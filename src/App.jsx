@@ -15,62 +15,7 @@ import Invoices from './pages/Invoices';
 const NotFound = () => <div>404 Not Found</div>;
 
 function App() {
-  return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <Navbar />
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/customers"
-            element={
-              <ProtectedRoute allowedRoles={['admin', 'manager']}>
-                <Navbar />
-                <Customers />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/cylinders"
-            element={
-              <ProtectedRoute allowedRoles={['admin', 'manager']}>
-                <Navbar />
-                <Cylinders />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/rentals"
-            element={
-              <ProtectedRoute allowedRoles={['admin', 'manager']}>
-                <Navbar />
-                <Rentals />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/invoices"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <Navbar />
-                <Invoices />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
-  );
+  return <div style={{padding: 40, fontSize: 32}}>Test Render - If you see this, React is working!</div>;
 }
 
 export default App; 
