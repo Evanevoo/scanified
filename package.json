@@ -1,5 +1,5 @@
 {
-  "name": "gas-cylinder-rental-tracker",
+  "name": "gas-cylinder-app",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -8,18 +8,21 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@headlessui/react": "^1.7.17",
+    "@heroicons/react": "^2.1.1",
     "@supabase/supabase-js": "^2.39.7",
+    "autoprefixer": "^10.4.14",
+    "jspdf": "^2.5.1",
+    "papaparse": "^5.4.1",
+    "postcss": "^8.4.21",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.22.3",
-    "xlsx": "^0.18.5",
-    "jspdf": "^2.5.1"
+    "tailwindcss": "^3.3.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.0.3",
-    "autoprefixer": "^10.4.14",
-    "postcss": "^8.4.24",
-    "tailwindcss": "^3.3.3",
+    "@vitejs/plugin-react": "^4.4.1",
     "vite": "^4.4.9"
   }
-} 
+}

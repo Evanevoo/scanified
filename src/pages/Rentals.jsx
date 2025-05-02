@@ -1,195 +1,239 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../utils/supabaseClient';
+import { supabase } from '../supabase/client';
 
-const Rentals = () => {
+function Rentals({ profile }) {
   const [rentals, setRentals] = useState([]);
-  const [customers, setCustomers] = useState([]);
-  const [cylinders, setCylinders] = useState([]);
-  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ id: null, customer_id: '', cylinder_id: '', rental_type: 'monthly', rental_start_date: '', rental_end_date: '', status: 'active' });
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('active');
+  const [showEndRentalModal, setShowEndRentalModal] = useState(false);
+  const [selectedRental, setSelectedRental] = useState(null);
+  const [endDate, setEndDate] = useState('');
 
-  const fetchRentals = async () => {
-    setLoading(true);
-    let query = supabase.from('rentals').select('*');
-    if (search) query = query.ilike('customer_id', `%${search}%`);
-    const { data } = await query.order('created_at', { ascending: false });
-    setRentals(data || []);
-    setLoading(false);
-  };
+  const canEdit = profile?.role === 'admin' || profile?.role === 'manager';
 
-  const fetchCustomers = async () => {
-    const { data } = await supabase.from('customers').select('id, name');
-    setCustomers(data || []);
-  };
+  // Fetch rentals with customer and cylinder details
+  useEffect(() => {
+    const fetchRentals = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const { data, error: rentalsError } = await supabase
+          .from('rentals')
+          .select(`
+            *,
+            customer:customer_id (
+              id,
+              name,
+              customer_number
+            ),
+            cylinder:cylinder_id (
+              id,
+              serial_number,
+              gas_type
+            )
+          `)
+          .eq('status', statusFilter)
+          .order('rental_start_date', { ascending: false });
 
-  const fetchCylinders = async () => {
-    const { data } = await supabase.from('cylinders').select('id, serial_number');
-    setCylinders(data || []);
-  };
+        if (rentalsError) throw rentalsError;
+        setRentals(data);
+      } catch (err) {
+        setError(err.message);
+      }
+      setLoading(false);
+    };
 
-  useEffect(() => { fetchRentals(); fetchCustomers(); fetchCylinders(); }, [search]);
-
-  const handleFormChange = e => setForm({ ...form, [e.target.name]: e.target.value });
-
-  const openAddForm = () => {
-    setForm({ id: null, customer_id: '', cylinder_id: '', rental_type: 'monthly', rental_start_date: '', rental_end_date: '', status: 'active' });
-    setShowForm(true);
-    setError('');
-  };
-
-  const openEditForm = (rental) => {
-    setForm({ ...rental });
-    setShowForm(true);
-    setError('');
-  };
-
-  const handleEndRental = async (id) => {
-    if (!window.confirm('End this rental?')) return;
-    await supabase.from('rentals').update({ status: 'ended', rental_end_date: new Date().toISOString().slice(0, 10) }).eq('id', id);
     fetchRentals();
+  }, [statusFilter]);
+
+  const openEndRentalModal = (rental) => {
+    setSelectedRental(rental);
+    setEndDate(new Date().toISOString().split('T')[0]);
+    setShowEndRentalModal(true);
   };
 
-  const handleSubmit = async (e) => {
+  const handleEndRental = async (e) => {
     e.preventDefault();
-    if (!form.customer_id || !form.cylinder_id || !form.rental_type || !form.rental_start_date) {
-      setError('All fields except end date are required.');
-      return;
+    setError(null);
+    try {
+      // Update rental status
+      const { error: rentalError } = await supabase
+        .from('rentals')
+        .update({
+          status: 'ended',
+          rental_end_date: endDate
+        })
+        .eq('id', selectedRental.id);
+
+      if (rentalError) throw rentalError;
+
+      // Unassign cylinder
+      const { error: cylinderError } = await supabase
+        .from('cylinders')
+        .update({
+          assigned_customer: null,
+          rental_start_date: null
+        })
+        .eq('id', selectedRental.cylinder.id);
+
+      if (cylinderError) throw cylinderError;
+
+      setShowEndRentalModal(false);
+      
+      // Refresh rentals list
+      const { data, error: refreshError } = await supabase
+        .from('rentals')
+        .select(`
+          *,
+          customer:customer_id (
+            id,
+            name,
+            customer_number
+          ),
+          cylinder:cylinder_id (
+            id,
+            serial_number,
+            gas_type
+          )
+        `)
+        .eq('status', statusFilter)
+        .order('rental_start_date', { ascending: false });
+
+      if (refreshError) throw refreshError;
+      setRentals(data);
+    } catch (err) {
+      setError(err.message);
     }
-    if (form.id) {
-      await supabase.from('rentals').update({
-        customer_id: form.customer_id,
-        cylinder_id: form.cylinder_id,
-        rental_type: form.rental_type,
-        rental_start_date: form.rental_start_date,
-        rental_end_date: form.rental_end_date,
-        status: form.status,
-      }).eq('id', form.id);
-    } else {
-      await supabase.from('rentals').insert({
-        customer_id: form.customer_id,
-        cylinder_id: form.cylinder_id,
-        rental_type: form.rental_type,
-        rental_start_date: form.rental_start_date,
-        rental_end_date: form.rental_end_date,
-        status: form.status,
-      });
-    }
-    setShowForm(false);
-    fetchRentals();
   };
+
+  if (loading) return <div>Loading rentals...</div>;
+  if (error) return <div className="text-red-600">Error: {error}</div>;
 
   return (
-    <div className="p-6">
+    <div className="relative">
       <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold">Rentals</h1>
-        <button onClick={openAddForm} className="bg-blue-600 text-white px-4 py-2 rounded">Add Rental</button>
-      </div>
-      <form onSubmit={e => e.preventDefault()} className="mb-4">
-        <input
-          type="text"
-          placeholder="Search by customer ID..."
-          className="border px-3 py-2 rounded w-full max-w-xs"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
-      </form>
-      {loading ? (
-        <div>Loading...</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full bg-white rounded shadow">
-            <thead>
-              <tr>
-                <th className="py-2 px-4 border-b">Customer</th>
-                <th className="py-2 px-4 border-b">Cylinder</th>
-                <th className="py-2 px-4 border-b">Rental Type</th>
-                <th className="py-2 px-4 border-b">Start Date</th>
-                <th className="py-2 px-4 border-b">End Date</th>
-                <th className="py-2 px-4 border-b">Status</th>
-                <th className="py-2 px-4 border-b">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rentals.map(r => (
-                <tr key={r.id}>
-                  <td className="py-2 px-4 border-b">{getCustomerName(customers, r.customer_id)}</td>
-                  <td className="py-2 px-4 border-b">{getCylinderSerial(cylinders, r.cylinder_id)}</td>
-                  <td className="py-2 px-4 border-b">{r.rental_type}</td>
-                  <td className="py-2 px-4 border-b">{r.rental_start_date ? new Date(r.rental_start_date).toLocaleDateString() : ''}</td>
-                  <td className="py-2 px-4 border-b">{r.rental_end_date ? new Date(r.rental_end_date).toLocaleDateString() : ''}</td>
-                  <td className="py-2 px-4 border-b">{r.status}</td>
-                  <td className="py-2 px-4 border-b">
-                    <button onClick={() => openEditForm(r)} className="text-blue-600 hover:underline mr-2">Edit</button>
-                    {r.status === 'active' && (
-                      <button onClick={() => handleEndRental(r.id)} className="text-red-600 hover:underline">End</button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <h2 className="text-xl font-bold">Rentals</h2>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setStatusFilter('active')}
+            className={`px-4 py-2 rounded ${
+              statusFilter === 'active'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-200 text-gray-700'
+            }`}
+          >
+            Active
+          </button>
+          <button
+            onClick={() => setStatusFilter('ended')}
+            className={`px-4 py-2 rounded ${
+              statusFilter === 'ended'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-200 text-gray-700'
+            }`}
+          >
+            Ended
+          </button>
         </div>
-      )}
-      {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <form onSubmit={handleSubmit} className="bg-white p-6 rounded shadow w-full max-w-sm relative">
-            <button type="button" onClick={() => setShowForm(false)} className="absolute top-2 right-2 text-gray-500">&times;</button>
-            <h2 className="text-xl font-bold mb-4">{form.id ? 'Edit' : 'Add'} Rental</h2>
-            {error && <div className="mb-2 text-red-500 text-sm">{error}</div>}
-            <div className="mb-2">
-              <label className="block mb-1">Customer</label>
-              <select name="customer_id" value={form.customer_id} onChange={handleFormChange} className="border px-3 py-2 rounded w-full" required>
-                <option value="">-- Select --</option>
-                {customers.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="mb-2">
-              <label className="block mb-1">Cylinder</label>
-              <select name="cylinder_id" value={form.cylinder_id} onChange={handleFormChange} className="border px-3 py-2 rounded w-full" required>
-                <option value="">-- Select --</option>
-                {cylinders.map(cy => (
-                  <option key={cy.id} value={cy.id}>{cy.serial_number}</option>
-                ))}
-              </select>
-            </div>
-            <div className="mb-2">
-              <label className="block mb-1">Rental Type</label>
-              <select name="rental_type" value={form.rental_type} onChange={handleFormChange} className="border px-3 py-2 rounded w-full" required>
-                <option value="monthly">Monthly</option>
-                <option value="yearly">Yearly</option>
-              </select>
-            </div>
-            <div className="mb-2">
-              <label className="block mb-1">Start Date</label>
-              <input name="rental_start_date" type="date" value={form.rental_start_date} onChange={handleFormChange} className="border px-3 py-2 rounded w-full" required />
-            </div>
-            <div className="mb-4">
-              <label className="block mb-1">End Date</label>
-              <input name="rental_end_date" type="date" value={form.rental_end_date} onChange={handleFormChange} className="border px-3 py-2 rounded w-full" />
-            </div>
-            <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded w-full">{form.id ? 'Update' : 'Add'} Rental</button>
-          </form>
+      </div>
+
+      <table className="min-w-full bg-white border">
+        <thead>
+          <tr>
+            <th className="border px-4 py-2">Customer</th>
+            <th className="border px-4 py-2">Cylinder</th>
+            <th className="border px-4 py-2">Gas Type</th>
+            <th className="border px-4 py-2">Type</th>
+            <th className="border px-4 py-2">Start Date</th>
+            <th className="border px-4 py-2">End Date</th>
+            {canEdit && statusFilter === 'active' && (
+              <th className="border px-4 py-2">Actions</th>
+            )}
+          </tr>
+        </thead>
+        <tbody>
+          {rentals.map(rental => (
+            <tr key={rental.id}>
+              <td className="border px-4 py-2">
+                {rental.customer.name}
+                <br />
+                <span className="text-sm text-gray-500">
+                  ({rental.customer.customer_number})
+                </span>
+              </td>
+              <td className="border px-4 py-2">{rental.cylinder.serial_number}</td>
+              <td className="border px-4 py-2">{rental.cylinder.gas_type}</td>
+              <td className="border px-4 py-2">
+                <span className={`capitalize ${
+                  rental.rental_type === 'monthly'
+                    ? 'text-blue-600'
+                    : 'text-green-600'
+                }`}>
+                  {rental.rental_type}
+                </span>
+              </td>
+              <td className="border px-4 py-2">{rental.rental_start_date}</td>
+              <td className="border px-4 py-2">{rental.rental_end_date || '-'}</td>
+              {canEdit && statusFilter === 'active' && (
+                <td className="border px-4 py-2">
+                  <button
+                    onClick={() => openEndRentalModal(rental)}
+                    className="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600"
+                  >
+                    End Rental
+                  </button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* End Rental Modal */}
+      {showEndRentalModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-white p-6 rounded-lg w-96">
+            <h3 className="text-lg font-bold mb-4">End Rental</h3>
+            <p className="mb-4">
+              End rental for cylinder {selectedRental.cylinder.serial_number}
+              <br />
+              <span className="text-sm text-gray-600">
+                Rented to: {selectedRental.customer.name}
+              </span>
+            </p>
+            <form onSubmit={handleEndRental} className="space-y-4">
+              <div>
+                <label className="block mb-2">End Date</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full border p-2 rounded"
+                  required
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEndRentalModal(false)}
+                  className="bg-gray-400 text-white px-4 py-2 rounded"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="bg-blue-600 text-white px-4 py-2 rounded"
+                >
+                  End Rental
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
   );
-};
-
-function getCustomerName(customers, id) {
-  if (!id) return '';
-  const c = customers.find(c => c.id === id);
-  return c ? c.name : '';
-}
-
-function getCylinderSerial(cylinders, id) {
-  if (!id) return '';
-  const c = cylinders.find(c => c.id === id);
-  return c ? c.serial_number : '';
 }
 
 export default Rentals; 

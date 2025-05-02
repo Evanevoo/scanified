@@ -1,142 +1,292 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../utils/supabaseClient';
-import { exportToExcel } from '../utils/fileImport';
+import { supabase } from '../supabase/client';
+import { generateInvoicePDF, calculateRentalAmount } from '../utils/pdfGenerator';
 
-const Invoices = () => {
-  const [customers, setCustomers] = useState([]);
+function Invoices({ profile }) {
   const [invoices, setInvoices] = useState([]);
-  const [rentals, setRentals] = useState([]);
-  const [selectedCustomer, setSelectedCustomer] = useState('');
-  const [rentalType, setRentalType] = useState('monthly');
+  const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState('');
   const [generating, setGenerating] = useState(false);
-  const [error, setError] = useState('');
 
+  const canGenerate = profile?.role === 'admin' || profile?.role === 'manager';
+
+  // Fetch invoices and customers
   useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        // Fetch invoices with customer details
+        const { data: invoicesData, error: invoicesError } = await supabase
+          .from('invoices')
+          .select(`
+            *,
+            customer:customer_id (
+              id,
+              name,
+              customer_number
+            ),
+            generated_by_user:generated_by (
+              full_name
+            )
+          `)
+          .order('invoice_date', { ascending: false });
+
+        if (invoicesError) throw invoicesError;
+
+        // Fetch customers for invoice generation
+        const { data: customersData, error: customersError } = await supabase
+          .from('customers')
+          .select('*')
+          .order('name');
+
+        if (customersError) throw customersError;
+
+        setInvoices(invoicesData);
+        setCustomers(customersData);
+      } catch (err) {
+        setError(err.message);
+      }
+      setLoading(false);
+    };
+
     fetchData();
   }, []);
 
-  const fetchData = async () => {
-    setLoading(true);
-    const [cust, inv, rent] = await Promise.all([
-      supabase.from('customers').select('id, name'),
-      supabase.from('invoices').select('*').order('invoice_date', { ascending: false }),
-      supabase.from('rentals').select('*').eq('status', 'active'),
-    ]);
-    setCustomers(cust.data || []);
-    setInvoices(inv.data || []);
-    setRentals(rent.data || []);
-    setLoading(false);
-  };
-
-  const handleGenerate = async (bulk = false) => {
+  const handleGenerateInvoice = async (customerId) => {
     setGenerating(true);
-    setError('');
-    let targets = bulk ? customers : customers.filter(c => c.id === selectedCustomer);
-    if (targets.length === 0) {
-      setError('No customers selected.');
-      setGenerating(false);
-      return;
+    setError(null);
+    try {
+      // Get customer details
+      const { data: customer } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('id', customerId)
+        .single();
+
+      // Get active rentals for customer
+      const { data: rentals } = await supabase
+        .from('rentals')
+        .select(`
+          *,
+          cylinder:cylinder_id (
+            serial_number,
+            gas_type
+          )
+        `)
+        .eq('customer_id', customerId)
+        .eq('status', 'active');
+
+      if (!rentals?.length) {
+        throw new Error('No active rentals found for this customer');
+      }
+
+      // Calculate amounts for each rental
+      const rentalsWithAmounts = rentals.map(rental => ({
+        ...rental,
+        amount: calculateRentalAmount(rental)
+      }));
+
+      // Create invoice record
+      const { data: invoice, error: invoiceError } = await supabase
+        .from('invoices')
+        .insert([{
+          customer_id: customerId,
+          amount: rentalsWithAmounts.reduce((sum, r) => sum + r.amount, 0),
+          invoice_date: new Date().toISOString().split('T')[0],
+          generated_by: profile.id,
+          rental_type: rentals[0].rental_type // Use first rental's type
+        }])
+        .select()
+        .single();
+
+      if (invoiceError) throw invoiceError;
+
+      // Generate PDF
+      const doc = generateInvoicePDF(invoice, customer, rentalsWithAmounts);
+      
+      // Save PDF to Blob and create URL
+      const pdfBlob = doc.output('blob');
+      const fileName = `invoice_${invoice.id}_${customer.customer_number}.pdf`;
+      
+      // Save file URL to invoice record
+      const { error: storageError } = await supabase.storage
+        .from('invoices')
+        .upload(fileName, pdfBlob);
+
+      if (storageError) throw storageError;
+
+      // Update invoice with file URL
+      const fileUrl = `${supabase.storage.from('invoices').getPublicUrl(fileName).data.publicUrl}`;
+      await supabase
+        .from('invoices')
+        .update({ file_url: fileUrl })
+        .eq('id', invoice.id);
+
+      // Refresh invoices list
+      const { data: refreshedInvoices } = await supabase
+        .from('invoices')
+        .select(`
+          *,
+          customer:customer_id (
+            id,
+            name,
+            customer_number
+          ),
+          generated_by_user:generated_by (
+            full_name
+          )
+        `)
+        .order('invoice_date', { ascending: false });
+
+      setInvoices(refreshedInvoices);
+      setShowGenerateModal(false);
+      
+      // Open PDF in new tab
+      window.open(fileUrl, '_blank');
+    } catch (err) {
+      setError(err.message);
     }
-    const today = new Date().toISOString().slice(0, 10);
-    const newInvoices = [];
-    for (const customer of targets) {
-      // Find active rentals for this customer and rental type
-      const custRentals = rentals.filter(r => r.customer_id === customer.id && r.rental_type === rentalType);
-      if (custRentals.length === 0) continue;
-      // Calculate amount (for demo: $10/month, $100/year per rental)
-      const amount = rentalType === 'monthly' ? custRentals.length * 10 : custRentals.length * 100;
-      newInvoices.push({
-        customer_id: customer.id,
-        rental_id: custRentals[0].id, // just link to one rental for simplicity
-        invoice_date: today,
-        amount,
-        details: `${custRentals.length} ${rentalType} rental(s)`
-      });
-    }
-    if (newInvoices.length === 0) {
-      setError('No active rentals found for selected customer(s) and rental type.');
-      setGenerating(false);
-      return;
-    }
-    await supabase.from('invoices').insert(newInvoices);
     setGenerating(false);
-    fetchData();
   };
 
-  const handleExport = () => {
-    exportToExcel(invoices, 'invoices.xlsx');
+  const handleBulkGenerate = async () => {
+    setGenerating(true);
+    setError(null);
+    try {
+      // Get all customers with active rentals
+      const { data: activeRentals } = await supabase
+        .from('rentals')
+        .select('customer_id')
+        .eq('status', 'active')
+        .distinct();
+
+      const customerIds = activeRentals.map(r => r.customer_id);
+      
+      // Generate invoice for each customer
+      for (const customerId of customerIds) {
+        await handleGenerateInvoice(customerId);
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+    setGenerating(false);
   };
+
+  if (loading) return <div>Loading invoices...</div>;
+  if (error) return <div className="text-red-600">Error: {error}</div>;
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Invoices</h1>
-      <div className="bg-white rounded shadow p-4 mb-6">
-        <h2 className="font-bold mb-2">Generate Invoice</h2>
-        <div className="flex flex-wrap gap-2 items-center mb-2">
-          <select value={selectedCustomer} onChange={e => setSelectedCustomer(e.target.value)} className="border px-3 py-2 rounded">
-            <option value="">-- Select Customer --</option>
-            {customers.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-          <select value={rentalType} onChange={e => setRentalType(e.target.value)} className="border px-3 py-2 rounded">
-            <option value="monthly">Monthly</option>
-            <option value="yearly">Yearly</option>
-          </select>
-          <button
-            onClick={() => handleGenerate(false)}
-            className="bg-blue-600 text-white px-4 py-2 rounded"
-            disabled={generating || !selectedCustomer}
-          >
-            Generate for Customer
-          </button>
-          <button
-            onClick={() => handleGenerate(true)}
-            className="bg-green-600 text-white px-4 py-2 rounded"
-            disabled={generating}
-          >
-            Generate for All
-          </button>
-          <button onClick={handleExport} className="bg-gray-600 text-white px-4 py-2 rounded">Export</button>
-        </div>
-        {error && <div className="text-red-500 text-sm mb-2">{error}</div>}
+    <div className="relative">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-bold">Invoices</h2>
+        {canGenerate && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowGenerateModal(true)}
+              className="bg-blue-600 text-white px-4 py-2 rounded"
+              disabled={generating}
+            >
+              Generate Invoice
+            </button>
+            <button
+              onClick={handleBulkGenerate}
+              className="bg-green-600 text-white px-4 py-2 rounded"
+              disabled={generating}
+            >
+              Bulk Generate
+            </button>
+          </div>
+        )}
       </div>
-      <h2 className="font-bold mb-2">Invoice History</h2>
-      {loading ? (
-        <div>Loading...</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full bg-white rounded shadow">
-            <thead>
-              <tr>
-                <th className="py-2 px-4 border-b">Date</th>
-                <th className="py-2 px-4 border-b">Customer</th>
-                <th className="py-2 px-4 border-b">Amount</th>
-                <th className="py-2 px-4 border-b">Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoices.map(inv => (
-                <tr key={inv.id}>
-                  <td className="py-2 px-4 border-b">{inv.invoice_date}</td>
-                  <td className="py-2 px-4 border-b">{getCustomerName(customers, inv.customer_id)}</td>
-                  <td className="py-2 px-4 border-b">${inv.amount}</td>
-                  <td className="py-2 px-4 border-b">{inv.details}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+      <table className="min-w-full bg-white border">
+        <thead>
+          <tr>
+            <th className="border px-4 py-2">Invoice #</th>
+            <th className="border px-4 py-2">Customer</th>
+            <th className="border px-4 py-2">Date</th>
+            <th className="border px-4 py-2">Amount</th>
+            <th className="border px-4 py-2">Generated By</th>
+            <th className="border px-4 py-2">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {invoices.map(invoice => (
+            <tr key={invoice.id}>
+              <td className="border px-4 py-2">{invoice.id}</td>
+              <td className="border px-4 py-2">
+                {invoice.customer.name}
+                <br />
+                <span className="text-sm text-gray-500">
+                  ({invoice.customer.customer_number})
+                </span>
+              </td>
+              <td className="border px-4 py-2">{invoice.invoice_date}</td>
+              <td className="border px-4 py-2">${invoice.amount.toFixed(2)}</td>
+              <td className="border px-4 py-2">{invoice.generated_by_user?.full_name}</td>
+              <td className="border px-4 py-2">
+                <a
+                  href={invoice.file_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 underline"
+                >
+                  Download PDF
+                </a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Generate Invoice Modal */}
+      {showGenerateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-white p-6 rounded-lg w-96">
+            <h3 className="text-lg font-bold mb-4">Generate Invoice</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block mb-2">Customer</label>
+                <select
+                  value={selectedCustomer}
+                  onChange={(e) => setSelectedCustomer(e.target.value)}
+                  className="w-full border p-2 rounded"
+                >
+                  <option value="">Select Customer</option>
+                  {customers.map(customer => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.name} ({customer.customer_number})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowGenerateModal(false)}
+                  className="bg-gray-400 text-white px-4 py-2 rounded"
+                  disabled={generating}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleGenerateInvoice(selectedCustomer)}
+                  className="bg-blue-600 text-white px-4 py-2 rounded"
+                  disabled={!selectedCustomer || generating}
+                >
+                  {generating ? 'Generating...' : 'Generate'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
-};
-
-function getCustomerName(customers, id) {
-  if (!id) return '';
-  const c = customers.find(c => c.id === id);
-  return c ? c.name : '';
 }
 
 export default Invoices; 
