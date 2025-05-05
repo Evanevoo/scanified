@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
+import { useNavigate } from 'react-router-dom';
 
 function Cylinders({ profile }) {
   const [cylinders, setCylinders] = useState([]);
@@ -13,6 +14,7 @@ function Cylinders({ profile }) {
   const [selectedCylinder, setSelectedCylinder] = useState(null);
 
   const canEdit = profile?.role === 'admin' || profile?.role === 'manager';
+  const navigate = useNavigate();
 
   // Fetch cylinders and customers from Supabase
   useEffect(() => {
@@ -26,7 +28,7 @@ function Cylinders({ profile }) {
           .select(`
             *,
             assigned_customer (
-              id,
+              CustomerListID,
               name,
               customer_number
             )
@@ -38,7 +40,7 @@ function Cylinders({ profile }) {
         // Fetch customers for assignment dropdown
         const { data: customersData, error: customersError } = await supabase
           .from('customers')
-          .select('id, name, customer_number')
+          .select('CustomerListID, name, customer_number')
           .order('name');
 
         if (customersError) throw customersError;
@@ -65,7 +67,7 @@ function Cylinders({ profile }) {
       // Refresh list
       const { data } = await supabase
         .from('cylinders')
-        .select('*, assigned_customer (id, name, customer_number)')
+        .select('*, assigned_customer (CustomerListID, name, customer_number)')
         .order('serial_number');
       setCylinders(data);
     }
@@ -90,7 +92,7 @@ function Cylinders({ profile }) {
       setForm({ serial_number: '', barcode_number: '', gas_type: '' });
       const { data } = await supabase
         .from('cylinders')
-        .select('*, assigned_customer (id, name, customer_number)')
+        .select('*, assigned_customer (CustomerListID, name, customer_number)')
         .order('serial_number');
       setCylinders(data);
     }
@@ -108,7 +110,7 @@ function Cylinders({ profile }) {
   const openAssignModal = (cylinder) => {
     setSelectedCylinder(cylinder);
     setAssignForm({
-      customer_id: cylinder.assigned_customer?.id || '',
+      customer_id: cylinder.assigned_customer?.CustomerListID || '',
       rental_start_date: cylinder.rental_start_date || new Date().toISOString().split('T')[0]
     });
     setShowAssignModal(true);
@@ -131,7 +133,7 @@ function Cylinders({ profile }) {
       // Refresh list
       const { data } = await supabase
         .from('cylinders')
-        .select('*, assigned_customer (id, name, customer_number)')
+        .select('*, assigned_customer (CustomerListID, name, customer_number)')
         .order('serial_number');
       setCylinders(data);
     }
@@ -141,8 +143,16 @@ function Cylinders({ profile }) {
   if (error) return <div className="text-red-600">Error: {error}</div>;
 
   return (
-    <div className="relative">
-      <h2 className="text-xl font-bold mb-4">Cylinders</h2>
+    <div className="relative max-w-7xl mx-auto mt-10 bg-gradient-to-br from-white via-blue-50 to-blue-100 shadow-2xl rounded-2xl p-8 border border-blue-100 w-full">
+      <div className="flex justify-between items-center mb-8">
+        <h2 className="text-xl font-bold">Cylinders</h2>
+        <button
+          onClick={() => navigate('/')}
+          className="bg-gradient-to-r from-gray-400 to-gray-300 text-white px-6 py-2 rounded-lg shadow-md hover:from-gray-500 hover:to-gray-400 font-semibold transition"
+        >
+          Back to Dashboard
+        </button>
+      </div>
       {canEdit && (
         <form onSubmit={editingId ? handleUpdate : handleAdd} className="mb-4 flex gap-2">
           <input name="serial_number" value={form.serial_number} onChange={handleChange} placeholder="Serial Number" className="border p-2 rounded" required />
@@ -198,7 +208,7 @@ function Cylinders({ profile }) {
                 >
                   <option value="">-- Unassign --</option>
                   {customers.map(customer => (
-                    <option key={customer.id} value={customer.id}>
+                    <option key={customer.CustomerListID} value={customer.CustomerListID}>
                       {customer.name} ({customer.customer_number})
                     </option>
                   ))}

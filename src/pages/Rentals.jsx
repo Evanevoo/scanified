@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
+import { useNavigate } from 'react-router-dom';
 
 function Rentals({ profile }) {
   const [rentals, setRentals] = useState([]);
@@ -11,6 +12,7 @@ function Rentals({ profile }) {
   const [endDate, setEndDate] = useState('');
 
   const canEdit = profile?.role === 'admin' || profile?.role === 'manager';
+  const navigate = useNavigate();
 
   // Fetch rentals with customer and cylinder details
   useEffect(() => {
@@ -23,7 +25,7 @@ function Rentals({ profile }) {
           .select(`
             *,
             customer:customer_id (
-              id,
+              CustomerListID,
               name,
               customer_number
             ),
@@ -87,7 +89,7 @@ function Rentals({ profile }) {
         .select(`
           *,
           customer:customer_id (
-            id,
+            CustomerListID,
             name,
             customer_number
           ),
@@ -111,9 +113,18 @@ function Rentals({ profile }) {
   if (error) return <div className="text-red-600">Error: {error}</div>;
 
   return (
-    <div className="relative">
-      <div className="flex justify-between items-center mb-4">
+    <div className="relative max-w-7xl mx-auto mt-10 bg-gradient-to-br from-white via-blue-50 to-blue-100 shadow-2xl rounded-2xl p-8 border border-blue-100 w-full">
+      <div className="flex justify-between items-center mb-8">
         <h2 className="text-xl font-bold">Rentals</h2>
+        <button
+          onClick={() => navigate('/')}
+          className="bg-gradient-to-r from-gray-400 to-gray-300 text-white px-6 py-2 rounded-lg shadow-md hover:from-gray-500 hover:to-gray-400 font-semibold transition"
+        >
+          Back to Dashboard
+        </button>
+      </div>
+
+      <div className="flex justify-between items-center mb-4">
         <div className="flex gap-2">
           <button
             onClick={() => setStatusFilter('active')}

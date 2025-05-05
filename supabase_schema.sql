@@ -8,12 +8,20 @@ CREATE TABLE IF NOT EXISTS profiles (
   role text CHECK (role IN ('admin', 'manager', 'user')) DEFAULT 'user'
 );
 
+-- Drop old customers table if it exists (CAUTION: this deletes all customer data!)
+DROP TABLE IF EXISTS customers CASCADE;
+
 -- CUSTOMERS
-CREATE TABLE IF NOT EXISTS customers (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  customer_number text UNIQUE NOT NULL,
-  name text NOT NULL,
-  contact_details text,
+CREATE TABLE customers (
+  "CustomerListID" text PRIMARY KEY,
+  customer_number text UNIQUE,         -- e.g. "CUST-001"
+  name text,                           -- full name or business name
+  contact_details text,                -- phone/email/address
+  bill_city text,
+  bill_state text,
+  bill_postal_code text,
+  phone text,
+  barcode text,
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now())
 );
 
@@ -23,15 +31,25 @@ CREATE TABLE IF NOT EXISTS cylinders (
   serial_number text UNIQUE NOT NULL,
   barcode_number text UNIQUE,
   gas_type text NOT NULL,
-  assigned_customer uuid REFERENCES customers(id),
+  assigned_customer text REFERENCES customers("CustomerListID"),
   rental_start_date date,
-  created_at timestamp with time zone DEFAULT timezone('utc'::text, now())
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()),
+  category text,
+  group_name text,
+  type text,
+  product_code text,
+  description text,
+  in_house_total integer,
+  with_customer_total integer,
+  lost_total integer,
+  total integer,
+  dock_stock text
 );
 
 -- RENTALS
 CREATE TABLE IF NOT EXISTS rentals (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  customer_id uuid REFERENCES customers(id),
+  customer_id text REFERENCES customers("CustomerListID"),
   cylinder_id uuid REFERENCES cylinders(id),
   rental_type text CHECK (rental_type IN ('monthly', 'yearly')) NOT NULL,
   rental_start_date date NOT NULL,
@@ -43,12 +61,41 @@ CREATE TABLE IF NOT EXISTS rentals (
 -- INVOICES
 CREATE TABLE IF NOT EXISTS invoices (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  customer_id uuid REFERENCES customers(id),
+  customer_id text,
   rental_id uuid REFERENCES rentals(id),
   invoice_date date NOT NULL,
   amount numeric NOT NULL,
   details text,
   generated_by uuid REFERENCES profiles(id),
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now())
+);
+
+-- Ensure the foreign key relationship exists
+ALTER TABLE invoices
+DROP CONSTRAINT IF EXISTS invoices_customer_id_fkey;
+
+ALTER TABLE invoices
+ADD CONSTRAINT invoices_customer_id_fkey
+FOREIGN KEY (customer_id) REFERENCES customers("CustomerListID");
+
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS generated_by uuid;
+
+ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_generated_by_fkey;
+
+ALTER TABLE invoices
+ADD CONSTRAINT invoices_generated_by_fkey
+FOREIGN KEY (generated_by) REFERENCES profiles(id);
+
+-- SALES ORDERS
+CREATE TABLE IF NOT EXISTS sales_orders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id text,
+  customer_name text,
+  order_date date,
+  gas_type text,
+  sales_order_number text,
+  shipped_bottles integer,
+  returned_bottles integer,
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now())
 );
 
@@ -58,6 +105,7 @@ ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cylinders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rentals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sales_orders ENABLE ROW LEVEL SECURITY;
 
 -- POLICIES
 
@@ -129,7 +177,42 @@ CREATE POLICY "Admins can modify invoices" ON invoices
     )
   );
 
--- If you already have a customers table and need to add the customer_number column:
--- ALTER TABLE customers ADD COLUMN customer_number text UNIQUE;
--- UPDATE customers SET customer_number = id::text WHERE customer_number IS NULL;
--- ALTER TABLE customers ALTER COLUMN customer_number SET NOT NULL; 
+-- SALES ORDERS POLICIES
+DROP POLICY IF EXISTS "All roles can view sales orders" ON sales_orders;
+CREATE POLICY "All roles can view sales orders" ON sales_orders
+  FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Admins and managers can modify sales orders" ON sales_orders;
+CREATE POLICY "Admins and managers can modify sales orders" ON sales_orders
+  FOR ALL USING (
+    exists (
+      select 1 from profiles p
+      where p.id = auth.uid() and p.role in ('admin', 'manager')
+    )
+  );
+
+-- NOTE: For case-insensitive lookups on CustomerListID, use LOWER(CustomerListID) or ILIKE in queries. 
+
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS full_name text;
+
+ALTER TABLE cylinders
+ALTER COLUMN assigned_customer TYPE text
+USING assigned_customer::text;
+
+ALTER TABLE cylinders
+DROP CONSTRAINT IF EXISTS cylinders_assigned_customer_fkey;
+
+ALTER TABLE cylinders
+ADD CONSTRAINT cylinders_assigned_customer_fkey
+FOREIGN KEY (assigned_customer) REFERENCES customers("CustomerListID");
+
+ALTER TABLE rentals
+ALTER COLUMN customer_id TYPE text
+USING customer_id::text;
+
+ALTER TABLE rentals
+DROP CONSTRAINT IF EXISTS rentals_customer_id_fkey;
+
+ALTER TABLE rentals
+ADD CONSTRAINT rentals_customer_id_fkey
+FOREIGN KEY (customer_id) REFERENCES customers("CustomerListID"); 

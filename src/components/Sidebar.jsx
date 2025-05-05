@@ -20,20 +20,10 @@ const Sidebar = () => (
     <nav className="flex-1">
       <ul className="space-y-1">
         <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/home">Home</Link></li>
-        <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/favorites">Favorites</Link></li>
         <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/custom-reports">Custom Reports</Link></li>
-        <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/management-reports">Management Reports</Link></li>
-        <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/quick-add">Quick Add</Link></li>
-        <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/lot-reports">Lot Reports</Link></li>
-        <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/regular-maintenance">Regular Maintenance</Link></li>
         <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/customers">Customers</Link></li>
         <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/locations">Locations</Link></li>
-        <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/search">Search</Link></li>
         <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/integration">Integration</Link></li>
-        <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/create-records">Create Records</Link></li>
-        <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/alerts">Alerts</Link></li>
-        <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/mobile-units">Mobile Units</Link></li>
-        <li><Link className="block px-4 py-2 rounded hover:bg-gray-700" to="/rental">Rental</Link></li>
       </ul>
     </nav>
   </div>

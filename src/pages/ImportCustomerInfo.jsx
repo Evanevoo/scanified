@@ -38,17 +38,55 @@ export default function ImportCustomerInfo() {
     setError(null);
     try {
       if (!preview.length) throw new Error('No data to import.');
-      // Map fields to match your Supabase customers table
+      // Aggressively normalize CustomerListID and map fields
       const mapped = preview.map(row => ({
-        customer_number: row.customer_number || row.CustomerNumber || row["Customer Number"],
-        name: row.name || row.Name,
-        contact_details: row.contact_details || row.Contact || row["Contact Details"] || row["Contact"],
+        CustomerListID: row.CustomerListID || row["CustomerListID"] || row["Customer ID"] || row["Customer Number"],
+        name: row.CustomerName || row["CustomerName"] || row["Customer Name"],
+        bill_city: row.BillCity || row["BillCity"] || row["Bill City"],
+        bill_state: row.BillState || row["BillState"] || row["Bill State"],
+        bill_postal_code: row.BillPostalCode || row["BillPostalCode"] || row["Bill Postal Code"],
+        phone: row.Phone || row["Phone"] || row["Contact"] || row["Contact Details"],
+        barcode: row["Customer barcode"] || row["Customer Barcode"] || row["Barcode"]
       }));
-      // Filter out rows missing required fields
-      const validRows = mapped.filter(r => r.customer_number && r.name);
-      const { error: insertError, count } = await supabase.from('customers').insert(validRows, { count: 'exact' });
+      // Fetch all existing unique values from the database (handle pagination)
+      let allExistingRows = [];
+      let from = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data: pageRows, error: fetchError } = await supabase
+          .from('customers')
+          .select('CustomerListID, customer_number')
+          .range(from, from + pageSize - 1);
+        if (fetchError) throw fetchError;
+        if (!pageRows || pageRows.length === 0) break;
+        allExistingRows = allExistingRows.concat(pageRows);
+        if (pageRows.length < pageSize) break;
+        from += pageSize;
+      }
+      const existingCustomerListIDs = new Set((allExistingRows || []).map(r => r.CustomerListID?.toLowerCase()));
+      const existingCustomerNumbers = new Set((allExistingRows || []).map(r => r.customer_number));
+      console.log('Existing CustomerListIDs in DB:', Array.from(existingCustomerListIDs));
+      const seenCustomerListIDs = new Set();
+      const duplicateInBatch = [];
+      const uniqueRows = mapped.filter(row => {
+        const id = row.CustomerListID && typeof row.CustomerListID === 'string' ? row.CustomerListID.trim().toLowerCase() : '';
+        if (
+          !id ||
+          existingCustomerListIDs.has(id) ||
+          seenCustomerListIDs.has(id) ||
+          (row.customer_number && existingCustomerNumbers.has(row.customer_number))
+        ) {
+          if (seenCustomerListIDs.has(id)) duplicateInBatch.push(id);
+          return false;
+        }
+        seenCustomerListIDs.add(id);
+        return true;
+      });
+      console.log('CustomerListIDs to insert:', uniqueRows.map(r => r.CustomerListID));
+      console.log('Duplicate CustomerListIDs in batch:', duplicateInBatch);
+      const { error: insertError, count } = await supabase.from('customers').insert(uniqueRows, { count: 'exact' });
       if (insertError) throw insertError;
-      setResult({ success: true, imported: validRows.length, errors: preview.length - validRows.length });
+      setResult({ success: true, imported: uniqueRows.length, errors: mapped.length - uniqueRows.length });
     } catch (err) {
       setError(err.message);
     } finally {
