@@ -36,12 +36,13 @@
     "react-native-screens": "^4.10.0",
     "react-router-dom": "^6.22.3",
     "tailwindcss": "^3.3.3",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "typescript": "~5.8.3",
+    "@types/react": "~19.0.10",
+    "@types/node": "*"
   },
   "devDependencies": {
-    "@types/react": "~19.0.10",
     "@vitejs/plugin-react": "^4.4.1",
-    "typescript": "~5.8.3",
     "vite": "^6.3.5"
   }
 }
