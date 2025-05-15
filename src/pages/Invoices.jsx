@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
 import { generateInvoicePDF, calculateRentalAmount } from '../utils/pdfGenerator';
 import { useNavigate } from 'react-router-dom';
+import {
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Dialog, DialogTitle, DialogContent, DialogActions, TextField, CircularProgress, Snackbar, Alert, MenuItem, Select, InputLabel, FormControl
+} from '@mui/material';
 
 function Invoices({ profile }) {
   const [invoices, setInvoices] = useState([]);
@@ -11,6 +14,12 @@ function Invoices({ profile }) {
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailing, setEmailing] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [emailSuccess, setEmailSuccess] = useState('');
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [manualEmail, setManualEmail] = useState('');
   const navigate = useNavigate();
 
   const canGenerate = profile?.role === 'admin' || profile?.role === 'manager';
@@ -57,6 +66,14 @@ function Invoices({ profile }) {
 
     fetchData();
   }, []);
+
+  // Reset manualEmail when opening modal
+  useEffect(() => {
+    if (showEmailModal && selectedInvoice) {
+      const defaultEmail = selectedInvoice.customer?.email || selectedInvoice.customer?.contact_email || '';
+      setManualEmail(defaultEmail);
+    }
+  }, [showEmailModal, selectedInvoice]);
 
   const handleGenerateInvoice = async (customerId) => {
     setGenerating(true);
@@ -178,117 +195,115 @@ function Invoices({ profile }) {
     setGenerating(false);
   };
 
-  if (loading) return <div>Loading invoices...</div>;
-  if (error) return <div className="text-red-600">Error: {error}</div>;
+  // Email invoice handler
+  const handleEmailInvoice = async () => {
+    setEmailing(true);
+    setEmailError('');
+    setEmailSuccess('');
+    try {
+      let emailToSend = manualEmail;
+      // If a new email is entered, always save it to the customer record
+      if (manualEmail && selectedInvoice.customer?.CustomerListID) {
+        const { error: updateError } = await supabase
+          .from('customers')
+          .update({ email: manualEmail })
+          .eq('CustomerListID', selectedInvoice.customer.CustomerListID);
+        if (updateError) throw new Error('Failed to save email: ' + updateError.message);
+        // Update local state so next time it shows as saved
+        setInvoices(invoices =>
+          invoices.map(inv =>
+            inv.customer?.CustomerListID === selectedInvoice.customer.CustomerListID
+              ? { ...inv, customer: { ...inv.customer, email: manualEmail } }
+              : inv
+          )
+        );
+        emailToSend = manualEmail;
+      }
+      if (!emailToSend) throw new Error('Please enter an email address.');
+      const res = await fetch('/.netlify/functions/emailInvoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: emailToSend,
+          subject: `Your Rental Invoice #${selectedInvoice.id}`,
+          text: `Dear ${selectedInvoice.customer?.name || ''},\n\nPlease find your rental invoice attached.\n\nThank you!`,
+          pdfUrl: selectedInvoice.file_url,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setEmailSuccess('Invoice emailed successfully!');
+    } catch (err) {
+      setEmailError(err.message);
+    }
+    setEmailing(false);
+  };
+
+  if (loading) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
+  if (error) return <Box p={4} color="error.main">Error: {error}</Box>;
 
   return (
-    <div className="max-w-5xl mx-auto mt-10 bg-gradient-to-br from-white via-blue-50 to-blue-100 shadow-2xl rounded-2xl p-8 border border-blue-100">
-      <div className="flex justify-between items-center mb-8">
-        <h2 className="text-3xl font-extrabold text-blue-900 tracking-tight">Invoices</h2>
-        <button
-          onClick={() => navigate('/')}
-          className="bg-gradient-to-r from-gray-400 to-gray-300 text-white px-6 py-2 rounded-lg shadow-md hover:from-gray-500 hover:to-gray-400 font-semibold transition"
-        >
-          Back to Dashboard
-        </button>
-        {canGenerate && (
-          <div className="flex gap-2">
-            <button
-              onClick={() => setShowGenerateModal(true)}
-              className="bg-gradient-to-r from-blue-600 to-blue-400 text-white px-5 py-2 rounded-lg shadow-md hover:from-blue-700 hover:to-blue-500 font-semibold transition flex items-center gap-2"
-              disabled={generating}
-            >
-              <svg xmlns='http://www.w3.org/2000/svg' className='h-5 w-5' fill='none' viewBox='0 0 24 24' stroke='currentColor'><path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M12 4v16m8-8H4' /></svg>
-              Generate Invoice
-            </button>
-            <button
-              onClick={handleBulkGenerate}
-              className="bg-gradient-to-r from-green-600 to-green-400 text-white px-5 py-2 rounded-lg shadow-md hover:from-green-700 hover:to-green-500 font-semibold transition flex items-center gap-2"
-              disabled={generating}
-            >
-              <svg xmlns='http://www.w3.org/2000/svg' className='h-5 w-5' fill='none' viewBox='0 0 24 24' stroke='currentColor'><path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M3 7h18M3 12h18M3 17h18' /></svg>
-              Bulk Generate
-            </button>
-          </div>
-        )}
-      </div>
-      <div className="overflow-x-auto rounded-2xl border border-blue-100 bg-white/70">
-        <table className="min-w-full border-separate border-spacing-0 rounded-2xl text-sm">
-          <thead className="bg-gradient-to-r from-blue-200 to-blue-100 sticky top-0 z-10 shadow-sm">
-            <tr>
-              <th className="border-b px-3 py-2 font-semibold text-blue-900 text-xs tracking-wider uppercase bg-blue-50 rounded-tl-2xl">Invoice #</th>
-              <th className="border-b px-3 py-2 font-semibold text-blue-900 text-xs tracking-wider uppercase">Customer</th>
-              <th className="border-b px-3 py-2 font-semibold text-blue-900 text-xs tracking-wider uppercase">Amount</th>
-              <th className="border-b px-3 py-2 font-semibold text-blue-900 text-xs tracking-wider uppercase">Date</th>
-              <th className="border-b px-3 py-2 font-semibold text-blue-900 text-xs tracking-wider uppercase">Generated By</th>
-              <th className="border-b px-3 py-2 font-semibold text-blue-900 text-xs tracking-wider uppercase rounded-tr-2xl">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {invoices.map((inv, idx) => (
-              <tr key={inv.id} className={idx % 2 === 0 ? 'bg-white/80 hover:bg-blue-50' : 'bg-blue-50/60 hover:bg-blue-100'}>
-                <td className="px-3 py-2 font-mono text-xs text-blue-800 whitespace-nowrap rounded-l-xl">{inv.id}</td>
-                <td className="px-3 py-2 text-blue-900 whitespace-nowrap">{inv.customer?.name || inv.customer_id}</td>
-                <td className="px-3 py-2 text-blue-900 whitespace-nowrap">${inv.amount?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                <td className="px-3 py-2 text-blue-900 whitespace-nowrap">{inv.invoice_date}</td>
-                <td className="px-3 py-2 text-blue-900 whitespace-nowrap">{inv.generated_by_user?.full_name || '-'}</td>
-                <td className="px-3 py-2 space-x-2 rounded-r-xl flex items-center">
-                  {inv.file_url && (
-                    <a href={inv.file_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 bg-gradient-to-r from-blue-500 to-blue-300 text-white px-3 py-1 rounded-lg shadow hover:from-blue-600 hover:to-blue-400 transition font-semibold text-xs">
-                      <svg xmlns='http://www.w3.org/2000/svg' className='h-4 w-4' fill='none' viewBox='0 0 24 24' stroke='currentColor'><path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V4a2 2 0 10-4 0v1.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9' /></svg>
-                      PDF
-                    </a>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Generate Invoice Modal */}
-      {showGenerateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-white p-6 rounded-lg w-96">
-            <h3 className="text-lg font-bold mb-4">Generate Invoice</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block mb-2">Customer</label>
-                <select
-                  value={selectedCustomer}
-                  onChange={(e) => setSelectedCustomer(e.target.value)}
-                  className="w-full border p-2 rounded"
-                >
-                  <option value="">Select Customer</option>
-                  {customers.map(customer => (
-                    <option key={customer.CustomerListID} value={customer.CustomerListID}>
-                      {customer.name} ({customer.customer_number})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowGenerateModal(false)}
-                  className="bg-gray-400 text-white px-4 py-2 rounded"
-                  disabled={generating}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => handleGenerateInvoice(selectedCustomer)}
-                  className="bg-blue-600 text-white px-4 py-2 rounded"
-                  disabled={!selectedCustomer || generating}
-                >
-                  {generating ? 'Generating...' : 'Generate'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    <Box maxWidth="lg" mx="auto" mt={4}>
+      <Paper elevation={6} sx={{ borderRadius: 4, p: 4 }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+          <Typography variant="h4" fontWeight={800} color="primary">Invoices</Typography>
+          <Button variant="outlined" color="secondary" onClick={() => navigate('/')}>Back to Dashboard</Button>
+        </Box>
+        {/* Table of invoices */}
+        <TableContainer component={Paper} sx={{ borderRadius: 2 }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>ID</TableCell>
+                <TableCell>Customer</TableCell>
+                <TableCell>Date</TableCell>
+                <TableCell>Amount</TableCell>
+                <TableCell>Rental Type</TableCell>
+                <TableCell>PDF</TableCell>
+                <TableCell>Email</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {invoices.map(inv => (
+                <TableRow key={inv.id}>
+                  <TableCell>{inv.id}</TableCell>
+                  <TableCell>{inv.customer?.name}</TableCell>
+                  <TableCell>{inv.invoice_date}</TableCell>
+                  <TableCell>${inv.amount?.toFixed(2)}</TableCell>
+                  <TableCell>{inv.rental_type}</TableCell>
+                  <TableCell>
+                    {inv.file_url ? <Button size="small" href={inv.file_url} target="_blank">PDF</Button> : '—'}
+                  </TableCell>
+                  <TableCell>
+                    <Button size="small" variant="contained" color="primary" onClick={() => { setSelectedInvoice(inv); setShowEmailModal(true); }}>Email</Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        {/* Email Modal */}
+        <Dialog open={showEmailModal} onClose={() => setShowEmailModal(false)}>
+          <DialogTitle>Email Invoice</DialogTitle>
+          <DialogContent>
+            <TextField
+              label="Email"
+              value={manualEmail}
+              onChange={e => setManualEmail(e.target.value)}
+              fullWidth
+              margin="normal"
+            />
+            {emailError && <Alert severity="error">{emailError}</Alert>}
+            {emailSuccess && <Alert severity="success">{emailSuccess}</Alert>}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowEmailModal(false)}>Cancel</Button>
+            <Button onClick={handleEmailInvoice} disabled={emailing} variant="contained" color="primary">
+              {emailing ? <CircularProgress size={20} /> : 'Send Email'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      </Paper>
+    </Box>
   );
 }
 

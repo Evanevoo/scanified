@@ -9,13 +9,14 @@ function Navbar() {
     navigate('/login');
   };
   return (
-    <nav className="bg-blue-700 text-white p-4 flex gap-4 items-center">
-      <NavLink to="/dashboard" className={({ isActive }) => isActive ? 'underline' : ''}>Dashboard</NavLink>
-      <NavLink to="/customers" className={({ isActive }) => isActive ? 'underline' : ''}>Customers</NavLink>
-      <NavLink to="/cylinders" className={({ isActive }) => isActive ? 'underline' : ''}>Cylinders</NavLink>
-      <NavLink to="/rentals" className={({ isActive }) => isActive ? 'underline' : ''}>Rentals</NavLink>
-      <NavLink to="/invoices" className={({ isActive }) => isActive ? 'underline' : ''}>Invoices</NavLink>
-      <button onClick={handleLogout} className="ml-auto bg-red-600 px-3 py-1 rounded text-white hover:bg-red-700">Logout</button>
+    <nav className="text-white p-4 flex gap-4 items-center" style={{ background: '#2563eb' }}>
+      <NavLink to="/dashboard" className={({ isActive }) => isActive ? 'underline text-blue-200' : 'hover:text-blue-200'}>Dashboard</NavLink>
+      <NavLink to="/customers" className={({ isActive }) => isActive ? 'underline text-blue-200' : 'hover:text-blue-200'}>Customers</NavLink>
+      <NavLink to="/cylinders" className={({ isActive }) => isActive ? 'underline text-blue-200' : 'hover:text-blue-200'}>Cylinders</NavLink>
+      <NavLink to="/rentals" className={({ isActive }) => isActive ? 'underline text-blue-200' : 'hover:text-blue-200'}>Rentals</NavLink>
+      <NavLink to="/invoices" className={({ isActive }) => isActive ? 'underline text-blue-200' : 'hover:text-blue-200'}>Invoices</NavLink>
+      <NavLink to="/settings" className={({ isActive }) => isActive ? 'underline text-blue-200' : 'hover:text-blue-200'}>Settings</NavLink>
+      <button onClick={handleLogout} className="ml-auto bg-blue-600 px-3 py-1 rounded text-white hover:bg-blue-700">Logout</button>
     </nav>
   );
 }

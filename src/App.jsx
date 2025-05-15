@@ -8,7 +8,6 @@ import Invoices from './pages/Invoices';
 import Home from './pages/Home';
 import Favorites from './pages/Favorites';
 import CustomReports from './pages/CustomReports';
-import ManagementReports from './pages/ManagementReports';
 import AllAssetsReport from './pages/management-reports/AllAssetsReport';
 import AssetTypeChangesReport from './pages/management-reports/AssetTypeChangesReport';
 import AssetsByCustomerReport from './pages/management-reports/AssetsByCustomerReport';
@@ -30,12 +29,26 @@ import LotReports from './pages/LotReports';
 import RegularMaintenance from './pages/RegularMaintenance';
 import Locations from './pages/Locations';
 import Search from './pages/Search';
-import Integration from './pages/Integration';
 import CreateRecords from './pages/CreateRecords';
 import Alerts from './pages/Alerts';
 import MobileUnits from './pages/MobileUnits';
 import Rental from './pages/Rental';
+import CustomerDetail from './pages/CustomerDetail';
+import AssetHistory from './pages/AssetHistory';
+import AssetHistoryLookup from './pages/AssetHistoryLookup';
+import ImportInvoices from './pages/ImportInvoices';
+import ImportHistory from './pages/ImportHistory';
+import AllAssetMovements from './pages/AllAssetMovements';
+import Import from './pages/Import';
+import ImportSalesReceipts from './pages/ImportSalesReceipts';
+import Settings from './pages/Settings';
+import ImportCustomerInfo from './pages/ImportCustomerInfo';
+import ScannedOrders from './pages/ScannedOrders';
+import SupabaseOrders from './pages/management-reports/SupabaseOrders';
 import { useAuth } from './hooks/useAuth';
+import MainLayout from './components/MainLayout';
+import { ImportProgressProvider } from './components/ImportProgressContext';
+import UserManagement from './pages/UserManagement';
 
 function App() {
   const { user, profile, loading } = useAuth();
@@ -45,49 +58,47 @@ function App() {
   const isAuthenticated = !!user;
 
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Navigate to="/login" />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/dashboard" element={<Navigate to="/home" replace />} />
-        <Route path="/customers" element={isAuthenticated ? <Customers user={user} profile={profile} /> : <Navigate to="/login" />} />
-        <Route path="/cylinders" element={isAuthenticated ? <Cylinders user={user} profile={profile} /> : <Navigate to="/login" />} />
-        <Route path="/rentals" element={isAuthenticated ? <Rentals user={user} profile={profile} /> : <Navigate to="/login" />} />
-        <Route path="/invoices" element={isAuthenticated ? <Invoices user={user} profile={profile} /> : <Navigate to="/login" />} />
-        <Route path="/home" element={isAuthenticated ? <Home user={user} profile={profile} /> : <Navigate to="/login" />} />
-        <Route path="/favorites" element={<Favorites />} />
-        <Route path="/custom-reports" element={<CustomReports />} />
-        <Route path="/management-reports" element={<ManagementReports />}>
-          <Route path="all-assets" element={<AllAssetsReport />} />
-          <Route path="asset-type-changes" element={<AssetTypeChangesReport />} />
-          <Route path="assets-by-customer" element={<AssetsByCustomerReport />} />
-          <Route path="audits-to-delivery-records" element={<AuditsToDeliveryRecordsReport />} />
-          <Route path="balance-changes-summary" element={<BalanceChangesSummaryReport />} />
-          <Route path="customer-deliveries" element={<CustomerDeliveriesReport />} />
-          <Route path="deliveries-by-location" element={<DeliveriesByLocationReport />} />
-          <Route path="delivery-totals-by-user" element={<DeliveryTotalsByUserReport />} />
-          <Route path="lost-assets" element={<LostAssetsReport />} />
-          <Route path="movement-between-locations" element={<MovementBetweenLocationsReport />} />
-          <Route path="negative-balance-report" element={<NegativeBalanceReport />} />
-          <Route path="new-assets-added" element={<NewAssetsAddedReport />} />
-          <Route path="not-scanned-source" element={<NotScannedSourceReport />} />
-          <Route path="overdue-asset-search" element={<OverdueAssetSearchReport />} />
-          <Route path="print-days-records" element={<PrintDaysRecordsReport />} />
-          <Route path="quick-map" element={<QuickMapReport />} />
-        </Route>
-        <Route path="/quick-add" element={<QuickAdd />} />
-        <Route path="/lot-reports" element={<LotReports />} />
-        <Route path="/regular-maintenance" element={<RegularMaintenance />} />
-        <Route path="/locations" element={<Locations />} />
-        <Route path="/search" element={<Search />} />
-        <Route path="/integration/*" element={<Integration />} />
-        <Route path="/create-records" element={<CreateRecords />} />
-        <Route path="/alerts" element={<Alerts />} />
-        <Route path="/mobile-units" element={<MobileUnits />} />
-        <Route path="/rental/*" element={<Rental />} />
-        <Route path="*" element={<Navigate to="/login" />} />
-      </Routes>
-    </Router>
+    <ImportProgressProvider>
+      <Router>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route element={<MainLayout />}>
+            <Route path="/" element={<Navigate to="/home" />} />
+            <Route path="/dashboard" element={<Navigate to="/home" replace />} />
+            <Route path="/customers" element={isAuthenticated ? <Customers user={user} profile={profile} /> : <Navigate to="/login" />} />
+            <Route path="/customers/:id" element={isAuthenticated ? <CustomerDetail /> : <Navigate to="/login" />} />
+            <Route path="/assets/:id/history" element={isAuthenticated ? <AssetHistory /> : <Navigate to="/login" />} />
+            <Route path="/assets/history-lookup" element={isAuthenticated ? <AssetHistoryLookup /> : <Navigate to="/login" />} />
+            <Route path="/cylinders" element={isAuthenticated ? <Cylinders user={user} profile={profile} /> : <Navigate to="/login" />} />
+            <Route path="/rentals" element={isAuthenticated ? <Rentals user={user} profile={profile} /> : <Navigate to="/login" />} />
+            <Route path="/invoices" element={isAuthenticated ? <Invoices user={user} profile={profile} /> : <Navigate to="/login" />} />
+            <Route path="/home" element={isAuthenticated ? <Home user={user} profile={profile} /> : <Navigate to="/login" />} />
+            <Route path="/settings" element={isAuthenticated ? <Settings /> : <Navigate to="/login" />} />
+            <Route path="/favorites" element={<Favorites />} />
+            <Route path="/custom-reports" element={<CustomReports />} />
+            <Route path="/orders-report" element={<SupabaseOrders />} />
+            <Route path="/quick-add" element={<QuickAdd />} />
+            <Route path="/lot-reports" element={<LotReports />} />
+            <Route path="/regular-maintenance" element={<RegularMaintenance />} />
+            <Route path="/locations" element={<Locations />} />
+            <Route path="/search" element={<Search />} />
+            <Route path="/create-records" element={<CreateRecords />} />
+            <Route path="/alerts" element={<Alerts />} />
+            <Route path="/mobile-units" element={<MobileUnits />} />
+            <Route path="/rental/*" element={<Rental />} />
+            <Route path="/import" element={isAuthenticated ? <Import /> : <Navigate to="/login" />} />
+            <Route path="/import-customer-info" element={isAuthenticated ? <ImportCustomerInfo /> : <Navigate to="/login" />} />
+            <Route path="/import-sales-receipts" element={isAuthenticated ? <ImportSalesReceipts /> : <Navigate to="/login" />} />
+            <Route path="/import-invoices" element={isAuthenticated ? <ImportInvoices /> : <Navigate to="/login" />} />
+            <Route path="/import-history" element={isAuthenticated ? <ImportHistory /> : <Navigate to="/login" />} />
+            <Route path="/all-asset-movements" element={isAuthenticated ? <AllAssetMovements /> : <Navigate to="/login" />} />
+            <Route path="/scanned-orders" element={isAuthenticated ? <ScannedOrders /> : <Navigate to="/login" />} />
+            <Route path="/user-management" element={isAuthenticated && profile?.role === 'admin' ? <UserManagement /> : <Navigate to="/home" />} />
+            <Route path="*" element={<Navigate to="/home" />} />
+          </Route>
+        </Routes>
+      </Router>
+    </ImportProgressProvider>
   );
 }
 

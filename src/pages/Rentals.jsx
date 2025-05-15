@@ -1,6 +1,65 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
+import {
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Dialog, DialogTitle, DialogContent, DialogActions, TextField, CircularProgress, Collapse, IconButton
+} from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+
+function EditableRentalRow({ rental, canEdit, onSave }) {
+  const [amount, setAmount] = useState(rental.rental_amount ?? 10);
+  const [type, setType] = useState(rental.rental_type || 'monthly');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    const { error } = await supabase
+      .from('rentals')
+      .update({ rental_amount: amount, rental_type: type })
+      .eq('id', rental.id);
+    setSaving(false);
+    if (error) setError(error.message);
+    else onSave();
+  };
+
+  return (
+    <TableRow>
+      <TableCell>{rental.cylinder.serial_number}</TableCell>
+      <TableCell>{rental.cylinder.gas_type}</TableCell>
+      <TableCell>
+        <TextField
+          select
+          value={type}
+          onChange={e => setType(e.target.value)}
+          size="small"
+          disabled={!canEdit}
+        >
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </TextField>
+      </TableCell>
+      <TableCell>
+        <TextField
+          type="number"
+          value={amount}
+          onChange={e => setAmount(Number(e.target.value))}
+          size="small"
+          disabled={!canEdit}
+        />
+      </TableCell>
+      <TableCell>{rental.rental_start_date}</TableCell>
+      <TableCell>{rental.rental_end_date || '-'}</TableCell>
+      {canEdit && (
+        <TableCell>
+          <Button onClick={handleSave} size="small" disabled={saving} variant="contained">{saving ? <CircularProgress size={18} /> : 'Save'}</Button>
+        </TableCell>
+      )}
+    </TableRow>
+  );
+}
 
 function Rentals({ profile }) {
   const [rentals, setRentals] = useState([]);
@@ -10,11 +69,11 @@ function Rentals({ profile }) {
   const [showEndRentalModal, setShowEndRentalModal] = useState(false);
   const [selectedRental, setSelectedRental] = useState(null);
   const [endDate, setEndDate] = useState('');
+  const [expandedCustomer, setExpandedCustomer] = useState(null);
 
   const canEdit = profile?.role === 'admin' || profile?.role === 'manager';
   const navigate = useNavigate();
 
-  // Fetch rentals with customer and cylinder details
   useEffect(() => {
     const fetchRentals = async () => {
       setLoading(true);
@@ -22,22 +81,9 @@ function Rentals({ profile }) {
       try {
         const { data, error: rentalsError } = await supabase
           .from('rentals')
-          .select(`
-            *,
-            customer:customer_id (
-              CustomerListID,
-              name,
-              customer_number
-            ),
-            cylinder:cylinder_id (
-              id,
-              serial_number,
-              gas_type
-            )
-          `)
+          .select(`*, customer:customer_id (CustomerListID, name, customer_number), cylinder:cylinder_id (id, serial_number, gas_type)`)
           .eq('status', statusFilter)
           .order('rental_start_date', { ascending: false });
-
         if (rentalsError) throw rentalsError;
         setRentals(data);
       } catch (err) {
@@ -45,9 +91,23 @@ function Rentals({ profile }) {
       }
       setLoading(false);
     };
-
     fetchRentals();
   }, [statusFilter]);
+
+  // Group rentals by customer
+  const customers = [];
+  const customerMap = {};
+  for (const rental of rentals) {
+    const custId = rental.customer.CustomerListID;
+    if (!customerMap[custId]) {
+      customerMap[custId] = {
+        customer: rental.customer,
+        rentals: [],
+      };
+      customers.push(customerMap[custId]);
+    }
+    customerMap[custId].rentals.push(rental);
+  }
 
   const openEndRentalModal = (rental) => {
     setSelectedRental(rental);
@@ -59,49 +119,22 @@ function Rentals({ profile }) {
     e.preventDefault();
     setError(null);
     try {
-      // Update rental status
       const { error: rentalError } = await supabase
         .from('rentals')
-        .update({
-          status: 'ended',
-          rental_end_date: endDate
-        })
+        .update({ status: 'ended', rental_end_date: endDate })
         .eq('id', selectedRental.id);
-
       if (rentalError) throw rentalError;
-
-      // Unassign cylinder
       const { error: cylinderError } = await supabase
         .from('cylinders')
-        .update({
-          assigned_customer: null,
-          rental_start_date: null
-        })
+        .update({ assigned_customer: null, rental_start_date: null })
         .eq('id', selectedRental.cylinder.id);
-
       if (cylinderError) throw cylinderError;
-
       setShowEndRentalModal(false);
-      
-      // Refresh rentals list
       const { data, error: refreshError } = await supabase
         .from('rentals')
-        .select(`
-          *,
-          customer:customer_id (
-            CustomerListID,
-            name,
-            customer_number
-          ),
-          cylinder:cylinder_id (
-            id,
-            serial_number,
-            gas_type
-          )
-        `)
+        .select(`*, customer:customer_id (CustomerListID, name, customer_number), cylinder:cylinder_id (id, serial_number, gas_type)`)
         .eq('status', statusFilter)
         .order('rental_start_date', { ascending: false });
-
       if (refreshError) throw refreshError;
       setRentals(data);
     } catch (err) {
@@ -109,141 +142,124 @@ function Rentals({ profile }) {
     }
   };
 
-  if (loading) return <div>Loading rentals...</div>;
-  if (error) return <div className="text-red-600">Error: {error}</div>;
+  if (loading) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
+  if (error) return <Box p={4} color="error.main">Error: {error}</Box>;
 
   return (
-    <div className="relative max-w-7xl mx-auto mt-10 bg-gradient-to-br from-white via-blue-50 to-blue-100 shadow-2xl rounded-2xl p-8 border border-blue-100 w-full">
-      <div className="flex justify-between items-center mb-8">
-        <h2 className="text-xl font-bold">Rentals</h2>
-        <button
-          onClick={() => navigate('/')}
-          className="bg-gradient-to-r from-gray-400 to-gray-300 text-white px-6 py-2 rounded-lg shadow-md hover:from-gray-500 hover:to-gray-400 font-semibold transition"
-        >
-          Back to Dashboard
-        </button>
-      </div>
-
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex gap-2">
-          <button
+    <Box maxWidth="lg" mx="auto" mt={4}>
+      <Paper elevation={6} sx={{ borderRadius: 4, p: 4 }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+          <Typography variant="h4" fontWeight={800} color="primary">Rentals</Typography>
+          <Button variant="outlined" color="secondary" onClick={() => navigate('/')}>Back to Dashboard</Button>
+        </Box>
+        <Box display="flex" gap={2} mb={2}>
+          <Button
+            variant={statusFilter === 'active' ? 'contained' : 'outlined'}
+            color="primary"
             onClick={() => setStatusFilter('active')}
-            className={`px-4 py-2 rounded ${
-              statusFilter === 'active'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-200 text-gray-700'
-            }`}
           >
             Active
-          </button>
-          <button
+          </Button>
+          <Button
+            variant={statusFilter === 'ended' ? 'contained' : 'outlined'}
+            color="primary"
             onClick={() => setStatusFilter('ended')}
-            className={`px-4 py-2 rounded ${
-              statusFilter === 'ended'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-200 text-gray-700'
-            }`}
           >
             Ended
-          </button>
-        </div>
-      </div>
-
-      <table className="min-w-full bg-white border">
-        <thead>
-          <tr>
-            <th className="border px-4 py-2">Customer</th>
-            <th className="border px-4 py-2">Cylinder</th>
-            <th className="border px-4 py-2">Gas Type</th>
-            <th className="border px-4 py-2">Type</th>
-            <th className="border px-4 py-2">Start Date</th>
-            <th className="border px-4 py-2">End Date</th>
-            {canEdit && statusFilter === 'active' && (
-              <th className="border px-4 py-2">Actions</th>
-            )}
-          </tr>
-        </thead>
-        <tbody>
-          {rentals.map(rental => (
-            <tr key={rental.id}>
-              <td className="border px-4 py-2">
-                {rental.customer.name}
-                <br />
-                <span className="text-sm text-gray-500">
-                  ({rental.customer.customer_number})
-                </span>
-              </td>
-              <td className="border px-4 py-2">{rental.cylinder.serial_number}</td>
-              <td className="border px-4 py-2">{rental.cylinder.gas_type}</td>
-              <td className="border px-4 py-2">
-                <span className={`capitalize ${
-                  rental.rental_type === 'monthly'
-                    ? 'text-blue-600'
-                    : 'text-green-600'
-                }`}>
-                  {rental.rental_type}
-                </span>
-              </td>
-              <td className="border px-4 py-2">{rental.rental_start_date}</td>
-              <td className="border px-4 py-2">{rental.rental_end_date || '-'}</td>
-              {canEdit && statusFilter === 'active' && (
-                <td className="border px-4 py-2">
-                  <button
-                    onClick={() => openEndRentalModal(rental)}
-                    className="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600"
-                  >
-                    End Rental
-                  </button>
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {/* End Rental Modal */}
-      {showEndRentalModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-white p-6 rounded-lg w-96">
-            <h3 className="text-lg font-bold mb-4">End Rental</h3>
-            <p className="mb-4">
-              End rental for cylinder {selectedRental.cylinder.serial_number}
-              <br />
-              <span className="text-sm text-gray-600">
-                Rented to: {selectedRental.customer.name}
-              </span>
-            </p>
-            <form onSubmit={handleEndRental} className="space-y-4">
-              <div>
-                <label className="block mb-2">End Date</label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full border p-2 rounded"
-                  required
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowEndRentalModal(false)}
-                  className="bg-gray-400 text-white px-4 py-2 rounded"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="bg-blue-600 text-white px-4 py-2 rounded"
-                >
-                  End Rental
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+          </Button>
+        </Box>
+        <TableContainer component={Paper} sx={{ borderRadius: 2 }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Customer</TableCell>
+                <TableCell># of Cylinders</TableCell>
+                <TableCell>Expand</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {customers.map(({ customer, rentals }) => (
+                <React.Fragment key={customer.CustomerListID}>
+                  <TableRow hover onClick={() => setExpandedCustomer(expandedCustomer === customer.CustomerListID ? null : customer.CustomerListID)}>
+                    <TableCell>{customer.name} <Typography variant="caption" color="text.secondary">({customer.customer_number})</Typography></TableCell>
+                    <TableCell align="center">{rentals.length}</TableCell>
+                    <TableCell align="center">
+                      <IconButton size="small">
+                        {expandedCustomer === customer.CustomerListID ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell colSpan={3} sx={{ p: 0, border: 0 }}>
+                      <Collapse in={expandedCustomer === customer.CustomerListID} timeout="auto" unmountOnExit>
+                        <Box sx={{ m: 1 }}>
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow>
+                                <TableCell>Cylinder</TableCell>
+                                <TableCell>Gas Type</TableCell>
+                                <TableCell>Type</TableCell>
+                                <TableCell>Amount</TableCell>
+                                <TableCell>Start Date</TableCell>
+                                <TableCell>End Date</TableCell>
+                                {canEdit && statusFilter === 'active' && <TableCell>Actions</TableCell>}
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {rentals.map(rental => (
+                                <EditableRentalRow
+                                  key={rental.id}
+                                  rental={rental}
+                                  canEdit={canEdit && statusFilter === 'active'}
+                                  onSave={() => {
+                                    const fetchRentals = async () => {
+                                      const { data } = await supabase
+                                        .from('rentals')
+                                        .select(`*, customer:customer_id (CustomerListID, name, customer_number), cylinder:cylinder_id (id, serial_number, gas_type)`)
+                                        .eq('status', statusFilter)
+                                        .order('rental_start_date', { ascending: false });
+                                      setRentals(data);
+                                    };
+                                    fetchRentals();
+                                  }}
+                                />
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </Box>
+                      </Collapse>
+                    </TableCell>
+                  </TableRow>
+                </React.Fragment>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        {/* End Rental Modal */}
+        <Dialog open={showEndRentalModal} onClose={() => setShowEndRentalModal(false)}>
+          <DialogTitle>End Rental</DialogTitle>
+          <DialogContent>
+            <Typography mb={2}>
+              End rental for cylinder <b>{selectedRental?.cylinder?.serial_number}</b><br />
+              <span style={{ fontSize: 12, color: '#666' }}>Rented to: {selectedRental?.customer?.name}</span>
+            </Typography>
+            <TextField
+              label="End Date"
+              type="date"
+              value={endDate}
+              onChange={e => setEndDate(e.target.value)}
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+              required
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowEndRentalModal(false)}>Cancel</Button>
+            <Button onClick={handleEndRental} variant="contained" color="primary">End Rental</Button>
+          </DialogActions>
+        </Dialog>
+      </Paper>
+    </Box>
   );
 }
 

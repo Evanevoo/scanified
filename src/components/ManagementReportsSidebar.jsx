@@ -2,6 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 
 const links = [
+  { to: '/management-reports/import-customers', label: 'Import Customers' },
   { to: '/management-reports/all-assets', label: 'All Assets' },
   { to: '/management-reports/asset-type-changes', label: 'Asset Type Changes' },
   { to: '/management-reports/assets-by-customer', label: 'Assets By Customer' },
@@ -18,11 +19,14 @@ const links = [
   { to: '/management-reports/overdue-asset-search', label: 'Overdue Asset Search' },
   { to: '/management-reports/print-days-records', label: "Print Day's Records" },
   { to: '/management-reports/quick-map', label: 'Quick Map' },
+  { to: '/management-reports/supabase-orders', label: 'Orders Report' },
 ];
+
+console.log(links);
 
 export default function ManagementReportsSidebar() {
   return (
-    <div className="bg-gray-200 w-64 min-h-screen p-0 border-r">
+    <div className="bg-gray-200 w-64 min-h-screen p-0 border-r overflow-y-auto">
       <div className="bg-gray-600 text-white font-bold px-4 py-3">Management Reports</div>
       <nav>
         {links.map(link => (
