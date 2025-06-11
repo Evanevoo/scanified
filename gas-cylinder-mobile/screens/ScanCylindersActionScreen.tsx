@@ -324,7 +324,15 @@ export default function ScanCylindersActionScreen() {
                     ];
                     const { error } = await supabase.from('scanned_cylinders').insert(allBarcodes);
                     if (error) setSyncResult('Error: ' + error.message);
-                    else setSyncResult('Synced successfully!');
+                    else {
+                      // Also update sales_orders.scanned_at for this order
+                      const { error: updateError } = await supabase
+                        .from('sales_orders')
+                        .update({ scanned_at: new Date().toISOString() })
+                        .eq('sales_order_number', orderNumber);
+                      if (updateError) setSyncResult('Error updating order: ' + updateError.message);
+                      else setSyncResult('Synced successfully!');
+                    }
                   } catch (e) {
                     setSyncResult('Error: ' + e.message);
                   }

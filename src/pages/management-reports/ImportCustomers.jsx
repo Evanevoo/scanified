@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
 import { supabase } from '../../supabase/client';
+import { Box, Paper, Typography } from '@mui/material';
 
 const REQUIRED_FIELDS = [
   'Customer ID',
@@ -90,19 +91,30 @@ export default function ImportCustomers() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       const text = event.target.result;
-      let parsed = Papa.parse(text, { delimiter: '\t', header: true, skipEmptyLines: true });
-      if (parsed.meta.fields.length < 2) {
-        parsed = Papa.parse(text, { delimiter: ',', header: true, skipEmptyLines: true });
+      let rows = text.split('\n').map(line => line.split('\t'));
+      if (!rows.length) return;
+      let detectedColumns = [];
+      let dataRows = rows;
+      // Detect if first row is header
+      const isHeader = rows[0].every(cell => typeof cell === 'string' && cell.length > 0 && !/^[0-9]+$/.test(cell));
+      if (isHeader) {
+        detectedColumns = rows[0].map((col, i) => col.trim() || `Column ${i+1}`);
+        dataRows = rows.slice(1);
+      } else {
+        detectedColumns = APP_FIELDS;
       }
-      setFileColumns(parsed.meta.fields);
-      setFileRows(parsed.data);
-      // Auto-map columns (exact match only)
-      const mapping = autoMapColumns(APP_FIELDS, parsed.meta.fields);
+      setFileColumns(detectedColumns);
+      setFileRows(dataRows);
+      // Auto-map columns by name or position
+      const mapping = {};
+      APP_FIELDS.forEach((f, i) => {
+        if (detectedColumns[i]) mapping[f] = detectedColumns[i];
+      });
       setAutoMapping(mapping);
       // Check for existing customers in DB
       setCheckingExisting(true);
       const customerIdCol = mapping['Customer ID'];
-      const ids = parsed.data.map(row => row[customerIdCol]).filter(Boolean);
+      const ids = dataRows.map(row => row[detectedColumns.indexOf(customerIdCol)]).filter(Boolean);
       let existingIds = [];
       if (ids.length > 0) {
         const { data, error } = await supabase
@@ -115,7 +127,7 @@ export default function ImportCustomers() {
       }
       setExistingCustomerIds(existingIds);
       // Filter preview to only new customers
-      const newRows = parsed.data.filter(row => !existingIds.includes(row[customerIdCol]));
+      const newRows = dataRows.filter(row => !existingIds.includes(row[detectedColumns.indexOf(customerIdCol)]));
       setNewCustomersPreview(newRows);
       setCheckingExisting(false);
       setStep(2);
@@ -229,152 +241,155 @@ export default function ImportCustomers() {
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Import Customers</h1>
-      <button
-        className="mb-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-        onClick={downloadSampleFile}
-      >
-        Download Sample File
-      </button>
-      {step === 1 && (
-        <>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".txt,.tsv,.csv,text/tab-separated-values,text/csv"
-            className="block mb-4"
-            onChange={handleFileChange}
-          />
-          <div className="text-gray-600 text-sm mt-4">
-            Accepted file type: Tab- or comma-delimited text (.txt, .tsv, .csv).<br />
-            Your file columns will be automatically mapped by name. Required columns: {REQUIRED_FIELDS.join(', ')}.
-          </div>
-        </>
-      )}
-      {step === 2 && (
-        <div className="mb-4">
-          {checkingExisting ? (
-            <div className="text-blue-600 font-semibold mb-2">Checking for existing customers...</div>
-          ) : (
-            <>
-              {/* Mapping UI */}
-              <div className="mb-4 p-3 bg-blue-50 border-l-4 border-blue-400 text-blue-900 font-bold rounded">
-                <span className="text-lg">Map your file columns to app fields:</span>
-                <table className="border text-sm mt-2">
-                  <thead>
-                    <tr>
-                      <th className="border px-2 py-1">App Field</th>
-                      <th className="border px-2 py-1">File Column</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {APP_FIELDS.map(appField => (
-                      <tr key={appField}>
-                        <td className="border px-2 py-1 font-semibold">{appField}</td>
-                        <td className="border px-2 py-1">
-                          <select
-                            value={autoMapping[appField] || ''}
-                            onChange={e => {
-                              setAutoMapping(m => ({ ...m, [appField]: e.target.value }));
-                            }}
-                          >
-                            <option value="">(Not Mapped)</option>
-                            {fileColumns.map(col => (
-                              <option key={col} value={col}>{col}</option>
-                            ))}
-                          </select>
-                        </td>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
+      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
+        <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Import Customers</Typography>
+        <button
+          className="mb-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          onClick={downloadSampleFile}
+        >
+          Download Sample File
+        </button>
+        {step === 1 && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt,.tsv,.csv,text/tab-separated-values,text/csv"
+              className="block mb-4"
+              onChange={handleFileChange}
+            />
+            <div className="text-gray-600 text-sm mt-4">
+              Accepted file type: Tab- or comma-delimited text (.txt, .tsv, .csv).<br />
+              Your file columns will be automatically mapped by name or position. Required columns: Customer ID, Customer Name.<br />
+              <b>Files without headers are supported.</b>
+            </div>
+          </>
+        )}
+        {step === 2 && (
+          <div className="mb-4">
+            {checkingExisting ? (
+              <div className="text-blue-600 font-semibold mb-2">Checking for existing customers...</div>
+            ) : (
+              <>
+                {/* Mapping UI */}
+                <div className="mb-4 p-3 bg-blue-50 border-l-4 border-blue-400 text-blue-900 font-bold rounded">
+                  <span className="text-lg">Map your file columns to app fields:</span>
+                  <table className="border text-sm mt-2">
+                    <thead>
+                      <tr>
+                        <th className="border px-2 py-1">App Field</th>
+                        <th className="border px-2 py-1">File Column</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {/* Preview Table */}
-              <div className="mb-2 font-semibold">Preview (showing {Math.min(newCustomersPreview.length, 5)} of {newCustomersPreview.length} new customers):</div>
-              <div className="overflow-x-auto max-h-96">
-                <table className="border text-sm" data-testid="preview-table">
-                  <thead>
-                    <tr>
-                      {fileColumns.map(col => (
-                        <th key={col} className="border px-2 py-1">{col}</th>
+                    </thead>
+                    <tbody>
+                      {APP_FIELDS.map(appField => (
+                        <tr key={appField}>
+                          <td className="border px-2 py-1 font-semibold">{appField}</td>
+                          <td className="border px-2 py-1">
+                            <select
+                              value={autoMapping[appField] || ''}
+                              onChange={e => {
+                                setAutoMapping(m => ({ ...m, [appField]: e.target.value }));
+                              }}
+                            >
+                              <option value="">(Not Mapped)</option>
+                              {fileColumns.map(col => (
+                                <option key={col} value={col}>{col}</option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {newCustomersPreview.slice(0, 5).map((row, idx) => (
-                      <tr key={idx}>
+                    </tbody>
+                  </table>
+                </div>
+                {/* Preview Table */}
+                <div className="mb-2 font-semibold">Preview (showing {Math.min(newCustomersPreview.length, 5)} of {newCustomersPreview.length} new customers):</div>
+                <div className="overflow-x-auto max-h-96">
+                  <table className="border text-sm" data-testid="preview-table">
+                    <thead>
+                      <tr>
                         {fileColumns.map(col => (
-                          <td key={col} className="border px-2 py-1">{row[col]}</td>
+                          <th key={col} className="border px-2 py-1">{col}</th>
                         ))}
                       </tr>
+                    </thead>
+                    <tbody>
+                      {newCustomersPreview.slice(0, 5).map((row, idx) => (
+                        <tr key={idx}>
+                          {fileColumns.map(col => (
+                            <td key={col} className="border px-2 py-1">{row[col]}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {newCustomersPreview.length > 5 && (
+                    <div className="text-xs text-gray-500 mt-1">Showing only the first 5 new customers.</div>
+                  )}
+                </div>
+                <button
+                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                  onClick={handleImport}
+                >
+                  Import
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {step === 3 && (
+          <>
+            <div className="mb-2">
+              <span className="text-green-700 font-semibold">Successfully added {successCount} new customer(s).</span>
+              {errors.length > 0 && <span className="text-red-700 ml-4 font-semibold">{errors.length} row(s) failed.</span>}
+            </div>
+            {addedCustomers.length > 0 && (
+              <div className="mb-4">
+                <div className="font-semibold mb-1">Newly Added Customers:</div>
+                <table className="border text-sm">
+                  <thead>
+                    <tr>
+                      <th className="border px-2 py-1">Customer Number</th>
+                      <th className="border px-2 py-1">Customer Name</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {addedCustomers.map((c, idx) => (
+                      <tr key={idx}>
+                        <td className="border px-2 py-1">{c.CustomerListID}</td>
+                        <td className="border px-2 py-1">{c.name}</td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>
-                {newCustomersPreview.length > 5 && (
-                  <div className="text-xs text-gray-500 mt-1">Showing only the first 5 new customers.</div>
-                )}
               </div>
-              <button
-                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-                onClick={handleImport}
-              >
-                Import
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {step === 3 && (
-        <>
-          <div className="mb-2">
-            <span className="text-green-700 font-semibold">Successfully added {successCount} new customer(s).</span>
-            {errors.length > 0 && <span className="text-red-700 ml-4 font-semibold">{errors.length} row(s) failed.</span>}
-          </div>
-          {addedCustomers.length > 0 && (
-            <div className="mb-4">
-              <div className="font-semibold mb-1">Newly Added Customers:</div>
-              <table className="border text-sm">
-                <thead>
-                  <tr>
-                    <th className="border px-2 py-1">Customer Number</th>
-                    <th className="border px-2 py-1">Customer Name</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {addedCustomers.map((c, idx) => (
-                    <tr key={idx}>
-                      <td className="border px-2 py-1">{c.CustomerListID}</td>
-                      <td className="border px-2 py-1">{c.name}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {errors.length > 0 && (
-            <div className="mb-2 text-red-700">
-              <div>First 10 errors:</div>
-              <ul className="list-disc ml-6">
-                {errors.slice(0, 10).map((err, i) => <li key={i}>{err}</li>)}
-              </ul>
-              {errors.length > 10 && <div>And {errors.length - 10} more...</div>}
-              <button
-                className="mt-2 px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"
-                onClick={downloadErrorCSV}
-              >
-                Download Failed Rows as CSV
-              </button>
-            </div>
-          )}
-          <button
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-            onClick={() => setStep(1)}
-          >
-            Import Another File
-          </button>
-        </>
-      )}
-    </div>
+            )}
+            {errors.length > 0 && (
+              <div className="mb-2 text-red-700">
+                <div>First 10 errors:</div>
+                <ul className="list-disc ml-6">
+                  {errors.slice(0, 10).map((err, i) => <li key={i}>{err}</li>)}
+                </ul>
+                {errors.length > 10 && <div>And {errors.length - 10} more...</div>}
+                <button
+                  className="mt-2 px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"
+                  onClick={downloadErrorCSV}
+                >
+                  Download Failed Rows as CSV
+                </button>
+              </div>
+            )}
+            <button
+              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              onClick={() => setStep(1)}
+            >
+              Import Another File
+            </button>
+          </>
+        )}
+      </Paper>
+    </Box>
   );
 } 

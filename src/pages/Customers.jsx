@@ -4,6 +4,11 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar
 } from '@mui/material';
+import Pagination from '@mui/material/Pagination';
+import FormControl from '@mui/material/FormControl';
+import InputLabel from '@mui/material/InputLabel';
+import Select from '@mui/material/Select';
+import MenuItem from '@mui/material/MenuItem';
 
 function exportToCSV(customers) {
   if (!customers.length) return;
@@ -48,6 +53,8 @@ function Customers({ profile }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [highlightedId, setHighlightedId] = useState(null);
   const [successMsg, setSuccessMsg] = useState('');
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(20);
 
   const canEdit = profile?.role === 'admin' || profile?.role === 'manager';
   const navigate = useNavigate();
@@ -141,92 +148,118 @@ function Customers({ profile }) {
     }
   };
 
+  // Pagination logic
+  const filteredCustomers = customers
+    .filter(c => c.name?.toLowerCase().includes(searchTerm.toLowerCase()))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const pageCount = Math.ceil(filteredCustomers.length / rowsPerPage);
+  const paginatedCustomers = filteredCustomers.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+
   if (loading) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
   if (error) return <Box p={4} color="error.main">Error: {error}</Box>;
 
   return (
-    <Box maxWidth="lg" mx="auto" mt={4}>
-      <Paper elevation={6} sx={{ borderRadius: 4, p: 4 }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
-          <Typography variant="h4" fontWeight={800} color="primary">Customers</Typography>
-          <Button variant="outlined" color="secondary" onClick={() => exportToCSV(customers)}>Export Customers</Button>
-          <Button variant="outlined" color="secondary" onClick={() => navigate('/')}>Back to Dashboard</Button>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
+      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
+        <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Customers</Typography>
+        <Box display="flex" justifyContent="flex-end" alignItems="center" gap={2} sx={{ p: 3, pb: 0 }}>
+          <Button variant="outlined" sx={{ fontWeight: 700, borderRadius: 8, px: 3, color: '#0074e8', borderColor: '#bdbdbd', background: '#fff', ':hover': { borderColor: '#0074e8', background: '#f5faff' } }} onClick={() => exportToCSV(customers)}>
+            Export to CSV
+          </Button>
+          <Button
+            variant="contained"
+            sx={{ fontWeight: 700, borderRadius: 8, px: 3, bgcolor: selected.length > 0 ? '#e53935' : '#e0e0e0', color: selected.length > 0 ? '#fff' : '#444', boxShadow: 'none' }}
+            disabled={selected.length === 0}
+            onClick={handleBulkDelete}
+          >
+            Delete Selected
+          </Button>
+          <Button variant="contained" sx={{ fontWeight: 700, borderRadius: 8, px: 3, bgcolor: '#111', color: '#fff', boxShadow: 'none', ':hover': { bgcolor: '#222' } }} onClick={() => navigate('/')}>Back to Dashboard</Button>
         </Box>
-        {/* Search Bar */}
-        <Box mb={3} maxWidth={400}>
+        <Box sx={{ p: 3, pt: 2 }}>
+          <Typography variant="h4" fontWeight={800} color="#1976d2" sx={{ mb: 2 }}>Customers</Typography>
           <TextField
-            label="Search customers by name, ID, or phone..."
+            placeholder="Search customers"
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             fullWidth
-            size="small"
+            size="medium"
+            sx={{ mb: 3, maxWidth: 400 }}
           />
-        </Box>
-        {canEdit && (
-          <Box component="form" onSubmit={editingId ? handleUpdate : handleAdd} mb={3} display="flex" gap={2} flexWrap="wrap">
-            <TextField name="CustomerListID" value={form.CustomerListID} onChange={handleChange} label="CustomerListID" size="small" required />
-            <TextField name="name" value={form.name} onChange={handleChange} label="Name" size="small" />
-            <TextField name="contact_details" value={form.contact_details} onChange={handleChange} label="Address" size="small" />
-            <TextField name="phone" value={form.phone} onChange={handleChange} label="Phone" size="small" />
-            <Button type="submit" variant="contained" color="primary">{editingId ? 'Update' : 'Add'}</Button>
-            {editingId && <Button type="button" onClick={() => { setEditingId(null); setForm({ CustomerListID: '', name: '', contact_details: '', phone: '' }); }} variant="outlined" color="secondary">Cancel</Button>}
+          <Box display="flex" alignItems="center" gap={2} mb={2}>
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>Rows per page</InputLabel>
+              <Select value={rowsPerPage} label="Rows per page" onChange={e => { setRowsPerPage(Number(e.target.value)); setPage(1); }}>
+                {[10, 20, 50, 100].map(opt => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
+              </Select>
+            </FormControl>
+            <Typography variant="body2" color="text.secondary">
+              Showing {paginatedCustomers.length} of {filteredCustomers.length} customers
+            </Typography>
           </Box>
-        )}
-        {selected.length > 0 && (
-          <Button onClick={handleBulkDelete} variant="contained" color="error" sx={{ mb: 2 }}>
-            Delete Selected ({selected.length})
-          </Button>
-        )}
-        <TableContainer component={Paper} sx={{ borderRadius: 2 }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell padding="checkbox">
-                  <Checkbox
-                    checked={selected.length === customers.length && customers.length > 0}
-                    onChange={handleSelectAll}
-                  />
-                </TableCell>
-                <TableCell>CustomerListID</TableCell>
-                <TableCell>Name</TableCell>
-                <TableCell>Address</TableCell>
-                <TableCell>Phone</TableCell>
-                <TableCell>Barcode</TableCell>
-                {canEdit && <TableCell>Actions</TableCell>}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {customers.filter(c =>
-                c.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                c.CustomerListID?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                c.phone?.toLowerCase().includes(searchTerm.toLowerCase())
-              ).map((c, idx) => (
-                <TableRow key={c.CustomerListID} hover selected={highlightedId === c.CustomerListID}>
+          <TableContainer component={Paper} sx={{ borderRadius: 2, width: '100%', maxWidth: '100%' }}>
+            <Table size="medium" sx={{ width: '100%' }}>
+              <TableHead>
+                <TableRow sx={{ background: '#fafbfc' }}>
                   <TableCell padding="checkbox">
                     <Checkbox
-                      checked={selected.includes(c.CustomerListID)}
-                      onChange={() => handleSelect(c.CustomerListID)}
+                      checked={paginatedCustomers.length > 0 && paginatedCustomers.every(c => selected.includes(c.CustomerListID))}
+                      indeterminate={paginatedCustomers.some(c => selected.includes(c.CustomerListID)) && !paginatedCustomers.every(c => selected.includes(c.CustomerListID))}
+                      onChange={() => {
+                        const allIds = paginatedCustomers.map(c => c.CustomerListID);
+                        if (allIds.every(id => selected.includes(id))) {
+                          setSelected(selected.filter(id => !allIds.includes(id)));
+                        } else {
+                          setSelected([...new Set([...selected, ...allIds])]);
+                        }
+                      }}
                     />
                   </TableCell>
-                  <TableCell>{c.CustomerListID}</TableCell>
-                  <TableCell>{c.name}</TableCell>
-                  <TableCell>{c.contact_details}</TableCell>
-                  <TableCell>{c.phone}</TableCell>
-                  <TableCell>{c.barcode}</TableCell>
-                  {canEdit && (
-                    <TableCell>
-                      <Button size="small" variant="contained" color="primary" onClick={e => { e.stopPropagation(); handleEdit(c); }}>Edit</Button>
-                      <Button size="small" variant="outlined" color="error" onClick={e => { e.stopPropagation(); handleDelete(c.CustomerListID); }} sx={{ ml: 1 }}>Delete</Button>
-                    </TableCell>
-                  )}
+                  <TableCell sx={{ fontWeight: 700 }}>Name</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Customer #</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Contact</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Phone</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Assets</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        <Snackbar open={!!successMsg} autoHideDuration={3000} onClose={() => setSuccessMsg('')} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
-          <Alert onClose={() => setSuccessMsg('')} severity="success" sx={{ width: '100%' }}>{successMsg}</Alert>
-        </Snackbar>
+              </TableHead>
+              <TableBody>
+                {paginatedCustomers.map((c, idx) => (
+                  <TableRow key={c.CustomerListID} sx={{ borderBottom: '1.5px solid #f0f0f0' }}>
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        checked={selected.includes(c.CustomerListID)}
+                        onChange={() => handleSelect(c.CustomerListID)}
+                      />
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 700, color: '#1976d2', cursor: 'pointer' }} onClick={() => navigate(`/customers/${c.CustomerListID}`)}>
+                      {c.name}
+                    </TableCell>
+                    <TableCell>{c.CustomerListID}</TableCell>
+                    <TableCell>{c.contact_details}</TableCell>
+                    <TableCell>{c.phone}</TableCell>
+                    <TableCell>{c.assets || 0}</TableCell>
+                    <TableCell>
+                      <Button variant="text" sx={{ color: '#1976d2', fontWeight: 700, textTransform: 'none', minWidth: 0, px: 1 }} onClick={() => navigate(`/customers/${c.CustomerListID}`)}>Edit</Button>
+                      <Button variant="text" sx={{ color: '#e53935', fontWeight: 700, textTransform: 'none', minWidth: 0, px: 1 }} onClick={() => handleDelete(c.CustomerListID)}>Delete</Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          <Box display="flex" justifyContent="center" alignItems="center" my={2}>
+            <Pagination
+              count={pageCount}
+              page={page}
+              onChange={(_, value) => setPage(value)}
+              color="primary"
+              shape="rounded"
+              showFirstButton
+              showLastButton
+            />
+          </Box>
+        </Box>
       </Paper>
     </Box>
   );

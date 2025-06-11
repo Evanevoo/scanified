@@ -1,21 +1,51 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
+import {
+  Box,
+  Typography,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Button,
+  Chip,
+  Divider,
+  TextField,
+  CircularProgress,
+  Alert
+} from '@mui/material';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+
+// Helper to check if a string looks like an address
+function looksLikeAddress(str) {
+  if (!str) return false;
+  // Heuristic: contains a comma and a number
+  return /\d/.test(str) && str.includes(',');
+}
 
 export default function CustomerDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [customer, setCustomer] = useState(null);
-  const [assets, setAssets] = useState([]);
+  const [customerAssets, setCustomerAssets] = useState([]);
+  const [locationAssets, setLocationAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       setError(null);
       try {
-        // Fetch customer
         const { data: customerData, error: customerError } = await supabase
           .from('customers')
           .select('*')
@@ -23,13 +53,19 @@ export default function CustomerDetail() {
           .single();
         if (customerError) throw customerError;
         setCustomer(customerData);
-        // Fetch assets assigned to this customer
-        const { data: assetsData, error: assetsError } = await supabase
+        setEditForm(customerData);
+        const { data: customerAssetsData, error: customerAssetsError } = await supabase
           .from('cylinders')
           .select('*')
           .eq('assigned_customer', id);
-        if (assetsError) throw assetsError;
-        setAssets(assetsData);
+        if (customerAssetsError) throw customerAssetsError;
+        setCustomerAssets(customerAssetsData || []);
+        const { data: rentalData, error: rentalError } = await supabase
+          .from('rentals')
+          .select(`*,cylinder:cylinder_id (id, serial_number, gas_type, barcode_number)`)
+          .eq('customer_id', id);
+        if (rentalError) throw rentalError;
+        setLocationAssets(rentalData || []);
       } catch (err) {
         setError(err.message);
       }
@@ -38,73 +74,276 @@ export default function CustomerDetail() {
     fetchData();
   }, [id]);
 
-  if (loading) return <div>Loading...</div>;
-  if (error) return <div className="text-red-600">Error: {error}</div>;
-  if (!customer) return <div>Customer not found.</div>;
+  const handleEditChange = (e) => {
+    setEditForm({ ...editForm, [e.target.name]: e.target.value });
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    setSaveSuccess(false);
+    const updateFields = {
+      name: editForm.name,
+      phone: editForm.phone,
+      contact_details: editForm.contact_details,
+      address: editForm.address,
+      address2: editForm.address2,
+      address3: editForm.address3,
+      address4: editForm.address4,
+      address5: editForm.address5,
+      city: editForm.city,
+      postal_code: editForm.postal_code
+    };
+    const { error } = await supabase
+      .from('customers')
+      .update(updateFields)
+      .eq('CustomerListID', id);
+    if (error) {
+      setSaveError(error.message);
+      setSaving(false);
+      return;
+    }
+    setCustomer({ ...customer, ...updateFields });
+    setEditing(false);
+    setSaving(false);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2000);
+  };
+
+  if (loading) return (
+    <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+      <Typography>Loading...</Typography>
+    </Box>
+  );
+  
+  if (error) return (
+    <Box p={4} color="error.main">
+      <Typography>Error: {error}</Typography>
+    </Box>
+  );
+  
+  if (!customer) return (
+    <Box p={4}>
+      <Typography>Customer not found.</Typography>
+    </Box>
+  );
 
   return (
-    <div className="max-w-5xl mx-auto mt-10 bg-gradient-to-br from-white via-blue-50 to-blue-100 shadow-2xl rounded-2xl p-8 border border-blue-100 w-full">
-      <button onClick={() => navigate(-1)} className="mb-4 bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded">Back</button>
-      <h2 className="text-2xl font-bold mb-4">Customer Details</h2>
-      <div className="mb-6 p-4 bg-white/80 rounded-xl shadow border border-blue-100">
-        <div className="font-bold text-blue-900 text-lg mb-2">{customer.name}</div>
-        <div className="text-sm text-gray-700">CustomerListID: <span className="font-mono">{customer.CustomerListID}</span></div>
-        <div className="text-sm text-gray-700">Address: {[
-          customer.contact_details,
-          customer.address2,
-          customer.address3,
-          customer.address4,
-          customer.address5,
-          customer.city,
-          customer.postal_code
-        ].filter(Boolean).join(', ')}</div>
-        <div className="text-sm text-gray-700">Phone: {customer.phone}</div>
-      </div>
-      <h3 className="font-bold mb-2 text-blue-800">Assets Assigned to Customer</h3>
-      {assets.length === 0 ? (
-        <div className="text-gray-500">No assets assigned to this customer.</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full bg-white border text-xs">
-            <thead>
-              <tr>
-                <th>Serial Number</th>
-                <th>Product Code</th>
-                <th>Description</th>
-                <th>Gas Type</th>
-                <th>Rental Start</th>
-                <th>Category</th>
-                <th>Group</th>
-                <th>Type</th>
-                <th>In-House Total</th>
-                <th>With Customer Total</th>
-                <th>Lost Total</th>
-                <th>Total</th>
-                <th>Dock Stock</th>
-              </tr>
-            </thead>
-            <tbody>
-              {assets.map(asset => (
-                <tr key={asset.id}>
-                  <td>{asset.serial_number}</td>
-                  <td>{asset.product_code}</td>
-                  <td>{asset.description}</td>
-                  <td>{asset.gas_type}</td>
-                  <td>{asset.rental_start_date || '-'}</td>
-                  <td>{asset.category}</td>
-                  <td>{asset.group_name}</td>
-                  <td>{asset.type}</td>
-                  <td>{asset.in_house_total}</td>
-                  <td>{asset.with_customer_total}</td>
-                  <td>{asset.lost_total}</td>
-                  <td>{asset.total}</td>
-                  <td>{asset.dock_stock}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+    <Box sx={{ p: 4, maxWidth: 900, mx: 'auto' }}>
+      <Button
+        startIcon={<ArrowBackIcon />}
+        onClick={() => navigate(-1)}
+        variant="outlined"
+        sx={{ mb: 4, borderRadius: 999, fontWeight: 700, px: 4 }}
+      >
+        Back
+      </Button>
+      
+      <Typography variant="h3" fontWeight={900} color="primary" mb={3} sx={{ letterSpacing: -1 }}>
+        Customer Details
+      </Typography>
+
+      {/* Customer Information */}
+      <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4, border: '1.5px solid #e0e0e0', boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)' }}>
+        <Box display="flex" alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between" flexDirection={{ xs: 'column', md: 'row' }} mb={2}>
+          <Typography variant="h5" fontWeight={700} color="primary">
+            {editing ? (
+              <TextField name="name" value={editForm.name || ''} onChange={handleEditChange} size="small" label="Name" sx={{ minWidth: 200 }} />
+            ) : (
+              customer.name
+            )}
+          </Typography>
+          {!editing && (
+            <Button variant="outlined" onClick={() => setEditing(true)} sx={{ borderRadius: 999, fontWeight: 700, ml: { md: 2 } }}>Edit</Button>
+          )}
+        </Box>
+        <Divider sx={{ mb: 2 }} />
+        <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={3}>
+          <Box>
+            <Typography variant="body2" color="text.secondary">Customer ID</Typography>
+            <Typography variant="body1" fontWeight={600} fontFamily="monospace" sx={{ mb: 2 }}>{customer.CustomerListID}</Typography>
+            <Typography variant="body2" color="text.secondary">Phone</Typography>
+            {editing ? (
+              <TextField name="phone" value={editForm.phone || ''} onChange={handleEditChange} size="small" label="Phone" sx={{ mb: 2, minWidth: 180 }} />
+            ) : (
+              <Typography variant="body1" sx={{ mb: 2 }}>{customer.phone || 'Not provided'}</Typography>
+            )}
+            <Typography variant="body2" color="text.secondary">Contact</Typography>
+            {editing ? (
+              <TextField name="contact_details" value={editForm.contact_details || ''} onChange={handleEditChange} size="small" label="Contact" sx={{ minWidth: 180 }} />
+            ) : (
+              <Typography variant="body1">
+                {([
+                  customer.address,
+                  customer.address2,
+                  customer.address3,
+                  customer.address4,
+                  customer.address5,
+                  customer.city,
+                  customer.postal_code
+                ].filter(Boolean).length === 0 && looksLikeAddress(customer.contact_details))
+                  ? 'Not provided'
+                  : (customer.contact_details || 'Not provided')}
+              </Typography>
+            )}
+          </Box>
+          <Box>
+            <Typography variant="body2" color="text.secondary">Address</Typography>
+            {editing ? (
+              <>
+                <TextField name="address" value={editForm.address || ''} onChange={handleEditChange} size="small" label="Address" sx={{ mb: 1, minWidth: 180 }} />
+                <TextField name="address2" value={editForm.address2 || ''} onChange={handleEditChange} size="small" label="Address 2" sx={{ mb: 1, minWidth: 180 }} />
+                <TextField name="address3" value={editForm.address3 || ''} onChange={handleEditChange} size="small" label="Address 3" sx={{ mb: 1, minWidth: 180 }} />
+                <TextField name="address4" value={editForm.address4 || ''} onChange={handleEditChange} size="small" label="Address 4" sx={{ mb: 1, minWidth: 180 }} />
+                <TextField name="address5" value={editForm.address5 || ''} onChange={handleEditChange} size="small" label="Address 5" sx={{ mb: 1, minWidth: 180 }} />
+                <TextField name="city" value={editForm.city || ''} onChange={handleEditChange} size="small" label="City" sx={{ mb: 1, minWidth: 180 }} />
+                <TextField name="postal_code" value={editForm.postal_code || ''} onChange={handleEditChange} size="small" label="Postal Code" sx={{ mb: 1, minWidth: 180 }} />
+              </>
+            ) : (
+              <Typography variant="body1" sx={{ mb: 2 }}>
+                {([
+                  customer.address,
+                  customer.address2,
+                  customer.address3,
+                  customer.address4,
+                  customer.address5,
+                  customer.city,
+                  customer.postal_code
+                ].filter(Boolean).length > 0)
+                  ? [
+                      customer.address,
+                      customer.address2,
+                      customer.address3,
+                      customer.address4,
+                      customer.address5,
+                      customer.city,
+                      customer.postal_code
+                    ].filter(Boolean).join(', ')
+                  : (looksLikeAddress(customer.contact_details)
+                      ? customer.contact_details
+                      : 'Not provided')}
+              </Typography>
+            )}
+          </Box>
+        </Box>
+        {editing && (
+          <Box display="flex" gap={2} mt={3}>
+            <Button variant="contained" color="primary" onClick={handleSave} disabled={saving}>{saving ? <CircularProgress size={20} /> : 'Save'}</Button>
+            <Button variant="outlined" color="secondary" onClick={() => { setEditing(false); setEditForm(customer); }} disabled={saving}>Cancel</Button>
+            {saveError && <Alert severity="error" sx={{ ml: 2 }}>{saveError}</Alert>}
+            {saveSuccess && <Alert severity="success" sx={{ ml: 2 }}>Saved!</Alert>}
+          </Box>
+        )}
+      </Paper>
+
+      {/* Currently Rented Bottles */}
+      <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4 }}>
+        <Typography variant="h5" fontWeight={700} color="primary" mb={3}>
+          🏠 Currently Rented Bottles ({customerAssets.length})
+        </Typography>
+        
+        {customerAssets.length === 0 ? (
+          <Typography color="text.secondary">No bottles currently rented to this customer.</Typography>
+        ) : (
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow sx={{ backgroundColor: '#f5f7fa' }}>
+                  <TableCell sx={{ fontWeight: 700 }}>Serial Number</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Barcode</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Gas Type</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {customerAssets.map((asset) => (
+                  <TableRow key={asset.id} hover>
+                    <TableCell>{asset.serial_number}</TableCell>
+                    <TableCell>{asset.barcode_number}</TableCell>
+                    <TableCell>{asset.gas_type}</TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={asset.location || 'Unknown'} 
+                        color="primary" 
+                        size="small"
+                        variant="outlined"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Chip 
+                        label="Rented" 
+                        color="success" 
+                        size="small"
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </Paper>
+
+      {/* Rental History */}
+      <Paper elevation={3} sx={{ p: 4, borderRadius: 4 }}>
+        <Typography variant="h5" fontWeight={700} color="primary" mb={3}>
+          📋 Rental History ({locationAssets.length})
+        </Typography>
+        
+        {locationAssets.length === 0 ? (
+          <Typography color="text.secondary">No rental history found for this customer.</Typography>
+        ) : (
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow sx={{ backgroundColor: '#f5f7fa' }}>
+                  <TableCell sx={{ fontWeight: 700 }}>Serial Number</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Gas Type</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Rental Type</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Rental Amount</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Start Date</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {locationAssets.map((rental) => (
+                  <TableRow key={rental.id} hover>
+                    <TableCell>{rental.cylinder?.serial_number || 'Unknown'}</TableCell>
+                    <TableCell>{rental.cylinder?.gas_type || 'Unknown'}</TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={rental.rental_type || 'Monthly'} 
+                        color="primary" 
+                        size="small"
+                        variant="outlined"
+                      />
+                    </TableCell>
+                    <TableCell>${rental.rental_amount || 0}</TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={rental.location || 'Unknown'} 
+                        color="secondary" 
+                        size="small"
+                        variant="outlined"
+                      />
+                    </TableCell>
+                    <TableCell>{rental.rental_start_date || '-'}</TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={rental.status || 'Active'} 
+                        color={rental.status === 'at_home' ? 'warning' : 'success'} 
+                        size="small"
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </Paper>
+    </Box>
   );
 } 
