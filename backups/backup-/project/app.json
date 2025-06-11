@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "92b9b67e-78c0-4e05-9bbb-dc8f6c8bd9ec"
+      }
+    },
+    "android": {
+      "package": "com.evanevoo.gascylinderapp"
+    }
+  }
+}

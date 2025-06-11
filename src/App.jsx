@@ -36,11 +36,9 @@ import Rental from './pages/Rental';
 import CustomerDetail from './pages/CustomerDetail';
 import AssetHistory from './pages/AssetHistory';
 import AssetHistoryLookup from './pages/AssetHistoryLookup';
-import ImportInvoices from './pages/ImportInvoices';
 import ImportHistory from './pages/ImportHistory';
 import AllAssetMovements from './pages/AllAssetMovements';
 import Import from './pages/Import';
-import ImportSalesReceipts from './pages/ImportSalesReceipts';
 import Settings from './pages/Settings';
 import ImportCustomerInfo from './pages/ImportCustomerInfo';
 import ScannedOrders from './pages/ScannedOrders';
@@ -49,6 +47,9 @@ import { useAuth } from './hooks/useAuth';
 import MainLayout from './components/MainLayout';
 import { ImportProgressProvider } from './components/ImportProgressContext';
 import UserManagement from './pages/UserManagement';
+import BottleManagement from './pages/BottleManagement';
+import ImportApprovals from './pages/ImportApprovals';
+import Integrations from './pages/Integrations';
 
 function App() {
   const { user, profile, loading } = useAuth();
@@ -70,6 +71,7 @@ function App() {
             <Route path="/assets/:id/history" element={isAuthenticated ? <AssetHistory /> : <Navigate to="/login" />} />
             <Route path="/assets/history-lookup" element={isAuthenticated ? <AssetHistoryLookup /> : <Navigate to="/login" />} />
             <Route path="/cylinders" element={isAuthenticated ? <Cylinders user={user} profile={profile} /> : <Navigate to="/login" />} />
+            <Route path="/all-gas-assets" element={isAuthenticated ? <Cylinders user={user} profile={profile} /> : <Navigate to="/login" />} />
             <Route path="/rentals" element={isAuthenticated ? <Rentals user={user} profile={profile} /> : <Navigate to="/login" />} />
             <Route path="/invoices" element={isAuthenticated ? <Invoices user={user} profile={profile} /> : <Navigate to="/login" />} />
             <Route path="/home" element={isAuthenticated ? <Home user={user} profile={profile} /> : <Navigate to="/login" />} />
@@ -87,13 +89,16 @@ function App() {
             <Route path="/mobile-units" element={<MobileUnits />} />
             <Route path="/rental/*" element={<Rental />} />
             <Route path="/import" element={isAuthenticated ? <Import /> : <Navigate to="/login" />} />
+            <Route path="/import-approvals" element={isAuthenticated ? <ImportApprovals /> : <Navigate to="/login" />} />
             <Route path="/import-customer-info" element={isAuthenticated ? <ImportCustomerInfo /> : <Navigate to="/login" />} />
-            <Route path="/import-sales-receipts" element={isAuthenticated ? <ImportSalesReceipts /> : <Navigate to="/login" />} />
-            <Route path="/import-invoices" element={isAuthenticated ? <ImportInvoices /> : <Navigate to="/login" />} />
+            <Route path="/import-sales-receipts" element={<Navigate to="/import" replace />} />
+            <Route path="/import-invoices" element={<Navigate to="/import" replace />} />
             <Route path="/import-history" element={isAuthenticated ? <ImportHistory /> : <Navigate to="/login" />} />
             <Route path="/all-asset-movements" element={isAuthenticated ? <AllAssetMovements /> : <Navigate to="/login" />} />
             <Route path="/scanned-orders" element={isAuthenticated ? <ScannedOrders /> : <Navigate to="/login" />} />
             <Route path="/user-management" element={isAuthenticated && profile?.role === 'admin' ? <UserManagement /> : <Navigate to="/home" />} />
+            <Route path="/bottle-management" element={isAuthenticated ? <BottleManagement /> : <Navigate to="/login" />} />
+            <Route path="/integrations" element={isAuthenticated ? <Integrations /> : <Navigate to="/login" />} />
             <Route path="*" element={<Navigate to="/home" />} />
           </Route>
         </Routes>

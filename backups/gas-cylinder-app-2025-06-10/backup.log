@@ -1,0 +1,525 @@
+
+-------------------------------------------------------------------------------
+   ROBOCOPY     ::     Robust File Copy for Windows                              
+-------------------------------------------------------------------------------
+
+  Started : June 10, 2025 2:17:11 PM
+   Source : C:\gas-cylinder-app\
+     Dest : C:\gas-cylinder-app\backups\gas-cylinder-app-2025-06-10\
+
+    Files : *.*
+	    
+Exc Files : build
+	    .idea
+	    .env.local
+	    .env.production
+	    *.log
+	    *.tmp
+	    
+ Exc Dirs : node_modules
+	    .git
+	    backups
+	    dist
+	    .vscode
+	    
+  Options : *.* /TEE /S /E /DCOPY:DA /COPY:DAT /R:3 /W:1 
+
+------------------------------------------------------------------------------
+
+	                  19	C:\gas-cylinder-app\
+	    New File  		     291	.env100%  
+	    New File  		      47	.gitignore100%  
+	    New File  		      58	.mise.toml100%  
+	    New File  		       2	.nvmrc100%  
+	    New File  		     195	app.json100%  
+	    New File  		     631	App.tsx100%  
+	    New File  		     212	backup.bat100%  
+	    New File  		    2847	backup.ps1100%  
+	    New File  		     343	eas.json100%  
+	    New File  		     385	index.html100%  
+	    New File  		     437	netlify.toml 87%  100%  
+	    New File  		  484485	package-lock.json100%  
+	    New File  		    1379	package.json100%  
+	    New File  		      88	postcss.config.js100%  
+	    New File  		    3798	README-BACKUP.md100%  
+	    New File  		     430	supabase.js100%  
+	    New File  		   11953	supabase_schema_updated.sql100%  
+	    New File  		     150	tailwind.config.js100%  
+	    New File  		     507	vite.config.js100%  
+	  New Dir          2	C:\gas-cylinder-app\.expo\
+	    New File  		      20	devices.json100%  
+	    New File  		     751	README.md100%  
+	  New Dir          2	C:\gas-cylinder-app\.netlify\
+	    New File  		     411	netlify.toml100%  
+	    New File  		      53	state.json100%  
+	  New Dir          1	C:\gas-cylinder-app\.netlify\functions\
+	    New File  		    1090	inviteUser.js100%  
+	  New Dir          0	C:\gas-cylinder-app\.netlify\functions-internal\
+	  New Dir          0	C:\gas-cylinder-app\.netlify\v1\
+	  New Dir          0	C:\gas-cylinder-app\.netlify\v1\functions\
+	  New Dir          6	C:\gas-cylinder-app\android\
+	    New File  		     129	.gitignore100%  
+	    New File  		    1594	build.gradle100%  
+	    New File  		    2291	gradle.properties100%  
+	    New File  		    8762	gradlew100%  
+	    New File  		    2966	gradlew.bat100%  
+	    New File  		    1539	settings.gradle100%  
+	  New Dir          1	C:\gas-cylinder-app\android\.gradle\
+	    New File  		       8	file-system.probe100%  
+	  New Dir          1	C:\gas-cylinder-app\android\.gradle\8.10.2\
+	    New File  		       0	gc.properties
+	  New Dir          3	C:\gas-cylinder-app\android\.gradle\8.10.2\checksums\
+	    New File  		      17	checksums.lock100%  
+	    New File  		   20197	md5-checksums.bin100%  
+	    New File  		   24923	sha1-checksums.bin100%  
+	  New Dir          1	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\
+	    New File  		       0	gc.properties
+	  New Dir          1	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\569c8b261a8a714d7731d5f568e0e5c05babae10\
+	    New File  		      99	metadata.bin100%  
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\569c8b261a8a714d7731d5f568e0e5c05babae10\classes\
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\569c8b261a8a714d7731d5f568e0e5c05babae10\classes\org\
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\569c8b261a8a714d7731d5f568e0e5c05babae10\classes\org\gradle\
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\569c8b261a8a714d7731d5f568e0e5c05babae10\classes\org\gradle\accessors\
+	  New Dir         18	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\569c8b261a8a714d7731d5f568e0e5c05babae10\classes\org\gradle\accessors\dm\
+	    New File  		     927	LibrariesForLibs$AndroidGradleLibraryAccessors.class100%  
+	    New File  		    1093	LibrariesForLibs$AndroidLibraryAccessors.class100%  
+	    New File  		     765	LibrariesForLibs$BundleAccessors.class100%  
+	    New File  		     924	LibrariesForLibs$KotlinGradleLibraryAccessors.class100%  
+	    New File  		    1086	LibrariesForLibs$KotlinLibraryAccessors.class100%  
+	    New File  		     901	LibrariesForLibs$KotlinPluginAccessors.class100%  
+	    New File  		    1112	LibrariesForLibs$PluginAccessors.class100%  
+	    New File  		    1322	LibrariesForLibs$VersionAccessors.class100%  
+	    New File  		    4358	LibrariesForLibs.class100%  
+	    New File  		    2227	LibrariesForLibsInPluginsBlock$AndroidGradleLibraryAccessors.class100%  
+	    New File  		    2435	LibrariesForLibsInPluginsBlock$AndroidLibraryAccessors.class100%  
+	    New File  		     891	LibrariesForLibsInPluginsBlock$BundleAccessors.class100%  
+	    New File  		    2224	LibrariesForLibsInPluginsBlock$KotlinGradleLibraryAccessors.class100%  
+	    New File  		    2428	LibrariesForLibsInPluginsBlock$KotlinLibraryAccessors.class100%  
+	    New File  		     943	LibrariesForLibsInPluginsBlock$KotlinPluginAccessors.class100%  
+	    New File  		    1196	LibrariesForLibsInPluginsBlock$PluginAccessors.class100%  
+	    New File  		    1364	LibrariesForLibsInPluginsBlock$VersionAccessors.class100%  
+	    New File  		    6207	LibrariesForLibsInPluginsBlock.class100%  
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\569c8b261a8a714d7731d5f568e0e5c05babae10\sources\
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\569c8b261a8a714d7731d5f568e0e5c05babae10\sources\org\
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\569c8b261a8a714d7731d5f568e0e5c05babae10\sources\org\gradle\
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\569c8b261a8a714d7731d5f568e0e5c05babae10\sources\org\gradle\accessors\
+	  New Dir          2	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\569c8b261a8a714d7731d5f568e0e5c05babae10\sources\org\gradle\accessors\dm\
+	    New File  		   11277	LibrariesForLibs.java100%  
+	    New File  		   16863	LibrariesForLibsInPluginsBlock.java100%  
+	  New Dir          1	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\633563da484e97172e803ec54a276bf953e60782\
+	    New File  		      99	metadata.bin100%  
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\633563da484e97172e803ec54a276bf953e60782\classes\
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\633563da484e97172e803ec54a276bf953e60782\classes\org\
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\633563da484e97172e803ec54a276bf953e60782\classes\org\gradle\
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\633563da484e97172e803ec54a276bf953e60782\classes\org\gradle\accessors\
+	  New Dir         60	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\633563da484e97172e803ec54a276bf953e60782\classes\org\gradle\accessors\dm\
+	    New File  		    1043	LibrariesForReactAndroidLibs$AndroidPluginAccessors.class100%  
+	    New File  		    1275	LibrariesForReactAndroidLibs$AndroidxAppcompatLibraryAccessors.class100%  
+	    New File  		    2231	LibrariesForReactAndroidLibs$AndroidxLibraryAccessors.class100%  
+	    New File  		    1049	LibrariesForReactAndroidLibs$AndroidxTestLibraryAccessors.class100%  
+	    New File  		    1399	LibrariesForReactAndroidLibs$AndroidxVersionAccessors.class100%  
+	    New File  		     989	LibrariesForReactAndroidLibs$BinaryCompatibilityPluginAccessors.class100%  
+	    New File  		     969	LibrariesForReactAndroidLibs$BinaryCompatibilityVersionAccessors.class100%  
+	    New File  		    1268	LibrariesForReactAndroidLibs$BinaryPluginAccessors.class100%  
+	    New File  		    1277	LibrariesForReactAndroidLibs$BinaryVersionAccessors.class100%  
+	    New File  		     801	LibrariesForReactAndroidLibs$BundleAccessors.class100%  
+	    New File  		     983	LibrariesForReactAndroidLibs$FrescoImagepipelineLibraryAccessors.class100%  
+	    New File  		    2211	LibrariesForReactAndroidLibs$FrescoLibraryAccessors.class100%  
+	    New File  		     948	LibrariesForReactAndroidLibs$FrescoUiLibraryAccessors.class100%  
+	    New File  		     946	LibrariesForReactAndroidLibs$InferLibraryAccessors.class100%  
+	    New File  		     928	LibrariesForReactAndroidLibs$InferVersionAccessors.class100%  
+	    New File  		     963	LibrariesForReactAndroidLibs$JavaxAnnotationLibraryAccessors.class100%  
+	    New File  		     945	LibrariesForReactAndroidLibs$JavaxAnnotationVersionAccessors.class100%  
+	    New File  		    1484	LibrariesForReactAndroidLibs$JavaxLibraryAccessors.class100%  
+	    New File  		    1525	LibrariesForReactAndroidLibs$JavaxVersionAccessors.class100%  
+	    New File  		     945	LibrariesForReactAndroidLibs$KotlinPluginAccessors.class100%  
+	    New File  		     942	LibrariesForReactAndroidLibs$NexusPluginAccessors.class100%  
+	    New File  		     922	LibrariesForReactAndroidLibs$NexusVersionAccessors.class100%  
+	    New File  		    1241	LibrariesForReactAndroidLibs$Okhttp3LibraryAccessors.class100%  
+	    New File  		    2691	LibrariesForReactAndroidLibs$PluginAccessors.class100%  
+	    New File  		    5462	LibrariesForReactAndroidLibs$VersionAccessors.class100%  
+	    New File  		    1156	LibrariesForReactAndroidLibs$YogaLibraryAccessors.class100%  
+	    New File  		     970	LibrariesForReactAndroidLibs$YogaProguardLibraryAccessors.class100%  
+	    New File  		     952	LibrariesForReactAndroidLibs$YogaProguardVersionAccessors.class100%  
+	    New File  		    1233	LibrariesForReactAndroidLibs$YogaVersionAccessors.class100%  
+	    New File  		    8612	LibrariesForReactAndroidLibs.class100%  
+	    New File  		    1085	LibrariesForReactAndroidLibsInPluginsBlock$AndroidPluginAccessors.class100%  
+	    New File  		    2626	LibrariesForReactAndroidLibsInPluginsBlock$AndroidxAppcompatLibraryAccessors.class100%  
+	    New File  		    3870	LibrariesForReactAndroidLibsInPluginsBlock$AndroidxLibraryAccessors.class100%  
+	    New File  		    2400	LibrariesForReactAndroidLibsInPluginsBlock$AndroidxTestLibraryAccessors.class100%  
+	    New File  		    1441	LibrariesForReactAndroidLibsInPluginsBlock$AndroidxVersionAccessors.class100%  
+	    New File  		    1031	LibrariesForReactAndroidLibsInPluginsBlock$BinaryCompatibilityPluginAccessors.class100%  
+	    New File  		    1011	LibrariesForReactAndroidLibsInPluginsBlock$BinaryCompatibilityVersionAccessors.class100%  
+	    New File  		    1352	LibrariesForReactAndroidLibsInPluginsBlock$BinaryPluginAccessors.class100%  
+	    New File  		    1361	LibrariesForReactAndroidLibsInPluginsBlock$BinaryVersionAccessors.class100%  
+	    New File  		     927	LibrariesForReactAndroidLibsInPluginsBlock$BundleAccessors.class100%  
+	    New File  		    2283	LibrariesForReactAndroidLibsInPluginsBlock$FrescoImagepipelineLibraryAccessors.class100%  
+	    New File  		    3748	LibrariesForReactAndroidLibsInPluginsBlock$FrescoLibraryAccessors.class100%  
+	    New File  		    2248	LibrariesForReactAndroidLibsInPluginsBlock$FrescoUiLibraryAccessors.class100%  
+	    New File  		    2246	LibrariesForReactAndroidLibsInPluginsBlock$InferLibraryAccessors.class100%  
+	    New File  		     970	LibrariesForReactAndroidLibsInPluginsBlock$InferVersionAccessors.class100%  
+	    New File  		    2263	LibrariesForReactAndroidLibsInPluginsBlock$JavaxAnnotationLibraryAccessors.class100%  
+	    New File  		     987	LibrariesForReactAndroidLibsInPluginsBlock$JavaxAnnotationVersionAccessors.class100%  
+	    New File  		    2877	LibrariesForReactAndroidLibsInPluginsBlock$JavaxLibraryAccessors.class100%  
+	    New File  		    1609	LibrariesForReactAndroidLibsInPluginsBlock$JavaxVersionAccessors.class100%  
+	    New File  		     987	LibrariesForReactAndroidLibsInPluginsBlock$KotlinPluginAccessors.class100%  
+	    New File  		     984	LibrariesForReactAndroidLibsInPluginsBlock$NexusPluginAccessors.class100%  
+	    New File  		     964	LibrariesForReactAndroidLibsInPluginsBlock$NexusVersionAccessors.class100%  
+	    New File  		    2592	LibrariesForReactAndroidLibsInPluginsBlock$Okhttp3LibraryAccessors.class100%  
+	    New File  		    2901	LibrariesForReactAndroidLibsInPluginsBlock$PluginAccessors.class100%  
+	    New File  		    5756	LibrariesForReactAndroidLibsInPluginsBlock$VersionAccessors.class100%  
+	    New File  		    2498	LibrariesForReactAndroidLibsInPluginsBlock$YogaLibraryAccessors.class100%  
+	    New File  		    2270	LibrariesForReactAndroidLibsInPluginsBlock$YogaProguardLibraryAccessors.class100%  
+	    New File  		     994	LibrariesForReactAndroidLibsInPluginsBlock$YogaProguardVersionAccessors.class100%  
+	    New File  		    1317	LibrariesForReactAndroidLibsInPluginsBlock$YogaVersionAccessors.class100%  
+	    New File  		   11275	LibrariesForReactAndroidLibsInPluginsBlock.class100%  
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\633563da484e97172e803ec54a276bf953e60782\sources\
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\633563da484e97172e803ec54a276bf953e60782\sources\org\
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\633563da484e97172e803ec54a276bf953e60782\sources\org\gradle\
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\633563da484e97172e803ec54a276bf953e60782\sources\org\gradle\accessors\
+	  New Dir          2	C:\gas-cylinder-app\android\.gradle\8.10.2\dependencies-accessors\633563da484e97172e803ec54a276bf953e60782\sources\org\gradle\accessors\dm\
+	    New File  		   46100	LibrariesForReactAndroidLibs.java100%  
+	    New File  		   64510	LibrariesForReactAndroidLibsInPluginsBlock.java100%  
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\expanded\
+	  New Dir          1	C:\gas-cylinder-app\android\.gradle\8.10.2\fileChanges\
+	    New File  		       1	last-build.bin100%  
+	  New Dir          3	C:\gas-cylinder-app\android\.gradle\8.10.2\fileHashes\
+	    New File  		   80965	fileHashes.bin100%  
+	    New File  		      17	fileHashes.lock100%  
+	    New File  		   21047	resourceHashesCache.bin100%  
+	  New Dir          0	C:\gas-cylinder-app\android\.gradle\8.10.2\vcsMetadata\
+	  New Dir          2	C:\gas-cylinder-app\android\.gradle\buildOutputCleanup\
+	    New File  		      17	buildOutputCleanup.lock100%  
+	    New File  		      54	cache.properties100%  
+	  New Dir          1	C:\gas-cylinder-app\android\.gradle\noVersion\
+	    New File  		      17	buildLogic.lock100%  
+	  New Dir          1	C:\gas-cylinder-app\android\.gradle\vcs-1\
+	    New File  		       0	gc.properties
+	  New Dir          3	C:\gas-cylinder-app\android\app\
+	    New File  		    7665	build.gradle100%  
+	    New File  		    2257	debug.keystore100%  
+	    New File  		     562	proguard-rules.pro100%  
+	  New Dir          0	C:\gas-cylinder-app\android\app\src\
+	  New Dir          1	C:\gas-cylinder-app\android\app\src\debug\
+	    New File  		     374	AndroidManifest.xml100%  
+	  New Dir          1	C:\gas-cylinder-app\android\app\src\main\
+	    New File  		    2159	AndroidManifest.xml100%  
+	  New Dir          0	C:\gas-cylinder-app\android\app\src\main\java\
+	  New Dir          0	C:\gas-cylinder-app\android\app\src\main\java\com\
+	  New Dir          0	C:\gas-cylinder-app\android\app\src\main\java\com\evanevoo\
+	  New Dir          2	C:\gas-cylinder-app\android\app\src\main\java\com\evanevoo\gascylinderapp\
+	    New File  		    2197	MainActivity.kt100%  
+	    New File  		    2130	MainApplication.kt100%  
+	  New Dir          0	C:\gas-cylinder-app\android\app\src\main\res\
+	  New Dir          2	C:\gas-cylinder-app\android\app\src\main\res\drawable\
+	    New File  		     245	ic_launcher_background.xml100%  
+	    New File  		    1917	rn_edit_text_material.xml100%  
+	  New Dir          1	C:\gas-cylinder-app\android\app\src\main\res\drawable-hdpi\
+	    New File  		   20754	splashscreen_logo.png100%  
+	  New Dir          1	C:\gas-cylinder-app\android\app\src\main\res\drawable-mdpi\
+	    New File  		   12863	splashscreen_logo.png100%  
+	  New Dir          1	C:\gas-cylinder-app\android\app\src\main\res\drawable-xhdpi\
+	    New File  		   29081	splashscreen_logo.png100%  
+	  New Dir          1	C:\gas-cylinder-app\android\app\src\main\res\drawable-xxhdpi\
+	    New File  		   47123	splashscreen_logo.png100%  
+	  New Dir          1	C:\gas-cylinder-app\android\app\src\main\res\drawable-xxxhdpi\
+	    New File  		   66529	splashscreen_logo.png100%  
+	  New Dir          2	C:\gas-cylinder-app\android\app\src\main\res\mipmap-hdpi\
+	    New File  		    3056	ic_launcher.webp100%  
+	    New File  		    5024	ic_launcher_round.webp100%  
+	  New Dir          2	C:\gas-cylinder-app\android\app\src\main\res\mipmap-mdpi\
+	    New File  		    2096	ic_launcher.webp100%  
+	    New File  		    2858	ic_launcher_round.webp100%  
+	  New Dir          2	C:\gas-cylinder-app\android\app\src\main\res\mipmap-xhdpi\
+	    New File  		    4569	ic_launcher.webp100%  
+	    New File  		    7098	ic_launcher_round.webp100%  
+	  New Dir          2	C:\gas-cylinder-app\android\app\src\main\res\mipmap-xxhdpi\
+	    New File  		    6464	ic_launcher.webp100%  
+	    New File  		   10676	ic_launcher_round.webp100%  
+	  New Dir          2	C:\gas-cylinder-app\android\app\src\main\res\mipmap-xxxhdpi\
+	    New File  		    9250	ic_launcher.webp100%  
+	    New File  		   15523	ic_launcher_round.webp100%  
+	  New Dir          3	C:\gas-cylinder-app\android\app\src\main\res\values\
+	    New File  		     174	colors.xml100%  
+	    New File  		      76	strings.xml100%  
+	    New File  		     870	styles.xml100%  
+	  New Dir          1	C:\gas-cylinder-app\android\app\src\main\res\values-night\
+	    New File  		      12	colors.xml100%  
+	  New Dir          0	C:\gas-cylinder-app\android\gradle\
+	  New Dir          2	C:\gas-cylinder-app\android\gradle\wrapper\
+	    New File  		   43583	gradle-wrapper.jar100%  
+	    New File  		     253	gradle-wrapper.properties100%  
+	  New Dir         12	C:\gas-cylinder-app\gas-cylinder-mobile\
+	    New File  		     398	.gitignore100%  
+	    New File  		     693	app.json100%  
+	    New File  		    2140	App.tsx100%  
+	    New File  		      38	emptyShim.js100%  
+	    New File  		     280	HomeScreen.tsx100%  
+	    New File  		     307	index.ts100%  
+	    New File  		    1031	LoginScreen.tsx100%  
+	    New File  		     660	metro.config.js100%  
+	    New File  		  393924	package-lock.json100%  
+	    New File  		    1051	package.json100%  
+	    New File  		     430	supabase.js100%  
+	    New File  		      85	tsconfig.json100%  
+	  New Dir          2	C:\gas-cylinder-app\gas-cylinder-mobile\.expo\
+	    New File  		      20	devices.json100%  
+	    New File  		     751	README.md100%  
+	  New Dir          0	C:\gas-cylinder-app\gas-cylinder-mobile\.expo\web\
+	  New Dir          0	C:\gas-cylinder-app\gas-cylinder-mobile\.expo\web\cache\
+	  New Dir          0	C:\gas-cylinder-app\gas-cylinder-mobile\.expo\web\cache\production\
+	  New Dir          0	C:\gas-cylinder-app\gas-cylinder-mobile\.expo\web\cache\production\images\
+	  New Dir          0	C:\gas-cylinder-app\gas-cylinder-mobile\.expo\web\cache\production\images\favicon\
+	  New Dir          1	C:\gas-cylinder-app\gas-cylinder-mobile\.expo\web\cache\production\images\favicon\favicon-24272cdaeff82cc5facdaccd982a6f05b60c4504704bbf94c19a6388659880bb-contain-transparent\
+	    New File  		    2919	favicon-48.png100%  
+	  New Dir          4	C:\gas-cylinder-app\gas-cylinder-mobile\assets\
+	    New File  		   17547	adaptive-icon.png100%  
+	    New File  		    1466	favicon.png100%  
+	    New File  		   22380	icon.png100%  
+	    New File  		   17547	splash-icon.png100%  
+	  New Dir         10	C:\gas-cylinder-app\gas-cylinder-mobile\screens\
+	    New File  		    9532	AddCylinderScreen.tsx100%  
+	    New File  		    4494	CustomerDetailsScreen.tsx100%  
+	    New File  		    9553	EditCylinderScreen.tsx100%  
+	    New File  		    6398	HistoryScreen.tsx100%  
+	    New File  		   10810	HomeScreen.tsx100%  
+	    New File  		    8881	LocateCylinderScreen.tsx100%  
+	    New File  		    3590	RecentScansScreen.tsx100%  
+	    New File  		   20660	ScanCylindersActionScreen.tsx100%  
+	    New File  		   14201	ScanCylindersScreen.tsx100%  
+	    New File  		    5051	SettingsScreen.tsx100%  
+	  New Dir          0	C:\gas-cylinder-app\path=src\
+	  New Dir          1	C:\gas-cylinder-app\path=src\pages\
+	    New File  		   11773	Settings.jsx100%  
+	  New Dir          7	C:\gas-cylinder-app\public\
+	    New File  		     339	browser.js 84%  100%  
+	    New File  		  202301	html2canvas.js 99%  100%  
+	    New File  		     480	index.html 88%  100%  
+	    New File  		  158608	index.js 99%  100%  
+	    New File  		   19431	main.css 99%  100%  
+	    New File  		   1.3 m	main.js 73%   99%  100%  
+	    New File  		   21753	purify.js 99%  100%  
+	  New Dir          3	C:\gas-cylinder-app\src\
+	    New File  		    7088	App.jsx100%  
+	    New File  		     366	index.jsx100%  
+	    New File  		    4809	tailwind.css100%  
+	  New Dir          7	C:\gas-cylinder-app\src\components\
+	    New File  		    1466	EnvTest.jsx100%  
+	    New File  		    1404	ImportProgressContext.jsx100%  
+	    New File  		   14222	MainLayout.jsx100%  
+	    New File  		    2253	ManagementReportsSidebar.jsx100%  
+	    New File  		    1434	Navbar.jsx100%  
+	    New File  		    1633	RentalSidebar.jsx100%  
+	    New File  		    5907	Sidebar.jsx100%  
+	  New Dir          1	C:\gas-cylinder-app\src\context\
+	    New File  		    2949	ThemeContext.jsx100%  
+	  New Dir          1	C:\gas-cylinder-app\src\hooks\
+	    New File  		     988	useAuth.js100%  
+	  New Dir         65	C:\gas-cylinder-app\src\pages\
+	    New File  		     533	AccountingAssetAgreementProducts.jsx100%  
+	    New File  		     233	AddNewCustomer.jsx100%  
+	    New File  		     208	Alerts.jsx100%  
+	    New File  		    9463	AllAssetMovements.jsx100%  
+	    New File  		   10476	AssetHistory.jsx100%  
+	    New File  		    1249	AssetHistoryLookup.jsx100%  
+	    New File  		    2217	AssetTransactionsReport.jsx100%  
+	    New File  		     534	AssignAssetTypesToRentalClasses.jsx100%  
+	    New File  		   15675	BottleManagement.jsx100%  
+	    New File  		     259	ChangeCustomerRelationships.jsx100%  
+	    New File  		     230	CreateNewAudit.jsx100%  
+	    New File  		     219	CreateRecords.jsx100%  
+	    New File  		    4324	CustomerDetail.jsx100%  
+	    New File  		     234	CustomerList.jsx100%  
+	    New File  		   10786	Customers.jsx100%  
+	    New File  		     224	CustomersSearch.jsx100%  
+	    New File  		     412	CustomReports.jsx100%  
+	    New File  		   17468	Cylinders.jsx100%  
+	    New File  		     504	ExpiringAssetAgreements.jsx100%  
+	    New File  		    1771	FailedSalesOrderImports.jsx100%  
+	    New File  		     403	Favorites.jsx100%  
+	    New File  		     457	FlatFees.jsx100%  
+	    New File  		    2763	Home.jsx100%  
+	    New File  		    1503	Import.jsx100%  
+	    New File  		   30188	ImportApprovals.jsx100%  
+	    New File  		    4465	ImportAssetBalance.jsx100%  
+	    New File  		   22264	ImportCustomerInfo.jsx100%  
+	    New File  		    1268	ImportFills.jsx100%  
+	    New File  		    5429	ImportHistory.jsx100%  
+	    New File  		   29793	ImportInvoices.jsx100%  
+	    New File  		   36374	ImportSalesReceipts.jsx100%  
+	    New File  		     109	index.jsx100%  
+	    New File  		    7102	Integrations.jsx100%  
+	    New File  		   11276	Invoices.jsx100%  
+	    New File  		     236	ListCustomerAudits.jsx100%  
+	    New File  		     221	Locations.jsx100%  
+	    New File  		    1357	LoginPage.jsx100%  
+	    New File  		     947	LoginScreen.jsx100%  
+	    New File  		     461	LotReports.jsx100%  
+	    New File  		     228	MergeCustomers.jsx100%  
+	    New File  		     225	MobileUnits.jsx100%  
+	    New File  		     240	NewCustomerReport.jsx100%  
+	    New File  		     402	QuickAdd.jsx100%  
+	    New File  		    2002	RecentSalesOrderImports.jsx100%  
+	    New File  		     246	RegularMaintenance.jsx100%  
+	    New File  		    2282	Rental.jsx100%  
+	    New File  		     504	RentalBillConfiguration.jsx100%  
+	    New File  		     486	RentalBillFormats.jsx100%  
+	    New File  		     472	RentalClasses.jsx100%  
+	    New File  		    3165	RentalClassGroups.jsx100%  
+	    New File  		     492	RentalInvoiceSearch.jsx100%  
+	    New File  		     509	RentalLegacyCodeMappings.jsx100%  
+	    New File  		   20117	Rentals.jsx100%  
+	    New File  		     492	RentalTaxCategories.jsx100%  
+	    New File  		     483	RentalTaxRegions.jsx100%  
+	    New File  		    3432	ReviewScreen.jsx100%  
+	    New File  		    1390	ScanCylindersScreen.jsx100%  
+	    New File  		    9432	ScannedOrders.jsx100%  
+	    New File  		     667	ScanOrderScreen.jsx100%  
+	    New File  		     203	Search.jsx100%  
+	    New File  		   10752	Settings.jsx100%  
+	    New File  		     509	ShowRentalBillingPeriods.jsx100%  
+	    New File  		     240	TransferActivity.jsx100%  
+	    New File  		     240	UnexpectedTransfers.jsx100%  
+	    New File  		    4919	UserManagement.jsx100%  
+	  New Dir         18	C:\gas-cylinder-app\src\pages\management-reports\
+	    New File  		     241	AllAssetsReport.jsx100%  
+	    New File  		     258	AssetsByCustomerReport.jsx100%  
+	    New File  		     250	AssetTypeChangesReport.jsx100%  
+	    New File  		     273	AuditsToDeliveryRecordsReport.jsx100%  
+	    New File  		     270	BalanceChangesSummaryReport.jsx100%  
+	    New File  		     254	CustomerDeliveriesReport.jsx100%  
+	    New File  		     262	DeliveriesByLocationReport.jsx100%  
+	    New File  		     264	DeliveryTotalsByUserReport.jsx100%  
+	    New File  		   15482	ImportCustomers.jsx100%  
+	    New File  		     236	LostAssetsReport.jsx100%  
+	    New File  		     273	MovementBetweenLocationsReport.jsx100%  
+	    New File  		     270	NegativeBalanceReport.jsx100%  
+	    New File  		     265	NewAssetsAddedReport.jsx100%  
+	    New File  		     272	NotScannedSourceReport.jsx100%  
+	    New File  		     277	OverdueAssetSearchReport.jsx100%  
+	    New File  		     268	PrintDaysRecordsReport.jsx100%  
+	    New File  		     256	QuickMapReport.jsx100%  
+	    New File  		    7191	SupabaseOrders.jsx100%  
+	  New Dir          1	C:\gas-cylinder-app\src\supabase\
+	    New File  		     248	client.js100%  
+	  New Dir          1	C:\gas-cylinder-app\src\theme\
+	    New File  		    3861	index.js100%  
+	  New Dir          3	C:\gas-cylinder-app\src\utils\
+	    New File  		     888	envTest.js100%  
+	    New File  		     498	ImportWorkerManager.js100%  
+	    New File  		    3074	pdfGenerator.js100%  
+	  New Dir          1	C:\gas-cylinder-app\src\workers\
+	    New File  		     926	invoiceImportWorker.js 93%  100%  
+	  New Dir          0	C:\gas-cylinder-app\trackabout\
+	  New Dir          4	C:\gas-cylinder-app\trackabout_backup\
+	    New File  		     291	.env100%  
+	    New File  		      50	.gitignore100%  
+	    New File  		      58	.mise.toml100%  
+	    New File  		       2	.nvmrc100%  
+	  New Dir          2	C:\gas-cylinder-app\trackabout_backup\.expo\
+	    New File  		      23	devices.json100%  
+	    New File  		     759	README.md100%  
+	  New Dir          6	C:\gas-cylinder-app\trackabout_backup\android\
+	    New File  		     145	.gitignore100%  
+	    New File  		    1635	build.gradle100%  
+	    New File  		    2347	gradle.properties100%  
+	    New File  		    9014	gradlew100%  
+	    New File  		    2966	gradlew.bat100%  
+	    New File  		    1577	settings.gradle100%  
+	  New Dir          3	C:\gas-cylinder-app\trackabout_backup\android\app\
+	    New File  		    7841	build.gradle100%  
+	    New File  		    2257	debug.keystore100%  
+	    New File  		     576	proguard-rules.pro100%  
+	  New Dir          0	C:\gas-cylinder-app\trackabout_backup\android\app\src\
+	  New Dir          1	C:\gas-cylinder-app\trackabout_backup\android\app\src\debug\
+	    New File  		     381	AndroidManifest.xml100%  
+	  New Dir          1	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\
+	    New File  		    2192	AndroidManifest.xml100%  
+	  New Dir          0	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\java\
+	  New Dir          0	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\java\com\
+	  New Dir          0	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\java\com\evanevoo\
+	  New Dir          2	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\java\com\evanevoo\gascylinderapp\
+	    New File  		    2258	MainActivity.kt100%  
+	    New File  		    2187	MainApplication.kt100%  
+	  New Dir          0	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\
+	  New Dir          2	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\drawable\
+	    New File  		     250	ic_launcher_background.xml100%  
+	    New File  		    1954	rn_edit_text_material.xml100%  
+	  New Dir          1	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\drawable-hdpi\
+	    New File  		   20754	splashscreen_logo.png100%  
+	  New Dir          1	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\drawable-mdpi\
+	    New File  		   12863	splashscreen_logo.png100%  
+	  New Dir          1	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\drawable-xhdpi\
+	    New File  		   29081	splashscreen_logo.png100%  
+	  New Dir          1	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\drawable-xxhdpi\
+	    New File  		   47123	splashscreen_logo.png100%  
+	  New Dir          1	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\drawable-xxxhdpi\
+	    New File  		   66529	splashscreen_logo.png100%  
+	  New Dir          2	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\mipmap-hdpi\
+	    New File  		    3056	ic_launcher.webp100%  
+	    New File  		    5024	ic_launcher_round.webp100%  
+	  New Dir          2	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\mipmap-mdpi\
+	    New File  		    2096	ic_launcher.webp100%  
+	    New File  		    2858	ic_launcher_round.webp100%  
+	  New Dir          2	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\mipmap-xhdpi\
+	    New File  		    4569	ic_launcher.webp100%  
+	    New File  		    7098	ic_launcher_round.webp100%  
+	  New Dir          2	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\mipmap-xxhdpi\
+	    New File  		    6464	ic_launcher.webp100%  
+	    New File  		   10676	ic_launcher_round.webp100%  
+	  New Dir          2	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\mipmap-xxxhdpi\
+	    New File  		    9250	ic_launcher.webp100%  
+	    New File  		   15523	ic_launcher_round.webp100%  
+	  New Dir          3	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\values\
+	    New File  		     178	colors.xml100%  
+	    New File  		      78	strings.xml100%  
+	    New File  		     886	styles.xml100%  
+	  New Dir          1	C:\gas-cylinder-app\trackabout_backup\android\app\src\main\res\values-night\
+	    New File  		      12	colors.xml100%  
+	  New Dir          0	C:\gas-cylinder-app\trackabout_backup\android\gradle\
+	  New Dir          2	C:\gas-cylinder-app\trackabout_backup\android\gradle\wrapper\
+	    New File  		   43583	gradle-wrapper.jar100%  
+	    New File  		     260	gradle-wrapper.properties100%  
+	  New Dir         12	C:\gas-cylinder-app\trackabout_backup\gas-cylinder-mobile\
+	    New File  		     435	.gitignore100%  
+	    New File  		     693	app.json100%  
+	    New File  		    2140	App.tsx100%  
+	    New File  		      38	emptyShim.js100%  
+	    New File  		     280	HomeScreen.tsx100%  
+	    New File  		     315	index.ts100%  
+	    New File  		    1031	LoginScreen.tsx100%  
+	    New File  		     660	metro.config.js100%  
+	    New File  		  404315	package-lock.json100%  
+	    New File  		    1087	package.json100%  
+	    New File  		     430	supabase.js100%  
+	    New File  		      91	tsconfig.json100%  
+	  New Dir          4	C:\gas-cylinder-app\trackabout_backup\gas-cylinder-mobile\assets\
+	    New File  		   17547	adaptive-icon.png100%  
+	    New File  		    1466	favicon.png100%  
+	    New File  		   22380	icon.png100%  
+	    New File  		   17547	splash-icon.png100%  
+	  New Dir         10	C:\gas-cylinder-app\trackabout_backup\gas-cylinder-mobile\screens\
+	    New File  		    9532	AddCylinderScreen.tsx100%  
+	    New File  		    4494	CustomerDetailsScreen.tsx100%  
+	    New File  		    9553	EditCylinderScreen.tsx100%  
+	    New File  		    6398	HistoryScreen.tsx100%  
+	    New File  		   10810	HomeScreen.tsx100%  
+	    New File  		    8881	LocateCylinderScreen.tsx100%  
+	    New File  		    3590	RecentScansScreen.tsx100%  
+	    New File  		   20660	ScanCylindersActionScreen.tsx100%  
+	    New File  		   14201	ScanCylindersScreen.tsx100%  
+	    New File  		    5051	SettingsScreen.tsx100%  
+
+------------------------------------------------------------------------------
+
+               Total    Copied   Skipped  Mismatch    FAILED    Extras
+    Dirs :       129       118        11         0         0         0
+   Files :       364       364         0         0         0         1
+   Bytes :    4.71 m    4.71 m         0         0         0         0
+   Times :   0:00:01   0:00:00                       0:00:00   0:00:00
+
+
+   Speed :           7,520,238 Bytes/sec.
+   Speed :             430.312 MegaBytes/min.
+   Ended : June 10, 2025 2:17:13 PM
+
