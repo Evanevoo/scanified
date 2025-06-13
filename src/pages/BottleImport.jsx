@@ -1,8 +1,52 @@
-import React, { useState } from 'react';
-import { Box, Typography, Button, Paper, Snackbar, Alert, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions, FormControl, InputLabel, Select, MenuItem, Table, TableHead, TableRow, TableCell, TableBody, Grid } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { 
+  Box, 
+  Typography, 
+  Button, 
+  Paper, 
+  Snackbar, 
+  Alert, 
+  CircularProgress, 
+  Dialog, 
+  DialogTitle, 
+  DialogContent, 
+  DialogActions, 
+  FormControl, 
+  InputLabel, 
+  Select, 
+  MenuItem, 
+  Table, 
+  TableHead, 
+  TableRow, 
+  TableCell, 
+  TableBody, 
+  Grid,
+  TextField,
+  InputAdornment,
+  TablePagination,
+  Chip,
+  Card,
+  CardContent,
+  IconButton,
+  Tooltip,
+  TableContainer,
+  FormControlLabel,
+  Checkbox,
+  Stack
+} from '@mui/material';
+import { 
+  Search as SearchIcon, 
+  FilterList as FilterIcon,
+  Refresh as RefreshIcon,
+  Download as DownloadIcon,
+  Upload as UploadIcon,
+  Visibility as ViewIcon,
+  CheckCircle as CheckCircleIcon
+} from '@mui/icons-material';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../supabase';
 import { get } from 'lodash';
+import backgroundService from '../utils/backgroundService';
 
 const columns = [
   { label: 'Serial Number', key: 'serial_number' },
@@ -25,6 +69,127 @@ export default function BottleImport() {
   const [columnMappings, setColumnMappings] = useState({});
   const [previewData, setPreviewData] = useState([]);
   const [mappingDialog, setMappingDialog] = useState(false);
+  
+  // Bottle display states
+  const [bottles, setBottles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterCustomer, setFilterCustomer] = useState('');
+  const [filterGasType, setFilterGasType] = useState('');
+  const [filterLocation, setFilterLocation] = useState('');
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
+  const [customers, setCustomers] = useState([]);
+  const [gasTypes, setGasTypes] = useState([]);
+  const [locations, setLocations] = useState([]);
+
+  // Fetch bottles with pagination and filters
+  const fetchBottles = async () => {
+    setLoading(true);
+    try {
+      let query = supabase
+        .from('bottles')
+        .select('*', { count: 'exact' });
+
+      // Apply search filter
+      if (searchTerm) {
+        query = query.or(`barcode_number.ilike.%${searchTerm}%,serial_number.ilike.%${searchTerm}%,product_code.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
+      }
+
+      // Apply customer filter
+      if (filterCustomer) {
+        query = query.eq('assigned_customer', filterCustomer);
+      }
+
+      // Apply gas type filter
+      if (filterGasType) {
+        query = query.eq('gas_type', filterGasType);
+      }
+
+      // Apply location filter
+      if (filterLocation) {
+        query = query.eq('location', filterLocation);
+      }
+
+      // Apply pagination
+      const from = page * rowsPerPage;
+      const to = from + rowsPerPage - 1;
+      query = query.range(from, to);
+
+      const { data, error, count } = await query;
+
+      if (error) throw error;
+
+      // Fetch customer data for bottles that have assigned_customer
+      const bottlesWithCustomers = data || [];
+      const customerIds = [...new Set(bottlesWithCustomers
+        .map(bottle => bottle.assigned_customer)
+        .filter(Boolean))];
+
+      let customerMap = {};
+      if (customerIds.length > 0) {
+        const { data: customerData } = await supabase
+          .from('customers')
+          .select('"CustomerListID", name')
+          .in('CustomerListID', customerIds);
+        
+        customerMap = (customerData || []).reduce((map, customer) => {
+          map[customer.CustomerListID] = customer;
+          return map;
+        }, {});
+      }
+
+      // Add customer data to bottles
+      const bottlesWithCustomerData = bottlesWithCustomers.map(bottle => ({
+        ...bottle,
+        customer: bottle.assigned_customer ? customerMap[bottle.assigned_customer] : null
+      }));
+
+      setBottles(bottlesWithCustomerData);
+      setTotalCount(count || 0);
+    } catch (error) {
+      console.error('Error fetching bottles:', error);
+      setSnackbar({ open: true, message: 'Error loading bottles: ' + error.message, severity: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch filter options
+  const fetchFilterOptions = async () => {
+    try {
+      // Get customers
+      const { data: customerData } = await supabase
+        .from('customers')
+        .select('"CustomerListID", name')
+        .order('name');
+      setCustomers(customerData || []);
+
+      // Get unique gas types
+      const { data: gasData } = await supabase
+        .from('bottles')
+        .select('gas_type')
+        .not('gas_type', 'is', null);
+      const uniqueGasTypes = [...new Set(gasData?.map(b => b.gas_type) || [])];
+      setGasTypes(uniqueGasTypes.sort());
+
+      // Get unique locations
+      const { data: locationData } = await supabase
+        .from('bottles')
+        .select('location')
+        .not('location', 'is', null);
+      const uniqueLocations = [...new Set(locationData?.map(b => b.location) || [])];
+      setLocations(uniqueLocations.sort());
+    } catch (error) {
+      console.error('Error fetching filter options:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchBottles();
+    fetchFilterOptions();
+  }, [page, rowsPerPage, searchTerm, filterCustomer, filterGasType, filterLocation]);
 
   const handleImport = async (file) => {
     setImporting(true);
@@ -218,7 +383,7 @@ export default function BottleImport() {
         }
       }
       
-      // 7. Feedback
+      // 7. Feedback and refresh
       let message = `Import complete!`;
       if (validBottles.length > 0) {
         message += ` Imported: ${validBottles.length}.`;
@@ -229,6 +394,10 @@ export default function BottleImport() {
         if (skippedRows.length > 10) message += `\n...and ${skippedRows.length - 10} more.`;
       }
       setSnackbar({ open: true, message: message.trim(), severity: skippedRows.length > 0 ? 'warning' : 'success' });
+      
+      // Refresh the bottles list and filter options
+      await fetchBottles();
+      await fetchFilterOptions();
     } catch (err) {
       setSnackbar({ open: true, message: err.message, severity: 'error' });
     } finally {
@@ -236,17 +405,97 @@ export default function BottleImport() {
     }
   };
 
+  const handleChangePage = (event, newPage) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setFilterCustomer('');
+    setFilterGasType('');
+    setFilterLocation('');
+    setPage(0);
+  };
+
   return (
     <Box sx={{ width: '100%', minHeight: '100vh', bgcolor: '#fff', py: 4, px: 2 }}>
-      <Typography variant="h4" fontWeight={700} mb={2}>Bottle Import</Typography>
-      <Box mb={3} display="flex" gap={2} flexWrap="wrap">
+      <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+        <Typography variant="h4" fontWeight={700}>Bottle Management</Typography>
+        <Box display="flex" alignItems="center" gap={1}>
+          <CheckCircleIcon color="success" fontSize="small" />
+          <Typography variant="body2" color="text.secondary">
+            Auto-updates running
+          </Typography>
+        </Box>
+      </Box>
+      
+      {/* Stats Cards */}
+      <Grid container spacing={3} mb={4}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={2} sx={{ borderRadius: 2 }}>
+            <CardContent sx={{ textAlign: 'center', py: 2 }}>
+              <Typography variant="h4" fontWeight={700} color="primary">
+                {totalCount}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Total Bottles
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={2} sx={{ borderRadius: 2 }}>
+            <CardContent sx={{ textAlign: 'center', py: 2 }}>
+              <Typography variant="h4" fontWeight={700} color="success.main">
+                {customers.length}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Customers
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={2} sx={{ borderRadius: 2 }}>
+            <CardContent sx={{ textAlign: 'center', py: 2 }}>
+              <Typography variant="h4" fontWeight={700} color="info.main">
+                {gasTypes.length}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Gas Types
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={2} sx={{ borderRadius: 2 }}>
+            <CardContent sx={{ textAlign: 'center', py: 2 }}>
+              <Typography variant="h4" fontWeight={700} color="warning.main">
+                {locations.length}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Locations
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Action Buttons */}
+      <Box mb={3} display="flex" gap={2} flexWrap="wrap" alignItems="center">
         <Button
-          variant="outlined"
-          sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none', px: 3, borderColor: '#1976d2', color: '#1976d2', borderWidth: 2 }}
+          variant="contained"
+          startIcon={<UploadIcon />}
+          sx={{ borderRadius: 2, fontWeight: 700, textTransform: 'none', px: 3 }}
           component="label"
           disabled={importing}
         >
-          {importing ? 'Importing...' : 'Import Bottles from File'}
+          {importing ? 'Importing...' : 'Import Bottles'}
           <input
             type="file"
             accept=".csv,.xlsx,.xls,.txt"
@@ -257,7 +506,222 @@ export default function BottleImport() {
             }}
           />
         </Button>
+        
+        <Button
+          variant="outlined"
+          startIcon={<RefreshIcon />}
+          onClick={() => {
+            fetchBottles();
+            fetchFilterOptions();
+          }}
+          sx={{ borderRadius: 2, fontWeight: 700, textTransform: 'none', px: 3 }}
+        >
+          Refresh
+        </Button>
       </Box>
+
+      {/* Search and Filters */}
+      <Paper elevation={1} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+        <Typography variant="h6" fontWeight={600} mb={2}>
+          <FilterIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+          Search & Filters
+        </Typography>
+        
+        <Grid container spacing={2} alignItems="center">
+          <Grid item xs={12} md={4}>
+            <TextField
+              fullWidth
+              placeholder="Search barcode, serial, or customer..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon />
+                  </InputAdornment>
+                ),
+              }}
+              size="small"
+            />
+          </Grid>
+          
+          <Grid item xs={12} md={2}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Customer</InputLabel>
+              <Select
+                value={filterCustomer}
+                onChange={(e) => setFilterCustomer(e.target.value)}
+                label="Customer"
+              >
+                <MenuItem value="">All Customers</MenuItem>
+                {customers.map((customer) => (
+                  <MenuItem key={customer.CustomerListID} value={customer.CustomerListID}>
+                    {customer.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          
+          <Grid item xs={12} md={2}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Gas Type</InputLabel>
+              <Select
+                value={filterGasType}
+                onChange={(e) => setFilterGasType(e.target.value)}
+                label="Gas Type"
+              >
+                <MenuItem value="">All Types</MenuItem>
+                {gasTypes.map((type) => (
+                  <MenuItem key={type} value={type}>{type}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          
+          <Grid item xs={12} md={2}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Location</InputLabel>
+              <Select
+                value={filterLocation}
+                onChange={(e) => setFilterLocation(e.target.value)}
+                label="Location"
+              >
+                <MenuItem value="">All Locations</MenuItem>
+                {locations.map((location) => (
+                  <MenuItem key={location} value={location}>{location}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          
+          <Grid item xs={12} md={2}>
+            <Button
+              variant="outlined"
+              onClick={clearFilters}
+              sx={{ borderRadius: 2, fontWeight: 600, textTransform: 'none' }}
+            >
+              Clear Filters
+            </Button>
+          </Grid>
+        </Grid>
+      </Paper>
+
+      {/* Bottles Table */}
+      <Paper elevation={1} sx={{ borderRadius: 2, overflow: 'hidden' }}>
+        <TableContainer>
+          <Table>
+            <TableHead>
+              <TableRow sx={{ bgcolor: 'grey.50' }}>
+                <TableCell sx={{ fontWeight: 700 }}>Barcode</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Serial Number</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Customer</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Gas Type</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Product Code</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Ownership</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Days at Location</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
+                    <CircularProgress />
+                  </TableCell>
+                </TableRow>
+              ) : bottles.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
+                    <Typography variant="body1" color="text.secondary">
+                      No bottles found. {searchTerm || filterCustomer || filterGasType || filterLocation ? 'Try adjusting your filters.' : 'Import some bottles to get started.'}
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                bottles.map((bottle) => (
+                  <TableRow key={bottle.id} hover>
+                    <TableCell>
+                      <Chip 
+                        label={bottle.barcode_number || 'N/A'} 
+                        size="small" 
+                        color={bottle.barcode_number ? "primary" : "default"}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontFamily="monospace">
+                        {bottle.serial_number || 'N/A'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={600}>
+                        {bottle.customer?.name || bottle.customer_name || 'Unassigned'}
+                      </Typography>
+                      {bottle.customer?.CustomerListID && (
+                        <Typography variant="caption" color="text.secondary">
+                          {bottle.customer.CustomerListID}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={bottle.gas_type || 'Unknown'} 
+                        size="small" 
+                        variant="outlined"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {bottle.location || 'N/A'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontFamily="monospace">
+                        {bottle.product_code || 'N/A'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={bottle.ownership || 'Unknown'} 
+                        size="small" 
+                        color={bottle.ownership === 'Owned' ? "success" : "default"}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {bottle.days_at_location || 0} days
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip title="View Details">
+                        <IconButton 
+                          size="small" 
+                          onClick={() => window.open(`/bottles/${bottle.barcode_number || bottle.serial_number}`, '_blank')}
+                        >
+                          <ViewIcon />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        
+        <TablePagination
+          component="div"
+          count={totalCount}
+          page={page}
+          onPageChange={handleChangePage}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={handleChangeRowsPerPage}
+          rowsPerPageOptions={[25, 50, 100]}
+          labelRowsPerPage="Bottles per page:"
+        />
+      </Paper>
+
       {/* Mapping Dialog */}
       <Dialog open={mappingDialog} onClose={() => setMappingDialog(false)} maxWidth="lg" fullWidth>
         <DialogTitle>Column Mapping</DialogTitle>
@@ -318,6 +782,7 @@ export default function BottleImport() {
           </Button>
         </DialogActions>
       </Dialog>
+      
       <Snackbar
         open={snackbar.open}
         autoHideDuration={4000}

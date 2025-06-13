@@ -53,6 +53,9 @@ import Integrations from './pages/Integrations';
 import BottleDetail from './pages/BottleDetail';
 import Bottles from './pages/Bottles';
 
+// Import background service for automatic daily updates
+import './utils/backgroundService';
+
 function App() {
   const { user, profile, loading } = useAuth();
 
