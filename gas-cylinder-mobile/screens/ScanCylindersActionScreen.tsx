@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Dimensions, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Dimensions, TextInput, Vibration } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRoute } from '@react-navigation/native';
 import { supabase } from '../supabase';
@@ -24,8 +24,19 @@ export default function ScanCylindersActionScreen() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
+  const [lastScanned, setLastScanned] = useState('');
 
   const isValidBarcode = (barcode) => /^\d{9}$/.test(barcode);
+
+  const playBeep = async () => {
+    try {
+      // Just use vibration for now - more reliable than audio files
+      Vibration.vibrate(80);
+    } catch (e) {
+      // If vibration fails, just continue silently
+      console.log('Vibration failed:', e);
+    }
+  };
 
   const handleBarcodeScanned = ({ data }) => {
     const barcode = data.trim();
@@ -45,6 +56,8 @@ export default function ScanCylindersActionScreen() {
       setScannedShip(list => [...list, barcode]);
       setShipCount(count => count + 1);
       setScanned(true);
+      setLastScanned(barcode);
+      playBeep();
       setTimeout(() => setScanned(false), 800);
       return;
     }
@@ -54,6 +67,8 @@ export default function ScanCylindersActionScreen() {
       setScannedReturn(list => [...list, barcode]);
       setReturnCount(count => count + 1);
       setScanned(true);
+      setLastScanned(barcode);
+      playBeep();
       setTimeout(() => setScanned(false), 800);
       return;
     }
@@ -68,6 +83,8 @@ export default function ScanCylindersActionScreen() {
       return;
     }
     setScanned(true);
+    setLastScanned(barcode);
+    playBeep();
     if (mode === 'SHIP') {
       setShipCount(count => count + 1);
       setScannedShip(list => [...list, barcode]);
@@ -82,6 +99,11 @@ export default function ScanCylindersActionScreen() {
     <View style={styles.container}>
       {/* Header */}
       <Text style={styles.header}>SCAN HERE</Text>
+      {scannedReturn.length > 0 && (
+        <Text style={styles.infoNote}>
+          💡 Returned cylinders will be automatically marked as empty when synced
+        </Text>
+      )}
       {/* Scan Area */}
       <View style={styles.scanAreaWrapper}>
         {scanError ? (
@@ -108,20 +130,37 @@ export default function ScanCylindersActionScreen() {
               onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
               barcodeScannerSettings={{
                 barcodeTypes: [
-                  'qr', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 'code128', 'pdf417', 'aztec', 'datamatrix', 'itf14', 'interleaved2of5',
+                  'qr', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 'code128', 'pdf417', 'aztec', 'datamatrix', 'itf14',
                 ],
               }}
             />
-            {/* Overlay border rectangle */}
-            <View style={styles.scanBorder} />
-            {/* Optional: darken area outside border */}
-            <View style={styles.overlayTop} />
-            <View style={styles.overlayBottom} />
-            <View style={styles.overlayLeft} />
-            <View style={styles.overlayRight} />
+            <View style={styles.cornerTL} />
+            <View style={styles.cornerTR} />
+            <View style={styles.cornerBL} />
+            <View style={styles.cornerBR} />
           </View>
         )}
       </View>
+      {/* Counters below scan area */}
+      <View style={styles.counterRowModern}>
+        <TouchableOpacity
+          style={[styles.counterBoxModern, mode === 'SHIP' && styles.counterBoxActiveModern]}
+          onPress={() => setMode('SHIP')}
+        >
+          <Text style={[styles.counterNumberModern, mode === 'SHIP' && styles.counterNumberActiveModern]}>{shipCount}</Text>
+          <Text style={[styles.counterLabelModern, mode === 'SHIP' && styles.counterLabelActiveModern]}>SHIP</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.counterBoxModern, mode === 'RETURN' && styles.counterBoxActiveModern]}
+          onPress={() => setMode('RETURN')}
+        >
+          <Text style={[styles.counterNumberModern, mode === 'RETURN' && styles.counterNumberActiveModern]}>{returnCount}</Text>
+          <Text style={[styles.counterLabelModern, mode === 'RETURN' && styles.counterLabelActiveModern]}>RETURN</Text>
+        </TouchableOpacity>
+      </View>
+      {lastScanned ? (
+        <Text style={styles.lastScanned}>Last scanned: {lastScanned}</Text>
+      ) : null}
       {/* Mode Toggle */}
       <View style={styles.toggleRow}>
         <TouchableOpacity
@@ -136,17 +175,6 @@ export default function ScanCylindersActionScreen() {
         >
           <Text style={[styles.toggleText, mode === 'RETURN' && styles.toggleTextActive]}>RETURN</Text>
         </TouchableOpacity>
-      </View>
-      {/* Counters */}
-      <View style={styles.counterRow}>
-        <View style={styles.counterBox}>
-          <Text style={styles.counterNumber}>{shipCount}</Text>
-          <Text style={styles.counterLabel}>SHIP</Text>
-        </View>
-        <View style={styles.counterBox}>
-          <Text style={styles.counterNumber}>{returnCount}</Text>
-          <Text style={styles.counterLabel}>RETURN</Text>
-        </View>
       </View>
       {/* Scanned Barcodes List */}
       <View style={{ width: '90%', maxWidth: 400, marginBottom: 12 }}>
@@ -304,6 +332,11 @@ export default function ScanCylindersActionScreen() {
                 ))}
               </View>
             )}
+            {scannedReturn.length > 0 && (
+              <Text style={{ color: '#f59e0b', fontSize: 14, marginBottom: 8, fontStyle: 'italic' }}>
+                Note: Returned cylinders will be automatically marked as empty.
+              </Text>
+            )}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 }}>
               <TouchableOpacity
                 style={[styles.manualButton, { backgroundColor: '#e0e7ff', flex: 1, marginRight: 8 }]}
@@ -325,13 +358,32 @@ export default function ScanCylindersActionScreen() {
                     const { error } = await supabase.from('scanned_cylinders').insert(allBarcodes);
                     if (error) setSyncResult('Error: ' + error.message);
                     else {
+                      // Mark returned cylinders as empty
+                      if (scannedReturn.length > 0) {
+                        const { error: updateError } = await supabase
+                          .from('cylinders')
+                          .update({ status: 'empty' })
+                          .in('barcode_number', scannedReturn);
+                        
+                        if (updateError) {
+                          console.warn('Could not update cylinder statuses:', updateError);
+                          // Don't fail the sync if status update fails
+                        }
+                      }
+                      
                       // Also update sales_orders.scanned_at for this order
                       const { error: updateError } = await supabase
                         .from('sales_orders')
                         .update({ scanned_at: new Date().toISOString() })
                         .eq('sales_order_number', orderNumber);
                       if (updateError) setSyncResult('Error updating order: ' + updateError.message);
-                      else setSyncResult('Synced successfully!');
+                      else {
+                        let successMsg = 'Synced successfully!';
+                        if (scannedReturn.length > 0) {
+                          successMsg += ` ${scannedReturn.length} returned cylinder(s) marked as empty.`;
+                        }
+                        setSyncResult(successMsg);
+                      }
                     }
                   } catch (e) {
                     setSyncResult('Error: ' + e.message);
@@ -382,55 +434,44 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: 'hidden',
   },
-  scanBorder: {
+  cornerTL: {
     position: 'absolute',
     top: 0,
     left: 0,
-    width: scanAreaSize,
-    height: scanAreaSize,
-    borderWidth: 4,
-    borderColor: '#2563eb',
-    borderRadius: 18,
-    zIndex: 10,
-  },
-  overlayTop: {
-    position: 'absolute',
-    top: -scanAreaSize * 0.5,
-    left: 0,
-    width: scanAreaSize,
-    height: scanAreaSize * 0.5,
+    width: scanAreaSize * 0.2,
+    height: scanAreaSize * 0.2,
     backgroundColor: 'rgba(0,0,0,0.25)',
     borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-  },
-  overlayBottom: {
-    position: 'absolute',
-    bottom: -scanAreaSize * 0.5,
-    left: 0,
-    width: scanAreaSize,
-    height: scanAreaSize * 0.5,
-    backgroundColor: 'rgba(0,0,0,0.25)',
-    borderBottomLeftRadius: 18,
     borderBottomRightRadius: 18,
   },
-  overlayLeft: {
+  cornerTR: {
     position: 'absolute',
     top: 0,
-    left: -scanAreaSize * 0.2,
+    right: 0,
     width: scanAreaSize * 0.2,
-    height: scanAreaSize,
-    backgroundColor: 'rgba(0,0,0,0.25)',
-    borderTopLeftRadius: 18,
-    borderBottomLeftRadius: 18,
-  },
-  overlayRight: {
-    position: 'absolute',
-    top: 0,
-    right: -scanAreaSize * 0.2,
-    width: scanAreaSize * 0.2,
-    height: scanAreaSize,
+    height: scanAreaSize * 0.2,
     backgroundColor: 'rgba(0,0,0,0.25)',
     borderTopRightRadius: 18,
+    borderBottomLeftRadius: 18,
+  },
+  cornerBL: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    width: scanAreaSize * 0.2,
+    height: scanAreaSize * 0.2,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    borderTopRightRadius: 18,
+    borderBottomLeftRadius: 18,
+  },
+  cornerBR: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: scanAreaSize * 0.2,
+    height: scanAreaSize * 0.2,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    borderTopLeftRadius: 18,
     borderBottomRightRadius: 18,
   },
   toggleRow: {
@@ -458,36 +499,41 @@ const styles = StyleSheet.create({
   toggleTextActive: {
     color: '#fff',
   },
-  counterRow: {
+  counterRowModern: {
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    width: '80%',
+    marginTop: 24,
   },
-  counterBox: {
-    backgroundColor: '#fff',
+  counterBoxModern: {
+    flex: 1,
+    backgroundColor: '#e0e7ff',
     borderRadius: 16,
+    marginHorizontal: 8,
     paddingVertical: 24,
-    paddingHorizontal: 32,
-    marginHorizontal: 16,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
-    minWidth: 90,
+    justifyContent: 'center',
   },
-  counterNumber: {
+  counterBoxActiveModern: {
+    backgroundColor: '#2563eb',
+  },
+  counterNumberModern: {
     fontSize: 36,
     fontWeight: 'bold',
     color: '#2563eb',
-    marginBottom: 4,
   },
-  counterLabel: {
-    fontSize: 16,
-    color: '#666',
+  counterNumberActiveModern: {
+    color: '#fff',
+  },
+  counterLabelModern: {
+    fontSize: 18,
+    color: '#2563eb',
     fontWeight: 'bold',
     letterSpacing: 1,
+  },
+  counterLabelActiveModern: {
+    color: '#fff',
   },
   manualButton: {
     marginTop: 8,
@@ -529,5 +575,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 12,
     backgroundColor: '#fff',
+  },
+  infoNote: {
+    color: '#666',
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  lastScanned: {
+    fontSize: 16,
+    color: '#2563eb',
+    marginBottom: 12,
+    fontWeight: 'bold',
   },
 }); 

@@ -11,6 +11,7 @@ import AddCylinderScreen from './screens/AddCylinderScreen';
 import LocateCylinderScreen from './screens/LocateCylinderScreen';
 import CustomerDetailsScreen from './screens/CustomerDetailsScreen';
 import HistoryScreen from './screens/HistoryScreen';
+import FillCylinderScreen from './screens/FillCylinderScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -28,6 +29,7 @@ export default function App() {
         <Stack.Screen name="LocateCylinder" component={LocateCylinderScreen} options={{ title: 'Locate Cylinder' }} />
         <Stack.Screen name="CustomerDetails" component={CustomerDetailsScreen} options={{ title: 'Customer Details' }} />
         <Stack.Screen name="History" component={HistoryScreen} options={{ title: 'Scan History' }} />
+        <Stack.Screen name="FillCylinder" component={FillCylinderScreen} options={{ title: 'Update Cylinder Status' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

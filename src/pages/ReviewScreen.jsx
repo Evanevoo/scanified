@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../supabase';
+import { supabase } from '../../supabase';
 
 export default function ReviewScreen({ navigation, route }) {
   const { orderNumber, cylinders } = route?.params || {};
@@ -76,6 +76,7 @@ export default function ReviewScreen({ navigation, route }) {
           <ul>
             {matchResults.map((res, idx) => (
               <li key={res.barcode + idx} style={{ color: res.match ? 'green' : 'red' }}>
+                <a href={`/bottles/${res.barcode}`} style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}>{res.barcode}</a>
                 {res.barcode}: {res.match ? 'MATCH' : `NO MATCH${res.reason ? ' (' + res.reason + ')' : ''}`}
               </li>
             ))}

@@ -149,6 +149,7 @@ export default function HomeScreen() {
                 else if (btn.title === 'Add New') navigation.navigate('AddCylinder');
                 else if (btn.title === 'Locate') navigation.navigate('LocateCylinder');
                 else if (btn.title === 'History') navigation.navigate('History');
+                else if (btn.title === 'Fill') navigation.navigate('FillCylinder');
               }}
             >
               <View style={styles.gridIconCircle}><Text style={styles.gridIcon}>{btn.icon}</Text></View>

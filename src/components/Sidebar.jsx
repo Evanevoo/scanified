@@ -17,7 +17,7 @@ const Sidebar = () => {
     const fetchSuggestions = async () => {
       // Search assets (barcode/serial), customers (name/ID/phone), sales orders (number)
       const [assets, customers, salesOrders] = await Promise.all([
-        supabase.from('cylinders').select('id, barcode_number, serial_number, product_code, description').or(`barcode_number.ilike.%${search}%,serial_number.ilike.%${search}%,product_code.ilike.%${search}%`).limit(5),
+        supabase.from('bottles').select('id, barcode_number, serial_number, product_code, description').or(`barcode_number.ilike.%${search}%,serial_number.ilike.%${search}%,product_code.ilike.%${search}%`).limit(5),
         supabase.from('customers').select('CustomerListID, name, phone').or(`CustomerListID.ilike.%${search}%,name.ilike.%${search}%,phone.ilike.%${search}%`).limit(5),
         supabase.from('sales_orders').select('id, sales_order_number, customer_name').or(`sales_order_number.ilike.%${search}%,customer_name.ilike.%${search}%`).limit(5),
       ]);

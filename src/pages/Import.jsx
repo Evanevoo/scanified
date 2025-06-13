@@ -9,6 +9,7 @@ import debounce from 'lodash.debounce';
 import { toast } from 'react-hot-toast';
 import { getImportWorker, addImportWorkerListener, removeImportWorkerListener } from '../utils/ImportWorkerManager';
 import { Box, Paper, Typography } from '@mui/material';
+import { findCustomer, normalizeCustomerName } from '../utils/customerMatching';
 
 // Import type definitions
 const IMPORT_TYPES = {
@@ -361,6 +362,8 @@ export default function Import() {
 
   function validateRows(previewRows, mappingObj) {
     const errors = [];
+    const customerValidationPromises = [];
+    
     previewRows.forEach((row, idx) => {
       REQUIRED_FIELDS.forEach(field => {
         if (!mappingObj[field.key]) {
@@ -369,8 +372,36 @@ export default function Import() {
           errors.push({ row: idx, field: field.key, reason: 'Missing value' });
         }
       });
+      
+      // Enhanced customer validation
+      if (row.customer_id || row.customer_name) {
+        const validationPromise = findCustomer(row.customer_name, row.customer_id)
+          .then(customer => {
+            if (!customer) {
+              errors.push({ 
+                row: idx, 
+                field: 'customer_id', 
+                reason: `Customer not found: ${row.customer_name || 'Unknown'} (${row.customer_id || 'No ID'})` 
+              });
+            }
+          })
+          .catch(err => {
+            console.error('Customer validation error:', err);
+            errors.push({ 
+              row: idx, 
+              field: 'customer_id', 
+              reason: 'Error validating customer' 
+            });
+          });
+        customerValidationPromises.push(validationPromise);
+      }
     });
-    setValidationErrors(errors);
+    
+    // Wait for all customer validations to complete
+    Promise.all(customerValidationPromises).then(() => {
+      setValidationErrors(errors);
+    });
+    
     return errors.length === 0;
   }
 
@@ -799,7 +830,9 @@ export default function Import() {
                           {row.date || ''}
                         </td>
                         <td className={`border px-2 py-1 text-xs ${rowErrors.find(e => e.field === 'product_code') ? 'bg-red-200 text-red-800 font-bold' : ''}`}>
-                          {row.product_code || ''}
+                          <a href={`/bottles/${row.product_code}`} style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}>
+                            {row.product_code}
+                          </a>
                         </td>
                         <td className={`border px-2 py-1 text-xs ${rowErrors.find(e => e.field === 'reference_number') ? 'bg-red-200 text-red-800 font-bold' : ''}`}>
                           {row.reference_number || ''}
