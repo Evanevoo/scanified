@@ -33,6 +33,7 @@ export default function CustomerDetail() {
   const [customer, setCustomer] = useState(null);
   const [customerAssets, setCustomerAssets] = useState([]);
   const [locationAssets, setLocationAssets] = useState([]);
+  const [bottleSummary, setBottleSummary] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -54,12 +55,22 @@ export default function CustomerDetail() {
         if (customerError) throw customerError;
         setCustomer(customerData);
         setEditForm(customerData);
+        
         const { data: customerAssetsData, error: customerAssetsError } = await supabase
           .from('bottles')
           .select('*')
           .eq('assigned_customer', id);
         if (customerAssetsError) throw customerAssetsError;
         setCustomerAssets(customerAssetsData || []);
+        
+        // Calculate bottle summary by gas type
+        const summary = {};
+        (customerAssetsData || []).forEach(bottle => {
+          const gasType = bottle.gas_type || 'Unknown';
+          summary[gasType] = (summary[gasType] || 0) + 1;
+        });
+        setBottleSummary(summary);
+        
         const { data: rentalData, error: rentalError } = await supabase
           .from('rentals')
           .select('*')
@@ -232,6 +243,43 @@ export default function CustomerDetail() {
             <Button variant="outlined" color="secondary" onClick={() => { setEditing(false); setEditForm(customer); }} disabled={saving}>Cancel</Button>
             {saveError && <Alert severity="error" sx={{ ml: 2 }}>{saveError}</Alert>}
             {saveSuccess && <Alert severity="success" sx={{ ml: 2 }}>Saved!</Alert>}
+          </Box>
+        )}
+      </Paper>
+
+      {/* Bottle Rental Summary */}
+      <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4, border: '1.5px solid #e0e0e0', boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)' }}>
+        <Typography variant="h5" fontWeight={700} color="primary" mb={3}>
+          📊 Bottle Rental Summary
+        </Typography>
+        
+        {Object.keys(bottleSummary).length === 0 ? (
+          <Typography color="text.secondary">No bottles currently rented to this customer.</Typography>
+        ) : (
+          <Box>
+            <Typography variant="body2" color="text.secondary" mb={2}>
+              Total bottles by gas type:
+            </Typography>
+            <Box display="flex" flexWrap="wrap" gap={2}>
+              {Object.entries(bottleSummary).map(([gasType, count]) => (
+                <Chip
+                  key={gasType}
+                  label={`${gasType} (${count})`}
+                  color="primary"
+                  variant="outlined"
+                  sx={{ 
+                    fontWeight: 600, 
+                    fontSize: '1rem',
+                    px: 2,
+                    py: 1,
+                    borderRadius: 2
+                  }}
+                />
+              ))}
+            </Box>
+            <Typography variant="body2" color="text.secondary" mt={2}>
+              Total bottles: {customerAssets.length}
+            </Typography>
           </Box>
         )}
       </Paper>

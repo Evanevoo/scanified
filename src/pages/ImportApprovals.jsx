@@ -3,6 +3,7 @@ import { supabase } from '../supabase/client';
 import { Box, Paper, Typography, Button, Alert, Snackbar, CircularProgress, Divider, Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton, MenuItem, Select, FormControl, InputLabel } from '@mui/material';
 import { useNavigate, Link } from 'react-router-dom';
 import HistoryIcon from '@mui/icons-material/History';
+import CloseIcon from '@mui/icons-material/Close';
 
 function formatDate(dt) {
   if (!dt) return '';
