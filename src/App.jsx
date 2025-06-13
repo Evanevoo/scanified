@@ -47,9 +47,11 @@ import { useAuth } from './hooks/useAuth';
 import MainLayout from './components/MainLayout';
 import { ImportProgressProvider } from './components/ImportProgressContext';
 import UserManagement from './pages/UserManagement';
-import BottleManagement from './pages/BottleManagement';
+import BottleImport from './pages/BottleImport';
 import ImportApprovals from './pages/ImportApprovals';
 import Integrations from './pages/Integrations';
+import BottleDetail from './pages/BottleDetail';
+import Bottles from './pages/Bottles';
 
 function App() {
   const { user, profile, loading } = useAuth();
@@ -97,8 +99,10 @@ function App() {
             <Route path="/all-asset-movements" element={isAuthenticated ? <AllAssetMovements /> : <Navigate to="/login" />} />
             <Route path="/scanned-orders" element={isAuthenticated ? <ScannedOrders /> : <Navigate to="/login" />} />
             <Route path="/user-management" element={isAuthenticated && profile?.role === 'admin' ? <UserManagement /> : <Navigate to="/home" />} />
-            <Route path="/bottle-management" element={isAuthenticated ? <BottleManagement /> : <Navigate to="/login" />} />
+            <Route path="/bottle-management" element={isAuthenticated ? <BottleImport /> : <Navigate to="/login" />} />
             <Route path="/integrations" element={isAuthenticated ? <Integrations /> : <Navigate to="/login" />} />
+            <Route path="/bottles/:barcode_number" element={isAuthenticated ? <BottleDetail /> : <Navigate to="/login" />} />
+            <Route path="/bottles" element={isAuthenticated ? <Bottles /> : <Navigate to="/login" />} />
             <Route path="*" element={<Navigate to="/home" />} />
           </Route>
         </Routes>

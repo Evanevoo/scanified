@@ -1,76 +1,108 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal } from 'react-native';
 import { supabase } from '../supabase';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Picker } from '@react-native-picker/picker';
+import ScanArea from '../components/ScanArea';
+
+interface GasType {
+  id: number;
+  category: string;
+  group_name: string;
+  type: string;
+  product_code: string;
+  description: string;
+  in_house_total: number;
+  with_customer_total: number;
+  lost_total: number;
+  total: number;
+  dock_stock: string;
+}
+
+interface Location {
+  id: string;
+  name: string;
+  province: string;
+  gst_rate: number;
+  pst_rate: number;
+  total_tax_rate: number;
+}
 
 export default function AddCylinderScreen() {
   const [barcode, setBarcode] = useState('');
   const [serial, setSerial] = useState('');
-  const [gasTypes, setGasTypes] = useState<string[]>([]);
+  const [gasTypes, setGasTypes] = useState<GasType[]>([]);
   const [selectedGasType, setSelectedGasType] = useState('');
-  const [scannerVisible, setScannerVisible] = useState(false);
-  const [permission, requestPermission] = useCameraPermissions();
-  const [scanned, setScanned] = useState(false);
-  const scanDelay = 1500; // ms
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingGasTypes, setLoadingGasTypes] = useState(true);
+  const [loadingLocations, setLoadingLocations] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
   useEffect(() => {
     const fetchGasTypes = async () => {
+      setLoadingGasTypes(true);
+      setError('');
       const { data, error } = await supabase
-        .from('cylinders')
-        .select('group_name')
-        .neq('group_name', '') // Exclude empty
-        .not('group_name', 'is', null) // Exclude null
-        .order('group_name', { ascending: true });
-      if (error) return setError('Failed to load gas types.');
-      const types = Array.from(new Set((data || []).map(row => row.group_name)));
-      setGasTypes(types);
+        .from('gas_types')
+        .select('*')
+        .order('category', { ascending: true })
+        .order('group_name', { ascending: true })
+        .order('type', { ascending: true });
+      if (error) {
+        setError('Failed to load gas types.');
+        return;
+      }
+      setGasTypes(data || []);
+      setLoadingGasTypes(false);
     };
     fetchGasTypes();
   }, []);
 
   useEffect(() => {
-    if (scannerVisible) {
-      setScanned(false);
-    }
-  }, [scannerVisible]);
-
-  const handleBarCodeScanned = (event: any) => {
-    // Only accept barcodes within the border area if boundingBox is available
-    const border = {
-      top: 0.41, left: 0.05, width: 0.9, height: 0.18
-    };
-    if (event?.boundingBox) {
-      const { origin, size } = event.boundingBox;
-      const centerX = origin.x + size.width / 2;
-      const centerY = origin.y + size.height / 2;
-      if (
-        centerX < border.left ||
-        centerX > border.left + border.width ||
-        centerY < border.top ||
-        centerY > border.top + border.height
-      ) {
-        // Barcode is outside the border, ignore
+    const fetchLocations = async () => {
+      setLoadingLocations(true);
+      setError('');
+      const { data, error } = await supabase
+        .from('locations')
+        .select('*')
+        .order('name', { ascending: true });
+      if (error) {
+        setError('Failed to load locations.');
         return;
       }
-    }
-    setScanned(true);
-    setTimeout(() => setScanned(false), scanDelay);
-    setBarcode(event.data);
-    setScannerVisible(false);
-  };
+      setLocations(data || []);
+      setLoadingLocations(false);
+    };
+    fetchLocations();
+  }, []);
 
   const handleSubmit = async () => {
     setError('');
     setSuccess('');
-    if (!barcode || !serial || !selectedGasType) {
+    if (!barcode || !serial || !selectedGasType || !selectedLocation) {
       setError('All fields are required.');
       return;
     }
     setLoading(true);
+    
+    // Get the selected gas type details
+    const selectedGasTypeData = gasTypes.find(gt => gt.id.toString() === selectedGasType);
+    if (!selectedGasTypeData) {
+      setError('Invalid gas type selected.');
+      setLoading(false);
+      return;
+    }
+
+    // Get the selected location details
+    const selectedLocationData = locations.find(loc => loc.id === selectedLocation);
+    if (!selectedLocationData) {
+      setError('Invalid location selected.');
+      setLoading(false);
+      return;
+    }
+    
     // Check for duplicate barcode or serial
     const { data: dup, error: dupError } = await supabase
       .from('cylinders')
@@ -86,10 +118,20 @@ export default function AddCylinderScreen() {
       setLoading(false);
       return;
     }
-    // Insert new cylinder
+    
+    // Insert new cylinder with gas type and location information
     const { error: insertError } = await supabase
       .from('cylinders')
-      .insert({ barcode_number: barcode, serial_number: serial, gas_type: selectedGasType });
+      .insert({ 
+        barcode_number: barcode, 
+        serial_number: serial, 
+        gas_type: selectedGasTypeData.type,
+        group_name: selectedGasTypeData.group_name,
+        category: selectedGasTypeData.category,
+        product_code: selectedGasTypeData.product_code,
+        description: selectedGasTypeData.description,
+        location: selectedLocationData.id
+      });
     setLoading(false);
     if (insertError) {
       setError('Failed to add cylinder.');
@@ -98,24 +140,25 @@ export default function AddCylinderScreen() {
       setBarcode('');
       setSerial('');
       setSelectedGasType('');
+      setSelectedLocation('');
     }
   };
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Add New Cylinder</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-        <TextInput
-          style={[styles.input, { flex: 1, marginBottom: 0 }]}
-          placeholder="Barcode Number"
-          value={barcode}
-          onChangeText={setBarcode}
-          autoCapitalize="none"
-        />
-        <TouchableOpacity style={styles.scanBtn} onPress={() => setScannerVisible(true)}>
-          <Text style={styles.scanBtnText}>📷</Text>
-        </TouchableOpacity>
-      </View>
+      <ScanArea
+        onScanned={setBarcode}
+        label="SCAN HERE"
+        style={{ marginBottom: 0 }}
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Barcode Number"
+        value={barcode}
+        onChangeText={setBarcode}
+        autoCapitalize="none"
+      />
       <TextInput
         style={styles.input}
         placeholder="Serial Number"
@@ -123,85 +166,76 @@ export default function AddCylinderScreen() {
         onChangeText={setSerial}
         autoCapitalize="none"
       />
-      <View style={styles.pickerWrapper}>
-        <Picker
-          selectedValue={selectedGasType}
-          onValueChange={setSelectedGasType}
-          style={styles.picker}
-        >
-          <Picker.Item label="Select Gas Type" value="" />
-          {gasTypes.map(type => (
-            <Picker.Item key={type} label={type} value={type} />
-          ))}
-        </Picker>
-      </View>
+      
+      <Text style={styles.label}>Gas Type</Text>
+      {loadingGasTypes ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="small" color="#2563eb" />
+          <Text style={styles.loadingText}>Loading gas types...</Text>
+        </View>
+      ) : gasTypes.length === 0 ? (
+        <Text style={styles.error}>No gas types available. Please import gas types in the web app first.</Text>
+      ) : (
+        <View style={styles.pickerWrapper}>
+          <Picker
+            selectedValue={selectedGasType}
+            onValueChange={setSelectedGasType}
+            style={styles.picker}
+          >
+            <Picker.Item label="Select Gas Type" value="" />
+            {gasTypes.map(type => (
+              <Picker.Item 
+                key={type.id} 
+                label={type.type} 
+                value={type.id.toString()} 
+              />
+            ))}
+          </Picker>
+        </View>
+      )}
+      
+      <Text style={styles.label}>Location</Text>
+      {loadingLocations ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="small" color="#2563eb" />
+          <Text style={styles.loadingText}>Loading locations...</Text>
+        </View>
+      ) : locations.length === 0 ? (
+        <Text style={styles.error}>No locations available. Please add locations in the web app first.</Text>
+      ) : (
+        <View style={styles.pickerWrapper}>
+          <Picker
+            selectedValue={selectedLocation}
+            onValueChange={setSelectedLocation}
+            style={styles.picker}
+          >
+            <Picker.Item label="Select Location" value="" />
+            {locations.map(location => {
+              const label = `${location.name}, ${location.province}`;
+              return (
+                <Picker.Item 
+                  key={location.id} 
+                  label={label} 
+                  value={location.id} 
+                />
+              );
+            })}
+          </Picker>
+        </View>
+      )}
+      
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {success ? <Text style={styles.success}>{success}</Text> : null}
-      <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit} disabled={loading}>
+      <TouchableOpacity 
+        style={[
+          styles.submitBtn, 
+          (loading || loadingGasTypes || loadingLocations || gasTypes.length === 0 || locations.length === 0) && styles.submitBtnDisabled
+        ]} 
+        onPress={handleSubmit} 
+        disabled={loading || loadingGasTypes || loadingLocations || gasTypes.length === 0 || locations.length === 0}
+      >
         {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Add Cylinder</Text>}
       </TouchableOpacity>
-      {/* Scanner Modal */}
-      <Modal
-        visible={scannerVisible}
-        animationType="slide"
-        transparent={false}
-        onRequestClose={() => setScannerVisible(false)}
-      >
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
-          {!permission ? (
-            <Text style={{ color: '#fff' }}>Requesting camera permission...</Text>
-          ) : !permission.granted ? (
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ color: '#fff', marginBottom: 16 }}>We need your permission to show the camera</Text>
-              <TouchableOpacity onPress={requestPermission} style={{ backgroundColor: '#2563eb', padding: 16, borderRadius: 10 }}>
-                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Grant Permission</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={{ width: '100%', height: '80%', justifyContent: 'center', alignItems: 'center' }}>
-              <CameraView
-                style={{ width: '100%', height: '100%' }}
-                facing="back"
-                onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-                barcodeScannerSettings={{
-                  barcodeTypes: [
-                    'ean13',
-                    'ean8',
-                    'upc_a',
-                    'upc_e',
-                    'code39',
-                    'code93',
-                    'code128',
-                    'itf14',
-                    'interleaved2of5',
-                  ],
-                }}
-              />
-              {/* Overlay border rectangle */}
-              <View style={{
-                position: 'absolute',
-                top: '41%',
-                left: '5%',
-                width: '90%',
-                height: '18%',
-                borderWidth: 3,
-                borderColor: '#2563eb',
-                borderRadius: 18,
-                backgroundColor: 'rgba(0,0,0,0.0)',
-                zIndex: 10,
-              }} />
-              {/* Optional: darken area outside border */}
-              <View style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '25%', backgroundColor: 'rgba(0,0,0,0.35)' }} />
-              <View style={{ position: 'absolute', top: '75%', left: 0, width: '100%', height: '25%', backgroundColor: 'rgba(0,0,0,0.35)' }} />
-              <View style={{ position: 'absolute', top: '25%', left: 0, width: '10%', height: '50%', backgroundColor: 'rgba(0,0,0,0.35)' }} />
-              <View style={{ position: 'absolute', top: '25%', right: 0, width: '10%', height: '50%', backgroundColor: 'rgba(0,0,0,0.35)' }} />
-            </View>
-          )}
-          <TouchableOpacity onPress={() => setScannerVisible(false)} style={{ marginTop: 24, backgroundColor: '#2563eb', padding: 16, borderRadius: 10 }}>
-            <Text style={{ color: '#fff', fontWeight: 'bold' }}>Close</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -218,18 +252,6 @@ const styles = StyleSheet.create({
     color: '#2563eb',
     marginBottom: 18,
     textAlign: 'center',
-  },
-  scanBtn: {
-    backgroundColor: '#2563eb',
-    borderRadius: 10,
-    padding: 12,
-    marginLeft: 8,
-    alignItems: 'center',
-  },
-  scanBtnText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 18,
   },
   input: {
     backgroundColor: '#fff',
@@ -263,6 +285,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
+  submitBtnDisabled: {
+    backgroundColor: '#e5e7eb',
+  },
   error: {
     color: '#ff5a1f',
     marginBottom: 8,
@@ -272,5 +297,22 @@ const styles = StyleSheet.create({
     color: '#22c55e',
     marginBottom: 8,
     textAlign: 'center',
+  },
+  label: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2563eb',
+    marginBottom: 8,
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  loadingText: {
+    color: '#2563eb',
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
 }); 

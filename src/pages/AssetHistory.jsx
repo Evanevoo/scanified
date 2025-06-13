@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../supabase/client';
+import { supabase } from '../../supabase';
 
 export default function AssetHistory() {
   const { id } = useParams(); // id can be barcode or serial number
@@ -23,7 +23,7 @@ export default function AssetHistory() {
       try {
         // Try to find asset by barcode or serial_number
         const { data: assetData, error: assetError } = await supabase
-          .from('cylinders')
+          .from('bottles')
           .select('*')
           .or(`barcode_number.eq.${id},serial_number.eq.${id}`)
           .single();
@@ -51,7 +51,7 @@ export default function AssetHistory() {
   const handleAssetEditSave = async () => {
     setLoading(true);
     setError(null);
-    const { error: updateError } = await supabase.from('cylinders').update(editForm).eq('id', asset.id);
+    const { error: updateError } = await supabase.from('bottles').update(editForm).eq('id', asset.id);
     if (updateError) setError(updateError.message);
     else {
       setAsset(editForm);
@@ -105,7 +105,18 @@ export default function AssetHistory() {
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-2 mb-2">
-            <div><b>Barcode:</b> {asset.barcode_number}</div>
+            <div><b>Barcode:</b> {asset.barcode_number ? (
+              <a
+                href={`/bottles/${asset.barcode_number}`}
+                style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}
+                onClick={e => {
+                  e.preventDefault();
+                  navigate(`/bottles/${asset.barcode_number}`);
+                }}
+              >
+                {asset.barcode_number}
+              </a>
+            ) : ''}</div>
             <div><b>Serial Number:</b> {asset.serial_number}</div>
             <div><b>Category:</b> {asset.category}</div>
             <div><b>Group:</b> {asset.group_name}</div>

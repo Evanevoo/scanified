@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../../supabase.js';
+import { supabase } from '../../supabase';
 import { useNavigate } from 'react-router-dom';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Collapse, IconButton, TextField, CircularProgress
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Collapse, IconButton, TextField, CircularProgress, FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
@@ -17,10 +17,11 @@ function exportToCSV(customers) {
       rows.push({
         Customer: customer.name,
         CustomerID: customer.CustomerListID,
-        Serial: rental.cylinder.serial_number,
-        Type: rental.cylinder.gas_type,
+        TotalBottles: rentals.length,
         RentalType: rental.rental_type,
         RentalRate: rental.rental_amount,
+        TaxCode: rental.tax_code,
+        Location: rental.location,
         StartDate: rental.rental_start_date,
         EndDate: rental.rental_end_date,
       });
@@ -33,7 +34,7 @@ function exportToCSV(customers) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'rentals.csv';
+  a.download = `rentals_export_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -45,6 +46,78 @@ const defaultEdit = (rentals) => ({
   taxCode: rentals[0]?.tax_code || 'GST',
   location: rentals[0]?.location || 'SASKATOON'
 });
+
+function getNextInvoiceNumber() {
+  const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
+  const now = new Date();
+  const currentMonth = now.getFullYear() + '-' + (now.getMonth() + 1).toString().padStart(2, '0');
+  let lastNumber = 10000;
+  let lastMonth = currentMonth;
+  if (state.lastMonth === currentMonth && state.lastNumber) {
+    lastNumber = 10000; // Always start from 10000 for the current month
+  } else if (state.lastMonth !== currentMonth && state.lastNumber) {
+    lastNumber = state.lastNumber + 1;
+    lastMonth = currentMonth;
+  }
+  return { next: lastNumber, currentMonth, lastMonth };
+}
+
+function setInvoiceState(number, month) {
+  // Only update if month has changed
+  const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
+  if (state.lastMonth !== month) {
+    localStorage.setItem('invoice_state', JSON.stringify({ lastNumber: number, lastMonth: month }));
+  }
+}
+
+function getInvoiceDates() {
+  const now = new Date();
+  // Invoice date is 1st of next month
+  const invoiceDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  // Due date is 1 month after invoice date
+  const dueDate = new Date(invoiceDate.getFullYear(), invoiceDate.getMonth() + 1, 1);
+  const fmt = d => d.toISOString().slice(0, 10);
+  return { invoiceDate: fmt(invoiceDate), dueDate: fmt(dueDate) };
+}
+
+function exportInvoices(customers) {
+  if (!customers.length) return;
+  const { next, currentMonth } = getNextInvoiceNumber();
+  let invoiceNumber = next;
+  const { invoiceDate, dueDate } = getInvoiceDates();
+  const rate = 10;
+  const taxRate = 0.11;
+  const rows = customers.map(({ customer, rentals }, idx) => {
+    const numBottles = rentals.length;
+    const base = numBottles * rate;
+    const tax = +(base * taxRate).toFixed(1);
+    const total = +(base + tax).toFixed(2);
+    return {
+      'Invoice#': `W${(invoiceNumber + idx).toString().padStart(5, '0')}`,
+      'Customer Number': customer.CustomerListID,
+      'Total': total,
+      'Date': invoiceDate,
+      'TX': tax,
+      'TX code': 'G',
+      'Due date': dueDate,
+      'Rate': rate,
+      'Name': customer.name,
+      '# of Bottles': numBottles
+    };
+  });
+  // Update invoice state
+  setInvoiceState(invoiceNumber + rows.length - 1, currentMonth);
+  // CSV export
+  const header = Object.keys(rows[0]).join(',');
+  const csv = [header, ...rows.map(r => Object.values(r).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `quickbooks_invoices_${invoiceDate}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 function Rentals() {
   const [rentals, setRentals] = useState([]);
@@ -64,12 +137,31 @@ function Rentals() {
       setLoading(true);
       setError(null);
       try {
+        // First, test if the rentals table exists and has data
+        const { data: testData, error: testError } = await supabase
+          .from('rentals')
+          .select('*')
+          .limit(5);
+        
+        if (testError) {
+          throw testError;
+        }
+        
+        // Now try the full query with joins
         const { data, error: rentalsError } = await supabase
           .from('rentals')
-          .select(`*, customer:customer_id (CustomerListID, name, customer_number), cylinder:cylinder_id (id, serial_number, gas_type)`)
+          .select(`
+            *,
+            customer:customer_id (CustomerListID, name, customer_number),
+            bottle:bottle_id (id, barcode_number, gas_type, description)
+          `)
           .order('rental_start_date', { ascending: false });
-        if (rentalsError) throw rentalsError;
-        setRentals(data);
+        
+        if (rentalsError) {
+          throw rentalsError;
+        }
+        
+        setRentals(data || []);
       } catch (err) {
         setError(err.message);
       }
@@ -78,14 +170,12 @@ function Rentals() {
     fetchRentals();
   }, []);
 
-  // Group rentals by customer, skip if missing customer or cylinder
+  // Group rentals by customer, skip if missing customer
   const customers = [];
   const customerMap = {};
   const locationBottles = []; // Bottles assigned to locations (at home)
   
   for (const rental of rentals) {
-    if (!rental.cylinder) continue; // <-- skip bad data
-    
     // If rental has no customer (location-assigned), add to locationBottles
     if (!rental.customer) {
       locationBottles.push(rental);
@@ -102,11 +192,7 @@ function Rentals() {
     }
     customerMap[custId].rentals.push(rental);
   }
-
-  // Debug logging
-  console.log('rentals', rentals);
-  console.log('customers', customers);
-
+  
   const paginatedCustomers = customers.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
 
   const handleEditChange = (custId, field, value) => {
@@ -122,22 +208,111 @@ function Rentals() {
   const handleSave = async (custId, rentals) => {
     setSavingMap(prev => ({ ...prev, [custId]: true }));
     const edit = editMap[custId] || defaultEdit(rentals);
-    await Promise.all(rentals.map(rental =>
-      supabase.from('rentals').update({
-        rental_amount: edit.rentalRate,
-        rental_type: edit.rentalType,
-        tax_code: edit.taxCode,
-        location: edit.location
-      }).eq('id', rental.id)
-    ));
+    try {
+      await Promise.all(rentals.map(rental =>
+        supabase.from('rentals').update({
+          rental_amount: edit.rentalRate,
+          rental_type: edit.rentalType,
+          tax_code: edit.taxCode,
+          location: edit.location
+        }).eq('id', rental.id)
+      ));
+      // Refresh data
+      const { data } = await supabase
+        .from('rentals')
+        .select(`*, customer:customer_id (CustomerListID, name, customer_number)`)
+        .order('rental_start_date', { ascending: false });
+      setRentals(data);
+    } catch (error) {
+      // Error handling for rental updates
+    }
     setSavingMap(prev => ({ ...prev, [custId]: false }));
+  };
+
+  // Function to create rental records for existing bottle assignments
+  const createRentalsForExistingBottles = async () => {
+    setLoading(true);
+    try {
+      // Get all bottles that are assigned to customers but don't have rental records
+      const { data: assignedBottles, error: bottlesError } = await supabase
+        .from('bottles')
+        .select('*')
+        .not('assigned_customer', 'is', null);
+      
+      if (bottlesError) throw bottlesError;
+      
+      // Get existing rental records to avoid duplicates
+      const { data: existingRentals, error: rentalsError } = await supabase
+        .from('rentals')
+        .select('bottle_id');
+      
+      if (rentalsError) throw rentalsError;
+      
+      const existingBottleIds = new Set(existingRentals.map(r => r.bottle_id));
+      
+      // Create rental records for bottles that don't have them
+      const bottlesToCreateRentalsFor = assignedBottles.filter(bottle => !existingBottleIds.has(bottle.id));
+      
+      if (bottlesToCreateRentalsFor.length === 0) {
+        alert('All assigned bottles already have rental records!');
+        return;
+      }
+      
+      // For each bottle, fetch location tax info and set tax_code and tax_rate
+      const rentalRecords = [];
+      for (const bottle of bottlesToCreateRentalsFor) {
+        let taxCode = 'pst+gst';
+        let taxRate = 0;
+        let rentalLocation = bottle.location || 'SASKATOON';
+        try {
+          const { data: locationData } = await supabase
+            .from('locations')
+            .select('id, total_tax_rate')
+            .eq('id', rentalLocation.toLowerCase())
+            .single();
+          if (locationData) {
+            taxRate = locationData.total_tax_rate;
+          }
+        } catch (e) {
+          // Could not fetch location tax info, using defaults
+        }
+        rentalRecords.push({
+          customer_id: bottle.assigned_customer,
+          bottle_id: bottle.id,
+          rental_start_date: bottle.rental_start_date || new Date().toISOString().split('T')[0],
+          rental_type: 'monthly',
+          rental_amount: 10,
+          location: rentalLocation,
+          tax_code: taxCode,
+          tax_rate: taxRate
+        });
+      }
+      
+      const { data: createdRentals, error: createError } = await supabase
+        .from('rentals')
+        .insert(rentalRecords)
+        .select();
+      
+      if (createError) throw createError;
+      
+      alert(`Successfully created ${createdRentals.length} rental records!`);
+      
+      // Refresh the rentals data
+      const { data } = await supabase
+        .from('rentals')
+        .select(`*, customer:customer_id (CustomerListID, name, customer_number)`)
+        .order('rental_start_date', { ascending: false });
+      setRentals(data);
+      
+    } catch (error) {
+      console.error('Error creating rental records:', error);
+      alert('Error creating rental records: ' + error.message);
+    }
+    setLoading(false);
   };
 
   if (loading) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
   if (error) return <Box p={4} color="error.main">Error: {error}</Box>;
-  if (!loading && customers.length === 0 && locationBottles.length === 0) {
-    return <Box p={4} textAlign="center">No rentals found. Check your data or Supabase query.</Box>;
-  }
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
@@ -146,7 +321,7 @@ function Rentals() {
         <Box display="flex" alignItems="center" justifyContent="space-between" mb={4}>
           <Button
             variant="contained"
-            onClick={() => exportToCSV(customers)}
+            onClick={() => exportInvoices(customers)}
             sx={{
               borderRadius: 999,
               bgcolor: '#111',
@@ -162,7 +337,32 @@ function Rentals() {
           >
             Export CSV
           </Button>
+          
+          <Button
+            variant="outlined"
+            onClick={createRentalsForExistingBottles}
+            disabled={loading}
+            sx={{
+              borderRadius: 999,
+              fontWeight: 700,
+              px: 4,
+              py: 1.5,
+              fontSize: 16,
+              borderColor: '#1976d2',
+              color: '#1976d2',
+              ':hover': { borderColor: '#1565c0', color: '#1565c0' }
+            }}
+          >
+            {loading ? <CircularProgress size={20} /> : 'Create Missing Rentals'}
+          </Button>
         </Box>
+
+        {/* Show message if no rentals */}
+        {customers.length === 0 && locationBottles.length === 0 && (
+          <Box p={4} textAlign="center">
+            No rentals found. Check your data or Supabase query.
+          </Box>
+        )}
 
         {/* Location Bottles (At Home) Section */}
         {locationBottles.length > 0 && (
@@ -179,8 +379,7 @@ function Rentals() {
                 <Table>
                   <TableHead>
                     <TableRow sx={{ backgroundColor: '#f8f9fa' }}>
-                      <TableCell sx={{ fontWeight: 700 }}>Serial Number</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>Gas Type</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>Rental ID</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>Start Date</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
@@ -189,8 +388,7 @@ function Rentals() {
                   <TableBody>
                     {locationBottles.map(rental => (
                       <TableRow key={rental.id} hover>
-                        <TableCell>{rental.cylinder.serial_number}</TableCell>
-                        <TableCell>{rental.cylinder.gas_type}</TableCell>
+                        <TableCell>{rental.id}</TableCell>
                         <TableCell>
                           <Typography variant="body2" color="primary" fontWeight={600}>
                             {rental.location || 'Unknown'}
@@ -244,7 +442,7 @@ function Rentals() {
                     <TableHead>
                       <TableRow sx={{ background: '#fafbfc' }}>
                         <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>Customer</TableCell>
-                        <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}># of Bottles</TableCell>
+                        <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>Total Bottles</TableCell>
                         <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>Rental Rate</TableCell>
                         <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>Rental Type</TableCell>
                         <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>Tax Code</TableCell>
@@ -279,12 +477,16 @@ function Rentals() {
                                     py: 0.5,
                                     fontSize: 15
                                   }}
-                                  onClick={() => navigate(`/customer/${customer.CustomerListID}`)}
+                                  onClick={() => navigate(`/customers/${customer.CustomerListID}`)}
                                 >
                                   View Details
                                 </Button>
                               </TableCell>
-                              <TableCell>{rentals.length}</TableCell>
+                              <TableCell>
+                                <Typography variant="h6" fontWeight={700} color="primary">
+                                  {rentals.length}
+                                </Typography>
+                              </TableCell>
                               <TableCell>
                                 <TextField
                                   value={edit.rentalRate}
@@ -294,89 +496,83 @@ function Rentals() {
                                 />
                               </TableCell>
                               <TableCell>
-                                <TextField
-                                  select
-                                  value={edit.rentalType}
-                                  onChange={e => handleEditChange(customer.CustomerListID, 'rentalType', e.target.value)}
-                                  size="small"
-                                  SelectProps={{ native: true }}
-                                  sx={{ minWidth: 110, bgcolor: '#fff' }}
-                                >
-                                  <option value="Monthly">Monthly</option>
-                                  <option value="Yearly">Yearly</option>
-                                </TextField>
+                                <FormControl size="small" sx={{ minWidth: 110, bgcolor: '#fff' }}>
+                                  <Select
+                                    value={edit.rentalType}
+                                    onChange={e => handleEditChange(customer.CustomerListID, 'rentalType', e.target.value)}
+                                    size="small"
+                                  >
+                                    <MenuItem value="Monthly">Monthly</MenuItem>
+                                    <MenuItem value="Yearly">Yearly</MenuItem>
+                                  </Select>
+                                </FormControl>
                               </TableCell>
                               <TableCell>
-                                <TextField
-                                  select
-                                  value={edit.taxCode}
-                                  onChange={e => handleEditChange(customer.CustomerListID, 'taxCode', e.target.value)}
-                                  size="small"
-                                  SelectProps={{ native: true }}
-                                  sx={{ minWidth: 90, bgcolor: '#fff' }}
-                                >
-                                  <option value="GST">GST</option>
-                                  <option value="PST">PST</option>
-                                  <option value="None">None</option>
-                                </TextField>
+                                <FormControl size="small" sx={{ minWidth: 90, bgcolor: '#fff' }}>
+                                  <Select
+                                    value={edit.taxCode}
+                                    onChange={e => handleEditChange(customer.CustomerListID, 'taxCode', e.target.value)}
+                                    size="small"
+                                  >
+                                    <MenuItem value="GST">GST</MenuItem>
+                                    <MenuItem value="PST">PST</MenuItem>
+                                    <MenuItem value="None">None</MenuItem>
+                                  </Select>
+                                </FormControl>
                               </TableCell>
                               <TableCell>
-                                <TextField
-                                  select
-                                  value={edit.location}
-                                  onChange={e => handleEditChange(customer.CustomerListID, 'location', e.target.value)}
-                                  size="small"
-                                  SelectProps={{ native: true }}
-                                  sx={{ minWidth: 120, bgcolor: '#fff' }}
-                                >
-                                  <option value="SASKATOON">SASKATOON</option>
-                                  <option value="REGINA">REGINA</option>
-                                  <option value="CHILLIWACK">CHILLIWACK</option>
-                                  <option value="PRINCE_GEORGE">PRINCE GEORGE</option>
-                                  <option value="None">None</option>
-                                </TextField>
+                                <FormControl size="small" sx={{ minWidth: 120, bgcolor: '#fff' }}>
+                                  <Select
+                                    value={edit.location}
+                                    onChange={e => handleEditChange(customer.CustomerListID, 'location', e.target.value)}
+                                    size="small"
+                                  >
+                                    <MenuItem value="SASKATOON">SASKATOON</MenuItem>
+                                    <MenuItem value="REGINA">REGINA</MenuItem>
+                                    <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
+                                    <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
+                                    <MenuItem value="None">None</MenuItem>
+                                  </Select>
+                                </FormControl>
                               </TableCell>
                               <TableCell>
                                 <Button
                                   variant="contained"
-                                  sx={{
-                                    borderRadius: 999,
-                                    bgcolor: '#111',
-                                    color: '#fff',
-                                    fontWeight: 700,
-                                    px: 4,
-                                    py: 1,
-                                    fontSize: 16,
-                                    boxShadow: 'none',
-                                    ':hover': { bgcolor: '#222' }
-                                  }}
+                                  size="small"
                                   onClick={() => handleSave(customer.CustomerListID, rentals)}
                                   disabled={saving}
+                                  sx={{
+                                    bgcolor: '#4caf50',
+                                    color: '#fff',
+                                    fontWeight: 700,
+                                    textTransform: 'none',
+                                    ':hover': { bgcolor: '#45a049' }
+                                  }}
                                 >
-                                  {saving ? <CircularProgress size={18} color="inherit" /> : 'Save'}
+                                  {saving ? <CircularProgress size={20} /> : 'Save'}
                                 </Button>
                               </TableCell>
                               <TableCell>
                                 <IconButton
                                   onClick={() => setExpandedCustomer(expanded ? null : customer.CustomerListID)}
+                                  size="small"
                                 >
                                   {expanded ? <ArrowDropUpIcon /> : <ArrowDropDownIcon />}
                                 </IconButton>
                               </TableCell>
                             </TableRow>
-                            {/* Expanded Cylinder Details */}
                             <TableRow>
                               <TableCell colSpan={8} sx={{ p: 0, border: 0, bgcolor: '#fcfcfc' }}>
                                 <Collapse in={expanded} timeout="auto" unmountOnExit>
                                   <Box sx={{ p: 2, pl: 4 }}>
                                     <Typography fontWeight={700} sx={{ mb: 1 }}>
-                                      Cylinders for {customer.name}
+                                      Rentals for {customer.name}
                                     </Typography>
                                     <Table size="small" sx={{ width: '100%' }}>
                                       <TableHead>
                                         <TableRow>
-                                          <TableCell sx={{ fontWeight: 700 }}>Serial #</TableCell>
-                                          <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
+                                          <TableCell sx={{ fontWeight: 700 }}>Bottle Type</TableCell>
+                                          <TableCell sx={{ fontWeight: 700 }}>Barcode</TableCell>
                                           <TableCell sx={{ fontWeight: 700 }}>Rental Type</TableCell>
                                           <TableCell sx={{ fontWeight: 700 }}>Rental Rate</TableCell>
                                           <TableCell sx={{ fontWeight: 700 }}>Start Date</TableCell>
@@ -387,26 +583,38 @@ function Rentals() {
                                       <TableBody>
                                         {rentals.map(rental => (
                                           <TableRow key={rental.id}>
-                                            <TableCell>{rental.cylinder.serial_number}</TableCell>
-                                            <TableCell>{rental.cylinder.gas_type}</TableCell>
+                                            <TableCell>{rental.bottle?.description || rental.bottle?.gas_type || 'Unknown'}</TableCell>
                                             <TableCell>
-                                              <TextField
-                                                select
-                                                value={rental.rental_type}
-                                                size="small"
-                                                SelectProps={{ native: true }}
-                                                sx={{ minWidth: 110, bgcolor: '#fff' }}
-                                                onChange={async e => {
-                                                  await supabase.from('rentals').update({ rental_type: e.target.value }).eq('id', rental.id);
-                                                }}
-                                              >
-                                                <option value="Monthly">Monthly</option>
-                                                <option value="Yearly">Yearly</option>
-                                              </TextField>
+                                              {rental.bottle?.barcode_number ? (
+                                                <a
+                                                  href={`/bottles/${rental.bottle.barcode_number}`}
+                                                  style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}
+                                                  onClick={e => {
+                                                    e.preventDefault();
+                                                    navigate(`/bottles/${rental.bottle.barcode_number}`);
+                                                  }}
+                                                >
+                                                  {rental.bottle.barcode_number}
+                                                </a>
+                                              ) : 'N/A'}
+                                            </TableCell>
+                                            <TableCell>
+                                              <FormControl size="small" sx={{ minWidth: 110, bgcolor: '#fff' }}>
+                                                <Select
+                                                  value={rental.rental_type || 'Monthly'}
+                                                  size="small"
+                                                  onChange={async e => {
+                                                    await supabase.from('rentals').update({ rental_type: e.target.value }).eq('id', rental.id);
+                                                  }}
+                                                >
+                                                  <MenuItem value="Monthly">Monthly</MenuItem>
+                                                  <MenuItem value="Yearly">Yearly</MenuItem>
+                                                </Select>
+                                              </FormControl>
                                             </TableCell>
                                             <TableCell>
                                               <TextField
-                                                value={rental.rental_amount}
+                                                value={rental.rental_amount || ''}
                                                 size="small"
                                                 sx={{ width: 80, bgcolor: '#fff' }}
                                                 onChange={async e => {
@@ -414,24 +622,23 @@ function Rentals() {
                                                 }}
                                               />
                                             </TableCell>
-                                            <TableCell>{rental.rental_start_date || '-'}</TableCell>
+                                            <TableCell>{rental.rental_start_date}</TableCell>
                                             <TableCell>
-                                              <TextField
-                                                select
-                                                value={rental.location || 'None'}
-                                                size="small"
-                                                SelectProps={{ native: true }}
-                                                sx={{ minWidth: 120, bgcolor: '#fff' }}
-                                                onChange={async e => {
-                                                  await supabase.from('rentals').update({ location: e.target.value }).eq('id', rental.id);
-                                                }}
-                                              >
-                                                <option value="SASKATOON">SASKATOON</option>
-                                                <option value="REGINA">REGINA</option>
-                                                <option value="CHILLIWACK">CHILLIWACK</option>
-                                                <option value="PRINCE_GEORGE">PRINCE GEORGE</option>
-                                                <option value="None">None</option>
-                                              </TextField>
+                                              <FormControl size="small" sx={{ minWidth: 120, bgcolor: '#fff' }}>
+                                                <Select
+                                                  value={rental.location || 'None'}
+                                                  size="small"
+                                                  onChange={async e => {
+                                                    await supabase.from('rentals').update({ location: e.target.value }).eq('id', rental.id);
+                                                  }}
+                                                >
+                                                  <MenuItem value="SASKATOON">SASKATOON</MenuItem>
+                                                  <MenuItem value="REGINA">REGINA</MenuItem>
+                                                  <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
+                                                  <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
+                                                  <MenuItem value="None">None</MenuItem>
+                                                </Select>
+                                              </FormControl>
                                             </TableCell>
                                             <TableCell>
                                               <Button
@@ -446,7 +653,7 @@ function Rentals() {
                                                   py: 0.5,
                                                   fontSize: 15
                                                 }}
-                                                onClick={() => navigate(`/customer/${customer.CustomerListID}`)}
+                                                onClick={() => navigate(`/customers/${customer.CustomerListID}`)}
                                               >
                                                 View Details
                                               </Button>

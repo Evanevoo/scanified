@@ -28,6 +28,7 @@
     "expo-dev-client": "^5.1.8",
     "file-saver": "^2.0.5",
     "jspdf": "^3.0.1",
+    "lodash": "^4.17.21",
     "lodash.throttle": "^4.1.1",
     "papaparse": "^5.4.1",
     "postcss": "^8.4.21",

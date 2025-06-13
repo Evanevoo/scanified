@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../supabase/client';
+import { supabase } from '../../supabase';
 import {
   Box,
   Typography,
@@ -55,14 +55,14 @@ export default function CustomerDetail() {
         setCustomer(customerData);
         setEditForm(customerData);
         const { data: customerAssetsData, error: customerAssetsError } = await supabase
-          .from('cylinders')
+          .from('bottles')
           .select('*')
           .eq('assigned_customer', id);
         if (customerAssetsError) throw customerAssetsError;
         setCustomerAssets(customerAssetsData || []);
         const { data: rentalData, error: rentalError } = await supabase
           .from('rentals')
-          .select(`*,cylinder:cylinder_id (id, serial_number, gas_type, barcode_number)`)
+          .select('*')
           .eq('customer_id', id);
         if (rentalError) throw rentalError;
         setLocationAssets(rentalData || []);
@@ -260,7 +260,20 @@ export default function CustomerDetail() {
                 {customerAssets.map((asset) => (
                   <TableRow key={asset.id} hover>
                     <TableCell>{asset.serial_number}</TableCell>
-                    <TableCell>{asset.barcode_number}</TableCell>
+                    <TableCell>
+                      {asset.barcode_number ? (
+                        <a
+                          href={`/bottles/${asset.barcode_number}`}
+                          style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}
+                          onClick={e => {
+                            e.preventDefault();
+                            navigate(`/bottles/${asset.barcode_number}`);
+                          }}
+                        >
+                          {asset.barcode_number}
+                        </a>
+                      ) : ''}
+                    </TableCell>
                     <TableCell>{asset.gas_type}</TableCell>
                     <TableCell>
                       <Chip 

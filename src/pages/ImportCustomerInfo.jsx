@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import Papa from 'papaparse';
 import { Box, Paper, Typography, Button, TextField, Alert, MenuItem, Snackbar } from '@mui/material';
+import { findCustomer, normalizeCustomerName, extractCustomerId } from '../utils/customerMatching';
 
 const colorMap = {
   'blue-600': '#2563eb',
@@ -18,13 +19,14 @@ function generateCustomerId() {
   return Math.random().toString(36).substr(2, 8).toUpperCase() + '-' + Date.now();
 }
 
-// Alias map for auto-mapping CSV columns to customer fields
+// Enhanced alias map for auto-mapping CSV columns to customer fields
 const FIELD_ALIASES = {
-  CustomerListID: ['customerlistid', 'customer id', 'customer_id', 'id', 'accountnumber', 'account number', 'holderstr'],
-  name: ['name', 'customername', 'customer name', 'holdername'],
+  CustomerListID: ['customerlistid', 'customer id', 'customer_id', 'id', 'accountnumber', 'account number', 'holderstr', 'customerlist'],
+  name: ['name', 'customername', 'customer name', 'holdername', 'company', 'company name'],
   contact_details: ['contact_details', 'address', 'contact', 'contact info', 'contact information', 'address1', 'address 1', 'billtofulladdress'],
   phone: ['phone', 'phone number', 'phonenumber', 'contact phone', 'mobile', 'mobile number']
 };
+
 const ALLOWED_FIELDS = [
   { key: 'CustomerListID', label: 'CustomerListID' },
   { key: 'name', label: 'Name' },
@@ -55,14 +57,7 @@ const ASSET_IMPORT_FIELDS = [
   { key: 'DAYS_ON_RENT', label: 'Days on Rent' },
 ];
 
-// Helper to extract just the ID from a string like "Name (ID)"
-function extractCustomerId(val) {
-  if (!val) return '';
-  const match = val.match(/\(([^)]+)\)$/);
-  return match ? match[1] : val;
-}
-
-// Helper to format date to ISO
+// Enhanced helper to format date to ISO
 function formatDate(val) {
   if (!val) return null;
   const d = new Date(val);
@@ -95,9 +90,73 @@ const TXT_COLUMNS = [
   "Salesman"
 ];
 
-// Helper to normalize names for matching
+// Enhanced helper to normalize names for matching
 function normalizeName(name) {
-  return (name || '').trim().replace(/\s+/g, '').toLowerCase();
+  return (name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+// Enhanced customer matching function
+async function findExistingCustomer(customerName, customerId) {
+  if (!customerName && !customerId) return null;
+  
+  // Strategy 1: Match by exact CustomerListID (case-insensitive)
+  if (customerId) {
+    const { data: customer, error } = await supabase
+      .from('customers')
+      .select('CustomerListID, name')
+      .ilike('CustomerListID', customerId.trim())
+      .single();
+    
+    if (customer && !error) {
+      return customer;
+    }
+  }
+  
+  // Strategy 2: Parse customer name with ID in parentheses
+  if (customerName) {
+    const idMatch = customerName.match(/\(([^)]+)\)$/);
+    if (idMatch) {
+      const extractedId = idMatch[1].trim();
+      const { data: customer, error } = await supabase
+        .from('customers')
+        .select('CustomerListID, name')
+        .ilike('CustomerListID', extractedId)
+        .single();
+      
+      if (customer && !error) {
+        return customer;
+      }
+    }
+  }
+  
+  // Strategy 3: Match by normalized name (remove parentheses and IDs)
+  if (customerName) {
+    const normalizedName = customerName.replace(/\([^)]*\)/g, '').trim();
+    const { data: customer, error } = await supabase
+      .from('customers')
+      .select('CustomerListID, name')
+      .ilike('name', normalizedName)
+      .single();
+    
+    if (customer && !error) {
+      return customer;
+    }
+  }
+  
+  // Strategy 4: Fuzzy name matching (case-insensitive)
+  if (customerName) {
+    const { data: customers, error } = await supabase
+      .from('customers')
+      .select('CustomerListID, name')
+      .ilike('name', `%${customerName.trim()}%`);
+    
+    if (customers && customers.length > 0 && !error) {
+      // Return the first match (most exact)
+      return customers[0];
+    }
+  }
+  
+  return null;
 }
 
 const ImportCustomerInfo = () => {
@@ -145,23 +204,30 @@ const ImportCustomerInfo = () => {
     setColumns([]);
     setMapping({});
     setShowMapping(false);
+    setLoading(true);
     if (!e.target.files[0]) return;
     const file = e.target.files[0];
     const ext = file.name.split('.').pop().toLowerCase();
     const reader = new FileReader();
     reader.onload = (evt) => {
       let rows;
+      let rawContent = evt.target.result;
+      // Debug: log raw file content
+      console.log('Raw file content:', rawContent.slice(0, 500));
       if (ext === 'xls' || ext === 'xlsx') {
-        const bstr = evt.target.result;
+        const bstr = rawContent;
         const wb = XLSX.read(bstr, { type: 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
         rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
       } else {
-        const text = evt.target.result;
-        rows = text.split('\n').map(line => line.split('\t'));
+        // Remove blank lines and trim
+        const lines = rawContent.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+        rows = lines.map(line => line.split('\t'));
       }
-      if (!rows.length) return;
+      if (!rows.length) { setLoading(false); return; }
+      // Remove empty rows
+      rows = rows.filter(row => Array.isArray(row) ? row.some(cell => cell && cell.trim() !== '') : true);
       let detectedColumns = [];
       let dataRows = rows;
       // Detect if first row is header
@@ -172,24 +238,52 @@ const ImportCustomerInfo = () => {
       } else {
         detectedColumns = ALLOWED_FIELDS.map(f => f.label);
       }
+      // Debug: log detected columns and first 3 rows
+      console.log('Detected columns:', detectedColumns);
+      console.log('First 3 data rows:', dataRows.slice(0,3));
       setColumns(detectedColumns);
-      // Auto-map columns by name or position
+      // Enhanced auto-map columns by name or position
       const initialMapping = {};
       ALLOWED_FIELDS.forEach((f, i) => {
-        // Try to find a column by alias
+        // Try to find a column by alias, case-insensitive and ignoring spaces/underscores
         const alias = FIELD_ALIASES[f.key] || [];
         const found = detectedColumns.find(col => alias.some(a => col.toLowerCase().replace(/[^a-z0-9]/g, '') === a.toLowerCase().replace(/[^a-z0-9]/g, '')));
         if (found) initialMapping[f.key] = found;
-        else if (detectedColumns[i]) initialMapping[f.key] = detectedColumns[i];
+        else {
+          // Try fuzzy match: contains alias
+          const fuzzy = detectedColumns.find(col => alias.some(a => col.toLowerCase().replace(/[^a-z0-9]/g, '').includes(a.toLowerCase().replace(/[^a-z0-9]/g, ''))));
+          if (fuzzy) initialMapping[f.key] = fuzzy;
+          else if (detectedColumns[i]) initialMapping[f.key] = detectedColumns[i];
+        }
       });
+      // Force mapping for your example columns
+      if (detectedColumns.includes('HolderStr')) initialMapping['CustomerListID'] = 'HolderStr';
+      if (detectedColumns.includes('HolderName')) initialMapping['name'] = 'HolderName';
+      if (detectedColumns.includes('BillToFullAddress')) initialMapping['contact_details'] = 'BillToFullAddress';
       setMapping(initialMapping);
       setShowMapping(true);
-      setPreview([]);
-      window._rawImportData = dataRows.map(row => {
-        const obj = {};
-        ALLOWED_FIELDS.forEach((f, i) => { obj[f.key] = row[i] || ''; });
-        return obj;
-      });
+      // Build preview data in batches
+      const previewData = [];
+      const BATCH = 500;
+      let i = 0;
+      function processBatch() {
+        for (let j = 0; j < BATCH && i < dataRows.length; j++, i++) {
+          const row = dataRows[i];
+          const obj = {};
+          detectedColumns.forEach((col, idx) => { obj[col] = row[idx] || ''; });
+          previewData.push(obj);
+        }
+        if (i < dataRows.length) {
+          setTimeout(processBatch, 0);
+        } else {
+          // Debug: log preview data
+          console.log('Preview data:', previewData.slice(0,3));
+          setPreview(previewData);
+          window._rawImportData = previewData;
+          setLoading(false);
+        }
+      }
+      processBatch();
     };
     if (ext === 'xls' || ext === 'xlsx') {
       reader.readAsBinaryString(file);
@@ -267,99 +361,87 @@ const ImportCustomerInfo = () => {
     let importedCount = 0;
     let skippedCount = 0;
     let errorCount = 0;
-    // Normalize all preview IDs
-    const normalizedPreview = preview.map(c => ({
-      ...c,
-      CustomerListID: normalizeId(c.CustomerListID),
-    }));
-    // Batch .in() query for existing IDs
-    const BATCH_SIZE = 500;
-    let existingIds = new Set();
-    for (let i = 0; i < normalizedPreview.length; i += BATCH_SIZE) {
-      const batch = normalizedPreview.slice(i, i + BATCH_SIZE).map(c => c.CustomerListID);
-      const { data: existing } = await supabase.from('customers').select('CustomerListID').in('CustomerListID', batch);
-      (existing || []).forEach(c => existingIds.add(normalizeId(c.CustomerListID)));
-    }
-    // Deduplicate within the batch itself and normalize
-    const seenIds = new Set();
-    const duplicateInBatch = [];
-    const duplicateInDb = [];
-    const invalidIds = [];
-    const toInsert = normalizedPreview
-      .filter(c => {
-        let rawId = c.CustomerListID || '';
-        let cleanedId = normalizeId(rawId);
-        let normId = cleanedId;
-        if (!normId) { invalidIds.push(rawId); return false; }
-        if (existingIds.has(normId)) { duplicateInDb.push(cleanedId); return false; }
-        if (seenIds.has(normId)) { duplicateInBatch.push(cleanedId); return false; }
-        seenIds.add(normId);
-        // Update the row to have the cleaned ID and barcode
-        c.CustomerListID = cleanedId;
-        c.customer_number = cleanedId;
-        c.barcode = `*%${cleanedId}*`;
-        c.AccountNumber = cleanedId;
-        return true;
-      })
-      .map(row => {
-        const filtered = {};
-        ALLOWED_FIELDS.forEach(f => { if (row[f.key] !== undefined) filtered[f.key] = row[f.key]; });
-        return filtered;
-      });
-    // Debug logging
-    console.log('Checked existing IDs:', Array.from(existingIds));
-    console.log('To insert:', toInsert.map(c => c.CustomerListID));
-    if (duplicateInBatch.length > 0 || duplicateInDb.length > 0 || invalidIds.length > 0) {
-      setError(
-        (duplicateInDb.length ? `Skipped (already in database): ${duplicateInDb.join(', ')}. ` : '') +
-        (duplicateInBatch.length ? `Skipped (duplicate in file): ${duplicateInBatch.join(', ')}. ` : '') +
-        (invalidIds.length ? `Skipped (invalid/empty ID): ${invalidIds.join(', ')}.` : '')
-      );
-    }
-    if (toInsert.length === 0) {
-      setError('All customers in the file already exist.');
-      skippedCount = preview.length;
-      importStatus = 'skipped';
-      errorCount = 0;
-      importedCount = 0;
-      // Log import history (all skipped)
-      await supabase.from('import_history').insert([
-        {
-          file_name: file?.name || '',
-          import_type: 'customers',
-          user_id: importUser?.id || null,
-          user_email: importUser?.email || null,
-          started_at: importStart,
-          finished_at: new Date().toISOString(),
-          status: importStatus,
-          summary: { imported: importedCount, skipped: skippedCount, errors: errorCount },
-          error_message: 'All customers in the file already exist.'
+    
+    try {
+      // Enhanced customer validation and deduplication
+      const customersToProcess = [];
+      const duplicateCustomers = [];
+      const invalidCustomers = [];
+      
+      for (const customer of preview) {
+        const customerName = customer[mapping.name] || '';
+        const customerId = customer[mapping.CustomerListID] || '';
+        
+        // Skip if no name or ID
+        if (!customerName.trim() && !customerId.trim()) {
+          invalidCustomers.push('Empty name and ID');
+          continue;
         }
-      ]);
-      setLoading(false);
-      return;
-    }
-    // Use insert to only add new customers, skip existing
-    const { error: insertError } = await supabase.from('customers').insert(toInsert);
-    if (insertError) {
-      // Try to extract the problematic ID from the error message
-      let duplicateIdMsg = '';
-      if (insertError.message && insertError.message.includes('duplicate key value')) {
-        duplicateIdMsg = `\nIDs attempted: ${toInsert.map(c => c.CustomerListID).join(', ')}`;
+        
+        // Check if customer already exists using enhanced matching
+        const existingCustomer = await findCustomer(customerName, customerId);
+        
+        if (existingCustomer) {
+          duplicateCustomers.push(`${customerName} (${customerId}) - matches existing: ${existingCustomer.name} (${existingCustomer.CustomerListID})`);
+          continue;
+        }
+        
+        // Prepare customer data
+        const customerData = {
+          CustomerListID: customerId.trim() || generateCustomerId(),
+          name: customerName.trim(),
+          contact_details: customer[mapping.contact_details] || '',
+          address2: customer[mapping.address2] || '',
+          address3: customer[mapping.address3] || '',
+          address4: customer[mapping.address4] || '',
+          address5: customer[mapping.address5] || '',
+          city: customer[mapping.city] || '',
+          postal_code: customer[mapping.postal_code] || '',
+          phone: customer[mapping.phone] || '',
+          customer_barcode: customer[mapping.customer_barcode] || `*%${customerId.trim()}*`,
+        };
+        
+        customersToProcess.push(customerData);
       }
-      setError(insertError.message + duplicateIdMsg);
-      console.error('Insert error:', insertError, 'IDs attempted:', toInsert.map(c => c.CustomerListID));
-      importErrorMsg = insertError.message + duplicateIdMsg;
-      importStatus = 'error';
-      errorCount = 1;
-    } else {
-      setSuccess(`${toInsert.length} customers imported successfully!`);
+      
+      // Import new customers
+      if (customersToProcess.length > 0) {
+        const { error: insertError } = await supabase
+          .from('customers')
+          .insert(customersToProcess);
+        
+        if (insertError) {
+          throw new Error(`Import error: ${insertError.message}`);
+        }
+        
+        importedCount = customersToProcess.length;
+      }
+      
+      skippedCount = duplicateCustomers.length + invalidCustomers.length;
+      
+      // Prepare result message
+      let message = `Import complete! `;
+      if (importedCount > 0) {
+        message += `Imported ${importedCount} new customers. `;
+      }
+      if (duplicateCustomers.length > 0) {
+        message += `Skipped ${duplicateCustomers.length} duplicate customers. `;
+      }
+      if (invalidCustomers.length > 0) {
+        message += `Skipped ${invalidCustomers.length} invalid entries. `;
+      }
+      
+      setSuccess(message.trim());
       setPreview([]);
       setFile(null);
-      importedCount = toInsert.length;
-      skippedCount = duplicateInDb.length + duplicateInBatch.length + invalidIds.length;
-      errorCount = 0;
+      
+    } catch (err) {
+      setError(err.message);
+      importErrorMsg = err.message;
+      importStatus = 'error';
+      errorCount = 1;
     }
+    
     // Log import history
     await supabase.from('import_history').insert([
       {
@@ -374,6 +456,7 @@ const ImportCustomerInfo = () => {
         error_message: importErrorMsg
       }
     ]);
+    
     setLoading(false);
   };
 
@@ -382,161 +465,228 @@ const ImportCustomerInfo = () => {
     setFile(null);
     setError('');
     setSuccess('');
+    setColumns([]);
+    setMapping({});
+    setShowMapping(false);
   };
 
-  // Add a function to build preview from mapping
   const handleConfirmMapping = () => {
-    setLoading(true);
-    setTimeout(() => {
-      localStorage.setItem('customerImportMapping', JSON.stringify(mapping));
-      const data = window._rawImportData || [];
-      const mappedData = [];
-      const BATCH = 500;
-      let i = 0;
-      function processBatch() {
-        for (let j = 0; j < BATCH && i < data.length; j++, i++) {
-          const row = data[i];
-          const obj = {};
-          ALLOWED_FIELDS.forEach(f => {
-            const col = mapping[f.key];
-            obj[f.key] = col ? row[col] : '';
-          });
-          // Generate barcode and account fields
-          const normId = obj.CustomerListID ? normalizeId(obj.CustomerListID) : '';
-          obj.customer_number = normId;
-          obj.customer_barcode = obj.customer_barcode || '';
-          obj.barcode = obj.customer_barcode || `*%${normId}*`;
-          obj.AccountNumber = normId;
-          mappedData.push(obj);
+    if (!window._rawImportData) return;
+    
+    const mappedData = window._rawImportData.map(row => {
+      const mapped = {};
+      Object.entries(mapping).forEach(([fieldKey, columnName]) => {
+        if (columnName && row[columnName] !== undefined) {
+          mapped[fieldKey] = row[columnName];
         }
-        if (i < data.length) {
-          setTimeout(processBatch, 0);
-        } else {
-          setPreview(mappedData);
-          setShowMapping(false);
-          setLoading(false);
-        }
-      }
-      processBatch();
-    }, 0);
+      });
+      return mapped;
+    });
+    
+    setPreview(mappedData);
+    setShowMapping(false);
+    
+    // Save mapping to localStorage
+    localStorage.setItem('customerImportMapping', JSON.stringify(mapping));
   };
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ maxWidth: 1100, mx: 'auto', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
-        <Button onClick={() => navigate('/dashboard')} variant="outlined" color="primary" sx={{ mb: 4, borderRadius: 999, fontWeight: 700, px: 4 }}>
-          ← Back to Dashboard
-        </Button>
-        <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Import Customers</Typography>
-        <Typography variant="body1" mb={3} color="text.secondary">
-          Import customers from Excel or CSV files. Your file columns will be automatically mapped by name or position.
-        </Typography>
-        <Box mb={4}>
-          <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileChange} style={{ display: 'none' }} id="file-input" />
-          <label htmlFor="file-input">
-            <Button variant="outlined" component="span" sx={{ borderRadius: 999, fontWeight: 700, px: 4 }}>
-              Choose File
-            </Button>
-          </label>
-          {file && (
-            <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
-              Selected: {file.name}
+      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
+        <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Import Customer Information</Typography>
+        
+        {!showMapping && !preview.length && (
+          <Box>
+            <Typography variant="body1" color="text.secondary" mb={3}>
+              Upload a CSV or Excel file with customer information. The system will automatically detect columns and match them to customer fields.
             </Typography>
-          )}
-        </Box>
-        <Box mb={3}>
-          <Button onClick={handleParse} disabled={!file} variant="contained" color="primary" sx={{ borderRadius: 999, fontWeight: 700, px: 4 }}>
-            Parse File
-          </Button>
-        </Box>
-        {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
-        {success && <Alert severity="success" sx={{ mb: 3 }}>{success}</Alert>}
-        {showMapping && columns.length > 0 && (
-          <Box mb={5}>
-            <Typography variant="h6" fontWeight={800} mb={2}>Map your file columns to app fields:</Typography>
-            <Paper variant="outlined" sx={{ mb: 2, borderRadius: 3, border: '1px solid #e3e7ef', boxShadow: 'none', p: 2 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15 }}>
+            
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xls,.txt"
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+              id="file-input"
+            />
+            <label htmlFor="file-input">
+              <Button
+                variant="contained"
+                component="span"
+                sx={{
+                  borderRadius: 999,
+                  bgcolor: '#111',
+                  color: '#fff',
+                  fontWeight: 700,
+                  px: 4,
+                  py: 1.5,
+                  fontSize: 16,
+                  boxShadow: 'none',
+                  ':hover': { bgcolor: '#222' }
+                }}
+              >
+                Choose File
+              </Button>
+            </label>
+            
+            {file && (
+              <Typography variant="body2" color="text.secondary" mt={2}>
+                Selected file: {file.name}
+              </Typography>
+            )}
+          </Box>
+        )}
+
+        {showMapping && (
+          <Box>
+            <Typography variant="h5" fontWeight={700} color="primary" mb={3}>
+              Column Mapping
+            </Typography>
+            <Typography variant="body2" color="text.secondary" mb={3}>
+              Please confirm the column mapping for your customer data:
+            </Typography>
+            
+            <Box display="grid" gridTemplateColumns="repeat(auto-fit, minmax(300px, 1fr))" gap={3} mb={4}>
+              {ALLOWED_FIELDS.map(field => (
+                <Box key={field.key}>
+                  <Typography variant="subtitle2" fontWeight={600} mb={1}>
+                    {field.label}
+                  </Typography>
+                  <TextField
+                    select
+                    fullWidth
+                    size="small"
+                    value={mapping[field.key] || ''}
+                    onChange={(e) => setMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
+                  >
+                    <MenuItem value="">Not mapped</MenuItem>
+                    {columns.map(col => (
+                      <MenuItem key={col} value={col}>{col}</MenuItem>
+                    ))}
+                  </TextField>
+                </Box>
+              ))}
+            </Box>
+            
+            <Box display="flex" gap={2}>
+              <Button
+                variant="contained"
+                onClick={handleConfirmMapping}
+                sx={{
+                  borderRadius: 999,
+                  bgcolor: '#111',
+                  color: '#fff',
+                  fontWeight: 700,
+                  px: 4,
+                  py: 1.5,
+                  fontSize: 16,
+                  boxShadow: 'none',
+                  ':hover': { bgcolor: '#222' }
+                }}
+              >
+                Confirm Mapping
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={handleCancel}
+                sx={{
+                  borderRadius: 999,
+                  fontWeight: 700,
+                  px: 4,
+                  py: 1.5,
+                  fontSize: 16
+                }}
+              >
+                Cancel
+              </Button>
+            </Box>
+          </Box>
+        )}
+
+        {preview.length > 0 && (
+          <Box>
+            <Typography variant="h5" fontWeight={700} color="primary" mb={3}>
+              Preview ({preview.length} customers)
+            </Typography>
+            
+            <Box sx={{ maxHeight: '400px', overflow: 'auto', mb: 4 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
-                  <tr style={{ background: '#fafbfc' }}>
-                    <th style={{ fontWeight: 800, padding: 8, borderBottom: '1px solid #eee' }}>App Field</th>
-                    <th style={{ fontWeight: 800, padding: 8, borderBottom: '1px solid #eee' }}>File Column</th>
+                  <tr style={{ backgroundColor: '#f5f5f5' }}>
+                    <th style={{ padding: '8px', textAlign: 'left', border: '1px solid #ddd' }}>Customer ID</th>
+                    <th style={{ padding: '8px', textAlign: 'left', border: '1px solid #ddd' }}>Name</th>
+                    <th style={{ padding: '8px', textAlign: 'left', border: '1px solid #ddd' }}>Contact</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ALLOWED_FIELDS.map(f => (
-                    <tr key={f.key}>
-                      <td style={{ padding: 8, borderBottom: '1px solid #f3f3f3' }}>{f.label}</td>
-                      <td style={{ padding: 8, borderBottom: '1px solid #f3f3f3' }}>
-                        <TextField
-                          select
-                          value={mapping[f.key] || ''}
-                          onChange={e => setMapping({ ...mapping, [f.key]: e.target.value })}
-                          size="medium"
-                          sx={{ minWidth: 160 }}
-                        >
-                          <MenuItem value="">-- None --</MenuItem>
-                          {columns.map(col => (
-                            <MenuItem key={col} value={col}>{col}</MenuItem>
-                          ))}
-                        </TextField>
+                  {preview.slice(0, 10).map((customer, idx) => (
+                    <tr key={idx}>
+                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>{customer.CustomerListID}</td>
+                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>{customer.name}</td>
+                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>{customer.contact_details}</td>
+                    </tr>
+                  ))}
+                  {preview.length > 10 && (
+                    <tr>
+                      <td colSpan={3} style={{ padding: '8px', textAlign: 'center', border: '1px solid #ddd', fontStyle: 'italic' }}>
+                        ... and {preview.length - 10} more customers
                       </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
-            </Paper>
-            <Button variant="contained" color="primary" onClick={handleConfirmMapping} sx={{ borderRadius: 999, fontWeight: 700, px: 4 }}>Confirm Mapping</Button>
-          </Box>
-        )}
-        {loading && (
-          <Box mb={4} display="flex" justifyContent="center" alignItems="center">
-            <Typography variant="h6" color="primary">Mapping data, please wait...</Typography>
-          </Box>
-        )}
-        {preview.length > 0 && (
-          <Box mt={4}>
-            <Typography variant="h6" fontWeight={800} color="primary" mb={4}>Preview & Approve</Typography>
-            <Box mb={4}>
-              <Button onClick={handleApprove} disabled={loading} variant="contained" color="primary" sx={{ mr: 2, borderRadius: 999, fontWeight: 700, px: 4 }}>Approve & Import</Button>
-              <Button onClick={handleCancel} disabled={loading} variant="outlined" color="primary" sx={{ borderRadius: 999, fontWeight: 700, px: 4 }}>Cancel</Button>
             </Box>
-            <Paper variant="outlined" sx={{ overflowX: 'auto', borderRadius: 3, border: '1px solid #e3e7ef', boxShadow: 'none' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15 }} role="table" aria-label="Customer import preview table">
-                <thead style={{ background: '#fafbfc' }}>
-                  <tr>
-                    {ALLOWED_FIELDS.map(field => (
-                      <th key={field.key} scope="col" style={{ fontWeight: 800, padding: 8, borderBottom: '1px solid #eee' }}>{field.label}</th>
-                    ))}
-                    <th scope="col" style={{ fontWeight: 800, padding: 8, borderBottom: '1px solid #eee' }}>Customer Number</th>
-                    <th scope="col" style={{ fontWeight: 800, padding: 8, borderBottom: '1px solid #eee' }}>Barcode</th>
-                    <th scope="col" style={{ fontWeight: 800, padding: 8, borderBottom: '1px solid #eee' }}>AccountNumber</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.slice(0, 100).map((row, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid #f3f3f3' }}>
-                      {ALLOWED_FIELDS.map(field => (
-                        <td key={field.key} style={{ padding: 8 }}><TextField value={row[field.key] || ''} onChange={e => handleFieldChange(idx, field.key, e.target.value)} size="small" sx={{ bgcolor: '#fafbfc', borderRadius: 2 }} /></td>
-                      ))}
-                      <td><TextField value={row.customer_number} readOnly size="small" sx={{ bgcolor: '#f3f3f3', borderRadius: 2 }} /></td>
-                      <td><TextField value={row.barcode} readOnly size="small" sx={{ bgcolor: '#f3f3f3', borderRadius: 2, fontFamily: 'monospace' }} /></td>
-                      <td><TextField value={row.AccountNumber} readOnly size="small" sx={{ bgcolor: '#f3f3f3', borderRadius: 2 }} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {preview.length > 100 && (
-                <Typography variant="body2" color="textSecondary" sx={{ p: 2 }}>
-                  Showing first 100 rows of {preview.length} total rows.
-                </Typography>
-              )}
-            </Paper>
+            
+            <Box display="flex" gap={2}>
+              <Button
+                variant="contained"
+                onClick={handleApprove}
+                disabled={loading}
+                sx={{
+                  borderRadius: 999,
+                  bgcolor: '#111',
+                  color: '#fff',
+                  fontWeight: 700,
+                  px: 4,
+                  py: 1.5,
+                  fontSize: 16,
+                  boxShadow: 'none',
+                  ':hover': { bgcolor: '#222' }
+                }}
+              >
+                {loading ? 'Importing...' : 'Import Customers'}
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={handleCancel}
+                disabled={loading}
+                sx={{
+                  borderRadius: 999,
+                  fontWeight: 700,
+                  px: 4,
+                  py: 1.5,
+                  fontSize: 16
+                }}
+              >
+                Cancel
+              </Button>
+            </Box>
           </Box>
         )}
-        <Snackbar open={!!snackbar} autoHideDuration={3000} onClose={() => setSnackbar('')}><Alert severity="success">{snackbar}</Alert></Snackbar>
+
+        {error && (
+          <Alert severity="error" sx={{ mt: 3 }}>
+            {error}
+          </Alert>
+        )}
+        
+        {success && (
+          <Alert severity="success" sx={{ mt: 3 }}>
+            {success}
+          </Alert>
+        )}
       </Paper>
     </Box>
   );
-}
+};
 
 export default ImportCustomerInfo; 

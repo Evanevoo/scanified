@@ -22,8 +22,6 @@ const links = [
   { to: '/management-reports/supabase-orders', label: 'Orders Report' },
 ];
 
-console.log(links);
-
 export default function ManagementReportsSidebar() {
   return (
     <div className="bg-gray-200 w-64 min-h-screen p-0 border-r overflow-y-auto">

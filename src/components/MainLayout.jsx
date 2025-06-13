@@ -29,6 +29,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { useThemeContext } from '../context/ThemeContext';
 import GlobalImportProgress from './GlobalImportProgress';
 import ImportNotification from './ImportNotification';
+import { supabase } from '../supabase/client';
 
 const drawerWidth = 250;
 
@@ -60,6 +61,7 @@ export default function MainLayout() {
   const [integrationsOpen, setIntegrationsOpen] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
   const searchRef = useRef();
   const navigate = useNavigate();
   const location = useLocation();
@@ -68,6 +70,43 @@ export default function MainLayout() {
   useEffect(() => {
     setShowSuggestions(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setSuggestions([]);
+      return;
+    }
+    let active = true;
+    const fetchSuggestions = async () => {
+      // Customers: by name or ID
+      const { data: customers } = await supabase
+        .from('customers')
+        .select('CustomerListID, name, phone')
+        .or(`CustomerListID.ilike.%${searchTerm}%,name.ilike.%${searchTerm}%`)
+        .limit(5);
+      // Bottles: by serial number or barcode
+      const { data: bottles } = await supabase
+        .from('cylinders')
+        .select('id, serial_number, barcode_number, assigned_customer')
+        .or(`serial_number.ilike.%${searchTerm}%,barcode_number.ilike.%${searchTerm}%`)
+        .limit(5);
+      const customerResults = (customers || []).map(c => ({
+        type: 'customer',
+        id: c.CustomerListID,
+        label: c.name,
+        sub: c.CustomerListID,
+      }));
+      const bottleResults = (bottles || []).map(b => ({
+        type: 'bottle',
+        id: b.id,
+        label: b.serial_number || b.barcode_number,
+        sub: b.barcode_number || b.serial_number,
+      }));
+      if (active) setSuggestions([...customerResults, ...bottleResults]);
+    };
+    fetchSuggestions();
+    return () => { active = false; };
+  }, [searchTerm]);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -80,6 +119,15 @@ export default function MainLayout() {
   }, []);
 
   const handleSidebarToggle = () => setSidebarOpen(!sidebarOpen);
+  const handleSelectSuggestion = (item) => {
+    setShowSuggestions(false);
+    setSearchTerm('');
+    if (item.type === 'customer') {
+      navigate(`/customers/${item.id}`);
+    } else if (item.type === 'bottle') {
+      navigate(`/assets/${item.id}/history`);
+    }
+  };
 
   const drawer = (
     <Box sx={{ bgcolor: '#fff', height: '100%', display: 'flex', flexDirection: 'column', borderRight: '1.5px solid #eaeaea', minHeight: '100vh', width: drawerWidth, position: 'relative', overflowY: 'hidden', overflowX: 'hidden' }}>
@@ -262,12 +310,13 @@ export default function MainLayout() {
           >
             LessAnnoyingScan
           </Typography>
-          <Box sx={{ flexGrow: 1, maxWidth: 400, ml: 1 }}>
+          <Box sx={{ flexGrow: 1, maxWidth: 400, ml: 1, position: 'relative' }} ref={searchRef}>
             <TextField
               size="small"
-              placeholder="Search customers, orders, cylinders..."
+              placeholder="Search customers, bottles..."
               value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
+              onChange={e => { setSearchTerm(e.target.value); setShowSuggestions(true); }}
+              onFocus={() => setShowSuggestions(true)}
               InputProps={{
                 startAdornment: <SearchIcon sx={{ color: '#bbb', mr: 1 }} />,
                 sx: {
@@ -300,6 +349,21 @@ export default function MainLayout() {
               }}
               fullWidth
             />
+            {showSuggestions && suggestions.length > 0 && (
+              <Box sx={{ position: 'absolute', top: 44, left: 0, width: '100%', bgcolor: '#fff', border: '1px solid #eaeaea', borderRadius: 2, boxShadow: 3, zIndex: 9999, maxHeight: 320, overflowY: 'auto' }}>
+                {suggestions.map((item, idx) => (
+                  <Box
+                    key={idx}
+                    sx={{ px: 2, py: 1.2, cursor: 'pointer', '&:hover': { bgcolor: '#f5faff' }, display: 'flex', alignItems: 'center', borderBottom: idx !== suggestions.length - 1 ? '1px solid #f3f3f3' : 'none' }}
+                    onMouseDown={() => handleSelectSuggestion(item)}
+                  >
+                    <span style={{ fontWeight: 700, color: '#00aaff', marginRight: 8 }}>{item.label}</span>
+                    <span style={{ color: '#888', fontSize: 13, marginRight: 8 }}>{item.sub}</span>
+                    <span style={{ fontSize: 12, background: '#e3e7ef', color: '#333', borderRadius: 8, padding: '2px 8px', marginLeft: 'auto' }}>{item.type === 'customer' ? 'Customer' : 'Bottle'}</span>
+                  </Box>
+                ))}
+              </Box>
+            )}
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', ml: 4 }}>
             {topNavLinks.map(link => (
