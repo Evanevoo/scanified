@@ -49,6 +49,7 @@ import { ImportProgressProvider } from './components/ImportProgressContext';
 import UserManagement from './pages/UserManagement';
 import BottleImport from './pages/BottleImport';
 import ImportApprovals from './pages/ImportApprovals';
+import ImportApprovalsHistory from './pages/ImportApprovalsHistory';
 import Integrations from './pages/Integrations';
 import BottleDetail from './pages/BottleDetail';
 import Bottles from './pages/Bottles';
@@ -95,6 +96,7 @@ function App() {
             <Route path="/rental/*" element={<Rental />} />
             <Route path="/import" element={isAuthenticated ? <Import /> : <Navigate to="/login" />} />
             <Route path="/import-approvals" element={isAuthenticated ? <ImportApprovals /> : <Navigate to="/login" />} />
+            <Route path="/history" element={isAuthenticated ? <ImportApprovalsHistory /> : <Navigate to="/login" />} />
             <Route path="/import-customer-info" element={isAuthenticated ? <ImportCustomerInfo /> : <Navigate to="/login" />} />
             <Route path="/import-sales-receipts" element={<Navigate to="/import" replace />} />
             <Route path="/import-invoices" element={<Navigate to="/import" replace />} />
