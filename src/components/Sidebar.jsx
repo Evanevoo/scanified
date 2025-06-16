@@ -108,6 +108,8 @@ const Sidebar = () => {
             { to: '/import-history', label: 'Import History' },
             { to: '/scanned-orders', label: 'Scanned Orders' },
             { to: '/orders-report', label: 'Orders Report' },
+            { to: '/integration', label: 'Integrations' },
+            { to: '/history', label: 'Import Approvals History' },
           ].map(({ to, label }) => (
             <li key={to}>
               <Link

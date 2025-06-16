@@ -46,6 +46,7 @@ const sidebarPages = [
       { label: 'Import Approvals', to: '/import-approvals' },
       { label: 'Bottle Management', to: '/bottle-management' },
       { label: 'Customer ID Generator', to: '/integrations' },
+      { label: 'Import Approvals History', to: '/history' },
     ]
   },
 ];
