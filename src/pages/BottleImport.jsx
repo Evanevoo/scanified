@@ -41,7 +41,9 @@ import {
   Download as DownloadIcon,
   Upload as UploadIcon,
   Visibility as ViewIcon,
-  CheckCircle as CheckCircleIcon
+  CheckCircle as CheckCircleIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../supabase';
@@ -83,6 +85,13 @@ export default function BottleImport() {
   const [customers, setCustomers] = useState([]);
   const [gasTypes, setGasTypes] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [selectedBottleId, setSelectedBottleId] = useState(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [bottleToEdit, setBottleToEdit] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Fetch bottles with pagination and filters
   const fetchBottles = async () => {
@@ -422,6 +431,57 @@ export default function BottleImport() {
     setPage(0);
   };
 
+  const handleSelectBottle = (id) => {
+    setSelectedBottleId(id === selectedBottleId ? null : id);
+  };
+
+  const handleEditBottle = () => {
+    const bottle = bottles.find(b => b.id === selectedBottleId);
+    setBottleToEdit(bottle);
+    setEditForm({ ...bottle });
+    setEditDialogOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from('bottles')
+        .update(editForm)
+        .eq('id', bottleToEdit.id);
+      if (error) throw error;
+      setSnackbar({ open: true, message: 'Bottle updated successfully!', severity: 'success' });
+      setEditDialogOpen(false);
+      setSelectedBottleId(null);
+      await fetchBottles();
+    } catch (err) {
+      setSnackbar({ open: true, message: err.message, severity: 'error' });
+    }
+    setSaving(false);
+  };
+
+  const handleDeleteBottle = () => {
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    setDeleting(true);
+    try {
+      const { error } = await supabase
+        .from('bottles')
+        .delete()
+        .eq('id', selectedBottleId);
+      if (error) throw error;
+      setSnackbar({ open: true, message: 'Bottle deleted successfully!', severity: 'success' });
+      setDeleteDialogOpen(false);
+      setSelectedBottleId(null);
+      await fetchBottles();
+    } catch (err) {
+      setSnackbar({ open: true, message: err.message, severity: 'error' });
+    }
+    setDeleting(false);
+  };
+
   return (
     <Box sx={{ width: '100%', minHeight: '100vh', bgcolor: '#fff', py: 4, px: 2 }}>
       <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
@@ -528,7 +588,7 @@ export default function BottleImport() {
         </Typography>
         
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12} md={6} lg={7}>
             <TextField
               fullWidth
               placeholder="Search barcode, serial, or customer..."
@@ -541,65 +601,69 @@ export default function BottleImport() {
                   </InputAdornment>
                 ),
               }}
-              size="small"
+              size="medium"
+              sx={{ fontSize: 18, height: 48 }}
             />
           </Grid>
-          
-          <Grid item xs={12} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Customer</InputLabel>
+          <Grid item md={3} lg={3}>
+            <FormControl fullWidth size="medium" sx={{ height: 48, minWidth: 200 }}>
+              <InputLabel sx={{ fontSize: 18, top: -7 }}>Customer</InputLabel>
               <Select
                 value={filterCustomer}
                 onChange={(e) => setFilterCustomer(e.target.value)}
                 label="Customer"
+                sx={{ height: 48, fontSize: 18, display: 'flex', alignItems: 'center', minWidth: 200 }}
+                MenuProps={{ PaperProps: { sx: { fontSize: 18 } } }}
               >
                 <MenuItem value="">All Customers</MenuItem>
                 {customers.map((customer) => (
-                  <MenuItem key={customer.CustomerListID} value={customer.CustomerListID}>
+                  <MenuItem key={customer.CustomerListID} value={customer.CustomerListID} sx={{ fontSize: 18 }}>
                     {customer.name}
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
           </Grid>
-          
-          <Grid item xs={12} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Gas Type</InputLabel>
+          <Grid item md={3} lg={3}>
+            <FormControl fullWidth size="medium" sx={{ height: 48, minWidth: 200 }}>
+              <InputLabel sx={{ fontSize: 18, top: -7 }}>Gas Type</InputLabel>
               <Select
                 value={filterGasType}
                 onChange={(e) => setFilterGasType(e.target.value)}
                 label="Gas Type"
+                sx={{ height: 48, fontSize: 18, display: 'flex', alignItems: 'center', minWidth: 200 }}
+                MenuProps={{ PaperProps: { sx: { fontSize: 18 } } }}
               >
                 <MenuItem value="">All Types</MenuItem>
                 {gasTypes.map((type) => (
-                  <MenuItem key={type} value={type}>{type}</MenuItem>
+                  <MenuItem key={type} value={type} sx={{ fontSize: 18 }}>{type}</MenuItem>
                 ))}
               </Select>
             </FormControl>
           </Grid>
-          
-          <Grid item xs={12} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Location</InputLabel>
+          <Grid item md={3} lg={3}>
+            <FormControl fullWidth size="medium" sx={{ height: 48, minWidth: 200 }}>
+              <InputLabel sx={{ fontSize: 18, top: -7 }}>Location</InputLabel>
               <Select
                 value={filterLocation}
                 onChange={(e) => setFilterLocation(e.target.value)}
                 label="Location"
+                sx={{ height: 48, fontSize: 18, display: 'flex', alignItems: 'center', minWidth: 200 }}
+                MenuProps={{ PaperProps: { sx: { fontSize: 18 } } }}
               >
                 <MenuItem value="">All Locations</MenuItem>
                 {locations.map((location) => (
-                  <MenuItem key={location} value={location}>{location}</MenuItem>
+                  <MenuItem key={location} value={location} sx={{ fontSize: 18 }}>{location}</MenuItem>
                 ))}
               </Select>
             </FormControl>
           </Grid>
-          
-          <Grid item xs={12} md={2}>
+          <Grid item xs={12} md={2} lg={2} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button
               variant="outlined"
               onClick={clearFilters}
-              sx={{ borderRadius: 2, fontWeight: 600, textTransform: 'none' }}
+              sx={{ borderRadius: 3, fontWeight: 700, textTransform: 'none', fontSize: 18, height: 48, px: 3, ml: 2 }}
+              size="large"
             >
               Clear Filters
             </Button>
@@ -607,12 +671,35 @@ export default function BottleImport() {
         </Grid>
       </Paper>
 
+      {/* Action Buttons */}
+      <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+        <Button
+          variant="contained"
+          color="primary"
+          startIcon={<EditIcon />}
+          disabled={!selectedBottleId}
+          onClick={handleEditBottle}
+        >
+          Edit
+        </Button>
+        <Button
+          variant="outlined"
+          color="error"
+          startIcon={<DeleteIcon />}
+          disabled={!selectedBottleId}
+          onClick={handleDeleteBottle}
+        >
+          Delete
+        </Button>
+      </Box>
+
       {/* Bottles Table */}
       <Paper elevation={1} sx={{ borderRadius: 2, overflow: 'hidden' }}>
         <TableContainer>
           <Table>
             <TableHead>
               <TableRow sx={{ bgcolor: 'grey.50' }}>
+                <TableCell padding="checkbox"></TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Barcode</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Serial Number</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Customer</TableCell>
@@ -627,13 +714,13 @@ export default function BottleImport() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
                     <CircularProgress />
                   </TableCell>
                 </TableRow>
               ) : bottles.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
                     <Typography variant="body1" color="text.secondary">
                       No bottles found. {searchTerm || filterCustomer || filterGasType || filterLocation ? 'Try adjusting your filters.' : 'Import some bottles to get started.'}
                     </Typography>
@@ -641,7 +728,14 @@ export default function BottleImport() {
                 </TableRow>
               ) : (
                 bottles.map((bottle) => (
-                  <TableRow key={bottle.id} hover>
+                  <TableRow key={bottle.id} hover selected={selectedBottleId === bottle.id}>
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        checked={selectedBottleId === bottle.id}
+                        onChange={() => handleSelectBottle(bottle.id)}
+                        color="primary"
+                      />
+                    </TableCell>
                     <TableCell>
                       <Chip 
                         label={bottle.barcode_number || 'N/A'} 
@@ -780,6 +874,95 @@ export default function BottleImport() {
           <Button onClick={processImport} variant="contained" disabled={importing}>
             {importing ? 'Importing...' : 'Import'}
           </Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* Edit Dialog */}
+      <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Edit Bottle</DialogTitle>
+        <DialogContent>
+          <TextField
+            margin="dense"
+            label="Barcode Number"
+            fullWidth
+            value={editForm.barcode_number || ''}
+            onChange={e => setEditForm(f => ({ ...f, barcode_number: e.target.value }))}
+          />
+          <TextField
+            margin="dense"
+            label="Serial Number"
+            fullWidth
+            value={editForm.serial_number || ''}
+            onChange={e => setEditForm(f => ({ ...f, serial_number: e.target.value }))}
+          />
+          <TextField
+            margin="dense"
+            label="Customer"
+            select
+            fullWidth
+            value={editForm.assigned_customer || ''}
+            onChange={e => setEditForm(f => ({ ...f, assigned_customer: e.target.value }))}
+          >
+            <MenuItem value="">Unassigned</MenuItem>
+            {customers.map(c => (
+              <MenuItem key={c.CustomerListID} value={c.CustomerListID}>{c.name}</MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            margin="dense"
+            label="Gas Type"
+            select
+            fullWidth
+            value={editForm.gas_type || ''}
+            onChange={e => setEditForm(f => ({ ...f, gas_type: e.target.value }))}
+          >
+            <MenuItem value="">Unknown</MenuItem>
+            {gasTypes.map(type => (
+              <MenuItem key={type} value={type}>{type}</MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            margin="dense"
+            label="Location"
+            select
+            fullWidth
+            value={editForm.location || ''}
+            onChange={e => setEditForm(f => ({ ...f, location: e.target.value }))}
+          >
+            <MenuItem value="">N/A</MenuItem>
+            {locations.map(loc => (
+              <MenuItem key={loc} value={loc}>{loc}</MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            margin="dense"
+            label="Product Code"
+            fullWidth
+            value={editForm.product_code || ''}
+            onChange={e => setEditForm(f => ({ ...f, product_code: e.target.value }))}
+          />
+          <TextField
+            margin="dense"
+            label="Ownership"
+            fullWidth
+            value={editForm.ownership || ''}
+            onChange={e => setEditForm(f => ({ ...f, ownership: e.target.value }))}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDialogOpen(false)} disabled={saving}>Cancel</Button>
+          <Button onClick={handleEditSave} color="primary" variant="contained" disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+        </DialogActions>
+      </Dialog>
+      {/* Delete Dialog */}
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="xs">
+        <DialogTitle>Delete Bottle</DialogTitle>
+        <DialogContent>
+          <p>Are you sure you want to delete this bottle? This action cannot be undone.</p>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>Cancel</Button>
+          <Button onClick={handleDeleteConfirm} color="error" variant="contained" disabled={deleting}>{deleting ? 'Deleting...' : 'Delete'}</Button>
         </DialogActions>
       </Dialog>
       
