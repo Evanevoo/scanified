@@ -11,9 +11,9 @@ function AssetWithWarning({ asset, currentCustomer }) {
       if (!asset) return;
       // Fetch scan history for this asset (barcode or id)
       const { data: scans, error } = await supabase
-        .from('bottle_scans')
+        .from('scanned_cylinders')
         .select('customer, mode, scanned_at')
-        .eq('bottle_barcode', asset)
+        .eq('cylinder_barcode', asset)
         .order('scanned_at', { ascending: false });
       if (error || !scans || scans.length === 0) return;
       // Find the most recent SHIP and RETURN events

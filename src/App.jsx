@@ -1,58 +1,62 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import LoginPage from './pages/LoginPage';
-import Customers from './pages/Customers';
-import Cylinders from './pages/Cylinders';
-import Rentals from './pages/Rentals';
-import Invoices from './pages/Invoices';
-import Home from './pages/Home';
-import Favorites from './pages/Favorites';
-import CustomReports from './pages/CustomReports';
-import AllAssetsReport from './pages/management-reports/AllAssetsReport';
-import AssetTypeChangesReport from './pages/management-reports/AssetTypeChangesReport';
-import AssetsByCustomerReport from './pages/management-reports/AssetsByCustomerReport';
-import AuditsToDeliveryRecordsReport from './pages/management-reports/AuditsToDeliveryRecordsReport';
-import BalanceChangesSummaryReport from './pages/management-reports/BalanceChangesSummaryReport';
-import CustomerDeliveriesReport from './pages/management-reports/CustomerDeliveriesReport';
-import DeliveriesByLocationReport from './pages/management-reports/DeliveriesByLocationReport';
-import DeliveryTotalsByUserReport from './pages/management-reports/DeliveryTotalsByUserReport';
-import LostAssetsReport from './pages/management-reports/LostAssetsReport';
-import MovementBetweenLocationsReport from './pages/management-reports/MovementBetweenLocationsReport';
-import NegativeBalanceReport from './pages/management-reports/NegativeBalanceReport';
-import NewAssetsAddedReport from './pages/management-reports/NewAssetsAddedReport';
-import NotScannedSourceReport from './pages/management-reports/NotScannedSourceReport';
-import OverdueAssetSearchReport from './pages/management-reports/OverdueAssetSearchReport';
-import PrintDaysRecordsReport from './pages/management-reports/PrintDaysRecordsReport';
-import QuickMapReport from './pages/management-reports/QuickMapReport';
-import QuickAdd from './pages/QuickAdd';
-import LotReports from './pages/LotReports';
-import RegularMaintenance from './pages/RegularMaintenance';
-import Locations from './pages/Locations';
-import Search from './pages/Search';
-import CreateRecords from './pages/CreateRecords';
-import Alerts from './pages/Alerts';
-import MobileUnits from './pages/MobileUnits';
-import Rental from './pages/Rental';
-import CustomerDetail from './pages/CustomerDetail';
-import AssetHistory from './pages/AssetHistory';
-import AssetHistoryLookup from './pages/AssetHistoryLookup';
-import ImportHistory from './pages/ImportHistory';
-import AllAssetMovements from './pages/AllAssetMovements';
-import Import from './pages/Import';
-import Settings from './pages/Settings';
-import ImportCustomerInfo from './pages/ImportCustomerInfo';
-import ScannedOrders from './pages/ScannedOrders';
-import SupabaseOrders from './pages/management-reports/SupabaseOrders';
 import { useAuth } from './hooks/useAuth';
 import MainLayout from './components/MainLayout';
 import { ImportProgressProvider } from './components/ImportProgressContext';
-import UserManagement from './pages/UserManagement';
-import BottleImport from './pages/BottleImport';
-import ImportApprovals from './pages/ImportApprovals';
-import ImportApprovalsHistory from './pages/ImportApprovalsHistory';
-import Integrations from './pages/Integrations';
-import BottleDetail from './pages/BottleDetail';
-import Bottles from './pages/Bottles';
+import LoadingSpinner from './components/LoadingSpinner';
+import ErrorBoundary from './components/ErrorBoundary';
+
+// Lazy load all page components
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const Customers = lazy(() => import('./pages/Customers'));
+const Cylinders = lazy(() => import('./pages/Cylinders'));
+const Rentals = lazy(() => import('./pages/Rentals'));
+const Invoices = lazy(() => import('./pages/Invoices'));
+const Home = lazy(() => import('./pages/Home'));
+const Favorites = lazy(() => import('./pages/Favorites'));
+const CustomReports = lazy(() => import('./pages/CustomReports'));
+const AllAssetsReport = lazy(() => import('./pages/management-reports/AllAssetsReport'));
+const AssetTypeChangesReport = lazy(() => import('./pages/management-reports/AssetTypeChangesReport'));
+const AssetsByCustomerReport = lazy(() => import('./pages/management-reports/AssetsByCustomerReport'));
+const AuditsToDeliveryRecordsReport = lazy(() => import('./pages/management-reports/AuditsToDeliveryRecordsReport'));
+const BalanceChangesSummaryReport = lazy(() => import('./pages/management-reports/BalanceChangesSummaryReport'));
+const CustomerDeliveriesReport = lazy(() => import('./pages/management-reports/CustomerDeliveriesReport'));
+const DeliveriesByLocationReport = lazy(() => import('./pages/management-reports/DeliveriesByLocationReport'));
+const DeliveryTotalsByUserReport = lazy(() => import('./pages/management-reports/DeliveryTotalsByUserReport'));
+const LostAssetsReport = lazy(() => import('./pages/management-reports/LostAssetsReport'));
+const MovementBetweenLocationsReport = lazy(() => import('./pages/management-reports/MovementBetweenLocationsReport'));
+const NegativeBalanceReport = lazy(() => import('./pages/management-reports/NegativeBalanceReport'));
+const NewAssetsAddedReport = lazy(() => import('./pages/management-reports/NewAssetsAddedReport'));
+const NotScannedSourceReport = lazy(() => import('./pages/management-reports/NotScannedSourceReport'));
+const OverdueAssetSearchReport = lazy(() => import('./pages/management-reports/OverdueAssetSearchReport'));
+const PrintDaysRecordsReport = lazy(() => import('./pages/management-reports/PrintDaysRecordsReport'));
+const QuickMapReport = lazy(() => import('./pages/management-reports/QuickMapReport'));
+const QuickAdd = lazy(() => import('./pages/QuickAdd'));
+const LotReports = lazy(() => import('./pages/LotReports'));
+const RegularMaintenance = lazy(() => import('./pages/RegularMaintenance'));
+const Locations = lazy(() => import('./pages/Locations'));
+const Search = lazy(() => import('./pages/Search'));
+const CreateRecords = lazy(() => import('./pages/CreateRecords'));
+const Alerts = lazy(() => import('./pages/Alerts'));
+const MobileUnits = lazy(() => import('./pages/MobileUnits'));
+const Rental = lazy(() => import('./pages/Rental'));
+const CustomerDetail = lazy(() => import('./pages/CustomerDetail'));
+const AssetHistory = lazy(() => import('./pages/AssetHistory'));
+const AssetHistoryLookup = lazy(() => import('./pages/AssetHistoryLookup'));
+const ImportHistory = lazy(() => import('./pages/ImportHistory'));
+const AllAssetMovements = lazy(() => import('./pages/AllAssetMovements'));
+const Import = lazy(() => import('./pages/Import'));
+const Settings = lazy(() => import('./pages/Settings'));
+const ImportCustomerInfo = lazy(() => import('./pages/ImportCustomerInfo'));
+const ScannedOrders = lazy(() => import('./pages/ScannedOrders'));
+const SupabaseOrders = lazy(() => import('./pages/management-reports/SupabaseOrders'));
+const UserManagement = lazy(() => import('./pages/UserManagement'));
+const BottleImport = lazy(() => import('./pages/BottleImport'));
+const ImportApprovals = lazy(() => import('./pages/ImportApprovals'));
+const ImportApprovalsHistory = lazy(() => import('./pages/ImportApprovalsHistory'));
+const Integrations = lazy(() => import('./pages/Integrations'));
+const BottleDetail = lazy(() => import('./pages/BottleDetail'));
+const Bottles = lazy(() => import('./pages/Bottles'));
 
 // Import background service for automatic daily updates
 import './utils/backgroundService';
@@ -60,59 +64,201 @@ import './utils/backgroundService';
 function App() {
   const { user, profile, loading } = useAuth();
 
-  if (loading) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+  if (loading) return <LoadingSpinner />;
 
   const isAuthenticated = !!user;
 
   return (
-    <ImportProgressProvider>
-      <Router>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route element={<MainLayout />}>
-            <Route path="/" element={<Navigate to="/home" />} />
-            <Route path="/dashboard" element={<Navigate to="/home" replace />} />
-            <Route path="/customers" element={isAuthenticated ? <Customers user={user} profile={profile} /> : <Navigate to="/login" />} />
-            <Route path="/customers/:id" element={isAuthenticated ? <CustomerDetail /> : <Navigate to="/login" />} />
-            <Route path="/assets/:id/history" element={isAuthenticated ? <AssetHistory /> : <Navigate to="/login" />} />
-            <Route path="/assets/history-lookup" element={isAuthenticated ? <AssetHistoryLookup /> : <Navigate to="/login" />} />
-            <Route path="/cylinders" element={isAuthenticated ? <Cylinders user={user} profile={profile} /> : <Navigate to="/login" />} />
-            <Route path="/all-gas-assets" element={isAuthenticated ? <Cylinders user={user} profile={profile} /> : <Navigate to="/login" />} />
-            <Route path="/rentals" element={isAuthenticated ? <Rentals user={user} profile={profile} /> : <Navigate to="/login" />} />
-            <Route path="/invoices" element={isAuthenticated ? <Invoices user={user} profile={profile} /> : <Navigate to="/login" />} />
-            <Route path="/home" element={isAuthenticated ? <Home user={user} profile={profile} /> : <Navigate to="/login" />} />
-            <Route path="/settings" element={isAuthenticated ? <Settings /> : <Navigate to="/login" />} />
-            <Route path="/favorites" element={<Favorites />} />
-            <Route path="/custom-reports" element={<CustomReports />} />
-            <Route path="/orders-report" element={<SupabaseOrders />} />
-            <Route path="/quick-add" element={<QuickAdd />} />
-            <Route path="/lot-reports" element={<LotReports />} />
-            <Route path="/regular-maintenance" element={<RegularMaintenance />} />
-            <Route path="/locations" element={<Locations />} />
-            <Route path="/search" element={<Search />} />
-            <Route path="/create-records" element={<CreateRecords />} />
-            <Route path="/alerts" element={<Alerts />} />
-            <Route path="/mobile-units" element={<MobileUnits />} />
-            <Route path="/rental/*" element={<Rental />} />
-            <Route path="/import" element={isAuthenticated ? <Import /> : <Navigate to="/login" />} />
-            <Route path="/import-approvals" element={isAuthenticated ? <ImportApprovals /> : <Navigate to="/login" />} />
-            <Route path="/history" element={isAuthenticated ? <ImportApprovalsHistory /> : <Navigate to="/login" />} />
-            <Route path="/import-customer-info" element={isAuthenticated ? <ImportCustomerInfo /> : <Navigate to="/login" />} />
-            <Route path="/import-sales-receipts" element={<Navigate to="/import" replace />} />
-            <Route path="/import-invoices" element={<Navigate to="/import" replace />} />
-            <Route path="/import-history" element={isAuthenticated ? <ImportHistory /> : <Navigate to="/login" />} />
-            <Route path="/all-asset-movements" element={isAuthenticated ? <AllAssetMovements /> : <Navigate to="/login" />} />
-            <Route path="/scanned-orders" element={isAuthenticated ? <ScannedOrders /> : <Navigate to="/login" />} />
-            <Route path="/user-management" element={isAuthenticated && profile?.role === 'admin' ? <UserManagement /> : <Navigate to="/home" />} />
-            <Route path="/bottle-management" element={isAuthenticated ? <BottleImport /> : <Navigate to="/login" />} />
-            <Route path="/integrations" element={isAuthenticated ? <Integrations /> : <Navigate to="/login" />} />
-            <Route path="/bottles/:barcode_number" element={isAuthenticated ? <BottleDetail /> : <Navigate to="/login" />} />
-            <Route path="/bottles" element={isAuthenticated ? <Bottles /> : <Navigate to="/login" />} />
-            <Route path="*" element={<Navigate to="/home" />} />
-          </Route>
-        </Routes>
-      </Router>
-    </ImportProgressProvider>
+    <ErrorBoundary>
+      <ImportProgressProvider>
+        <Router>
+          <Routes>
+            <Route path="/login" element={
+              <Suspense fallback={<LoadingSpinner />}>
+                <LoginPage />
+              </Suspense>
+            } />
+            <Route element={<MainLayout />}>
+              <Route path="/" element={<Navigate to="/home" />} />
+              <Route path="/dashboard" element={<Navigate to="/home" replace />} />
+              <Route path="/customers" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Customers user={user} profile={profile} />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/customers/:id" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <CustomerDetail />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/assets/:id/history" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <AssetHistory />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/assets/history-lookup" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <AssetHistoryLookup />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/cylinders" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Cylinders user={user} profile={profile} />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/all-gas-assets" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Cylinders user={user} profile={profile} />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/rentals" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Rentals user={user} profile={profile} />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/invoices" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Invoices user={user} profile={profile} />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/home" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Home user={user} profile={profile} />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/settings" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Settings />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/favorites" element={
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Favorites />
+                </Suspense>
+              } />
+              <Route path="/custom-reports" element={
+                <Suspense fallback={<LoadingSpinner />}>
+                  <CustomReports />
+                </Suspense>
+              } />
+              <Route path="/orders-report" element={
+                <Suspense fallback={<LoadingSpinner />}>
+                  <SupabaseOrders />
+                </Suspense>
+              } />
+              <Route path="/quick-add" element={
+                <Suspense fallback={<LoadingSpinner />}>
+                  <QuickAdd />
+                </Suspense>
+              } />
+              <Route path="/lot-reports" element={
+                <Suspense fallback={<LoadingSpinner />}>
+                  <LotReports />
+                </Suspense>
+              } />
+              <Route path="/regular-maintenance" element={
+                <Suspense fallback={<LoadingSpinner />}>
+                  <RegularMaintenance />
+                </Suspense>
+              } />
+              <Route path="/locations" element={
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Locations />
+                </Suspense>
+              } />
+              <Route path="/search" element={
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Search />
+                </Suspense>
+              } />
+              <Route path="/create-records" element={
+                <Suspense fallback={<LoadingSpinner />}>
+                  <CreateRecords />
+                </Suspense>
+              } />
+              <Route path="/alerts" element={
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Alerts />
+                </Suspense>
+              } />
+              <Route path="/mobile-units" element={
+                <Suspense fallback={<LoadingSpinner />}>
+                  <MobileUnits />
+                </Suspense>
+              } />
+              <Route path="/rental/*" element={
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Rental />
+                </Suspense>
+              } />
+              <Route path="/import" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Import />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/import-approvals" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <ImportApprovals />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/history" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <ImportApprovalsHistory />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/import-customer-info" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <ImportCustomerInfo />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/import-sales-receipts" element={<Navigate to="/import" replace />} />
+              <Route path="/import-invoices" element={<Navigate to="/import" replace />} />
+              <Route path="/import-history" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <ImportHistory />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/all-asset-movements" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <AllAssetMovements />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/scanned-orders" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <ScannedOrders />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/user-management" element={isAuthenticated && profile?.role === 'admin' ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <UserManagement />
+                </Suspense>
+              ) : <Navigate to="/home" />} />
+              <Route path="/bottle-management" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <BottleImport />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/integrations" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Integrations />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/bottles/:barcode_number" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <BottleDetail />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="/bottles" element={isAuthenticated ? (
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Bottles />
+                </Suspense>
+              ) : <Navigate to="/login" />} />
+              <Route path="*" element={<Navigate to="/home" />} />
+            </Route>
+          </Routes>
+        </Router>
+      </ImportProgressProvider>
+    </ErrorBoundary>
   );
 }
 
