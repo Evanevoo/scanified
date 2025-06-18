@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal } from 'react-native';
 import { supabase } from '../supabase';
 import { Picker } from '@react-native-picker/picker';
+import { useTheme } from '../context/ThemeContext';
 import ScanArea from '../components/ScanArea';
 
 interface GasType {
@@ -28,6 +29,7 @@ interface Location {
 }
 
 export default function AddCylinderScreen() {
+  const { colors } = useTheme();
   const [barcode, setBarcode] = useState('');
   const [serial, setSerial] = useState('');
   const [gasTypes, setGasTypes] = useState<GasType[]>([]);
@@ -104,24 +106,32 @@ export default function AddCylinderScreen() {
     }
     
     // Check for duplicate barcode or serial
-    const { data: dup, error: dupError } = await supabase
-      .from('cylinders')
+    const { data: barcodeDup, error: barcodeError } = await supabase
+      .from('bottles')
       .select('id')
-      .or(`barcode_number.eq.${barcode},serial_number.eq.${serial}`);
-    if (dupError) {
-      setError('Error checking duplicates.');
+      .eq('barcode_number', barcode);
+    
+    const { data: serialDup, error: serialError } = await supabase
+      .from('bottles')
+      .select('id')
+      .eq('serial_number', serial);
+    
+    if (barcodeError || serialError) {
+      console.error('Duplicate check error:', barcodeError || serialError);
+      setError('Error checking duplicates: ' + (barcodeError?.message || serialError?.message));
       setLoading(false);
       return;
     }
-    if (dup && dup.length > 0) {
+    
+    if ((barcodeDup && barcodeDup.length > 0) || (serialDup && serialDup.length > 0)) {
       setError('A cylinder with this barcode or serial already exists.');
       setLoading(false);
       return;
     }
     
-    // Insert new cylinder with gas type and location information
+    // Insert new bottle with gas type and location information
     const { error: insertError } = await supabase
-      .from('cylinders')
+      .from('bottles')
       .insert({ 
         barcode_number: barcode, 
         serial_number: serial, 
@@ -145,78 +155,82 @@ export default function AddCylinderScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Add New Cylinder</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Text style={[styles.title, { color: colors.primary }]}>Add New Cylinder</Text>
       <ScanArea
         onScanned={setBarcode}
         label="SCAN HERE"
         style={{ marginBottom: 0 }}
       />
       <TextInput
-        style={styles.input}
+        style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
         placeholder="Barcode Number"
+        placeholderTextColor={colors.textSecondary}
         value={barcode}
         onChangeText={setBarcode}
         autoCapitalize="none"
       />
       <TextInput
-        style={styles.input}
+        style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
         placeholder="Serial Number"
+        placeholderTextColor={colors.textSecondary}
         value={serial}
         onChangeText={setSerial}
         autoCapitalize="none"
       />
       
-      <Text style={styles.label}>Gas Type</Text>
+      <Text style={[styles.label, { color: colors.text }]}>Gas Type</Text>
       {loadingGasTypes ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color="#2563eb" />
-          <Text style={styles.loadingText}>Loading gas types...</Text>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading gas types...</Text>
         </View>
       ) : gasTypes.length === 0 ? (
-        <Text style={styles.error}>No gas types available. Please import gas types in the web app first.</Text>
+        <Text style={[styles.error, { color: colors.error }]}>No gas types available. Please import gas types in the web app first.</Text>
       ) : (
-        <View style={styles.pickerWrapper}>
+        <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Picker
             selectedValue={selectedGasType}
             onValueChange={setSelectedGasType}
-            style={styles.picker}
+            style={[styles.picker, { color: colors.text }]}
           >
-            <Picker.Item label="Select Gas Type" value="" />
+            <Picker.Item label="Select Gas Type" value="" color={colors.textSecondary} />
             {gasTypes.map(type => (
               <Picker.Item 
                 key={type.id} 
                 label={type.type} 
-                value={type.id.toString()} 
+                value={type.id.toString()}
+                color={colors.text}
               />
             ))}
           </Picker>
         </View>
       )}
       
-      <Text style={styles.label}>Location</Text>
+      <Text style={[styles.label, { color: colors.text }]}>Location</Text>
       {loadingLocations ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color="#2563eb" />
-          <Text style={styles.loadingText}>Loading locations...</Text>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading locations...</Text>
         </View>
       ) : locations.length === 0 ? (
-        <Text style={styles.error}>No locations available. Please add locations in the web app first.</Text>
+        <Text style={[styles.error, { color: colors.error }]}>No locations available. Please add locations in the web app first.</Text>
       ) : (
-        <View style={styles.pickerWrapper}>
+        <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Picker
             selectedValue={selectedLocation}
             onValueChange={setSelectedLocation}
-            style={styles.picker}
+            style={[styles.picker, { color: colors.text }]}
           >
-            <Picker.Item label="Select Location" value="" />
+            <Picker.Item label="Select Location" value="" color={colors.textSecondary} />
             {locations.map(location => {
               const label = `${location.name}, ${location.province}`;
               return (
                 <Picker.Item 
                   key={location.id} 
                   label={label} 
-                  value={location.id} 
+                  value={location.id}
+                  color={colors.text}
                 />
               );
             })}
@@ -224,17 +238,18 @@ export default function AddCylinderScreen() {
         </View>
       )}
       
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {success ? <Text style={styles.success}>{success}</Text> : null}
+      {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
+      {success ? <Text style={[styles.success, { color: colors.success }]}>{success}</Text> : null}
       <TouchableOpacity 
         style={[
           styles.submitBtn, 
-          (loading || loadingGasTypes || loadingLocations || gasTypes.length === 0 || locations.length === 0) && styles.submitBtnDisabled
+          { backgroundColor: colors.primary },
+          (loading || loadingGasTypes || loadingLocations || gasTypes.length === 0 || locations.length === 0) && { backgroundColor: colors.border }
         ]} 
         onPress={handleSubmit} 
         disabled={loading || loadingGasTypes || loadingLocations || gasTypes.length === 0 || locations.length === 0}
       >
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Add Cylinder</Text>}
+        {loading ? <ActivityIndicator color={colors.surface} /> : <Text style={[styles.submitBtnText, { color: colors.surface }]}>Add Cylinder</Text>}
       </TouchableOpacity>
     </View>
   );
@@ -243,30 +258,24 @@ export default function AddCylinderScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
     padding: 24,
   },
   title: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#2563eb',
     marginBottom: 18,
     textAlign: 'center',
   },
   input: {
-    backgroundColor: '#fff',
     borderRadius: 10,
     padding: 12,
     fontSize: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
   },
   pickerWrapper: {
-    backgroundColor: '#fff',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
     marginBottom: 16,
   },
   picker: {
@@ -274,34 +283,26 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   submitBtn: {
-    backgroundColor: '#2563eb',
     borderRadius: 10,
     padding: 14,
     alignItems: 'center',
     marginTop: 10,
   },
   submitBtnText: {
-    color: '#fff',
     fontWeight: 'bold',
     fontSize: 16,
   },
-  submitBtnDisabled: {
-    backgroundColor: '#e5e7eb',
-  },
   error: {
-    color: '#ff5a1f',
     marginBottom: 8,
     textAlign: 'center',
   },
   success: {
-    color: '#22c55e',
     marginBottom: 8,
     textAlign: 'center',
   },
   label: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#2563eb',
     marginBottom: 8,
   },
   loadingContainer: {
@@ -311,7 +312,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   loadingText: {
-    color: '#2563eb',
     fontWeight: 'bold',
     marginLeft: 8,
   },

@@ -97,6 +97,40 @@ export default function SettingsScreen() {
     }
   };
 
+  // Get sync status for display
+  const getSyncStatusText = () => {
+    if (syncing) return 'Syncing...';
+    if (!isConnected) return 'Offline';
+    if (offlineCount > 0) return `${settings.lastSync} (${offlineCount} pending)`;
+    return settings.lastSync;
+  };
+
+  const getSyncStatusColor = () => {
+    if (syncing) return colors.primary;
+    if (!isConnected) return colors.warning;
+    if (offlineCount > 0) return colors.warning;
+    return colors.text;
+  };
+
+  const handleTestOfflineScan = async () => {
+    try {
+      const testScan = {
+        order_number: 'TEST_ORDER_001',
+        cylinder_barcode: '123456789',
+        mode: 'SHIP',
+        customer_id: 'test-customer',
+        location: 'Test Location',
+        user_id: user?.id || 'test-user',
+      };
+      
+      await SyncService.saveOfflineScan(testScan);
+      await loadOfflineData();
+      Alert.alert('Test Scan Saved', 'Test scan has been saved offline. Check the offline count above.');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to save test scan: ' + error.message);
+    }
+  };
+
   const handleClearData = () => {
     Alert.alert(
       'Clear Local Data',
@@ -380,9 +414,8 @@ export default function SettingsScreen() {
           {syncing ? (
             <ActivityIndicator size="small" color={colors.primary} />
           ) : (
-            <Text style={[styles.settingValue, { color: colors.text }]}>
-              {settings.lastSync}
-              {offlineCount > 0 && ` (${offlineCount} pending)`}
+            <Text style={[styles.settingValue, { color: getSyncStatusColor() }]}>
+              {getSyncStatusText()}
             </Text>
           )}
         </View>
@@ -397,6 +430,10 @@ export default function SettingsScreen() {
           thumbColor={settings.autoSync ? '#fff' : colors.surface}
         />
       </View>
+      
+      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleTestOfflineScan}>
+        <Text style={[styles.settingText, { color: colors.primary }]}>Test Offline Scan</Text>
+      </TouchableOpacity>
       
       <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleClearData}>
         <Text style={[styles.settingText, { color: colors.danger }]}>Clear Local Data</Text>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, TextInput, ScrollView, FlatList } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabase';
 
 const BUTTONS = [
@@ -45,6 +46,7 @@ const FILES = [
 
 export default function HomeScreen() {
   const navigation = useNavigation();
+  const { colors } = useTheme();
   const [unreadCount, setUnreadCount] = useState(0);
   const [search, setSearch] = useState('');
   const [customers, setCustomers] = useState([]);
@@ -56,7 +58,7 @@ export default function HomeScreen() {
     const fetchUnreadCount = async () => {
       // Adjust the filter as needed for your schema
       const { count, error } = await supabase
-        .from('scanned_cylinders')
+        .from('bottle_scans')
         .select('*', { count: 'exact', head: true })
         .is('read', false);
       if (!error) setUnreadCount(count || 0);
@@ -94,13 +96,13 @@ export default function HomeScreen() {
       }
       // For each customer, fetch their rented gases
       const results = await Promise.all(custs.map(async (cust) => {
-        const { data: cylinders } = await supabase
-          .from('cylinders')
+        const { data: bottles } = await supabase
+          .from('bottles')
           .select('group_name')
           .eq('assigned_customer', cust.CustomerListID);
         return {
           ...cust,
-          gases: Array.from(new Set((cylinders || []).map(c => c.group_name))).filter(Boolean),
+          gases: Array.from(new Set((bottles || []).map(c => c.group_name))).filter(Boolean),
         };
       }));
       setCustomerResults(results);
@@ -113,8 +115,8 @@ export default function HomeScreen() {
     // Fetch recent scans for the bottom grid
     const fetchRecentScans = async () => {
       const { data, error } = await supabase
-        .from('scanned_cylinders')
-        .select('cylinder_barcode, customer_name, created_at')
+        .from('bottle_scans')
+        .select('bottle_barcode, customer_name, created_at')
         .order('created_at', { ascending: false })
         .limit(6);
       if (!error && data) setRecentScans(data);
@@ -123,17 +125,17 @@ export default function HomeScreen() {
   }, []);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}>
         {/* Top Row: Settings and Notification */}
         <View style={styles.topRow}>
-          <TouchableOpacity style={styles.iconCircle} onPress={() => navigation.navigate('Settings')}>
+          <TouchableOpacity style={[styles.iconCircle, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => navigation.navigate('Settings')}>
             <Text style={styles.topIcon}>⚙️</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconCircle} onPress={() => navigation.navigate('RecentScans')}>
+          <TouchableOpacity style={[styles.iconCircle, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => navigation.navigate('RecentScans')}>
             <Text style={styles.topIcon}>🔔</Text>
             {unreadCount > 0 && (
-              <View style={styles.badge}><Text style={styles.badgeText}>{unreadCount}</Text></View>
+              <View style={[styles.badge, { backgroundColor: colors.error }]}><Text style={[styles.badgeText, { color: colors.surface }]}>{unreadCount}</Text></View>
             )}
           </TouchableOpacity>
         </View>
@@ -142,7 +144,7 @@ export default function HomeScreen() {
           {BUTTONS.map((btn, idx) => (
             <TouchableOpacity
               key={btn.title}
-              style={[styles.gridButton, { backgroundColor: btn.color, marginRight: idx % 2 === 0 ? 12 : 0, marginBottom: idx < 2 ? 12 : 0 }]}
+              style={[styles.gridButton, { backgroundColor: colors.surface, borderColor: colors.border, marginRight: idx % 2 === 0 ? 12 : 0, marginBottom: idx < 2 ? 12 : 0 }]}
               onPress={() => {
                 if (btn.action === 'ScanCylinders') navigation.navigate('ScanCylinders');
                 else if (btn.title === 'Edit') navigation.navigate('EditCylinder');
@@ -152,39 +154,39 @@ export default function HomeScreen() {
                 else if (btn.title === 'Fill') navigation.navigate('FillCylinder');
               }}
             >
-              <View style={styles.gridIconCircle}><Text style={styles.gridIcon}>{btn.icon}</Text></View>
-              <Text style={styles.gridTitle}>{btn.title}</Text>
+              <View style={[styles.gridIconCircle, { backgroundColor: colors.primary }]}><Text style={styles.gridIcon}>{btn.icon}</Text></View>
+              <Text style={[styles.gridTitle, { color: colors.text }]}>{btn.title}</Text>
             </TouchableOpacity>
           ))}
         </View>
         {/* Customer Search Bar */}
         <View style={styles.searchRow}>
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
             placeholder="Search customers by name"
-            placeholderTextColor="#bbb"
+            placeholderTextColor={colors.textSecondary}
             value={search}
             onChangeText={setSearch}
           />
-          <TouchableOpacity style={styles.micCircle}><Text style={styles.micIcon}>🔍</Text></TouchableOpacity>
+          <TouchableOpacity style={[styles.micCircle, { backgroundColor: colors.primary }]}><Text style={styles.micIcon}>🔍</Text></TouchableOpacity>
         </View>
         {search.trim().length > 0 && (
-          <View style={styles.customerDropdown}>
+          <View style={[styles.customerDropdown, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             {loadingCustomers ? (
-              <Text style={{ padding: 12, color: '#2563eb' }}>Loading...</Text>
+              <Text style={{ padding: 12, color: colors.primary }}>Loading...</Text>
             ) : customerResults.length === 0 ? (
-              <Text style={{ padding: 12, color: '#888' }}>No customers found.</Text>
+              <Text style={{ padding: 12, color: colors.textSecondary }}>No customers found.</Text>
             ) : (
               customerResults.map(item => (
                 <TouchableOpacity
                   key={item.CustomerListID}
-                  style={styles.customerItem}
+                  style={[styles.customerItem, { borderBottomColor: colors.border }]}
                   onPress={() => navigation.navigate('CustomerDetails', { customerId: item.CustomerListID })}
                 >
-                  <Text style={styles.customerName}>{item.name}</Text>
-                  <Text style={styles.customerDetail}>Barcode: {item.barcode}</Text>
-                  <Text style={styles.customerDetail}>Contact: {item.contact_details}</Text>
-                  <Text style={styles.customerDetail}>Gases: {item.gases.length > 0 ? item.gases.join(', ') : 'None'}</Text>
+                  <Text style={[styles.customerName, { color: colors.text }]}>{item.name}</Text>
+                  <Text style={[styles.customerDetail, { color: colors.textSecondary }]}>Barcode: {item.barcode}</Text>
+                  <Text style={[styles.customerDetail, { color: colors.textSecondary }]}>Contact: {item.contact_details}</Text>
+                  <Text style={[styles.customerDetail, { color: colors.textSecondary }]}>Gases: {item.gases.length > 0 ? item.gases.join(', ') : 'None'}</Text>
                 </TouchableOpacity>
               ))
             )}
@@ -198,7 +200,6 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
   },
   container: {
     padding: 20,
@@ -215,7 +216,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
@@ -223,17 +223,16 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 2,
     elevation: 1,
+    borderWidth: 1,
   },
   topIcon: {
     fontSize: 20,
-    color: '#222',
     fontWeight: 'bold',
   },
   badge: {
     position: 'absolute',
     top: 2,
     right: 2,
-    backgroundColor: '#FF5A1F',
     borderRadius: 8,
     minWidth: 16,
     height: 16,
@@ -242,7 +241,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 3,
   },
   badgeText: {
-    color: '#fff',
     fontSize: 10,
     fontWeight: 'bold',
   },
@@ -263,12 +261,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 6,
     elevation: 2,
+    borderWidth: 1,
   },
   gridIconCircle: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 10,
@@ -283,7 +281,6 @@ const styles = StyleSheet.create({
   gridTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#222',
     marginBottom: 4,
   },
   searchRow: {
@@ -293,19 +290,17 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
     borderRadius: 16,
     paddingVertical: 10,
     paddingHorizontal: 18,
     fontSize: 16,
-    color: '#222',
     marginRight: 10,
+    borderWidth: 1,
   },
   micCircle: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -327,7 +322,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     marginRight: 12,
-    backgroundColor: '#F3F4F6',
     shadowColor: '#000',
     shadowOpacity: 0.04,
     shadowRadius: 2,
@@ -339,13 +333,10 @@ const styles = StyleSheet.create({
   },
   fileName: {
     fontSize: 14,
-    color: '#222',
   },
   customerDropdown: {
-    backgroundColor: '#fff',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
     marginBottom: 12,
     shadowColor: '#000',
     shadowOpacity: 0.06,
@@ -356,17 +347,14 @@ const styles = StyleSheet.create({
   customerItem: {
     padding: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#f1f1f1',
   },
   customerName: {
     fontWeight: 'bold',
     fontSize: 16,
-    color: '#2563eb',
     marginBottom: 2,
   },
   customerDetail: {
     fontSize: 13,
-    color: '#444',
     marginBottom: 1,
   },
 }); 

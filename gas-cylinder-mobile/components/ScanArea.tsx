@@ -14,7 +14,6 @@ const ScanArea: React.FC<ScanAreaProps> = ({ onScanned, label = 'SCAN HERE', sty
   const [scanned, setScanned] = useState(false);
   const [lastScanned, setLastScanned] = useState('');
   const [error, setError] = useState('');
-  const scanAreaSize = 260;
 
   const playBeep = async () => {
     try {
@@ -40,7 +39,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({ onScanned, label = 'SCAN HERE', sty
     <View style={[styles.wrapper, style]}>
       <Text style={styles.header}>{label}</Text>
       <View style={styles.scanAreaWrapper}>
-        <View style={[styles.scanAreaBox, { width: scanAreaSize, height: scanAreaSize }]}> 
+        <View style={styles.scanAreaBox}> 
           {!permission ? (
             <Text style={{ color: '#fff' }}>Requesting camera permission...</Text>
           ) : !permission.granted ? (
@@ -88,9 +87,10 @@ const bracketThickness = 5;
 
 const styles = StyleSheet.create({
   wrapper: {
+    flex: 1,
     alignItems: 'center',
     width: '100%',
-    marginBottom: 16,
+    justifyContent: 'center',
   },
   header: {
     fontSize: 22,
@@ -100,23 +100,21 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   scanAreaWrapper: {
+    flex: 1,
     width: '100%',
     alignItems: 'center',
-    marginBottom: 8,
+    justifyContent: 'center',
   },
-  scanAreaBox: {
-    borderWidth: 0,
-    borderColor: 'transparent',
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: '#222',
+  scanAreaBox: { 
+    flex: 1,
+    width: '100%', 
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
   },
   camera: {
     width: '100%',
     height: '100%',
-    borderRadius: 16,
   },
   corner: {
     position: 'absolute',

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Gas Cylinder Icon Generator</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            text-align: center;
+        }
+        canvas {
+            border: 2px solid #333;
+            margin: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        button:hover {
+            background: #1d4ed8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Gas Cylinder App Icon Generator</h1>
+        <canvas id="iconCanvas" width="1024" height="1024"></canvas>
+        <br>
+        <button onclick="downloadIcon()">Download Icon (1024x1024)</button>
+        <button onclick="downloadAdaptiveIcon()">Download Adaptive Icon</button>
+        <p>Right-click on the canvas and "Save image as..." to download</p>
+    </div>
+
+    <script>
+        function drawIcon() {
+            const canvas = document.getElementById('iconCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, 1024, 1024);
+            
+            // Background gradient
+            const gradient = ctx.createLinearGradient(0, 0, 1024, 1024);
+            gradient.addColorStop(0, '#2563eb');
+            gradient.addColorStop(1, '#1d4ed8');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 1024, 1024);
+            
+            // Draw gas cylinder
+            const centerX = 512;
+            const centerY = 512;
+            const cylinderWidth = 400;
+            const cylinderHeight = 600;
+            
+            // Cylinder body
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(centerX - cylinderWidth/2, centerY - cylinderHeight/2 + 50, cylinderWidth, cylinderHeight - 100);
+            
+            // Cylinder top (rounded)
+            ctx.beginPath();
+            ctx.ellipse(centerX, centerY - cylinderHeight/2 + 50, cylinderWidth/2, 50, 0, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // Cylinder bottom (rounded)
+            ctx.beginPath();
+            ctx.ellipse(centerX, centerY + cylinderHeight/2 - 50, cylinderWidth/2, 50, 0, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // Gas valve
+            ctx.fillStyle = '#374151';
+            ctx.fillRect(centerX - 30, centerY - cylinderHeight/2 - 20, 60, 40);
+            
+            // Gas valve handle
+            ctx.fillStyle = '#6b7280';
+            ctx.fillRect(centerX - 40, centerY - cylinderHeight/2 - 30, 80, 20);
+            
+            // Safety ring
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 8;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, cylinderWidth/2 + 20, 0, 2 * Math.PI);
+            ctx.stroke();
+            
+            // Add some shine
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.fillRect(centerX - cylinderWidth/2 + 20, centerY - cylinderHeight/2 + 70, 60, cylinderHeight - 140);
+            
+            // App name
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 48px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('GAS', centerX, centerY + cylinderHeight/2 + 80);
+            ctx.fillText('MANAGER', centerX, centerY + cylinderHeight/2 + 130);
+        }
+        
+        function downloadIcon() {
+            const canvas = document.getElementById('iconCanvas');
+            const link = document.createElement('a');
+            link.download = 'gas-cylinder-icon.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+        
+        function downloadAdaptiveIcon() {
+            const canvas = document.getElementById('iconCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Create adaptive icon (foreground only)
+            const adaptiveCanvas = document.createElement('canvas');
+            adaptiveCanvas.width = 1024;
+            adaptiveCanvas.height = 1024;
+            const adaptiveCtx = adaptiveCanvas.getContext('2d');
+            
+            // Clear with transparent background
+            adaptiveCtx.clearRect(0, 0, 1024, 1024);
+            
+            // Draw only the cylinder (no background)
+            const centerX = 512;
+            const centerY = 512;
+            const cylinderWidth = 400;
+            const cylinderHeight = 600;
+            
+            // Cylinder body
+            adaptiveCtx.fillStyle = '#2563eb';
+            adaptiveCtx.fillRect(centerX - cylinderWidth/2, centerY - cylinderHeight/2 + 50, cylinderWidth, cylinderHeight - 100);
+            
+            // Cylinder top (rounded)
+            adaptiveCtx.beginPath();
+            adaptiveCtx.ellipse(centerX, centerY - cylinderHeight/2 + 50, cylinderWidth/2, 50, 0, 0, 2 * Math.PI);
+            adaptiveCtx.fill();
+            
+            // Cylinder bottom (rounded)
+            adaptiveCtx.beginPath();
+            adaptiveCtx.ellipse(centerX, centerY + cylinderHeight/2 - 50, cylinderWidth/2, 50, 0, 0, 2 * Math.PI);
+            adaptiveCtx.fill();
+            
+            // Gas valve
+            adaptiveCtx.fillStyle = '#374151';
+            adaptiveCtx.fillRect(centerX - 30, centerY - cylinderHeight/2 - 20, 60, 40);
+            
+            // Gas valve handle
+            adaptiveCtx.fillStyle = '#6b7280';
+            adaptiveCtx.fillRect(centerX - 40, centerY - cylinderHeight/2 - 30, 80, 20);
+            
+            // Safety ring
+            adaptiveCtx.strokeStyle = '#ef4444';
+            adaptiveCtx.lineWidth = 8;
+            adaptiveCtx.beginPath();
+            adaptiveCtx.arc(centerX, centerY, cylinderWidth/2 + 20, 0, 2 * Math.PI);
+            adaptiveCtx.stroke();
+            
+            const link = document.createElement('a');
+            link.download = 'gas-cylinder-adaptive-icon.png';
+            link.href = adaptiveCanvas.toDataURL();
+            link.click();
+        }
+        
+        // Draw icon when page loads
+        window.onload = drawIcon;
+    </script>
+</body>
+</html> 

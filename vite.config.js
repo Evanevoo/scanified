@@ -9,22 +9,7 @@ export default defineConfig({
     }
   },
   server: {
-    port: 5174,
-    proxy: {
-      '/auth/v1': {
-        target: 'https://jtfucttzaswmqqhmmhfb.supabase.co',
-        changeOrigin: true,
-        secure: false,
-        headers: {
-          'Origin': 'http://localhost:5174'
-        }
-      }
-    },
-    cors: {
-      origin: '*',
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Info', 'apikey']
-    }
+    port: 5174
   },
   preview: {
     port: 5174

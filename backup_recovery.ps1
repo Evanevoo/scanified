@@ -102,6 +102,22 @@ CREATE TABLE IF NOT EXISTS locations (
     total_tax_rate DECIMAL(5,2)
 );
 
+-- Cylinder Scans Table (for mobile app scanning functionality)
+CREATE TABLE IF NOT EXISTS cylinder_scans (
+    id SERIAL PRIMARY KEY,
+    order_number TEXT,
+    cylinder_barcode TEXT NOT NULL,
+    mode TEXT CHECK (mode IN ('SHIP', 'RETURN')),
+    customer_id TEXT REFERENCES customers(CustomerListID),
+    customer_name TEXT,
+    location TEXT,
+    user_id TEXT,
+    timestamp TIMESTAMP DEFAULT NOW(),
+    created_at TIMESTAMP DEFAULT NOW(),
+    read BOOLEAN DEFAULT FALSE,
+    verified BOOLEAN DEFAULT FALSE
+);
+
 -- Insert default locations
 INSERT INTO locations (id, name, province, gst_rate, pst_rate, total_tax_rate) VALUES
 ('saskatoon', 'Saskatoon', 'Saskatchewan', 5.0, 6.0, 11.0),
