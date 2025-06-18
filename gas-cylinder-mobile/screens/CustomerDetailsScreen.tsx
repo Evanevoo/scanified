@@ -28,11 +28,16 @@ export default function CustomerDetailsScreen() {
       }
       setCustomer(cust);
       // Fetch cylinders rented by this customer
-      const { data: cyls } = await supabase
-        .from('cylinders')
-        .select('barcode_number, serial_number, group_name, status')
+      const { data, error } = await supabase
+        .from('bottles')
+        .select('*')
         .eq('assigned_customer', customerId);
-      setCylinders(cyls || []);
+      if (error) {
+        setError('Error fetching cylinders.');
+        setLoading(false);
+        return;
+      }
+      setCylinders(data || []);
       setLoading(false);
     };
     fetchDetails();

@@ -12,34 +12,56 @@ import {
   ScrollView
 } from 'react-native';
 import { supabase } from './supabase';
+import { ValidationSchemas } from './utils/validation';
+import { useErrorHandler } from './hooks/useErrorHandler';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const { handleError, isLoading, withErrorHandling } = useErrorHandler();
+
+  const validateForm = (): boolean => {
+    const emailValidation = ValidationSchemas.login.email(email);
+    const passwordValidation = ValidationSchemas.login.password(password);
+    
+    setEmailError(emailValidation.errors[0] || '');
+    setPasswordError(passwordValidation.errors[0] || '');
+    
+    return emailValidation.isValid && passwordValidation.isValid;
+  };
 
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please enter both email and password');
+    if (!validateForm()) {
       return;
     }
 
-    setLoading(true);
-    try {
+    await withErrorHandling(async () => {
       const { error } = await supabase.auth.signInWithPassword({ 
         email: email.trim(), 
         password 
       });
       
       if (error) {
-        Alert.alert('Login Failed', error.message);
+        throw new Error(error.message);
       }
-      // If successful, the useAuth hook will automatically update the user state
-      // and the App component will navigate to the main screens
-    } catch (error) {
-      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
-    } finally {
-      setLoading(false);
+    }, 'Login Failed');
+  };
+
+  const handleEmailChange = (text: string) => {
+    setEmail(text);
+    if (emailError) {
+      const validation = ValidationSchemas.login.email(text);
+      setEmailError(validation.errors[0] || '');
+    }
+  };
+
+  const handlePasswordChange = (text: string) => {
+    setPassword(text);
+    if (passwordError) {
+      const validation = ValidationSchemas.login.password(text);
+      setPasswordError(validation.errors[0] || '');
     }
   };
 
@@ -59,33 +81,35 @@ export default function LoginScreen() {
           <View style={styles.formContainer}>
             <Text style={styles.label}>Email</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, emailError && styles.inputError]}
               value={email}
-              onChangeText={setEmail}
+              onChangeText={handleEmailChange}
               placeholder="Enter your email"
               autoCapitalize="none"
               keyboardType="email-address"
               autoComplete="email"
-              editable={!loading}
+              editable={!isLoading}
             />
+            {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
             
             <Text style={styles.label}>Password</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, passwordError && styles.inputError]}
               value={password}
-              onChangeText={setPassword}
+              onChangeText={handlePasswordChange}
               placeholder="Enter your password"
               secureTextEntry
               autoComplete="password"
-              editable={!loading}
+              editable={!isLoading}
             />
+            {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
             
             <TouchableOpacity
-              style={[styles.loginButton, loading && styles.loginButtonDisabled]}
+              style={[styles.loginButton, isLoading && styles.loginButtonDisabled]}
               onPress={handleLogin}
-              disabled={loading}
+              disabled={isLoading}
             >
-              {loading ? (
+              {isLoading ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
                 <Text style={styles.loginButtonText}>Sign In</Text>
@@ -151,7 +175,17 @@ const styles = StyleSheet.create({
     padding: 16,
     fontSize: 16,
     backgroundColor: '#fff',
-    marginBottom: 20,
+    marginBottom: 8,
+  },
+  inputError: {
+    borderColor: '#dc3545',
+    backgroundColor: '#fff5f5',
+  },
+  errorText: {
+    color: '#dc3545',
+    fontSize: 14,
+    marginBottom: 12,
+    marginLeft: 4,
   },
   loginButton: {
     backgroundColor: '#2563eb',

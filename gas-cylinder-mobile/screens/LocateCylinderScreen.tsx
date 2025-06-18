@@ -40,7 +40,7 @@ export default function LocateCylinderScreen() {
     setLoading(true);
     setError('');
     setCylinder(null);
-    let query = supabase.from('cylinders').select('*');
+    let query = supabase.from('bottles').select('*');
     if (mode === 'barcode') query = query.eq('barcode_number', value);
     else query = query.eq('serial_number', value);
     const { data, error } = await query.single();
@@ -116,7 +116,7 @@ export default function LocateCylinderScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            <View style={{ width: '100%', height: '80%', justifyContent: 'center', alignItems: 'center' }}>
+            <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
               <CameraView
                 style={{ width: '100%', height: '100%' }}
                 facing="back"

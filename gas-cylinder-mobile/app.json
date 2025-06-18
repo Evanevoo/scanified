@@ -1,34 +1,54 @@
 {
   "expo": {
-    "name": "gas-cylinder-mobile",
+    "name": "Gas Cylinder Mobile",
     "slug": "gas-cylinder-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#2563eb"
     },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.evanevoo.gascylindermobile"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#2563eb"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.evanevoo.gascylindermobile"
+      "package": "com.evanevoo.gascylindermobile",
+      "versionCode": 1,
+      "permissions": [
+        "CAMERA",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Gas Cylinder Mobile to access your camera to scan barcodes."
+        }
+      ]
+    ],
     "extra": {
       "eas": {
-        "projectId": "d71ec042-1fec-4186-ac3b-0ae85a6af345"
+        "projectId": "your-project-id-here"
       }
     }
   }

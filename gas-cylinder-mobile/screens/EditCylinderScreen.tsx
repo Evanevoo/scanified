@@ -48,9 +48,9 @@ export default function EditCylinderScreen() {
     setError('');
     setCylinder(null);
     const { data, error } = await supabase
-      .from('cylinders')
+      .from('bottles')
       .select('*')
-      .eq('barcode', barcodeValue)
+      .eq('barcode_number', barcodeValue)
       .single();
     setLoading(false);
     if (error || !data) {
@@ -67,9 +67,9 @@ export default function EditCylinderScreen() {
     setError('');
     // Check for duplicate barcode or serial (excluding this cylinder)
     const { data: dupBarcode } = await supabase
-      .from('cylinders')
+      .from('bottles')
       .select('id')
-      .eq('barcode', barcode)
+      .eq('barcode_number', barcode)
       .neq('id', cylinder.id)
       .maybeSingle();
     if (dupBarcode) {
@@ -78,7 +78,7 @@ export default function EditCylinderScreen() {
       return;
     }
     const { data: dupSerial } = await supabase
-      .from('cylinders')
+      .from('bottles')
       .select('id')
       .eq('serial_number', serial)
       .neq('id', cylinder.id)
@@ -90,7 +90,7 @@ export default function EditCylinderScreen() {
     }
     // Update cylinder
     const { error: updateError } = await supabase
-      .from('cylinders')
+      .from('bottles')
       .update({ barcode, serial_number: serial })
       .eq('id', cylinder.id);
     setLoading(false);
@@ -173,9 +173,9 @@ export default function EditCylinderScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            <View style={{ width: 320, height: 320, justifyContent: 'center', alignItems: 'center' }}>
+            <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
               <CameraView
-                style={{ width: 320, height: 320 }}
+                style={{ width: '100%', height: '100%' }}
                 facing="back"
                 onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
                 barcodeScannerSettings={{

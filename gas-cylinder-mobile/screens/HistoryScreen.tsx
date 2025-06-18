@@ -22,7 +22,7 @@ export default function HistoryScreen() {
       setError('');
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabase
-        .from('scanned_cylinders')
+        .from('bottle_scans')
         .select('*')
         .eq('verified', false)
         .gte('created_at', since)
@@ -41,21 +41,21 @@ export default function HistoryScreen() {
   const openEdit = (scan) => {
     setEditScan(scan);
     setEditCustomer(scan.customer_name || '');
-    setEditCylinders(scan.cylinders || scan.cylinder_barcode ? [scan.cylinder_barcode] : []);
+    setEditCylinders(scan.cylinders || scan.bottle_barcode ? [scan.bottle_barcode] : []);
   };
 
   const saveEdit = async () => {
     setSaving(true);
     const { error } = await supabase
-      .from('scanned_cylinders')
-      .update({ customer_name: editCustomer, cylinder_barcode: editCylinders[0] })
+      .from('bottle_scans')
+      .update({ customer_name: editCustomer, bottle_barcode: editCylinders[0] })
       .eq('id', editScan.id);
     setSaving(false);
     setEditScan(null);
     // Refresh list
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { data } = await supabase
-      .from('scanned_cylinders')
+      .from('bottle_scans')
       .select('*')
       .eq('verified', false)
       .gte('created_at', since)
@@ -72,7 +72,7 @@ export default function HistoryScreen() {
           keyExtractor={item => item.id}
           renderItem={({ item }) => (
             <TouchableOpacity style={styles.scanItem} onPress={() => openEdit(item)}>
-              <Text style={styles.scanBarcode}>{item.cylinder_barcode}</Text>
+              <Text style={styles.scanBarcode}>{item.bottle_barcode}</Text>
               <Text style={styles.scanCustomer}>{item.customer_name}</Text>
               <Text style={styles.scanDate}>{formatDate(item.created_at)}</Text>
               <Text style={styles.scanStatus}>Verified: {item.verified ? 'Yes' : 'No'}</Text>

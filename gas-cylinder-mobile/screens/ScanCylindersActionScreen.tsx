@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Dimensions, TextInput, Vibration } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Dimensions, TextInput, Vibration, Alert } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRoute } from '@react-navigation/native';
 import { supabase } from '../supabase';
+import { SyncService } from '../services/SyncService';
+import { useTheme } from '../context/ThemeContext';
 
 const { width } = Dimensions.get('window');
 
 export default function ScanCylindersActionScreen() {
   const route = useRoute();
   const { customer, orderNumber } = route.params || {};
+  const { colors } = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [mode, setMode] = useState('SHIP'); // 'SHIP' or 'RETURN'
@@ -25,8 +28,34 @@ export default function ScanCylindersActionScreen() {
   const [syncResult, setSyncResult] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
   const [lastScanned, setLastScanned] = useState('');
+  const [isConnected, setIsConnected] = useState(true);
+  const [offlineCount, setOfflineCount] = useState(0);
 
   const isValidBarcode = (barcode) => /^\d{9}$/.test(barcode);
+
+  // Check connectivity and offline status
+  useEffect(() => {
+    checkConnectivity();
+    loadOfflineCount();
+    
+    // Set up periodic refresh
+    const interval = setInterval(() => {
+      checkConnectivity();
+      loadOfflineCount();
+    }, 5000); // Check every 5 seconds
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  const checkConnectivity = async () => {
+    const connected = await SyncService.checkConnectivity();
+    setIsConnected(connected);
+  };
+
+  const loadOfflineCount = async () => {
+    const count = await SyncService.getOfflineScanCount();
+    setOfflineCount(count);
+  };
 
   const playBeep = async () => {
     try {
@@ -95,31 +124,146 @@ export default function ScanCylindersActionScreen() {
     setTimeout(() => setScanned(false), 800);
   };
 
+  const handleFinishAndSync = async () => {
+    setShowConfirm(false);
+    setSyncing(true);
+    setSyncResult('');
+
+    try {
+      // Check connectivity first
+      await checkConnectivity();
+
+      // Get user ID first
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id;
+
+      if (!isConnected) {
+        // Save scans offline
+        const allBarcodes = [
+          ...scannedShip.map(bc => ({ 
+            order_number: orderNumber, 
+            bottle_barcode: bc, 
+            mode: 'SHIP',
+            customer_id: customer?.id,
+            location: customer?.location || 'Unknown',
+            user_id: userId
+          })),
+          ...scannedReturn.map(bc => ({ 
+            order_number: orderNumber, 
+            bottle_barcode: bc, 
+            mode: 'RETURN',
+            customer_id: customer?.id,
+            location: customer?.location || 'Unknown',
+            user_id: userId
+          })),
+        ];
+
+        // Save each scan offline
+        for (const scan of allBarcodes) {
+          await SyncService.saveOfflineScan(scan);
+        }
+
+        await loadOfflineCount();
+        setSyncResult(`Saved ${allBarcodes.length} scans offline. Will sync when connection is restored.`);
+        
+        // Clear the scanned lists
+        setScannedShip([]);
+        setScannedReturn([]);
+        setShipCount(0);
+        setReturnCount(0);
+        setLastScanned('');
+      } else {
+        // Online - sync immediately
+        const allBarcodes = [
+          ...scannedShip.map(bc => ({ order_number: orderNumber, bottle_barcode: bc, mode: 'SHIP' })),
+          ...scannedReturn.map(bc => ({ order_number: orderNumber, bottle_barcode: bc, mode: 'RETURN' })),
+        ];
+
+        const { error } = await supabase.from('bottle_scans').insert(allBarcodes);
+        
+        if (error) {
+          setSyncResult('Error: ' + error.message);
+        } else {
+          // Mark returned bottles as empty
+          if (scannedReturn.length > 0) {
+            const { error: updateError } = await supabase
+              .from('bottles')
+              .update({ status: 'empty' })
+              .in('barcode_number', scannedReturn);
+            
+            if (updateError) {
+              console.warn('Could not update bottle statuses:', updateError);
+            }
+          }
+          
+          // Update sales_orders.scanned_at for this order
+          const { error: updateError } = await supabase
+            .from('sales_orders')
+            .update({ scanned_at: new Date().toISOString() })
+            .eq('sales_order_number', orderNumber);
+          
+          if (updateError) {
+            setSyncResult('Error updating order: ' + updateError.message);
+          } else {
+            let successMsg = 'Synced successfully!';
+            if (scannedReturn.length > 0) {
+              successMsg += ` ${scannedReturn.length} returned bottle(s) marked as empty.`;
+            }
+            setSyncResult(successMsg);
+            
+            // Clear the scanned lists
+            setScannedShip([]);
+            setScannedReturn([]);
+            setShipCount(0);
+            setReturnCount(0);
+            setLastScanned('');
+          }
+        }
+      }
+    } catch (e) {
+      setSyncResult('Error: ' + e.message);
+    }
+    setSyncing(false);
+  };
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <Text style={styles.header}>SCAN HERE</Text>
+      <Text style={[styles.header, { color: colors.primary }]}>SCAN HERE</Text>
+      
+      {/* Connection Status */}
+      <View style={[styles.connectionStatus, { backgroundColor: isConnected ? colors.success : colors.warning }]}>
+        <Text style={[styles.connectionText, { color: colors.text }]}>
+          {isConnected ? '🟢 Online' : '🟡 Offline'}
+        </Text>
+        {offlineCount > 0 && (
+          <Text style={[styles.connectionText, { color: colors.text }]}>
+            {offlineCount} scan(s) pending sync
+          </Text>
+        )}
+      </View>
+      
       {scannedReturn.length > 0 && (
-        <Text style={styles.infoNote}>
-          💡 Returned cylinders will be automatically marked as empty when synced
+        <Text style={[styles.infoNote, { color: colors.textSecondary }]}>
+          💡 Returned bottles will be automatically marked as empty when synced
         </Text>
       )}
       {/* Scan Area */}
       <View style={styles.scanAreaWrapper}>
         {scanError ? (
           <View style={{ position: 'absolute', top: 10, left: 0, right: 0, alignItems: 'center', zIndex: 100 }}>
-            <View style={{ backgroundColor: '#ff5a1f', paddingVertical: 10, paddingHorizontal: 24, borderRadius: 14 }}>
-              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{scanError}</Text>
+            <View style={{ backgroundColor: colors.error, paddingVertical: 10, paddingHorizontal: 24, borderRadius: 14 }}>
+              <Text style={{ color: colors.surface, fontWeight: 'bold', fontSize: 16 }}>{scanError}</Text>
             </View>
           </View>
         ) : null}
         {!permission ? (
-          <Text style={{ color: '#fff' }}>Requesting camera permission...</Text>
+          <Text style={{ color: colors.text }}>Requesting camera permission...</Text>
         ) : !permission.granted ? (
           <View style={{ alignItems: 'center' }}>
-            <Text style={{ color: '#fff', marginBottom: 16 }}>We need your permission to show the camera</Text>
-            <TouchableOpacity onPress={requestPermission} style={styles.permissionButton}>
-              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Grant Permission</Text>
+            <Text style={{ color: colors.text, marginBottom: 16 }}>We need your permission to show the camera</Text>
+            <TouchableOpacity onPress={requestPermission} style={[styles.permissionButton, { backgroundColor: colors.primary }]}>
+              <Text style={{ color: colors.surface, fontWeight: 'bold' }}>Grant Permission</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -334,7 +478,7 @@ export default function ScanCylindersActionScreen() {
             )}
             {scannedReturn.length > 0 && (
               <Text style={{ color: '#f59e0b', fontSize: 14, marginBottom: 8, fontStyle: 'italic' }}>
-                Note: Returned cylinders will be automatically marked as empty.
+                Note: Returned bottles will be automatically marked as empty.
               </Text>
             )}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 }}>
@@ -346,50 +490,7 @@ export default function ScanCylindersActionScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.manualButton, { backgroundColor: '#2563eb', flex: 1, marginLeft: 8 }]}
-                onPress={async () => {
-                  setShowConfirm(false);
-                  setSyncing(true);
-                  setSyncResult('');
-                  try {
-                    const allBarcodes = [
-                      ...scannedShip.map(bc => ({ order_number: orderNumber, cylinder_barcode: bc, mode: 'SHIP' })),
-                      ...scannedReturn.map(bc => ({ order_number: orderNumber, cylinder_barcode: bc, mode: 'RETURN' })),
-                    ];
-                    const { error } = await supabase.from('scanned_cylinders').insert(allBarcodes);
-                    if (error) setSyncResult('Error: ' + error.message);
-                    else {
-                      // Mark returned cylinders as empty
-                      if (scannedReturn.length > 0) {
-                        const { error: updateError } = await supabase
-                          .from('cylinders')
-                          .update({ status: 'empty' })
-                          .in('barcode_number', scannedReturn);
-                        
-                        if (updateError) {
-                          console.warn('Could not update cylinder statuses:', updateError);
-                          // Don't fail the sync if status update fails
-                        }
-                      }
-                      
-                      // Also update sales_orders.scanned_at for this order
-                      const { error: updateError } = await supabase
-                        .from('sales_orders')
-                        .update({ scanned_at: new Date().toISOString() })
-                        .eq('sales_order_number', orderNumber);
-                      if (updateError) setSyncResult('Error updating order: ' + updateError.message);
-                      else {
-                        let successMsg = 'Synced successfully!';
-                        if (scannedReturn.length > 0) {
-                          successMsg += ` ${scannedReturn.length} returned cylinder(s) marked as empty.`;
-                        }
-                        setSyncResult(successMsg);
-                      }
-                    }
-                  } catch (e) {
-                    setSyncResult('Error: ' + e.message);
-                  }
-                  setSyncing(false);
-                }}
+                onPress={handleFinishAndSync}
               >
                 <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Confirm & Sync</Text>
               </TouchableOpacity>
@@ -423,15 +524,15 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   cameraContainer: {
-    width: scanAreaSize,
-    height: scanAreaSize,
+    width: '100%',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
   },
   camera: {
-    width: scanAreaSize,
-    height: scanAreaSize,
-    borderRadius: 18,
+    width: '100%',
+    height: '100%',
+    borderRadius: 0,
     overflow: 'hidden',
   },
   cornerTL: {
@@ -585,6 +686,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#2563eb',
     marginBottom: 12,
+    fontWeight: 'bold',
+  },
+  connectionStatus: {
+    padding: 8,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  connectionText: {
+    fontSize: 16,
     fontWeight: 'bold',
   },
 }); 
