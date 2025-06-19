@@ -4,8 +4,9 @@ import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 export default function LoadingScreen() {
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color="#2563eb" />
-      <Text style={styles.text}>Loading...</Text>
+      <Text style={styles.title}>LessAnnoyingScan</Text>
+      <ActivityIndicator size="large" color="#2563eb" style={styles.loader} />
+      <Text style={styles.text}>Initializing...</Text>
     </View>
   );
 }
@@ -17,8 +18,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#F8FAFC',
   },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2563eb',
+    marginBottom: 20,
+  },
+  loader: {
+    marginVertical: 20,
+  },
   text: {
-    marginTop: 16,
     fontSize: 16,
     color: '#6b7280',
     fontWeight: '500',

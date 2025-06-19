@@ -62,20 +62,8 @@ export function ThemeContextProvider({ children }) {
   const setMode = (newMode) => setModeState(newMode);
   const setAccent = (newAccent) => setAccentState(newAccent);
 
-  // Convert accent color key to theme color name
-  const getAccentColorName = (accentKey) => {
-    const colorMap = {
-      'blue-600': 'blue',
-      'emerald-500': 'emerald',
-      'purple-600': 'purple',
-      'rose-500': 'rose',
-      'amber-500': 'amber',
-    };
-    return colorMap[accentKey] || 'blue';
-  };
-
   const theme = useMemo(() => 
-    createAppTheme(mode, getAccentColorName(accent)),
+    createAppTheme(mode, accent),
     [mode, accent]
   );
 
