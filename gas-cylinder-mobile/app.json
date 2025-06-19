@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Gas Cylinder Mobile",
+    "name": "LessAnnoyingScan",
     "slug": "gas-cylinder-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -42,7 +42,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Gas Cylinder Mobile to access your camera to scan barcodes."
+          "cameraPermission": "Allow LessAnnoyingScan to access your camera to scan barcodes."
         }
       ]
     ],

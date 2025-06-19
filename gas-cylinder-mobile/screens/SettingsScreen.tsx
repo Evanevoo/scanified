@@ -18,6 +18,7 @@ import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabase';
 import { SyncService } from '../services/SyncService';
 import { copyToClipboard } from '../utils/clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function SettingsScreen() {
   const navigation = useNavigation();
@@ -27,6 +28,7 @@ export default function SettingsScreen() {
   const [syncing, setSyncing] = useState(false);
   const [offlineCount, setOfflineCount] = useState(0);
   const [isConnected, setIsConnected] = useState(true);
+  const [logoutLoading, setLogoutLoading] = useState(false);
 
   useEffect(() => {
     loadOfflineData();
@@ -53,11 +55,83 @@ export default function SettingsScreen() {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
+            setLogoutLoading(true);
             try {
-              await supabase.auth.signOut();
-              // Navigation will be handled automatically by the auth state change
+              console.log('Logging out user:', user?.email);
+              
+              // Clear any stored data
+              await AsyncStorage.removeItem('rememberedEmail');
+              
+              // Sign out from Supabase
+              const { error } = await supabase.auth.signOut();
+              
+              if (error) {
+                console.error('Logout error:', error);
+                Alert.alert('Error', 'Failed to logout. Please try again.');
+              } else {
+                console.log('Logout successful');
+                Alert.alert('Success', 'You have been logged out successfully.');
+              }
             } catch (error) {
+              console.error('Logout exception:', error);
               Alert.alert('Error', 'Failed to logout. Please try again.');
+            } finally {
+              setLogoutLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleChangePassword = () => {
+    Alert.alert(
+      'Change Password',
+      'A password reset email will be sent to your email address.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send Email',
+          onPress: async () => {
+            try {
+              const { error } = await supabase.auth.resetPasswordForEmail(user?.email || '');
+              if (error) {
+                Alert.alert('Error', error.message);
+              } else {
+                Alert.alert('Success', 'Password reset email sent. Please check your inbox.');
+              }
+            } catch (error) {
+              Alert.alert('Error', 'Failed to send reset email. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleUpdateProfile = () => {
+    Alert.alert(
+      'Update Profile',
+      'Profile updates are not available in this version. Please contact support.',
+      [{ text: 'OK' }]
+    );
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'This action cannot be undone. All your data will be permanently deleted.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // This would require additional backend setup
+              Alert.alert('Not Available', 'Account deletion is not available in this version. Please contact support.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete account. Please try again.');
             }
           },
         },
@@ -199,8 +273,8 @@ export default function SettingsScreen() {
   const handleShareApp = async () => {
     try {
       await Share.share({
-        message: 'Check out this Gas Cylinder Management App!',
-        url: 'https://yourcompany.com/app',
+        message: 'Check out LessAnnoyingScan - the best gas cylinder management app!',
+        title: 'LessAnnoyingScan',
       });
     } catch (error) {
       Alert.alert('Error', 'Failed to share app.');
@@ -210,32 +284,25 @@ export default function SettingsScreen() {
   const handleDebugInfo = () => {
     const debugInfo = getDebugInfo();
     Alert.alert(
-      'Debug Information',
-      debugInfo,
-      [
-        { text: 'Copy', onPress: () => copyToClipboard(debugInfo) },
-        { text: 'Close', style: 'cancel' },
-      ]
+      'Debug Info',
+      `User: ${user?.email || 'N/A'}\nProfile: ${JSON.stringify(profile, null, 2)}\nSettings: ${JSON.stringify(settings, null, 2)}`,
+      [{ text: 'OK' }]
     );
   };
 
   const handleResetApp = () => {
     Alert.alert(
       'Reset App',
-      'This will reset the entire app to factory settings. All data will be lost. This action cannot be undone.',
+      'This will reset the app to its initial state. All data will be lost.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Reset App',
+          text: 'Reset',
           style: 'destructive',
           onPress: async () => {
             try {
-              // Clear all data
               await clearAllData();
-              // Reset settings
               await resetSettings();
-              // Sign out user
-              await supabase.auth.signOut();
               Alert.alert('Success', 'App has been reset. Please restart the app.');
             } catch (error) {
               Alert.alert('Error', 'Failed to reset app. Please try again.');
@@ -256,7 +323,7 @@ export default function SettingsScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}>
+    <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
       <Text style={[styles.title, { color: colors.primary }]}>Settings</Text>
 
       {/* Account Section */}
@@ -273,8 +340,26 @@ export default function SettingsScreen() {
         <Text style={[styles.settingText, { color: colors.primary }]}>Role</Text>
         <Text style={[styles.settingValue, { color: colors.text }]}>{profile?.role || 'user'}</Text>
       </View>
-      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleLogout}>
+      
+      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleChangePassword}>
+        <Text style={[styles.settingText, { color: colors.primary }]}>Change Password</Text>
+      </TouchableOpacity>
+      
+      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleUpdateProfile}>
+        <Text style={[styles.settingText, { color: colors.primary }]}>Update Profile</Text>
+      </TouchableOpacity>
+      
+      <TouchableOpacity 
+        style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} 
+        onPress={handleLogout}
+        disabled={logoutLoading}
+      >
         <Text style={[styles.settingText, { color: colors.danger }]}>Logout</Text>
+        {logoutLoading && <ActivityIndicator size="small" color={colors.danger} style={styles.logoutLoader} />}
+      </TouchableOpacity>
+      
+      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleDeleteAccount}>
+        <Text style={[styles.settingText, { color: colors.danger }]}>Delete Account</Text>
       </TouchableOpacity>
 
       {/* App Preferences */}
@@ -467,19 +552,8 @@ export default function SettingsScreen() {
       {profile?.role === 'admin' && (
         <>
           <Text style={[styles.sectionTitle, { color: colors.primary }]}>Admin Only</Text>
-          <TouchableOpacity 
-            style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} 
-            onPress={() => navigation.navigate('UserManagement')}
-          >
-            <Text style={[styles.settingText, { color: colors.primary }]}>Manage Users</Text>
-          </TouchableOpacity>
-          
           <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleDebugInfo}>
             <Text style={[styles.settingText, { color: colors.primary }]}>Debug Info</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleResetSettings}>
-            <Text style={[styles.settingText, { color: colors.warning }]}>Reset Settings</Text>
           </TouchableOpacity>
           
           <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleResetApp}>
@@ -552,5 +626,8 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     textAlign: 'center',
+  },
+  logoutLoader: {
+    marginLeft: 8,
   },
 });

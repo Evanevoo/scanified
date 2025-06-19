@@ -5,7 +5,7 @@
 @tailwind utilities;
 
 :root {
-  --accent: #3fffb0;
+  --accent: #2563eb;
   --font-serif: 'Playfair Display', serif;
   --font-sans: 'Inter', Arial, sans-serif;
   --text-main: #111;
@@ -57,7 +57,7 @@ nav, .nav {
 
 button, .theme-button {
   background-color: var(--accent);
-  color: var(--text-main);
+  color: white;
   border-radius: 32px;
   font-family: var(--font-sans);
   font-weight: 700;
@@ -65,12 +65,14 @@ button, .theme-button {
   letter-spacing: 0.08em;
   padding: 12px 32px;
   border: none;
-  box-shadow: 0 2px 8px rgba(63,255,176,0.08);
-  transition: background 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
+  transition: all 0.2s ease;
 }
 button:hover, .theme-button:hover {
-  background-color: #2ee9a6;
-  box-shadow: 0 4px 16px rgba(63,255,176,0.15);
+  background-color: var(--accent);
+  opacity: 0.9;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.3);
+  transform: translateY(-1px);
 }
 
 hr, .divider {
@@ -126,6 +128,20 @@ hr, .divider {
 }
 
 .theme-accent-border {
+  border-color: var(--accent) !important;
+}
+
+/* Accent color highlights */
+.accent-highlight {
+  color: var(--accent) !important;
+}
+
+.accent-bg {
+  background-color: var(--accent) !important;
+  color: white !important;
+}
+
+.accent-border {
   border-color: var(--accent) !important;
 }
 
@@ -212,50 +228,46 @@ textarea:focus {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #2ee9a6;
+  background: var(--accent);
+  opacity: 0.8;
 }
 
 /* Dark mode styles */
 .dark {
-  background-color: #1a1a1a;
-  color: #ffffff;
   --text-main: #fff;
-  --bg-main: #111;
+  --bg-main: #121212;
   --divider: #333;
 }
 
 .dark body {
-  background-color: #1a1a1a;
-  color: #ffffff;
+  background: var(--bg-main);
+  color: var(--text-main);
 }
 
-/* Dark mode overrides for Material-UI components */
 .dark .MuiAppBar-root {
-  background-color: #2d2d2d !important;
+  background-color: #1e1e1e !important;
 }
 
 .dark .MuiDrawer-paper {
-  background-color: #2d2d2d !important;
-  color: #ffffff !important;
+  background-color: #1e1e1e !important;
 }
 
 .dark .MuiPaper-root {
-  background-color: #2d2d2d !important;
-  color: #ffffff !important;
+  background-color: #1e1e1e !important;
 }
 
 .dark .MuiTableCell-root {
-  color: #ffffff !important;
+  color: #fff !important;
 }
 
 .dark .MuiTableHead-root .MuiTableCell-root {
-  background-color: #3d3d3d !important;
+  background-color: #2a2a2a !important;
 }
 
-/* Import notification animations */
+/* Animation keyframes */
 @keyframes slide-in {
   from {
-    transform: translateX(100%);
+    transform: translateX(-100%);
     opacity: 0;
   }
   to {
@@ -275,10 +287,23 @@ textarea:focus {
   }
 }
 
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .animate-slide-in {
   animation: slide-in 0.3s ease-out;
 }
 
 .animate-slide-out {
   animation: slide-out 0.3s ease-in;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
 } 

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { View, ActivityIndicator } from 'react-native';
 
 interface Settings {
   theme: 'light' | 'dark' | 'auto';
@@ -17,6 +18,7 @@ interface SettingsContextType {
   clearAllData: () => Promise<void>;
   resetSettings: () => Promise<void>;
   getDebugInfo: () => string;
+  isLoaded: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -57,6 +59,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     } catch (error) {
       console.error('Error loading settings:', error);
+      // Keep default settings if loading fails
     } finally {
       setIsLoaded(true);
     }
@@ -113,10 +116,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }, null, 2);
   };
 
-  if (!isLoaded) {
-    return null; // Or a loading component
-  }
-
+  // Always provide the context, even while loading
   return (
     <SettingsContext.Provider
       value={{
@@ -125,6 +125,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         clearAllData,
         resetSettings,
         getDebugInfo,
+        isLoaded,
       }}
     >
       {children}

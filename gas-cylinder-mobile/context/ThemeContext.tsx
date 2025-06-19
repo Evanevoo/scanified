@@ -60,11 +60,13 @@ export const useTheme = () => {
 };
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { settings } = useSettings();
+  const { settings, isLoaded } = useSettings();
   const systemColorScheme = useColorScheme();
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
+    if (!isLoaded) return; // Don't update theme until settings are loaded
+    
     let shouldBeDark = false;
     
     switch (settings.theme) {
@@ -77,12 +79,16 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       case 'auto':
         shouldBeDark = systemColorScheme === 'dark';
         break;
+      default:
+        shouldBeDark = systemColorScheme === 'dark';
+        break;
     }
     
     setIsDark(shouldBeDark);
-  }, [settings.theme, systemColorScheme]);
+  }, [settings.theme, systemColorScheme, isLoaded]);
 
-  const colors = isDark ? darkTheme : lightTheme;
+  // Use light theme as default while loading
+  const colors = isLoaded ? (isDark ? darkTheme : lightTheme) : lightTheme;
 
   return (
     <ThemeContext.Provider value={{ colors, isDark }}>

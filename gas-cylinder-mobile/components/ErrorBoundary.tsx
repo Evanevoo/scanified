@@ -85,6 +85,9 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 }
 
+// Default export for easier importing
+export default ErrorBoundary;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
