@@ -10,6 +10,12 @@ build/
 *.tgz
 *.tar.gz
 
+# APK and large build files
+*.apk
+*.aab
+*.ipa
+*.app
+
 # Environment variables
 .env
 .env.local
