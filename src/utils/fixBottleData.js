@@ -1,4 +1,4 @@
-import { supabase } from '../../supabase';
+import { supabase } from '../supabase/client';
 
 /**
  * Fix bottles with NULL values in required fields

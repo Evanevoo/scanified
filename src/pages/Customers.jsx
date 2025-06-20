@@ -4,6 +4,45 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination
 } from '@mui/material';
+import { ErrorBoundary } from 'react-error-boundary';
+
+// Add error boundary wrapper
+function CustomersErrorBoundary({ children }) {
+  const [hasError, setHasError] = useState(false);
+  const [error, setError] = useState(null);
+
+  if (hasError) {
+    return (
+      <Box p={3}>
+        <Typography variant="h6" color="error">
+          Error loading Customers page
+        </Typography>
+        <Typography variant="body2" color="textSecondary">
+          {error?.message || 'An unknown error occurred'}
+        </Typography>
+        <Button 
+          variant="contained" 
+          onClick={() => window.location.reload()}
+          sx={{ mt: 2 }}
+        >
+          Reload Page
+        </Button>
+      </Box>
+    );
+  }
+
+  return (
+    <ErrorBoundary
+      onError={(error) => {
+        console.error('Customers component error:', error);
+        setError(error);
+        setHasError(true);
+      }}
+    >
+      {children}
+    </ErrorBoundary>
+  );
+}
 
 function exportToCSV(customers) {
   if (!customers.length) return;
@@ -40,6 +79,8 @@ function exportToCSV(customers) {
 }
 
 function Customers({ profile }) {
+  console.log('Customers component rendering, profile:', profile);
+  
   const [customers, setCustomers] = useState([]);
   const [form, setForm] = useState({ CustomerListID: '', name: '', contact_details: '', phone: '' });
   const [editingId, setEditingId] = useState(null);
@@ -59,15 +100,21 @@ function Customers({ profile }) {
   // Fetch customers with pagination
   useEffect(() => {
     const fetchCustomers = async () => {
+      console.log('Fetching customers...');
       setLoading(true);
       try {
         const from = (page - 1) * rowsPerPage;
         const to = from + rowsPerPage - 1;
 
         // Get total count
-        const { count } = await supabase
+        const { count, error: countError } = await supabase
           .from('customers')
           .select('*', { count: 'exact', head: true });
+
+        if (countError) {
+          console.error('Error getting count:', countError);
+          throw countError;
+        }
 
         setTotalCount(count || 0);
 
@@ -78,25 +125,35 @@ function Customers({ profile }) {
           .order('name')
           .range(from, to);
 
-        if (error) throw error;
+        if (error) {
+          console.error('Error fetching customers:', error);
+          throw error;
+        }
+        
+        console.log('Customers fetched successfully:', data?.length || 0);
         setCustomers(data || []);
 
         // Fetch asset counts for these customers
         if (data && data.length > 0) {
           const customerIds = data.map(c => c.CustomerListID);
-          const { data: rentalData } = await supabase
+          const { data: rentalData, error: rentalError } = await supabase
             .from('rentals')
             .select('customer_id')
             .in('customer_id', customerIds)
             .is('rental_end_date', null); // Only active rentals
 
-          const counts = {};
-          rentalData?.forEach(rental => {
-            counts[rental.customer_id] = (counts[rental.customer_id] || 0) + 1;
-          });
-          setAssetCounts(counts);
+          if (rentalError) {
+            console.error('Error fetching rental data:', rentalError);
+          } else {
+            const counts = {};
+            rentalData?.forEach(rental => {
+              counts[rental.customer_id] = (counts[rental.customer_id] || 0) + 1;
+            });
+            setAssetCounts(counts);
+          }
         }
       } catch (err) {
+        console.error('Error in fetchCustomers:', err);
         setError(err.message);
       }
       setLoading(false);
@@ -472,4 +529,4 @@ function Customers({ profile }) {
   );
 }
 
-export default Customers; 
+export default CustomersErrorBoundary(Customers); 

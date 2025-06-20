@@ -1,4 +1,4 @@
-import { supabase } from '../../supabase';
+import { supabase } from '../supabase/client';
 
 /**
  * Updates the days_at_location field for all bottles

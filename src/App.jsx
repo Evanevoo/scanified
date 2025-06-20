@@ -1,10 +1,32 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from './hooks/useAuth';
-import MainLayout from './components/MainLayout';
+import { Toaster } from 'react-hot-toast';
+import { AuthProvider } from './hooks/useAuth';
 import { ImportProgressProvider } from './components/ImportProgressContext';
+import { PermissionsProvider } from './context/PermissionsContext';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorBoundary from './components/ErrorBoundary';
+import ProtectedRoute from './components/ProtectedRoute';
+import OrganizationSetup from './pages/OrganizationSetup';
+import Billing from './pages/Billing';
+import OwnerDashboard from './pages/OwnerDashboard';
+import CustomerPortal from './pages/CustomerPortal';
+import CustomerRegistration from './pages/CustomerRegistration';
+import OrganizationRegistration from './pages/OrganizationRegistration';
+import AnalyticsDashboard from './pages/AnalyticsDashboard';
+import DeliveryManagement from './pages/DeliveryManagement';
+import LandingPage from './pages/LandingPage';
+import DebugAuth from './pages/DebugAuth';
+import TestSupabase from './pages/TestSupabase';
+import CustomerBillingPortal from './pages/CustomerBillingPortal';
+import OwnerPortal from './pages/OwnerPortal';
+import ResetPassword from './pages/ResetPassword';
+import ContactUs from './pages/ContactUs';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfService from './pages/TermsOfService';
+import PricingPage from './pages/PricingPage';
+import Documentation from './pages/Documentation';
+import CustomPageViewer from './pages/CustomPageViewer';
 
 // Lazy load all page components
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -61,204 +83,133 @@ const Bottles = lazy(() => import('./pages/Bottles'));
 // Import background service for automatic daily updates
 import './utils/backgroundService';
 
-function App() {
-  const { user, profile, loading } = useAuth();
-
-  if (loading) return <LoadingSpinner />;
-
-  const isAuthenticated = !!user;
-
+function AppContent() {
   return (
     <ErrorBoundary>
       <ImportProgressProvider>
         <Router>
-          <Routes>
-            <Route path="/login" element={
-              <Suspense fallback={<LoadingSpinner />}>
-                <LoginPage />
-              </Suspense>
-            } />
-            <Route element={<MainLayout />}>
-              <Route path="/" element={<Navigate to="/home" />} />
-              <Route path="/dashboard" element={<Navigate to="/home" replace />} />
-              <Route path="/customers" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Customers user={user} profile={profile} />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/customers/:id" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <CustomerDetail />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/assets/:id/history" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <AssetHistory />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/assets/history-lookup" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <AssetHistoryLookup />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/cylinders" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Cylinders user={user} profile={profile} />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/all-gas-assets" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Cylinders user={user} profile={profile} />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/rentals" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Rentals user={user} profile={profile} />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/invoices" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Invoices user={user} profile={profile} />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/home" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Home user={user} profile={profile} />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/settings" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Settings />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/favorites" element={
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Favorites />
-                </Suspense>
-              } />
-              <Route path="/custom-reports" element={
-                <Suspense fallback={<LoadingSpinner />}>
-                  <CustomReports />
-                </Suspense>
-              } />
-              <Route path="/orders-report" element={
-                <Suspense fallback={<LoadingSpinner />}>
-                  <SupabaseOrders />
-                </Suspense>
-              } />
-              <Route path="/quick-add" element={
-                <Suspense fallback={<LoadingSpinner />}>
-                  <QuickAdd />
-                </Suspense>
-              } />
-              <Route path="/lot-reports" element={
-                <Suspense fallback={<LoadingSpinner />}>
-                  <LotReports />
-                </Suspense>
-              } />
-              <Route path="/regular-maintenance" element={
-                <Suspense fallback={<LoadingSpinner />}>
-                  <RegularMaintenance />
-                </Suspense>
-              } />
-              <Route path="/locations" element={
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Locations />
-                </Suspense>
-              } />
-              <Route path="/search" element={
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Search />
-                </Suspense>
-              } />
-              <Route path="/create-records" element={
-                <Suspense fallback={<LoadingSpinner />}>
-                  <CreateRecords />
-                </Suspense>
-              } />
-              <Route path="/alerts" element={
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Alerts />
-                </Suspense>
-              } />
-              <Route path="/mobile-units" element={
-                <Suspense fallback={<LoadingSpinner />}>
-                  <MobileUnits />
-                </Suspense>
-              } />
-              <Route path="/rental/*" element={
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Rental />
-                </Suspense>
-              } />
-              <Route path="/import" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Import />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/import-approvals" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <ImportApprovals />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/history" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <ImportApprovalsHistory />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/import-customer-info" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <ImportCustomerInfo />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/import-sales-receipts" element={<Navigate to="/import" replace />} />
-              <Route path="/import-invoices" element={<Navigate to="/import" replace />} />
-              <Route path="/import-history" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <ImportHistory />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/all-asset-movements" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <AllAssetMovements />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/scanned-orders" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <ScannedOrders />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/user-management" element={isAuthenticated && profile?.role === 'admin' ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <UserManagement />
-                </Suspense>
-              ) : <Navigate to="/home" />} />
-              <Route path="/bottle-management" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <BottleImport />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/integrations" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Integrations />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/bottles/:barcode_number" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <BottleDetail />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="/bottles" element={isAuthenticated ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <Bottles />
-                </Suspense>
-              ) : <Navigate to="/login" />} />
-              <Route path="*" element={<Navigate to="/home" />} />
-            </Route>
-          </Routes>
+          <PermissionsProvider>
+            <Toaster 
+              position="top-right"
+              toastOptions={{
+                duration: 5000,
+                style: {
+                  background: '#363636',
+                  color: '#fff',
+                },
+                success: {
+                  duration: 3000,
+                  iconTheme: {
+                    primary: '#4ade80',
+                    secondary: '#fff',
+                  },
+                },
+                error: {
+                  duration: 4000,
+                  iconTheme: {
+                    primary: '#ef4444',
+                    secondary: '#fff',
+                  },
+                },
+              }}
+            />
+            <Suspense fallback={<LoadingSpinner />}>
+              <Routes>
+                {/* --- Public Routes --- */}
+                <Route path="/" element={<LandingPage />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/register" element={<OrganizationRegistration />} />
+                <Route path="/setup" element={<OrganizationSetup />} />
+                <Route path="/contact" element={<ContactUs />} />
+                <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+                <Route path="/terms-of-service" element={<TermsOfService />} />
+                <Route path="/pricing" element={<PricingPage />} />
+                <Route path="/documentation" element={<Documentation />} />
+                <Route path="/p/:slug" element={<CustomPageViewer />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
+                <Route path="/customer-register" element={<CustomerRegistration />} />
+                <Route path="/portal" element={<CustomerPortal />} />
+
+                {/* --- Semi-Protected Owner Portal --- */}
+                <Route path="/owner-portal" element={<OwnerPortal />} />
+
+                {/* --- Debug Routes --- */}
+                <Route path="/debug" element={<DebugAuth />} />
+                <Route path="/test" element={<TestSupabase />} />
+
+                {/* --- ALL Protected Routes Go Here --- */}
+                <Route element={<ProtectedRoute />}>
+                  <Route path="/dashboard" element={<Home />} />
+                  <Route path="/customers" element={<Customers />} />
+                  <Route path="/cylinders" element={<Cylinders />} />
+                  <Route path="/bottles" element={<Bottles />} />
+                  <Route path="/rentals" element={<Rentals />} />
+                  <Route path="/invoices" element={<Invoices />} />
+                  <Route path="/favorites" element={<Favorites />} />
+                  <Route path="/custom-reports" element={<CustomReports />} />
+                  <Route path="/analytics" element={<AnalyticsDashboard />} />
+                  <Route path="/delivery-management" element={<DeliveryManagement />} />
+                  <Route path="/reports/all-assets" element={<AllAssetsReport />} />
+                  <Route path="/reports/asset-type-changes" element={<AssetTypeChangesReport />} />
+                  <Route path="/reports/assets-by-customer" element={<AssetsByCustomerReport />} />
+                  <Route path="/reports/audits-to-delivery" element={<AuditsToDeliveryRecordsReport />} />
+                  <Route path="/reports/balance-changes" element={<BalanceChangesSummaryReport />} />
+                  <Route path="/reports/customer-deliveries" element={<CustomerDeliveriesReport />} />
+                  <Route path="/reports/deliveries-by-location" element={<DeliveriesByLocationReport />} />
+                  <Route path="/reports/delivery-totals" element={<DeliveryTotalsByUserReport />} />
+                  <Route path="/reports/lost-assets" element={<LostAssetsReport />} />
+                  <Route path="/reports/movement-between-locations" element={<MovementBetweenLocationsReport />} />
+                  <Route path="/reports/negative-balance" element={<NegativeBalanceReport />} />
+                  <Route path="/reports/new-assets" element={<NewAssetsAddedReport />} />
+                  <Route path="/reports/not-scanned-source" element={<NotScannedSourceReport />} />
+                  <Route path="/reports/overdue-assets" element={<OverdueAssetSearchReport />} />
+                  <Route path="/reports/print-days" element={<PrintDaysRecordsReport />} />
+                  <Route path="/reports/quick-map" element={<QuickMapReport />} />
+                  <Route path="/reports/supabase-orders" element={<SupabaseOrders />} />
+                  <Route path="/quick-add" element={<QuickAdd />} />
+                  <Route path="/lot-reports" element={<LotReports />} />
+                  <Route path="/regular-maintenance" element={<RegularMaintenance />} />
+                  <Route path="/locations" element={<Locations />} />
+                  <Route path="/search" element={<Search />} />
+                  <Route path="/create-records" element={<CreateRecords />} />
+                  <Route path="/alerts" element={<Alerts />} />
+                  <Route path="/mobile-units" element={<MobileUnits />} />
+                  <Route path="/rental" element={<Rental />} />
+                  <Route path="/customer/:id" element={<CustomerDetail />} />
+                  <Route path="/asset-history" element={<AssetHistory />} />
+                  <Route path="/asset-history-lookup" element={<AssetHistoryLookup />} />
+                  <Route path="/import-history" element={<ImportHistory />} />
+                  <Route path="/all-asset-movements" element={<AllAssetMovements />} />
+                  <Route path="/import" element={<Import />} />
+                  <Route path="/settings" element={<Settings />} />
+                  <Route path="/import-customer-info" element={<ImportCustomerInfo />} />
+                  <Route path="/scanned-orders" element={<ScannedOrders />} />
+                  <Route path="/user-management" element={<UserManagement />} />
+                  <Route path="/bottle-import" element={<BottleImport />} />
+                  <Route path="/import-approvals" element={<ImportApprovals />} />
+                  <Route path="/import-approvals-history" element={<ImportApprovalsHistory />} />
+                  <Route path="/integrations" element={<Integrations />} />
+                  <Route path="/bottle/:id" element={<BottleDetail />} />
+                  <Route path="/orders" element={<ScannedOrders />} />
+                  <Route path="/billing" element={<Billing />} />
+                </Route>
+                
+                {/* Catch-all for any other unmatched routes */}
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </Suspense>
+          </PermissionsProvider>
         </Router>
       </ImportProgressProvider>
     </ErrorBoundary>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

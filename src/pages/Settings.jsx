@@ -35,7 +35,10 @@ import {
   Card,
   CardContent,
   Tooltip,
-  Badge
+  Badge,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -45,6 +48,9 @@ import BusinessIcon from '@mui/icons-material/Business';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import DataUsageIcon from '@mui/icons-material/DataUsage';
 import SaveIcon from '@mui/icons-material/Save';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import PaymentIcon from '@mui/icons-material/Payment';
 import { useThemeContext } from '../context/ThemeContext';
 import UserManagement from './UserManagement';
 
@@ -87,7 +93,7 @@ const colorMap = {
 };
 
 export default function Settings() {
-  const { user, profile } = useAuth();
+  const { user, profile, organization } = useAuth();
   const navigate = useNavigate();
   const { mode, setMode, accent, setAccent } = useThemeContext();
   const [activeTab, setActiveTab] = useState(0);
@@ -230,12 +236,14 @@ export default function Settings() {
   // Theme update
   const handleThemeChange = (t) => {
     setMode(t);
+    setProfileChanged(true);
     setNotifMsg('Theme updated successfully!');
     setNotifSnackbar(true);
   };
 
   const handleColorChange = (c) => {
     setAccent(c);
+    setProfileChanged(true);
     setNotifMsg('Accent color updated successfully!');
     setNotifSnackbar(true);
   };
@@ -337,9 +345,9 @@ export default function Settings() {
   }, [fullName, profile?.full_name]);
 
   return (
-    <Box maxWidth={800} mx="auto" mt={8}>
+    <Box maxWidth={1200} mx="auto" mt={8} mb={4}>
       <Paper elevation={3} sx={{ p: 4, borderRadius: 4, bgcolor: 'background.default' }}>
-        <Stack direction="row" alignItems="center" spacing={2} mb={2}>
+        <Stack direction="row" alignItems="center" spacing={2} mb={4}>
           <IconButton color="primary" onClick={() => navigate('/dashboard')}>
             <ArrowBackIcon />
           </IconButton>
@@ -347,554 +355,521 @@ export default function Settings() {
             Settings
           </Typography>
         </Stack>
-        <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 3 }} variant="scrollable" scrollButtons="auto">
-          <Tab label="Profile" />
-          <Tab label="Security" />
-          <Tab label="Appearance" />
-          <Tab label="Notifications" />
-          <Tab label="Business Logic" />
-          <Tab label="Data & Export" />
-          {profile?.role === 'admin' && <Tab label="Admin" />}
-        </Tabs>
-        
-        {/* Profile Tab */}
-        {activeTab === 0 && (
-          <Box component="form" onSubmit={handleProfileSave} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <TextField
-              label="Full Name"
-              variant="outlined"
-              value={fullName}
-              onChange={e => setFullName(e.target.value)}
-              fullWidth
-            />
-            <TextField
-              label="Email"
-              variant="outlined"
-              value={email}
-              disabled
-              fullWidth
-            />
-            <Button 
-              type="submit" 
-              variant="contained" 
-              color="primary" 
-              startIcon={<SaveIcon />}
-              disabled={!profileChanged}
-              sx={{ mt: 2, width: 150 }}
-            >
-              {profileChanged ? 'Save Changes' : 'Saved'}
-            </Button>
-            <Snackbar open={profileSnackbar} autoHideDuration={3000} onClose={() => setProfileSnackbar(false)}>
-              <Alert onClose={() => setProfileSnackbar(false)} severity={profileMsg.includes('successfully') ? 'success' : 'error'} sx={{ width: '100%' }}>
-                {profileMsg}
-              </Alert>
-            </Snackbar>
-          </Box>
-        )}
 
-        {/* Security Tab */}
-        {activeTab === 1 && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Session Management</Typography>
-                <FormControlLabel
-                  control={<Switch checked={securitySettings.loginHistory} onChange={(e) => handleSecurityChange('loginHistory', e.target.checked)} />}
-                  label="Track Login History"
-                />
-                <Box sx={{ mt: 2 }}>
-                  <Typography gutterBottom>Session Timeout (minutes)</Typography>
-                  <Slider
-                    value={securitySettings.sessionTimeout}
-                    onChange={(e, value) => handleSecurityChange('sessionTimeout', value)}
-                    min={15}
-                    max={120}
-                    step={15}
-                    marks
-                    valueLabelDisplay="auto"
-                  />
-                  <Typography variant="caption" color="text.secondary">
-                    Current: {securitySettings.sessionTimeout} minutes
-                  </Typography>
-                </Box>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Password Security</Typography>
-                <FormControlLabel
-                  control={<Switch checked={securitySettings.passwordRequirements} onChange={(e) => handleSecurityChange('passwordRequirements', e.target.checked)} />}
-                  label="Enforce Strong Password Requirements"
-                />
-                <FormControlLabel
-                  control={<Switch checked={securitySettings.accountLockout} onChange={(e) => handleSecurityChange('accountLockout', e.target.checked)} />}
-                  label="Account Lockout After Failed Attempts"
-                />
-                {securitySettings.accountLockout && (
-                  <Box sx={{ mt: 2 }}>
-                    <Typography gutterBottom>Failed Attempts Before Lockout</Typography>
-                    <Slider
-                      value={securitySettings.failedAttempts}
-                      onChange={(e, value) => handleSecurityChange('failedAttempts', value)}
-                      min={3}
-                      max={10}
-                      step={1}
-                      marks
-                      valueLabelDisplay="auto"
-                    />
-                  </Box>
-                )}
-              </CardContent>
-            </Card>
-
-            <Box component="form" onSubmit={handlePasswordSave} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Typography variant="h6">Change Password</Typography>
-              <TextField
-                label="New Password"
-                type="password"
-                variant="outlined"
-                value={newPassword}
-                onChange={e => setNewPassword(e.target.value)}
-                fullWidth
-                helperText="Password must be at least 6 characters long"
-              />
-              <TextField
-                label="Confirm New Password"
-                type="password"
-                variant="outlined"
-                value={confirmPassword}
-                onChange={e => setConfirmPassword(e.target.value)}
-                fullWidth
-              />
-              <Button type="submit" variant="contained" color="primary" sx={{ mt: 2, width: 180 }}>
-                Change Password
-              </Button>
-              <Snackbar open={passwordSnackbar} autoHideDuration={3000} onClose={() => setPasswordSnackbar(false)}>
-                <Alert onClose={() => setPasswordSnackbar(false)} severity={passwordMsg.includes('successfully') ? 'success' : 'error'} sx={{ width: '100%' }}>
-                  {passwordMsg}
-                </Alert>
-              </Snackbar>
-            </Box>
-
-            <Button 
-              variant="contained" 
-              color="primary" 
-              startIcon={<SaveIcon />}
-              disabled={!securityChanged}
-              onClick={handleSecuritySave}
-              sx={{ mt: 2, width: 150 }}
-            >
-              {securityChanged ? 'Save Security Settings' : 'Security Settings Saved'}
-            </Button>
-          </Box>
-        )}
-
-        {/* Appearance Tab */}
-        {activeTab === 2 && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Theme Settings</Typography>
-                <FormControl fullWidth sx={{ mb: 2 }}>
-                  <InputLabel>Theme</InputLabel>
-                  <Select
-                    value={mode}
-                    label="Theme"
-                    onChange={e => handleThemeChange(e.target.value)}
-                  >
-                    <MenuItem value="light">Light</MenuItem>
-                    <MenuItem value="dark">Dark</MenuItem>
-                  </Select>
-                </FormControl>
-                <FormControl fullWidth sx={{ mb: 2 }}>
-                  <InputLabel>Import Customers Page Theme</InputLabel>
-                  <Select
-                    value={importCustomersTheme}
-                    label="Import Customers Page Theme"
-                    onChange={e => handleImportThemeChange(e.target.value)}
-                  >
-                    <MenuItem value="system">System/Global</MenuItem>
-                    <MenuItem value="light">Light</MenuItem>
-                    <MenuItem value="dark">Dark</MenuItem>
-                  </Select>
-                </FormControl>
-                <Button 
-                  variant="contained" 
-                  color="primary" 
-                  startIcon={<SaveIcon />}
-                  disabled={!importThemeChanged}
-                  onClick={handleImportThemeSave}
-                  sx={{ width: 200 }}
-                >
-                  {importThemeChanged ? 'Save Import Theme' : 'Import Theme Saved'}
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Accent Color</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Choose your accent color for highlights, buttons, and tabs
-                </Typography>
-                <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
-                  {themeColors.map(tc => (
-                    <Tooltip key={tc.value} title={tc.name}>
-                      <IconButton
-                        onClick={() => handleColorChange(tc.value)}
-                        sx={{
-                          width: 50,
-                          height: 50,
-                          borderRadius: '50%',
-                          border: accent === tc.value ? `4px solid #fff` : '2px solid #ccc',
-                          background: colorMap[tc.value],
-                          boxShadow: accent === tc.value ? '0 0 0 4px rgba(0,0,0,0.2)' : 'none',
-                          '&:hover': {
-                            transform: 'scale(1.1)',
-                            boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
-                          },
-                        }}
-                      >
-                        {accent === tc.value && (
-                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M5 13l4 4L19 7" />
-                          </svg>
-                        )}
-                      </IconButton>
-                    </Tooltip>
-                  ))}
+        <Grid container spacing={3}>
+          {/* Profile Settings */}
+          <Grid item xs={12} md={6}>
+            <Accordion defaultExpanded>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Stack direction="row" alignItems="center" spacing={2}>
+                  <AccountCircleIcon color="primary" />
+                  <Typography variant="h6">Profile Settings</Typography>
                 </Stack>
-                <Typography variant="caption" color="text.secondary">
-                  Selected: {themeColors.find(tc => tc.value === accent)?.name || 'Blue'}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Box>
-        )}
-
-        {/* Notifications Tab */}
-        {activeTab === 3 && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Notification Channels</Typography>
-                <FormControlLabel
-                  control={<Switch checked={notifications.email} onChange={() => handleNotifChange('email')} />}
-                  label="Email Notifications"
-                />
-                <FormControlLabel
-                  control={<Switch checked={notifications.inApp} onChange={() => handleNotifChange('inApp')} />}
-                  label="In-App Notifications"
-                />
-                <FormControlLabel
-                  control={<Switch checked={notifications.browser} onChange={() => handleNotifChange('browser')} />}
-                  label="Browser Push Notifications"
-                />
-                <FormControlLabel
-                  control={<Switch checked={notifications.sms} onChange={() => handleNotifChange('sms')} />}
-                  label="SMS Notifications"
-                />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Notification Types</Typography>
-                <FormControlLabel
-                  control={<Switch checked={notifications.dailySummary} onChange={() => handleNotifChange('dailySummary')} />}
-                  label="Daily Summary Reports"
-                />
-                <FormControlLabel
-                  control={<Switch checked={notifications.alerts} onChange={() => handleNotifChange('alerts')} />}
-                  label="Critical Alerts"
-                />
-                <FormControlLabel
-                  control={<Switch checked={notifications.reports} onChange={() => handleNotifChange('reports')} />}
-                  label="Weekly/Monthly Reports"
-                />
-              </CardContent>
-            </Card>
-
-            <Button 
-              variant="contained" 
-              color="primary" 
-              startIcon={<SaveIcon />}
-              disabled={!notificationsChanged}
-              onClick={handleNotificationsSave}
-              sx={{ width: 200 }}
-            >
-              {notificationsChanged ? 'Save Notification Settings' : 'Notification Settings Saved'}
-            </Button>
-
-            <Snackbar open={notifSnackbar} autoHideDuration={3000} onClose={() => setNotifSnackbar(false)}>
-              <Alert onClose={() => setNotifSnackbar(false)} severity="success" sx={{ width: '100%' }}>
-                {notifMsg}
-              </Alert>
-            </Snackbar>
-          </Box>
-        )}
-
-        {/* Business Logic Tab */}
-        {activeTab === 4 && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Scan Settings</Typography>
-                <FormControl fullWidth sx={{ mb: 2 }}>
-                  <InputLabel>Default Scan Mode</InputLabel>
-                  <Select
-                    value={businessSettings.defaultScanMode}
-                    label="Default Scan Mode"
-                    onChange={(e) => handleBusinessChange('defaultScanMode', e.target.value)}
+              </AccordionSummary>
+              <AccordionDetails>
+                <Box component="form" onSubmit={handleProfileSave} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <TextField
+                    label="Full Name"
+                    value={fullName}
+                    onChange={(e) => {
+                      setFullName(e.target.value);
+                      setProfileChanged(true);
+                    }}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Email"
+                    value={email}
+                    fullWidth
+                    disabled
+                  />
+                  <Button 
+                    type="submit" 
+                    variant="contained" 
+                    color="primary"
+                    disabled={!profileChanged}
+                    startIcon={<SaveIcon />}
                   >
-                    <MenuItem value="SHIP">Ship</MenuItem>
-                    <MenuItem value="RETURN">Return</MenuItem>
-                  </Select>
-                </FormControl>
-                <FormControlLabel
-                  control={<Switch checked={businessSettings.autoAssignment} onChange={(e) => handleBusinessChange('autoAssignment', e.target.checked)} />}
-                  label="Auto-assign Cylinders to Customers"
-                />
-              </CardContent>
-            </Card>
+                    Save Profile
+                  </Button>
+                </Box>
+              </AccordionDetails>
+            </Accordion>
+          </Grid>
 
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Billing Preferences</Typography>
-                <FormControlLabel
-                  control={<Switch checked={businessSettings.billingPreferences.taxIncluded} onChange={(e) => handleBusinessChange('billingPreferences', { ...businessSettings.billingPreferences, taxIncluded: e.target.checked })} />}
-                  label="Tax Included in Prices"
-                />
-                <FormControl fullWidth sx={{ mt: 2 }}>
-                  <InputLabel>Currency</InputLabel>
-                  <Select
-                    value={businessSettings.billingPreferences.currency}
-                    label="Currency"
-                    onChange={(e) => handleBusinessChange('billingPreferences', { ...businessSettings.billingPreferences, currency: e.target.value })}
+          {/* Billing & Subscription */}
+          <Grid item xs={12} md={6}>
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Stack direction="row" alignItems="center" spacing={2}>
+                  <PaymentIcon color="primary" />
+                  <Typography variant="h6">Billing & Subscription</Typography>
+                </Stack>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={2}>
+                  <Typography variant="body2" color="text.secondary">
+                    Manage your subscription plan and billing information.
+                  </Typography>
+                  <Button 
+                    variant="contained" 
+                    color="primary"
+                    onClick={() => navigate('/billing')}
+                    fullWidth
+                    startIcon={<PaymentIcon />}
                   >
-                    <MenuItem value="USD">USD ($)</MenuItem>
-                    <MenuItem value="EUR">EUR (€)</MenuItem>
-                    <MenuItem value="GBP">GBP (£)</MenuItem>
-                    <MenuItem value="CAD">CAD (C$)</MenuItem>
-                  </Select>
-                </FormControl>
-              </CardContent>
-            </Card>
+                    Manage Billing & Plans
+                  </Button>
+                  {organization && (
+                    <Box>
+                      <Typography variant="body2" color="text.secondary">
+                        Current Plan: <Chip label={organization.subscription_plan || 'Trial'} size="small" />
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Organization: {organization.name}
+                      </Typography>
+                      {organization.trial_end_date && (
+                        <Typography variant="body2" color="text.secondary">
+                          Trial ends: {new Date(organization.trial_end_date).toLocaleDateString()}
+                        </Typography>
+                      )}
+                    </Box>
+                  )}
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+          </Grid>
 
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Customer Defaults</Typography>
-                <FormControlLabel
-                  control={<Switch checked={businessSettings.customerDefaults.autoGroup} onChange={(e) => handleBusinessChange('customerDefaults', { ...businessSettings.customerDefaults, autoGroup: e.target.checked })} />}
-                  label="Auto-group Similar Customers"
-                />
-                <FormControl fullWidth sx={{ mt: 2 }}>
-                  <InputLabel>Default Customer Status</InputLabel>
-                  <Select
-                    value={businessSettings.customerDefaults.defaultStatus}
-                    label="Default Customer Status"
-                    onChange={(e) => handleBusinessChange('customerDefaults', { ...businessSettings.customerDefaults, defaultStatus: e.target.value })}
-                  >
-                    <MenuItem value="active">Active</MenuItem>
-                    <MenuItem value="inactive">Inactive</MenuItem>
-                    <MenuItem value="pending">Pending</MenuItem>
-                  </Select>
-                </FormControl>
-              </CardContent>
-            </Card>
+          {/* Security Settings */}
+          <Grid item xs={12} md={6}>
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Stack direction="row" alignItems="center" spacing={2}>
+                  <SecurityIcon color="primary" />
+                  <Typography variant="h6">Security</Typography>
+                </Stack>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={3}>
+                  {/* Password Change */}
+                  <Box component="form" onSubmit={handlePasswordSave}>
+                    <Typography variant="subtitle1" gutterBottom>Change Password</Typography>
+                    <Stack spacing={2}>
+                      <TextField
+                        type="password"
+                        label="New Password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        fullWidth
+                      />
+                      <TextField
+                        type="password"
+                        label="Confirm Password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        fullWidth
+                      />
+                      <Button type="submit" variant="contained" color="primary">
+                        Update Password
+                      </Button>
+                    </Stack>
+                  </Box>
+                  
+                  <Divider />
+                  
+                  {/* Security Preferences */}
+                  <Box>
+                    <Typography variant="subtitle1" gutterBottom>Security Preferences</Typography>
+                    <Stack spacing={2}>
+                      <FormControlLabel
+                        control={<Switch checked={securitySettings.loginHistory} onChange={(e) => handleSecurityChange('loginHistory', e.target.checked)} />}
+                        label="Track Login History"
+                      />
+                      <FormControlLabel
+                        control={<Switch checked={securitySettings.twoFactorEnabled} onChange={(e) => handleSecurityChange('twoFactorEnabled', e.target.checked)} />}
+                        label="Two-Factor Authentication"
+                      />
+                      <Box>
+                        <Typography gutterBottom>Session Timeout (minutes)</Typography>
+                        <Slider
+                          value={securitySettings.sessionTimeout}
+                          onChange={(e, value) => handleSecurityChange('sessionTimeout', value)}
+                          min={15}
+                          max={120}
+                          step={15}
+                          marks
+                          valueLabelDisplay="auto"
+                        />
+                        <Typography variant="caption" color="text.secondary">
+                          Current: {securitySettings.sessionTimeout} minutes
+                        </Typography>
+                      </Box>
+                      <Button 
+                        variant="outlined" 
+                        color="primary"
+                        onClick={handleSecuritySave}
+                        disabled={!securityChanged}
+                        startIcon={<SaveIcon />}
+                      >
+                        Save Security Settings
+                      </Button>
+                    </Stack>
+                  </Box>
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+          </Grid>
 
-            <Button 
-              variant="contained" 
-              color="primary" 
-              startIcon={<SaveIcon />}
-              disabled={!businessChanged}
-              onClick={handleBusinessSave}
-              sx={{ width: 200 }}
-            >
-              {businessChanged ? 'Save Business Settings' : 'Business Settings Saved'}
-            </Button>
-          </Box>
-        )}
+          {/* Appearance Settings */}
+          <Grid item xs={12} md={6}>
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Stack direction="row" alignItems="center" spacing={2}>
+                  <DataUsageIcon color="primary" />
+                  <Typography variant="h6">Appearance</Typography>
+                </Stack>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={3}>
+                  {/* Theme Selection */}
+                  <Box>
+                    <Typography variant="subtitle1" gutterBottom>Theme</Typography>
+                    <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+                      <Button
+                        variant={mode === 'light' ? 'contained' : 'outlined'}
+                        onClick={() => handleThemeChange('light')}
+                        size="small"
+                      >
+                        Light
+                      </Button>
+                      <Button
+                        variant={mode === 'dark' ? 'contained' : 'outlined'}
+                        onClick={() => handleThemeChange('dark')}
+                        size="small"
+                      >
+                        Dark
+                      </Button>
+                      <Button
+                        variant={mode === 'system' ? 'contained' : 'outlined'}
+                        onClick={() => handleThemeChange('system')}
+                        size="small"
+                      >
+                        System
+                      </Button>
+                    </Stack>
+                  </Box>
 
-        {/* Data & Export Tab */}
-        {activeTab === 5 && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Export Settings</Typography>
-                <FormControl fullWidth sx={{ mb: 2 }}>
-                  <InputLabel>Default Export Format</InputLabel>
-                  <Select
-                    value={dataSettings.exportFormat}
-                    label="Default Export Format"
-                    onChange={(e) => handleDataChange('exportFormat', e.target.value)}
-                  >
-                    <MenuItem value="CSV">CSV</MenuItem>
-                    <MenuItem value="Excel">Excel</MenuItem>
-                    <MenuItem value="PDF">PDF</MenuItem>
-                    <MenuItem value="JSON">JSON</MenuItem>
-                  </Select>
-                </FormControl>
-                <Button
-                  variant="outlined"
-                  startIcon={<DownloadIcon />}
-                  onClick={() => setExportDialog(true)}
-                  fullWidth
-                >
-                  Export All Data
-                </Button>
-              </CardContent>
-            </Card>
+                  {/* Color Selection */}
+                  <Box>
+                    <Typography variant="subtitle1" gutterBottom>Accent Color</Typography>
+                    <Grid container spacing={1}>
+                      {themeColors.map((color) => (
+                        <Grid item key={color.value}>
+                          <Tooltip title={color.name}>
+                            <Box
+                              sx={{
+                                width: 40,
+                                height: 40,
+                                borderRadius: '50%',
+                                bgcolor: colorMap[color.value],
+                                cursor: 'pointer',
+                                border: accent === color.value ? 3 : 1,
+                                borderColor: accent === color.value ? 'primary.main' : 'divider',
+                                '&:hover': { transform: 'scale(1.1)' },
+                                transition: 'transform 0.2s'
+                              }}
+                              onClick={() => handleColorChange(color.value)}
+                            />
+                          </Tooltip>
+                        </Grid>
+                      ))}
+                    </Grid>
+                  </Box>
 
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Backup Settings</Typography>
-                <FormControlLabel
-                  control={<Switch checked={dataSettings.autoBackup} onChange={(e) => handleDataChange('autoBackup', e.target.checked)} />}
-                  label="Automatic Backups"
-                />
-                {dataSettings.autoBackup && (
-                  <FormControl fullWidth sx={{ mt: 2 }}>
-                    <InputLabel>Backup Frequency</InputLabel>
-                    <Select
-                      value={dataSettings.backupFrequency}
-                      label="Backup Frequency"
-                      onChange={(e) => handleDataChange('backupFrequency', e.target.value)}
+                  {/* Import Theme */}
+                  <Box>
+                    <Typography variant="subtitle1" gutterBottom>Import Customers Page Theme</Typography>
+                    <FormControl fullWidth>
+                      <InputLabel>Theme</InputLabel>
+                      <Select
+                        value={importCustomersTheme}
+                        label="Theme"
+                        onChange={(e) => handleImportThemeChange(e.target.value)}
+                      >
+                        <MenuItem value="light">Light</MenuItem>
+                        <MenuItem value="dark">Dark</MenuItem>
+                        <MenuItem value="system">System</MenuItem>
+                      </Select>
+                    </FormControl>
+                    <Button 
+                      variant="outlined" 
+                      color="primary"
+                      onClick={handleImportThemeSave}
+                      disabled={!importThemeChanged}
+                      startIcon={<SaveIcon />}
+                      sx={{ mt: 1 }}
                     >
-                      <MenuItem value="daily">Daily</MenuItem>
-                      <MenuItem value="weekly">Weekly</MenuItem>
-                      <MenuItem value="monthly">Monthly</MenuItem>
+                      Save Import Theme
+                    </Button>
+                  </Box>
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+          </Grid>
+
+          {/* Notifications */}
+          <Grid item xs={12} md={6}>
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Stack direction="row" alignItems="center" spacing={2}>
+                  <NotificationsIcon color="primary" />
+                  <Typography variant="h6">Notifications</Typography>
+                </Stack>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={2}>
+                  <Typography variant="subtitle1" gutterBottom>Notification Channels</Typography>
+                  <FormControlLabel
+                    control={<Switch checked={notifications.email} onChange={() => handleNotifChange('email')} />}
+                    label="Email Notifications"
+                  />
+                  <FormControlLabel
+                    control={<Switch checked={notifications.inApp} onChange={() => handleNotifChange('inApp')} />}
+                    label="In-App Notifications"
+                  />
+                  <FormControlLabel
+                    control={<Switch checked={notifications.browser} onChange={() => handleNotifChange('browser')} />}
+                    label="Browser Push Notifications"
+                  />
+                  <FormControlLabel
+                    control={<Switch checked={notifications.sms} onChange={() => handleNotifChange('sms')} />}
+                    label="SMS Notifications"
+                  />
+                  
+                  <Divider />
+                  
+                  <Typography variant="subtitle1" gutterBottom>Notification Types</Typography>
+                  <FormControlLabel
+                    control={<Switch checked={notifications.dailySummary} onChange={() => handleNotifChange('dailySummary')} />}
+                    label="Daily Summary"
+                  />
+                  <FormControlLabel
+                    control={<Switch checked={notifications.alerts} onChange={() => handleNotifChange('alerts')} />}
+                    label="System Alerts"
+                  />
+                  <FormControlLabel
+                    control={<Switch checked={notifications.reports} onChange={() => handleNotifChange('reports')} />}
+                    label="Report Notifications"
+                  />
+                  
+                  <Button 
+                    variant="outlined" 
+                    color="primary"
+                    onClick={handleNotificationsSave}
+                    disabled={!notificationsChanged}
+                    startIcon={<SaveIcon />}
+                  >
+                    Save Notification Settings
+                  </Button>
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+          </Grid>
+
+          {/* Business Logic */}
+          <Grid item xs={12} md={6}>
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Stack direction="row" alignItems="center" spacing={2}>
+                  <BusinessIcon color="primary" />
+                  <Typography variant="h6">Business Logic</Typography>
+                </Stack>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={2}>
+                  <Typography variant="subtitle1" gutterBottom>Scan Settings</Typography>
+                  <FormControl fullWidth>
+                    <InputLabel>Default Scan Mode</InputLabel>
+                    <Select
+                      value={businessSettings.defaultScanMode}
+                      label="Default Scan Mode"
+                      onChange={(e) => handleBusinessChange('defaultScanMode', e.target.value)}
+                    >
+                      <MenuItem value="SHIP">Ship</MenuItem>
+                      <MenuItem value="RETURN">Return</MenuItem>
                     </Select>
                   </FormControl>
-                )}
-                <Button
-                  variant="outlined"
-                  onClick={() => setBackupDialog(true)}
-                  sx={{ mt: 2 }}
-                  fullWidth
-                >
-                  Create Manual Backup
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Data Retention</Typography>
-                <Box sx={{ mb: 2 }}>
-                  <Typography gutterBottom>Data Retention Period (days)</Typography>
-                  <Slider
-                    value={dataSettings.retentionDays}
-                    onChange={(e, value) => handleDataChange('retentionDays', value)}
-                    min={30}
-                    max={1095}
-                    step={30}
-                    marks
-                    valueLabelDisplay="auto"
+                  <FormControlLabel
+                    control={<Switch checked={businessSettings.autoAssignment} onChange={(e) => handleBusinessChange('autoAssignment', e.target.checked)} />}
+                    label="Auto-assign Cylinders to Customers"
                   />
-                  <Typography variant="caption" color="text.secondary">
-                    Current: {dataSettings.retentionDays} days
-                  </Typography>
-                </Box>
-                <FormControlLabel
-                  control={<Switch checked={dataSettings.includeArchived} onChange={(e) => handleDataChange('includeArchived', e.target.checked)} />}
-                  label="Include Archived Records in Exports"
-                />
-              </CardContent>
-            </Card>
-
-            <Button 
-              variant="contained" 
-              color="primary" 
-              startIcon={<SaveIcon />}
-              disabled={!dataChanged}
-              onClick={handleDataSave}
-              sx={{ width: 200 }}
-            >
-              {dataChanged ? 'Save Data Settings' : 'Data Settings Saved'}
-            </Button>
-          </Box>
-        )}
-
-        {/* Admin Tab */}
-        {profile?.role === 'admin' && activeTab === 6 && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>User Management</Typography>
-                <UserManagement />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>System Health</Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" color="text.secondary">Database Status</Typography>
-                    <Chip label="Healthy" color="success" size="small" />
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" color="text.secondary">Last Backup</Typography>
-                    <Typography variant="body2">2 hours ago</Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" color="text.secondary">Active Users</Typography>
-                    <Typography variant="body2">12</Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" color="text.secondary">Storage Used</Typography>
-                    <Typography variant="body2">2.4 GB / 10 GB</Typography>
-                  </Grid>
-                </Grid>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>System Actions</Typography>
-                <Stack direction="row" spacing={2}>
-                  <Button variant="outlined" color="warning">
-                    Clear Cache
-                  </Button>
-                  <Button variant="outlined" color="error">
-                    Reset System
+                  
+                  <Divider />
+                  
+                  <Typography variant="subtitle1" gutterBottom>Billing Preferences</Typography>
+                  <FormControlLabel
+                    control={<Switch checked={businessSettings.billingPreferences.taxIncluded} onChange={(e) => handleBusinessChange('billingPreferences', { ...businessSettings.billingPreferences, taxIncluded: e.target.checked })} />}
+                    label="Include Tax in Prices"
+                  />
+                  <FormControl fullWidth>
+                    <InputLabel>Currency</InputLabel>
+                    <Select
+                      value={businessSettings.billingPreferences.currency}
+                      label="Currency"
+                      onChange={(e) => handleBusinessChange('billingPreferences', { ...businessSettings.billingPreferences, currency: e.target.value })}
+                    >
+                      <MenuItem value="USD">USD ($)</MenuItem>
+                      <MenuItem value="EUR">EUR (€)</MenuItem>
+                      <MenuItem value="GBP">GBP (£)</MenuItem>
+                      <MenuItem value="CAD">CAD (C$)</MenuItem>
+                    </Select>
+                  </FormControl>
+                  
+                  <Button 
+                    variant="outlined" 
+                    color="primary"
+                    onClick={handleBusinessSave}
+                    disabled={!businessChanged}
+                    startIcon={<SaveIcon />}
+                  >
+                    Save Business Settings
                   </Button>
                 </Stack>
-              </CardContent>
-            </Card>
-          </Box>
-        )}
+              </AccordionDetails>
+            </Accordion>
+          </Grid>
+
+          {/* Data & Export */}
+          <Grid item xs={12} md={6}>
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Stack direction="row" alignItems="center" spacing={2}>
+                  <DownloadIcon color="primary" />
+                  <Typography variant="h6">Data & Export</Typography>
+                </Stack>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={2}>
+                  <Typography variant="subtitle1" gutterBottom>Export Settings</Typography>
+                  <FormControl fullWidth>
+                    <InputLabel>Default Export Format</InputLabel>
+                    <Select
+                      value={dataSettings.exportFormat}
+                      label="Default Export Format"
+                      onChange={(e) => handleDataChange('exportFormat', e.target.value)}
+                    >
+                      <MenuItem value="CSV">CSV</MenuItem>
+                      <MenuItem value="XLSX">Excel (XLSX)</MenuItem>
+                      <MenuItem value="PDF">PDF</MenuItem>
+                    </Select>
+                  </FormControl>
+                  
+                  <FormControlLabel
+                    control={<Switch checked={dataSettings.autoBackup} onChange={(e) => handleDataChange('autoBackup', e.target.checked)} />}
+                    label="Automatic Backups"
+                  />
+                  
+                  <FormControlLabel
+                    control={<Switch checked={dataSettings.includeArchived} onChange={(e) => handleDataChange('includeArchived', e.target.checked)} />}
+                    label="Include Archived Data in Exports"
+                  />
+                  
+                  <Button 
+                    variant="outlined" 
+                    color="primary"
+                    onClick={() => setExportDialog(true)}
+                    startIcon={<DownloadIcon />}
+                  >
+                    Export Data
+                  </Button>
+                  
+                  <Button 
+                    variant="outlined" 
+                    color="primary"
+                    onClick={() => setBackupDialog(true)}
+                  >
+                    Create Backup
+                  </Button>
+                  
+                  <Button 
+                    variant="outlined" 
+                    color="primary"
+                    onClick={handleDataSave}
+                    disabled={!dataChanged}
+                    startIcon={<SaveIcon />}
+                  >
+                    Save Data Settings
+                  </Button>
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+          </Grid>
+
+          {/* Admin Settings */}
+          {profile?.role === 'admin' && (
+            <Grid item xs={12}>
+              <Accordion>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Stack direction="row" alignItems="center" spacing={2}>
+                    <AdminPanelSettingsIcon color="primary" />
+                    <Typography variant="h6">Admin Settings</Typography>
+                  </Stack>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <UserManagement />
+                </AccordionDetails>
+              </Accordion>
+            </Grid>
+          )}
+        </Grid>
+
+        {/* Snackbars */}
+        <Snackbar open={profileSnackbar} autoHideDuration={6000} onClose={() => setProfileSnackbar(false)}>
+          <Alert onClose={() => setProfileSnackbar(false)} severity={profileMsg.includes('error') ? 'error' : 'success'}>
+            {profileMsg}
+          </Alert>
+        </Snackbar>
+
+        <Snackbar open={passwordSnackbar} autoHideDuration={6000} onClose={() => setPasswordSnackbar(false)}>
+          <Alert onClose={() => setPasswordSnackbar(false)} severity={passwordMsg.includes('error') ? 'error' : 'success'}>
+            {passwordMsg}
+          </Alert>
+        </Snackbar>
+
+        <Snackbar open={notifSnackbar} autoHideDuration={6000} onClose={() => setNotifSnackbar(false)}>
+          <Alert onClose={() => setNotifSnackbar(false)} severity="success">
+            {notifMsg}
+          </Alert>
+        </Snackbar>
+
+        {/* Export Dialog */}
+        <Dialog open={exportDialog} onClose={() => setExportDialog(false)}>
+          <DialogTitle>Export Data</DialogTitle>
+          <DialogContent>
+            <Typography>Choose export format:</Typography>
+            <Stack spacing={1} sx={{ mt: 2 }}>
+              <Button onClick={() => handleExportData('CSV')} variant="outlined">CSV</Button>
+              <Button onClick={() => handleExportData('XLSX')} variant="outlined">Excel (XLSX)</Button>
+              <Button onClick={() => handleExportData('PDF')} variant="outlined">PDF</Button>
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setExportDialog(false)}>Cancel</Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Backup Dialog */}
+        <Dialog open={backupDialog} onClose={() => setBackupDialog(false)}>
+          <DialogTitle>Create Backup</DialogTitle>
+          <DialogContent>
+            <Typography>This will create a complete backup of your data.</Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setBackupDialog(false)}>Cancel</Button>
+            <Button onClick={handleCreateBackup} variant="contained">Create Backup</Button>
+          </DialogActions>
+        </Dialog>
       </Paper>
-
-      {/* Export Dialog */}
-      <Dialog open={exportDialog} onClose={() => setExportDialog(false)}>
-        <DialogTitle>Export Data</DialogTitle>
-        <DialogContent>
-          <Typography>Choose export format:</Typography>
-          <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
-            <Button variant="outlined" onClick={() => handleExportData('CSV')}>CSV</Button>
-            <Button variant="outlined" onClick={() => handleExportData('Excel')}>Excel</Button>
-            <Button variant="outlined" onClick={() => handleExportData('PDF')}>PDF</Button>
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setExportDialog(false)}>Cancel</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Backup Dialog */}
-      <Dialog open={backupDialog} onClose={() => setBackupDialog(false)}>
-        <DialogTitle>Create Backup</DialogTitle>
-        <DialogContent>
-          <Typography>This will create a complete backup of all data. Continue?</Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setBackupDialog(false)}>Cancel</Button>
-          <Button onClick={handleCreateBackup} variant="contained">Create Backup</Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 } 

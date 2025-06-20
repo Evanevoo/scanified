@@ -1,0 +1,233 @@
+import React from 'react';
+import {
+  Box, Typography, Grid, Card, CardContent, CardActions, Button,
+  Chip, Avatar, Divider, Alert
+} from '@mui/material';
+import {
+  Business as BusinessIcon,
+  Analytics as AnalyticsIcon,
+  Settings as SettingsIcon,
+  People as PeopleIcon,
+  Support as SupportIcon,
+  CheckCircle as CheckCircleIcon,
+  TrendingUp as TrendingUpIcon,
+  Email as EmailIcon,
+  Security as SecurityIcon
+} from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
+
+export default function OwnerPortalLanding() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const quickActions = [
+    {
+      title: 'Customer Management',
+      description: 'Manage all customer organizations, subscriptions, and billing',
+      icon: <PeopleIcon sx={{ fontSize: 40 }} />,
+      color: '#1976d2',
+      path: '/owner-portal/customers'
+    },
+    {
+      title: 'Analytics Dashboard',
+      description: 'View business metrics, revenue trends, and customer insights',
+      icon: <AnalyticsIcon sx={{ fontSize: 40 }} />,
+      color: '#2e7d32',
+      path: '/owner-portal/analytics'
+    },
+    {
+      title: 'Tools & Operations',
+      description: 'Bulk operations, system management, and administrative tools',
+      icon: <SettingsIcon sx={{ fontSize: 40 }} />,
+      color: '#ed6c02',
+      path: '/owner-portal/tools'
+    },
+    {
+      title: 'Support Center',
+      description: 'Customer support tools and ticket management',
+      icon: <SupportIcon sx={{ fontSize: 40 }} />,
+      color: '#9c27b0',
+      path: '/owner-portal/support'
+    }
+  ];
+
+  const systemStatus = [
+    { name: 'Database', status: 'healthy', color: 'success' },
+    { name: 'API Services', status: 'healthy', color: 'success' },
+    { name: 'Payment Processing', status: 'healthy', color: 'success' },
+    { name: 'Email Services', status: 'warning', color: 'warning' }
+  ];
+
+  return (
+    <Box sx={{ p: 3 }}>
+      {/* Header */}
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h3" gutterBottom sx={{ fontWeight: 700 }}>
+          Owner Portal
+        </Typography>
+        <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+          Welcome back, {user?.email}
+        </Typography>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          This is your central hub for managing the entire platform. Access customer data, 
+          analytics, system tools, and administrative functions.
+        </Alert>
+      </Box>
+
+      {/* Quick Actions */}
+      <Typography variant="h5" gutterBottom sx={{ mb: 3, fontWeight: 600 }}>
+        Quick Actions
+      </Typography>
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        {quickActions.map((action, index) => (
+          <Grid item xs={12} sm={6} md={3} key={index}>
+            <Card 
+              sx={{ 
+                height: '100%', 
+                cursor: 'pointer',
+                transition: 'transform 0.2s, box-shadow 0.2s',
+                '&:hover': {
+                  transform: 'translateY(-4px)',
+                  boxShadow: 4
+                }
+              }}
+              onClick={() => navigate(action.path)}
+            >
+              <CardContent sx={{ textAlign: 'center', p: 3 }}>
+                <Avatar 
+                  sx={{ 
+                    width: 60, 
+                    height: 60, 
+                    mx: 'auto', 
+                    mb: 2,
+                    bgcolor: action.color 
+                  }}
+                >
+                  {action.icon}
+                </Avatar>
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                  {action.title}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {action.description}
+                </Typography>
+              </CardContent>
+              <CardActions sx={{ justifyContent: 'center', pb: 2 }}>
+                <Button 
+                  variant="outlined" 
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(action.path);
+                  }}
+                >
+                  Access
+                </Button>
+              </CardActions>
+            </Card>
+          </Grid>
+        ))}
+      </Grid>
+
+      <Divider sx={{ my: 4 }} />
+
+      {/* System Status */}
+      <Typography variant="h5" gutterBottom sx={{ mb: 3, fontWeight: 600 }}>
+        System Status
+      </Typography>
+      <Grid container spacing={2} sx={{ mb: 4 }}>
+        {systemStatus.map((service, index) => (
+          <Grid item xs={12} sm={6} md={3} key={index}>
+            <Card sx={{ p: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                  {service.name}
+                </Typography>
+                <Chip 
+                  label={service.status} 
+                  color={service.color}
+                  size="small"
+                  icon={<CheckCircleIcon />}
+                />
+              </Box>
+            </Card>
+          </Grid>
+        ))}
+      </Grid>
+
+      {/* Quick Stats */}
+      <Typography variant="h5" gutterBottom sx={{ mb: 3, fontWeight: 600 }}>
+        Platform Overview
+      </Typography>
+      <Grid container spacing={3}>
+        <Grid item xs={12} md={6}>
+          <Card sx={{ p: 3 }}>
+            <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+              Recent Activity
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+              <TrendingUpIcon color="success" sx={{ mr: 1 }} />
+              <Typography variant="body2">
+                5 new customer registrations this week
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+              <EmailIcon color="primary" sx={{ mr: 1 }} />
+              <Typography variant="body2">
+                12 support tickets pending
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <SecurityIcon color="warning" sx={{ mr: 1 }} />
+              <Typography variant="body2">
+                3 trial accounts expiring soon
+              </Typography>
+            </Box>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Card sx={{ p: 3 }}>
+            <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+              Quick Links
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Button 
+                variant="text" 
+                startIcon={<BusinessIcon />}
+                onClick={() => navigate('/owner-portal/customers')}
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                Manage Customers
+              </Button>
+              <Button 
+                variant="text" 
+                startIcon={<AnalyticsIcon />}
+                onClick={() => navigate('/owner-portal/analytics')}
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                View Analytics
+              </Button>
+              <Button 
+                variant="text" 
+                startIcon={<SettingsIcon />}
+                onClick={() => navigate('/owner-portal/tools')}
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                System Tools
+              </Button>
+              <Button 
+                variant="text" 
+                startIcon={<SupportIcon />}
+                onClick={() => navigate('/owner-portal/support')}
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                Support Center
+              </Button>
+            </Box>
+          </Card>
+        </Grid>
+      </Grid>
+    </Box>
+  );
+} 

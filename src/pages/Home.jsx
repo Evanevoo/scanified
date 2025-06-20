@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Box, Card, CardContent, Typography, Grid, Button, Paper } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
-import { useErrorHandler } from '../hooks/useErrorHandler';
 import { useAppStore } from '../store/appStore';
 import LoadingSpinner from '../components/LoadingSpinner';
 
@@ -14,7 +13,6 @@ import LoadingSpinner from '../components/LoadingSpinner';
  */
 export default function Home({ profile }) {
   const navigate = useNavigate();
-  const { handleError, executeWithErrorHandling } = useErrorHandler();
   const { addNotification } = useAppStore();
   
   const [stats, setStats] = useState({
@@ -27,69 +25,91 @@ export default function Home({ profile }) {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        await executeWithErrorHandling(async () => {
-          // Get total cylinders
-          const { count: totalCylinders, error: cylindersError } = await supabase
-            .from('bottles')
-            .select('*', { count: 'exact', head: true });
+        console.log('Home: Starting to fetch stats...');
+        
+        // Get total cylinders
+        const { count: totalCylinders, error: cylindersError } = await supabase
+          .from('bottles')
+          .select('*', { count: 'exact', head: true });
 
-          if (cylindersError) throw cylindersError;
+        console.log('Home: Cylinders query result:', { totalCylinders, cylindersError });
 
-          // Get rented cylinders (active rentals)
-          const { count: rentedCylinders, error: rentalsError } = await supabase
-            .from('rentals')
-            .select('*', { count: 'exact', head: true })
-            .is('rental_end_date', null); // Only active rentals
+        if (cylindersError) {
+          console.error('Home: Cylinders error:', cylindersError);
+          throw cylindersError;
+        }
 
-          if (rentalsError) throw rentalsError;
+        // Get rented cylinders (active rentals)
+        const { count: rentedCylinders, error: rentalsError } = await supabase
+          .from('rentals')
+          .select('*', { count: 'exact', head: true })
+          .is('rental_end_date', null); // Only active rentals
 
-          // Get total customers
-          const { count: totalCustomers, error: customersError } = await supabase
-            .from('customers')
-            .select('*', { count: 'exact', head: true });
+        console.log('Home: Rentals query result:', { rentedCylinders, rentalsError });
 
-          if (customersError) throw customersError;
+        if (rentalsError) {
+          console.error('Home: Rentals error:', rentalsError);
+          throw rentalsError;
+        }
 
-          setStats({
-            totalCylinders: totalCylinders || 0,
-            rentedCylinders: rentedCylinders || 0,
-            totalCustomers: totalCustomers || 0,
-            loading: false
-          });
+        // Get total customers
+        const { count: totalCustomers, error: customersError } = await supabase
+          .from('customers')
+          .select('*', { count: 'exact', head: true });
 
-          // Add notification for successful stats load
-          addNotification({
-            type: 'success',
-            title: 'Dashboard Updated',
-            message: 'Statistics have been refreshed successfully'
-          });
-        }, {
-          showToast: false, // Don't show toast for background stats loading
-          logToConsole: true
+        console.log('Home: Customers query result:', { totalCustomers, customersError });
+
+        if (customersError) {
+          console.error('Home: Customers error:', customersError);
+          throw customersError;
+        }
+
+        const newStats = {
+          totalCylinders: totalCylinders || 0,
+          rentedCylinders: rentedCylinders || 0,
+          totalCustomers: totalCustomers || 0,
+          loading: false
+        };
+
+        console.log('Home: Setting stats:', newStats);
+        setStats(newStats);
+
+        // Add notification for successful stats load
+        addNotification({
+          type: 'success',
+          title: 'Dashboard Updated',
+          message: 'Statistics have been refreshed successfully'
         });
       } catch (error) {
-        console.error('Error fetching stats:', error);
-        setStats(prev => ({ ...prev, loading: false }));
+        console.error('Home: Error fetching stats:', error);
+        setStats({
+          totalCylinders: 0,
+          rentedCylinders: 0,
+          totalCustomers: 0,
+          loading: false
+        });
         
         // Show error notification
         addNotification({
           type: 'error',
           title: 'Stats Loading Failed',
-          message: 'Failed to load dashboard statistics'
+          message: 'Failed to load dashboard statistics. Please check your permissions.'
         });
       }
     };
 
     fetchStats();
-  }, [executeWithErrorHandling, addNotification]);
+  }, [addNotification]);
 
   const handleViewScannedOrders = () => {
     try {
       navigate('/scanned-orders');
     } catch (error) {
-      handleError(error, {
-        showToast: true,
-        toastMessage: 'Failed to navigate to scanned orders'
+      console.error('Navigation error:', error);
+      addNotification({
+        type: 'error',
+        title: 'Navigation Failed',
+        message: 'Failed to navigate to scanned orders'
       });
     }
   };
@@ -98,7 +118,11 @@ export default function Home({ profile }) {
     return <LoadingSpinner message="Loading dashboard..." />;
   }
 
-  const availableCylinders = stats.totalCylinders - stats.rentedCylinders;
+  // Ensure all values are numbers before calculations
+  const totalCylinders = Number(stats.totalCylinders) || 0;
+  const rentedCylinders = Number(stats.rentedCylinders) || 0;
+  const totalCustomers = Number(stats.totalCustomers) || 0;
+  const availableCylinders = totalCylinders - rentedCylinders;
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
@@ -114,7 +138,7 @@ export default function Home({ profile }) {
               <Card elevation={3} sx={{ borderRadius: 3, bgcolor: '#f8f9fa' }}>
                 <CardContent sx={{ textAlign: 'center', py: 3 }}>
                   <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
-                    {stats.totalCylinders.toLocaleString()}
+                    {totalCylinders.toLocaleString()}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Total Cylinders
@@ -126,7 +150,7 @@ export default function Home({ profile }) {
               <Card elevation={3} sx={{ borderRadius: 3, bgcolor: '#e3f2fd' }}>
                 <CardContent sx={{ textAlign: 'center', py: 3 }}>
                   <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
-                    {stats.rentedCylinders.toLocaleString()}
+                    {rentedCylinders.toLocaleString()}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Rented Cylinders
@@ -150,7 +174,7 @@ export default function Home({ profile }) {
               <Card elevation={3} sx={{ borderRadius: 3, bgcolor: '#e8f5e8' }}>
                 <CardContent sx={{ textAlign: 'center', py: 3 }}>
                   <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
-                    {stats.totalCustomers.toLocaleString()}
+                    {totalCustomers.toLocaleString()}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Total Customers

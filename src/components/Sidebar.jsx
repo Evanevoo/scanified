@@ -1,8 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabase/client';
+import { useAuth } from '../hooks/useAuth';
+import { ListItem, ListItemButton, ListItemIcon, ListItemText } from '@mui/material';
+import { AdminPanelSettings, Payment, People, Analytics, Storefront } from '@mui/icons-material';
+import {
+  Drawer, List, Divider, Box, Typography, Collapse
+} from '@mui/material';
+import {
+  Dashboard, LocalShipping, Assessment,
+  Receipt, Settings, Business, Notifications,
+  Inventory, Map, Schedule, AccountCircle, Security, Support
+} from '@mui/icons-material';
 
-const Sidebar = () => {
+const drawerWidth = 280;
+
+const Sidebar = ({ open, onClose }) => {
+  const { profile, organization } = useAuth();
   const [search, setSearch] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -62,78 +76,227 @@ const Sidebar = () => {
     }
   };
 
+  const handleNavigation = (path) => {
+    navigate(path);
+    if (onClose) onClose();
+  };
+
+  const isActive = (path) => location.pathname === path;
+
+  const menuItems = [
+    {
+      title: 'Dashboard',
+      path: '/dashboard',
+      icon: <Dashboard />,
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Analytics',
+      path: '/analytics',
+      icon: <Analytics />,
+      roles: ['admin', 'manager', 'owner']
+    },
+    {
+      title: 'Customers',
+      path: '/customers',
+      icon: <People />,
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Inventory',
+      path: '/inventory',
+      icon: <Inventory />,
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Deliveries',
+      path: '/deliveries',
+      icon: <LocalShipping />,
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Rentals',
+      path: '/rentals',
+      icon: <Schedule />,
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Invoices',
+      path: '/invoices',
+      icon: <Receipt />,
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'User Management',
+      path: '/user-management',
+      icon: <AdminPanelSettings />,
+      roles: ['admin', 'owner']
+    },
+    {
+      title: 'Billing',
+      path: '/billing',
+      icon: <Payment />,
+      roles: ['admin', 'owner']
+    },
+    {
+      title: 'Reports',
+      path: '/reports',
+      icon: <Assessment />,
+      roles: ['admin', 'manager', 'owner']
+    },
+    {
+      title: 'Settings',
+      path: '/settings',
+      icon: <Settings />,
+      roles: ['admin', 'owner']
+    }
+  ];
+
+  const ownerItems = [
+    {
+      title: 'Owner Dashboard',
+      path: '/owner-dashboard',
+      icon: <Business />,
+      roles: ['owner']
+    },
+    {
+      title: 'Customer Management',
+      path: '/customer-management',
+      icon: <AccountCircle />,
+      roles: ['owner']
+    },
+    {
+      title: 'Security',
+      path: '/security',
+      icon: <Security />,
+      roles: ['owner']
+    }
+  ];
+
+  const filteredMenuItems = menuItems.filter(item => 
+    item.roles.includes(profile?.role)
+  );
+
+  const filteredOwnerItems = ownerItems.filter(item => 
+    item.roles.includes(profile?.role)
+  );
+
   return (
-    <div className="bg-gray-800 text-white w-64 h-screen p-4 flex flex-col overflow-y-hidden">
-      {/* Unified Search Section */}
-      <div className="mb-6">
-        <div className="mb-2 text-xs text-gray-400">Search:</div>
-        <form onSubmit={handleSubmit} autoComplete="off">
-          <input
-            className="w-full mb-2 p-2 rounded text-black"
-            placeholder="Asset, Customer, Order..."
-            value={search}
-            onChange={e => { setSearch(e.target.value); setShowSuggestions(true); }}
-            onFocus={() => setShowSuggestions(true)}
-            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-          />
-        </form>
-        {showSuggestions && suggestions.length > 0 && (
-          <div className="absolute z-20 bg-white text-black w-56 rounded shadow border max-h-60 overflow-y-auto">
-            {suggestions.map((item, idx) => (
-              <div
-                key={idx}
-                className="px-4 py-2 cursor-pointer hover:bg-blue-100"
-                onMouseDown={() => handleSelect(item)}
-              >
-                <span className="font-semibold">{item.label}</span>
-                <span className="text-xs text-gray-500 ml-2">{item.sub}</span>
-                <span className="text-xs ml-2 rounded px-2 py-1 bg-gray-200 text-gray-700">{item.type}</span>
-              </div>
-            ))}
-          </div>
+    <Drawer
+      variant="permanent"
+      sx={{
+        width: drawerWidth,
+        flexShrink: 0,
+        '& .MuiDrawer-paper': {
+          width: drawerWidth,
+          boxSizing: 'border-box',
+          top: 0,
+          height: '100%',
+          zIndex: (theme) => theme.zIndex.drawer
+        },
+      }}
+    >
+      <Box sx={{ overflow: 'auto', mt: 8 }}>
+        {/* Organization Info */}
+        {organization && (
+          <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
+            <Typography variant="h6" color="primary">
+              {organization.name}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {profile?.role} • {profile?.full_name}
+            </Typography>
+          </Box>
         )}
-      </div>
-      {/* Navigation Tabs */}
-      <nav className="flex-1">
-        <ul className="space-y-1">
-          {[
-            { to: '/home', label: 'Home' },
-            { to: '/custom-reports', label: 'Custom Reports' },
-            { to: '/customers', label: 'Customers' },
-            { to: '/locations', label: 'Locations' },
-            { to: '/assets/history-lookup', label: 'Asset History Lookup' },
-            { to: '/all-asset-movements', label: 'All Asset Movements' },
-            { to: '/import', label: 'Import' },
-            { to: '/import-customer-info', label: 'Import Customers' },
-            { to: '/import-history', label: 'Import History' },
-            { to: '/scanned-orders', label: 'Scanned Orders' },
-            { to: '/orders-report', label: 'Orders Report' },
-            { to: '/integration', label: 'Integrations' },
-            { to: '/history', label: 'Import Approvals History' },
-          ].map(({ to, label }) => (
-            <li key={to}>
-              <Link
-                to={to}
-                className="block px-4 py-2 rounded font-medium transition-colors duration-200"
-                style={
-                  location.pathname === to
-                    ? { background: 'var(--accent)', color: 'white' }
-                    : { background: 'transparent', color: 'white' }
-                }
-                onMouseOver={e => {
-                  if (location.pathname !== to) e.currentTarget.style.background = 'var(--accent)';
-                }}
-                onMouseOut={e => {
-                  if (location.pathname !== to) e.currentTarget.style.background = 'transparent';
+
+        {/* Main Menu */}
+        <List>
+          {filteredMenuItems.map((item) => (
+            <ListItem key={item.path} disablePadding>
+              <ListItemButton
+                selected={isActive(item.path)}
+                onClick={() => handleNavigation(item.path)}
+                sx={{
+                  '&.Mui-selected': {
+                    backgroundColor: 'primary.light',
+                    '&:hover': {
+                      backgroundColor: 'primary.light',
+                    },
+                  },
                 }}
               >
-                {label}
-              </Link>
-            </li>
+                <ListItemIcon sx={{ color: isActive(item.path) ? 'primary.main' : 'inherit' }}>
+                  {item.icon}
+                </ListItemIcon>
+                <ListItemText 
+                  primary={item.title}
+                  sx={{ 
+                    '& .MuiListItemText-primary': {
+                      fontWeight: isActive(item.path) ? 600 : 400,
+                    }
+                  }}
+                />
+              </ListItemButton>
+            </ListItem>
           ))}
-        </ul>
-      </nav>
-    </div>
+        </List>
+
+        {/* Owner Section */}
+        {filteredOwnerItems.length > 0 && (
+          <>
+            <Divider />
+            <Box sx={{ p: 2 }}>
+              <Typography variant="overline" color="text.secondary">
+                Owner Tools
+              </Typography>
+            </Box>
+            <List>
+              {filteredOwnerItems.map((item) => (
+                <ListItem key={item.path} disablePadding>
+                  <ListItemButton
+                    selected={isActive(item.path)}
+                    onClick={() => handleNavigation(item.path)}
+                    sx={{
+                      '&.Mui-selected': {
+                        backgroundColor: 'secondary.light',
+                        '&:hover': {
+                          backgroundColor: 'secondary.light',
+                        },
+                      },
+                    }}
+                  >
+                    <ListItemIcon sx={{ color: isActive(item.path) ? 'secondary.main' : 'inherit' }}>
+                      {item.icon}
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary={item.title}
+                      sx={{ 
+                        '& .MuiListItemText-primary': {
+                          fontWeight: isActive(item.path) ? 600 : 400,
+                        }
+                      }}
+                    />
+                  </ListItemButton>
+                </ListItem>
+              ))}
+            </List>
+          </>
+        )}
+
+        {/* Support */}
+        <Divider />
+        <List>
+          <ListItem disablePadding>
+            <ListItemButton>
+              <ListItemIcon>
+                <Support />
+              </ListItemIcon>
+              <ListItemText primary="Support" />
+            </ListItemButton>
+          </ListItem>
+        </List>
+      </Box>
+    </Drawer>
   );
 };
 
