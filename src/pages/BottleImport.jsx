@@ -46,7 +46,7 @@ import {
   Delete as DeleteIcon
 } from '@mui/icons-material';
 import * as XLSX from 'xlsx';
-import { supabase } from '../../supabase';
+import { supabase } from '../supabase/client';
 import { get } from 'lodash';
 import backgroundService from '../utils/backgroundService';
 

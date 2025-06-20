@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
@@ -17,6 +17,8 @@ import PeopleIcon from '@mui/icons-material/People';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import SwapVertIcon from '@mui/icons-material/SwapVert';
 import AssignmentIcon from '@mui/icons-material/Assignment';
+import BusinessIcon from '@mui/icons-material/Business';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import Button from '@mui/material/Button';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
@@ -29,15 +31,20 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { useThemeContext } from '../context/ThemeContext';
 import GlobalImportProgress from './GlobalImportProgress';
 import ImportNotification from './ImportNotification';
+import { useOwnerAccess } from '../hooks/useOwnerAccess';
 import { supabase } from '../supabase/client';
+import { usePermissions } from '../context/PermissionsContext';
 
 const drawerWidth = 250;
 
 const sidebarPages = [
-  { label: 'Customers', icon: <PeopleIcon />, to: '/customers' },
-  { label: 'Locations', icon: <LocationOnIcon />, to: '/locations' },
-  { label: 'All Gas Assets', icon: <SwapVertIcon />, to: '/all-gas-assets' },
-  { label: 'Scanned Orders', icon: <AssignmentIcon />, to: '/scanned-orders' },
+  { label: 'Customers', icon: <PeopleIcon />, to: '/customers', requiredPermission: 'read:customers' },
+  { label: 'Locations', icon: <LocationOnIcon />, to: '/locations', requiredPermission: 'read:locations' },
+  { label: 'All Gas Assets', icon: <SwapVertIcon />, to: '/all-gas-assets', requiredPermission: 'read:cylinders' },
+  { label: 'Scanned Orders', icon: <AssignmentIcon />, to: '/scanned-orders', requiredPermission: 'read:rentals' },
+  { label: 'User Management', icon: <AdminPanelSettingsIcon />, to: '/user-management', requiredPermission: 'manage:users' },
+  { label: 'Owner Dashboard', icon: <BusinessIcon />, to: '/owner-dashboard', ownerOnly: true },
+  { label: 'Owner Portal', icon: <AdminPanelSettingsIcon />, to: '/owner-portal', ownerOnly: true },
   {
     label: 'Integrations', icon: <SwapVertIcon />, to: null, subItems: [
       { label: 'Import', to: '/import' },
@@ -55,9 +62,10 @@ const topNavLinks = [
   { label: 'Home', to: '/home' },
   { label: 'Rentals', to: '/rentals' },
   { label: 'Orders', to: '/import-approvals' },
+  { label: 'Billing', to: '/billing' },
 ];
 
-export default function MainLayout() {
+export default function MainLayout({ profile }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [integrationsOpen, setIntegrationsOpen] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -67,6 +75,21 @@ export default function MainLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { mode } = useThemeContext();
+  const { isOwner } = useOwnerAccess();
+  const { can } = usePermissions();
+
+  // Only show owner pages if the user is actually an owner
+  const filteredSidebarPages = useMemo(() => {
+    return sidebarPages.filter(item => {
+      if (item.ownerOnly && profile?.role !== 'owner') {
+        return false;
+      }
+      if (item.requiredPermission && !can(item.requiredPermission)) {
+        return false;
+      }
+      return true;
+    });
+  }, [isOwner, can, profile]);
 
   useEffect(() => {
     setShowSuggestions(false);
@@ -130,6 +153,36 @@ export default function MainLayout() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      // Sign out from Supabase (this clears the session completely)
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('Logout error:', error);
+      }
+      
+      // Clear all local storage
+      localStorage.clear();
+      sessionStorage.clear();
+      
+      // Clear any other stored data
+      if (window.indexedDB) {
+        // Clear IndexedDB if available
+        const databases = await window.indexedDB.databases();
+        databases.forEach(db => {
+          window.indexedDB.deleteDatabase(db.name);
+        });
+      }
+      
+      // Force a hard redirect to the login page
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('Logout failed:', error);
+      // Fallback: force redirect anyway
+      window.location.href = '/login';
+    }
+  };
+
   const drawer = (
     <Box sx={{ bgcolor: '#fff', height: '100%', display: 'flex', flexDirection: 'column', borderRight: '1.5px solid #eaeaea', minHeight: '100vh', width: drawerWidth, position: 'relative', overflowY: 'hidden', overflowX: 'hidden' }}>
       <Box sx={{ position: 'sticky', top: 0, zIndex: 2, bgcolor: '#fff', borderBottom: '1.5px solid #eaeaea' }}>
@@ -157,7 +210,7 @@ export default function MainLayout() {
       </Box>
       <Divider sx={{ my: 1, bgcolor: '#eaeaea' }} />
       <List sx={{ flex: 1 }}>
-        {sidebarPages.map((item, idx) => (
+        {filteredSidebarPages.map((item, idx) => (
           <React.Fragment key={item.label}>
             {item.label !== 'Integrations' ? (
               <ListItem disablePadding sx={{ mb: 0.5 }}>
@@ -391,7 +444,7 @@ export default function MainLayout() {
             <IconButton sx={{ color: '#111', ml: 2 }} onClick={() => navigate('/settings')} aria-label="Settings">
               <SettingsIcon />
             </IconButton>
-            <IconButton sx={{ color: '#111', ml: 1 }} onClick={() => { localStorage.clear(); navigate('/login'); }} aria-label="Logout">
+            <IconButton sx={{ color: '#111', ml: 1 }} onClick={handleLogout} aria-label="Logout">
               <LogoutIcon />
             </IconButton>
           </Box>

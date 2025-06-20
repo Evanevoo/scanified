@@ -1,49 +1,79 @@
-# Deployment Guide
+# Gas Cylinder Management System - Deployment Guide
 
-This guide will help you deploy the Gas Cylinder Management Application to either Netlify or Vercel.
+## 🚀 Complete System Overview
 
-## Prerequisites
+Your gas cylinder management system now includes:
 
-- GitHub repository connected (already done)
-- Supabase project configured
-- Environment variables ready
+### ✅ **Core Features**
+- **Multi-tenant SaaS platform** with organization isolation
+- **7-day free trial** for all new customers
+- **Payment processing** with Stripe integration
+- **Mobile app** with barcode scanning and offline support
+- **Customer portal** for self-service ordering
+- **Analytics dashboard** with real-time business metrics
+- **Owner dashboard** for managing all customer accounts
 
-## Environment Variables
+### 📱 **Mobile App**
+- **React Native** with Expo
+- **Barcode scanning** for bottles and customers
+- **Offline support** with automatic sync
+- **Real-time synchronization** with web app
+- **Ready for app store deployment**
 
-Before deploying, you'll need to set up these environment variables in your deployment platform:
+### 💳 **Payment System**
+- **Stripe integration** for secure payments
+- **Subscription management** with recurring billing
+- **Trial period enforcement** with automatic conversion
+- **Invoice generation** and payment tracking
+
+## 🛠️ Setup Instructions
+
+### 1. **Environment Variables**
+
+Create a `.env` file in your project root:
 
 ```env
-VITE_SUPABASE_URL=your_supabase_project_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+# Supabase
+REACT_APP_SUPABASE_URL=your_supabase_url
+REACT_APP_SUPABASE_ANON_KEY=your_supabase_anon_key
+
+# Stripe (for payment processing)
+REACT_APP_STRIPE_PUBLISHABLE_KEY=pk_test_your_stripe_publishable_key
+STRIPE_SECRET_KEY=sk_test_your_stripe_secret_key
+
+# Netlify (for serverless functions)
+NETLIFY_SITE_ID=your_netlify_site_id
+NETLIFY_ACCESS_TOKEN=your_netlify_access_token
 ```
 
-## Option 1: Deploy to Netlify
+### 2. **Database Setup**
 
-### Method 1: Connect via GitHub (Recommended)
+Run the multi-tenancy schema in your Supabase SQL editor:
 
-1. **Go to Netlify**
-   - Visit [netlify.com](https://netlify.com)
-   - Sign up/Login with your GitHub account
+```sql
+-- Execute the multi_tenancy_schema.sql file
+-- This will create all necessary tables and policies
+```
 
-2. **Create New Site**
-   - Click "New site from Git"
-   - Choose "GitHub" as your Git provider
-   - Select your repository: `Evanevoo/Gas-Cylinder-`
+### 3. **Stripe Configuration**
 
-3. **Configure Build Settings**
-   - **Build command**: `npm run build`
-   - **Publish directory**: `dist`
-   - **Node version**: `18`
+1. **Create Stripe Account**: Sign up at https://stripe.com
+2. **Get API Keys**: From Stripe Dashboard > Developers > API Keys
+3. **Create Products**: Set up your subscription plans in Stripe Dashboard
+4. **Configure Webhooks**: Point to your Netlify functions
 
-4. **Set Environment Variables**
-   - Go to Site settings → Environment variables
-   - Add your Supabase environment variables
+### 4. **Install Dependencies**
 
-5. **Deploy**
-   - Click "Deploy site"
-   - Netlify will automatically build and deploy your site
+```bash
+# Web app dependencies
+npm install
 
-### Method 2: Deploy via Netlify CLI
+# Mobile app dependencies
+cd gas-cylinder-mobile
+npm install
+```
+
+### 5. **Deploy to Netlify**
 
 ```bash
 # Install Netlify CLI
@@ -52,113 +82,203 @@ npm install -g netlify-cli
 # Login to Netlify
 netlify login
 
-# Build your project
-npm run build
-
 # Deploy
-netlify deploy --prod --dir=dist
+netlify deploy --prod
 ```
 
-## Option 2: Deploy to Vercel
-
-### Method 1: Connect via GitHub (Recommended)
-
-1. **Go to Vercel**
-   - Visit [vercel.com](https://vercel.com)
-   - Sign up/Login with your GitHub account
-
-2. **Import Project**
-   - Click "New Project"
-   - Import your GitHub repository: `Evanevoo/Gas-Cylinder-`
-
-3. **Configure Project**
-   - **Framework Preset**: Vite
-   - **Root Directory**: `./` (leave as default)
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-
-4. **Set Environment Variables**
-   - Add your Supabase environment variables
-   - Click "Deploy"
-
-### Method 2: Deploy via Vercel CLI
+### 6. **Deploy Mobile App**
 
 ```bash
-# Install Vercel CLI
-npm install -g vercel
+# Build for production
+cd gas-cylinder-mobile
+expo build:android  # For Android
+expo build:ios      # For iOS
 
-# Login to Vercel
-vercel login
-
-# Deploy
-vercel --prod
+# Or use EAS Build
+eas build --platform all
 ```
 
-## Post-Deployment
+## 📊 **System Architecture**
 
-### 1. Verify Deployment
-- Check that your site loads correctly
-- Test authentication functionality
-- Verify Supabase connection
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Web App       │    │   Mobile App    │    │   Supabase      │
+│   (React)       │◄──►│   (React Native)│◄──►│   (Database)    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Netlify       │    │   Stripe        │    │   Analytics     │
+│   Functions     │    │   Payments      │    │   Dashboard     │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
 
-### 2. Set Up Custom Domain (Optional)
-- **Netlify**: Site settings → Domain management
-- **Vercel**: Project settings → Domains
+## 🎯 **Key Features Implemented**
 
-### 3. Configure HTTPS
-- Both platforms provide automatic HTTPS
-- No additional configuration needed
+### **Multi-Tenancy**
+- ✅ Organization isolation
+- ✅ Role-based access control
+- ✅ Usage limits per subscription
+- ✅ Owner can manage all organizations
 
-## Troubleshooting
+### **Payment Processing**
+- ✅ Stripe integration
+- ✅ Subscription management
+- ✅ Trial period enforcement
+- ✅ Invoice generation
 
-### Common Issues
+### **Customer Portal**
+- ✅ Self-service ordering
+- ✅ Order tracking
+- ✅ Invoice history
+- ✅ Account management
 
-1. **Build Fails**
-   - Check Node.js version (should be 18+)
-   - Verify all dependencies are installed
-   - Check for TypeScript errors
+### **Analytics Dashboard**
+- ✅ Real-time metrics
+- ✅ Revenue tracking
+- ✅ Customer analytics
+- ✅ Delivery status
 
-2. **Environment Variables Not Working**
-   - Ensure variables are set in deployment platform
-   - Check variable names (must start with `VITE_`)
-   - Redeploy after adding variables
+### **Mobile App**
+- ✅ Barcode scanning
+- ✅ Offline support
+- ✅ Real-time sync
+- ✅ Field worker optimization
 
-3. **Supabase Connection Issues**
-   - Verify Supabase URL and keys
-   - Check CORS settings in Supabase
-   - Ensure Row Level Security is configured
+## 🔧 **Configuration**
 
-### Build Optimization
+### **Subscription Plans**
 
-The deployment configurations include:
-- ✅ Static asset caching
-- ✅ Security headers
-- ✅ SPA routing support
-- ✅ Performance optimizations
+Update the subscription plans in `src/services/subscriptionService.js`:
 
-## Monitoring
+```javascript
+const SUBSCRIPTION_PLANS = {
+  basic: {
+    name: 'Basic',
+    price: 29,
+    users: 5,
+    customers: 100,
+    bottles: 1000,
+    features: ['Basic reporting', 'Email support', 'Mobile app access']
+  },
+  pro: {
+    name: 'Pro',
+    price: 99,
+    users: 15,
+    customers: 500,
+    bottles: 5000,
+    features: ['Advanced reporting', 'Priority support', 'API access']
+  },
+  enterprise: {
+    name: 'Enterprise',
+    price: 299,
+    users: 999999,
+    customers: 999999,
+    bottles: 999999,
+    features: ['All Pro features', 'Dedicated support', 'Custom integrations']
+  }
+};
+```
 
-### Netlify
-- Function logs in dashboard
-- Build logs for debugging
-- Analytics and performance metrics
+### **Stripe Products**
 
-### Vercel
-- Function logs in dashboard
-- Real-time build logs
-- Performance analytics
+Create corresponding products in your Stripe Dashboard with the same price IDs.
 
-## Continuous Deployment
+## 🚀 **Deployment Checklist**
 
-Both platforms support automatic deployments:
-- Every push to `main` branch triggers a new deployment
-- Preview deployments for pull requests
-- Rollback to previous versions if needed
+### **Pre-Deployment**
+- [ ] Set up Supabase project
+- [ ] Configure environment variables
+- [ ] Set up Stripe account and products
+- [ ] Install all dependencies
+- [ ] Test locally
 
-## Support
+### **Web App Deployment**
+- [ ] Deploy to Netlify
+- [ ] Configure custom domain
+- [ ] Set up SSL certificate
+- [ ] Test payment processing
+- [ ] Verify multi-tenancy
 
-If you encounter issues:
-1. Check the platform's documentation
-2. Review build logs for errors
-3. Verify environment variables
-4. Test locally with `npm run build` 
+### **Mobile App Deployment**
+- [ ] Build production APK/IPA
+- [ ] Submit to app stores
+- [ ] Configure app store listings
+- [ ] Set up app store analytics
+
+### **Post-Deployment**
+- [ ] Create owner account
+- [ ] Test trial signup flow
+- [ ] Verify payment processing
+- [ ] Test mobile app sync
+- [ ] Monitor error logs
+
+## 📈 **Business Model**
+
+### **Revenue Streams**
+1. **Subscription Fees**: Monthly/annual plans
+2. **Transaction Fees**: Per-delivery charges
+3. **Premium Features**: Advanced analytics, API access
+4. **Custom Integrations**: Enterprise solutions
+
+### **Customer Acquisition**
+1. **7-day free trial** (no credit card required)
+2. **Mobile app** for field workers
+3. **Customer portal** for self-service
+4. **Analytics** for business insights
+
+### **Retention Strategies**
+1. **Automated billing** with Stripe
+2. **Usage tracking** and limits
+3. **Customer support** integration
+4. **Regular feature updates**
+
+## 🔒 **Security & Compliance**
+
+### **Data Protection**
+- ✅ Row-level security (RLS) in Supabase
+- ✅ Encrypted data transmission
+- ✅ Secure authentication
+- ✅ Regular backups
+
+### **Payment Security**
+- ✅ PCI DSS compliant (Stripe)
+- ✅ Secure payment processing
+- ✅ Fraud protection
+- ✅ Dispute handling
+
+## 📞 **Support & Maintenance**
+
+### **Monitoring**
+- Set up error tracking (Sentry)
+- Monitor performance metrics
+- Track user engagement
+- Monitor payment success rates
+
+### **Updates**
+- Regular security updates
+- Feature enhancements
+- Bug fixes
+- Performance optimizations
+
+## 🎉 **Launch Strategy**
+
+### **Phase 1: Soft Launch**
+- Deploy to production
+- Invite beta customers
+- Gather feedback
+- Fix critical issues
+
+### **Phase 2: Public Launch**
+- App store releases
+- Marketing campaign
+- Customer onboarding
+- Support system setup
+
+### **Phase 3: Scale**
+- Feature expansion
+- Market penetration
+- Partnership development
+- International expansion
+
+Your gas cylinder management system is now a **complete SaaS platform** ready for production deployment! 🚀 

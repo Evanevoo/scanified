@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../../supabase';
+import { supabase } from '../supabase/client';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, 
   CircularProgress, Button, Chip, Divider, Grid, Card, CardContent, TextField, MenuItem, Snackbar, Alert

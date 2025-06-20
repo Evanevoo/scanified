@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../../supabase';
+import { supabase } from '../supabase/client';
 
 export default function AssetHistory() {
   const { id } = useParams(); // id can be barcode or serial number

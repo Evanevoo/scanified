@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../../supabase';
+import { supabase } from '../supabase/client';
 
 export default function ReviewScreen({ navigation, route }) {
   const { orderNumber, cylinders } = route?.params || {};

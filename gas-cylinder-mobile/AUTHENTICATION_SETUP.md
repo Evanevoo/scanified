@@ -81,7 +81,7 @@ Both platforms fetch user profiles from the same `profiles` table:
 ### Mobile App Files:
 - `App.tsx` - Main navigation with authentication routing
 - `LoginScreen.tsx` - Enhanced login screen with proper styling
-- `hooks/useAuth.js` - Authentication state management
+- `hooks/useAuth.jsx` - Authentication state management
 - `supabase.js` - Supabase client configuration
 - `components/LoadingScreen.tsx` - Loading state component
 

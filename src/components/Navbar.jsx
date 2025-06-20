@@ -1,24 +1,114 @@
-import React from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
-import { supabase } from '../supabase/client';
+import React, { useState } from 'react';
+import {
+  AppBar, Toolbar, Typography, IconButton, Menu, MenuItem,
+  Box, Avatar, Badge, Tooltip
+} from '@mui/material';
+import {
+  Menu as MenuIcon, AccountCircle, Notifications,
+  Settings, Logout, Dashboard, Business
+} from '@mui/icons-material';
+import { useAuth } from '../hooks/useAuth';
+import NotificationCenter from './NotificationCenter';
 
-function Navbar() {
-  const navigate = useNavigate();
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    navigate('/login');
+export default function Navbar({ onMenuClick }) {
+  const { profile, signOut, organization } = useAuth();
+  const [anchorEl, setAnchorEl] = useState(null);
+
+  const handleMenu = (event) => {
+    setAnchorEl(event.currentTarget);
   };
-  return (
-    <nav className="text-white p-4 flex gap-4 items-center" style={{ background: '#2563eb' }}>
-      <NavLink to="/dashboard" className={({ isActive }) => isActive ? 'underline text-blue-200' : 'hover:text-blue-200'}>Dashboard</NavLink>
-      <NavLink to="/customers" className={({ isActive }) => isActive ? 'underline text-blue-200' : 'hover:text-blue-200'}>Customers</NavLink>
-      <NavLink to="/cylinders" className={({ isActive }) => isActive ? 'underline text-blue-200' : 'hover:text-blue-200'}>Cylinders</NavLink>
-      <NavLink to="/rentals" className={({ isActive }) => isActive ? 'underline text-blue-200' : 'hover:text-blue-200'}>Rentals</NavLink>
-      <NavLink to="/invoices" className={({ isActive }) => isActive ? 'underline text-blue-200' : 'hover:text-blue-200'}>Invoices</NavLink>
-      <NavLink to="/settings" className={({ isActive }) => isActive ? 'underline text-blue-200' : 'hover:text-blue-200'}>Settings</NavLink>
-      <button onClick={handleLogout} className="ml-auto bg-blue-600 px-3 py-1 rounded text-white hover:bg-blue-700">Logout</button>
-    </nav>
-  );
-}
 
-export default Navbar; 
+  const handleClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      handleClose();
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  };
+
+  return (
+    <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
+      <Toolbar>
+        <IconButton
+          color="inherit"
+          aria-label="open drawer"
+          edge="start"
+          onClick={onMenuClick}
+          sx={{ mr: 2 }}
+        >
+          <MenuIcon />
+        </IconButton>
+
+        <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+          Gas Cylinder Management
+          {organization && (
+            <Typography variant="caption" display="block" sx={{ opacity: 0.8 }}>
+              {organization.name}
+            </Typography>
+          )}
+        </Typography>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {/* Notification Center */}
+          <NotificationCenter />
+
+          {/* User Menu */}
+          <Tooltip title="Account settings">
+            <IconButton
+              size="large"
+              aria-label="account of current user"
+              aria-controls="menu-appbar"
+              aria-haspopup="true"
+              onClick={handleMenu}
+              color="inherit"
+            >
+              <Avatar sx={{ width: 32, height: 32, bgcolor: 'secondary.main' }}>
+                {profile?.full_name?.charAt(0) || 'U'}
+              </Avatar>
+            </IconButton>
+          </Tooltip>
+
+          <Menu
+            id="menu-appbar"
+            anchorEl={anchorEl}
+            anchorOrigin={{
+              vertical: 'bottom',
+              horizontal: 'right',
+            }}
+            keepMounted
+            transformOrigin={{
+              vertical: 'top',
+              horizontal: 'right',
+            }}
+            open={Boolean(anchorEl)}
+            onClose={handleClose}
+          >
+            <MenuItem onClick={handleClose}>
+              <AccountCircle sx={{ mr: 1 }} />
+              Profile
+            </MenuItem>
+            <MenuItem onClick={handleClose}>
+              <Settings sx={{ mr: 1 }} />
+              Settings
+            </MenuItem>
+            {profile?.role === 'owner' && (
+              <MenuItem onClick={handleClose}>
+                <Business sx={{ mr: 1 }} />
+                Owner Dashboard
+              </MenuItem>
+            )}
+            <MenuItem onClick={handleSignOut}>
+              <Logout sx={{ mr: 1 }} />
+              Sign Out
+            </MenuItem>
+          </Menu>
+        </Box>
+      </Toolbar>
+    </AppBar>
+  );
+} 
