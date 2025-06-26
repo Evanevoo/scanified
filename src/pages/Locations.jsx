@@ -66,7 +66,7 @@ const initialLocations = [
 ];
 
 export default function Locations() {
-  const [locations, setLocations] = useState(initialLocations);
+  const [locations, setLocations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMsg, setSnackbarMsg] = useState('');
