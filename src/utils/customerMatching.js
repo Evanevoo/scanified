@@ -4,18 +4,41 @@ import { supabase } from '../supabase/client';
  * Enhanced customer matching function with multiple strategies
  * @param {string} customerName - Customer name (can include ID in parentheses)
  * @param {string} customerId - Customer ID
+ * @param {string} organizationId - Organization ID for filtering
  * @returns {Promise<Object|null>} Customer object or null if not found
  */
-export async function findCustomer(customerName, customerId) {
+export async function findCustomer(customerName, customerId, organizationId = null) {
   if (!customerName && !customerId) return null;
+  
+  // Get current user's organization_id if not provided
+  if (!organizationId) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single();
+      organizationId = profile?.organization_id;
+    }
+  }
+  
+  // Build query with organization filter
+  const buildQuery = (query) => {
+    if (organizationId) {
+      return query.eq('organization_id', organizationId);
+    }
+    return query;
+  };
   
   // Strategy 1: Match by exact CustomerListID (case-insensitive)
   if (customerId) {
-    const { data: customer, error } = await supabase
-      .from('customers')
-      .select('CustomerListID, name, contact_details, phone')
-      .ilike('CustomerListID', customerId.trim())
-      .single();
+    const { data: customer, error } = await buildQuery(
+      supabase
+        .from('customers')
+        .select('CustomerListID, name, contact_details, phone')
+        .ilike('CustomerListID', customerId.trim())
+    ).single();
     
     if (customer && !error) {
       return customer;
@@ -27,11 +50,12 @@ export async function findCustomer(customerName, customerId) {
     const idMatch = customerName.match(/\(([^)]+)\)$/);
     if (idMatch) {
       const extractedId = idMatch[1].trim();
-      const { data: customer, error } = await supabase
-        .from('customers')
-        .select('CustomerListID, name, contact_details, phone')
-        .ilike('CustomerListID', extractedId)
-        .single();
+      const { data: customer, error } = await buildQuery(
+        supabase
+          .from('customers')
+          .select('CustomerListID, name, contact_details, phone')
+          .ilike('CustomerListID', extractedId)
+      ).single();
       
       if (customer && !error) {
         return customer;
@@ -42,11 +66,12 @@ export async function findCustomer(customerName, customerId) {
   // Strategy 3: Match by normalized name (remove parentheses and IDs)
   if (customerName) {
     const normalizedName = customerName.replace(/\([^)]*\)/g, '').trim();
-    const { data: customer, error } = await supabase
-      .from('customers')
-      .select('CustomerListID, name, contact_details, phone')
-      .ilike('name', normalizedName)
-      .single();
+    const { data: customer, error } = await buildQuery(
+      supabase
+        .from('customers')
+        .select('CustomerListID, name, contact_details, phone')
+        .ilike('name', normalizedName)
+    ).single();
     
     if (customer && !error) {
       return customer;
@@ -55,10 +80,12 @@ export async function findCustomer(customerName, customerId) {
   
   // Strategy 4: Fuzzy name matching (case-insensitive)
   if (customerName) {
-    const { data: customers, error } = await supabase
-      .from('customers')
-      .select('CustomerListID, name, contact_details, phone')
-      .ilike('name', `%${customerName.trim()}%`);
+    const { data: customers, error } = await buildQuery(
+      supabase
+        .from('customers')
+        .select('CustomerListID, name, contact_details, phone')
+        .ilike('name', `%${customerName.trim()}%`)
+    );
     
     if (customers && customers.length > 0 && !error) {
       // Return the first match (most exact)

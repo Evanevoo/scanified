@@ -17,6 +17,187 @@ import { deliveryService } from '../services/deliveryService';
 import { useAuth } from '../hooks/useAuth';
 import { notificationService } from '../services/notificationService';
 
+function TabPanel({ children, value, index, ...other }) {
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`delivery-tabpanel-${index}`}
+      aria-labelledby={`delivery-tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
+    </div>
+  );
+}
+
+function DeliveryTable({ deliveries, loading, onUpdateStatus, onAssignDriver }) {
+  const [selectedDelivery, setSelectedDelivery] = useState(null);
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'scheduled':
+        return 'primary';
+      case 'in_transit':
+        return 'warning';
+      case 'delivered':
+        return 'success';
+      case 'cancelled':
+        return 'error';
+      default:
+        return 'default';
+    }
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'scheduled':
+        return <ScheduleIcon />;
+      case 'in_transit':
+        return <CarIcon />;
+      case 'delivered':
+        return <CheckIcon />;
+      case 'cancelled':
+        return <WarningIcon />;
+      default:
+        return <ScheduleIcon />;
+    }
+  };
+
+  return (
+    <>
+      <Paper>
+        <TableContainer>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>ID</TableCell>
+                <TableCell>Customer</TableCell>
+                <TableCell>Date & Time</TableCell>
+                <TableCell>Driver</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={6} align="center">
+                    <CircularProgress />
+                  </TableCell>
+                </TableRow>
+              ) : deliveries.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} align="center">
+                    <Typography color="textSecondary">
+                      No deliveries found
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                deliveries.map((delivery) => (
+                  <TableRow key={delivery.id}>
+                    <TableCell>#{delivery.id}</TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {delivery.customer?.name || 'N/A'}
+                      </Typography>
+                      <Typography variant="caption" color="textSecondary">
+                        {delivery.customer?.phone || 'N/A'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {new Date(delivery.delivery_date).toLocaleDateString()}
+                      </Typography>
+                      <Typography variant="caption" color="textSecondary">
+                        {delivery.delivery_time || 'N/A'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      {delivery.driver ? (
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <PersonIcon sx={{ mr: 1, fontSize: 16 }} />
+                          {delivery.driver.full_name}
+                        </Box>
+                      ) : (
+                        <Chip
+                          label="Unassigned"
+                          size="small"
+                          color="warning"
+                          variant="outlined"
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        icon={getStatusIcon(delivery.status)}
+                        label={delivery.status.replace('_', ' ')}
+                        color={getStatusColor(delivery.status)}
+                        size="small"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Tooltip title="Update Status">
+                          <IconButton
+                            size="small"
+                            onClick={() => setSelectedDelivery(delivery)}
+                          >
+                            <EditIcon />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Track Location">
+                          <IconButton size="small">
+                            <LocationIcon />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="View Route">
+                          <IconButton size="small">
+                            <MapIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+
+      {/* Update Status Dialog */}
+      {selectedDelivery && (
+        <Dialog open={!!selectedDelivery} onClose={() => setSelectedDelivery(null)}>
+          <DialogTitle>Update Delivery Status</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" sx={{ mb: 2 }}>
+              Delivery #{selectedDelivery.id} - {selectedDelivery.customer?.name}
+            </Typography>
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel>Status</InputLabel>
+              <Select
+                value={selectedDelivery.status}
+                onChange={(e) => onUpdateStatus(selectedDelivery.id, e.target.value)}
+                label="Status"
+              >
+                <MenuItem value="scheduled">Scheduled</MenuItem>
+                <MenuItem value="in_transit">In Transit</MenuItem>
+                <MenuItem value="delivered">Delivered</MenuItem>
+                <MenuItem value="cancelled">Cancelled</MenuItem>
+              </Select>
+            </FormControl>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setSelectedDelivery(null)}>Close</Button>
+          </DialogActions>
+        </Dialog>
+      )}
+    </>
+  );
+}
+
 export default function DeliveryManagement() {
   const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState(0);
@@ -111,51 +292,6 @@ export default function DeliveryManagement() {
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'scheduled':
-        return 'primary';
-      case 'in_transit':
-        return 'warning';
-      case 'delivered':
-        return 'success';
-      case 'cancelled':
-        return 'error';
-      default:
-        return 'default';
-    }
-  };
-
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'scheduled':
-        return <ScheduleIcon />;
-      case 'in_transit':
-        return <CarIcon />;
-      case 'delivered':
-        return <CheckIcon />;
-      case 'cancelled':
-        return <WarningIcon />;
-      default:
-        return <ScheduleIcon />;
-    }
-  };
-
-  const filteredDeliveries = () => {
-    switch (activeTab) {
-      case 0: // All
-        return deliveries;
-      case 1: // Scheduled
-        return deliveries.filter(d => d.status === 'scheduled');
-      case 2: // In Transit
-        return deliveries.filter(d => d.status === 'in_transit');
-      case 3: // Delivered
-        return deliveries.filter(d => d.status === 'delivered');
-      default:
-        return deliveries;
-    }
-  };
-
   const stats = {
     total: deliveries.length,
     scheduled: deliveries.filter(d => d.status === 'scheduled').length,
@@ -230,107 +366,26 @@ export default function DeliveryManagement() {
         </Tabs>
       </Paper>
 
-      {/* Deliveries Table */}
-      <Paper>
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>ID</TableCell>
-                <TableCell>Customer</TableCell>
-                <TableCell>Date & Time</TableCell>
-                <TableCell>Driver</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={6} align="center">
-                    <CircularProgress />
-                  </TableCell>
-                </TableRow>
-              ) : filteredDeliveries().length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} align="center">
-                    <Typography color="textSecondary">
-                      No deliveries found
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredDeliveries().map((delivery) => (
-                  <TableRow key={delivery.id}>
-                    <TableCell>#{delivery.id}</TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
-                        {delivery.customer?.name || 'N/A'}
-                      </Typography>
-                      <Typography variant="caption" color="textSecondary">
-                        {delivery.customer?.phone || 'N/A'}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
-                        {new Date(delivery.delivery_date).toLocaleDateString()}
-                      </Typography>
-                      <Typography variant="caption" color="textSecondary">
-                        {delivery.delivery_time || 'N/A'}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      {delivery.driver ? (
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <PersonIcon sx={{ mr: 1, fontSize: 16 }} />
-                          {delivery.driver.full_name}
-                        </Box>
-                      ) : (
-                        <Chip
-                          label="Unassigned"
-                          size="small"
-                          color="warning"
-                          variant="outlined"
-                        />
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        icon={getStatusIcon(delivery.status)}
-                        label={delivery.status.replace('_', ' ')}
-                        color={getStatusColor(delivery.status)}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', gap: 1 }}>
-                        <Tooltip title="Update Status">
-                          <IconButton
-                            size="small"
-                            onClick={() => setSelectedDelivery(delivery)}
-                          >
-                            <EditIcon />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Track Location">
-                          <IconButton size="small">
-                            <LocationIcon />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="View Route">
-                          <IconButton size="small">
-                            <MapIcon />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+      {/* Tab Panels */}
+      <TabPanel value={activeTab} index={0}>
+        <Typography variant="h6" sx={{ mb: 2 }}>All Deliveries</Typography>
+        <DeliveryTable deliveries={deliveries} loading={loading} onUpdateStatus={handleUpdateStatus} onAssignDriver={handleAssignDriver} />
+      </TabPanel>
+
+      <TabPanel value={activeTab} index={1}>
+        <Typography variant="h6" sx={{ mb: 2 }}>Scheduled Deliveries</Typography>
+        <DeliveryTable deliveries={deliveries.filter(d => d.status === 'scheduled')} loading={loading} onUpdateStatus={handleUpdateStatus} onAssignDriver={handleAssignDriver} />
+      </TabPanel>
+
+      <TabPanel value={activeTab} index={2}>
+        <Typography variant="h6" sx={{ mb: 2 }}>In Transit Deliveries</Typography>
+        <DeliveryTable deliveries={deliveries.filter(d => d.status === 'in_transit')} loading={loading} onUpdateStatus={handleUpdateStatus} onAssignDriver={handleAssignDriver} />
+      </TabPanel>
+
+      <TabPanel value={activeTab} index={3}>
+        <Typography variant="h6" sx={{ mb: 2 }}>Delivered</Typography>
+        <DeliveryTable deliveries={deliveries.filter(d => d.status === 'delivered')} loading={loading} onUpdateStatus={handleUpdateStatus} onAssignDriver={handleAssignDriver} />
+      </TabPanel>
 
       {/* Create Delivery Dialog */}
       <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="md" fullWidth>
@@ -407,49 +462,6 @@ export default function DeliveryManagement() {
           </Button>
         </DialogActions>
       </Dialog>
-
-      {/* Update Status Dialog */}
-      {selectedDelivery && (
-        <Dialog open={!!selectedDelivery} onClose={() => setSelectedDelivery(null)}>
-          <DialogTitle>Update Delivery Status</DialogTitle>
-          <DialogContent>
-            <Typography variant="body2" sx={{ mb: 2 }}>
-              Delivery #{selectedDelivery.id} - {selectedDelivery.customer?.name}
-            </Typography>
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Status</InputLabel>
-              <Select
-                value={selectedDelivery.status}
-                onChange={(e) => handleUpdateStatus(selectedDelivery.id, e.target.value)}
-                label="Status"
-              >
-                <MenuItem value="scheduled">Scheduled</MenuItem>
-                <MenuItem value="in_transit">In Transit</MenuItem>
-                <MenuItem value="delivered">Delivered</MenuItem>
-                <MenuItem value="cancelled">Cancelled</MenuItem>
-              </Select>
-            </FormControl>
-            {!selectedDelivery.driver_id && (
-              <FormControl fullWidth>
-                <InputLabel>Assign Driver</InputLabel>
-                <Select
-                  onChange={(e) => handleAssignDriver(selectedDelivery.id, e.target.value)}
-                  label="Assign Driver"
-                >
-                  {drivers.map((driver) => (
-                    <MenuItem key={driver.id} value={driver.id}>
-                      {driver.full_name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            )}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setSelectedDelivery(null)}>Close</Button>
-          </DialogActions>
-        </Dialog>
-      )}
     </Box>
   );
 } 

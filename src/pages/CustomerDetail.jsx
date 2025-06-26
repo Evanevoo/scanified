@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import {
   Box,
@@ -63,11 +63,11 @@ export default function CustomerDetail() {
         if (customerAssetsError) throw customerAssetsError;
         setCustomerAssets(customerAssetsData || []);
         
-        // Calculate bottle summary by gas type
+        // Calculate bottle summary by type
         const summary = {};
         (customerAssetsData || []).forEach(bottle => {
-          const gasType = bottle.gas_type || 'Unknown';
-          summary[gasType] = (summary[gasType] || 0) + 1;
+          const type = bottle.type || bottle.description || 'Unknown';
+          summary[type] = (summary[type] || 0) + 1;
         });
         setBottleSummary(summary);
         
@@ -258,13 +258,13 @@ export default function CustomerDetail() {
         ) : (
           <Box>
             <Typography variant="body2" color="text.secondary" mb={2}>
-              Total bottles by gas type:
+              Total bottles by type:
             </Typography>
             <Box display="flex" flexWrap="wrap" gap={2}>
-              {Object.entries(bottleSummary).map(([gasType, count]) => (
+              {Object.entries(bottleSummary).map(([type, count]) => (
                 <Chip
-                  key={gasType}
-                  label={`${gasType} (${count})`}
+                  key={type}
+                  label={`${type} (${count})`}
                   color="primary"
                   variant="outlined"
                   sx={{ 
@@ -299,7 +299,7 @@ export default function CustomerDetail() {
                 <TableRow sx={{ backgroundColor: '#f5f7fa' }}>
                   <TableCell sx={{ fontWeight: 700 }}>Serial Number</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Barcode</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Gas Type</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
                 </TableRow>
@@ -310,19 +310,15 @@ export default function CustomerDetail() {
                     <TableCell>{asset.serial_number}</TableCell>
                     <TableCell>
                       {asset.barcode_number ? (
-                        <a
-                          href={`/bottles/${asset.barcode_number}`}
+                        <Link
+                          to={`/bottle/${asset.id}`}
                           style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}
-                          onClick={e => {
-                            e.preventDefault();
-                            navigate(`/bottles/${asset.barcode_number}`);
-                          }}
                         >
                           {asset.barcode_number}
-                        </a>
+                        </Link>
                       ) : ''}
                     </TableCell>
-                    <TableCell>{asset.gas_type}</TableCell>
+                    <TableCell>{asset.type || asset.description || 'Unknown'}</TableCell>
                     <TableCell>
                       <Chip 
                         label={asset.location || 'Unknown'} 
@@ -360,7 +356,7 @@ export default function CustomerDetail() {
               <TableHead>
                 <TableRow sx={{ backgroundColor: '#f5f7fa' }}>
                   <TableCell sx={{ fontWeight: 700 }}>Serial Number</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Gas Type</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Rental Type</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Rental Amount</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
@@ -372,7 +368,7 @@ export default function CustomerDetail() {
                 {locationAssets.map((rental) => (
                   <TableRow key={rental.id} hover>
                     <TableCell>{rental.cylinder?.serial_number || 'Unknown'}</TableCell>
-                    <TableCell>{rental.cylinder?.gas_type || 'Unknown'}</TableCell>
+                    <TableCell>{rental.cylinder?.type || 'Unknown'}</TableCell>
                     <TableCell>
                       <Chip 
                         label={rental.rental_type || 'Monthly'} 

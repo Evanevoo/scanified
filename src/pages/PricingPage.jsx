@@ -88,9 +88,10 @@ function PricingPage() {
                 </Typography>
                 <Box display="flex" alignItems="baseline" mb={2}>
                   <Typography variant="h4" fontWeight="bold">
-                    {plan.price_interval === 'custom' ? 'Custom' : `$${plan.price}`}
+                    {plan.name.toLowerCase().includes('enterprise') ? 'Contact Sales' : 
+                     plan.price_interval === 'custom' ? 'Custom' : `$${plan.price}`}
                   </Typography>
-                  {plan.price_interval !== 'custom' && (
+                  {!plan.name.toLowerCase().includes('enterprise') && plan.price_interval !== 'custom' && (
                     <Typography variant="subtitle1" color="text.secondary">
                       /month
                     </Typography>

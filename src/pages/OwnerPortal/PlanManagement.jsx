@@ -3,7 +3,7 @@ import { supabase } from '../../supabase/client';
 import {
   Box, Paper, Typography, Button, TextField, Grid, CircularProgress,
   Dialog, DialogActions, DialogContent, DialogTitle, Switch, FormControlLabel,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Alert
 } from '@mui/material';
 import { Edit as EditIcon, Add as AddIcon } from '@mui/icons-material';
 import { useAuth } from '../../hooks/useAuth';
@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 
 const PlanManagement = () => {
   const { profile } = useAuth();
+  const isOwner = profile?.role === 'owner';
   useOwnerAccess(profile); // Restrict access to owners
 
   const [plans, setPlans] = useState([]);
@@ -65,14 +66,24 @@ const PlanManagement = () => {
   const handleSave = async () => {
     let planToSave = { ...selectedPlan };
     try {
-      // Ensure features are valid JSON before saving
       planToSave.features = JSON.parse(planToSave.features);
     } catch (e) {
       toast.error('Features field contains invalid JSON. Please correct it.');
       return;
     }
 
-    // Remove the id for insert operations
+    // Validation for required numeric fields
+    if (planToSave.price === '' || planToSave.price === undefined || isNaN(Number(planToSave.price))) {
+      toast.error('Price is required and must be a number.');
+      return;
+    }
+    // Convert numeric fields to numbers
+    planToSave.price = Number(planToSave.price);
+    planToSave.max_users = planToSave.max_users === '' || planToSave.max_users === undefined ? null : Number(planToSave.max_users);
+    planToSave.max_cylinders = planToSave.max_cylinders === '' || planToSave.max_cylinders === undefined ? null : Number(planToSave.max_cylinders);
+    // Remove max_customers if present
+    delete planToSave.max_customers;
+
     if (isNewPlan) {
       delete planToSave.id;
     }
@@ -103,33 +114,37 @@ const PlanManagement = () => {
       <Button startIcon={<AddIcon />} variant="contained" onClick={() => openModal()} sx={{ mb: 2 }}>
         Create New Plan
       </Button>
-      <TableContainer component={Paper}>
+      <TableContainer component={Paper} sx={{ mt: 3 }}>
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Name</TableCell>
+              <TableCell>Plan Name</TableCell>
+              <TableCell>Description</TableCell>
               <TableCell>Price</TableCell>
-              <TableCell>Max Users</TableCell>
-              <TableCell>Max Cylinders</TableCell>
-              <TableCell>Max Customers</TableCell>
-              <TableCell>Active</TableCell>
-              <TableCell>Actions</TableCell>
+              <TableCell>Features</TableCell>
+              {isOwner && <TableCell>Actions</TableCell>}
             </TableRow>
           </TableHead>
           <TableBody>
             {plans.map(plan => (
               <TableRow key={plan.id}>
                 <TableCell>{plan.name}</TableCell>
-                <TableCell>${plan.price}/{plan.price_interval}</TableCell>
-                <TableCell>{plan.max_users === -1 ? 'Unlimited' : plan.max_users}</TableCell>
-                <TableCell>{plan.max_cylinders === -1 ? 'Unlimited' : plan.max_cylinders}</TableCell>
-                <TableCell>{plan.max_customers === -1 ? 'Unlimited' : plan.max_customers}</TableCell>
-                <TableCell>{plan.is_active ? 'Yes' : 'No'}</TableCell>
+                <TableCell>{plan.description}</TableCell>
+                <TableCell>${plan.price} / {plan.price_interval}</TableCell>
                 <TableCell>
-                  <IconButton onClick={() => openModal(plan)}>
-                    <EditIcon />
-                  </IconButton>
+                  <ul>
+                    {Array.isArray(plan.features)
+                      ? plan.features.map((f, i) => <li key={i}>{f}</li>)
+                      : null}
+                  </ul>
                 </TableCell>
+                {isOwner && (
+                  <TableCell>
+                    <Button variant="outlined" size="small" onClick={() => openModal(plan)}>
+                      Edit
+                    </Button>
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>
@@ -161,9 +176,6 @@ const PlanManagement = () => {
             <Grid item xs={6} sm={4}>
               <TextField name="max_cylinders" label="Max Cylinders" type="number" value={selectedPlan?.max_cylinders || 0} onChange={handleModalChange} fullWidth />
             </Grid>
-            <Grid item xs={6} sm={4}>
-              <TextField name="max_customers" label="Max Customers" type="number" value={selectedPlan?.max_customers || 0} onChange={handleModalChange} fullWidth />
-            </Grid>
             <Grid item xs={12}>
                <TextField
                 name="features"
@@ -189,6 +201,13 @@ const PlanManagement = () => {
           <Button onClick={handleSave} variant="contained">Save</Button>
         </DialogActions>
       </Dialog>
+      {!isOwner && (
+        <Box sx={{ mt: 4, textAlign: 'center' }}>
+          <Alert severity="info">
+            To change your plan, please contact support or complete payment.
+          </Alert>
+        </Box>
+      )}
     </Box>
   );
 };

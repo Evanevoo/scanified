@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
+import { useOwnerAccess } from '../hooks/useOwnerAccess';
 import {
   Box, Paper, Typography, Button, Card, CardContent, Grid, Alert,
   LinearProgress, Chip, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, CircularProgress, Divider, Stack, IconButton, List, ListItem,
   ListItemIcon, ListItemText, CardActions, Badge, Tooltip, Switch,
-  FormControlLabel, Accordion, AccordionSummary, AccordionDetails
+  FormControlLabel, Accordion, AccordionSummary, AccordionDetails,
+  FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import {
   CreditCard as CreditCardIcon,
@@ -29,8 +31,12 @@ import {
   Palette as PaletteIcon,
   Cancel as CancelIcon,
   Refresh as RefreshIcon,
-  Download as DownloadIcon
+  Download as DownloadIcon,
+  Info as InfoIcon,
+  Close as CloseIcon
 } from '@mui/icons-material';
+import { usePermissions } from '../context/PermissionsContext';
+import { loadStripe } from '@stripe/stripe-js';
 
 // Helper function to check if a limit is effectively unlimited
 const isUnlimited = (limit) => limit === -1 || limit >= 999999;
@@ -44,8 +50,20 @@ const safeToLocaleString = (value) => {
 // Helper function to safely parse JSON
 const safeJsonParse = (jsonString, defaultValue = []) => {
   if (!jsonString) return defaultValue;
+  
+  // If it's already an array, return it
+  if (Array.isArray(jsonString)) return jsonString;
+  
+  // If it's a string that doesn't look like JSON, return default
+  if (typeof jsonString === 'string' && !jsonString.trim().startsWith('[') && !jsonString.trim().startsWith('{')) {
+    console.warn('Features field contains non-JSON string:', jsonString);
+    return defaultValue;
+  }
+  
   try {
-    return JSON.parse(jsonString);
+    const parsed = JSON.parse(jsonString);
+    // Ensure it's an array
+    return Array.isArray(parsed) ? parsed : defaultValue;
   } catch (error) {
     console.error('Error parsing JSON:', jsonString, error);
     return defaultValue;
@@ -73,6 +91,10 @@ const getPlanTier = (plan) => {
 
 // Helper function to check if a plan has a specific feature
 const hasFeature = (plan, featureName) => {
+  if (!plan || !plan.features) {
+    return getDefaultFeatureAvailability(plan, featureName);
+  }
+  
   const features = safeJsonParse(plan.features, []);
   console.log(`Checking feature "${featureName}" for plan "${plan.name}":`, features);
   
@@ -83,22 +105,23 @@ const hasFeature = (plan, featureName) => {
   
   // Map feature names to common variations
   const featureMap = {
-    'Analytics': ['analytics', 'reports', 'dashboard', 'insights'],
-    'Delivery Management': ['delivery', 'shipping', 'logistics', 'management'],
-    'API Access': ['api', 'rest', 'integration', 'webhook'],
-    'Custom Branding': ['branding', 'custom', 'white label', 'logo'],
-    'Priority Support': ['support', 'priority', 'help', 'assistance'],
+    'Analytics': ['analytics', 'reports', 'dashboard', 'insights', 'advanced analytics'],
+    'Delivery Management': ['delivery', 'shipping', 'logistics', 'management', 'delivery management'],
+    'API Access': ['api', 'rest', 'integration', 'webhook', 'api access', 'custom integrations'],
+    'Custom Branding': ['branding', 'custom', 'white label', 'logo', 'white-label options'],
+    'Priority Support': ['support', 'priority', 'help', 'assistance', 'priority support', 'dedicated support'],
     'Speed': ['speed', 'performance', 'fast', 'optimization'],
     'Security': ['security', 'encryption', 'compliance', 'audit']
   };
   
   const searchTerms = featureMap[featureName] || [featureName.toLowerCase()];
   
-  return features.some(feature => 
-    searchTerms.some(term => 
+  return features.some(feature => {
+    if (typeof feature !== 'string') return false;
+    return searchTerms.some(term => 
       feature.toLowerCase().includes(term)
-    )
-  );
+    );
+  });
 };
 
 // Helper function to determine feature availability based on plan tier
@@ -158,9 +181,105 @@ const getDefaultFeatureAvailability = (plan, featureName) => {
   return availability.enterprise;
 };
 
+const SUBSCRIPTION_PLANS = {
+  basic: {
+    name: 'Basic',
+    price: 29,
+    features: [
+      'Up to 100 customers',
+      'Up to 1,000 cylinders',
+      'Basic reporting',
+      'Email support'
+    ],
+    stripe_price_id: import.meta.env.VITE_STRIPE_BASIC_PRICE_ID
+  },
+  pro: {
+    name: 'Professional',
+    price: 79,
+    features: [
+      'Up to 500 customers',
+      'Up to 5,000 cylinders',
+      'Advanced reporting',
+      'Priority support',
+      'API access'
+    ],
+    stripe_price_id: import.meta.env.VITE_STRIPE_PRO_PRICE_ID
+  },
+  enterprise: {
+    name: 'Enterprise',
+    price: 'Contact Sales',
+    features: [
+      'Unlimited customers',
+      'Unlimited cylinders',
+      'Custom integrations',
+      'Dedicated support',
+      'Custom features'
+    ],
+    stripe_price_id: null
+  }
+};
+
+// Luhn algorithm for card number validation
+function isValidCardNumber(number) {
+  const digits = number.replace(/\D/g, '').split('').reverse().map(Number);
+  let sum = 0;
+  for (let i = 0; i < digits.length; i++) {
+    let digit = digits[i];
+    if (i % 2 === 1) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+  }
+  return sum % 10 === 0;
+}
+
+function isValidExpiryDate(expiry) {
+  if (!expiry || !/^\d{2}\/\d{2}$/.test(expiry)) return false;
+  const [month, year] = expiry.split('/').map(Number);
+  if (month < 1 || month > 12) return false;
+  const now = new Date();
+  const expDate = new Date(2000 + year, month - 1, 1);
+  return expDate >= new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+function isValidCVC(cvc) {
+  return /^\d{3,4}$/.test(cvc);
+}
+
+// Add these validation functions at the top of the file
+const validateCardNumber = (number) => {
+  const digits = number.replace(/\D/g, '').split('').reverse().map(Number);
+  let sum = 0;
+  for (let i = 0; i < digits.length; i++) {
+    let digit = digits[i];
+    if (i % 2 === 1) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+  }
+  return sum % 10 === 0;
+};
+
+const validateExpiryDate = (expiry) => {
+  if (!expiry || !/^\d{2}\/\d{2}$/.test(expiry)) return false;
+  const [month, year] = expiry.split('/').map(Number);
+  if (month < 1 || month > 12) return false;
+  const now = new Date();
+  const expDate = new Date(2000 + year, month - 1, 1);
+  return expDate >= new Date(now.getFullYear(), now.getMonth(), 1);
+};
+
+const validateCVC = (cvc) => {
+  return /^\d{3,4}$/.test(cvc);
+};
+
 export default function Billing() {
   const { organization, profile } = useAuth();
+  const { isOwner } = useOwnerAccess();
   const navigate = useNavigate();
+  const { isOrgAdmin } = usePermissions();
   const [subscription, setSubscription] = useState(null);
   const [usage, setUsage] = useState(null);
   const [plans, setPlans] = useState([]);
@@ -173,6 +292,20 @@ export default function Billing() {
   const [processingPayment, setProcessingPayment] = useState(false);
   const [cancelDialog, setCancelDialog] = useState(false);
   const [reactivateDialog, setReactivateDialog] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [cardNumber, setCardNumber] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
+  const [cvv, setCvv] = useState('');
+  const [cardholderName, setCardholderName] = useState('');
+  const [success, setSuccess] = useState('');
+  const [cardError, setCardError] = useState('');
+  const [billingAddress, setBillingAddress] = useState({
+    line1: '',
+    city: '',
+    state: '',
+    postalCode: '',
+    country: ''
+  });
 
   useEffect(() => {
     if (organization) {
@@ -253,36 +386,293 @@ export default function Billing() {
   };
 
   const handlePlanSelection = (plan) => {
+    console.log('Plan selected:', plan);
+    
+    // For Enterprise plans, redirect to contact page
+    if (plan.name.toLowerCase().includes('enterprise')) {
+      window.open('/contact', '_blank');
+      return;
+    }
+    
     setSelectedPlan(plan);
     setShowUpgradeDialog(true);
+    // Clear form fields when opening dialog
+    setCardNumber('');
+    setExpiryDate('');
+    setCvv('');
+    setCardholderName('');
+    setError('');
+    setSuccess('');
   };
 
   const handleUpgrade = async () => {
-    if (!selectedPlan) return;
+    console.log('=== UPGRADE FUNCTION CALLED ===');
+    alert('Upgrade process started! Check console for details.');
+    console.log('selectedPlan:', selectedPlan);
+    console.log('organization:', organization);
+    console.log('profile:', profile);
     
-    setUpgrading(true);
-    try {
-      const { error } = await supabase
-        .from('organizations')
-        .update({ 
-          subscription_plan_id: selectedPlan.id,
-          subscription_status: 'active',
-          subscription_start_date: new Date().toISOString(),
-          max_users: selectedPlan.max_users,
-          max_cylinders: selectedPlan.max_cylinders,
-          max_customers: selectedPlan.max_customers
-        })
-        .eq('id', organization.id);
+    if (!selectedPlan) {
+      console.log('No plan selected');
+      setError('No plan selected. Please select a plan first.');
+      return;
+    }
+    
+    console.log('Upgrade started for plan:', selectedPlan);
+    console.log('Organization:', organization);
+    
+    // Don't allow upgrades for free plans without payment
+    if (selectedPlan.price > 0) {
+      console.log('Plan has price > 0, proceeding with payment flow');
+      setUpgrading(true);
+      setError(''); // Clear any previous errors
+      
+      try {
+        console.log('Creating payment intent for amount:', selectedPlan.price * 100);
 
-      if (error) throw error;
+        const requestBody = {
+          amount: selectedPlan.price * 100, // Convert to cents
+          currency: 'usd',
+          customerId: organization.stripe_customer_id || null, // Can be null
+          metadata: {
+            organization_id: organization.id,
+            organization_name: organization.name,
+            organization_email: organization.email || profile?.email,
+            organization_slug: organization.slug,
+            plan_id: selectedPlan.id,
+            plan_name: selectedPlan.name,
+            type: 'plan_upgrade'
+          }
+        };
 
-      await loadBillingData(); // Refresh data
-      setShowUpgradeDialog(false);
-      setSelectedPlan(null);
-    } catch (error) {
-      setError(error.message);
-    } finally {
-      setUpgrading(false);
+        console.log('Request body:', requestBody);
+
+        // Check if we're in development mode
+        const isDevelopment = import.meta.env.DEV;
+        console.log('Environment check:', {
+          isDevelopment,
+          env: import.meta.env.MODE,
+          dev: import.meta.env.DEV
+        });
+        
+        let clientSecret;
+        
+        if (isDevelopment) {
+          console.log('Development mode detected, using development payment flow');
+          
+          // In development, use mock payment for testing
+          console.log('Development: Using mock payment for testing');
+          clientSecret = 'pi_mock_secret_' + Date.now();
+          
+          // Simulate network delay
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          console.log('Development: Mock payment intent created:', clientSecret);
+        } else {
+          // Production mode - use actual Netlify function
+          console.log('Production mode, using Netlify function');
+          
+          const response = await fetch('/.netlify/functions/create-payment-intent', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+          });
+
+          console.log('Payment intent response status:', response.status);
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Response not ok:', errorText);
+            throw new Error(`Payment service unavailable (${response.status}). Please try again later.`);
+          }
+
+          const responseData = await response.json();
+          console.log('Payment intent response:', responseData);
+
+          const { error } = responseData;
+          
+          if (error) {
+            console.error('Payment intent error:', error);
+            throw new Error('Payment service unavailable. Please try again later.');
+          }
+
+          clientSecret = responseData.clientSecret;
+          
+          if (!clientSecret) {
+            throw new Error('Payment service error. Please try again later.');
+          }
+        }
+
+        console.log('Loading Stripe...');
+        // Initialize Stripe
+        let stripe = null;
+        
+        if (isDevelopment) {
+          // In development, try to load Stripe if key is available, otherwise skip
+          if (import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY) {
+            try {
+              const { loadStripe } = await import('@stripe/stripe-js');
+              stripe = await loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+            } catch (error) {
+              console.log('Development: Stripe key not available, using mock payment');
+            }
+          } else {
+            console.log('Development: No Stripe key, using mock payment');
+          }
+        } else {
+          // Production mode - Stripe is required
+          const { loadStripe } = await import('@stripe/stripe-js');
+          stripe = await loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+
+          if (!stripe) {
+            throw new Error('Payment system failed to load. Please refresh and try again.');
+          }
+        }
+
+        console.log('Confirming payment...');
+        
+        let paymentResult;
+        
+        if (isDevelopment) {
+          // In development, simulate successful payment
+          console.log('Development: Simulating successful payment');
+          paymentResult = {
+            paymentIntent: {
+              status: 'succeeded',
+              customer: 'cus_mock_' + Date.now()
+            }
+          };
+          
+          // Simulate network delay
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        } else {
+          // Confirm payment with entered card details
+          setCardError('');
+          if (!validateCardNumber(cardNumber)) {
+            setCardError('Invalid card number.');
+            return;
+          }
+          if (!validateExpiryDate(expiryDate)) {
+            setCardError('Invalid expiry date.');
+            return;
+          }
+          if (!validateCVC(cvv)) {
+            setCardError('Invalid CVC.');
+            return;
+          }
+          if (!cardholderName.trim()) {
+            setCardError('Cardholder name is required.');
+            return;
+          }
+          if (!billingAddress.line1.trim() || !billingAddress.city.trim() || 
+              !billingAddress.state.trim() || !billingAddress.postalCode.trim() || 
+              !billingAddress.country.trim()) {
+            setCardError('Complete billing address is required.');
+            return;
+          }
+          paymentResult = await stripe.confirmCardPayment(clientSecret, {
+            payment_method: {
+              card: {
+                number: cardNumber.replace(/\s/g, ''),
+                exp_month: parseInt(expiryDate.split('/')[0]),
+                exp_year: parseInt('20' + expiryDate.split('/')[1]),
+                cvc: cvv,
+              },
+              billing_details: {
+                name: cardholderName,
+                email: organization.email || profile?.email,
+                address: {
+                  line1: billingAddress.line1,
+                  city: billingAddress.city,
+                  state: billingAddress.state,
+                  postal_code: billingAddress.postalCode,
+                  country: billingAddress.country
+                }
+              }
+            }
+          });
+        }
+
+        const { error: paymentError, paymentIntent } = paymentResult;
+
+        if (paymentError) {
+          console.error('Payment error:', paymentError);
+          throw new Error(paymentError.message || 'Payment failed. Please check your card details and try again.');
+        }
+
+        console.log('Payment result:', paymentIntent);
+
+        if (paymentIntent.status === 'succeeded') {
+          console.log('Payment successful, updating database...');
+          // Payment successful, now update the database
+          const { error: updateError } = await supabase
+            .from('organizations')
+            .update({ 
+              subscription_plan_id: selectedPlan.id,
+              subscription_status: 'active',
+              subscription_start_date: new Date().toISOString(),
+              max_users: selectedPlan.max_users,
+              max_cylinders: selectedPlan.max_cylinders,
+              max_customers: selectedPlan.max_customers,
+              stripe_customer_id: paymentIntent.customer || organization.stripe_customer_id
+            })
+            .eq('id', organization.id);
+
+          if (updateError) {
+            console.error('Database update error:', updateError);
+            throw new Error('Payment successful but failed to update subscription. Please contact support.');
+          }
+
+          console.log('Database updated successfully');
+          await loadBillingData(); // Refresh data
+          setShowUpgradeDialog(false);
+          setSelectedPlan(null);
+          setSuccess('Payment successful! Your plan has been updated.');
+          // Clear form fields
+          setCardNumber('');
+          setExpiryDate('');
+          setCvv('');
+          setCardholderName('');
+        } else {
+          throw new Error('Payment was not successful. Please try again.');
+        }
+
+      } catch (error) {
+        console.error('Upgrade error:', error);
+        setError(error.message || 'Failed to upgrade plan. Please try again.');
+      } finally {
+        setUpgrading(false);
+      }
+    } else {
+      console.log('Plan is free, proceeding with direct upgrade');
+      // Free plan - allow direct upgrade
+      setUpgrading(true);
+      try {
+        const { error } = await supabase
+          .from('organizations')
+          .update({ 
+            subscription_plan_id: selectedPlan.id,
+            subscription_status: 'active',
+            subscription_start_date: new Date().toISOString(),
+            max_users: selectedPlan.max_users,
+            max_cylinders: selectedPlan.max_cylinders,
+            max_customers: selectedPlan.max_customers
+          })
+          .eq('id', organization.id);
+
+        if (error) throw error;
+
+        await loadBillingData(); // Refresh data
+        setShowUpgradeDialog(false);
+        setSelectedPlan(null);
+        setSuccess('Plan upgraded successfully!');
+      } catch (error) {
+        setError(error.message);
+      } finally {
+        setUpgrading(false);
+      }
     }
   };
 
@@ -347,6 +737,141 @@ export default function Billing() {
     return Math.min((current / max) * 100, 100);
   };
 
+  // Owner-only direct plan change handler
+  const handleOwnerPlanChange = async (plan) => {
+    if (!organization) return;
+    setUpgrading(true);
+    try {
+      const { error } = await supabase
+        .from('organizations')
+        .update({
+          subscription_plan_id: plan.id,
+          subscription_status: 'active',
+          subscription_start_date: new Date().toISOString(),
+          max_users: plan.max_users,
+          max_cylinders: plan.max_cylinders,
+          max_customers: plan.max_customers
+        })
+        .eq('id', organization.id);
+      if (error) throw error;
+      await loadBillingData();
+      setShowUpgradeDialog(false);
+      setSelectedPlan(null);
+      alert('Plan updated directly by owner.');
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      setUpgrading(false);
+    }
+  };
+
+  const handlePaymentSubmit = async () => {
+    if (!selectedPlan || selectedPlan === 'enterprise') {
+      setError('Invalid plan selected.');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      // Create payment intent with Stripe
+      const response = await fetch('/.netlify/functions/create-payment-intent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          plan: selectedPlan,
+          organizationId: organization.id,
+          amount: SUBSCRIPTION_PLANS[selectedPlan].price * 100, // Convert to cents
+          currency: 'usd'
+        }),
+      });
+
+      const { clientSecret, error: paymentError } = await response.json();
+
+      if (paymentError) {
+        throw new Error(paymentError);
+      }
+
+      // Confirm payment with Stripe
+      const stripe = await loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
+      const { error: confirmError } = await stripe.confirmCardPayment(clientSecret, {
+        payment_method: {
+          card: {
+            number: cardNumber.replace(/\s/g, ''),
+            exp_month: parseInt(expiryDate.split('/')[0]),
+            exp_year: parseInt('20' + expiryDate.split('/')[1]),
+            cvc: cvv,
+          },
+          billing_details: {
+            name: cardholderName,
+          },
+        },
+      });
+
+      if (confirmError) {
+        throw new Error(confirmError.message);
+      }
+
+      // Update organization subscription
+      const { error: updateError } = await supabase
+        .from('organizations')
+        .update({
+          subscription_plan: selectedPlan,
+          subscription_status: 'active',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', organization.id);
+
+      if (updateError) {
+        throw new Error('Failed to update subscription: ' + updateError.message);
+      }
+
+      setSuccess('Plan upgraded successfully!');
+      setPaymentDialog(false);
+      
+      // Refresh organization data
+      await loadBillingData();
+
+    } catch (err) {
+      setError(err.message || 'Payment failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Add validation before payment submission
+  const validatePaymentForm = () => {
+    setCardError('');
+    
+    if (!isValidCardNumber(cardNumber)) {
+      setCardError('Invalid card number.');
+      return false;
+    }
+    if (!isValidExpiryDate(expiryDate)) {
+      setCardError('Invalid expiry date.');
+      return false;
+    }
+    if (!isValidCVC(cvv)) {
+      setCardError('Invalid CVC.');
+      return false;
+    }
+    if (!cardholderName.trim()) {
+      setCardError('Cardholder name is required.');
+      return false;
+    }
+    if (!billingAddress.line1.trim() || !billingAddress.city.trim() || 
+        !billingAddress.state.trim() || !billingAddress.postalCode.trim() || 
+        !billingAddress.country.trim()) {
+      setCardError('Complete billing address is required.');
+      return false;
+    }
+    
+    return true;
+  };
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -357,6 +882,14 @@ export default function Billing() {
 
   if (!organization) {
     return <Alert severity="error">No organization found.</Alert>;
+  }
+
+  if (profile?.role === 'owner') {
+    return (
+      <div style={{ padding: 32, textAlign: 'center' }}>
+        <h2>Billing is not applicable for the platform owner account.</h2>
+      </div>
+    );
   }
 
   const currentPlan = getCurrentPlan();
@@ -377,7 +910,19 @@ export default function Billing() {
           </Typography>
         </Stack>
 
+        {import.meta.env.DEV && (
+          <Alert severity="info" sx={{ mb: 3 }}>
+            <strong>Development Mode:</strong> Payments are simulated for testing. No actual charges will be made.
+          </Alert>
+        )}
+
         {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
+
+        {success && (
+          <Alert severity="success" sx={{ mb: 3 }}>
+            {success}
+          </Alert>
+        )}
 
         {/* Trial Status */}
         {isOnTrial && (
@@ -430,8 +975,23 @@ export default function Billing() {
               </Typography>
               
               <Typography variant="h6" color="text.secondary" gutterBottom>
-                ${currentPlan.price}/{currentPlan.price_interval}
-                {currentPlan.price === 0 && ' (Contact Sales)'}
+                {currentPlan.name.toLowerCase().includes('enterprise') ? (
+                  <>
+                    Contact Sales
+                    <Typography variant="body2" component="span" color="text.secondary">
+                      {' '}(Custom Pricing)
+                    </Typography>
+                  </>
+                ) : (
+                  <>
+                    ${currentPlan.price}/{currentPlan.price_interval}
+                    {currentPlan.price === 0 && (
+                      <Typography variant="body2" component="span" color="text.secondary">
+                        {' '}(Contact Sales)
+                      </Typography>
+                    )}
+                  </>
+                )}
               </Typography>
               
               {isSubscriptionCancelled && (
@@ -561,11 +1121,22 @@ export default function Billing() {
                     </Box>
                     
                     <Typography variant="h4" color="primary" gutterBottom>
-                      ${plan.price}/{plan.price_interval}
-                      {plan.price === 0 && (
-                        <Typography variant="body2" component="span" color="text.secondary">
-                          {' '}(Contact Sales)
-                        </Typography>
+                      {plan.name.toLowerCase().includes('enterprise') ? (
+                        <>
+                          Contact Sales
+                          <Typography variant="body2" component="span" color="text.secondary">
+                            {' '}(Custom Pricing)
+                          </Typography>
+                        </>
+                      ) : (
+                        <>
+                          ${plan.price}/{plan.price_interval}
+                          {plan.price === 0 && (
+                            <Typography variant="body2" component="span" color="text.secondary">
+                              {' '}(Contact Sales)
+                            </Typography>
+                          )}
+                        </>
                       )}
                     </Typography>
 
@@ -585,12 +1156,16 @@ export default function Billing() {
                     <List dense sx={{ py: 0 }}>
                       {(function() {
                         try {
-                          return safeJsonParse(plan.features || '[]').map((feature, index) => (
+                          const features = safeJsonParse(plan.features || '[]');
+                          if (!Array.isArray(features) || features.length === 0) {
+                            return <ListItem><ListItemText primary="Features not available" /></ListItem>;
+                          }
+                          return features.map((feature, index) => (
                             <ListItem key={index} sx={{ py: 0.5, px: 0 }}>
                               <ListItemIcon sx={{ minWidth: 24 }}>
                                 <CheckCircleIcon color="primary" fontSize="small" />
                               </ListItemIcon>
-                              <ListItemText primary={feature} />
+                              <ListItemText primary={typeof feature === 'string' ? feature : 'Invalid feature'} />
                             </ListItem>
                           ));
                         } catch (error) {
@@ -607,9 +1182,10 @@ export default function Billing() {
                       color="primary"
                       fullWidth
                       onClick={() => handlePlanSelection(plan)}
-                      disabled={currentPlan?.id === plan.id}
+                      disabled={currentPlan?.id === plan.id || plan.name.toLowerCase().includes('enterprise')}
                     >
-                      {currentPlan?.id === plan.id ? 'Current Plan' : 'Select Plan'}
+                      {currentPlan?.id === plan.id ? 'Current Plan' : 
+                       plan.name.toLowerCase().includes('enterprise') ? 'Contact Sales' : 'Select Plan'}
                     </Button>
                   </CardActions>
                 </Card>
@@ -680,26 +1256,133 @@ export default function Billing() {
         {/* Dialogs */}
         <Dialog open={showUpgradeDialog} onClose={() => setShowUpgradeDialog(false)} maxWidth="sm" fullWidth>
           <DialogTitle>
-            {selectedPlan ? `Upgrade to ${selectedPlan.name}` : 'Select a Plan'}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography variant="h6">
+                {selectedPlan ? `Upgrade to ${selectedPlan.name}` : 'Select a Plan'}
+              </Typography>
+              <IconButton onClick={() => setShowUpgradeDialog(false)}>
+                <CloseIcon />
+              </IconButton>
+            </Box>
           </DialogTitle>
           <DialogContent>
             {selectedPlan && (
               <Box>
                 <Typography variant="h6" color="primary" gutterBottom>
-                  {selectedPlan.name} - ${selectedPlan.price}/{selectedPlan.price_interval}
+                  {selectedPlan.name} - {selectedPlan.name.toLowerCase().includes('enterprise') ? 'Contact Sales' : `$${selectedPlan.price}/${selectedPlan.price_interval}`}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" gutterBottom>
-                  {selectedPlan.price === 0 ? 'Contact our sales team for custom pricing.' : 'This will be charged monthly.'}
+                  {selectedPlan.name.toLowerCase().includes('enterprise') 
+                    ? 'Enterprise plans require custom pricing. Please contact our sales team for a personalized quote.' 
+                    : selectedPlan.price === 0 
+                      ? 'Contact our sales team for custom pricing.' 
+                      : 'This will be charged monthly.'}
                 </Typography>
+                
+                {!selectedPlan.name.toLowerCase().includes('enterprise') && selectedPlan.price > 0 && (
+                  <>
+                    <Divider sx={{ my: 2 }} />
+                    <Typography variant="subtitle1" gutterBottom>
+                      Payment Information
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+                      <TextField
+                        label="Cardholder Name"
+                        value={cardholderName}
+                        onChange={(e) => setCardholderName(e.target.value)}
+                        fullWidth
+                        required
+                        placeholder="John Doe"
+                      />
+                      <TextField
+                        label="Card Number"
+                        value={cardNumber}
+                        onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
+                        placeholder="1234 5678 9012 3456"
+                        fullWidth
+                        required
+                        inputProps={{ maxLength: 19 }}
+                      />
+                      <Box sx={{ display: 'flex', gap: 2 }}>
+                        <TextField
+                          label="Expiry Date"
+                          value={expiryDate}
+                          onChange={(e) => setExpiryDate(formatExpiryDate(e.target.value))}
+                          placeholder="MM/YY"
+                          fullWidth
+                          required
+                          inputProps={{ maxLength: 5 }}
+                        />
+                        <TextField
+                          label="CVV"
+                          value={cvv}
+                          onChange={(e) => setCvv(e.target.value.replace(/\D/g, ''))}
+                          placeholder="123"
+                          fullWidth
+                          required
+                          inputProps={{ maxLength: 4 }}
+                        />
+                      </Box>
+                      {cardError && <Alert severity="error">{cardError}</Alert>}
+                      <TextField
+                        label="Billing Address"
+                        value={billingAddress.line1}
+                        onChange={(e) => setBillingAddress({ ...billingAddress, line1: e.target.value })}
+                        fullWidth
+                        margin="normal"
+                        required
+                      />
+                      <TextField
+                        label="City"
+                        value={billingAddress.city}
+                        onChange={(e) => setBillingAddress({ ...billingAddress, city: e.target.value })}
+                        fullWidth
+                        margin="normal"
+                        required
+                      />
+                      <TextField
+                        label="State"
+                        value={billingAddress.state}
+                        onChange={(e) => setBillingAddress({ ...billingAddress, state: e.target.value })}
+                        fullWidth
+                        margin="normal"
+                        required
+                      />
+                      <TextField
+                        label="Postal Code"
+                        value={billingAddress.postalCode}
+                        onChange={(e) => setBillingAddress({ ...billingAddress, postalCode: e.target.value })}
+                        fullWidth
+                        margin="normal"
+                        required
+                      />
+                      <TextField
+                        label="Country"
+                        value={billingAddress.country}
+                        onChange={(e) => setBillingAddress({ ...billingAddress, country: e.target.value })}
+                        fullWidth
+                        margin="normal"
+                        required
+                      />
+                    </Box>
+                  </>
+                )}
+                
+                <Divider sx={{ my: 2 }} />
+                <Typography variant="subtitle2" gutterBottom>Features:</Typography>
                 <List dense>
                   {(function() {
                     try {
-                      return safeJsonParse(selectedPlan.features || '[]').map((feature, index) => (
+                      const features = safeJsonParse(selectedPlan.features || '[]');
+                      if (!Array.isArray(features) || features.length === 0) {
+                        return <ListItem><ListItemText primary="Features not available" /></ListItem>;
+                      }
+                      return features.map((feature, index) => (
                         <ListItem key={index} sx={{ py: 0.5, px: 0 }}>
                           <ListItemIcon sx={{ minWidth: 24 }}>
                             <CheckCircleIcon color="primary" fontSize="small" />
                           </ListItemIcon>
-                          <ListItemText primary={feature} />
+                          <ListItemText primary={typeof feature === 'string' ? feature : 'Invalid feature'} />
                         </ListItem>
                       ));
                     } catch (error) {
@@ -710,15 +1393,41 @@ export default function Billing() {
                 </List>
               </Box>
             )}
+            {!selectedPlan && (
+              <Typography color="error">
+                No plan selected. Please select a plan first.
+              </Typography>
+            )}
           </DialogContent>
-          <DialogActions>
+          <DialogActions sx={{ p: 3 }}>
             <Button onClick={() => setShowUpgradeDialog(false)}>Cancel</Button>
             <Button 
-              onClick={handleUpgrade} 
+              onClick={() => {
+                console.log('=== BUTTON CLICKED - VERSION 2.0 ===');
+                console.log('Timestamp:', new Date().toISOString());
+                alert('Button clicked! Testing... V2.0');
+                console.log('Button clicked!');
+                console.log('Button disabled state:', {
+                  upgrading,
+                  selectedPlan: !!selectedPlan,
+                  isEnterprise: selectedPlan?.name.toLowerCase().includes('enterprise'),
+                  hasPrice: selectedPlan?.price > 0,
+                  cardFields: { cardNumber, expiryDate, cvv, cardholderName },
+                  allFieldsFilled: cardNumber && expiryDate && cvv && cardholderName
+                });
+                handleUpgrade();
+              }} 
               variant="contained" 
-              disabled={upgrading || !selectedPlan}
+              disabled={
+                upgrading || 
+                !selectedPlan || 
+                selectedPlan?.name.toLowerCase().includes('enterprise') ||
+                (selectedPlan?.price > 0 && (!cardNumber || !expiryDate || !cvv || !cardholderName))
+              }
+              startIcon={upgrading ? <CircularProgress size={20} /> : <CreditCardIcon />}
             >
-              {upgrading ? <CircularProgress size={20} /> : 'Upgrade'}
+              {upgrading ? 'Processing...' : 
+               selectedPlan?.name.toLowerCase().includes('enterprise') ? 'Contact Sales' : 'Complete Payment'}
             </Button>
           </DialogActions>
         </Dialog>
@@ -752,7 +1461,138 @@ export default function Billing() {
             </Button>
           </DialogActions>
         </Dialog>
+
+        {/* Owner-only plan change UI */}
+        {isOwner && (
+          <Box sx={{ mb: 3 }}>
+            <Alert severity="info">You are logged in as the owner. You can change plans for this organization directly without payment.</Alert>
+            <Typography variant="h6" sx={{ mt: 2 }}>Change Plan (Owner Only)</Typography>
+            <Grid container spacing={2} sx={{ mb: 2 }}>
+              {plans.map((plan) => (
+                <Grid item key={plan.id}>
+                  <Button
+                    variant={subscription?.subscription_plan_id === plan.id ? 'outlined' : 'contained'}
+                    color="secondary"
+                    onClick={() => handleOwnerPlanChange(plan)}
+                    disabled={subscription?.subscription_plan_id === plan.id}
+                  >
+                    {plan.name}
+                  </Button>
+                </Grid>
+              ))}
+            </Grid>
+          </Box>
+        )}
+
+        {/* Payment Dialog */}
+        <Dialog 
+          open={paymentDialog} 
+          onClose={() => setPaymentDialog(false)}
+          maxWidth="sm"
+          fullWidth
+        >
+          <DialogTitle>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography variant="h6">
+                Payment Information
+              </Typography>
+              <IconButton onClick={() => setPaymentDialog(false)}>
+                <CloseIcon />
+              </IconButton>
+            </Box>
+          </DialogTitle>
+          
+          <DialogContent>
+            {import.meta.env.DEV && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                <strong>Development Mode:</strong> This is a test payment. No actual charges will be made.
+              </Alert>
+            )}
+            
+            <Typography variant="body1" sx={{ mb: 3 }}>
+              You're upgrading to the {SUBSCRIPTION_PLANS[selectedPlan]?.name} plan for ${SUBSCRIPTION_PLANS[selectedPlan]?.price}/month.
+            </Typography>
+
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <TextField
+                label="Cardholder Name"
+                value={cardholderName}
+                onChange={(e) => setCardholderName(e.target.value)}
+                fullWidth
+                required
+              />
+
+              <TextField
+                label="Card Number"
+                value={cardNumber}
+                onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
+                placeholder="1234 5678 9012 3456"
+                fullWidth
+                required
+                inputProps={{ maxLength: 19 }}
+              />
+
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <TextField
+                  label="Expiry Date"
+                  value={expiryDate}
+                  onChange={(e) => setExpiryDate(formatExpiryDate(e.target.value))}
+                  placeholder="MM/YY"
+                  fullWidth
+                  required
+                  inputProps={{ maxLength: 5 }}
+                />
+                <TextField
+                  label="CVV"
+                  value={cvv}
+                  onChange={(e) => setCvv(e.target.value.replace(/\D/g, ''))}
+                  placeholder="123"
+                  fullWidth
+                  required
+                  inputProps={{ maxLength: 4 }}
+                />
+              </Box>
+            </Box>
+          </DialogContent>
+
+          <DialogActions sx={{ p: 3 }}>
+            <Button onClick={() => setPaymentDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handlePaymentSubmit}
+              disabled={loading || !cardNumber || !expiryDate || !cvv || !cardholderName}
+              startIcon={loading ? <CircularProgress size={20} /> : <CreditCardIcon />}
+            >
+              {loading ? 'Processing...' : 'Complete Payment'}
+            </Button>
+          </DialogActions>
+        </Dialog>
       </Paper>
     </Box>
   );
+}
+
+function formatCardNumber(value) {
+  const v = value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
+  const matches = v.match(/\d{4,16}/g);
+  const match = matches && matches[0] || '';
+  const parts = [];
+  for (let i = 0, len = match.length; i < len; i += 4) {
+    parts.push(match.substring(i, i + 4));
+  }
+  if (parts.length) {
+    return parts.join(' ');
+  } else {
+    return v;
+  }
+}
+
+function formatExpiryDate(value) {
+  const v = value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
+  if (v.length >= 2) {
+    return v.substring(0, 2) + '/' + v.substring(2, 4);
+  }
+  return v;
 } 

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, CircularProgress, Alert
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, CircularProgress, Alert, MenuItem, Select, InputLabel, FormControl
 } from '@mui/material';
 
 function AssetWithWarning({ asset, currentCustomer }) {
@@ -48,29 +48,38 @@ export default function ScannedOrders() {
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
+  const [organizations, setOrganizations] = useState([]);
+  const [selectedOrg, setSelectedOrg] = useState('');
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    async function fetchOrganizations() {
+      const { data, error } = await supabase.from('organizations').select('id, name');
+      if (!error) setOrganizations(data || []);
+    }
+    fetchOrganizations();
+  }, []);
 
   useEffect(() => {
     async function fetchOrders() {
       setLoading(true);
       setError(null);
-      const { data, error } = await supabase
-        .from('sales_orders')
-        .select('*')
-        .not('scanned_at', 'is', null)
-        .order('scanned_at', { ascending: false });
+      let query = supabase.from('sales_orders').select('*').not('scanned_at', 'is', null).order('scanned_at', { ascending: false });
+      if (selectedOrg) query = query.eq('organization_id', selectedOrg);
+      const { data, error } = await query;
       if (error) setError(error.message);
       else setOrders(data || []);
       setLoading(false);
     }
     fetchOrders();
-  }, [saving]);
+  }, [saving, selectedOrg]);
 
   const handleEdit = (order) => {
     setEditingId(order.id);
     setEditForm({
       sales_order_number: order.sales_order_number || '',
       customer_name: order.customer_name || '',
-      assets: order.assets || '', // assuming assets is a comma-separated string or array
+      assets: order.assets || '',
     });
   };
 
@@ -93,11 +102,42 @@ export default function ScannedOrders() {
     if (error) setError(error.message);
   };
 
+  // Filter orders by search
+  const filteredOrders = orders.filter(order => {
+    if (!search) return true;
+    const s = search.toLowerCase();
+    return (
+      (order.sales_order_number && order.sales_order_number.toLowerCase().includes(s)) ||
+      (order.customer_name && order.customer_name.toLowerCase().includes(s)) ||
+      (order.assets && order.assets.toLowerCase && order.assets.toLowerCase().includes(s))
+    );
+  });
+
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
       <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
         <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Scanned Orders</Typography>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} gap={2}>
+          <FormControl sx={{ minWidth: 220 }} size="small">
+            <InputLabel>Organization</InputLabel>
+            <Select
+              value={selectedOrg}
+              label="Organization"
+              onChange={e => setSelectedOrg(e.target.value)}
+            >
+              <MenuItem value="">All Organizations</MenuItem>
+              {organizations.map(org => (
+                <MenuItem key={org.id} value={org.id}>{org.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            size="small"
+            label="Search orders, customer, asset..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            sx={{ minWidth: 260 }}
+          />
           <Button
             variant="outlined"
             color="secondary"
@@ -128,9 +168,8 @@ export default function ScannedOrders() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {orders.map(order => {
+                {filteredOrders.map(order => {
                   const isMismatched = !order.assets || !order.status;
-                  // Parse assets as array (comma-separated or array)
                   let assetList = [];
                   if (Array.isArray(order.assets)) assetList = order.assets;
                   else if (typeof order.assets === 'string') assetList = order.assets.split(',').map(a => a.trim()).filter(Boolean);
@@ -218,7 +257,7 @@ export default function ScannedOrders() {
                 })}
               </TableBody>
             </Table>
-            {orders.length === 0 && <Typography color="text.secondary" mt={2}>No scanned orders found.</Typography>}
+            {filteredOrders.length === 0 && <Typography color="text.secondary" mt={2}>No scanned orders found.</Typography>}
           </TableContainer>
         )}
       </Paper>

@@ -17,6 +17,8 @@ const drawerWidth = 280;
 
 const Sidebar = ({ open, onClose }) => {
   const { profile, organization } = useAuth();
+  console.log('Sidebar profile:', profile);
+  if (!profile) return null;
   const [search, setSearch] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -61,8 +63,8 @@ const Sidebar = ({ open, onClose }) => {
   const handleSelect = (item) => {
     setShowSuggestions(false);
     setSearch('');
-    if (item.type === 'asset') navigate(`/assets/${item.id}/history`);
-    else if (item.type === 'customer') navigate(`/customers/${item.id}`);
+    if (item.type === 'asset') navigate(`/bottle/${item.id}`);
+    else if (item.type === 'customer') navigate(`/customer/${item.id}`);
     else if (item.type === 'order') navigate(`/integration`); // Adjust to actual order detail page if exists
     else alert('Unknown type');
   };
@@ -152,7 +154,7 @@ const Sidebar = ({ open, onClose }) => {
     }
   ];
 
-  const ownerItems = [
+  const ownerMenuItems = [
     {
       title: 'Owner Dashboard',
       path: '/owner-dashboard',
@@ -160,15 +162,9 @@ const Sidebar = ({ open, onClose }) => {
       roles: ['owner']
     },
     {
-      title: 'Customer Management',
-      path: '/customer-management',
-      icon: <AccountCircle />,
-      roles: ['owner']
-    },
-    {
-      title: 'Security',
-      path: '/security',
-      icon: <Security />,
+      title: 'Owner Portal',
+      path: '/owner-portal',
+      icon: <AdminPanelSettings />,
       roles: ['owner']
     }
   ];
@@ -177,9 +173,19 @@ const Sidebar = ({ open, onClose }) => {
     item.roles.includes(profile?.role)
   );
 
-  const filteredOwnerItems = ownerItems.filter(item => 
+  const filteredOwnerItems = ownerMenuItems.filter(item => 
     item.roles.includes(profile?.role)
   );
+
+  // Use ownerMenuItems for owner, otherwise use filteredMenuItems
+  const itemsToShow = profile?.role === 'owner' ? ownerMenuItems : filteredMenuItems;
+
+  // Debug logging for organization and logo
+  console.log('Sidebar - Organization data:', organization);
+  console.log('Sidebar - Organization logo_url:', organization?.logo_url);
+  console.log('Sidebar - Organization name:', organization?.name);
+  console.log('Sidebar - Profile role:', profile?.role);
+  console.log('Sidebar - Profile organization_id:', profile?.organization_id);
 
   return (
     <Drawer
@@ -199,19 +205,53 @@ const Sidebar = ({ open, onClose }) => {
       <Box sx={{ overflow: 'auto', mt: 8 }}>
         {/* Organization Info */}
         {organization && (
-          <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
-            <Typography variant="h6" color="primary">
-              {organization.name}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {profile?.role} • {profile?.full_name}
-            </Typography>
+          <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 2 }}>
+            {organization.logo_url ? (
+              <img 
+                key={organization.logo_url}
+                src={organization.logo_url} 
+                alt="Org Logo" 
+                style={{ height: 40, width: 40, objectFit: 'contain', borderRadius: 6, background: '#fff', border: '1px solid #eee' }}
+                onError={(e) => {
+                  console.error('Failed to load logo:', organization.logo_url);
+                  e.target.style.display = 'none';
+                }}
+                onLoad={() => {
+                  console.log('Logo loaded successfully:', organization.logo_url);
+                }}
+              />
+            ) : (
+              <Box 
+                sx={{ 
+                  height: 40, 
+                  width: 40, 
+                  borderRadius: 6, 
+                  background: '#f0f0f0', 
+                  border: '1px solid #eee',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#999',
+                  fontSize: '12px'
+                }}
+              >
+                {organization.name?.charAt(0)?.toUpperCase() || '?'}
+              </Box>
+            )}
+            <Box>
+              <Typography variant="h6" color="primary">
+                {organization.name}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {profile?.role} • {profile?.full_name}
+              </Typography>
+            </Box>
           </Box>
         )}
 
         {/* Main Menu */}
         <List>
-          {filteredMenuItems.map((item) => (
+          {itemsToShow.map((item) => (
             <ListItem key={item.path} disablePadding>
               <ListItemButton
                 selected={isActive(item.path)}
@@ -241,8 +281,8 @@ const Sidebar = ({ open, onClose }) => {
           ))}
         </List>
 
-        {/* Owner Section */}
-        {filteredOwnerItems.length > 0 && (
+        {/* Only show Owner Section for non-owner roles if needed */}
+        {profile?.role !== 'owner' && filteredOwnerItems.length > 0 && (
           <>
             <Divider />
             <Box sx={{ p: 2 }}>

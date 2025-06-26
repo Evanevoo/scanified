@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Collapse, IconButton, TextField, CircularProgress, FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
@@ -137,31 +137,34 @@ function Rentals() {
       setLoading(true);
       setError(null);
       try {
-        // First, test if the rentals table exists and has data
-        const { data: testData, error: testError } = await supabase
+        // Fetch all rentals
+        const { data: rentalsData, error: rentalsError } = await supabase
           .from('rentals')
           .select('*')
-          .limit(5);
-        
-        if (testError) {
-          throw testError;
-        }
-        
-        // Now try the full query with joins
-        const { data, error: rentalsError } = await supabase
-          .from('rentals')
-          .select(`
-            *,
-            customer:customer_id (CustomerListID, name, customer_number),
-            bottle:bottle_id (id, barcode_number, gas_type, description)
-          `)
           .order('rental_start_date', { ascending: false });
-        
-        if (rentalsError) {
-          throw rentalsError;
+        if (rentalsError) throw rentalsError;
+        // Get unique customer_ids
+        const customerIds = Array.from(new Set((rentalsData || []).map(r => r.customer_id).filter(Boolean)));
+        let customersMap = {};
+        if (customerIds.length > 0) {
+          // Fetch all customers in one query
+          const { data: customersData, error: customersError } = await supabase
+            .from('customers')
+            .select('*')
+            .in('CustomerListID', customerIds);
+          if (!customersError && customersData) {
+            customersMap = customersData.reduce((map, c) => {
+              map[c.CustomerListID] = c;
+              return map;
+            }, {});
+          }
         }
-        
-        setRentals(data || []);
+        // Attach customer info to each rental
+        const rentalsWithCustomer = (rentalsData || []).map(r => ({
+          ...r,
+          customer: customersMap[r.customer_id] || null
+        }));
+        setRentals(rentalsWithCustomer);
       } catch (err) {
         setError(err.message);
       }
@@ -173,15 +176,9 @@ function Rentals() {
   // Group rentals by customer, skip if missing customer
   const customers = [];
   const customerMap = {};
-  const locationBottles = []; // Bottles assigned to locations (at home)
   
   for (const rental of rentals) {
-    // If rental has no customer (location-assigned), add to locationBottles
-    if (!rental.customer) {
-      locationBottles.push(rental);
-      continue;
-    }
-    
+    if (!rental.customer) continue; // Skip rentals with no customer
     const custId = rental.customer.CustomerListID;
     if (!customerMap[custId]) {
       customerMap[custId] = {
@@ -220,7 +217,7 @@ function Rentals() {
       // Refresh data
       const { data } = await supabase
         .from('rentals')
-        .select(`*, customer:customer_id (CustomerListID, name, customer_number)`)
+        .select('*')
         .order('rental_start_date', { ascending: false });
       setRentals(data);
     } catch (error) {
@@ -300,7 +297,7 @@ function Rentals() {
       // Refresh the rentals data
       const { data } = await supabase
         .from('rentals')
-        .select(`*, customer:customer_id (CustomerListID, name, customer_number)`)
+        .select('*')
         .order('rental_start_date', { ascending: false });
       setRentals(data);
       
@@ -358,54 +355,9 @@ function Rentals() {
         </Box>
 
         {/* Show message if no rentals */}
-        {customers.length === 0 && locationBottles.length === 0 && (
+        {customers.length === 0 && (
           <Box p={4} textAlign="center">
             No rentals found. Check your data or Supabase query.
-          </Box>
-        )}
-
-        {/* Location Bottles (At Home) Section */}
-        {locationBottles.length > 0 && (
-          <Box mb={4}>
-            <Typography variant="h5" fontWeight={700} color="primary" mb={2}>
-              🏠 Bottles At Home ({locationBottles.length})
-            </Typography>
-            <Typography variant="body2" color="text.secondary" mb={3}>
-              These bottles are assigned to locations and are not currently rented to customers.
-            </Typography>
-            
-            <Paper elevation={2} sx={{ borderRadius: 3, overflow: 'hidden' }}>
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow sx={{ backgroundColor: '#f8f9fa' }}>
-                      <TableCell sx={{ fontWeight: 700 }}>Rental ID</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>Start Date</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {locationBottles.map(rental => (
-                      <TableRow key={rental.id} hover>
-                        <TableCell>{rental.id}</TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="primary" fontWeight={600}>
-                            {rental.location || 'Unknown'}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>{rental.rental_start_date || '-'}</TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="success.main" fontWeight={600}>
-                            At Home
-                          </Typography>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Paper>
           </Box>
         )}
 
@@ -477,7 +429,7 @@ function Rentals() {
                                     py: 0.5,
                                     fontSize: 15
                                   }}
-                                  onClick={() => navigate(`/customers/${customer.CustomerListID}`)}
+                                  onClick={() => navigate(`/customer/${customer.CustomerListID}`)}
                                 >
                                   View Details
                                 </Button>
@@ -586,16 +538,12 @@ function Rentals() {
                                             <TableCell>{rental.bottle?.description || rental.bottle?.gas_type || 'Unknown'}</TableCell>
                                             <TableCell>
                                               {rental.bottle?.barcode_number ? (
-                                                <a
-                                                  href={`/bottles/${rental.bottle.barcode_number}`}
+                                                <Link
+                                                  to={`/bottle/${rental.bottle.id}`}
                                                   style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}
-                                                  onClick={e => {
-                                                    e.preventDefault();
-                                                    navigate(`/bottles/${rental.bottle.barcode_number}`);
-                                                  }}
                                                 >
                                                   {rental.bottle.barcode_number}
-                                                </a>
+                                                </Link>
                                               ) : 'N/A'}
                                             </TableCell>
                                             <TableCell>
@@ -653,7 +601,7 @@ function Rentals() {
                                                   py: 0.5,
                                                   fontSize: 15
                                                 }}
-                                                onClick={() => navigate(`/customers/${customer.CustomerListID}`)}
+                                                onClick={() => navigate(`/customer/${customer.CustomerListID}`)}
                                               >
                                                 View Details
                                               </Button>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Container,
@@ -35,9 +35,27 @@ import {
   Group
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../supabase/client';
 
 export default function LandingPage() {
   const navigate = useNavigate();
+  const [pricingPlans, setPricingPlans] = useState([]);
+
+  useEffect(() => {
+    const fetchPlans = async () => {
+      const { data, error } = await supabase
+        .from('subscription_plans')
+        .select('*')
+        .eq('is_active', true)
+        .order('price', { ascending: true });
+      if (error) {
+        console.error("Error fetching plans: ", error);
+      } else {
+        setPricingPlans(data);
+      }
+    };
+    fetchPlans();
+  }, []);
 
   const features = [
     {
@@ -81,50 +99,6 @@ export default function LandingPage() {
     'Mobile-first design for field workers',
     'Multi-location support',
     'Integration with existing systems'
-  ];
-
-  const pricingPlans = [
-    {
-      name: 'Starter',
-      price: '$99',
-      period: '/month',
-      features: [
-        'Up to 1,000 cylinders',
-        '5 users',
-        'Basic reporting',
-        'Mobile app access',
-        'Email support'
-      ],
-      popular: false
-    },
-    {
-      name: 'Professional',
-      price: '$299',
-      period: '/month',
-      features: [
-        'Up to 10,000 cylinders',
-        '25 users',
-        'Advanced analytics',
-        'Delivery management',
-        'Priority support',
-        'Custom integrations'
-      ],
-      popular: true
-    },
-    {
-      name: 'Enterprise',
-      price: 'Custom',
-      period: '',
-      features: [
-        'Unlimited cylinders',
-        'Unlimited users',
-        'Custom development',
-        'Dedicated support',
-        'White-label options',
-        'API access'
-      ],
-      popular: false
-    }
   ];
 
   return (
@@ -286,59 +260,60 @@ export default function LandingPage() {
         </Typography>
         
         <Grid container spacing={4} justifyContent="center">
-          {pricingPlans.map((plan, index) => (
-            <Grid item xs={12} sm={6} md={4} key={index}>
-              <Card 
-                sx={{ 
-                  height: '100%', 
-                  position: 'relative',
-                  transform: plan.popular ? 'scale(1.05)' : 'none',
-                  border: plan.popular ? 2 : 1,
-                  borderColor: plan.popular ? 'primary.main' : 'divider'
-                }}
-              >
-                {plan.popular && (
-                  <Chip 
-                    label="Most Popular" 
-                    color="primary" 
-                    sx={{ 
-                      position: 'absolute', 
-                      top: -12, 
-                      left: '50%', 
-                      transform: 'translateX(-50%)',
-                      zIndex: 1
-                    }} 
-                  />
+          {pricingPlans.map((plan) => (
+            <Grid item key={plan.name} xs={12} sm={6} md={4}>
+              <Card sx={{ 
+                height: '100%', 
+                display: 'flex', 
+                flexDirection: 'column',
+                border: plan.is_most_popular ? '2px solid' : '1px solid',
+                borderColor: plan.is_most_popular ? 'primary.main' : 'grey.300',
+                position: 'relative',
+                transform: plan.is_most_popular ? 'scale(1.05)' : 'none',
+                zIndex: plan.is_most_popular ? 1 : 0,
+              }}>
+                {plan.is_most_popular && (
+                  <Chip label="Most Popular" color="primary" sx={{ position: 'absolute', top: 16, right: 16 }} />
                 )}
-                <CardContent sx={{ pt: plan.popular ? 4 : 2 }}>
-                  <Typography variant="h4" component="h3" gutterBottom>
+                <CardContent sx={{ flexGrow: 1 }}>
+                  <Typography variant="h5" component="h2" gutterBottom>
                     {plan.name}
                   </Typography>
-                  <Typography variant="h3" component="div" sx={{ mb: 1 }}>
-                    {plan.price}
-                    <Typography component="span" variant="h6" color="text.secondary">
-                      {plan.period}
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', my: 2 }}>
+                    <Typography variant="h3" component="p">
+                      {plan.name.toLowerCase().includes('enterprise') ? 'Contact Sales' : `$${plan.price}`}
                     </Typography>
-                  </Typography>
-                  <Divider sx={{ my: 2 }} />
-                  <List dense>
-                    {plan.features.map((feature, featureIndex) => (
-                      <ListItem key={featureIndex} sx={{ px: 0 }}>
+                    {!plan.name.toLowerCase().includes('enterprise') && (
+                      <Typography variant="h6" color="text.secondary">
+                        /{plan.price_interval}
+                      </Typography>
+                    )}
+                  </Box>
+                  <List>
+                    {(plan.features || []).map((feature, index) => (
+                      <ListItem key={index} sx={{ py: 0.5 }}>
                         <ListItemIcon sx={{ minWidth: 32 }}>
-                          <CheckCircle color="primary" fontSize="small" />
+                          <CheckCircle fontSize="small" color="primary" />
                         </ListItemIcon>
                         <ListItemText primary={feature} />
                       </ListItem>
                     ))}
                   </List>
                 </CardContent>
-                <CardActions sx={{ p: 2, pt: 0 }}>
+                <CardActions>
                   <Button 
-                    variant={plan.popular ? "contained" : "outlined"} 
-                    fullWidth
-                    onClick={() => navigate('/register')}
+                    fullWidth 
+                    variant={plan.is_most_popular ? 'contained' : 'outlined'} 
+                    color="primary"
+                    onClick={() => {
+                      if (plan.name.toLowerCase().includes('enterprise')) {
+                        navigate('/contact');
+                      } else {
+                        navigate(`/register?plan=${plan.id}`);
+                      }
+                    }}
                   >
-                    Get Started
+                    {plan.name.toLowerCase().includes('enterprise') ? 'Contact Sales' : 'Get Started'}
                   </Button>
                 </CardActions>
               </Card>

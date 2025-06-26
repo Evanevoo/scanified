@@ -34,16 +34,32 @@ class BackgroundService {
       this.checkAndUpdate();
     }, 60 * 60 * 1000); // 1 hour
 
-    // Also check when the page becomes visible (user returns to tab)
+    // Only check when the page becomes visible if it was hidden for more than 5 minutes
+    let hiddenStartTime = null;
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) {
-        this.checkAndUpdate();
+      if (document.hidden) {
+        hiddenStartTime = Date.now();
+      } else {
+        // Only check if the page was hidden for more than 5 minutes
+        if (hiddenStartTime && (Date.now() - hiddenStartTime) > 5 * 60 * 1000) {
+          this.checkAndUpdate();
+        }
+        hiddenStartTime = null;
       }
     });
 
-    // Check when the app regains focus
+    // Check when the app regains focus (but only if it was away for a while)
+    let focusStartTime = null;
+    window.addEventListener('blur', () => {
+      focusStartTime = Date.now();
+    });
+    
     window.addEventListener('focus', () => {
-      this.checkAndUpdate();
+      // Only check if the window was blurred for more than 5 minutes
+      if (focusStartTime && (Date.now() - focusStartTime) > 5 * 60 * 1000) {
+        this.checkAndUpdate();
+      }
+      focusStartTime = null;
     });
   }
 

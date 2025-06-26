@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 
 export default function AssetHistory() {
@@ -106,16 +106,12 @@ export default function AssetHistory() {
         ) : (
           <div className="grid grid-cols-2 gap-2 mb-2">
             <div><b>Barcode:</b> {asset.barcode_number ? (
-              <a
-                href={`/bottles/${asset.barcode_number}`}
+              <Link
+                to={`/bottle/${asset.id}`}
                 style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}
-                onClick={e => {
-                  e.preventDefault();
-                  navigate(`/bottles/${asset.barcode_number}`);
-                }}
               >
                 {asset.barcode_number}
-              </a>
+              </Link>
             ) : ''}</div>
             <div><b>Serial Number:</b> {asset.serial_number}</div>
             <div><b>Category:</b> {asset.category}</div>

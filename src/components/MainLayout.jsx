@@ -34,38 +34,12 @@ import ImportNotification from './ImportNotification';
 import { useOwnerAccess } from '../hooks/useOwnerAccess';
 import { supabase } from '../supabase/client';
 import { usePermissions } from '../context/PermissionsContext';
+import { useAuth } from '../hooks/useAuth';
 
 const drawerWidth = 250;
 
-const sidebarPages = [
-  { label: 'Customers', icon: <PeopleIcon />, to: '/customers', requiredPermission: 'read:customers' },
-  { label: 'Locations', icon: <LocationOnIcon />, to: '/locations', requiredPermission: 'read:locations' },
-  { label: 'All Gas Assets', icon: <SwapVertIcon />, to: '/all-gas-assets', requiredPermission: 'read:cylinders' },
-  { label: 'Scanned Orders', icon: <AssignmentIcon />, to: '/scanned-orders', requiredPermission: 'read:rentals' },
-  { label: 'User Management', icon: <AdminPanelSettingsIcon />, to: '/user-management', requiredPermission: 'manage:users' },
-  { label: 'Owner Dashboard', icon: <BusinessIcon />, to: '/owner-dashboard', ownerOnly: true },
-  { label: 'Owner Portal', icon: <AdminPanelSettingsIcon />, to: '/owner-portal', ownerOnly: true },
-  {
-    label: 'Integrations', icon: <SwapVertIcon />, to: null, subItems: [
-      { label: 'Import', to: '/import' },
-      { label: 'Import Customers', to: '/import-customer-info' },
-      { label: 'Import History', to: '/import-history' },
-      { label: 'Import Approvals', to: '/import-approvals' },
-      { label: 'Bottle Management', to: '/bottle-management' },
-      { label: 'Customer ID Generator', to: '/integrations' },
-      { label: 'Import Approvals History', to: '/history' },
-    ]
-  },
-];
-
-const topNavLinks = [
-  { label: 'Home', to: '/home' },
-  { label: 'Rentals', to: '/rentals' },
-  { label: 'Orders', to: '/import-approvals' },
-  { label: 'Billing', to: '/billing' },
-];
-
-export default function MainLayout({ profile }) {
+export default function MainLayout() {
+  const { profile, organization } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [integrationsOpen, setIntegrationsOpen] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -78,18 +52,28 @@ export default function MainLayout({ profile }) {
   const { isOwner } = useOwnerAccess();
   const { can } = usePermissions();
 
-  // Only show owner pages if the user is actually an owner
-  const filteredSidebarPages = useMemo(() => {
-    return sidebarPages.filter(item => {
-      if (item.ownerOnly && profile?.role !== 'owner') {
-        return false;
-      }
-      if (item.requiredPermission && !can(item.requiredPermission)) {
-        return false;
-      }
-      return true;
-    });
-  }, [isOwner, can, profile]);
+  // Sidebar logic - only show owner links for owner, show full navigation for organizations
+  const sidebarPages = profile?.role === 'owner'
+    ? [
+        { label: 'Owner Dashboard', icon: <BusinessIcon />, to: '/owner-portal/locations' },
+        { label: 'Home', icon: <AdminPanelSettingsIcon />, to: '/owner-portal' },
+      ]
+    : [
+        { label: 'Customers', icon: <PeopleIcon />, to: '/customers' },
+        { label: 'Locations', icon: <LocationOnIcon />, to: '/locations' },
+        { label: 'All Gas Assets', icon: <SwapVertIcon />, to: '/assets' },
+        { label: 'Bottle Management', icon: <AssignmentIcon />, to: '/bottle-management' },
+        { label: 'Scanned Orders', icon: <AssignmentIcon />, to: '/scanned-orders' },
+        {
+          label: 'Integrations', icon: <SwapVertIcon />, to: null, subItems: [
+            { label: 'Import', to: '/import' },
+            { label: 'Import Customers', to: '/import-customer-info' },
+            { label: 'Import History', to: '/import-history' },
+            { label: 'Import Approvals', to: '/import-approvals' },
+            { label: 'Customer ID Generator', to: '/integrations' },
+          ]
+        },
+      ];
 
   useEffect(() => {
     setShowSuggestions(false);
@@ -110,7 +94,7 @@ export default function MainLayout({ profile }) {
         .limit(5);
       // Bottles: by serial number or barcode
       const { data: bottles } = await supabase
-        .from('cylinders')
+        .from('bottles')
         .select('id, serial_number, barcode_number, assigned_customer')
         .or(`serial_number.ilike.%${searchTerm}%,barcode_number.ilike.%${searchTerm}%`)
         .limit(5);
@@ -147,39 +131,30 @@ export default function MainLayout({ profile }) {
     setShowSuggestions(false);
     setSearchTerm('');
     if (item.type === 'customer') {
-      navigate(`/customers/${item.id}`);
+      navigate(`/customer/${item.id}`);
     } else if (item.type === 'bottle') {
-      navigate(`/assets/${item.id}/history`);
+      navigate(`/bottle/${item.id}`);
     }
   };
 
   const handleLogout = async () => {
     try {
-      // Sign out from Supabase (this clears the session completely)
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        console.error('Logout error:', error);
-      }
+      await supabase.auth.signOut();
       
-      // Clear all local storage
-      localStorage.clear();
-      sessionStorage.clear();
-      
-      // Clear any other stored data
+      // Clear any cached data
       if (window.indexedDB) {
-        // Clear IndexedDB if available
         const databases = await window.indexedDB.databases();
         databases.forEach(db => {
           window.indexedDB.deleteDatabase(db.name);
         });
       }
       
-      // Force a hard redirect to the login page
-      window.location.href = '/login';
+      // Navigate to login page using React Router
+      navigate('/login');
     } catch (error) {
       console.error('Logout failed:', error);
-      // Fallback: force redirect anyway
-      window.location.href = '/login';
+      // Fallback: navigate anyway
+      navigate('/login');
     }
   };
 
@@ -210,7 +185,7 @@ export default function MainLayout({ profile }) {
       </Box>
       <Divider sx={{ my: 1, bgcolor: '#eaeaea' }} />
       <List sx={{ flex: 1 }}>
-        {filteredSidebarPages.map((item, idx) => (
+        {sidebarPages.map((item, idx) => (
           <React.Fragment key={item.label}>
             {item.label !== 'Integrations' ? (
               <ListItem disablePadding sx={{ mb: 0.5 }}>
@@ -312,6 +287,16 @@ export default function MainLayout({ profile }) {
     </Box>
   );
 
+  // Top navigation links - only show for organizations, not for owner
+  const topNavLinks = profile?.role === 'owner' 
+    ? [] 
+    : [
+        { label: 'Home', to: '/dashboard' },
+        { label: 'Rentals', to: '/rentals' },
+        { label: 'Orders', to: '/import-approvals' },
+        { label: 'Billing', to: '/billing' },
+      ];
+
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#fff' }}>
       <CssBaseline />
@@ -355,15 +340,40 @@ export default function MainLayout({ profile }) {
         }}
       >
         <Toolbar sx={{ minHeight: 64, px: 3 }}>
-          <Typography
-            variant="h5"
-            component="div"
-            sx={{ fontFamily: 'Inter, Montserrat, Arial, sans-serif', fontWeight: 900, color: '#111', letterSpacing: '-0.01em', fontSize: '1.6rem', mr: 3, cursor: 'pointer' }}
-            onClick={() => navigate('/home')}
-            title="Go to Home"
-          >
-            LessAnnoyingScan
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', mr: 3 }}>
+            {organization?.logo_url && (
+              <img 
+                key={organization.logo_url}
+                src={organization.logo_url} 
+                alt="Org Logo" 
+                style={{ 
+                  height: 32, 
+                  width: 32, 
+                  objectFit: 'contain', 
+                  borderRadius: 4, 
+                  background: '#fff', 
+                  border: '1px solid #eee',
+                  marginRight: 12
+                }} 
+                onError={(e) => {
+                  console.error('Failed to load logo in header:', organization.logo_url);
+                  e.target.style.display = 'none';
+                }}
+                onLoad={() => {
+                  console.log('Logo loaded successfully in header:', organization.logo_url);
+                }}
+              />
+            )}
+            <Typography
+              variant="h5"
+              component="div"
+              sx={{ fontFamily: 'Inter, Montserrat, Arial, sans-serif', fontWeight: 900, color: '#111', letterSpacing: '-0.01em', fontSize: '1.6rem', cursor: 'pointer' }}
+              onClick={() => navigate('/dashboard')}
+              title="Go to Dashboard"
+            >
+              LessAnnoyingScan
+            </Typography>
+          </Box>
           <Box sx={{ flexGrow: 1, maxWidth: 400, ml: 1, position: 'relative' }} ref={searchRef}>
             <TextField
               size="small"

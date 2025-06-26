@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 
 export default function ReviewScreen({ navigation, route }) {
@@ -76,7 +77,7 @@ export default function ReviewScreen({ navigation, route }) {
           <ul>
             {matchResults.map((res, idx) => (
               <li key={res.barcode + idx} style={{ color: res.match ? 'green' : 'red' }}>
-                <a href={`/bottles/${res.barcode}`} style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}>{res.barcode}</a>
+                <Link to={`/bottles/${res.barcode}`} style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}>{res.barcode}</Link>
                 {res.barcode}: {res.match ? 'MATCH' : `NO MATCH${res.reason ? ' (' + res.reason + ')' : ''}`}
               </li>
             ))}
