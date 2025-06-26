@@ -515,11 +515,7 @@ export default function Assets() {
                   <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Product Code</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>In-House Total</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>With Customer Total</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Lost Total</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Total</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Dock Stock</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Organization</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Details</TableCell>
                 </TableRow>
@@ -537,11 +533,7 @@ export default function Assets() {
                     <TableCell>{row.type}</TableCell>
                     <TableCell>{row.product_code}</TableCell>
                     <TableCell>{row.description}</TableCell>
-                    <TableCell>{row.in_house_total}</TableCell>
-                    <TableCell>{row.with_customer_total}</TableCell>
-                    <TableCell>{row.lost_total}</TableCell>
                     <TableCell>{row.total}</TableCell>
-                    <TableCell>{row.dock_stock}</TableCell>
                     <TableCell>{organizationName}</TableCell>
                     <TableCell>
                       <Button

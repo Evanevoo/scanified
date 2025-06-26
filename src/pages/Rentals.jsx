@@ -140,9 +140,14 @@ function Rentals() {
         // Fetch all rentals
         const { data: rentalsData, error: rentalsError } = await supabase
           .from('rentals')
-          .select('*')
+          .select('*, bottles(*)')
+          .not('bottle_id', 'is', null)
           .order('rental_start_date', { ascending: false });
         if (rentalsError) throw rentalsError;
+        
+        console.log('Rentals: Sample rental data:', rentalsData?.slice(0, 3));
+        console.log('Rentals: Total rentals fetched:', rentalsData?.length || 0);
+        console.log('Rentals: First rental fields:', Object.keys(rentalsData?.[0] || {}));
         // Get unique customer_ids
         const customerIds = Array.from(new Set((rentalsData || []).map(r => r.customer_id).filter(Boolean)));
         let customersMap = {};
@@ -535,16 +540,13 @@ function Rentals() {
                                       <TableBody>
                                         {rentals.map(rental => (
                                           <TableRow key={rental.id}>
-                                            <TableCell>{rental.bottle?.description || rental.bottle?.gas_type || 'Unknown'}</TableCell>
                                             <TableCell>
-                                              {rental.bottle?.barcode_number ? (
-                                                <Link
-                                                  to={`/bottle/${rental.bottle.id}`}
-                                                  style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}
-                                                >
-                                                  {rental.bottle.barcode_number}
-                                                </Link>
-                                              ) : 'N/A'}
+                                              {rental.bottles
+                                                ? rental.bottles.gas_type || rental.bottles.description || '—'
+                                                : '—'}
+                                            </TableCell>
+                                            <TableCell>
+                                              {rental.bottles?.barcode_number || '—'}
                                             </TableCell>
                                             <TableCell>
                                               <FormControl size="small" sx={{ minWidth: 110, bgcolor: '#fff' }}>
