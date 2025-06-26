@@ -146,6 +146,8 @@ export default function OwnerDashboard() {
   const handleSaveAll = async () => {
     setSaving(true);
     try {
+      // Note: Owner dashboard can change plans without payment verification
+      // since this is an administrative tool for managing customer organizations
       const updateData = {
         name: editForm.name,
         slug: editForm.slug,

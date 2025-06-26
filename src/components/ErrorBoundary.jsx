@@ -40,8 +40,8 @@ class ErrorBoundary extends React.Component {
       errorInfo: null 
     });
     
-    // Optionally reload the page for a fresh start
-    window.location.reload();
+    // Reset the component state without reloading the page
+    // This allows the app to recover gracefully
   };
 
   render() {

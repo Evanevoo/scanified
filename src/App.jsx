@@ -1,7 +1,7 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useMemo, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { AuthProvider } from './hooks/useAuth';
+import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ImportProgressProvider } from './components/ImportProgressContext';
 import { PermissionsProvider } from './context/PermissionsContext';
 import LoadingSpinner from './components/LoadingSpinner';
@@ -27,6 +27,10 @@ import TermsOfService from './pages/TermsOfService';
 import PricingPage from './pages/PricingPage';
 import Documentation from './pages/Documentation';
 import CustomPageViewer from './pages/CustomPageViewer';
+import ImportApprovals from './pages/ImportApprovals';
+import ImportApprovalDetail from './pages/ImportApprovalDetail';
+import ImportApprovalsHistory from './pages/ImportApprovalsHistory';
+import Home from './pages/Home';
 
 // Lazy load all page components
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -34,7 +38,6 @@ const Customers = lazy(() => import('./pages/Customers'));
 const Cylinders = lazy(() => import('./pages/Cylinders'));
 const Rentals = lazy(() => import('./pages/Rentals'));
 const Invoices = lazy(() => import('./pages/Invoices'));
-const Home = lazy(() => import('./pages/Home'));
 const Favorites = lazy(() => import('./pages/Favorites'));
 const CustomReports = lazy(() => import('./pages/CustomReports'));
 const AllAssetsReport = lazy(() => import('./pages/management-reports/AllAssetsReport'));
@@ -73,17 +76,173 @@ const ImportCustomerInfo = lazy(() => import('./pages/ImportCustomerInfo'));
 const ScannedOrders = lazy(() => import('./pages/ScannedOrders'));
 const SupabaseOrders = lazy(() => import('./pages/management-reports/SupabaseOrders'));
 const UserManagement = lazy(() => import('./pages/UserManagement'));
-const BottleImport = lazy(() => import('./pages/BottleImport'));
-const ImportApprovals = lazy(() => import('./pages/ImportApprovals'));
-const ImportApprovalsHistory = lazy(() => import('./pages/ImportApprovalsHistory'));
+const ImportAssetBalance = lazy(() => import('./pages/ImportAssetBalance'));
 const Integrations = lazy(() => import('./pages/Integrations'));
 const BottleDetail = lazy(() => import('./pages/BottleDetail'));
-const Bottles = lazy(() => import('./pages/Bottles'));
+const Assets = lazy(() => import('./pages/Assets'));
+const BottleManagement = lazy(() => import('./pages/BottleManagement'));
 
 // Import background service for automatic daily updates
-import './utils/backgroundService';
+// import './utils/backgroundService';
 
 function AppContent() {
+  const { profile } = useAuth();
+  
+  // Page visibility handler to prevent reloads when switching tabs
+  useEffect(() => {
+    let isPageVisible = true;
+    let visibilityTimeout = null;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        console.log('Page became hidden');
+        isPageVisible = false;
+        // Disable auth listeners temporarily
+        window.__authListenerDisabled = true;
+      } else {
+        console.log('Page became visible - preventing reloads');
+        isPageVisible = true;
+        
+        // Clear any pending timeouts
+        if (visibilityTimeout) {
+          clearTimeout(visibilityTimeout);
+          visibilityTimeout = null;
+        }
+        
+        // Re-enable auth listeners after a short delay
+        visibilityTimeout = setTimeout(() => {
+          window.__authListenerDisabled = false;
+          console.log('Auth listeners re-enabled');
+        }, 1000);
+      }
+    };
+
+    // Prevent any potential reloads
+    const handleBeforeUnload = (e) => {
+      if (isPageVisible) {
+        console.log('Preventing page unload');
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      if (visibilityTimeout) {
+        clearTimeout(visibilityTimeout);
+      }
+    };
+  }, []);
+  
+  // Initialize background service for daily updates
+  useEffect(() => {
+    // Temporarily disable background service to test if it's causing auth restarts
+    console.log('Background service temporarily disabled for testing');
+    /*
+    import('./utils/backgroundService').then(({ default: BackgroundService }) => {
+      const backgroundService = new BackgroundService();
+      backgroundService.initialize();
+    });
+    */
+  }, []);
+  
+  // Memoize the routes to prevent unnecessary re-renders
+  const routes = useMemo(() => (
+    <Routes>
+      {/* Redirect root to dashboard for authenticated users, landing page for others */}
+      <Route path="/" element={profile ? <Navigate to="/dashboard" replace /> : <LandingPage />} />
+      <Route path="/landing" element={<LandingPage />} />
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<OrganizationRegistration />} />
+      <Route path="/setup" element={<OrganizationSetup />} />
+      <Route path="/contact" element={<ContactUs />} />
+      <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+      <Route path="/terms-of-service" element={<TermsOfService />} />
+      <Route path="/pricing" element={<PricingPage />} />
+      <Route path="/documentation" element={<Documentation />} />
+      <Route path="/p/:slug" element={<CustomPageViewer />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/customer-register" element={<CustomerRegistration />} />
+      <Route path="/portal" element={<CustomerPortal />} />
+
+      {/* --- Semi-Protected Owner Portal --- */}
+      <Route path="/owner-portal/*" element={<OwnerPortal />} />
+
+      {/* --- Debug Routes --- */}
+      <Route path="/debug" element={<DebugAuth />} />
+      <Route path="/test" element={<TestSupabase />} />
+
+      {/* --- ALL Protected Routes Go Here --- */}
+      <Route element={<ProtectedRoute />}>
+        <Route path="/dashboard" element={<Home />} />
+        <Route path="/customers" element={<Customers />} />
+        <Route path="/cylinders" element={<Cylinders />} />
+        <Route path="/assets" element={<Assets />} />
+        <Route path="/rentals" element={<Rentals />} />
+        <Route path="/invoices" element={<Invoices />} />
+        <Route path="/favorites" element={<Favorites />} />
+        <Route path="/custom-reports" element={<CustomReports />} />
+        <Route path="/analytics" element={<AnalyticsDashboard />} />
+        <Route path="/delivery-management" element={<DeliveryManagement />} />
+        <Route path="/reports/all-assets" element={<AllAssetsReport />} />
+        <Route path="/reports/asset-type-changes" element={<AssetTypeChangesReport />} />
+        <Route path="/reports/assets-by-customer" element={<AssetsByCustomerReport />} />
+        <Route path="/reports/audits-to-delivery" element={<AuditsToDeliveryRecordsReport />} />
+        <Route path="/reports/balance-changes" element={<BalanceChangesSummaryReport />} />
+        <Route path="/reports/customer-deliveries" element={<CustomerDeliveriesReport />} />
+        <Route path="/reports/deliveries-by-location" element={<DeliveriesByLocationReport />} />
+        <Route path="/reports/delivery-totals" element={<DeliveryTotalsByUserReport />} />
+        <Route path="/reports/lost-assets" element={<LostAssetsReport />} />
+        <Route path="/reports/movement-between-locations" element={<MovementBetweenLocationsReport />} />
+        <Route path="/reports/negative-balance" element={<NegativeBalanceReport />} />
+        <Route path="/reports/new-assets" element={<NewAssetsAddedReport />} />
+        <Route path="/reports/not-scanned-source" element={<NotScannedSourceReport />} />
+        <Route path="/reports/overdue-assets" element={<OverdueAssetSearchReport />} />
+        <Route path="/reports/print-days" element={<PrintDaysRecordsReport />} />
+        <Route path="/reports/quick-map" element={<QuickMapReport />} />
+        <Route path="/reports/supabase-orders" element={<SupabaseOrders />} />
+        <Route path="/quick-add" element={<QuickAdd />} />
+        <Route path="/lot-reports" element={<LotReports />} />
+        <Route path="/regular-maintenance" element={<RegularMaintenance />} />
+        <Route path="/locations" element={<Locations />} />
+        <Route path="/search" element={<Search />} />
+        <Route path="/create-records" element={<CreateRecords />} />
+        <Route path="/alerts" element={<Alerts />} />
+        <Route path="/mobile-units" element={<MobileUnits />} />
+        <Route path="/rental" element={<Rental />} />
+        <Route path="/customer/:id" element={<CustomerDetail />} />
+        <Route path="/asset-history" element={<AssetHistory />} />
+        <Route path="/asset-history-lookup" element={<AssetHistoryLookup />} />
+        <Route path="/import-history" element={<ImportHistory />} />
+        <Route path="/all-asset-movements" element={<AllAssetMovements />} />
+        <Route path="/import" element={<Import />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/import-customer-info" element={<ImportCustomerInfo />} />
+        <Route path="/scanned-orders" element={<ScannedOrders />} />
+        <Route path="/user-management" element={<UserManagement />} />
+        <Route path="/import-asset-balance" element={<ImportAssetBalance />} />
+        <Route path="/import-approvals" element={<ImportApprovals />} />
+        <Route path="/import-approval/:invoiceNumber/detail" element={<ImportApprovalDetail />} />
+        <Route path="/import-approvals-history" element={<ImportApprovalsHistory />} />
+        <Route path="/import-approvals/history" element={<ImportApprovalsHistory />} />
+        <Route path="/integrations" element={<Integrations />} />
+        <Route path="/bottle/:id" element={<BottleDetail />} />
+        <Route path="/assets/:id" element={<BottleDetail />} />
+        <Route path="/orders" element={<ScannedOrders />} />
+        <Route path="/billing" element={<Billing />} />
+        <Route path="/bottle-management" element={<BottleManagement />} />
+      </Route>
+      
+      {/* Catch-all for any other unmatched routes */}
+      <Route path="*" element={profile ? <Navigate to="/dashboard" replace /> : <Navigate to="/" replace />} />
+    </Routes>
+  ), [profile]);
+
   return (
     <ErrorBoundary>
       <ImportProgressProvider>
@@ -114,89 +273,7 @@ function AppContent() {
               }}
             />
             <Suspense fallback={<LoadingSpinner />}>
-              <Routes>
-                {/* --- Public Routes --- */}
-                <Route path="/" element={<LandingPage />} />
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/register" element={<OrganizationRegistration />} />
-                <Route path="/setup" element={<OrganizationSetup />} />
-                <Route path="/contact" element={<ContactUs />} />
-                <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-                <Route path="/terms-of-service" element={<TermsOfService />} />
-                <Route path="/pricing" element={<PricingPage />} />
-                <Route path="/documentation" element={<Documentation />} />
-                <Route path="/p/:slug" element={<CustomPageViewer />} />
-                <Route path="/reset-password" element={<ResetPassword />} />
-                <Route path="/customer-register" element={<CustomerRegistration />} />
-                <Route path="/portal" element={<CustomerPortal />} />
-
-                {/* --- Semi-Protected Owner Portal --- */}
-                <Route path="/owner-portal" element={<OwnerPortal />} />
-
-                {/* --- Debug Routes --- */}
-                <Route path="/debug" element={<DebugAuth />} />
-                <Route path="/test" element={<TestSupabase />} />
-
-                {/* --- ALL Protected Routes Go Here --- */}
-                <Route element={<ProtectedRoute />}>
-                  <Route path="/dashboard" element={<Home />} />
-                  <Route path="/customers" element={<Customers />} />
-                  <Route path="/cylinders" element={<Cylinders />} />
-                  <Route path="/bottles" element={<Bottles />} />
-                  <Route path="/rentals" element={<Rentals />} />
-                  <Route path="/invoices" element={<Invoices />} />
-                  <Route path="/favorites" element={<Favorites />} />
-                  <Route path="/custom-reports" element={<CustomReports />} />
-                  <Route path="/analytics" element={<AnalyticsDashboard />} />
-                  <Route path="/delivery-management" element={<DeliveryManagement />} />
-                  <Route path="/reports/all-assets" element={<AllAssetsReport />} />
-                  <Route path="/reports/asset-type-changes" element={<AssetTypeChangesReport />} />
-                  <Route path="/reports/assets-by-customer" element={<AssetsByCustomerReport />} />
-                  <Route path="/reports/audits-to-delivery" element={<AuditsToDeliveryRecordsReport />} />
-                  <Route path="/reports/balance-changes" element={<BalanceChangesSummaryReport />} />
-                  <Route path="/reports/customer-deliveries" element={<CustomerDeliveriesReport />} />
-                  <Route path="/reports/deliveries-by-location" element={<DeliveriesByLocationReport />} />
-                  <Route path="/reports/delivery-totals" element={<DeliveryTotalsByUserReport />} />
-                  <Route path="/reports/lost-assets" element={<LostAssetsReport />} />
-                  <Route path="/reports/movement-between-locations" element={<MovementBetweenLocationsReport />} />
-                  <Route path="/reports/negative-balance" element={<NegativeBalanceReport />} />
-                  <Route path="/reports/new-assets" element={<NewAssetsAddedReport />} />
-                  <Route path="/reports/not-scanned-source" element={<NotScannedSourceReport />} />
-                  <Route path="/reports/overdue-assets" element={<OverdueAssetSearchReport />} />
-                  <Route path="/reports/print-days" element={<PrintDaysRecordsReport />} />
-                  <Route path="/reports/quick-map" element={<QuickMapReport />} />
-                  <Route path="/reports/supabase-orders" element={<SupabaseOrders />} />
-                  <Route path="/quick-add" element={<QuickAdd />} />
-                  <Route path="/lot-reports" element={<LotReports />} />
-                  <Route path="/regular-maintenance" element={<RegularMaintenance />} />
-                  <Route path="/locations" element={<Locations />} />
-                  <Route path="/search" element={<Search />} />
-                  <Route path="/create-records" element={<CreateRecords />} />
-                  <Route path="/alerts" element={<Alerts />} />
-                  <Route path="/mobile-units" element={<MobileUnits />} />
-                  <Route path="/rental" element={<Rental />} />
-                  <Route path="/customer/:id" element={<CustomerDetail />} />
-                  <Route path="/asset-history" element={<AssetHistory />} />
-                  <Route path="/asset-history-lookup" element={<AssetHistoryLookup />} />
-                  <Route path="/import-history" element={<ImportHistory />} />
-                  <Route path="/all-asset-movements" element={<AllAssetMovements />} />
-                  <Route path="/import" element={<Import />} />
-                  <Route path="/settings" element={<Settings />} />
-                  <Route path="/import-customer-info" element={<ImportCustomerInfo />} />
-                  <Route path="/scanned-orders" element={<ScannedOrders />} />
-                  <Route path="/user-management" element={<UserManagement />} />
-                  <Route path="/bottle-import" element={<BottleImport />} />
-                  <Route path="/import-approvals" element={<ImportApprovals />} />
-                  <Route path="/import-approvals-history" element={<ImportApprovalsHistory />} />
-                  <Route path="/integrations" element={<Integrations />} />
-                  <Route path="/bottle/:id" element={<BottleDetail />} />
-                  <Route path="/orders" element={<ScannedOrders />} />
-                  <Route path="/billing" element={<Billing />} />
-                </Route>
-                
-                {/* Catch-all for any other unmatched routes */}
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
+              {routes}
             </Suspense>
           </PermissionsProvider>
         </Router>

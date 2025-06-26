@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -501,17 +501,36 @@ export default function Import() {
 
   // Function to detect if this should be processed as sales receipts
   async function detectSalesReceiptType() {
-    // Check if any products are cylinders (indicating sales receipts)
     let cylinderCount = 0;
     let totalRows = 0;
+    
+    // Get current user and organization
+    const user = await getCurrentUser();
+    if (!user) {
+      console.error('User not authenticated');
+      return false;
+    }
+    
+    // Get user's organization_id
+    const { data: userProfile, error: profileError } = await supabase
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (profileError || !userProfile?.organization_id) {
+      console.error('User not assigned to an organization');
+      return false;
+    }
     
     for (const row of preview) {
       if (row.product_code) {
         totalRows++;
         const { data: cylinder } = await supabase
-          .from('cylinders')
+          .from('bottles')
           .select('id')
           .eq('barcode_number', row.product_code)
+          .eq('organization_id', userProfile.organization_id)
           .single();
         
         if (cylinder) {
@@ -746,35 +765,59 @@ export default function Import() {
     let receiptsCreated = 0, receiptsExisting = 0;
     let lineItemsCreated = 0, lineItemsSkipped = 0;
     
-    for (let i = 0; i < preview.length; i++) {
-      const row = preview[i];
+    // Get current user and organization
+    const user = await getCurrentUser();
+    if (!user) {
+      toast.error('User not authenticated');
+      setLoading(false);
+      return;
+    }
+    
+    // Get user's organization_id
+    const { data: userProfile, error: profileError } = await supabase
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (profileError || !userProfile?.organization_id) {
+      toast.error('User not assigned to an organization');
+      setLoading(false);
+      return;
+    }
+    
+    // Deduplicate customer IDs in the preview
+    const allCustomerIds = Array.from(new Set(preview.map(row => (row.customer_id || '').trim().toLowerCase()))).filter(Boolean);
+    // Query all at once for existing customers in THIS organization only
+    const { data: existingCustomers, error: fetchError } = await supabase
+      .from('customers')
+      .select('CustomerListID')
+      .eq('organization_id', userProfile.organization_id);
+    const existingIds = new Set((existingCustomers || []).map(c => (c.CustomerListID || '').trim().toLowerCase()));
+
+    for (const row of preview) {
       let customerStatus = 'Existing';
       let invoiceStatus = 'Existing';
       let receiptStatus = 'Existing';
       let lineItemStatus = 'Created';
-      
-      // Check customer
-      const { data: existingCustomer } = await supabase
-        .from('customers')
-        .select('CustomerListID')
-        .eq('CustomerListID', row.customer_id)
-        .single();
-      
-      if (!existingCustomer) {
+      const cid = (row.customer_id || '').trim().toLowerCase();
+      if (cid && !existingIds.has(cid)) {
         customersCreated++;
         customerStatus = 'Create';
+        existingIds.add(cid); // Prevent double-counting
       } else {
         customersExisting++;
       }
       
       // Check if this should be an invoice or sales receipt
-      const { data: cylinder } = await supabase
-        .from('cylinders')
+      const { data: bottle } = await supabase
+        .from('bottles')
         .select('id')
         .eq('barcode_number', row.product_code)
+        .eq('organization_id', userProfile.organization_id)
         .single();
       
-      if (cylinder) {
+      if (bottle) {
         // This is a sales receipt
         const { data: existingReceipt } = await supabase
           .from('sales_receipts')
@@ -793,7 +836,7 @@ export default function Import() {
         const { data: existingInvoice } = await supabase
           .from('invoices')
           .select('id')
-          .eq('invoice_number', String(row.reference_number))
+          .eq('details', String(row.reference_number))
           .single();
         
         if (!existingInvoice) {
@@ -805,7 +848,7 @@ export default function Import() {
       }
       
       // Check line item
-      if (cylinder) {
+      if (bottle) {
         // Sales receipt line item
         const { data: existingReceipt } = await supabase
           .from('sales_receipts')
@@ -834,7 +877,7 @@ export default function Import() {
         const { data: existingInvoice } = await supabase
           .from('invoices')
           .select('id')
-          .eq('invoice_number', String(row.reference_number))
+          .eq('details', String(row.reference_number))
           .single();
         
         if (existingInvoice) {
@@ -863,76 +906,433 @@ export default function Import() {
     setLoading(false);
   }
 
-  // Function to create missing customers
+  // Add state for import report
+  const [customerImportReport, setCustomerImportReport] = useState(null);
+
   async function createMissingCustomers() {
-    if (!previewSummary || previewSummary.customersCreated === 0) {
+    console.log('createMissingCustomers called');
+    
+    // Get current user and organization
+    const user = await getCurrentUser();
+    if (!user) {
+      toast.error('User not authenticated');
+      return;
+    }
+    
+    // Get user's organization_id
+    const { data: userProfile, error: profileError } = await supabase
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (profileError || !userProfile?.organization_id) {
+      toast.error('User not assigned to an organization');
+      return;
+    }
+    
+    console.log('User organization_id:', userProfile.organization_id);
+    
+    // Get all unique customer IDs from the preview (same logic as checkPreviewStatuses)
+    const allCustomerIds = Array.from(new Set(preview.map(row => (row.customer_id || '').trim().toLowerCase()))).filter(Boolean);
+    
+    if (allCustomerIds.length === 0) {
+      console.log('No customer IDs found in preview');
       toast.error('No customers to create');
       return;
     }
+    
+    console.log('All customer IDs from preview:', allCustomerIds);
+    
+    // Check which customers exist in THIS organization
+    const { data: existingCustomers, error: fetchError } = await supabase
+      .from('customers')
+      .select('CustomerListID')
+      .eq('organization_id', userProfile.organization_id);
+    
+    if (fetchError) {
+      console.error('Error fetching existing customers:', fetchError);
+      toast.error('Error checking existing customers');
+      return;
+    }
+    
+    const existingIds = new Set((existingCustomers || []).map(c => (c.CustomerListID || '').trim().toLowerCase()));
+    const missingCustomerIds = allCustomerIds.filter(cid => !existingIds.has(cid));
+    
+    console.log('Missing customer IDs:', missingCustomerIds);
+    
+    if (missingCustomerIds.length === 0) {
+      console.log('No customers to create');
+      toast.success('No customers to create');
+      return;
+    }
 
+    console.log('Creating customers:', missingCustomerIds);
     setLoading(true);
     let createdCount = 0;
     let errorCount = 0;
     const errors = [];
+    const createdCustomers = [];
+    const skippedCustomers = [];
 
-    // Get unique customers that need to be created
+    // Get the actual customer data from preview for these IDs
     const customersToCreate = [];
-    const seenCustomers = new Set();
-
-    for (const row of preview) {
-      if (!seenCustomers.has(row.customer_id)) {
-        seenCustomers.add(row.customer_id);
-        
-        // Check if customer already exists
-        const { data: existingCustomer } = await supabase
-          .from('customers')
-          .select('CustomerListID')
-          .eq('CustomerListID', row.customer_id)
-          .single();
-
-        if (!existingCustomer) {
-          customersToCreate.push({
-            CustomerListID: row.customer_id,
-            name: row.customer_name,
-            barcode: `*%${(row.customer_id || '').toLowerCase().replace(/\s+/g, '')}*`,
-            customer_barcode: `*%${(row.customer_id || '').toLowerCase().replace(/\s+/g, '')}*`
-          });
-        }
+    const seenInBatch = new Set();
+    
+    for (const customerId of missingCustomerIds) {
+      // Find the first row with this customer ID to get the customer name
+      const customerRow = preview.find(row => 
+        (row.customer_id || '').trim().toLowerCase() === customerId
+      );
+      
+      if (customerRow && !seenInBatch.has(customerId)) {
+        console.log(`Customer ${customerId} will be created for this organization`);
+        customersToCreate.push({
+          CustomerListID: customerRow.customer_id, // Use original case
+          name: customerRow.customer_name || `Customer ${customerRow.customer_id}`,
+          barcode: `*%${(customerRow.customer_id || '').toLowerCase().replace(/\s+/g, '')}*`,
+          customer_barcode: `*%${(customerRow.customer_id || '').toLowerCase().replace(/\s+/g, '')}*`,
+          organization_id: userProfile.organization_id // Explicitly set organization_id
+        });
+        seenInBatch.add(customerId);
       }
     }
+    
+    console.log('Customers to create:', customersToCreate);
 
-    // Create customers in batches
+    if (customersToCreate.length === 0) {
+      console.log('No customers to create after processing');
+      setLoading(false);
+      toast.success('No customers to create');
+      return;
+    }
+
+    // Create customers in batches, fallback to one-by-one if batch fails
     const batchSize = 10;
     for (let i = 0; i < customersToCreate.length; i += batchSize) {
       const batch = customersToCreate.slice(i, i + batchSize);
+      console.log(`Creating batch ${Math.floor(i / batchSize) + 1}:`, batch);
       
-      const { data, error } = await supabase
-        .from('customers')
-        .insert(batch)
-        .select();
-
-      if (error) {
-        console.error('Error creating customers:', error);
+      try {
+        const { data, error } = await supabase
+          .from('customers')
+          .insert(batch)
+          .select();
+        
+        console.log('Supabase response - data:', data);
+        console.log('Supabase response - error:', error);
+        
+        if (error && (error.code === '23505' || error.message.includes('duplicate key'))) {
+          console.log('Batch failed due to duplicate, trying one-by-one...');
+          // Batch failed due to duplicate, try one-by-one
+          for (const customer of batch) {
+            console.log('Trying to create customer one-by-one:', customer);
+            const { data: singleData, error: singleError } = await supabase
+              .from('customers')
+              .insert([customer])
+              .select();
+            
+            console.log('Single customer response - data:', singleData);
+            console.log('Single customer response - error:', singleError);
+            
+            if (singleError && (singleError.code === '23505' || singleError.message.includes('duplicate key'))) {
+              // Skip duplicate, do not increment errorCount
+              console.log('Customer already exists (primary key constraint):', customer.CustomerListID);
+              skippedCustomers.push({
+                CustomerListID: customer.CustomerListID,
+                name: customer.name,
+                reason: 'already exists (primary key constraint)'
+              });
+              errors.push(`Duplicate: ${customer.CustomerListID}`);
+            } else if (singleError) {
+              errorCount++;
+              errors.push(`Error: ${singleError.message}`);
+            } else if (singleData && singleData.length > 0) {
+              createdCount++;
+              createdCustomers.push({
+                CustomerListID: singleData[0].CustomerListID,
+                name: singleData[0].name
+              });
+            }
+          }
+        } else if (error) {
+          console.error('Batch error:', error);
+          errorCount += batch.length;
+          errors.push(`Batch ${Math.floor(i / batchSize) + 1}: ${error.message}`);
+        } else if (data && data.length > 0) {
+          console.log('Batch created successfully:', data);
+          createdCount += data.length;
+          for (const c of data) {
+            createdCustomers.push({
+              CustomerListID: c.CustomerListID,
+              name: c.name
+            });
+          }
+        } else {
+          console.log('No data returned from batch insert, but no error either');
+        }
+      } catch (e) {
+        console.error('Exception in batch creation:', e);
         errorCount += batch.length;
-        errors.push(`Batch ${Math.floor(i / batchSize) + 1}: ${error.message}`);
-      } else {
-        createdCount += data.length;
+        errors.push(`Batch ${Math.floor(i / batchSize) + 1}: ${e.message}`);
       }
     }
 
+    console.log('Customer creation completed. Created:', createdCount, 'Errors:', errorCount);
     setLoading(false);
 
+    // After building skippedCustomers, deduplicate by CustomerListID
+    const dedupedSkipped = Array.from(new Map(skippedCustomers.map(c => [c.CustomerListID, c])).values());
+    setCustomerImportReport({ created: createdCustomers, skipped: dedupedSkipped });
+
     if (createdCount > 0) {
+      console.log('Showing success toast');
       toast.success(`Successfully created ${createdCount} customers`);
     }
-    
     if (errorCount > 0) {
+      console.log('Showing error toast');
       toast.error(`Failed to create ${errorCount} customers. Check console for details.`);
       console.error('Customer creation errors:', errors);
     }
-
+    
+    // Show detailed results
+    const otherOrgCustomers = skippedCustomers.filter(c => c.reason.includes('another organization'));
+    if (otherOrgCustomers.length > 0) {
+      toast.info(`${otherOrgCustomers.length} customers exist in other organizations and cannot be created here.`);
+    }
+    
     // Refresh the preview status to update the summary
     await checkPreviewStatuses();
+  }
+
+  // Direct import function that handles customer creation automatically
+  async function handleDirectImport() {
+    setLoading(true);
+    try {
+      const user = await getCurrentUser();
+      if (!user) throw new Error('User not authenticated');
+      
+      console.log('Starting direct import with automatic customer creation...');
+      
+      let imported = 0, errors = 0;
+      let customersCreated = 0, customersExisting = 0;
+      let invoicesCreated = 0, invoicesExisting = 0;
+      let receiptsCreated = 0, receiptsExisting = 0;
+      let lineItemsCreated = 0, lineItemsSkipped = 0;
+      let skippedRows = [];
+      
+      if (!preview.length) throw new Error('No data to import.');
+      
+      const CHUNK_SIZE = 500;
+      for (let chunkStart = 0; chunkStart < preview.length; chunkStart += CHUNK_SIZE) {
+        const chunk = preview.slice(chunkStart, chunkStart + CHUNK_SIZE);
+
+        // --- Bulk check for existing customers ---
+        const customerIds = [...new Set(chunk.map(row => row.customer_id).filter(Boolean))];
+        const { data: existingCustomers = [] } = await supabase
+          .from('customers')
+          .select('CustomerListID')
+          .in('CustomerListID', customerIds);
+        const existingCustomerIds = new Set((existingCustomers || []).map(c => c.CustomerListID));
+
+        // --- Bulk insert new customers with better duplicate handling ---
+        const newCustomers = [];
+        const seenInChunk = new Set();
+        
+        for (const row of chunk) {
+          if (!row.customer_id || !row.customer_name) continue;
+          
+          const customerId = row.customer_id.trim();
+          const customerIdLower = customerId.toLowerCase();
+          
+          // Skip if already exists in database or already processed in this chunk
+          if (existingCustomerIds.has(customerId) || seenInChunk.has(customerIdLower)) {
+            continue;
+          }
+          
+          newCustomers.push({
+            CustomerListID: customerId,
+            name: row.customer_name.trim(),
+            barcode: `*%${customerIdLower.replace(/\s+/g, '')}*`,
+            customer_barcode: `*%${customerIdLower.replace(/\s+/g, '')}*`,
+            organization_id: userProfile.organization_id // Explicitly set organization_id
+          });
+          seenInChunk.add(customerIdLower);
+        }
+        
+        if (newCustomers.length) {
+          console.log(`Creating ${newCustomers.length} new customers...`);
+          const { error: customerError } = await supabase.from('customers').insert(newCustomers);
+          if (customerError) {
+            console.error('Error creating customers:', customerError);
+            // Try one-by-one if batch fails
+            for (const customer of newCustomers) {
+              const { error: singleError } = await supabase.from('customers').insert([customer]);
+              if (singleError && singleError.code !== '23505') { // Ignore duplicate errors
+                console.error('Error creating customer:', customer.CustomerListID, singleError);
+                errors++;
+              } else if (singleError && singleError.code === '23505') {
+                console.log('Customer already exists (ignoring):', customer.CustomerListID);
+              } else {
+                customersCreated++;
+              }
+            }
+          } else {
+            customersCreated += newCustomers.length;
+          }
+        }
+        customersExisting += customerIds.length - newCustomers.length;
+
+        // --- Determine if this is invoice or sales receipt data ---
+        const { data: bottle } = await supabase
+          .from('bottles')
+          .select('id')
+          .eq('barcode_number', chunk[0]?.product_code)
+          .eq('organization_id', userProfile.organization_id)
+          .single();
+        
+        const isSalesReceipt = bottle;
+
+        if (isSalesReceipt) {
+          // --- Handle sales receipts ---
+          const receiptNumbers = [...new Set(chunk.map(row => row.reference_number).filter(Boolean))];
+          const { data: existingReceipts = [] } = await supabase
+            .from('invoices')
+            .select('details')
+            .in('details', receiptNumbers);
+          const existingReceiptNumbers = new Set((existingReceipts || []).map(r => r.details));
+
+          // Create new sales receipts (using invoices table)
+          for (const row of chunk) {
+            if (!existingReceiptNumbers.has(row.reference_number)) {
+              const { data: receipt, error: receiptError } = await supabase
+                .from('invoices')
+                .insert({
+                  details: row.reference_number, // Use details column for receipt number
+                  customer_id: row.customer_id,
+                  invoice_date: convertDate(row.date), // Convert date format
+                  amount: 0 // Use amount instead of total_amount
+                })
+                .select()
+                .single();
+
+              if (receiptError) {
+                console.error('Error creating sales receipt:', receiptError);
+                errors++;
+                continue;
+              }
+
+              receiptsCreated++;
+              
+              // Create line item
+              const { error: lineItemError } = await supabase
+                .from('invoice_line_items')
+                .insert({
+                  invoice_id: receipt.id,
+                  product_code: row.product_code,
+                  qty_out: row.qty_out || 0,
+                  qty_in: row.qty_in || 0,
+                  description: row.product_code,
+                  rate: 0,
+                  amount: 0,
+                  serial_number: row.product_code
+                });
+
+              if (lineItemError) {
+                console.error('Error creating line item:', lineItemError);
+                errors++;
+              } else {
+                lineItemsCreated++;
+                imported++;
+              }
+            } else {
+              receiptsExisting++;
+              lineItemsSkipped++;
+            }
+          }
+        } else {
+          // --- Handle invoices ---
+          const invoiceNumbers = [...new Set(chunk.map(row => row.reference_number).filter(Boolean))];
+          const { data: existingInvoices = [] } = await supabase
+            .from('invoices')
+            .select('details')
+            .in('details', invoiceNumbers);
+          const existingInvoiceNumbers = new Set((existingInvoices || []).map(i => i.details));
+
+          // Create new invoices
+          for (const row of chunk) {
+            if (!existingInvoiceNumbers.has(row.reference_number)) {
+              const { data: invoice, error: invoiceError } = await supabase
+                .from('invoices')
+                .insert({
+                  details: row.reference_number,
+                  customer_id: row.customer_id,
+                  invoice_date: convertDate(row.date), // Convert date format
+                  amount: 0
+                })
+                .select()
+                .single();
+
+              if (invoiceError) {
+                console.error('Error creating invoice:', invoiceError);
+                errors++;
+                continue;
+              }
+
+              invoicesCreated++;
+              
+              // Create line item
+              const { error: lineItemError } = await supabase
+                .from('invoice_line_items')
+                .insert({
+                  invoice_id: invoice.id,
+                  product_code: row.product_code,
+                  qty_out: row.qty_out || 0,
+                  qty_in: row.qty_in || 0,
+                  description: row.product_code,
+                  rate: 0,
+                  amount: 0,
+                  serial_number: row.product_code
+                });
+
+              if (lineItemError) {
+                console.error('Error creating line item:', lineItemError);
+                errors++;
+              } else {
+                lineItemsCreated++;
+                imported++;
+              }
+            } else {
+              invoicesExisting++;
+              lineItemsSkipped++;
+            }
+          }
+        }
+      }
+
+      setResult({
+        message: 'Direct import completed successfully!',
+        imported,
+        errors,
+        customersCreated,
+        customersExisting,
+        invoicesCreated,
+        invoicesExisting,
+        receiptsCreated,
+        receiptsExisting,
+        lineItemsCreated,
+        lineItemsSkipped,
+        skippedRows,
+        importType: 'direct',
+        dataLocation: 'Directly in database - check Invoices page or database tables'
+      });
+
+    } catch (error) {
+      console.error('Direct import error:', error);
+      setError(error.message);
+    }
+    setLoading(false);
+    setImporting(false);
   }
 
   return (
@@ -979,6 +1379,14 @@ export default function Import() {
             onChange={handleFileChange} 
             className="border p-2 rounded w-full" 
           />
+          <button 
+            type="button"
+            onClick={checkPreviewStatuses}
+            disabled={!file || !preview.length || loading}
+            className="bg-green-600 text-white px-6 py-2 rounded-lg shadow-md hover:bg-green-700 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? 'Analyzing...' : 'Preview'}
+          </button>
           <button 
             type="submit" 
             className="bg-blue-600 text-white px-6 py-2 rounded-lg shadow-md hover:bg-blue-700 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1066,75 +1474,67 @@ export default function Import() {
                   </tr>
                 </thead>
                 <tbody>
-                  {preview.slice(0, 5).map((row, i) => {
-                    const rowErrors = validationErrors.filter(e => e.row === i);
-                    return (
-                      <tr key={i} className={rowErrors.length ? 'bg-red-100' : ''}>
-                        <td className={`border px-2 py-1 text-xs ${rowErrors.find(e => e.field === 'customer_id') ? 'bg-red-200 text-red-800 font-bold' : ''}`}>
-                          {row.customer_id || ''}
-                        </td>
-                        <td className={`border px-2 py-1 text-xs ${rowErrors.find(e => e.field === 'customer_name') ? 'bg-red-200 text-red-800 font-bold' : ''}`}>
-                          {row.customer_name || ''}
-                        </td>
-                        <td className={`border px-2 py-1 text-xs ${rowErrors.find(e => e.field === 'date') ? 'bg-red-200 text-red-800 font-bold' : ''}`}>
-                          {row.date || ''}
-                        </td>
-                        <td className={`border px-2 py-1 text-xs ${rowErrors.find(e => e.field === 'product_code') ? 'bg-red-200 text-red-800 font-bold' : ''}`}>
-                          <a href={`/bottles/${row.product_code}`} style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}>
-                            {row.product_code}
-                          </a>
-                        </td>
-                        <td className={`border px-2 py-1 text-xs ${rowErrors.find(e => e.field === 'reference_number') ? 'bg-red-200 text-red-800 font-bold' : ''}`}>
-                          {row.reference_number || ''}
-                        </td>
-                        <td className={`border px-2 py-1 text-xs ${rowErrors.find(e => e.field === 'qty_out') ? 'bg-red-200 text-red-800 font-bold' : ''}`}>
-                          {row.qty_out || ''}
-                        </td>
-                        <td className={`border px-2 py-1 text-xs ${rowErrors.find(e => e.field === 'qty_in') ? 'bg-red-200 text-red-800 font-bold' : ''}`}>
-                          {row.qty_in || ''}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {preview.slice(0, 10).map((row, idx) => (
+                    <tr key={idx} className={idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
+                      <td className="border px-2 py-1 text-xs">{row.customer_id || '-'}</td>
+                      <td className="border px-2 py-1 text-xs">{row.customer_name || '-'}</td>
+                      <td className="border px-2 py-1 text-xs">{row.date || '-'}</td>
+                      <td className="border px-2 py-1 text-xs">{row.product_code || '-'}</td>
+                      <td className="border px-2 py-1 text-xs">{row.reference_number || '-'}</td>
+                      <td className="border px-2 py-1 text-xs">{row.qty_out || '0'}</td>
+                      <td className="border px-2 py-1 text-xs">{row.qty_in || '0'}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
-              {preview.length > 5 && <div className="text-xs text-gray-500 mt-1">Showing first 5 rows only.</div>}
+              {preview.length > 10 && (
+                <div className="text-sm text-gray-600 mt-2">
+                  Showing first 10 rows of {preview.length} total rows
+                </div>
+              )}
             </div>
-            {validationErrors.length > 0 && (
-              <div className="text-red-700 bg-red-100 border border-red-300 rounded p-2 mt-2">
-                {validationErrors.length} validation error(s) found. Please fix highlighted rows before importing.
-              </div>
-            )}
-            <button
-              className="bg-blue-500 text-white px-4 py-2 rounded shadow hover:bg-blue-600 font-semibold transition mt-4"
-              onClick={checkPreviewStatuses}
-              disabled={loading || validationErrors.length > 0}
-            >
-              {loading ? 'Checking...' : 'Check Preview'}
-            </button>
           </div>
         )}
 
         {/* Preview Summary */}
-        {previewChecked && previewSummary && (
-          <div className="bg-blue-50 text-blue-900 p-4 rounded mb-4 border border-blue-200">
-            <div className="font-semibold mb-1">Import Summary:</div>
-            <div>Customers to create: {previewSummary.customersCreated}, already exist: {previewSummary.customersExisting}</div>
-            <div>Records to create: {previewSummary.invoicesCreated || previewSummary.receiptsCreated}, already exist: {previewSummary.invoicesExisting || previewSummary.receiptsExisting}</div>
-            <div>Line items to import: {previewSummary.lineItemsCreated}, skipped: {previewSummary.lineItemsSkipped}</div>
+        {previewSummary && (
+          <div className="mb-6 bg-white/80 rounded-lg p-4 border border-blue-200">
+            <div className="font-semibold mb-2">Preview Summary:</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <div className="font-medium text-gray-700">Customers:</div>
+                <div className="text-green-600">{previewSummary.customersCreated} to create</div>
+                <div className="text-gray-600">{previewSummary.customersExisting} existing</div>
+              </div>
+              <div>
+                <div className="font-medium text-gray-700">Invoices:</div>
+                <div className="text-blue-600">{previewSummary.invoicesCreated} to create</div>
+                <div className="text-gray-600">{previewSummary.invoicesExisting} existing</div>
+              </div>
+              <div>
+                <div className="font-medium text-gray-700">Sales Receipts:</div>
+                <div className="text-purple-600">{previewSummary.receiptsCreated} to create</div>
+                <div className="text-gray-600">{previewSummary.receiptsExisting} existing</div>
+              </div>
+              <div>
+                <div className="font-medium text-gray-700">Line Items:</div>
+                <div className="text-orange-600">{previewSummary.lineItemsCreated} to create</div>
+                <div className="text-gray-600">{previewSummary.lineItemsSkipped} skipped</div>
+              </div>
+            </div>
             
             {/* Create Missing Customers Button */}
             {previewSummary.customersCreated > 0 && (
-              <div className="mt-3 pt-3 border-t border-blue-300">
-                <div className="text-sm mb-2">
-                  <strong>Action Required:</strong> You have {previewSummary.customersCreated} customers that need to be created before importing.
+              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                <div className="text-sm text-yellow-800 mb-2">
+                  <strong>Missing Customers Detected:</strong> You need to create {previewSummary.customersCreated} customers before importing.
                 </div>
                 <button
                   onClick={createMissingCustomers}
                   disabled={loading}
-                  className="bg-green-600 text-white px-4 py-2 rounded shadow hover:bg-green-700 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700 font-semibold transition disabled:opacity-50"
                 >
-                  {loading ? 'Creating Customers...' : `Create ${previewSummary.customersCreated} Missing Customers`}
+                  {loading ? 'Creating...' : 'Create Missing Customers'}
                 </button>
               </div>
             )}
@@ -1153,10 +1553,15 @@ export default function Import() {
                 <div className="mt-2 text-sm">
                   You can check the status of your import in the <strong>Import Approvals</strong> page.
                 </div>
+                <div className="mt-3">
+                  <a href="/import-approvals" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
+                    Go to Import Approvals
+                  </a>
+                </div>
               </>
             ) : (
               <>
-                <div>Import finished!</div>
+                <div className="font-semibold text-lg">✅ Import Completed Successfully!</div>
                 <div>Customers created: {result.customersCreated}, already existed: {result.customersExisting}</div>
                 <div>
                   {result.receiptsCreated !== undefined ? 'Sales Receipts' : 'Invoices'} created: {result.invoicesCreated || result.receiptsCreated}, 
@@ -1164,6 +1569,26 @@ export default function Import() {
                 </div>
                 <div>Line items imported: {result.lineItemsCreated}, skipped: {result.lineItemsSkipped}</div>
                 <div>Total imported: {result.imported}, Errors: {result.errors}</div>
+                
+                {/* Show where to find the data */}
+                {result.importType === 'direct' && (
+                  <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded">
+                    <div className="font-semibold text-blue-900 mb-2">📍 Where to find your imported data:</div>
+                    <div className="text-blue-800 text-sm space-y-1">
+                      <div>• <strong>Sales Receipts/Invoices:</strong> Check the <a href="/invoices" className="underline">Invoices page</a></div>
+                      <div>• <strong>Customers:</strong> Check the <a href="/customers" className="underline">Customers page</a></div>
+                      <div>• <strong>Line Items:</strong> View in the database or invoice details</div>
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <a href="/invoices" className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 text-xs">
+                        View Invoices
+                      </a>
+                      <a href="/customers" className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 text-xs">
+                        View Customers
+                      </a>
+                    </div>
+                  </div>
+                )}
               </>
             )}
             
@@ -1311,6 +1736,31 @@ export default function Import() {
           <button onClick={downloadSkippedItems} className="bg-gray-200 text-gray-800 px-3 py-1 rounded shadow hover:bg-gray-300 text-xs font-semibold mb-2">
             Download Skipped Items Debug CSV
           </button>
+        )}
+
+        {/* Customer Import Report */}
+        {customerImportReport && (
+          <div className="bg-gray-50 border border-gray-300 rounded p-4 mb-4">
+            <div className="font-bold mb-2">Customer Import Report</div>
+            <div className="mb-2 text-green-700">
+              <strong>Created ({customerImportReport.created.length}):</strong>
+              {customerImportReport.created.length === 0 ? ' None' : ''}
+              <ul className="list-disc ml-6">
+                {customerImportReport.created.map(c => (
+                  <li key={c.CustomerListID}>{c.CustomerListID} - {c.name}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="mb-2 text-yellow-800">
+              <strong>Skipped ({customerImportReport.skipped.length}):</strong>
+              {customerImportReport.skipped.length === 0 ? ' None' : ''}
+              <ul className="list-disc ml-6">
+                {customerImportReport.skipped.map(c => (
+                  <li key={c.CustomerListID}>{c.CustomerListID} - {c.name} <span className="italic">({c.reason})</span></li>
+                ))}
+              </ul>
+            </div>
+          </div>
         )}
       </Paper>
     </Box>

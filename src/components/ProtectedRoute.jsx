@@ -3,12 +3,20 @@ import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from './LoadingSpinner';
 import MainLayout from './MainLayout';
+import { Alert, Box } from '@mui/material';
 
 const ProtectedRoute = () => {
-  const { user, profile, organization, loading } = useAuth();
+  const { user, profile, organization, loading, trialExpired } = useAuth();
 
   // Log the state for debugging purposes.
-  console.log('ProtectedRoute:', { loading, user: !!user, profile: !!profile, organization: !!organization });
+  console.log('ProtectedRoute:', { 
+    loading, 
+    user: !!user, 
+    profile: !!profile, 
+    organization: !!organization,
+    profileRole: profile?.role,
+    organizationId: profile?.organization_id
+  });
 
   if (loading) {
     // Show a full-page loading spinner while auth state is being determined.
@@ -18,6 +26,16 @@ const ProtectedRoute = () => {
   if (!user) {
     // If the user is not authenticated, redirect them to the login page.
     return <Navigate to="/login" replace />;
+  }
+
+  if (trialExpired) {
+    return (
+      <Box sx={{ p: 6 }}>
+        <Alert severity="error">
+          Your trial has expired. Please contact support or upgrade to a paid plan to regain access.
+        </Alert>
+      </Box>
+    );
   }
 
   if (user && !profile) {

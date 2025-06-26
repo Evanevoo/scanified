@@ -3,14 +3,15 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, 
-  CircularProgress, Button, Chip, Divider, Grid, Card, CardContent, TextField, MenuItem, Snackbar, Alert
+  CircularProgress, Button, Chip, Divider, Grid, Card, CardContent, TextField, MenuItem, Snackbar, Alert, Select
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 export default function BottleDetail() {
-  const { barcode_number } = useParams();
+  const { id } = useParams();
   const navigate = useNavigate();
   const [bottle, setBottle] = useState(null);
+  const [assetInfo, setAssetInfo] = useState(null);
   const [rentals, setRentals] = useState([]);
   const [customer, setCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -18,6 +19,7 @@ export default function BottleDetail() {
   const [editBottle, setEditBottle] = useState(null);
   const [saving, setSaving] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [locations, setLocations] = useState([]);
 
   useEffect(() => {
     const fetchBottleDetails = async () => {
@@ -25,11 +27,11 @@ export default function BottleDetail() {
       setError(null);
       
       try {
-        // Fetch bottle details
+        // Fetch bottle details by ID
         const { data: bottleData, error: bottleError } = await supabase
           .from('bottles')
           .select('*')
-          .eq('barcode_number', barcode_number)
+          .eq('id', id)
           .single();
         
         if (bottleError) {
@@ -38,19 +40,86 @@ export default function BottleDetail() {
           return;
         }
         
+        // Auto-fill logic for bottle fields if empty
+        if (bottleData.description) {
+          const desc = bottleData.description.trim();
+          const firstWord = desc.split(/\s|-/)[0];
+          if (!bottleData.type || bottleData.type.trim() === '') bottleData.type = firstWord;
+          if (!bottleData.category || bottleData.category.trim() === '') bottleData.category = 'BOTTLE';
+          if (!bottleData.group_name || bottleData.group_name.trim() === '') bottleData.group_name = firstWord;
+          if (!bottleData.gas_type || bottleData.gas_type.trim() === '') bottleData.gas_type = firstWord;
+        }
         setBottle(bottleData);
         setEditBottle(bottleData);
         
-        // Fetch rental history
-        const { data: rentalData, error: rentalError } = await supabase
+        // Fetch asset information based on product description
+        if (bottleData.description) {
+          const { data: assetData, error: assetError } = await supabase
+            .from('bottles')
+            .select('*')
+            .eq('description', bottleData.description);
+          
+          if (!assetError && assetData && assetData.length > 0) {
+            // Find the first bottle with populated values for asset details
+            const firstWithType = assetData.find(b => b.type && b.type.trim() !== '') || assetData[0];
+            const firstWithCategory = assetData.find(b => b.category && b.category.trim() !== '') || assetData[0];
+            const firstWithGroup = assetData.find(b => b.group_name && b.group_name.trim() !== '') || assetData[0];
+            const firstWithGasType = assetData.find(b => b.gas_type && b.gas_type.trim() !== '') || assetData[0];
+            
+            // Calculate asset-level statistics
+            const assetStats = {
+              product_code: bottleData.product_code || '',
+              description: bottleData.description,
+              type: firstWithType?.type || '',
+              category: firstWithCategory?.category || '',
+              group_name: firstWithGroup?.group_name || '',
+              gas_type: firstWithGasType?.gas_type || '',
+              location: assetData[0].location || '',
+              total_count: assetData.length,
+              available_count: assetData.filter(b => b.status === 'available').length,
+              rented_count: assetData.filter(b => b.status === 'rented').length,
+              lost_count: assetData.filter(b => b.status === 'lost').length,
+              in_house_total: assetData.reduce((sum, b) => sum + (b.in_house_total || 0), 0),
+              with_customer_total: assetData.reduce((sum, b) => sum + (b.with_customer_total || 0), 0),
+              lost_total: assetData.reduce((sum, b) => sum + (b.lost_total || 0), 0),
+              total: assetData.reduce((sum, b) => sum + (b.total || 0), 0)
+            };
+            setAssetInfo(assetStats);
+          }
+        }
+        
+        // Fetch rental history (try all possible links, no join)
+        let rentalData = [];
+        // Try by bottle_id
+        let res = await supabase
           .from('rentals')
-          .select('*, customer:customer_id (CustomerListID, name, customer_number)')
+          .select('*')
           .eq('bottle_id', bottleData.id)
           .order('rental_start_date', { ascending: false });
-        
-        if (!rentalError) {
-          setRentals(rentalData || []);
+        if (res.data && res.data.length > 0) {
+          rentalData = res.data;
+        } else {
+          // Try by serial_number
+          res = await supabase
+            .from('rentals')
+            .select('*')
+            .eq('serial_number', bottleData.serial_number)
+            .order('rental_start_date', { ascending: false });
+          if (res.data && res.data.length > 0) {
+            rentalData = res.data;
+          } else {
+            // Try by barcode_number
+            res = await supabase
+              .from('rentals')
+              .select('*')
+              .eq('barcode_number', bottleData.barcode_number)
+              .order('rental_start_date', { ascending: false });
+            if (res.data && res.data.length > 0) {
+              rentalData = res.data;
+            }
+          }
         }
+        setRentals(rentalData || []);
         
         // Fetch customer details if assigned
         if (bottleData.assigned_customer) {
@@ -65,6 +134,13 @@ export default function BottleDetail() {
           }
         }
         
+        // Fetch locations for dropdown
+        const fetchLocations = async () => {
+          const { data, error } = await supabase.from('locations').select('*').order('name');
+          if (!error && data) setLocations(data);
+        };
+        fetchLocations();
+        
       } catch (err) {
         setError(err.message);
       }
@@ -72,10 +148,10 @@ export default function BottleDetail() {
       setLoading(false);
     };
     
-    if (barcode_number) {
+    if (id) {
       fetchBottleDetails();
     }
-  }, [barcode_number]);
+  }, [id]);
 
   const handleEditChange = (field, value) => {
     setEditBottle(prev => ({ ...prev, [field]: value }));
@@ -153,9 +229,8 @@ export default function BottleDetail() {
           <Grid item xs={12} md={6}>
             <Paper elevation={2} sx={{ p: 3, borderRadius: 2 }}>
               <Typography variant="h6" fontWeight={700} mb={3} color="primary">
-                📦 Bottle Information
+                🏷️ Asset Information
               </Typography>
-              
               <Grid container spacing={2}>
                 <Grid item xs={6}>
                   <Typography variant="body2" color="text.secondary">Barcode</Typography>
@@ -176,10 +251,10 @@ export default function BottleDetail() {
                   />
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Product Code</Typography>
+                  <Typography variant="body2" color="text.secondary">Group</Typography>
                   <TextField
-                    value={editBottle?.product_code || ''}
-                    onChange={e => handleEditChange('product_code', e.target.value)}
+                    value={editBottle?.group_name || ''}
+                    onChange={e => handleEditChange('group_name', e.target.value)}
                     fullWidth
                     size="small"
                   />
@@ -194,19 +269,10 @@ export default function BottleDetail() {
                   />
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Category</Typography>
+                  <Typography variant="body2" color="text.secondary">Product Code</Typography>
                   <TextField
-                    value={editBottle?.category || ''}
-                    onChange={e => handleEditChange('category', e.target.value)}
-                    fullWidth
-                    size="small"
-                  />
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Group</Typography>
-                  <TextField
-                    value={editBottle?.group_name || ''}
-                    onChange={e => handleEditChange('group_name', e.target.value)}
+                    value={editBottle?.product_code || ''}
+                    onChange={e => handleEditChange('product_code', e.target.value)}
                     fullWidth
                     size="small"
                   />
@@ -221,30 +287,19 @@ export default function BottleDetail() {
                   />
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Gas Type</Typography>
-                  <TextField
-                    value={editBottle?.gas_type || ''}
-                    onChange={e => handleEditChange('gas_type', e.target.value)}
-                    fullWidth
-                    size="small"
-                  />
-                </Grid>
-                <Grid item xs={6}>
                   <Typography variant="body2" color="text.secondary">Location</Typography>
-                  <TextField
+                  <Select
                     value={editBottle?.location || ''}
                     onChange={e => handleEditChange('location', e.target.value)}
                     fullWidth
                     size="small"
-                  />
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Status</Typography>
-                  <Chip 
-                    label={bottle.assigned_customer ? 'Rented' : 'Available'} 
-                    color={bottle.assigned_customer ? 'warning' : 'success'}
-                    size="small"
-                  />
+                    displayEmpty
+                  >
+                    <MenuItem value=""><em>None</em></MenuItem>
+                    {locations.map(loc => (
+                      <MenuItem key={loc.id} value={loc.name}>{loc.name}</MenuItem>
+                    ))}
+                  </Select>
                 </Grid>
                 <Grid item xs={12}>
                   <Button
@@ -285,7 +340,7 @@ export default function BottleDetail() {
                   <Grid item xs={12}>
                     <Button 
                       variant="outlined" 
-                      onClick={() => navigate(`/customers/${customer.CustomerListID}`)}
+                      onClick={() => navigate(`/customer/${customer.CustomerListID}`)}
                       sx={{ mt: 1 }}
                     >
                       View Customer Details

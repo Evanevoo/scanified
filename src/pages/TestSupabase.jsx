@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, Paper, Button } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 
 export default function TestSupabase() {
   const [testResult, setTestResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
   const testSimpleQuery = async () => {
     setLoading(true);
@@ -177,7 +179,7 @@ export default function TestSupabase() {
       <Box sx={{ mt: 3 }}>
         <Button 
           variant="outlined" 
-          onClick={() => window.location.href = '/debug'}
+          onClick={() => navigate('/debug')}
         >
           Back to Debug
         </Button>

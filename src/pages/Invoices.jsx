@@ -33,17 +33,7 @@ function Invoices({ profile }) {
         // Fetch invoices with customer details
         const { data: invoicesData, error: invoicesError } = await supabase
           .from('invoices')
-          .select(`
-            *,
-            customer:customer_id (
-              CustomerListID,
-              name,
-              customer_number
-            ),
-            generated_by_user:generated_by (
-              full_name
-            )
-          `)
+          .select('*')
           .order('invoice_date', { ascending: false });
 
         if (invoicesError) throw invoicesError;
@@ -148,17 +138,7 @@ function Invoices({ profile }) {
       // Refresh invoices list
       const { data: refreshedInvoices } = await supabase
         .from('invoices')
-        .select(`
-          *,
-          customer:customer_id (
-            CustomerListID,
-            name,
-            customer_number
-          ),
-          generated_by_user:generated_by (
-            full_name
-          )
-        `)
+        .select('*')
         .order('invoice_date', { ascending: false });
 
       setInvoices(refreshedInvoices);

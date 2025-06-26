@@ -1,9 +1,12 @@
 import React from 'react';
 import { Box, Typography, Paper, Button } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../supabase/client';
 
 export default function DebugAuth() {
   const { user, profile, organization, loading } = useAuth();
+  const navigate = useNavigate();
 
   const isAuthenticated = !!user;
   const needsOrganizationSetup = isAuthenticated && !organization;
@@ -57,8 +60,69 @@ export default function DebugAuth() {
             <Typography>Organization Name: {organization.name}</Typography>
             <Typography>Organization Slug: {organization.slug}</Typography>
             <Typography>Subscription Status: {organization.subscription_status}</Typography>
+            <Typography>Logo URL: {organization.logo_url || 'No logo URL'}</Typography>
+            <Typography>Logo URL Type: {typeof organization.logo_url}</Typography>
+            <Typography>All Organization Fields: {JSON.stringify(organization, null, 2)}</Typography>
           </>
         )}
+      </Paper>
+
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Test Logo Upload
+        </Typography>
+        <Button 
+          variant="contained" 
+          onClick={async () => {
+            try {
+              // Test if we can update the organization
+              const { data, error } = await supabase
+                .from('organizations')
+                .update({ logo_url: 'https://via.placeholder.com/40x40/blue/white?text=TEST' })
+                .eq('id', organization?.id)
+                .select();
+              
+              if (error) {
+                console.error('Test update error:', error);
+                alert('Error updating organization: ' + error.message);
+              } else {
+                console.log('Test update success:', data);
+                alert('Test logo URL updated successfully! Check the sidebar.');
+              }
+            } catch (err) {
+              console.error('Test error:', err);
+              alert('Test failed: ' + err.message);
+            }
+          }}
+          sx={{ mr: 2 }}
+        >
+          Test Logo URL Update
+        </Button>
+        <Button 
+          variant="outlined" 
+          onClick={async () => {
+            try {
+              // Test if logo_url column exists
+              const { data, error } = await supabase
+                .from('organizations')
+                .select('logo_url')
+                .limit(1);
+              
+              if (error) {
+                console.error('Column test error:', error);
+                alert('Error testing column: ' + error.message);
+              } else {
+                console.log('Column test success:', data);
+                alert('logo_url column exists! Data: ' + JSON.stringify(data));
+              }
+            } catch (err) {
+              console.error('Column test error:', err);
+              alert('Column test failed: ' + err.message);
+            }
+          }}
+        >
+          Test Logo URL Column
+        </Button>
       </Paper>
 
       <Paper sx={{ p: 3, mb: 3 }}>
@@ -72,14 +136,14 @@ export default function DebugAuth() {
       <Box sx={{ mt: 3 }}>
         <Button 
           variant="contained" 
-          onClick={() => window.location.href = '/owner-dashboard'}
+          onClick={() => navigate('/owner-dashboard')}
           sx={{ mr: 2 }}
         >
           Try Owner Dashboard
         </Button>
         <Button 
           variant="outlined" 
-          onClick={() => window.location.href = '/'}
+          onClick={() => navigate('/')}
         >
           Go to Landing Page
         </Button>

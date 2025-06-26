@@ -23,6 +23,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Cancel';
 import { supabase } from '../supabase/client';
+import { useAuth } from '../hooks/useAuth';
 
 // Initial locations with current tax rates (as of 2024)
 const initialLocations = [
@@ -72,6 +73,9 @@ export default function Locations() {
   const [snackbarSeverity, setSnackbarSeverity] = useState('success');
   const [editValues, setEditValues] = useState({});
   const [error, setError] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newLocation, setNewLocation] = useState({ name: '', province: '', gst_rate: '', pst_rate: '' });
+  const { profile } = useAuth();
 
   useEffect(() => {
     loadLocationsFromDatabase();
@@ -211,12 +215,70 @@ export default function Locations() {
     }
   };
 
+  const handleAddLocation = async () => {
+    if (!newLocation.name || !newLocation.province || newLocation.gst_rate === '' || newLocation.pst_rate === '') {
+      setSnackbarMsg('Please fill in all fields');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+    if (locations.some(loc => loc.name.toLowerCase() === newLocation.name.toLowerCase() && loc.province.toLowerCase() === newLocation.province.toLowerCase())) {
+      setSnackbarMsg('A location with this name and province already exists.');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+    setLoading(true);
+    try {
+      const gst = parseFloat(newLocation.gst_rate);
+      const pst = parseFloat(newLocation.pst_rate);
+      const total = gst + pst;
+      const { error, data } = await supabase.from('locations').insert([
+        {
+          organization_id: profile.organization_id,
+          name: newLocation.name,
+          province: newLocation.province,
+          gst_rate: gst,
+          pst_rate: pst,
+          total_tax_rate: total
+        }
+      ]);
+      if (error) throw error;
+      setSnackbarMsg('Location added successfully');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      setShowAddForm(false);
+      setNewLocation({ name: '', province: '', gst_rate: '', pst_rate: '' });
+      loadLocationsFromDatabase();
+    } catch (error) {
+      setSnackbarMsg('Error adding location: ' + (error.message || error));
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
       <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
-        <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>
-          📍 Location Management
-        </Typography>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>
+            📍 Location Management
+          </Typography>
+          <Button variant="contained" color="primary" onClick={() => setShowAddForm(v => !v)}>
+            {showAddForm ? 'Cancel' : 'Add New Location'}
+          </Button>
+        </Box>
+        {showAddForm && (
+          <Box mb={3} display="flex" gap={2} alignItems="center">
+            <TextField label="Name" value={newLocation.name} onChange={e => setNewLocation({ ...newLocation, name: e.target.value })} size="small" />
+            <TextField label="Province" value={newLocation.province} onChange={e => setNewLocation({ ...newLocation, province: e.target.value })} size="small" />
+            <TextField label="GST Rate (%)" type="number" value={newLocation.gst_rate} onChange={e => setNewLocation({ ...newLocation, gst_rate: e.target.value })} size="small" inputProps={{ step: 0.1, min: 0, max: 100 }} />
+            <TextField label="PST Rate (%)" type="number" value={newLocation.pst_rate} onChange={e => setNewLocation({ ...newLocation, pst_rate: e.target.value })} size="small" inputProps={{ step: 0.1, min: 0, max: 100 }} />
+            <Button variant="contained" color="success" onClick={handleAddLocation} disabled={loading}>Add</Button>
+          </Box>
+        )}
         
         <Typography variant="body1" color="text.secondary" mb={4}>
           Manage tax rates for different locations. GST and PST rates can be customized per location.
@@ -228,58 +290,6 @@ export default function Locations() {
           </Box>
         ) : (
           <>
-            {/* Summary Cards */}
-            <Grid container spacing={3} mb={4}>
-              <Grid item xs={12} sm={6} md={3}>
-                <Card elevation={3} sx={{ borderRadius: 3, bgcolor: '#f8f9fa' }}>
-                  <CardContent sx={{ textAlign: 'center', py: 3 }}>
-                    <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
-                      {locations.length}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Total Locations
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Card elevation={3} sx={{ borderRadius: 3, bgcolor: '#e3f2fd' }}>
-                  <CardContent sx={{ textAlign: 'center', py: 3 }}>
-                    <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
-                      SK
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Saskatchewan
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Card elevation={3} sx={{ borderRadius: 3, bgcolor: '#f3e5f5' }}>
-                  <CardContent sx={{ textAlign: 'center', py: 3 }}>
-                    <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
-                      BC
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      British Columbia
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Card elevation={3} sx={{ borderRadius: 3, bgcolor: '#e8f5e8' }}>
-                  <CardContent sx={{ textAlign: 'center', py: 3 }}>
-                    <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
-                      5%
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      GST Rate
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
-
             {/* Locations Table */}
             <Paper elevation={3} sx={{ borderRadius: 4, overflow: 'hidden' }}>
               <TableContainer>

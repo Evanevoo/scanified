@@ -6,41 +6,24 @@ import {
 } from '@mui/material';
 import { ErrorBoundary } from 'react-error-boundary';
 
-// Add error boundary wrapper
-function CustomersErrorBoundary({ children }) {
-  const [hasError, setHasError] = useState(false);
-  const [error, setError] = useState(null);
-
-  if (hasError) {
-    return (
-      <Box p={3}>
-        <Typography variant="h6" color="error">
-          Error loading Customers page
-        </Typography>
-        <Typography variant="body2" color="textSecondary">
-          {error?.message || 'An unknown error occurred'}
-        </Typography>
-        <Button 
-          variant="contained" 
-          onClick={() => window.location.reload()}
-          sx={{ mt: 2 }}
-        >
-          Reload Page
-        </Button>
-      </Box>
-    );
-  }
-
+// Remove CustomersErrorBoundary and replace with a FallbackComponent
+function CustomersErrorFallback({ error, resetErrorBoundary }) {
   return (
-    <ErrorBoundary
-      onError={(error) => {
-        console.error('Customers component error:', error);
-        setError(error);
-        setHasError(true);
-      }}
-    >
-      {children}
-    </ErrorBoundary>
+    <Box p={3}>
+      <Typography variant="h6" color="error">
+        Error loading Customers page
+      </Typography>
+      <Typography variant="body2" color="textSecondary">
+        {error?.message || 'An unknown error occurred'}
+      </Typography>
+      <Button 
+        variant="contained" 
+        onClick={resetErrorBoundary}
+        sx={{ mt: 2 }}
+      >
+        Try Again
+      </Button>
+    </Box>
   );
 }
 
@@ -76,6 +59,27 @@ function exportToCSV(customers) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+async function exportAllCustomersToCSV() {
+  try {
+    const { data: allCustomers, error } = await supabase
+      .from('customers')
+      .select('*')
+      .order('name');
+    
+    if (error) throw error;
+    
+    if (!allCustomers || allCustomers.length === 0) {
+      alert('No customers found to export.');
+      return;
+    }
+    
+    exportToCSV(allCustomers);
+  } catch (error) {
+    console.error('Error exporting customers:', error);
+    alert('Error exporting customers: ' + error.message);
+  }
 }
 
 function Customers({ profile }) {
@@ -320,7 +324,17 @@ function Customers({ profile }) {
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
       <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
-        <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Customers</Typography>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+          <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>Customers</Typography>
+          <Button
+            variant="contained"
+            color="secondary"
+            onClick={exportAllCustomersToCSV}
+            sx={{ ml: 2 }}
+          >
+            Export All Customers
+          </Button>
+        </Box>
         
         {/* Action Buttons */}
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
@@ -436,7 +450,7 @@ function Customers({ profile }) {
                       onChange={() => handleSelect(c.CustomerListID)}
                     />
                   </TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: '#1976d2', cursor: 'pointer' }} onClick={() => navigate(`/customers/${c.CustomerListID}`)}>
+                  <TableCell sx={{ fontWeight: 700, color: '#1976d2', cursor: 'pointer' }} onClick={() => navigate(`/customer/${c.CustomerListID}`)}>
                     {c.name}
                   </TableCell>
                   <TableCell>{c.CustomerListID}</TableCell>
@@ -457,7 +471,7 @@ function Customers({ profile }) {
                         minWidth: 0, 
                         px: 1 
                       }} 
-                      onClick={() => navigate(`/customers/${c.CustomerListID}`)}
+                      onClick={() => navigate(`/customer/${c.CustomerListID}`)}
                     >
                       View
                     </Button>
@@ -529,4 +543,11 @@ function Customers({ profile }) {
   );
 }
 
-export default CustomersErrorBoundary(Customers); 
+// Export Customers wrapped in ErrorBoundary
+export default function CustomersWithBoundary(props) {
+  return (
+    <ErrorBoundary FallbackComponent={CustomersErrorFallback}>
+      <Customers {...props} />
+    </ErrorBoundary>
+  );
+} 

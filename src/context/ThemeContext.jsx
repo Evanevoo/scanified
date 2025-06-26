@@ -20,24 +20,44 @@ export function useThemeContext() {
 
 export function ThemeContextProvider({ children }) {
   const { user, profile } = useAuth();
-  const [mode, setModeState] = useState('light');
-  const [accent, setAccentState] = useState('blue-600');
+  const [mode, setModeState] = useState(() => {
+    // Initialize from localStorage immediately to prevent flash
+    return localStorage.getItem('theme') || 'light';
+  });
+  const [accent, setAccentState] = useState(() => {
+    // Initialize from localStorage immediately to prevent flash
+    return localStorage.getItem('themeColor') || 'blue-600';
+  });
   const [loading, setLoading] = useState(true);
 
   // Load theme/accent from profile or localStorage
   useEffect(() => {
     async function loadTheme() {
-      if (profile) {
-        setModeState(profile.theme || 'light');
-        setAccentState(profile.accent_color || 'blue-600');
+      if (profile && user) {
+        // User is authenticated - use their profile settings
+        const profileTheme = profile.theme || localStorage.getItem('theme') || 'light';
+        const profileAccent = profile.accent_color || localStorage.getItem('themeColor') || 'blue-600';
+        
+        setModeState(profileTheme);
+        setAccentState(profileAccent);
+        
+        // Update localStorage with profile values
+        localStorage.setItem('theme', profileTheme);
+        localStorage.setItem('themeColor', profileAccent);
       } else {
-        setModeState(localStorage.getItem('theme') || 'light');
-        setAccentState(localStorage.getItem('themeColor') || 'blue-600');
+        // User is not authenticated - use default theme for public pages
+        // Don't load user-specific themes for public pages
+        setModeState('light');
+        setAccentState('blue-600');
+        
+        // Reset localStorage to defaults for public pages
+        localStorage.setItem('theme', 'light');
+        localStorage.setItem('themeColor', 'blue-600');
       }
       setLoading(false);
     }
     loadTheme();
-  }, [profile]);
+  }, [profile, user]);
 
   // Save to localStorage and update <html> for custom CSS
   useEffect(() => {
@@ -51,7 +71,7 @@ export function ThemeContextProvider({ children }) {
 
   // Update Supabase profile when theme/accent changes (if logged in)
   useEffect(() => {
-    if (!loading && user) {
+    if (!loading && user && profile) {
       // Only update if values differ from profile
       if ((profile?.theme !== mode || profile?.accent_color !== accent)) {
         supabase.from('profiles').update({ theme: mode, accent_color: accent }).eq('id', user.id);
@@ -59,8 +79,15 @@ export function ThemeContextProvider({ children }) {
     }
   }, [mode, accent, user, profile, loading]);
 
-  const setMode = (newMode) => setModeState(newMode);
-  const setAccent = (newAccent) => setAccentState(newAccent);
+  const setMode = (newMode) => {
+    setModeState(newMode);
+    localStorage.setItem('theme', newMode);
+  };
+  
+  const setAccent = (newAccent) => {
+    setAccentState(newAccent);
+    localStorage.setItem('themeColor', newAccent);
+  };
 
   const theme = useMemo(() => 
     createAppTheme(mode, accent),

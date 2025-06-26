@@ -4,6 +4,7 @@ import { supabase } from '../supabase';
 import { Picker } from '@react-native-picker/picker';
 import { useTheme } from '../context/ThemeContext';
 import ScanArea from '../components/ScanArea';
+import { useAuth } from '../hooks/useAuth';
 
 interface GasType {
   id: number;
@@ -41,6 +42,7 @@ export default function AddCylinderScreen() {
   const [loadingLocations, setLoadingLocations] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const { profile } = useAuth();
 
   useEffect(() => {
     const fetchGasTypes = async () => {
@@ -66,19 +68,49 @@ export default function AddCylinderScreen() {
     const fetchLocations = async () => {
       setLoadingLocations(true);
       setError('');
+      if (!profile?.organization_id) {
+        setLocations([]);
+        setLoadingLocations(false);
+        return;
+      }
       const { data, error } = await supabase
         .from('locations')
         .select('*')
+        .eq('organization_id', profile.organization_id)
         .order('name', { ascending: true });
       if (error) {
         setError('Failed to load locations.');
+        setLocations([]);
+        setLoadingLocations(false);
         return;
       }
       setLocations(data || []);
       setLoadingLocations(false);
     };
     fetchLocations();
+  }, [profile]);
+
+  useEffect(() => {
+    // Restore draft if present
+    const draft = localStorage.getItem('addCylinderDraft');
+    if (draft) {
+      const { barcode, serial, selectedGasType, selectedLocation } = JSON.parse(draft);
+      setBarcode(barcode || '');
+      setSerial(serial || '');
+      setSelectedGasType(selectedGasType || '');
+      setSelectedLocation(selectedLocation || '');
+    }
   }, []);
+
+  useEffect(() => {
+    // Auto-save draft
+    localStorage.setItem('addCylinderDraft', JSON.stringify({
+      barcode,
+      serial,
+      selectedGasType,
+      selectedLocation
+    }));
+  }, [barcode, serial, selectedGasType, selectedLocation]);
 
   const handleSubmit = async () => {
     setError('');
@@ -151,6 +183,7 @@ export default function AddCylinderScreen() {
       setSerial('');
       setSelectedGasType('');
       setSelectedLocation('');
+      localStorage.removeItem('addCylinderDraft');
     }
   };
 

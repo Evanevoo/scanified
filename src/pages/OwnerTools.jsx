@@ -240,6 +240,15 @@ export default function OwnerTools() {
               <Typography variant="body2" color="text.secondary">
                 Manage multiple organizations at once
               </Typography>
+              <Button variant="contained" color="primary" sx={{ mt: 2, mr: 2 }} onClick={() => setBulkEmailDialog(true)}>
+                Send Bulk Email
+              </Button>
+              <Button variant="contained" color="secondary" sx={{ mt: 2, mr: 2 }} onClick={() => setBulkPlanDialog(true)}>
+                Change Plans
+              </Button>
+              <Button variant="contained" color="warning" sx={{ mt: 2 }} onClick={() => setTrialExtensionDialog(true)}>
+                Extend Trials
+              </Button>
             </CardContent>
           </Card>
         </Grid>
@@ -270,6 +279,77 @@ export default function OwnerTools() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* Bulk Email Dialog */}
+      <Dialog open={bulkEmailDialog} onClose={() => setBulkEmailDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Send Bulk Email</DialogTitle>
+        <DialogContent>
+          <TextField
+            label="Subject"
+            fullWidth
+            margin="normal"
+            value={emailData.subject}
+            onChange={e => setEmailData({ ...emailData, subject: e.target.value })}
+          />
+          <TextField
+            label="Message"
+            fullWidth
+            margin="normal"
+            multiline
+            minRows={4}
+            value={emailData.message}
+            onChange={e => setEmailData({ ...emailData, message: e.target.value })}
+          />
+          {/* You can add organization selection here if needed */}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkEmailDialog(false)}>Cancel</Button>
+          <Button onClick={handleBulkEmail} variant="contained" disabled={loading}>Send</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk Plan Change Dialog */}
+      <Dialog open={bulkPlanDialog} onClose={() => setBulkPlanDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Change Plans</DialogTitle>
+        <DialogContent>
+          <FormControl fullWidth margin="normal">
+            <InputLabel>Plan</InputLabel>
+            <Select
+              value={planData.plan}
+              onChange={e => setPlanData({ ...planData, plan: e.target.value })}
+            >
+              <MenuItem value="basic">Basic</MenuItem>
+              <MenuItem value="pro">Pro</MenuItem>
+              <MenuItem value="enterprise">Enterprise</MenuItem>
+            </Select>
+          </FormControl>
+          {/* You can add organization selection here if needed */}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkPlanDialog(false)}>Cancel</Button>
+          <Button onClick={handleBulkPlanChange} variant="contained" disabled={loading}>Change</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Trial Extension Dialog */}
+      <Dialog open={trialExtensionDialog} onClose={() => setTrialExtensionDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Extend Trials</DialogTitle>
+        <DialogContent>
+          <TextField
+            label="Days to Extend"
+            type="number"
+            fullWidth
+            margin="normal"
+            value={trialExtensionData.days}
+            onChange={e => setTrialExtensionData({ ...trialExtensionData, days: parseInt(e.target.value) })}
+          />
+          {/* You can add organization selection here if needed */}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTrialExtensionDialog(false)}>Cancel</Button>
+          <Button onClick={handleTrialExtension} variant="contained" disabled={loading}>Extend</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 } 

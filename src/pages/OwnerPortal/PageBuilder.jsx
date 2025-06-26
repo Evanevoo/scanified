@@ -13,10 +13,15 @@ function PageBuilder() {
   const [open, setOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [currentPage, setCurrentPage] = useState(null);
+  const [user, setUser] = useState(null);
   const { addNotification } = useAppStore();
-  const { user } = supabase.auth.user() || {};
 
   useEffect(() => {
+    async function fetchUser() {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user);
+    }
+    fetchUser();
     fetchPages();
   }, []);
 

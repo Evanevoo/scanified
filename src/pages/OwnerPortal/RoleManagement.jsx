@@ -23,6 +23,7 @@ function RoleManagement() {
   const [isEditing, setIsEditing] = useState(false);
   const [currentRole, setCurrentRole] = useState(null);
   const { addNotification } = useAppStore();
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchRoles();
@@ -65,6 +66,7 @@ function RoleManagement() {
   };
   
   const handleSave = async () => {
+    setSaving(true);
     let error;
     const { id, ...roleData } = currentRole;
 
@@ -74,6 +76,7 @@ function RoleManagement() {
       ({ error } = await supabase.from('roles').insert(roleData));
     }
 
+    setSaving(false);
     if (error) {
       addNotification({ type: 'error', title: 'Error saving role', message: error.message });
     } else {
@@ -143,7 +146,7 @@ function RoleManagement() {
           </DialogContent>
           <DialogActions>
             <Button onClick={handleClose}>Cancel</Button>
-            <Button onClick={handleSave} variant="contained">Save Role</Button>
+            <Button onClick={handleSave} variant="contained" disabled={saving}>{saving ? 'Saving...' : 'Save Role'}</Button>
           </DialogActions>
         </Dialog>
       )}

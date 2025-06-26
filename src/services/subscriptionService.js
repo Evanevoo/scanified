@@ -58,9 +58,94 @@ export const subscriptionService = {
   },
 
   async updateSubscription(organizationId, plan) {
+    // Get organization details
+    const { data: organization, error: orgError } = await supabase
+      .from('organizations')
+      .select('*')
+      .eq('id', organizationId)
+      .single();
+    
+    if (orgError) throw orgError;
+
+    // Get plan details
+    const planDetails = SUBSCRIPTION_PLANS[plan];
+    if (!planDetails) throw new Error('Invalid plan');
+
+    // Check if payment is required
+    if (planDetails.price > 0) {
+      // Check if organization has payment method
+      if (!organization.stripe_customer_id) {
+        throw new Error('Please add a payment method before upgrading your plan.');
+      }
+
+      // Create payment intent for the plan upgrade
+      const response = await fetch('/.netlify/functions/create-payment-intent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: planDetails.price * 100, // Convert to cents
+          currency: 'usd',
+          customerId: organization.stripe_customer_id,
+          metadata: {
+            organization_id: organizationId,
+            plan: plan,
+            plan_name: planDetails.name,
+            type: 'plan_upgrade'
+          }
+        }),
+      });
+
+      const { clientSecret, error } = await response.json();
+      
+      if (error) {
+        throw new Error(error);
+      }
+
+      // Initialize Stripe
+      const { loadStripe } = await import('@stripe/stripe-js');
+      const stripe = await loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+
+      if (!stripe) {
+        throw new Error('Stripe failed to load');
+      }
+
+      // Confirm payment
+      const { error: paymentError, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
+        payment_method: {
+          card: null, // Will use default payment method
+          billing_details: {
+            name: organization.name,
+            email: organization.email
+          }
+        }
+      });
+
+      if (paymentError) {
+        throw new Error(paymentError.message);
+      }
+
+      if (paymentIntent.status !== 'succeeded') {
+        throw new Error('Payment was not successful');
+      }
+    }
+
+    // Payment successful (or free plan), now update the database
     const { error } = await supabase
       .from('organizations')
-      .update({ subscription_plan: plan })
+      .update({ 
+        subscription_plan: plan,
+        subscription_status: 'active',
+        subscription_start_date: new Date().toISOString(),
+        max_users: planDetails.users,
+        max_customers: planDetails.customers,
+        max_bottles: planDetails.bottles,
+        ...(planDetails.price > 0 && {
+          last_payment_date: new Date().toISOString(),
+          last_payment_amount: planDetails.price
+        })
+      })
       .eq('id', organizationId);
     
     if (error) throw error;

@@ -53,6 +53,7 @@ import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import PaymentIcon from '@mui/icons-material/Payment';
 import { useThemeContext } from '../context/ThemeContext';
 import UserManagement from './UserManagement';
+import { usePermissions } from '../context/PermissionsContext';
 
 const themeColors = [
   { name: 'Blue', value: 'blue-600' },
@@ -92,8 +93,23 @@ const colorMap = {
   'sky-500': '#0ea5e9',
 };
 
+function TabPanel({ children, value, index, ...other }) {
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`settings-tabpanel-${index}`}
+      aria-labelledby={`settings-tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
+    </div>
+  );
+}
+
 export default function Settings() {
-  const { user, profile, organization } = useAuth();
+  const { user, profile, organization, reloadOrganization } = useAuth();
+  const { isOrgAdmin } = usePermissions();
   const navigate = useNavigate();
   const { mode, setMode, accent, setAccent } = useThemeContext();
   const [activeTab, setActiveTab] = useState(0);
@@ -184,10 +200,15 @@ export default function Settings() {
   const [backupDialog, setBackupDialog] = useState(false);
   const [securityDialog, setSecurityDialog] = useState(false);
 
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoUrl, setLogoUrl] = useState(organization?.logo_url || '');
+  const [logoMsg, setLogoMsg] = useState('');
+
   useEffect(() => {
     setFullName(profile?.full_name || '');
     setEmail(user?.email || '');
-  }, [profile, user]);
+    setLogoUrl(organization?.logo_url || '');
+  }, [profile, user, organization]);
 
   // Profile update
   const handleProfileSave = async (e) => {
@@ -344,6 +365,65 @@ export default function Settings() {
     setProfileChanged(fullName !== (profile?.full_name || ''));
   }, [fullName, profile?.full_name]);
 
+  // Admin-only logo upload handler
+  const handleLogoUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    console.log('Logo upload started:', file.name, file.size);
+    setLogoUploading(true);
+    setLogoMsg('');
+    try {
+      const fileExt = file.name.split('.').pop();
+      const filePath = `org-${organization.id}-${Date.now()}.${fileExt}`;
+      console.log('Uploading to path:', filePath);
+      
+      // Upload to Supabase Storage
+      let { error: uploadError } = await supabase.storage
+        .from('organization-logos')
+        .upload(filePath, file, { upsert: true });
+      if (uploadError) throw uploadError;
+      console.log('File uploaded successfully');
+      
+      // Get public URL
+      const { data } = supabase.storage.from('organization-logos').getPublicUrl(filePath);
+      if (!data?.publicUrl) throw new Error('Failed to get public URL');
+      console.log('Public URL obtained:', data.publicUrl);
+      
+      // Add cache-busting parameter to the URL
+      const logoUrlWithCacheBust = `${data.publicUrl}?t=${Date.now()}`;
+      console.log('Logo URL with cache busting:', logoUrlWithCacheBust);
+      
+      // Save to org
+      const { error: updateError } = await supabase
+        .from('organizations')
+        .update({ logo_url: logoUrlWithCacheBust })
+        .eq('id', organization.id);
+      if (updateError) throw updateError;
+      console.log('Organization updated in database');
+      
+      setLogoUrl(logoUrlWithCacheBust);
+      setLogoMsg('Logo updated!');
+      
+      // Refresh organization context/state so new logo appears immediately
+      console.log('Calling reloadOrganization...');
+      if (typeof reloadOrganization === 'function') {
+        await reloadOrganization();
+        console.log('reloadOrganization completed');
+      } else {
+        console.log('reloadOrganization function not available');
+      }
+      
+      // Don't force page refresh - let the reloadOrganization handle it
+      console.log('Logo upload process completed');
+      
+    } catch (err) {
+      console.error('Logo upload error:', err);
+      setLogoMsg('Error uploading logo: ' + err.message);
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
   return (
     <Box maxWidth={1200} mx="auto" mt={8} mb={4}>
       <Paper elevation={3} sx={{ p: 4, borderRadius: 4, bgcolor: 'background.default' }}>
@@ -356,519 +436,286 @@ export default function Settings() {
           </Typography>
         </Stack>
 
-        <Grid container spacing={3}>
-          {/* Profile Settings */}
-          <Grid item xs={12} md={6}>
-            <Accordion defaultExpanded>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Stack direction="row" alignItems="center" spacing={2}>
-                  <AccountCircleIcon color="primary" />
-                  <Typography variant="h6">Profile Settings</Typography>
-                </Stack>
-              </AccordionSummary>
-              <AccordionDetails>
-                <Box component="form" onSubmit={handleProfileSave} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <TextField
-                    label="Full Name"
-                    value={fullName}
-                    onChange={(e) => {
-                      setFullName(e.target.value);
-                      setProfileChanged(true);
-                    }}
-                    fullWidth
-                  />
-                  <TextField
-                    label="Email"
-                    value={email}
-                    fullWidth
-                    disabled
-                  />
-                  <Button 
-                    type="submit" 
-                    variant="contained" 
-                    color="primary"
-                    disabled={!profileChanged}
-                    startIcon={<SaveIcon />}
-                  >
-                    Save Profile
-                  </Button>
-                </Box>
-              </AccordionDetails>
-            </Accordion>
-          </Grid>
+        <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 3 }} variant="scrollable" scrollButtons="auto">
+          <Tab label="Profile" />
+          <Tab label="Security" />
+          <Tab label="Appearance" />
+          <Tab label="Notifications" />
+          <Tab label="Billing & Subscription" />
+          {profile?.role === 'admin' && <Tab label="User Management" />}
+        </Tabs>
 
-          {/* Billing & Subscription */}
-          <Grid item xs={12} md={6}>
-            <Accordion>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Stack direction="row" alignItems="center" spacing={2}>
-                  <PaymentIcon color="primary" />
-                  <Typography variant="h6">Billing & Subscription</Typography>
-                </Stack>
-              </AccordionSummary>
-              <AccordionDetails>
-                <Stack spacing={2}>
-                  <Typography variant="body2" color="text.secondary">
-                    Manage your subscription plan and billing information.
+        {/* Profile Tab */}
+        <TabPanel value={activeTab} index={0}>
+          <Box component="form" onSubmit={handleProfileSave} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              label="Full Name"
+              value={fullName}
+              onChange={(e) => {
+                setFullName(e.target.value);
+                setProfileChanged(true);
+              }}
+              fullWidth
+            />
+            <TextField
+              label="Email"
+              value={email}
+              fullWidth
+              disabled
+            />
+            <Button 
+              type="submit" 
+              variant="contained" 
+              color="primary"
+              disabled={!profileChanged}
+              startIcon={<SaveIcon />}
+            >
+              Save Profile
+            </Button>
+          </Box>
+        </TabPanel>
+
+        {/* Security Tab */}
+        <TabPanel value={activeTab} index={1}>
+          <Stack spacing={3}>
+            {/* Password Change */}
+            <Box component="form" onSubmit={handlePasswordSave}>
+              <Typography variant="subtitle1" gutterBottom>Change Password</Typography>
+              <Stack spacing={2}>
+                <TextField
+                  type="password"
+                  label="New Password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  fullWidth
+                />
+                <TextField
+                  type="password"
+                  label="Confirm Password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  fullWidth
+                />
+                <Button type="submit" variant="contained" color="primary">
+                  Update Password
+                </Button>
+              </Stack>
+            </Box>
+            
+            <Divider />
+            
+            {/* Security Preferences */}
+            <Box>
+              <Typography variant="subtitle1" gutterBottom>Security Preferences</Typography>
+              <Stack spacing={2}>
+                <FormControlLabel
+                  control={<Switch checked={securitySettings.loginHistory} onChange={(e) => handleSecurityChange('loginHistory', e.target.checked)} />}
+                  label="Track Login History"
+                />
+                <FormControlLabel
+                  control={<Switch checked={securitySettings.twoFactorEnabled} onChange={(e) => handleSecurityChange('twoFactorEnabled', e.target.checked)} />}
+                  label="Two-Factor Authentication"
+                />
+                <Box>
+                  <Typography gutterBottom>Session Timeout (minutes)</Typography>
+                  <Slider
+                    value={securitySettings.sessionTimeout}
+                    onChange={(e, value) => handleSecurityChange('sessionTimeout', value)}
+                    min={15}
+                    max={120}
+                    step={15}
+                    marks
+                    valueLabelDisplay="auto"
+                  />
+                  <Typography variant="caption" color="text.secondary">
+                    Current: {securitySettings.sessionTimeout} minutes
                   </Typography>
-                  <Button 
-                    variant="contained" 
-                    color="primary"
-                    onClick={() => navigate('/billing')}
-                    fullWidth
-                    startIcon={<PaymentIcon />}
-                  >
-                    Manage Billing & Plans
-                  </Button>
-                  {organization && (
-                    <Box>
-                      <Typography variant="body2" color="text.secondary">
-                        Current Plan: <Chip label={organization.subscription_plan || 'Trial'} size="small" />
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Organization: {organization.name}
-                      </Typography>
-                      {organization.trial_end_date && (
-                        <Typography variant="body2" color="text.secondary">
-                          Trial ends: {new Date(organization.trial_end_date).toLocaleDateString()}
-                        </Typography>
-                      )}
-                    </Box>
-                  )}
-                </Stack>
-              </AccordionDetails>
-            </Accordion>
-          </Grid>
+                </Box>
+                <Button 
+                  variant="outlined" 
+                  color="primary"
+                  onClick={handleSecuritySave}
+                  disabled={!securityChanged}
+                  startIcon={<SaveIcon />}
+                >
+                  Save Security Settings
+                </Button>
+              </Stack>
+            </Box>
+          </Stack>
+        </TabPanel>
 
-          {/* Security Settings */}
-          <Grid item xs={12} md={6}>
-            <Accordion>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Stack direction="row" alignItems="center" spacing={2}>
-                  <SecurityIcon color="primary" />
-                  <Typography variant="h6">Security</Typography>
-                </Stack>
-              </AccordionSummary>
-              <AccordionDetails>
-                <Stack spacing={3}>
-                  {/* Password Change */}
-                  <Box component="form" onSubmit={handlePasswordSave}>
-                    <Typography variant="subtitle1" gutterBottom>Change Password</Typography>
-                    <Stack spacing={2}>
-                      <TextField
-                        type="password"
-                        label="New Password"
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        fullWidth
-                      />
-                      <TextField
-                        type="password"
-                        label="Confirm Password"
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        fullWidth
-                      />
-                      <Button type="submit" variant="contained" color="primary">
-                        Update Password
-                      </Button>
-                    </Stack>
+        {/* Appearance Tab */}
+        <TabPanel value={activeTab} index={2}>
+          <Stack spacing={3}>
+            <FormControl fullWidth>
+              <InputLabel>Theme</InputLabel>
+              <Select
+                value={mode}
+                label="Theme"
+                onChange={(e) => handleThemeChange(e.target.value)}
+              >
+                <MenuItem value="light">Light</MenuItem>
+                <MenuItem value="dark">Dark</MenuItem>
+                <MenuItem value="system">System</MenuItem>
+              </Select>
+            </FormControl>
+            
+            <FormControl fullWidth>
+              <InputLabel>Import Customers Page Theme</InputLabel>
+              <Select
+                value={importCustomersTheme}
+                label="Import Customers Page Theme"
+                onChange={(e) => setImportCustomersTheme(e.target.value)}
+              >
+                <MenuItem value="system">System/Global</MenuItem>
+                <MenuItem value="light">Light</MenuItem>
+                <MenuItem value="dark">Dark</MenuItem>
+              </Select>
+            </FormControl>
+            
+            <Box>
+              <Typography variant="subtitle1" mb={1}>Accent Color</Typography>
+              <Stack direction="row" spacing={2}>
+                {themeColors.map(tc => (
+                  <IconButton
+                    key={tc.value}
+                    onClick={() => handleColorChange(tc.value)}
+                    sx={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: '50%',
+                      border: accent === tc.value ? `3px solid #fff` : '2px solid #ccc',
+                      background: colorMap[tc.value],
+                      boxShadow: accent === tc.value ? '0 0 0 4px rgba(0,0,0,0.1)' : 'none',
+                    }}
+                  >
+                    {accent === tc.value && (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+                    )}
+                  </IconButton>
+                ))}
+              </Stack>
+              <Typography variant="caption" color="text.secondary">Your accent color is used for highlights, buttons, and tabs.</Typography>
+            </Box>
+            
+            <Button 
+              variant="outlined" 
+              color="primary"
+              onClick={handleImportThemeSave}
+              startIcon={<SaveIcon />}
+            >
+              Save Appearance Settings
+            </Button>
+
+            {isOrgAdmin && (
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="h6" sx={{ mb: 1 }}>Organization Logo</Typography>
+                {logoUrl && (
+                  <Box sx={{ mb: 1 }}>
+                    <img src={logoUrl} alt="Organization Logo" style={{ maxHeight: 64, maxWidth: 128, borderRadius: 8, border: '1px solid #eee' }} />
                   </Box>
-                  
-                  <Divider />
-                  
-                  {/* Security Preferences */}
-                  <Box>
-                    <Typography variant="subtitle1" gutterBottom>Security Preferences</Typography>
-                    <Stack spacing={2}>
-                      <FormControlLabel
-                        control={<Switch checked={securitySettings.loginHistory} onChange={(e) => handleSecurityChange('loginHistory', e.target.checked)} />}
-                        label="Track Login History"
-                      />
-                      <FormControlLabel
-                        control={<Switch checked={securitySettings.twoFactorEnabled} onChange={(e) => handleSecurityChange('twoFactorEnabled', e.target.checked)} />}
-                        label="Two-Factor Authentication"
-                      />
-                      <Box>
-                        <Typography gutterBottom>Session Timeout (minutes)</Typography>
-                        <Slider
-                          value={securitySettings.sessionTimeout}
-                          onChange={(e, value) => handleSecurityChange('sessionTimeout', value)}
-                          min={15}
-                          max={120}
-                          step={15}
-                          marks
-                          valueLabelDisplay="auto"
-                        />
-                        <Typography variant="caption" color="text.secondary">
-                          Current: {securitySettings.sessionTimeout} minutes
-                        </Typography>
-                      </Box>
-                      <Button 
-                        variant="outlined" 
-                        color="primary"
-                        onClick={handleSecuritySave}
-                        disabled={!securityChanged}
-                        startIcon={<SaveIcon />}
-                      >
-                        Save Security Settings
-                      </Button>
-                    </Stack>
-                  </Box>
-                </Stack>
-              </AccordionDetails>
-            </Accordion>
-          </Grid>
+                )}
+                <Button
+                  variant="contained"
+                  component="label"
+                  disabled={logoUploading}
+                  sx={{ mb: 1 }}
+                >
+                  {logoUploading ? 'Uploading...' : 'Upload Logo'}
+                  <input type="file" accept="image/*" hidden onChange={handleLogoUpload} />
+                </Button>
+                {logoMsg && <Alert severity={logoMsg.startsWith('Error') ? 'error' : 'success'} sx={{ mt: 1 }}>{logoMsg}</Alert>}
+                <Typography variant="body2" color="text.secondary">Recommended: PNG, JPG, or SVG. Max 1MB.</Typography>
+              </Box>
+            )}
+          </Stack>
+        </TabPanel>
 
-          {/* Appearance Settings */}
-          <Grid item xs={12} md={6}>
-            <Accordion>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Stack direction="row" alignItems="center" spacing={2}>
-                  <DataUsageIcon color="primary" />
-                  <Typography variant="h6">Appearance</Typography>
-                </Stack>
-              </AccordionSummary>
-              <AccordionDetails>
-                <Stack spacing={3}>
-                  {/* Theme Selection */}
-                  <Box>
-                    <Typography variant="subtitle1" gutterBottom>Theme</Typography>
-                    <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-                      <Button
-                        variant={mode === 'light' ? 'contained' : 'outlined'}
-                        onClick={() => handleThemeChange('light')}
-                        size="small"
-                      >
-                        Light
-                      </Button>
-                      <Button
-                        variant={mode === 'dark' ? 'contained' : 'outlined'}
-                        onClick={() => handleThemeChange('dark')}
-                        size="small"
-                      >
-                        Dark
-                      </Button>
-                      <Button
-                        variant={mode === 'system' ? 'contained' : 'outlined'}
-                        onClick={() => handleThemeChange('system')}
-                        size="small"
-                      >
-                        System
-                      </Button>
-                    </Stack>
-                  </Box>
+        {/* Notifications Tab */}
+        <TabPanel value={activeTab} index={3}>
+          <Stack spacing={3}>
+            <FormControlLabel
+              control={<Switch checked={notifications.email} onChange={() => handleNotifChange('email')} color="primary" />}
+              label="Email Notifications"
+            />
+            <FormControlLabel
+              control={<Switch checked={notifications.inApp} onChange={() => handleNotifChange('inApp')} color="primary" />}
+              label="In-App Notifications"
+            />
+            <FormControlLabel
+              control={<Switch checked={notifications.sms} onChange={() => handleNotifChange('sms')} color="primary" />}
+              label="SMS Notifications"
+            />
+            <Button 
+              variant="outlined" 
+              color="primary"
+              onClick={handleNotificationsSave}
+              startIcon={<SaveIcon />}
+            >
+              Save Notification Settings
+            </Button>
+          </Stack>
+        </TabPanel>
 
-                  {/* Color Selection */}
-                  <Box>
-                    <Typography variant="subtitle1" gutterBottom>Accent Color</Typography>
-                    <Grid container spacing={1}>
-                      {themeColors.map((color) => (
-                        <Grid item key={color.value}>
-                          <Tooltip title={color.name}>
-                            <Box
-                              sx={{
-                                width: 40,
-                                height: 40,
-                                borderRadius: '50%',
-                                bgcolor: colorMap[color.value],
-                                cursor: 'pointer',
-                                border: accent === color.value ? 3 : 1,
-                                borderColor: accent === color.value ? 'primary.main' : 'divider',
-                                '&:hover': { transform: 'scale(1.1)' },
-                                transition: 'transform 0.2s'
-                              }}
-                              onClick={() => handleColorChange(color.value)}
-                            />
-                          </Tooltip>
-                        </Grid>
-                      ))}
-                    </Grid>
-                  </Box>
+        {/* Billing & Subscription Tab */}
+        <TabPanel value={activeTab} index={4}>
+          <Stack spacing={2}>
+            <Typography variant="body2" color="text.secondary">
+              Manage your subscription plan and billing information.
+            </Typography>
+            <Button 
+              variant="contained" 
+              color="primary"
+              onClick={() => navigate('/billing')}
+              fullWidth
+              startIcon={<PaymentIcon />}
+            >
+              Manage Billing & Plans
+            </Button>
+            {organization && (
+              <Box>
+                <Typography variant="body2" color="text.secondary">
+                  Current Plan: <Chip label={organization.subscription_plan || 'Trial'} size="small" />
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Organization: {organization.name}
+                </Typography>
+                {organization.trial_end_date && (
+                  <Typography variant="body2" color="text.secondary">
+                    Trial ends: {new Date(organization.trial_end_date).toLocaleDateString()}
+                  </Typography>
+                )}
+              </Box>
+            )}
+          </Stack>
+        </TabPanel>
 
-                  {/* Import Theme */}
-                  <Box>
-                    <Typography variant="subtitle1" gutterBottom>Import Customers Page Theme</Typography>
-                    <FormControl fullWidth>
-                      <InputLabel>Theme</InputLabel>
-                      <Select
-                        value={importCustomersTheme}
-                        label="Theme"
-                        onChange={(e) => handleImportThemeChange(e.target.value)}
-                      >
-                        <MenuItem value="light">Light</MenuItem>
-                        <MenuItem value="dark">Dark</MenuItem>
-                        <MenuItem value="system">System</MenuItem>
-                      </Select>
-                    </FormControl>
-                    <Button 
-                      variant="outlined" 
-                      color="primary"
-                      onClick={handleImportThemeSave}
-                      disabled={!importThemeChanged}
-                      startIcon={<SaveIcon />}
-                      sx={{ mt: 1 }}
-                    >
-                      Save Import Theme
-                    </Button>
-                  </Box>
-                </Stack>
-              </AccordionDetails>
-            </Accordion>
-          </Grid>
-
-          {/* Notifications */}
-          <Grid item xs={12} md={6}>
-            <Accordion>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Stack direction="row" alignItems="center" spacing={2}>
-                  <NotificationsIcon color="primary" />
-                  <Typography variant="h6">Notifications</Typography>
-                </Stack>
-              </AccordionSummary>
-              <AccordionDetails>
-                <Stack spacing={2}>
-                  <Typography variant="subtitle1" gutterBottom>Notification Channels</Typography>
-                  <FormControlLabel
-                    control={<Switch checked={notifications.email} onChange={() => handleNotifChange('email')} />}
-                    label="Email Notifications"
-                  />
-                  <FormControlLabel
-                    control={<Switch checked={notifications.inApp} onChange={() => handleNotifChange('inApp')} />}
-                    label="In-App Notifications"
-                  />
-                  <FormControlLabel
-                    control={<Switch checked={notifications.browser} onChange={() => handleNotifChange('browser')} />}
-                    label="Browser Push Notifications"
-                  />
-                  <FormControlLabel
-                    control={<Switch checked={notifications.sms} onChange={() => handleNotifChange('sms')} />}
-                    label="SMS Notifications"
-                  />
-                  
-                  <Divider />
-                  
-                  <Typography variant="subtitle1" gutterBottom>Notification Types</Typography>
-                  <FormControlLabel
-                    control={<Switch checked={notifications.dailySummary} onChange={() => handleNotifChange('dailySummary')} />}
-                    label="Daily Summary"
-                  />
-                  <FormControlLabel
-                    control={<Switch checked={notifications.alerts} onChange={() => handleNotifChange('alerts')} />}
-                    label="System Alerts"
-                  />
-                  <FormControlLabel
-                    control={<Switch checked={notifications.reports} onChange={() => handleNotifChange('reports')} />}
-                    label="Report Notifications"
-                  />
-                  
-                  <Button 
-                    variant="outlined" 
-                    color="primary"
-                    onClick={handleNotificationsSave}
-                    disabled={!notificationsChanged}
-                    startIcon={<SaveIcon />}
-                  >
-                    Save Notification Settings
-                  </Button>
-                </Stack>
-              </AccordionDetails>
-            </Accordion>
-          </Grid>
-
-          {/* Business Logic */}
-          <Grid item xs={12} md={6}>
-            <Accordion>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Stack direction="row" alignItems="center" spacing={2}>
-                  <BusinessIcon color="primary" />
-                  <Typography variant="h6">Business Logic</Typography>
-                </Stack>
-              </AccordionSummary>
-              <AccordionDetails>
-                <Stack spacing={2}>
-                  <Typography variant="subtitle1" gutterBottom>Scan Settings</Typography>
-                  <FormControl fullWidth>
-                    <InputLabel>Default Scan Mode</InputLabel>
-                    <Select
-                      value={businessSettings.defaultScanMode}
-                      label="Default Scan Mode"
-                      onChange={(e) => handleBusinessChange('defaultScanMode', e.target.value)}
-                    >
-                      <MenuItem value="SHIP">Ship</MenuItem>
-                      <MenuItem value="RETURN">Return</MenuItem>
-                    </Select>
-                  </FormControl>
-                  <FormControlLabel
-                    control={<Switch checked={businessSettings.autoAssignment} onChange={(e) => handleBusinessChange('autoAssignment', e.target.checked)} />}
-                    label="Auto-assign Cylinders to Customers"
-                  />
-                  
-                  <Divider />
-                  
-                  <Typography variant="subtitle1" gutterBottom>Billing Preferences</Typography>
-                  <FormControlLabel
-                    control={<Switch checked={businessSettings.billingPreferences.taxIncluded} onChange={(e) => handleBusinessChange('billingPreferences', { ...businessSettings.billingPreferences, taxIncluded: e.target.checked })} />}
-                    label="Include Tax in Prices"
-                  />
-                  <FormControl fullWidth>
-                    <InputLabel>Currency</InputLabel>
-                    <Select
-                      value={businessSettings.billingPreferences.currency}
-                      label="Currency"
-                      onChange={(e) => handleBusinessChange('billingPreferences', { ...businessSettings.billingPreferences, currency: e.target.value })}
-                    >
-                      <MenuItem value="USD">USD ($)</MenuItem>
-                      <MenuItem value="EUR">EUR (€)</MenuItem>
-                      <MenuItem value="GBP">GBP (£)</MenuItem>
-                      <MenuItem value="CAD">CAD (C$)</MenuItem>
-                    </Select>
-                  </FormControl>
-                  
-                  <Button 
-                    variant="outlined" 
-                    color="primary"
-                    onClick={handleBusinessSave}
-                    disabled={!businessChanged}
-                    startIcon={<SaveIcon />}
-                  >
-                    Save Business Settings
-                  </Button>
-                </Stack>
-              </AccordionDetails>
-            </Accordion>
-          </Grid>
-
-          {/* Data & Export */}
-          <Grid item xs={12} md={6}>
-            <Accordion>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Stack direction="row" alignItems="center" spacing={2}>
-                  <DownloadIcon color="primary" />
-                  <Typography variant="h6">Data & Export</Typography>
-                </Stack>
-              </AccordionSummary>
-              <AccordionDetails>
-                <Stack spacing={2}>
-                  <Typography variant="subtitle1" gutterBottom>Export Settings</Typography>
-                  <FormControl fullWidth>
-                    <InputLabel>Default Export Format</InputLabel>
-                    <Select
-                      value={dataSettings.exportFormat}
-                      label="Default Export Format"
-                      onChange={(e) => handleDataChange('exportFormat', e.target.value)}
-                    >
-                      <MenuItem value="CSV">CSV</MenuItem>
-                      <MenuItem value="XLSX">Excel (XLSX)</MenuItem>
-                      <MenuItem value="PDF">PDF</MenuItem>
-                    </Select>
-                  </FormControl>
-                  
-                  <FormControlLabel
-                    control={<Switch checked={dataSettings.autoBackup} onChange={(e) => handleDataChange('autoBackup', e.target.checked)} />}
-                    label="Automatic Backups"
-                  />
-                  
-                  <FormControlLabel
-                    control={<Switch checked={dataSettings.includeArchived} onChange={(e) => handleDataChange('includeArchived', e.target.checked)} />}
-                    label="Include Archived Data in Exports"
-                  />
-                  
-                  <Button 
-                    variant="outlined" 
-                    color="primary"
-                    onClick={() => setExportDialog(true)}
-                    startIcon={<DownloadIcon />}
-                  >
-                    Export Data
-                  </Button>
-                  
-                  <Button 
-                    variant="outlined" 
-                    color="primary"
-                    onClick={() => setBackupDialog(true)}
-                  >
-                    Create Backup
-                  </Button>
-                  
-                  <Button 
-                    variant="outlined" 
-                    color="primary"
-                    onClick={handleDataSave}
-                    disabled={!dataChanged}
-                    startIcon={<SaveIcon />}
-                  >
-                    Save Data Settings
-                  </Button>
-                </Stack>
-              </AccordionDetails>
-            </Accordion>
-          </Grid>
-
-          {/* Admin Settings */}
-          {profile?.role === 'admin' && (
-            <Grid item xs={12}>
-              <Accordion>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Stack direction="row" alignItems="center" spacing={2}>
-                    <AdminPanelSettingsIcon color="primary" />
-                    <Typography variant="h6">Admin Settings</Typography>
-                  </Stack>
-                </AccordionSummary>
-                <AccordionDetails>
-                  <UserManagement />
-                </AccordionDetails>
-              </Accordion>
-            </Grid>
-          )}
-        </Grid>
+        {/* User Management Tab (Admins Only) */}
+        {profile?.role === 'admin' && (
+          <TabPanel value={activeTab} index={5}>
+            <UserManagement />
+          </TabPanel>
+        )}
 
         {/* Snackbars */}
-        <Snackbar open={profileSnackbar} autoHideDuration={6000} onClose={() => setProfileSnackbar(false)}>
-          <Alert onClose={() => setProfileSnackbar(false)} severity={profileMsg.includes('error') ? 'error' : 'success'}>
+        <Snackbar open={profileSnackbar} autoHideDuration={3000} onClose={() => setProfileSnackbar(false)}>
+          <Alert onClose={() => setProfileSnackbar(false)} severity={profileMsg === 'Profile updated!' ? 'success' : 'error'} sx={{ width: '100%' }}>
             {profileMsg}
           </Alert>
         </Snackbar>
-
-        <Snackbar open={passwordSnackbar} autoHideDuration={6000} onClose={() => setPasswordSnackbar(false)}>
-          <Alert onClose={() => setPasswordSnackbar(false)} severity={passwordMsg.includes('error') ? 'error' : 'success'}>
+        
+        <Snackbar open={passwordSnackbar} autoHideDuration={3000} onClose={() => setPasswordSnackbar(false)}>
+          <Alert onClose={() => setPasswordSnackbar(false)} severity={passwordMsg === 'Password updated!' ? 'success' : 'error'} sx={{ width: '100%' }}>
             {passwordMsg}
           </Alert>
         </Snackbar>
-
-        <Snackbar open={notifSnackbar} autoHideDuration={6000} onClose={() => setNotifSnackbar(false)}>
-          <Alert onClose={() => setNotifSnackbar(false)} severity="success">
+        
+        <Snackbar open={notifSnackbar} autoHideDuration={3000} onClose={() => setNotifSnackbar(false)}>
+          <Alert onClose={() => setNotifSnackbar(false)} severity="success" sx={{ width: '100%' }}>
             {notifMsg}
           </Alert>
         </Snackbar>
-
-        {/* Export Dialog */}
-        <Dialog open={exportDialog} onClose={() => setExportDialog(false)}>
-          <DialogTitle>Export Data</DialogTitle>
-          <DialogContent>
-            <Typography>Choose export format:</Typography>
-            <Stack spacing={1} sx={{ mt: 2 }}>
-              <Button onClick={() => handleExportData('CSV')} variant="outlined">CSV</Button>
-              <Button onClick={() => handleExportData('XLSX')} variant="outlined">Excel (XLSX)</Button>
-              <Button onClick={() => handleExportData('PDF')} variant="outlined">PDF</Button>
-            </Stack>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setExportDialog(false)}>Cancel</Button>
-          </DialogActions>
-        </Dialog>
-
-        {/* Backup Dialog */}
-        <Dialog open={backupDialog} onClose={() => setBackupDialog(false)}>
-          <DialogTitle>Create Backup</DialogTitle>
-          <DialogContent>
-            <Typography>This will create a complete backup of your data.</Typography>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setBackupDialog(false)}>Cancel</Button>
-            <Button onClick={handleCreateBackup} variant="contained">Create Backup</Button>
-          </DialogActions>
-        </Dialog>
       </Paper>
     </Box>
   );
