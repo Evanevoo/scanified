@@ -138,6 +138,7 @@ export default function BottleManagement() {
     if (userProfile) {
       fetchOrganization();
       fetchBottles();
+      setDefaultLocations(); // Set default locations for bottles without location
     }
   }, [userProfile]);
 
@@ -152,12 +153,25 @@ export default function BottleManagement() {
         bottle.product_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         bottle.description?.toLowerCase().includes(searchTerm.toLowerCase());
       
-      // Location filter
-      const matchesLocation = locationFilter === 'All' || bottle.location === locationFilter;
+      // Location filter - handle case sensitivity and null values
+      let matchesLocation = true;
+      if (locationFilter !== 'All') {
+        const bottleLocation = bottle.location?.toUpperCase() || '';
+        const filterLocation = locationFilter.toUpperCase();
+        matchesLocation = bottleLocation === filterLocation;
+      }
       
       return matchesSearch && matchesLocation;
     });
     setFilteredBottles(filtered);
+    
+    // Debug: Log location values for troubleshooting
+    if (locationFilter !== 'All') {
+      const uniqueLocations = [...new Set(bottles.map(b => b.location))];
+      console.log('Available bottle locations:', uniqueLocations);
+      console.log('Filtering by:', locationFilter);
+      console.log('Filtered count:', filtered.length);
+    }
   }, [bottles, searchTerm, locationFilter]);
 
   const fetchUserProfile = async () => {
@@ -888,9 +902,47 @@ export default function BottleManagement() {
   };
 
   const checkLastUpdateTime = () => {
-    const stored = localStorage.getItem('lastDaysUpdate');
-    if (stored) {
-      setLastUpdateTime(stored);
+    const now = new Date();
+    const lastUpdate = lastUpdateTime ? new Date(lastUpdateTime) : null;
+    const timeDiff = lastUpdate ? now - lastUpdate : Infinity;
+    return timeDiff > 24 * 60 * 60 * 1000; // 24 hours
+  };
+
+  // Function to set default locations for bottles without location
+  const setDefaultLocations = async () => {
+    try {
+      console.log('Setting default locations for bottles without location...');
+      
+      // Get bottles without location
+      const { data: bottlesWithoutLocation, error } = await supabase
+        .from('bottles')
+        .select('id, location')
+        .or('location.is.null,location.eq.')
+        .limit(100); // Process in batches
+      
+      if (error) {
+        console.error('Error fetching bottles without location:', error);
+        return;
+      }
+      
+      if (bottlesWithoutLocation && bottlesWithoutLocation.length > 0) {
+        console.log(`Found ${bottlesWithoutLocation.length} bottles without location`);
+        
+        // Update them with default location
+        const { error: updateError } = await supabase
+          .from('bottles')
+          .update({ location: 'SASKATOON' })
+          .in('id', bottlesWithoutLocation.map(b => b.id));
+        
+        if (updateError) {
+          console.error('Error updating bottle locations:', updateError);
+        } else {
+          console.log('Successfully set default locations');
+          fetchBottles(); // Refresh the data
+        }
+      }
+    } catch (error) {
+      console.error('Error in setDefaultLocations:', error);
     }
   };
 
@@ -1099,7 +1151,7 @@ export default function BottleManagement() {
               </Typography>
             </Box>
             
-            <Box display="flex" gap={1}>
+            <Box display="flex" gap={2}>
               <Button
                 variant="outlined"
                 startIcon={<AddIcon />}
@@ -1113,7 +1165,7 @@ export default function BottleManagement() {
                 onClick={() => fileInputRef.current?.click()}
                 disabled={importing}
               >
-                {importing ? 'Importing...' : 'Import'}
+                {importing ? 'Importing...' : 'Import Excel'}
               </Button>
               <Button
                 variant="outlined"
@@ -1129,6 +1181,12 @@ export default function BottleManagement() {
                 disabled={updatingDays}
               >
                 {updatingDays ? 'Updating...' : 'Update Days At Location'}
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={setDefaultLocations}
+              >
+                Fix Locations
               </Button>
               {lastUpdateTime && (
                 <Typography variant="caption" color="text.secondary" sx={{ ml: 1, alignSelf: 'center' }}>
