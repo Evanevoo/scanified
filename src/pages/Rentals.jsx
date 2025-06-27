@@ -231,6 +231,51 @@ function Rentals() {
     setSavingMap(prev => ({ ...prev, [custId]: false }));
   };
 
+  // Helper function to update rental and refresh data
+  const updateRentalAndRefresh = async (rentalId, updates) => {
+    try {
+      const { error } = await supabase
+        .from('rentals')
+        .update(updates)
+        .eq('id', rentalId);
+      if (error) throw error;
+      
+      // Refresh data after successful update
+      const { data: rentalsData, error: rentalsError } = await supabase
+        .from('rentals')
+        .select('*, bottles(*)')
+        .not('bottle_id', 'is', null)
+        .order('rental_start_date', { ascending: false });
+      if (rentalsError) throw rentalsError;
+      
+      // Get unique customer_ids
+      const customerIds = Array.from(new Set((rentalsData || []).map(r => r.customer_id).filter(Boolean)));
+      let customersMap = {};
+      if (customerIds.length > 0) {
+        const { data: customersData, error: customersError } = await supabase
+          .from('customers')
+          .select('*')
+          .in('CustomerListID', customerIds);
+        if (!customersError && customersData) {
+          customersMap = customersData.reduce((map, c) => {
+            map[c.CustomerListID] = c;
+            return map;
+          }, {});
+        }
+      }
+      
+      // Attach customer info to each rental
+      const rentalsWithCustomer = (rentalsData || []).map(r => ({
+        ...r,
+        customer: customersMap[r.customer_id] || null
+      }));
+      setRentals(rentalsWithCustomer);
+    } catch (err) {
+      console.error('Error updating rental:', err);
+      alert('Error updating rental: ' + err.message);
+    }
+  };
+
   // Function to create rental records for existing bottle assignments
   const createRentalsForExistingBottles = async () => {
     setLoading(true);
@@ -553,9 +598,7 @@ function Rentals() {
                                                 <Select
                                                   value={rental.rental_type || 'Monthly'}
                                                   size="small"
-                                                  onChange={async e => {
-                                                    await supabase.from('rentals').update({ rental_type: e.target.value }).eq('id', rental.id);
-                                                  }}
+                                                  onChange={e => updateRentalAndRefresh(rental.id, { rental_type: e.target.value })}
                                                 >
                                                   <MenuItem value="Monthly">Monthly</MenuItem>
                                                   <MenuItem value="Yearly">Yearly</MenuItem>
@@ -567,9 +610,7 @@ function Rentals() {
                                                 value={rental.rental_amount || ''}
                                                 size="small"
                                                 sx={{ width: 80, bgcolor: '#fff' }}
-                                                onChange={async e => {
-                                                  await supabase.from('rentals').update({ rental_amount: e.target.value }).eq('id', rental.id);
-                                                }}
+                                                onChange={e => updateRentalAndRefresh(rental.id, { rental_amount: e.target.value })}
                                               />
                                             </TableCell>
                                             <TableCell>{rental.rental_start_date}</TableCell>
@@ -578,9 +619,7 @@ function Rentals() {
                                                 <Select
                                                   value={rental.location || 'None'}
                                                   size="small"
-                                                  onChange={async e => {
-                                                    await supabase.from('rentals').update({ location: e.target.value }).eq('id', rental.id);
-                                                  }}
+                                                  onChange={e => updateRentalAndRefresh(rental.id, { location: e.target.value })}
                                                 >
                                                   <MenuItem value="SASKATOON">SASKATOON</MenuItem>
                                                   <MenuItem value="REGINA">REGINA</MenuItem>
