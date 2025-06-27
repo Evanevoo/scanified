@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate, Link } from 'react-router-dom';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Collapse, IconButton, TextField, CircularProgress, FormControl, InputLabel, Select, MenuItem
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Collapse, IconButton, TextField, CircularProgress, FormControl, InputLabel, Select, MenuItem, Chip
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
@@ -131,6 +131,7 @@ function Rentals() {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [page, setPage] = useState(0);
   const rowsPerPage = 20;
+  const [locationFilter, setLocationFilter] = useState('All');
 
   useEffect(() => {
     const fetchRentals = async () => {
@@ -195,7 +196,13 @@ function Rentals() {
     customerMap[custId].rentals.push(rental);
   }
   
-  const paginatedCustomers = customers.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
+  // Filter customers by location
+  const filteredCustomers = customers.filter(({ customer, rentals }) => {
+    if (locationFilter === 'All') return true;
+    return rentals.some(rental => rental.location === locationFilter);
+  });
+  
+  const paginatedCustomers = filteredCustomers.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
 
   const handleEditChange = (custId, field, value) => {
     setEditMap(prev => ({
@@ -211,6 +218,7 @@ function Rentals() {
     setSavingMap(prev => ({ ...prev, [custId]: true }));
     const edit = editMap[custId] || defaultEdit(rentals);
     try {
+      // Update all rentals for this customer
       await Promise.all(rentals.map(rental =>
         supabase.from('rentals').update({
           rental_amount: edit.rentalRate,
@@ -219,14 +227,56 @@ function Rentals() {
           location: edit.location
         }).eq('id', rental.id)
       ));
+      
+      // If location is being updated, also update all bottles for this customer
+      if (edit.location) {
+        const bottleIds = rentals.map(rental => rental.bottle_id).filter(Boolean);
+        if (bottleIds.length > 0) {
+          const { error: bottleUpdateError } = await supabase
+            .from('bottles')
+            .update({ location: edit.location })
+            .in('id', bottleIds);
+          
+          if (bottleUpdateError) {
+            console.error('Error updating bottle locations:', bottleUpdateError);
+            // Don't throw here - rentals were updated successfully, just log the bottle update error
+          }
+        }
+      }
+      
       // Refresh data
-      const { data } = await supabase
+      const { data: rentalsData, error: rentalsError } = await supabase
         .from('rentals')
-        .select('*')
+        .select('*, bottles(*)')
+        .not('bottle_id', 'is', null)
         .order('rental_start_date', { ascending: false });
-      setRentals(data);
+      if (rentalsError) throw rentalsError;
+      
+      // Get unique customer_ids
+      const customerIds = Array.from(new Set((rentalsData || []).map(r => r.customer_id).filter(Boolean)));
+      let customersMap = {};
+      if (customerIds.length > 0) {
+        const { data: customersData, error: customersError } = await supabase
+          .from('customers')
+          .select('*')
+          .in('CustomerListID', customerIds);
+        if (!customersError && customersData) {
+          customersMap = customersData.reduce((map, c) => {
+            map[c.CustomerListID] = c;
+            return map;
+          }, {});
+        }
+      }
+      
+      // Attach customer info to each rental
+      const rentalsWithCustomer = (rentalsData || []).map(r => ({
+        ...r,
+        customer: customersMap[r.customer_id] || null
+      }));
+      setRentals(rentalsWithCustomer);
     } catch (error) {
-      // Error handling for rental updates
+      console.error('Error updating rentals:', error);
+      alert('Error updating rentals: ' + error.message);
     }
     setSavingMap(prev => ({ ...prev, [custId]: false }));
   };
@@ -234,11 +284,34 @@ function Rentals() {
   // Helper function to update rental and refresh data
   const updateRentalAndRefresh = async (rentalId, updates) => {
     try {
+      // First, get the current rental to check if location is being updated
+      const { data: currentRental, error: fetchError } = await supabase
+        .from('rentals')
+        .select('bottle_id, location')
+        .eq('id', rentalId)
+        .single();
+      
+      if (fetchError) throw fetchError;
+      
+      // Update the rental
       const { error } = await supabase
         .from('rentals')
         .update(updates)
         .eq('id', rentalId);
       if (error) throw error;
+      
+      // If location is being updated, also update the bottle's location
+      if (updates.location && currentRental.bottle_id) {
+        const { error: bottleUpdateError } = await supabase
+          .from('bottles')
+          .update({ location: updates.location })
+          .eq('id', currentRental.bottle_id);
+        
+        if (bottleUpdateError) {
+          console.error('Error updating bottle location:', bottleUpdateError);
+          // Don't throw here - rental was updated successfully, just log the bottle update error
+        }
+      }
       
       // Refresh data after successful update
       const { data: rentalsData, error: rentalsError } = await supabase
@@ -342,14 +415,48 @@ function Rentals() {
       
       if (createError) throw createError;
       
+      // Ensure all bottles have the correct location set
+      for (const rental of createdRentals) {
+        if (rental.location && rental.bottle_id) {
+          await supabase
+            .from('bottles')
+            .update({ location: rental.location })
+            .eq('id', rental.bottle_id);
+        }
+      }
+      
       alert(`Successfully created ${createdRentals.length} rental records!`);
       
       // Refresh the rentals data
-      const { data } = await supabase
+      const { data: rentalsData, error: refreshError } = await supabase
         .from('rentals')
-        .select('*')
+        .select('*, bottles(*)')
+        .not('bottle_id', 'is', null)
         .order('rental_start_date', { ascending: false });
-      setRentals(data);
+      if (refreshError) throw refreshError;
+      
+      // Get unique customer_ids
+      const customerIds = Array.from(new Set((rentalsData || []).map(r => r.customer_id).filter(Boolean)));
+      let customersMap = {};
+      if (customerIds.length > 0) {
+        const { data: customersData, error: customersError } = await supabase
+          .from('customers')
+          .select('*')
+          .in('CustomerListID', customerIds);
+        if (!customersError && customersData) {
+          customersMap = customersData.reduce((map, c) => {
+            map[c.CustomerListID] = c;
+            return map;
+          }, {});
+        }
+      }
+      
+      // Attach customer info to each rental
+      const rentalsWithCustomer = (rentalsData || []).map(r => ({
+        ...r,
+        customer: customersMap[r.customer_id] || null
+      }));
+      setRentals(rentalsWithCustomer);
       
     } catch (error) {
       console.error('Error creating rental records:', error);
@@ -366,56 +473,88 @@ function Rentals() {
       <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
         <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Rentals</Typography>
         <Box display="flex" alignItems="center" justifyContent="space-between" mb={4}>
-          <Button
-            variant="contained"
-            onClick={() => exportInvoices(customers)}
-            sx={{
-              borderRadius: 999,
-              bgcolor: '#111',
-              color: '#fff',
-              fontWeight: 700,
-              px: 4,
-              py: 1.5,
-              fontSize: 16,
-              boxShadow: 'none',
-              ':hover': { bgcolor: '#222' }
-            }}
-            startIcon={<DownloadIcon />}
-          >
-            Export CSV
-          </Button>
+          <Box display="flex" alignItems="center" gap={2}>
+            <FormControl size="small" sx={{ minWidth: 150 }}>
+              <Select
+                value={locationFilter}
+                onChange={(e) => setLocationFilter(e.target.value)}
+                displayEmpty
+              >
+                <MenuItem value="All">All Locations</MenuItem>
+                <MenuItem value="SASKATOON">SASKATOON</MenuItem>
+                <MenuItem value="REGINA">REGINA</MenuItem>
+                <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
+                <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
+              </Select>
+            </FormControl>
+            <Typography variant="body2" color="text.secondary">
+              Showing {filteredCustomers.length} customers
+            </Typography>
+          </Box>
           
-          <Button
-            variant="outlined"
-            onClick={createRentalsForExistingBottles}
-            disabled={loading}
-            sx={{
-              borderRadius: 999,
-              fontWeight: 700,
-              px: 4,
-              py: 1.5,
-              fontSize: 16,
-              borderColor: '#1976d2',
-              color: '#1976d2',
-              ':hover': { borderColor: '#1565c0', color: '#1565c0' }
-            }}
-          >
-            {loading ? <CircularProgress size={20} /> : 'Create Missing Rentals'}
-          </Button>
+          <Box display="flex" gap={2}>
+            <Button
+              variant="contained"
+              onClick={() => exportInvoices(filteredCustomers)}
+              sx={{
+                borderRadius: 999,
+                bgcolor: '#111',
+                color: '#fff',
+                fontWeight: 700,
+                px: 4,
+                py: 1.5,
+                fontSize: 16,
+                boxShadow: 'none',
+                ':hover': { bgcolor: '#222' }
+              }}
+              startIcon={<DownloadIcon />}
+            >
+              Export CSV
+            </Button>
+            
+            <Button
+              variant="outlined"
+              onClick={createRentalsForExistingBottles}
+              disabled={loading}
+              sx={{
+                borderRadius: 999,
+                fontWeight: 700,
+                px: 4,
+                py: 1.5,
+                fontSize: 16,
+                borderColor: '#1976d2',
+                color: '#1976d2',
+                ':hover': { borderColor: '#1565c0', color: '#1565c0' }
+              }}
+            >
+              {loading ? <CircularProgress size={20} /> : 'Create Missing Rentals'}
+            </Button>
+          </Box>
         </Box>
 
         {/* Show message if no rentals */}
-        {customers.length === 0 && (
+        {filteredCustomers.length === 0 && (
           <Box p={4} textAlign="center">
-            No rentals found. Check your data or Supabase query.
+            {locationFilter === 'All' 
+              ? 'No rentals found. Check your data or Supabase query.'
+              : `No rentals found for ${locationFilter} location.`
+            }
           </Box>
         )}
 
         {/* Customer Rentals Section */}
-        {customers.length > 0 && (
+        {filteredCustomers.length > 0 && (
           <Box>
             <Typography variant="h5" fontWeight={700} color="primary" mb={2}>
-              👥 Customer Rentals ({customers.length} customers)
+              👥 Customer Rentals ({filteredCustomers.length} customers)
+              {locationFilter !== 'All' && (
+                <Chip 
+                  label={`Filtered by ${locationFilter}`} 
+                  color="secondary" 
+                  size="small" 
+                  sx={{ ml: 2 }}
+                />
+              )}
             </Typography>
             <Typography variant="body2" color="text.secondary" mb={3}>
               These bottles are currently rented to customers.
@@ -669,11 +808,11 @@ function Rentals() {
                     Previous
                   </Button>
                   <Typography mx={2}>
-                    Page {page + 1} of {Math.ceil(customers.length / rowsPerPage)}
+                    Page {page + 1} of {Math.ceil(filteredCustomers.length / rowsPerPage)}
                   </Typography>
                   <Button
-                    onClick={() => setPage(p => Math.min(Math.ceil(customers.length / rowsPerPage) - 1, p + 1))}
-                    disabled={page >= Math.ceil(customers.length / rowsPerPage) - 1}
+                    onClick={() => setPage(p => Math.min(Math.ceil(filteredCustomers.length / rowsPerPage) - 1, p + 1))}
+                    disabled={page >= Math.ceil(filteredCustomers.length / rowsPerPage) - 1}
                   >
                     Next
                   </Button>

@@ -92,6 +92,7 @@ function Customers({ profile }) {
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [locationFilter, setLocationFilter] = useState('All');
   const [successMsg, setSuccessMsg] = useState('');
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
@@ -110,10 +111,18 @@ function Customers({ profile }) {
         const from = (page - 1) * rowsPerPage;
         const to = from + rowsPerPage - 1;
 
-        // Get total count
-        const { count, error: countError } = await supabase
+        // Build query with filters
+        let query = supabase
           .from('customers')
           .select('*', { count: 'exact', head: true });
+
+        // Apply location filter
+        if (locationFilter !== 'All') {
+          query = query.eq('location', locationFilter);
+        }
+
+        // Get total count
+        const { count, error: countError } = await query;
 
         if (countError) {
           console.error('Error getting count:', countError);
@@ -123,11 +132,18 @@ function Customers({ profile }) {
         setTotalCount(count || 0);
 
         // Get paginated customers
-        const { data, error } = await supabase
+        let dataQuery = supabase
           .from('customers')
           .select('*')
           .order('name')
           .range(from, to);
+
+        // Apply location filter to data query
+        if (locationFilter !== 'All') {
+          dataQuery = dataQuery.eq('location', locationFilter);
+        }
+
+        const { data, error } = await dataQuery;
 
         if (error) {
           console.error('Error fetching customers:', error);
@@ -164,7 +180,7 @@ function Customers({ profile }) {
     };
 
     fetchCustomers();
-  }, [page, rowsPerPage]);
+  }, [page, rowsPerPage, locationFilter]);
 
   // Debounced search
   const debouncedSearch = useMemo(() => {
@@ -400,6 +416,19 @@ function Customers({ profile }) {
               size="medium"
               sx={{ maxWidth: 400 }}
             />
+            <FormControl size="small" sx={{ minWidth: 150 }}>
+              <Select
+                value={locationFilter}
+                onChange={(e) => setLocationFilter(e.target.value)}
+                displayEmpty
+              >
+                <MenuItem value="All">All Locations</MenuItem>
+                <MenuItem value="SASKATOON">SASKATOON</MenuItem>
+                <MenuItem value="REGINA">REGINA</MenuItem>
+                <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
+                <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
+              </Select>
+            </FormControl>
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <InputLabel>Rows per page</InputLabel>
               <Select 
@@ -418,6 +447,7 @@ function Customers({ profile }) {
           <Typography variant="body2" color="text.secondary" mb={2}>
             Showing {customers.length} of {totalCount} customers
             {searchTerm && ` (filtered by "${searchTerm}")`}
+            {locationFilter !== 'All' && ` (location: ${locationFilter})`}
           </Typography>
         </Box>
 

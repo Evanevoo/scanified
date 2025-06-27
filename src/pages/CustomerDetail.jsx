@@ -16,7 +16,10 @@ import {
   Divider,
   TextField,
   CircularProgress,
-  Alert
+  Alert,
+  FormControl,
+  Select,
+  MenuItem
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
@@ -178,6 +181,31 @@ export default function CustomerDetail() {
               <TextField name="phone" value={editForm.phone || ''} onChange={handleEditChange} size="small" label="Phone" sx={{ mb: 2, minWidth: 180 }} />
             ) : (
               <Typography variant="body1" sx={{ mb: 2 }}>{customer.phone || 'Not provided'}</Typography>
+            )}
+            <Typography variant="body2" color="text.secondary">Location</Typography>
+            {editing ? (
+              <FormControl size="small" sx={{ mb: 2, minWidth: 180 }}>
+                <Select
+                  name="location"
+                  value={editForm.location || 'SASKATOON'}
+                  onChange={handleEditChange}
+                  label="Location"
+                >
+                  <MenuItem value="SASKATOON">SASKATOON</MenuItem>
+                  <MenuItem value="REGINA">REGINA</MenuItem>
+                  <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
+                  <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
+                </Select>
+              </FormControl>
+            ) : (
+              <Typography variant="body1" sx={{ mb: 2 }}>
+                <Chip 
+                  label={customer.location || 'SASKATOON'} 
+                  color="primary" 
+                  size="small"
+                  variant="outlined"
+                />
+              </Typography>
             )}
             <Typography variant="body2" color="text.secondary">Contact</Typography>
             {editing ? (
