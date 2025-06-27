@@ -64,6 +64,7 @@ export default function BottleManagement() {
   const [deleting, setDeleting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredBottles, setFilteredBottles] = useState([]);
+  const [locationFilter, setLocationFilter] = useState('All');
   const [editDialog, setEditDialog] = useState({ open: false, bottle: null });
   const [addDialog, setAddDialog] = useState({ open: false });
   const [newBottle, setNewBottle] = useState({
@@ -141,16 +142,23 @@ export default function BottleManagement() {
   }, [userProfile]);
 
   useEffect(() => {
-    const filtered = bottles.filter(bottle =>
-      bottle.barcode_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bottle.serial_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bottle.assigned_customer?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bottle.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bottle.product_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bottle.description?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filtered = bottles.filter(bottle => {
+      // Text search filter
+      const matchesSearch = 
+        bottle.barcode_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        bottle.serial_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        bottle.assigned_customer?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        bottle.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        bottle.product_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        bottle.description?.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      // Location filter
+      const matchesLocation = locationFilter === 'All' || bottle.location === locationFilter;
+      
+      return matchesSearch && matchesLocation;
+    });
     setFilteredBottles(filtered);
-  }, [bottles, searchTerm]);
+  }, [bottles, searchTerm, locationFilter]);
 
   const fetchUserProfile = async () => {
     try {
@@ -707,6 +715,16 @@ export default function BottleManagement() {
       } else {
         console.log('Rental records created successfully');
         
+        // Ensure all bottles have the correct location set based on their rental location
+        for (const rentalRecord of rentalRecords) {
+          if (rentalRecord.location && rentalRecord.bottle_id) {
+            await supabase
+              .from('bottles')
+              .update({ location: rentalRecord.location })
+              .eq('id', rentalRecord.bottle_id);
+          }
+        }
+        
         // Debug: Check what rental records were actually created
         const { data: createdRentals, error: checkError } = await supabase
           .from('rentals')
@@ -1063,6 +1081,22 @@ export default function BottleManagement() {
                 size="small"
                 sx={{ minWidth: 300 }}
               />
+              <FormControl size="small" sx={{ minWidth: 150 }}>
+                <Select
+                  value={locationFilter}
+                  onChange={(e) => setLocationFilter(e.target.value)}
+                  displayEmpty
+                >
+                  <MenuItem value="All">All Locations</MenuItem>
+                  <MenuItem value="SASKATOON">SASKATOON</MenuItem>
+                  <MenuItem value="REGINA">REGINA</MenuItem>
+                  <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
+                  <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
+                </Select>
+              </FormControl>
+              <Typography variant="body2" color="text.secondary">
+                Showing {filteredBottles.length} bottles
+              </Typography>
             </Box>
             
             <Box display="flex" gap={1}>

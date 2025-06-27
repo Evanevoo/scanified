@@ -38,6 +38,7 @@ export default function ImportApprovals() {
   const [error, setError] = useState('');
   const [snackbar, setSnackbar] = useState('');
   const [search, setSearch] = useState('');
+  const [locationFilter, setLocationFilter] = useState('All');
   const [auditDialog, setAuditDialog] = useState({ open: false, logs: [], title: '' });
   const navigate = useNavigate();
   const [customerNameToId, setCustomerNameToId] = useState({});
@@ -104,16 +105,27 @@ export default function ImportApprovals() {
       setLoading(true);
       setError('');
       try {
-        const { data: invoices, error: invErr } = await supabase
+        let invoicesQuery = supabase
           .from('imported_invoices')
           .select('*')
           .eq('status', 'pending')
           .order('uploaded_at', { ascending: false });
-        const { data: receipts, error: recErr } = await supabase
+        
+        let receiptsQuery = supabase
           .from('imported_sales_receipts')
           .select('*')
           .eq('status', 'pending')
           .order('uploaded_at', { ascending: false });
+        
+        // Apply location filter if not "All"
+        if (locationFilter !== 'All') {
+          invoicesQuery = invoicesQuery.eq('location', locationFilter);
+          receiptsQuery = receiptsQuery.eq('location', locationFilter);
+        }
+        
+        const { data: invoices, error: invErr } = await invoicesQuery;
+        const { data: receipts, error: recErr } = await receiptsQuery;
+        
         if (invErr || recErr) throw new Error(invErr?.message || recErr?.message);
         setPendingInvoices(invoices || []);
         setPendingReceipts(receipts || []);
@@ -123,7 +135,7 @@ export default function ImportApprovals() {
       setLoading(false);
     }
     fetchData();
-  }, [snackbar]);
+  }, [snackbar, locationFilter]);
 
   // Fetch all customers once for lookup
   useEffect(() => {
@@ -565,13 +577,28 @@ export default function ImportApprovals() {
         </Alert>
       )}
 
-      <TextField
-        fullWidth
-        label="Search imports..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        sx={{ mb: 3 }}
-      />
+      <Box display="flex" gap={2} alignItems="center" mb={3}>
+        <TextField
+          fullWidth
+          label="Search imports..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          sx={{ flexGrow: 1 }}
+        />
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <Select
+            value={locationFilter}
+            onChange={(e) => setLocationFilter(e.target.value)}
+            displayEmpty
+          >
+            <MenuItem value="All">All Locations</MenuItem>
+            <MenuItem value="SASKATOON">SASKATOON</MenuItem>
+            <MenuItem value="REGINA">REGINA</MenuItem>
+            <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
+            <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
+          </Select>
+        </FormControl>
+      </Box>
 
       {Object.values(invoiceCustomerLineItems).length === 0 ? (
         <Paper sx={{ p: 3, textAlign: 'center' }}>
