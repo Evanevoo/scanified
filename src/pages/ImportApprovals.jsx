@@ -150,9 +150,6 @@ export default function ImportApprovals() {
       setLoading(false);
     }
     fetchData();
-    
-    // Fix import locations on first load
-    fixImportLocations();
   }, [snackbar, locationFilter]);
 
   // Fetch all customers once for lookup
@@ -220,6 +217,11 @@ export default function ImportApprovals() {
     fetchScannedOrders();
   }, []);
 
+  // Run location fix once when component mounts
+  useEffect(() => {
+    fixImportLocations();
+  }, []); // Empty dependency array means it runs only once
+
   // Function to fix location values in import tables
   const fixImportLocations = async () => {
     try {
@@ -249,13 +251,12 @@ export default function ImportApprovals() {
         console.log('Updated receipt locations');
       }
       
-      // Refresh the data
-      const event = { target: { value: '' } };
-      // Trigger a re-fetch by updating snackbar
-      setSnackbar(prev => prev + ' ');
+      // Show success message
+      setSnackbar('Location values updated successfully');
       
     } catch (error) {
       console.error('Error in fixImportLocations:', error);
+      setSnackbar('Error updating location values: ' + error.message);
     }
   };
 
