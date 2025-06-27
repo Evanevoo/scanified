@@ -117,10 +117,11 @@ export default function ImportApprovals() {
           .eq('status', 'pending')
           .order('uploaded_at', { ascending: false });
         
-        // Apply location filter if not "All"
+        // Apply location filter if not "All" - handle case sensitivity
         if (locationFilter !== 'All') {
-          invoicesQuery = invoicesQuery.eq('location', locationFilter);
-          receiptsQuery = receiptsQuery.eq('location', locationFilter);
+          // Use case-insensitive filtering
+          invoicesQuery = invoicesQuery.ilike('location', locationFilter);
+          receiptsQuery = receiptsQuery.ilike('location', locationFilter);
         }
         
         const { data: invoices, error: invErr } = await invoicesQuery;
@@ -129,12 +130,29 @@ export default function ImportApprovals() {
         if (invErr || recErr) throw new Error(invErr?.message || recErr?.message);
         setPendingInvoices(invoices || []);
         setPendingReceipts(receipts || []);
+        
+        // Debug: Log location values for troubleshooting
+        if (locationFilter !== 'All') {
+          const allInvoices = await supabase.from('imported_invoices').select('location');
+          const allReceipts = await supabase.from('imported_sales_receipts').select('location');
+          const uniqueLocations = [...new Set([
+            ...(allInvoices.data || []).map(i => i.location),
+            ...(allReceipts.data || []).map(r => r.location)
+          ])];
+          console.log('Available import locations:', uniqueLocations);
+          console.log('Filtering by:', locationFilter);
+          console.log('Filtered invoices:', invoices?.length || 0);
+          console.log('Filtered receipts:', receipts?.length || 0);
+        }
       } catch (e) {
         setError(e.message);
       }
       setLoading(false);
     }
     fetchData();
+    
+    // Fix import locations on first load
+    fixImportLocations();
   }, [snackbar, locationFilter]);
 
   // Fetch all customers once for lookup
@@ -201,6 +219,45 @@ export default function ImportApprovals() {
     }
     fetchScannedOrders();
   }, []);
+
+  // Function to fix location values in import tables
+  const fixImportLocations = async () => {
+    try {
+      console.log('Fixing location values in import tables...');
+      
+      // Update imported_invoices without location
+      const { error: invoiceError } = await supabase
+        .from('imported_invoices')
+        .update({ location: 'SASKATOON' })
+        .or('location.is.null,location.eq.');
+      
+      if (invoiceError) {
+        console.error('Error updating invoice locations:', invoiceError);
+      } else {
+        console.log('Updated invoice locations');
+      }
+      
+      // Update imported_sales_receipts without location
+      const { error: receiptError } = await supabase
+        .from('imported_sales_receipts')
+        .update({ location: 'SASKATOON' })
+        .or('location.is.null,location.eq.');
+      
+      if (receiptError) {
+        console.error('Error updating receipt locations:', receiptError);
+      } else {
+        console.log('Updated receipt locations');
+      }
+      
+      // Refresh the data
+      const event = { target: { value: '' } };
+      // Trigger a re-fetch by updating snackbar
+      setSnackbar(prev => prev + ' ');
+      
+    } catch (error) {
+      console.error('Error in fixImportLocations:', error);
+    }
+  };
 
   // Helper to get scanned order by order/invoice number
   function getScannedOrder(orderNum) {
@@ -562,13 +619,21 @@ export default function ImportApprovals() {
         <Typography variant="h4" component="h1">
           Import Approvals
         </Typography>
-        <Button
-          variant="outlined"
-          startIcon={<HistoryIcon />}
-          onClick={() => navigate('/import-approvals/history')}
-        >
-          Import Approvals History
-        </Button>
+        <Box display="flex" gap={2}>
+          <Button
+            variant="outlined"
+            onClick={fixImportLocations}
+          >
+            Fix Locations
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<HistoryIcon />}
+            onClick={() => navigate('/import-approvals/history')}
+          >
+            Import Approvals History
+          </Button>
+        </Box>
       </Box>
 
       {error && (
