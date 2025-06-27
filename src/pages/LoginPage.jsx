@@ -131,12 +131,15 @@ function LoginPage() {
             {/* Forgot Password Link */}
             <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 3 }}>
               <Link
-                component="button"
                 variant="body2"
-                onClick={() => setForgotPasswordOpen(true)}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setForgotPasswordOpen(true);
+                }}
                 sx={{ 
                   textDecoration: 'none',
                   color: 'primary.main',
+                  cursor: 'pointer',
                   '&:hover': { textDecoration: 'underline' }
                 }}
               >
