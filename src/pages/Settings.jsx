@@ -63,7 +63,7 @@ import {
   Warning as WarningIcon,
   CheckCircle as CheckCircleIcon,
   Schedule as ScheduleIcon,
-  Copy as CopyIcon
+  ContentCopy as CopyIcon
 } from '@mui/icons-material';
 
 const themeColors = [
