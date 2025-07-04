@@ -24,7 +24,8 @@ import {
   Chat as ChatIcon,
   Email as EmailIcon,
   Phone as PhoneIcon,
-  ExpandMore as ExpandMoreIcon
+  ExpandMore as ExpandMoreIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
@@ -65,6 +66,8 @@ export default function SupportCenter() {
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [ticketDialog, setTicketDialog] = useState(false);
   const [replyDialog, setReplyDialog] = useState(false);
+  const [deleteDialog, setDeleteDialog] = useState(false);
+  const [ticketToDelete, setTicketToDelete] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -246,6 +249,30 @@ export default function SupportCenter() {
     }
   };
 
+  const handleDeleteTicket = (ticket) => {
+    setTicketToDelete(ticket);
+    setDeleteDialog(true);
+  };
+
+  const confirmDeleteTicket = async () => {
+    setLoading(true);
+    try {
+      // In production, this would delete from Supabase
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const updatedTickets = tickets.filter(ticket => ticket.id !== ticketToDelete.id);
+      setTickets(updatedTickets);
+      setDeleteDialog(false);
+      setTicketToDelete(null);
+      setSnackbar({ open: true, message: 'Ticket deleted successfully', severity: 'success' });
+    } catch (error) {
+      console.error('Error deleting ticket:', error);
+      setSnackbar({ open: true, message: 'Error deleting ticket', severity: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'open': return 'error';
@@ -394,17 +421,27 @@ export default function SupportCenter() {
                       </Typography>
                     </Grid>
                     <Grid item xs={12} sm={4} sx={{ textAlign: 'right' }}>
-                      <Button
-                        onClick={() => {
-                          setSelectedTicket(ticket);
-                          setTicketDialog(true);
-                        }}
-                        variant="outlined"
-                        startIcon={<ViewIcon />}
-                        size="small"
-                      >
-                        View Details
-                      </Button>
+                      <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                        <Button
+                          onClick={() => {
+                            setSelectedTicket(ticket);
+                            setTicketDialog(true);
+                          }}
+                          variant="outlined"
+                          startIcon={<ViewIcon />}
+                          size="small"
+                        >
+                          View Details
+                        </Button>
+                        <IconButton
+                          onClick={() => handleDeleteTicket(ticket)}
+                          color="error"
+                          size="small"
+                          title="Delete ticket"
+                        >
+                          <DeleteIcon />
+                        </IconButton>
+                      </Box>
                     </Grid>
                   </Grid>
                 </CardContent>
@@ -600,6 +637,34 @@ export default function SupportCenter() {
             disabled={loading || !replyMessage.trim()}
           >
             {loading ? <CircularProgress size={20} /> : 'Send Reply'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialog} onClose={() => setDeleteDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Typography variant="h6" fontWeight={700} color="error">
+            Delete Ticket
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" sx={{ mt: 1 }}>
+            Are you sure you want to delete the ticket "{ticketToDelete?.subject}"?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialog(false)}>Cancel</Button>
+          <Button
+            onClick={confirmDeleteTicket}
+            variant="contained"
+            color="error"
+            disabled={loading}
+          >
+            {loading ? <CircularProgress size={20} /> : 'Delete Ticket'}
           </Button>
         </DialogActions>
       </Dialog>

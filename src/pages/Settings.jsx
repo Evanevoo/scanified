@@ -599,7 +599,7 @@ export default function Settings() {
         {/* Debug info - remove this later */}
         <Box sx={{ mb: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
           <Typography variant="body2" color="text.secondary">
-            Debug: Your role is "{profile?.role}" | Organization: {organization?.name || 'Unknown'} | ID: {profile?.organization_id}
+            Debug: Your role is "{profile?.role}" | Organization: {organization?.name || 'Unknown'}
           </Typography>
         </Box>
 
