@@ -102,9 +102,9 @@ export default function LandingPage() {
   ];
 
   return (
-    <Box>
+    <Box sx={{ minHeight: '100vh', overflow: 'visible' }}>
       {/* Navigation */}
-      <AppBar position="static" color="default" elevation={1}>
+      <AppBar position="static" color="default" elevation={1} sx={{ position: 'relative' }}>
         <Toolbar>
           <Typography variant="h6" component="div" sx={{ flexGrow: 1, fontWeight: 'bold' }}>
             LessAnnoyingScan

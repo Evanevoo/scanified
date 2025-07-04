@@ -27,7 +27,7 @@ export default function ImportApprovalsHistory() {
       const { data, error } = await supabase
         .from('imported_invoices')
         .select('*')
-        .in('status', ['verified', 'rejected'])
+        .in('status', ['approved', 'rejected'])
         .order('verified_at', { ascending: false });
       setRows(data || []);
       setLoading(false);

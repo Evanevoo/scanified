@@ -10,7 +10,7 @@ import {
 import {
   Dashboard, LocalShipping, Assessment,
   Receipt, Settings, Business, Notifications,
-  Inventory, Map, Schedule, AccountCircle, Security, Support
+  Inventory, Map, Schedule, AccountCircle, Security, Support, Build as BuildIcon, CheckCircle
 } from '@mui/icons-material';
 
 const drawerWidth = 280;
@@ -85,86 +85,108 @@ const Sidebar = ({ open, onClose }) => {
 
   const isActive = (path) => location.pathname === path;
 
-  const menuItems = [
+  const menuItems = profile?.role === 'owner' ? [
     {
       title: 'Dashboard',
       path: '/dashboard',
-      icon: <Dashboard />,
-      roles: ['admin', 'user', 'manager', 'owner']
-    },
-    {
-      title: 'Analytics',
-      path: '/analytics',
-      icon: <Analytics />,
-      roles: ['admin', 'manager', 'owner']
-    },
-    {
-      title: 'Customers',
-      path: '/customers',
-      icon: <People />,
-      roles: ['admin', 'user', 'manager', 'owner']
-    },
-    {
-      title: 'Inventory',
-      path: '/inventory',
-      icon: <Inventory />,
-      roles: ['admin', 'user', 'manager', 'owner']
-    },
-    {
-      title: 'Deliveries',
-      path: '/deliveries',
-      icon: <LocalShipping />,
-      roles: ['admin', 'user', 'manager', 'owner']
-    },
-    {
-      title: 'Rentals',
-      path: '/rentals',
-      icon: <Schedule />,
-      roles: ['admin', 'user', 'manager', 'owner']
-    },
-    {
-      title: 'Invoices',
-      path: '/invoices',
-      icon: <Receipt />,
-      roles: ['admin', 'user', 'manager', 'owner']
-    },
-    {
-      title: 'User Management',
-      path: '/user-management',
-      icon: <AdminPanelSettings />,
-      roles: ['admin', 'owner']
-    },
-    {
-      title: 'Billing',
-      path: '/billing',
-      icon: <Payment />,
-      roles: ['admin', 'owner']
-    },
-    {
-      title: 'Reports',
-      path: '/reports',
-      icon: <Assessment />,
-      roles: ['admin', 'manager', 'owner']
-    },
-    {
-      title: 'Settings',
-      path: '/settings',
-      icon: <Settings />,
-      roles: ['admin', 'owner']
-    }
-  ];
-
-  const ownerMenuItems = [
-    {
-      title: 'Owner Dashboard',
-      path: '/owner-dashboard',
-      icon: <Business />,
+      icon: <Dashboard />, 
       roles: ['owner']
     },
     {
       title: 'Owner Portal',
       path: '/owner-portal',
-      icon: <AdminPanelSettings />,
+      icon: <Business />, 
+      roles: ['owner']
+    }
+  ] : [
+    {
+      title: 'Dashboard',
+      path: '/dashboard',
+      icon: <Dashboard />, 
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Analytics',
+      path: '/analytics',
+      icon: <Analytics />, 
+      roles: ['admin', 'manager', 'owner']
+    },
+    {
+      title: 'Organization Analytics',
+      path: '/organization-analytics',
+      icon: <Analytics />, 
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Customers',
+      path: '/customers',
+      icon: <People />, 
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Inventory',
+      path: '/inventory',
+      icon: <Inventory />, 
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Deliveries',
+      path: '/deliveries',
+      icon: <LocalShipping />, 
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Rentals',
+      path: '/rentals',
+      icon: <Schedule />, 
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Invoices',
+      path: '/invoices',
+      icon: <Receipt />, 
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Organization Tools',
+      path: '/organization-tools',
+      icon: <BuildIcon />, 
+      roles: ['admin', 'manager', 'owner']
+    },
+    {
+      title: 'User Management',
+      path: '/user-management',
+      icon: <AdminPanelSettings />, 
+      roles: ['admin', 'owner']
+    },
+    {
+      title: 'Billing',
+      path: '/billing',
+      icon: <Payment />, 
+      roles: ['admin', 'owner']
+    },
+    {
+      title: 'Reports',
+      path: '/reports',
+      icon: <Assessment />, 
+      roles: ['admin', 'manager', 'owner']
+    },
+    {
+      title: 'Settings',
+      path: '/settings',
+      icon: <Settings />, 
+      roles: ['admin', 'owner']
+    },
+    {
+      title: 'Support Center',
+      path: '/support',
+      icon: <Support />, 
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Data Utilities',
+      path: '/data-utilities',
+      icon: <BuildIcon />, 
       roles: ['owner']
     }
   ];
@@ -172,13 +194,6 @@ const Sidebar = ({ open, onClose }) => {
   const filteredMenuItems = menuItems.filter(item => 
     item.roles.includes(profile?.role)
   );
-
-  const filteredOwnerItems = ownerMenuItems.filter(item => 
-    item.roles.includes(profile?.role)
-  );
-
-  // Use ownerMenuItems for owner, otherwise use filteredMenuItems
-  const itemsToShow = profile?.role === 'owner' ? ownerMenuItems : filteredMenuItems;
 
   // Debug logging for organization and logo
   console.log('Sidebar - Organization data:', organization);
@@ -251,7 +266,7 @@ const Sidebar = ({ open, onClose }) => {
 
         {/* Main Menu */}
         <List>
-          {itemsToShow.map((item) => (
+          {filteredMenuItems.map((item) => (
             <ListItem key={item.path} disablePadding>
               <ListItemButton
                 selected={isActive(item.path)}
@@ -280,48 +295,6 @@ const Sidebar = ({ open, onClose }) => {
             </ListItem>
           ))}
         </List>
-
-        {/* Only show Owner Section for non-owner roles if needed */}
-        {profile?.role !== 'owner' && filteredOwnerItems.length > 0 && (
-          <>
-            <Divider />
-            <Box sx={{ p: 2 }}>
-              <Typography variant="overline" color="text.secondary">
-                Owner Tools
-              </Typography>
-            </Box>
-            <List>
-              {filteredOwnerItems.map((item) => (
-                <ListItem key={item.path} disablePadding>
-                  <ListItemButton
-                    selected={isActive(item.path)}
-                    onClick={() => handleNavigation(item.path)}
-                    sx={{
-                      '&.Mui-selected': {
-                        backgroundColor: 'secondary.light',
-                        '&:hover': {
-                          backgroundColor: 'secondary.light',
-                        },
-                      },
-                    }}
-                  >
-                    <ListItemIcon sx={{ color: isActive(item.path) ? 'secondary.main' : 'inherit' }}>
-                      {item.icon}
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary={item.title}
-                      sx={{ 
-                        '& .MuiListItemText-primary': {
-                          fontWeight: isActive(item.path) ? 600 : 400,
-                        }
-                      }}
-                    />
-                  </ListItemButton>
-                </ListItem>
-              ))}
-            </List>
-          </>
-        )}
 
         {/* Support */}
         <Divider />

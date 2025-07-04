@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useMemo, useState, useEffect } from 'react';
 import { ThemeProvider } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 import { createAppTheme } from '../theme';
@@ -104,7 +105,10 @@ export function ThemeContextProvider({ children }) {
 
   return (
     <ThemeContext.Provider value={value}>
-      <ThemeProvider theme={theme}>{children}</ThemeProvider>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        {children}
+      </ThemeProvider>
     </ThemeContext.Provider>
   );
 } 

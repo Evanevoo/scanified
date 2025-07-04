@@ -1,0 +1,31 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="90" fill="#1E3A8A" stroke="#F59E0B" stroke-width="3"/>
+  
+  <!-- Gas Cylinder Body -->
+  <rect x="70" y="80" width="60" height="80" rx="8" fill="#F59E0B" stroke="#374151" stroke-width="2"/>
+  
+  <!-- Cylinder Top -->
+  <ellipse cx="100" cy="80" rx="30" ry="8" fill="#F59E0B" stroke="#374151" stroke-width="2"/>
+  
+  <!-- Gas Valve -->
+  <circle cx="100" cy="75" r="6" fill="#374151"/>
+  <rect x="97" y="65" width="6" height="10" fill="#374151"/>
+  
+  <!-- Boss Crown -->
+  <path d="M85 60 L100 45 L115 60 L110 65 L105 62 L100 67 L95 62 L90 65 Z" fill="#F59E0B" stroke="#374151" stroke-width="1"/>
+  <circle cx="90" cy="58" r="2" fill="#374151"/>
+  <circle cx="100" cy="58" r="2" fill="#374151"/>
+  <circle cx="110" cy="58" r="2" fill="#374151"/>
+  
+  <!-- Boss Tie -->
+  <path d="M95 90 L100 110 L105 90 L100 85 Z" fill="#EA580C"/>
+  <rect x="98" y="85" width="4" height="8" fill="#EA580C"/>
+  
+  <!-- Gas Flow Lines -->
+  <path d="M75 100 Q65 95 55 100" stroke="#F59E0B" stroke-width="2" fill="none" opacity="0.7"/>
+  <path d="M125 100 Q135 105 145 100" stroke="#F59E0B" stroke-width="2" fill="none" opacity="0.7"/>
+  
+  <!-- Text "GasBoss" -->
+  <text x="100" y="180" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#F59E0B">GasBoss</text>
+</svg> 

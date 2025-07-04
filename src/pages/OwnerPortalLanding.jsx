@@ -12,7 +12,14 @@ import {
   CheckCircle as CheckCircleIcon,
   TrendingUp as TrendingUpIcon,
   Email as EmailIcon,
-  Security as SecurityIcon
+  Security as SecurityIcon,
+  Payment as PaymentIcon,
+  HealthAndSafety as HealthIcon,
+  AdminPanelSettings as AdminIcon,
+  History as HistoryIcon,
+  Person as PersonIcon,
+  Assignment as AssignmentIcon,
+  Build as BuildIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -37,7 +44,7 @@ export default function OwnerPortalLanding() {
       path: '/owner-portal/analytics'
     },
     {
-      title: 'Tools & Operations',
+      title: 'Data Utilities',
       description: 'Bulk operations, system management, and administrative tools',
       icon: <SettingsIcon sx={{ fontSize: 40 }} />,
       color: '#ed6c02',
@@ -49,6 +56,62 @@ export default function OwnerPortalLanding() {
       icon: <SupportIcon sx={{ fontSize: 40 }} />,
       color: '#9c27b0',
       path: '/owner-portal/support'
+    },
+    {
+      title: 'System Health',
+      description: 'Monitor system performance, database status, and service health',
+      icon: <HealthIcon sx={{ fontSize: 40 }} />,
+      color: '#f57c00',
+      path: '/owner-portal/system-health'
+    },
+    {
+      title: 'Security Events',
+      description: 'Track security events, login attempts, and system access logs',
+      icon: <SecurityIcon sx={{ fontSize: 40 }} />,
+      color: '#d32f2f',
+      path: '/owner-portal/security'
+    },
+    {
+      title: 'User Management',
+      description: 'Manage users across all organizations and assign roles',
+      icon: <AdminIcon sx={{ fontSize: 40 }} />,
+      color: '#7b1fa2',
+      path: '/owner-portal/user-management'
+    },
+    {
+      title: 'Audit Log',
+      description: 'View comprehensive audit trail of all system activities',
+      icon: <HistoryIcon sx={{ fontSize: 40 }} />,
+      color: '#455a64',
+      path: '/owner-portal/audit-log'
+    },
+    {
+      title: 'Impersonation',
+      description: 'Temporarily access customer accounts for support and debugging',
+      icon: <PersonIcon sx={{ fontSize: 40 }} />,
+      color: '#ff9800',
+      path: '/owner-portal/impersonation'
+    },
+    {
+      title: 'Plan Management',
+      description: 'Manage subscription plans, pricing, and feature access',
+      icon: <AssignmentIcon sx={{ fontSize: 40 }} />,
+      color: '#009688',
+      path: '/owner-portal/plans'
+    },
+    {
+      title: 'Role Management',
+      description: 'Define and manage user roles and permissions across organizations',
+      icon: <BuildIcon sx={{ fontSize: 40 }} />,
+      color: '#607d8b',
+      path: '/owner-portal/roles'
+    },
+    {
+      title: 'Page Builder',
+      description: 'Create and manage custom pages for customer portals',
+      icon: <BuildIcon sx={{ fontSize: 40 }} />,
+      color: '#795548',
+      path: '/owner-portal/page-builder'
     }
   ];
 
@@ -214,7 +277,7 @@ export default function OwnerPortalLanding() {
                 onClick={() => navigate('/owner-portal/tools')}
                 sx={{ justifyContent: 'flex-start' }}
               >
-                System Tools
+                Data Utilities
               </Button>
               <Button 
                 variant="text" 
@@ -223,6 +286,30 @@ export default function OwnerPortalLanding() {
                 sx={{ justifyContent: 'flex-start' }}
               >
                 Support Center
+              </Button>
+              <Button 
+                variant="text" 
+                startIcon={<HealthIcon />}
+                onClick={() => navigate('/owner-portal/system-health')}
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                System Health
+              </Button>
+              <Button 
+                variant="text" 
+                startIcon={<SecurityIcon />}
+                onClick={() => navigate('/owner-portal/security')}
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                Security Events
+              </Button>
+              <Button 
+                variant="text" 
+                startIcon={<AdminIcon />}
+                onClick={() => navigate('/owner-portal/user-management')}
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                User Management
               </Button>
             </Box>
           </Card>

@@ -260,8 +260,8 @@ export default function Locations() {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
+      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
           <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>
             📍 Location Management
@@ -295,7 +295,7 @@ export default function Locations() {
               <TableContainer>
                 <Table>
                   <TableHead>
-                    <TableRow sx={{ backgroundColor: '#f5f7fa' }}>
+                    <TableRow sx={{ backgroundColor: 'var(--bg-card)' }}>
                       <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>Province</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>GST Rate (%)</TableCell>

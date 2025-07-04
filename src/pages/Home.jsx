@@ -223,8 +223,8 @@ export default function Home({ profile }) {
   const availableCylinders = totalCylinders - rentedCylinders;
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
+      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
         <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>
           Dashboard
         </Typography>
@@ -233,7 +233,7 @@ export default function Home({ profile }) {
           {/* Stats Cards */}
           <Grid container spacing={3} mb={4}>
             <Grid item xs={12} sm={6} md={3}>
-              <Card elevation={3} sx={{ borderRadius: 3, bgcolor: '#f8f9fa' }}>
+              <Card elevation={3} sx={{ borderRadius: 3, bgcolor: 'var(--bg-card)' }}>
                 <CardContent sx={{ textAlign: 'center', py: 3 }}>
                   <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
                     {totalCylinders.toLocaleString()}
@@ -245,7 +245,7 @@ export default function Home({ profile }) {
               </Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <Card elevation={3} sx={{ borderRadius: 3, bgcolor: '#e3f2fd' }}>
+              <Card elevation={3} sx={{ borderRadius: 3, bgcolor: 'var(--bg-card)' }}>
                 <CardContent sx={{ textAlign: 'center', py: 3 }}>
                   <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
                     {rentedCylinders.toLocaleString()}
@@ -257,7 +257,7 @@ export default function Home({ profile }) {
               </Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <Card elevation={3} sx={{ borderRadius: 3, bgcolor: '#f3e5f5' }}>
+              <Card elevation={3} sx={{ borderRadius: 3, bgcolor: 'var(--bg-card)' }}>
                 <CardContent sx={{ textAlign: 'center', py: 3 }}>
                   <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
                     {availableCylinders.toLocaleString()}
@@ -269,7 +269,7 @@ export default function Home({ profile }) {
               </Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <Card elevation={3} sx={{ borderRadius: 3, bgcolor: '#e8f5e8' }}>
+              <Card elevation={3} sx={{ borderRadius: 3, bgcolor: 'var(--bg-card)' }}>
                 <CardContent sx={{ textAlign: 'center', py: 3 }}>
                   <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
                     {totalCustomers.toLocaleString()}
