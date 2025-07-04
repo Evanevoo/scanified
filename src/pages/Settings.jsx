@@ -63,7 +63,8 @@ import {
   Warning as WarningIcon,
   CheckCircle as CheckCircleIcon,
   Schedule as ScheduleIcon,
-  ContentCopy as CopyIcon
+  ContentCopy as CopyIcon,
+  ContactSupport as ContactSupportIcon
 } from '@mui/icons-material';
 
 const themeColors = [
@@ -205,6 +206,25 @@ export default function Settings() {
     }
   );
   const [dataChanged, setDataChanged] = useState(false);
+
+  // Contact Information Settings
+  const [contactInfo, setContactInfo] = useState(
+    JSON.parse(localStorage.getItem('contactInfo')) || {
+      email: 'contact@lessannoyingscan.com',
+      phone: '+1 (555) 123-4567',
+      address: '123 Business St, Suite 100, City, State 12345',
+      businessHours: {
+        monday: '9:00 AM - 6:00 PM',
+        tuesday: '9:00 AM - 6:00 PM',
+        wednesday: '9:00 AM - 6:00 PM',
+        thursday: '9:00 AM - 6:00 PM',
+        friday: '9:00 AM - 6:00 PM',
+        saturday: '10:00 AM - 2:00 PM',
+        sunday: 'Closed'
+      }
+    }
+  );
+  const [contactChanged, setContactChanged] = useState(false);
 
   // Dialogs
   const [exportDialog, setExportDialog] = useState(false);
@@ -364,6 +384,32 @@ export default function Settings() {
     localStorage.setItem('dataSettings', JSON.stringify(dataSettings));
     setDataChanged(false);
     setNotifMsg('Data settings saved!');
+    setNotifSnackbar(true);
+  };
+
+  // Contact information update
+  const handleContactChange = (key, value) => {
+    const updated = { ...contactInfo, [key]: value };
+    setContactInfo(updated);
+    setContactChanged(true);
+  };
+
+  const handleBusinessHoursChange = (day, value) => {
+    const updated = { 
+      ...contactInfo, 
+      businessHours: { 
+        ...contactInfo.businessHours, 
+        [day]: value 
+      } 
+    };
+    setContactInfo(updated);
+    setContactChanged(true);
+  };
+
+  const handleContactSave = () => {
+    localStorage.setItem('contactInfo', JSON.stringify(contactInfo));
+    setContactChanged(false);
+    setNotifMsg('Contact information saved!');
     setNotifSnackbar(true);
   };
 
@@ -594,6 +640,7 @@ export default function Settings() {
           <Tab label="Billing & Subscription" />
           {profile?.role === 'admin' && <Tab label="User Management" />}
           {(profile?.role === 'owner' || profile?.role === 'admin') && <Tab label="User Invites" />}
+        {(profile?.role === 'owner' || profile?.role === 'admin') && <Tab label="Contact Information" />}
         </Tabs>
         
         {/* Debug info - remove this later */}
@@ -973,6 +1020,130 @@ export default function Settings() {
                   })}
                 </Box>
               )}
+            </Stack>
+          </TabPanel>
+        )}
+
+        {/* Contact Information Tab (Owners and Admins) */}
+        {(profile?.role === 'owner' || profile?.role === 'admin') && (
+          <TabPanel value={activeTab} index={profile?.role === 'admin' ? 7 : 6}>
+            <Stack spacing={3}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="h6">
+                  Contact Information
+                </Typography>
+                <Button
+                  variant="contained"
+                  startIcon={<SaveIcon />}
+                  onClick={handleContactSave}
+                  disabled={!contactChanged}
+                >
+                  Save Changes
+                </Button>
+              </Box>
+
+              <Alert severity="info">
+                <Typography variant="body2">
+                  This contact information will be displayed on your public contact page and used for customer inquiries.
+                </Typography>
+              </Alert>
+
+              <Grid container spacing={3}>
+                {/* Basic Contact Info */}
+                <Grid item xs={12} md={6}>
+                  <Card variant="outlined">
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        Basic Information
+                      </Typography>
+                      
+                      <TextField
+                        fullWidth
+                        label="Contact Email"
+                        type="email"
+                        value={contactInfo.email}
+                        onChange={(e) => handleContactChange('email', e.target.value)}
+                        sx={{ mb: 2 }}
+                        helperText="Primary contact email for customers"
+                      />
+                      
+                      <TextField
+                        fullWidth
+                        label="Phone Number"
+                        value={contactInfo.phone}
+                        onChange={(e) => handleContactChange('phone', e.target.value)}
+                        sx={{ mb: 2 }}
+                        helperText="Business phone number"
+                      />
+                      
+                      <TextField
+                        fullWidth
+                        label="Business Address"
+                        multiline
+                        rows={3}
+                        value={contactInfo.address}
+                        onChange={(e) => handleContactChange('address', e.target.value)}
+                        helperText="Full business address"
+                      />
+                    </CardContent>
+                  </Card>
+                </Grid>
+
+                {/* Business Hours */}
+                <Grid item xs={12} md={6}>
+                  <Card variant="outlined">
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        Business Hours
+                      </Typography>
+                      
+                      {Object.entries(contactInfo.businessHours).map(([day, hours]) => (
+                        <Box key={day} sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                          <Typography variant="body2" sx={{ minWidth: 80, textTransform: 'capitalize' }}>
+                            {day}:
+                          </Typography>
+                          <TextField
+                            size="small"
+                            value={hours}
+                            onChange={(e) => handleBusinessHoursChange(day, e.target.value)}
+                            sx={{ flexGrow: 1 }}
+                          />
+                        </Box>
+                      ))}
+                    </CardContent>
+                  </Card>
+                </Grid>
+
+                {/* Preview */}
+                <Grid item xs={12}>
+                  <Card variant="outlined">
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        Preview
+                      </Typography>
+                      <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+                        <Typography variant="body2" sx={{ mb: 1 }}>
+                          <strong>Email:</strong> {contactInfo.email}
+                        </Typography>
+                        <Typography variant="body2" sx={{ mb: 1 }}>
+                          <strong>Phone:</strong> {contactInfo.phone}
+                        </Typography>
+                        <Typography variant="body2" sx={{ mb: 2 }}>
+                          <strong>Address:</strong> {contactInfo.address}
+                        </Typography>
+                        <Typography variant="body2" sx={{ mb: 1 }}>
+                          <strong>Business Hours:</strong>
+                        </Typography>
+                        {Object.entries(contactInfo.businessHours).map(([day, hours]) => (
+                          <Typography key={day} variant="body2" sx={{ ml: 2 }}>
+                            {day.charAt(0).toUpperCase() + day.slice(1)}: {hours}
+                          </Typography>
+                        ))}
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              </Grid>
             </Stack>
           </TabPanel>
         )}

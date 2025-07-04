@@ -22,11 +22,20 @@ function ContactUs() {
     message: ''
   });
 
-  // This would typically come from organization settings or environment variables
-  const contactInfo = {
-    email: 'contact@lessannoyingscan.com', // Owner can configure this
-    phone: '+1 (555) 123-4567', // Owner can configure this
-    address: '123 Business St, Suite 100, City, State 12345' // Owner can configure this
+  // Get contact info from localStorage (set by organization owner in Settings)
+  const contactInfo = JSON.parse(localStorage.getItem('contactInfo')) || {
+    email: 'contact@lessannoyingscan.com',
+    phone: '+1 (555) 123-4567',
+    address: '123 Business St, Suite 100, City, State 12345',
+    businessHours: {
+      monday: '9:00 AM - 6:00 PM',
+      tuesday: '9:00 AM - 6:00 PM',
+      wednesday: '9:00 AM - 6:00 PM',
+      thursday: '9:00 AM - 6:00 PM',
+      friday: '9:00 AM - 6:00 PM',
+      saturday: '10:00 AM - 2:00 PM',
+      sunday: 'Closed'
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -227,15 +236,11 @@ function ContactUs() {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 Business Hours
               </Typography>
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                Monday - Friday: 9:00 AM - 6:00 PM EST
-              </Typography>
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                Saturday: 10:00 AM - 2:00 PM EST
-              </Typography>
-              <Typography variant="body2">
-                Sunday: Closed
-              </Typography>
+              {Object.entries(contactInfo.businessHours).map(([day, hours]) => (
+                <Typography key={day} variant="body2" sx={{ mb: 1 }}>
+                  {day.charAt(0).toUpperCase() + day.slice(1)}: {hours}
+                </Typography>
+              ))}
             </Box>
           </Box>
         </CardContent>
