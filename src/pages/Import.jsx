@@ -560,7 +560,6 @@ export default function Import() {
       if (existingImport) {
         setResult({
           message: 'Import updated and submitted for approval',
-          imported_id: existingImport.id,
           total_rows: preview.length,
           status: 'pending_approval'
         });
@@ -618,7 +617,6 @@ export default function Import() {
           
           setResult({
             message: 'Import submitted for approval (RLS retry mode)',
-            imported_id: retryInvoice.id,
             total_rows: preview.length,
             status: 'pending_approval'
           });
@@ -630,7 +628,6 @@ export default function Import() {
 
       setResult({
         message: 'Import submitted for approval',
-        imported_id: importedInvoice.id,
         total_rows: preview.length,
         status: 'pending_approval'
       });
@@ -705,7 +702,6 @@ export default function Import() {
           
           setResult({
             message: 'Import submitted for approval (RLS retry mode)',
-            imported_id: retryReceipt.id,
             total_rows: preview.length,
             status: 'pending_approval'
           });
@@ -717,7 +713,6 @@ export default function Import() {
 
       setResult({
         message: 'Import submitted for approval',
-        imported_id: importedReceipt.id,
         total_rows: preview.length,
         status: 'pending_approval'
       });
@@ -1548,7 +1543,6 @@ export default function Import() {
               <>
                 <div className="font-semibold text-lg">✅ Import Submitted for Approval!</div>
                 <div>Your import has been submitted and is awaiting approval by an administrator.</div>
-                <div>Import ID: {result.imported_id}</div>
                 <div>Total rows: {result.total_rows}</div>
                 <div className="mt-2 text-sm">
                   You can check the status of your import in the <strong>Import Approvals</strong> page.

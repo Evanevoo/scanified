@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
-import CssBaseline from '@mui/material/CssBaseline';
 import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
 import IconButton from '@mui/material/IconButton';
@@ -25,7 +24,6 @@ import Typography from '@mui/material/Typography';
 import SettingsIcon from '@mui/icons-material/SettingsOutlined';
 import LogoutIcon from '@mui/icons-material/LogoutOutlined';
 import SearchIcon from '@mui/icons-material/Search';
-import TextField from '@mui/material/TextField';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { useThemeContext } from '../context/ThemeContext';
@@ -35,12 +33,13 @@ import { useOwnerAccess } from '../hooks/useOwnerAccess';
 import { supabase } from '../supabase/client';
 import { usePermissions } from '../context/PermissionsContext';
 import { useAuth } from '../hooks/useAuth';
+import TextField from '@mui/material/TextField';
+
 
 const drawerWidth = 250;
 
 export default function MainLayout() {
   const { profile, organization } = useAuth();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [integrationsOpen, setIntegrationsOpen] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -68,7 +67,7 @@ export default function MainLayout() {
           label: 'Integrations', icon: <SwapVertIcon />, to: null, subItems: [
             { label: 'Import', to: '/import' },
             { label: 'Import Customers', to: '/import-customer-info' },
-            { label: 'Import History', to: '/import-history' },
+
             { label: 'Import Approvals', to: '/import-approvals' },
             { label: 'Customer ID Generator', to: '/integrations' },
           ]
@@ -80,6 +79,7 @@ export default function MainLayout() {
   }, [location.pathname]);
 
   useEffect(() => {
+    console.log('Search term changed:', searchTerm);
     if (!searchTerm.trim()) {
       setSuggestions([]);
       return;
@@ -87,17 +87,26 @@ export default function MainLayout() {
     let active = true;
     const fetchSuggestions = async () => {
       // Customers: by name or ID
-      const { data: customers } = await supabase
+      const { data: customers, error: customerError } = await supabase
         .from('customers')
         .select('CustomerListID, name, phone')
         .or(`CustomerListID.ilike.%${searchTerm}%,name.ilike.%${searchTerm}%`)
         .limit(5);
+      
+      if (customerError) {
+        console.error('Error fetching customers for search:', customerError);
+      }
+      
       // Bottles: by serial number or barcode
-      const { data: bottles } = await supabase
+      const { data: bottles, error: bottleError } = await supabase
         .from('bottles')
         .select('id, serial_number, barcode_number, assigned_customer')
         .or(`serial_number.ilike.%${searchTerm}%,barcode_number.ilike.%${searchTerm}%`)
         .limit(5);
+      
+      if (bottleError) {
+        console.error('Error fetching bottles for search:', bottleError);
+      }
       const customerResults = (customers || []).map(c => ({
         type: 'customer',
         id: c.CustomerListID,
@@ -110,7 +119,10 @@ export default function MainLayout() {
         label: b.serial_number || b.barcode_number,
         sub: b.barcode_number || b.serial_number,
       }));
-      if (active) setSuggestions([...customerResults, ...bottleResults]);
+      if (active) {
+        console.log('Setting suggestions:', [...customerResults, ...bottleResults]);
+        setSuggestions([...customerResults, ...bottleResults]);
+      }
     };
     fetchSuggestions();
     return () => { active = false; };
@@ -126,8 +138,8 @@ export default function MainLayout() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleSidebarToggle = () => setSidebarOpen(!sidebarOpen);
   const handleSelectSuggestion = (item) => {
+    console.log('Selected suggestion:', item);
     setShowSuggestions(false);
     setSearchTerm('');
     if (item.type === 'customer') {
@@ -159,23 +171,44 @@ export default function MainLayout() {
   };
 
   const drawer = (
-    <Box sx={{ bgcolor: '#fff', height: '100%', display: 'flex', flexDirection: 'column', borderRight: '1.5px solid #eaeaea', minHeight: '100vh', width: drawerWidth, position: 'relative', overflowY: 'hidden', overflowX: 'hidden' }}>
-      <Box sx={{ position: 'sticky', top: 0, zIndex: 2, bgcolor: '#fff', borderBottom: '1.5px solid #eaeaea' }}>
-        <Toolbar sx={{ minHeight: 56, px: 2, py: 0, justifyContent: 'flex-start', bgcolor: '#fff' }}>
+    <Box sx={{ 
+      bgcolor: '#fff', 
+      height: '100%', 
+      display: 'flex', 
+      flexDirection: 'column', 
+      borderRight: '1.5px solid #eaeaea', 
+      minHeight: '100vh', 
+      width: drawerWidth, 
+      position: 'relative', 
+      overflowY: 'hidden', 
+      overflowX: 'hidden',
+      boxShadow: '2px 0 10px rgba(0,0,0,0.1)'
+    }}>
+      <Box sx={{ 
+        position: 'sticky', 
+        top: 0, 
+        zIndex: 2, 
+        bgcolor: '#fff', 
+        borderBottom: '1.5px solid #eaeaea',
+        background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)'
+      }}>
+        <Toolbar sx={{ minHeight: 56, px: 2, py: 0, justifyContent: 'flex-start', bgcolor: 'transparent' }}>
           <Button
-            onClick={handleSidebarToggle}
-            sx={{
-              color: '#111',
-              fontWeight: 700,
-              fontSize: '1rem',
-              textTransform: 'none',
-              pl: 0,
-              bgcolor: '#fff',
-              minHeight: 40,
-              minWidth: 0,
-              boxShadow: 'none',
-              borderRadius: 2,
-              '&:hover': { bgcolor: '#f5faff' },
+            sx={{ 
+              color: '#1976d2', 
+              fontWeight: 700, 
+              fontSize: '1rem', 
+              textTransform: 'none', 
+              pl: 0, 
+              bgcolor: 'transparent', 
+              minHeight: 40, 
+              minWidth: 0, 
+              boxShadow: 'none', 
+              borderRadius: 2, 
+              '&:hover': { 
+                bgcolor: 'rgba(25, 118, 210, 0.1)',
+                color: '#1565c0'
+              } 
             }}
             startIcon={<MenuOpenIcon />}
           >
@@ -183,7 +216,7 @@ export default function MainLayout() {
           </Button>
         </Toolbar>
       </Box>
-      <Divider sx={{ my: 1, bgcolor: '#eaeaea' }} />
+      <Divider sx={{ my: 1, bgcolor: 'var(--divider)' }} />
       <List sx={{ flex: 1 }}>
         {sidebarPages.map((item, idx) => (
           <React.Fragment key={item.label}>
@@ -298,35 +331,46 @@ export default function MainLayout() {
       ];
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#fff' }}>
-      <CssBaseline />
-      {sidebarOpen ? (
-        <Box component="nav" sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }} aria-label="sidebar">
-          <Drawer
-            variant="permanent"
-            sx={{
-              display: { xs: 'none', sm: 'block' },
-              '& .MuiDrawer-paper': {
-                boxSizing: 'border-box',
-                width: drawerWidth,
-                bgcolor: '#fff',
-                borderRight: '1.5px solid #eaeaea',
-                overflowY: 'hidden',
-                overflowX: 'hidden',
-              },
-            }}
-            open
-          >
-            {drawer}
-          </Drawer>
+    <Box sx={{
+      display: 'flex',
+      height: '100vh',
+      width: '100vw',
+      position: 'relative',
+      background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+      overflow: 'hidden',
+    }}>
+      {/* Background overlay for depth */}
+      <Box sx={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'radial-gradient(ellipse at 60% 0%, rgba(66,165,245,0.12) 0%, rgba(25,118,210,0.08) 60%, transparent 100%)',
+        zIndex: 0,
+        pointerEvents: 'none',
+      }} />
+      <Drawer
+        variant="permanent"
+        sx={{
+          width: drawerWidth,
+          flexShrink: 0,
+          height: '100vh',
+          overflow: 'hidden',
+          '& .MuiDrawer-paper': {
+            width: drawerWidth,
+            boxSizing: 'border-box',
+            top: 0,
+            height: '100vh',
+            overflow: 'hidden',
+            zIndex: (theme) => theme.zIndex.drawer
+          },
+        }}
+      >
+        <Box sx={{ height: '100vh', overflowY: 'auto', overflowX: 'hidden' }}>
+          {drawer}
         </Box>
-      ) : (
-        <Box sx={{ position: 'fixed', top: 16, left: 16, zIndex: 1300 }}>
-          <Button onClick={handleSidebarToggle} sx={{ color: '#111', fontWeight: 700, fontSize: '1rem', textTransform: 'none', borderRadius: 2, bgcolor: '#fff', boxShadow: 1, minWidth: 0, p: 1 }} startIcon={<MenuIcon />}>
-            Show Sidebar
-          </Button>
-        </Box>
-      )}
+      </Drawer>
       <AppBar
         position="fixed"
         elevation={0}
@@ -352,7 +396,7 @@ export default function MainLayout() {
                   objectFit: 'contain', 
                   borderRadius: 4, 
                   background: '#fff', 
-                  border: '1px solid #eee',
+                  border: '1px solid rgba(255,255,255,0.2)',
                   marginRight: 12
                 }} 
                 onError={(e) => {
@@ -374,68 +418,13 @@ export default function MainLayout() {
               LessAnnoyingScan
             </Typography>
           </Box>
-          <Box sx={{ flexGrow: 1, maxWidth: 400, ml: 1, position: 'relative' }} ref={searchRef}>
-            <TextField
-              size="small"
-              placeholder="Search customers, bottles..."
-              value={searchTerm}
-              onChange={e => { setSearchTerm(e.target.value); setShowSuggestions(true); }}
-              onFocus={() => setShowSuggestions(true)}
-              InputProps={{
-                startAdornment: <SearchIcon sx={{ color: '#bbb', mr: 1 }} />,
-                sx: {
-                  bgcolor: '#f8f8f8',
-                  borderRadius: 32,
-                  fontFamily: 'Inter, Montserrat, Arial, sans-serif',
-                  fontWeight: 500,
-                  fontSize: '1rem',
-                  height: 40,
-                  pl: 1,
-                  pr: 1,
-                  '& .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#eaeaea',
-                  },
-                  '&:hover .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#00aaff',
-                  },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#00aaff',
-                    borderWidth: 2,
-                  },
-                  '& input': {
-                    color: '#111',
-                    '&::placeholder': {
-                      color: '#bbb',
-                      opacity: 1,
-                    },
-                  },
-                },
-              }}
-              fullWidth
-            />
-            {showSuggestions && suggestions.length > 0 && (
-              <Box sx={{ position: 'absolute', top: 44, left: 0, width: '100%', bgcolor: '#fff', border: '1px solid #eaeaea', borderRadius: 2, boxShadow: 3, zIndex: 9999, maxHeight: 320, overflowY: 'auto' }}>
-                {suggestions.map((item, idx) => (
-                  <Box
-                    key={idx}
-                    sx={{ px: 2, py: 1.2, cursor: 'pointer', '&:hover': { bgcolor: '#f5faff' }, display: 'flex', alignItems: 'center', borderBottom: idx !== suggestions.length - 1 ? '1px solid #f3f3f3' : 'none' }}
-                    onMouseDown={() => handleSelectSuggestion(item)}
-                  >
-                    <span style={{ fontWeight: 700, color: '#00aaff', marginRight: 8 }}>{item.label}</span>
-                    <span style={{ color: '#888', fontSize: 13, marginRight: 8 }}>{item.sub}</span>
-                    <span style={{ fontSize: 12, background: '#e3e7ef', color: '#333', borderRadius: 8, padding: '2px 8px', marginLeft: 'auto' }}>{item.type === 'customer' ? 'Customer' : 'Bottle'}</span>
-                  </Box>
-                ))}
-              </Box>
-            )}
-          </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', ml: 4 }}>
             {topNavLinks.map(link => (
               <Button
                 key={link.label}
                 onClick={() => navigate(link.to)}
                 sx={{
-                  color: location.pathname === link.to ? '#00aaff' : '#111',
+                  color: location.pathname === link.to ? '#1976d2' : '#111',
                   fontWeight: 700,
                   fontFamily: 'Inter, Montserrat, Arial, sans-serif',
                   fontSize: '1.1rem',
@@ -444,19 +433,119 @@ export default function MainLayout() {
                   mx: 1.5,
                   px: 2,
                   minWidth: 0,
-                  borderBottom: location.pathname === link.to ? '2.5px solid #00aaff' : '2.5px solid transparent',
+                  borderBottom: location.pathname === link.to ? '2.5px solid #1976d2' : '2.5px solid transparent',
                   transition: 'color 0.2s, border-bottom 0.2s',
+                  '&:hover': {
+                    color: '#1976d2',
+                    backgroundColor: 'rgba(25,118,210,0.07)',
+                  },
                 }}
               >
                 {link.label}
               </Button>
             ))}
-            <IconButton sx={{ color: '#111', ml: 2 }} onClick={() => navigate('/settings')} aria-label="Settings">
+            <IconButton sx={{ color: '#111', ml: 2, '&:hover': { backgroundColor: 'rgba(25,118,210,0.07)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
               <SettingsIcon />
             </IconButton>
-            <IconButton sx={{ color: '#111', ml: 1 }} onClick={handleLogout} aria-label="Logout">
+            <IconButton sx={{ color: '#111', ml: 1, '&:hover': { backgroundColor: 'rgba(25,118,210,0.07)' } }} onClick={handleLogout} aria-label="Logout">
               <LogoutIcon />
             </IconButton>
+          </Box>
+          <Box sx={{ flexGrow: 1, maxWidth: 400, ml: 1, position: 'relative' }} ref={searchRef}>
+            <TextField
+              placeholder="Search customers, bottles..."
+              size="small"
+              variant="outlined"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onFocus={() => setShowSuggestions(true)}
+              sx={{
+                background: 'rgba(255,255,255,0.9)',
+                borderRadius: '24px',
+                border: '1.5px solid rgba(255,255,255,0.3)',
+                color: '#1976d2',
+                fontSize: '1.1rem',
+                width: 320,
+                boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: '24px',
+                  background: 'rgba(255,255,255,0.9)',
+                  color: '#1976d2',
+                  fontWeight: 500,
+                  '& fieldset': {
+                    borderColor: 'rgba(255,255,255,0.3)',
+                  },
+                  '&:hover fieldset': {
+                    borderColor: 'rgba(255,255,255,0.5)',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: 'white',
+                    boxShadow: '0 0 0 2px rgba(255,255,255,0.2)',
+                    outline: 'none',
+                  },
+                  '&.Mui-focused': {
+                    outline: 'none',
+                  },
+                  '& input:focus': {
+                    outline: 'none',
+                  },
+                  '& .MuiInputAdornment-root .MuiSvgIcon-root': {
+                    color: '#1976d2',
+                  },
+                },
+                '& input': {
+                  color: '#1976d2',
+                  fontWeight: 500,
+                  fontSize: '1.1rem',
+                  '&::placeholder': {
+                    color: 'rgba(25, 118, 210, 0.7)',
+                  },
+                },
+              }}
+              InputProps={{
+                startAdornment: (
+                  <SearchIcon style={{ color: '#1976d2', marginRight: 8 }} />
+                ),
+              }}
+            />
+            {showSuggestions && suggestions.length > 0 && (
+              <Box sx={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                bgcolor: 'white',
+                borderRadius: 2,
+                boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+                zIndex: 1000,
+                mt: 1,
+                maxHeight: 300,
+                overflow: 'auto',
+                border: '1px solid #e0e0e0'
+              }}>
+                {suggestions.map((item, index) => (
+                  <Box
+                    key={`${item.type}-${item.id}`}
+                    onClick={() => handleSelectSuggestion(item)}
+                    sx={{
+                      p: 2,
+                      cursor: 'pointer',
+                      borderBottom: index < suggestions.length - 1 ? '1px solid #f0f0f0' : 'none',
+                      '&:hover': {
+                        bgcolor: '#f5f5f5'
+                      }
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ fontWeight: 600, color: '#1976d2' }}>
+                      {item.label}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#666' }}>
+                      {item.type === 'customer' ? 'Customer' : 'Bottle'} • {item.sub}
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
+            )}
           </Box>
         </Toolbar>
       </AppBar>
@@ -465,14 +554,30 @@ export default function MainLayout() {
         sx={{
           flexGrow: 1,
           p: 3,
-          width: '100%',
-          maxWidth: '100%',
-          bgcolor: '#fff',
-          minHeight: '100vh',
+          width: `calc(100vw - ${drawerWidth}px)`,
+          bgcolor: 'transparent',
+          height: '100vh',
+          position: 'relative',
+          zIndex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'stretch',
+          overflow: 'hidden',
         }}
       >
         <Toolbar sx={{ minHeight: 64 }} />
-        <Outlet />
+        <Box sx={{
+          flex: 1,
+          width: '100%',
+          bgcolor: '#fff',
+          p: 0,
+          borderRadius: 0,
+          boxShadow: 'none',
+          minHeight: 'calc(100vh - 64px)',
+          overflow: 'auto',
+        }}>
+          <Outlet />
+        </Box>
         <GlobalImportProgress />
         <ImportNotification />
       </Box>

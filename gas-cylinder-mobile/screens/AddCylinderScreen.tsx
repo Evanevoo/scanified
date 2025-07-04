@@ -43,6 +43,10 @@ export default function AddCylinderScreen() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const { profile } = useAuth();
+  const [owners, setOwners] = useState<{ id: string; name: string }[]>([]);
+  const [selectedOwner, setSelectedOwner] = useState('');
+  const [addingOwner, setAddingOwner] = useState(false);
+  const [newOwnerName, setNewOwnerName] = useState('');
 
   useEffect(() => {
     const fetchGasTypes = async () => {
@@ -91,25 +95,22 @@ export default function AddCylinderScreen() {
   }, [profile]);
 
   useEffect(() => {
-    // Restore draft if present
-    const draft = localStorage.getItem('addCylinderDraft');
-    if (draft) {
-      const { barcode, serial, selectedGasType, selectedLocation } = JSON.parse(draft);
-      setBarcode(barcode || '');
-      setSerial(serial || '');
-      setSelectedGasType(selectedGasType || '');
-      setSelectedLocation(selectedLocation || '');
-    }
-  }, []);
+    // Fetch owners for the current organization
+    const fetchOwners = async () => {
+      if (!profile?.organization_id) return;
+      const { data, error } = await supabase
+        .from('owners')
+        .select('id, name')
+        .eq('organization_id', profile.organization_id)
+        .order('name', { ascending: true });
+      if (!error && data) setOwners(data);
+    };
+    fetchOwners();
+  }, [profile]);
 
   useEffect(() => {
-    // Auto-save draft
-    localStorage.setItem('addCylinderDraft', JSON.stringify({
-      barcode,
-      serial,
-      selectedGasType,
-      selectedLocation
-    }));
+    // Auto-save draft functionality removed for React Native compatibility
+    // localStorage is not available in React Native
   }, [barcode, serial, selectedGasType, selectedLocation]);
 
   const handleSubmit = async () => {
@@ -172,7 +173,8 @@ export default function AddCylinderScreen() {
         category: selectedGasTypeData.category,
         product_code: selectedGasTypeData.product_code,
         description: selectedGasTypeData.description,
-        location: selectedLocationData.id
+        location: selectedLocationData.id,
+        ownership: selectedOwner
       });
     setLoading(false);
     if (insertError) {
@@ -183,7 +185,22 @@ export default function AddCylinderScreen() {
       setSerial('');
       setSelectedGasType('');
       setSelectedLocation('');
-      localStorage.removeItem('addCylinderDraft');
+      // localStorage.removeItem('addCylinderDraft'); // Removed for React Native compatibility
+    }
+  };
+
+  // Add new owner
+  const handleAddOwner = async () => {
+    if (!newOwnerName.trim() || !profile?.organization_id) return;
+    const { data, error } = await supabase
+      .from('owners')
+      .insert({ name: newOwnerName.trim(), organization_id: profile.organization_id })
+      .select();
+    if (!error && data && data[0]) {
+      setOwners([...owners, data[0]]);
+      setSelectedOwner(data[0].name);
+      setAddingOwner(false);
+      setNewOwnerName('');
     }
   };
 
@@ -268,6 +285,42 @@ export default function AddCylinderScreen() {
               );
             })}
           </Picker>
+        </View>
+      )}
+      
+      <Text style={[styles.label, { color: colors.text }]}>Ownership</Text>
+      <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+        <Picker
+          selectedValue={selectedOwner}
+          onValueChange={value => {
+            if (value === '__add_new__') setAddingOwner(true);
+            else setSelectedOwner(value);
+          }}
+          style={[styles.picker, { color: colors.text }]}
+        >
+          <Picker.Item label="Select Owner" value="" color={colors.textSecondary} />
+          {owners.map(owner => (
+            <Picker.Item key={owner.id} label={owner.name} value={owner.name} color={colors.text} />
+          ))}
+          <Picker.Item label="Add new owner..." value="__add_new__" color={colors.textSecondary} />
+        </Picker>
+      </View>
+      {addingOwner && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+          <TextInput
+            style={[styles.input, { flex: 1, backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+            placeholder="New owner name"
+            placeholderTextColor={colors.textSecondary}
+            value={newOwnerName}
+            onChangeText={setNewOwnerName}
+            autoCapitalize="words"
+          />
+          <TouchableOpacity style={[styles.submitBtn, { marginLeft: 8, backgroundColor: colors.primary }]} onPress={handleAddOwner}>
+            <Text style={[styles.submitBtnText, { color: colors.surface }]}>Add</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.submitBtn, { marginLeft: 8, backgroundColor: colors.border }]} onPress={() => setAddingOwner(false)}>
+            <Text style={[styles.submitBtnText, { color: colors.text }]}>Cancel</Text>
+          </TouchableOpacity>
         </View>
       )}
       

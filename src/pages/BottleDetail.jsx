@@ -303,6 +303,78 @@ export default function BottleDetail() {
                 </Grid>
                 <Grid item xs={12}>
                   <Button
+                    variant="outlined"
+                    color="secondary"
+                    sx={{ mr: 2, mb: 1 }}
+                    onClick={async () => {
+                      if (!editBottle?.description) return;
+                      // Use ilike for case-insensitive match if supported
+                      let assetData = [];
+                      let assetError = null;
+                      try {
+                        const { data, error } = await supabase
+                          .from('bottles')
+                          .select('*')
+                          .ilike('description', editBottle.description.trim());
+                        assetData = data || [];
+                        assetError = error;
+                      } catch (e) {
+                        // fallback to eq if ilike not supported
+                        const { data, error } = await supabase
+                          .from('bottles')
+                          .select('*')
+                          .eq('description', editBottle.description.trim());
+                        assetData = data || [];
+                        assetError = error;
+                      }
+                      if (!assetError && assetData.length > 0) {
+                        // Helper to get most common or first non-empty value
+                        const getBest = (field) => {
+                          const nonEmpty = assetData.map(b => b[field]).filter(v => v && v.trim() !== '');
+                          if (nonEmpty.length === 0) return '';
+                          const freq = {};
+                          nonEmpty.forEach(v => { freq[v] = (freq[v] || 0) + 1; });
+                          return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0] || nonEmpty[0];
+                        };
+                        let changed = false;
+                        let filledFields = [];
+                        setEditBottle(prev => {
+                          const updated = { ...prev };
+                          if (!prev.group_name || prev.group_name.trim() === '') {
+                            const val = getBest('group_name');
+                            if (val) { updated.group_name = val; changed = true; filledFields.push('Group'); }
+                          }
+                          if (!prev.type || prev.type.trim() === '') {
+                            const val = getBest('type');
+                            if (val) { updated.type = val; changed = true; filledFields.push('Type'); }
+                          }
+                          if (!prev.product_code || prev.product_code.trim() === '') {
+                            const val = getBest('product_code');
+                            if (val) { updated.product_code = val; changed = true; filledFields.push('Product Code'); }
+                          }
+                          if (!prev.location || prev.location.trim() === '') {
+                            const val = getBest('location');
+                            if (val) { updated.location = val; changed = true; filledFields.push('Location'); }
+                          }
+                          return updated;
+                        });
+                        setTimeout(() => {
+                          if (changed) {
+                            setSnackbar({ open: true, message: `Fields auto-filled: ${filledFields.join(', ')}`, severity: 'info' });
+                          } else {
+                            setSnackbar({ open: true, message: 'No new info found to fill.', severity: 'info' });
+                          }
+                        }, 100);
+                        // Debug log
+                        console.log('Auto-fill candidates:', assetData.map(b => ({ group_name: b.group_name, type: b.type, product_code: b.product_code, location: b.location })));
+                      } else {
+                        setSnackbar({ open: true, message: 'No asset info found for this description.', severity: 'warning' });
+                      }
+                    }}
+                  >
+                    Refresh & Auto-Fill
+                  </Button>
+                  <Button
                     variant="contained"
                     color="primary"
                     onClick={handleSave}

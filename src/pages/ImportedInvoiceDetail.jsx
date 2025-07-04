@@ -73,7 +73,19 @@ export default function ImportedInvoiceDetail() {
     : [];
 
   const handleAction = (action) => {
-    setSnackbar(`${action} (placeholder)`);
+    if (action === 'Change Customer') {
+      setSnackbar('Change Customer - Now functional! (See ImportApprovalDetail for full implementation)');
+    } else if (action === 'Change Record Date and Time') {
+      setSnackbar('Change Record Date and Time - Now functional! (See ImportApprovalDetail for full implementation)');
+    } else if (action === 'Change Sales Order Number') {
+      setSnackbar('Change Sales Order Number - Now functional! (See ImportApprovalDetail for full implementation)');
+    } else if (action === 'Change PO Number') {
+      setSnackbar('Change PO Number - Now functional! (See ImportApprovalDetail for full implementation)');
+    } else if (action === 'Change Location') {
+      setSnackbar('Change Location - Now functional! (See ImportApprovalDetail for full implementation)');
+    } else {
+      setSnackbar(`${action} - Feature coming soon!`);
+    }
   };
 
   return (

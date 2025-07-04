@@ -5,11 +5,15 @@
 @tailwind utilities;
 
 :root {
-  --accent: #2563eb;
+  --accent: #6366f1; /* Indigo-500 */
   --font-serif: 'Playfair Display', serif;
   --font-sans: 'Inter', Arial, sans-serif;
   --text-main: #111;
+  --text-secondary: #444;
   --bg-main: #fff;
+  --bg-card: #fff;
+  --bg-sidebar: #fff;
+  --bg-topbar: #fff;
   --divider: #eaeaea;
 }
 
@@ -21,6 +25,32 @@ body {
   padding: 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+html {
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+.sidebar, .nav, nav {
+  background: var(--bg-sidebar) !important;
+  color: var(--text-main) !important;
+  border: none !important;
+}
+
+.topbar, .navbar {
+  background: var(--bg-topbar) !important;
+  color: var(--text-main) !important;
+  border: none !important;
+}
+
+.card, .dashboard-card, .MuiPaper-root {
+  background: var(--bg-card) !important;
+  color: var(--text-main) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 2px 12px rgba(30, 41, 59, 0.06) !important;
 }
 
 h1, h2, h3, h4 {
@@ -58,21 +88,29 @@ nav, .nav {
 button, .theme-button {
   background-color: var(--accent);
   color: white;
-  border-radius: 32px;
+  border-radius: 8px;
   font-family: var(--font-sans);
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 12px 32px;
+  text-transform: none;
+  letter-spacing: 0.04em;
+  padding: 10px 24px;
   border: none;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.10);
   transition: all 0.2s ease;
 }
 button:hover, .theme-button:hover {
   background-color: var(--accent);
-  opacity: 0.9;
-  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.3);
+  opacity: 0.92;
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.18);
   transform: translateY(-1px);
+}
+
+input, .search-bar {
+  background: #f3f4f6 !important;
+  color: var(--text-main) !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 6px !important;
+  padding: 8px 16px !important;
 }
 
 hr, .divider {
@@ -232,38 +270,6 @@ textarea:focus {
   opacity: 0.8;
 }
 
-/* Dark mode styles */
-.dark {
-  --text-main: #fff;
-  --bg-main: #121212;
-  --divider: #333;
-}
-
-.dark body {
-  background: var(--bg-main);
-  color: var(--text-main);
-}
-
-.dark .MuiAppBar-root {
-  background-color: #1e1e1e !important;
-}
-
-.dark .MuiDrawer-paper {
-  background-color: #1e1e1e !important;
-}
-
-.dark .MuiPaper-root {
-  background-color: #1e1e1e !important;
-}
-
-.dark .MuiTableCell-root {
-  color: #fff !important;
-}
-
-.dark .MuiTableHead-root .MuiTableCell-root {
-  background-color: #2a2a2a !important;
-}
-
 /* Animation keyframes */
 @keyframes slide-in {
   from {
@@ -306,4 +312,13 @@ textarea:focus {
 
 .animate-fade-in {
   animation: fade-in 0.3s ease-out;
+}
+
+/* Remove blue outline from all inputs inside MUI OutlinedInput */
+.MuiOutlinedInput-root input:focus,
+.MuiOutlinedInput-root.Mui-focused,
+.MuiOutlinedInput-input:focus,
+input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
 } 

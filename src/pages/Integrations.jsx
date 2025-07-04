@@ -1,13 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase/client';
-import { Box, Paper, Typography, Button, TextField, Alert, Snackbar, Grid, FormControl, InputLabel, Select, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton } from '@mui/material';
+import { Box, Paper, Typography, Button, TextField, Alert, Snackbar, Grid, FormControl, InputLabel, Select, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Divider } from '@mui/material';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import DownloadIcon from '@mui/icons-material/Download';
+import QrCodeIcon from '@mui/icons-material/QrCode';
 
 export default function Integrations() {
   const [customers, setCustomers] = useState([]);
+  const [customersWithoutIds, setCustomersWithoutIds] = useState([]);
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState('');
   const [idFormat, setIdFormat] = useState('1370000');
@@ -15,9 +20,17 @@ export default function Integrations() {
   const [quantity, setQuantity] = useState(10);
   const [generatedIds, setGeneratedIds] = useState([]);
   const [skippedCount, setSkippedCount] = useState(0);
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [uploadedData, setUploadedData] = useState([]);
+  const [processingUpload, setProcessingUpload] = useState(false);
+  const [recentlyGeneratedCustomers, setRecentlyGeneratedCustomers] = useState([]);
+  const [trackaboutApiKey, setTrackaboutApiKey] = useState('');
+  const [trackaboutCompanyId, setTrackaboutCompanyId] = useState('');
+  const [trackaboutSyncStatus, setTrackaboutSyncStatus] = useState('');
 
   useEffect(() => {
     loadCustomers();
+    loadCustomersWithoutIds();
   }, []);
 
   const loadCustomers = async () => {
@@ -35,6 +48,21 @@ export default function Integrations() {
       setSnackbar(`Error loading customers: ${error.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadCustomersWithoutIds = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('id, name, contact_details, phone')
+        .or('CustomerListID.is.null,CustomerListID.eq.')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setCustomersWithoutIds(data || []);
+    } catch (error) {
+      console.error('Error loading customers without IDs:', error);
     }
   };
 
@@ -76,26 +104,59 @@ export default function Integrations() {
 
     setLoading(true);
     try {
-      const customersToInsert = generatedIds.map(customer => ({
-        CustomerListID: customer.CustomerListID,
-        name: customer.name,
-        contact_details: customer.contact_details,
-        phone: customer.phone,
-        customer_number: customer.CustomerListID,
-        barcode: `*%${customer.CustomerListID}*`,
-        customer_barcode: `*%${customer.CustomerListID}*`,
-        AccountNumber: customer.CustomerListID
-      }));
+      const customersToInsert = [];
+      const customersToUpdate = [];
 
-      const { error } = await supabase
-        .from('customers')
-        .insert(customersToInsert);
+      generatedIds.forEach(customer => {
+        const customerData = {
+          CustomerListID: customer.CustomerListID,
+          name: customer.name,
+          contact_details: customer.contact_details,
+          phone: customer.phone,
+          customer_number: customer.CustomerListID,
+          barcode: `*%${customer.CustomerListID}*`,
+          customer_barcode: `*%${customer.CustomerListID}*`,
+          AccountNumber: customer.CustomerListID
+        };
 
-      if (error) throw error;
+        if (customer.fromExistingCustomer && customer.originalId) {
+          customersToUpdate.push({ id: customer.originalId, ...customerData });
+        } else {
+          customersToInsert.push(customerData);
+        }
+      });
 
-      setSnackbar(`Successfully saved ${generatedIds.length} customers to database`);
+      // Insert new customers
+      if (customersToInsert.length > 0) {
+        const { error: insertError } = await supabase
+          .from('customers')
+          .insert(customersToInsert);
+
+        if (insertError) throw insertError;
+      }
+
+      // Update existing customers
+      for (const customer of customersToUpdate) {
+        const { error: updateError } = await supabase
+          .from('customers')
+          .update(customer)
+          .eq('id', customer.id);
+
+        if (updateError) throw updateError;
+      }
+
+      const totalProcessed = customersToInsert.length + customersToUpdate.length;
+      setSnackbar(`Successfully processed ${totalProcessed} customers (${customersToInsert.length} new, ${customersToUpdate.length} updated)`);
+      
+      // Store recently generated customers for export
+      const recentlyGenerated = [...customersToInsert, ...customersToUpdate];
+      setRecentlyGeneratedCustomers(recentlyGenerated);
+      
       setGeneratedIds([]);
+      setUploadedData([]);
+      setUploadedFile(null);
       loadCustomers(); // Refresh the list
+      loadCustomersWithoutIds(); // Refresh customers without IDs
     } catch (error) {
       setSnackbar(`Error saving customers: ${error.message}`);
     } finally {
@@ -118,12 +179,32 @@ export default function Integrations() {
       'Account Number': customer.CustomerListID
     }));
 
+    // Create worksheet with proper Excel formatting
     const ws = XLSX.utils.json_to_sheet(data);
+    
+    // Set column widths for better readability
+    const colWidths = [
+      { wch: 15 }, // Customer ID
+      { wch: 25 }, // Customer Name
+      { wch: 30 }, // Contact Details
+      { wch: 15 }, // Phone
+      { wch: 20 }, // Barcode
+      { wch: 15 }  // Account Number
+    ];
+    ws['!cols'] = colWidths;
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Customer IDs');
     
-    const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const dataBlob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    // Write with proper Excel formatting
+    const excelBuffer = XLSX.write(wb, { 
+      bookType: 'xlsx', 
+      type: 'array',
+      compression: true
+    });
+    const dataBlob = new Blob([excelBuffer], { 
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+    });
     
     const fileName = `customer_ids_${idFormat}_${new Date().toISOString().split('T')[0]}.xlsx`;
     saveAs(dataBlob, fileName);
@@ -144,14 +225,522 @@ export default function Integrations() {
     setGeneratedIds([]);
   };
 
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setUploadedFile(file);
+    setProcessingUpload(true);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { 
+          type: 'array',
+          cellDates: true,
+          cellNF: false,
+          cellText: false
+        });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        
+        // Use proper Excel parsing with headers
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+          header: 1,
+          defval: '',
+          blankrows: false
+        });
+
+        if (jsonData.length < 2) {
+          throw new Error('File must contain at least a header row and one data row');
+        }
+
+        // Convert to array of objects with headers
+        const headers = jsonData[0].map(header => String(header || '').trim());
+        const rows = jsonData.slice(1);
+        const processedData = rows.map(row => {
+          const obj = {};
+          headers.forEach((header, index) => {
+            obj[header] = row[index] || '';
+          });
+          return obj;
+        }).filter(row => Object.values(row).some(value => value !== '')); // Remove empty rows
+
+        setUploadedData(processedData);
+        setSnackbar(`Successfully uploaded ${processedData.length} rows from ${file.name}`);
+      } catch (error) {
+        setSnackbar(`Error processing file: ${error.message}`);
+      } finally {
+        setProcessingUpload(false);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const generateIdsForUploadedData = () => {
+    if (uploadedData.length === 0) {
+      setSnackbar('No uploaded data to process');
+      return;
+    }
+
+    const existingIds = new Set(customers.map(c => c.CustomerListID));
+    const batchIds = new Set();
+    const newIds = [];
+
+    uploadedData.forEach((row, index) => {
+      const timestamp = Date.now() + index;
+      const customerId = `${idFormat}-${timestamp}`;
+      
+      if (!existingIds.has(customerId) && !batchIds.has(customerId)) {
+        batchIds.add(customerId);
+        newIds.push({
+          CustomerListID: customerId,
+          name: row.name || row.Name || row.CustomerName || `Customer ${index + 1}`,
+          contact_details: row.contact_details || row.ContactDetails || row.Address || '',
+          phone: row.phone || row.Phone || '',
+          generated: true,
+          fromUpload: true
+        });
+      }
+    });
+
+    setGeneratedIds(newIds);
+    setSnackbar(`Generated ${newIds.length} customer IDs from uploaded data`);
+  };
+
+  const generateIdsForCustomersWithoutIds = () => {
+    if (customersWithoutIds.length === 0) {
+      setSnackbar('No customers without IDs found');
+      return;
+    }
+
+    const existingIds = new Set(customers.map(c => c.CustomerListID));
+    const batchIds = new Set();
+    const newIds = [];
+
+    customersWithoutIds.forEach((customer, index) => {
+      const timestamp = Date.now() + index;
+      const customerId = `${idFormat}-${timestamp}`;
+      
+      if (!existingIds.has(customerId) && !batchIds.has(customerId)) {
+        batchIds.add(customerId);
+        newIds.push({
+          CustomerListID: customerId,
+          name: customer.name || `Customer ${index + 1}`,
+          contact_details: customer.contact_details || '',
+          phone: customer.phone || '',
+          generated: true,
+          fromExistingCustomer: true,
+          originalId: customer.id
+        });
+      }
+    });
+
+    setGeneratedIds(newIds);
+    setSnackbar(`Generated ${newIds.length} customer IDs for existing customers`);
+  };
+
+  const exportForZedAxis = () => {
+    if (generatedIds.length === 0) {
+      setSnackbar('No generated customer IDs to export');
+      return;
+    }
+
+    // Zed Axis format: Customer ID, Customer Name, Contact Details, Phone, Barcode
+    const zedAxisData = generatedIds.map(customer => ({
+      'Customer ID': customer.CustomerListID,
+      'Customer Name': customer.name,
+      'Contact Details': customer.contact_details,
+      'Phone': customer.phone,
+      'Barcode': `*%${customer.CustomerListID}*`,
+      'Account Number': customer.CustomerListID
+    }));
+
+    // Create worksheet with proper Excel formatting
+    const ws = XLSX.utils.json_to_sheet(zedAxisData);
+    
+    // Set column widths for Zed Axis compatibility
+    const colWidths = [
+      { wch: 15 }, // Customer ID
+      { wch: 25 }, // Customer Name
+      { wch: 30 }, // Contact Details
+      { wch: 15 }, // Phone
+      { wch: 20 }, // Barcode
+      { wch: 15 }  // Account Number
+    ];
+    ws['!cols'] = colWidths;
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Zed Axis Import');
+    
+    // Write with proper Excel formatting
+    const excelBuffer = XLSX.write(wb, { 
+      bookType: 'xlsx', 
+      type: 'array',
+      compression: true
+    });
+    const dataBlob = new Blob([excelBuffer], { 
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+    });
+    
+    const fileName = `zed_axis_customers_${idFormat}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    saveAs(dataBlob, fileName);
+    setSnackbar(`Exported ${generatedIds.length} customers for Zed Axis import`);
+  };
+
+  const exportAllGeneratedForZedAxis = async () => {
+    try {
+      // Get all customers with the current ID format prefix that were recently created
+      const { data, error } = await supabase
+        .from('customers')
+        .select('CustomerListID, name, contact_details, phone, created_at')
+        .ilike('CustomerListID', `${idFormat}-%`)
+        .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()) // Last 24 hours
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      if (data.length === 0) {
+        setSnackbar('No recently generated customers found for export');
+        return;
+      }
+
+      const zedAxisData = data.map(customer => ({
+        'Customer ID': customer.CustomerListID,
+        'Customer Name': customer.name,
+        'Contact Details': customer.contact_details,
+        'Phone': customer.phone,
+        'Barcode': `*%${customer.CustomerListID}*`,
+        'Account Number': customer.CustomerListID
+      }));
+
+      // Create worksheet with proper Excel formatting
+      const ws = XLSX.utils.json_to_sheet(zedAxisData);
+      
+      // Set column widths for Zed Axis compatibility
+      const colWidths = [
+        { wch: 15 }, // Customer ID
+        { wch: 25 }, // Customer Name
+        { wch: 30 }, // Contact Details
+        { wch: 15 }, // Phone
+        { wch: 20 }, // Barcode
+        { wch: 15 }  // Account Number
+      ];
+      ws['!cols'] = colWidths;
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Zed Axis Import');
+      
+      // Write with proper Excel formatting
+      const excelBuffer = XLSX.write(wb, { 
+        bookType: 'xlsx', 
+        type: 'array',
+        compression: true
+      });
+      const dataBlob = new Blob([excelBuffer], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
+      
+      const fileName = `zed_axis_all_customers_${idFormat}_${new Date().toISOString().split('T')[0]}.xlsx`;
+      saveAs(dataBlob, fileName);
+      setSnackbar(`Exported ${data.length} recently generated customers for Zed Axis import`);
+    } catch (error) {
+      setSnackbar(`Error exporting customers: ${error.message}`);
+    }
+  };
+
+  const exportForTrackAbout = () => {
+    if (generatedIds.length === 0) {
+      setSnackbar('No generated customer IDs to export');
+      return;
+    }
+
+    // TrackAbout format: Asset ID, Description, Customer ID, Customer Name, Location
+    const trackaboutData = generatedIds.map(customer => ({
+      'Asset ID': customer.CustomerListID,
+      'Description': customer.name,
+      'Customer ID': customer.CustomerListID,
+      'Customer Name': customer.name,
+      'Location': customer.contact_details || '',
+      'Barcode': `*%${customer.CustomerListID}*`,
+      'Asset Type': 'Customer',
+      'Status': 'Active'
+    }));
+
+    // Create worksheet with proper Excel formatting
+    const ws = XLSX.utils.json_to_sheet(trackaboutData);
+    
+    // Set column widths for TrackAbout compatibility
+    const colWidths = [
+      { wch: 15 }, // Asset ID
+      { wch: 25 }, // Description
+      { wch: 15 }, // Customer ID
+      { wch: 25 }, // Customer Name
+      { wch: 30 }, // Location
+      { wch: 20 }, // Barcode
+      { wch: 15 }, // Asset Type
+      { wch: 10 }  // Status
+    ];
+    ws['!cols'] = colWidths;
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'TrackAbout Import');
+    
+    // Write with proper Excel formatting
+    const excelBuffer = XLSX.write(wb, { 
+      bookType: 'xlsx', 
+      type: 'array',
+      compression: true
+    });
+    const dataBlob = new Blob([excelBuffer], { 
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+    });
+    
+    const fileName = `trackabout_customers_${idFormat}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    saveAs(dataBlob, fileName);
+    setSnackbar(`Exported ${generatedIds.length} customers for TrackAbout import`);
+  };
+
+  const syncToTrackAbout = async () => {
+    if (!trackaboutApiKey || !trackaboutCompanyId) {
+      setSnackbar('Please enter TrackAbout API credentials');
+      return;
+    }
+
+    if (generatedIds.length === 0) {
+      setSnackbar('No generated customer IDs to sync');
+      return;
+    }
+
+    setTrackaboutSyncStatus('Syncing to TrackAbout...');
+    
+    try {
+      // TrackAbout API endpoint (you'll need to replace with actual endpoint)
+      const trackaboutEndpoint = `https://api.trackabout.com/v1/companies/${trackaboutCompanyId}/assets`;
+      
+      const syncPromises = generatedIds.map(async (customer) => {
+        const assetData = {
+          assetId: customer.CustomerListID,
+          description: customer.name,
+          customerId: customer.CustomerListID,
+          customerName: customer.name,
+          location: customer.contact_details || '',
+          barcode: `*%${customer.CustomerListID}*`,
+          assetType: 'Customer',
+          status: 'Active'
+        };
+
+        const response = await fetch(trackaboutEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${trackaboutApiKey}`,
+            'X-API-Key': trackaboutApiKey
+          },
+          body: JSON.stringify(assetData)
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to sync customer ${customer.CustomerListID}: ${response.statusText}`);
+        }
+
+        return response.json();
+      });
+
+      await Promise.all(syncPromises);
+      setTrackaboutSyncStatus('Successfully synced to TrackAbout!');
+      setSnackbar(`Successfully synced ${generatedIds.length} customers to TrackAbout`);
+    } catch (error) {
+      setTrackaboutSyncStatus('Sync failed');
+      setSnackbar(`Error syncing to TrackAbout: ${error.message}`);
+    }
+  };
+
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ maxWidth: 1200, mx: 'auto', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
+      <Paper elevation={0} sx={{ maxWidth: 1200, mx: 'auto', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
         <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Customer ID Generator</Typography>
         
         <Typography variant="body1" mb={4} color="text.secondary">
-          Generate customer IDs for Zed Axis/QuickBooks integration. These IDs follow the format: [PREFIX]-[TIMESTAMP]
+          Upload customer files and generate customer IDs for Zed Axis/QuickBooks integration. These IDs follow the format: [PREFIX]-[TIMESTAMP]
         </Typography>
+
+        {/* File Upload Section */}
+        <Paper variant="outlined" sx={{ p: 3, mb: 4, borderRadius: 2 }}>
+          <Typography variant="h6" fontWeight={800} color="primary" mb={3}>Upload Customer File</Typography>
+          <Typography variant="body2" color="text.secondary" mb={2}>
+            Upload Excel files (.xlsx, .xls) with customer data. The first row should contain column headers.
+            Supported columns: name, Name, CustomerName, contact_details, ContactDetails, Address, phone, Phone
+          </Typography>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} sm={6}>
+              <input
+                accept=".xlsx,.xls"
+                style={{ display: 'none' }}
+                id="file-upload"
+                type="file"
+                onChange={handleFileUpload}
+              />
+              <label htmlFor="file-upload">
+                <Button
+                  variant="outlined"
+                  component="span"
+                  startIcon={<CloudUploadIcon />}
+                  disabled={processingUpload}
+                  sx={{ borderRadius: 2, fontWeight: 700 }}
+                >
+                  {processingUpload ? 'Processing...' : 'Choose File'}
+                </Button>
+              </label>
+              {uploadedFile && (
+                <Typography variant="body2" sx={{ mt: 1, color: 'success.main' }}>
+                  ✓ {uploadedFile.name} ({uploadedData.length} rows)
+                </Typography>
+              )}
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Button
+                onClick={generateIdsForUploadedData}
+                variant="contained"
+                color="secondary"
+                disabled={uploadedData.length === 0}
+                startIcon={<AddIcon />}
+                sx={{ borderRadius: 2, fontWeight: 700 }}
+              >
+                Generate IDs from Upload
+              </Button>
+            </Grid>
+          </Grid>
+        </Paper>
+
+        {/* Generate IDs for Customers Without IDs */}
+        {customersWithoutIds.length > 0 && (
+          <Paper variant="outlined" sx={{ p: 3, mb: 4, borderRadius: 2 }}>
+            <Typography variant="h6" fontWeight={800} color="primary" mb={3}>
+              Generate IDs for Existing Customers ({customersWithoutIds.length} found)
+            </Typography>
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} sm={6}>
+                <Typography variant="body2" color="text.secondary">
+                  Found {customersWithoutIds.length} customers without CustomerListID
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Button
+                  onClick={generateIdsForCustomersWithoutIds}
+                  variant="contained"
+                  color="warning"
+                  startIcon={<RefreshIcon />}
+                  sx={{ borderRadius: 2, fontWeight: 700 }}
+                >
+                  Generate IDs for These Customers
+                </Button>
+              </Grid>
+            </Grid>
+          </Paper>
+        )}
+
+        {/* Zed Axis Export Section */}
+        <Paper variant="outlined" sx={{ p: 3, mb: 4, borderRadius: 2 }}>
+          <Typography variant="h6" fontWeight={800} color="info" mb={3}>
+            Zed Axis Integration Export
+          </Typography>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} sm={6}>
+              <Typography variant="body2" color="text.secondary">
+                Export recently generated customers for Zed Axis import
+              </Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Button
+                onClick={exportAllGeneratedForZedAxis}
+                variant="contained"
+                color="info"
+                startIcon={<DownloadIcon />}
+                sx={{ borderRadius: 2, fontWeight: 700 }}
+              >
+                Export All Recent for Zed Axis
+              </Button>
+            </Grid>
+          </Grid>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            This will export all customers with the current ID prefix that were created in the last 24 hours
+          </Typography>
+        </Paper>
+
+        {/* TrackAbout Integration Section */}
+        <Paper variant="outlined" sx={{ p: 3, mb: 4, borderRadius: 2 }}>
+          <Typography variant="h6" fontWeight={800} color="success" mb={3}>
+            TrackAbout Integration
+          </Typography>
+          <Typography variant="body2" color="text.secondary" mb={3}>
+            Direct integration with TrackAbout.com to eliminate Excel barcode generation
+          </Typography>
+          
+          {/* TrackAbout API Configuration */}
+          <Grid container spacing={2} sx={{ mb: 3 }}>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label="TrackAbout API Key"
+                value={trackaboutApiKey}
+                onChange={(e) => setTrackaboutApiKey(e.target.value)}
+                fullWidth
+                variant="outlined"
+                type="password"
+                placeholder="Enter your TrackAbout API key"
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label="TrackAbout Company ID"
+                value={trackaboutCompanyId}
+                onChange={(e) => setTrackaboutCompanyId(e.target.value)}
+                fullWidth
+                variant="outlined"
+                placeholder="Enter your TrackAbout company ID"
+              />
+            </Grid>
+          </Grid>
+
+          {/* TrackAbout Actions */}
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} sm={4}>
+              <Button
+                onClick={exportForTrackAbout}
+                variant="outlined"
+                color="success"
+                startIcon={<DownloadIcon />}
+                sx={{ borderRadius: 2, fontWeight: 700 }}
+                fullWidth
+              >
+                Export for TrackAbout
+              </Button>
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <Button
+                onClick={syncToTrackAbout}
+                variant="contained"
+                color="success"
+                startIcon={<QrCodeIcon />}
+                sx={{ borderRadius: 2, fontWeight: 700 }}
+                fullWidth
+                disabled={!trackaboutApiKey || !trackaboutCompanyId}
+              >
+                Sync to TrackAbout
+              </Button>
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+                {trackaboutSyncStatus}
+              </Typography>
+            </Grid>
+          </Grid>
+          
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+            Direct sync eliminates the need for Excel barcode generation. Customers are automatically added to TrackAbout with proper barcodes.
+          </Typography>
+        </Paper>
 
         {/* ID Generation Controls */}
         <Paper variant="outlined" sx={{ p: 3, mb: 4, borderRadius: 2 }}>
@@ -217,7 +806,7 @@ export default function Integrations() {
         {/* Generated IDs Table */}
         {generatedIds.length > 0 && (
           <Paper variant="outlined" sx={{ mb: 4, borderRadius: 2 }}>
-            <Box sx={{ p: 3, borderBottom: '1px solid #eee' }}>
+            <Box sx={{ p: 3, borderBottom: '1px solid var(--divider)' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6" fontWeight={800} color="primary">
                   Generated Customer IDs ({generatedIds.length})
@@ -240,6 +829,15 @@ export default function Integrations() {
                     Export to Excel
                   </Button>
                   <Button
+                    onClick={exportForZedAxis}
+                    variant="contained"
+                    color="info"
+                    sx={{ mr: 2, borderRadius: 2, fontWeight: 700 }}
+                    startIcon={<DownloadIcon />}
+                  >
+                    Export for Zed Axis
+                  </Button>
+                  <Button
                     onClick={saveToDatabase}
                     variant="contained"
                     color="primary"
@@ -255,7 +853,7 @@ export default function Integrations() {
             <TableContainer>
               <Table>
                 <TableHead>
-                  <TableRow sx={{ backgroundColor: '#fafbfc' }}>
+                  <TableRow sx={{ backgroundColor: 'var(--bg-card)' }}>
                     <TableCell sx={{ fontWeight: 800 }}>Customer ID</TableCell>
                     <TableCell sx={{ fontWeight: 800 }}>Name</TableCell>
                     <TableCell sx={{ fontWeight: 800 }}>Contact Details</TableCell>
@@ -265,7 +863,7 @@ export default function Integrations() {
                 </TableHead>
                 <TableBody>
                   {generatedIds.map((customer, index) => (
-                    <TableRow key={index} sx={{ '&:hover': { backgroundColor: '#f8f9fa' } }}>
+                    <TableRow key={index} sx={{ '&:hover': { backgroundColor: 'var(--bg-card-hover)' } }}>
                       <TableCell>
                         <Typography variant="body2" fontFamily="monospace" fontWeight={600}>
                           {customer.CustomerListID}
@@ -315,41 +913,46 @@ export default function Integrations() {
           </Paper>
         )}
 
-        {/* Recent Customers */}
-        <Paper variant="outlined" sx={{ borderRadius: 2 }}>
-          <Box sx={{ p: 3, borderBottom: '1px solid #eee' }}>
-            <Typography variant="h6" fontWeight={800} color="primary">
-              Recent Customers in Database
-            </Typography>
-          </Box>
-          
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow sx={{ backgroundColor: '#fafbfc' }}>
-                  <TableCell sx={{ fontWeight: 800 }}>Customer ID</TableCell>
-                  <TableCell sx={{ fontWeight: 800 }}>Name</TableCell>
-                  <TableCell sx={{ fontWeight: 800 }}>Contact Details</TableCell>
-                  <TableCell sx={{ fontWeight: 800 }}>Phone</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {customers.map((customer) => (
-                  <TableRow key={customer.CustomerListID}>
-                    <TableCell>
-                      <Typography variant="body2" fontFamily="monospace" fontWeight={600}>
-                        {customer.CustomerListID}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>{customer.name}</TableCell>
-                    <TableCell>{customer.contact_details}</TableCell>
-                    <TableCell>{customer.phone}</TableCell>
+
+
+        {/* Customers Without IDs */}
+        {customersWithoutIds.length > 0 && (
+          <Paper variant="outlined" sx={{ borderRadius: 2 }}>
+            <Box sx={{ p: 3, borderBottom: '1px solid var(--divider)' }}>
+              <Typography variant="h6" fontWeight={800} color="warning">
+                Customers Without CustomerListID ({customersWithoutIds.length})
+              </Typography>
+            </Box>
+            
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow sx={{ backgroundColor: 'var(--bg-card)' }}>
+                    <TableCell sx={{ fontWeight: 800 }}>Name</TableCell>
+                    <TableCell sx={{ fontWeight: 800 }}>Contact Details</TableCell>
+                    <TableCell sx={{ fontWeight: 800 }}>Phone</TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Paper>
+                </TableHead>
+                <TableBody>
+                  {customersWithoutIds.slice(0, 10).map((customer) => (
+                    <TableRow key={customer.id}>
+                      <TableCell>{customer.name}</TableCell>
+                      <TableCell>{customer.contact_details}</TableCell>
+                      <TableCell>{customer.phone}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              {customersWithoutIds.length > 10 && (
+                <Box sx={{ p: 2, textAlign: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Showing first 10 of {customersWithoutIds.length} customers without IDs
+                  </Typography>
+                </Box>
+              )}
+            </TableContainer>
+          </Paper>
+        )}
 
         <Snackbar open={!!snackbar} autoHideDuration={4000} onClose={() => setSnackbar('')}>
           <Alert severity="success" onClose={() => setSnackbar('')}>

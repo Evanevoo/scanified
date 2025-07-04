@@ -174,6 +174,10 @@ export default function BottleManagement() {
     }
   }, [bottles, searchTerm, locationFilter]);
 
+  useEffect(() => {
+    handleUpdateDaysAtLocation();
+  }, []);
+
   const fetchUserProfile = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -779,12 +783,18 @@ export default function BottleManagement() {
           const worksheet = workbook.Sheets[sheetName];
           const data = XLSX.utils.sheet_to_json(worksheet);
           
+          // Debug: Log available column names from the first row
+          if (data.length > 0) {
+            console.log('Available Excel columns:', Object.keys(data[0]));
+            console.log('First row sample:', data[0]);
+          }
+          
           // Map Excel columns to database columns
           const mappedData = data.map(row => {
             // Enhanced column name mapping with more variations
             const mapped = {
-              barcode_number: row['Barcode'] || row['barcode_number'] || row['Barcode Number'] || row['BARCODE'] || row['BARCODE_NUMBER'] || '',
-              serial_number: row['Serial Number'] || row['serial_number'] || row['Serial'] || row['SERIAL'] || row['SERIAL_NUMBER'] || '',
+              barcode_number: row['Barcode'] || row['barcode_number'] || row['Barcode Number'] || row['BARCODE'] || row['BARCODE_NUMBER'] || row['Barcode Number'] || '',
+              serial_number: (row['Serial Number'] || row['serial_number'] || row['Serial'] || row['SERIAL'] || row['SERIAL_NUMBER'] || row['Serial'] || '').toString().trim(),
               assigned_customer: row['CustomerListID'] || row['assigned_customer'] || row['Customer ID'] || row['CustomerID'] || row['CUSTOMER_ID'] || '',
               customer_name: row['Customer'] || row['customer_name'] || row['Customer Name'] || row['CUSTOMER'] || row['CUSTOMER_NAME'] || '',
               location: row['Location'] || row['location'] || row['LOCATION'] || '',
@@ -797,12 +807,9 @@ export default function BottleManagement() {
               total: cleanInt(row['Total'] || row['total'] || row['TOTAL'] || 0)
             };
             
-            // Set default values for empty required fields
-            if (!mapped.serial_number && mapped.barcode_number) {
-              mapped.serial_number = mapped.barcode_number; // Use barcode as serial if serial is empty
-            }
-            if (!mapped.serial_number && !mapped.barcode_number) {
-              mapped.serial_number = 'Not Set'; // Default fallback
+            // If serial_number is empty after trimming, set to 'Not Set'
+            if (!mapped.serial_number) {
+              mapped.serial_number = 'Not Set';
             }
             
             // Auto-fill product_code and gas_type based on description if empty
@@ -977,135 +984,6 @@ export default function BottleManagement() {
         <p className="text-gray-600">Manage your gas cylinders and import data</p>
       </div>
 
-      {/* Debug Panel */}
-      <div className="mb-4 p-4 bg-yellow-100 border border-yellow-400 rounded">
-        <h3 className="font-bold text-yellow-800 mb-2">Debug Info:</h3>
-        <div className="text-sm text-yellow-700">
-          <p>User Profile: {userProfile ? 'Loaded' : 'Not loaded'}</p>
-          <p>Organization: {organization ? 'Loaded' : 'Not loaded'}</p>
-          <p>Organization ID: {userProfile?.organization_id || 'None'}</p>
-          <p>Bottles Count: {bottles.length}</p>
-          <p>Importing: {importing ? 'Yes' : 'No'}</p>
-        </div>
-        <div className="mt-2">
-          <button 
-            onClick={async () => {
-              console.log('=== MANUAL DATABASE CHECK ===');
-              const { data: customers, error: custError } = await supabase
-                .from('customers')
-                .select('*')
-                .limit(5);
-              console.log('Customers in DB:', customers, custError);
-              
-              const { data: bottles, error: bottleError } = await supabase
-                .from('bottles')
-                .select('*')
-                .limit(5);
-              console.log('Bottles in DB:', bottles, bottleError);
-              
-              const { data: rentals, error: rentalError } = await supabase
-                .from('rentals')
-                .select('*')
-                .limit(5);
-              console.log('Rentals in DB:', rentals, rentalError);
-            }}
-            className="px-3 py-1 bg-blue-500 text-white rounded text-xs mr-2"
-          >
-            Check DB
-          </button>
-          <button 
-            onClick={() => {
-              console.log('Current userProfile:', userProfile);
-              console.log('Current organization:', organization);
-            }}
-            className="px-3 py-1 bg-green-500 text-white rounded text-xs mr-2"
-          >
-            Log State
-          </button>
-          <button 
-            onClick={async () => {
-              console.log('=== CHECKING BOTTLES WITH CUSTOMERS ===');
-              const { data: bottlesWithCustomers, error } = await supabase
-                .from('bottles')
-                .select('id, barcode_number, serial_number, assigned_customer, customer_name')
-                .not('assigned_customer', 'is', null);
-              console.log('Bottles with customers:', bottlesWithCustomers, error);
-            }}
-            className="px-3 py-1 bg-purple-500 text-white rounded text-xs mr-2"
-          >
-            Check Assigned
-          </button>
-          <button 
-            onClick={async () => {
-              console.log('=== CHECKING RENTAL RECORDS ===');
-              const { data: rentals, error } = await supabase
-                .from('rentals')
-                .select('*')
-                .limit(10);
-              console.log('Rental records with joins:', rentals, error);
-            }}
-            className="px-3 py-1 bg-orange-500 text-white rounded text-xs mr-2"
-          >
-            Check Rentals
-          </button>
-          <button 
-            onClick={() => {
-              const input = document.createElement('input');
-              input.type = 'file';
-              input.accept = '.xlsx,.xls';
-              input.onchange = (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                  const reader = new FileReader();
-                  reader.onload = (e) => {
-                    try {
-                      const workbook = XLSX.read(e.target.result, { type: 'binary' });
-                      const sheetName = workbook.SheetNames[0];
-                      const worksheet = workbook.Sheets[sheetName];
-                      const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-                      
-                      if (data.length > 0) {
-                        console.log('=== EXCEL COLUMN NAMES ===');
-                        console.log('Column names:', data[0]);
-                        console.log('First data row:', data[1]);
-                        alert('Check console for Excel column names');
-                      }
-                    } catch (error) {
-                      console.error('Error reading Excel:', error);
-                    }
-                  };
-                  reader.readAsBinaryString(file);
-                }
-              };
-              input.click();
-            }}
-            className="px-3 py-1 bg-yellow-500 text-white rounded text-xs mr-2"
-          >
-            Check Excel Columns
-          </button>
-          <button 
-            onClick={async () => {
-              console.log('=== DELETING ALL RENTAL RECORDS ===');
-              const { error } = await supabase
-                .from('rentals')
-                .delete()
-                .neq('id', '00000000-0000-0000-0000-000000000000');
-              
-              if (error) {
-                console.error('Error deleting rentals:', error);
-                alert('Error: ' + error.message);
-              } else {
-                console.log('All rental records deleted');
-                alert('All rental records deleted successfully');
-              }
-            }}
-            className="px-3 py-1 bg-red-500 text-white rounded text-xs"
-          >
-            Delete All Rentals
-          </button>
-        </div>
-      </div>
-
       {/* Import Section */}
       <div className="bg-white rounded-lg shadow p-6 mb-6">
         <Box p={3}>
@@ -1174,25 +1052,6 @@ export default function BottleManagement() {
               >
                 Export
               </Button>
-              <Button
-                variant="outlined"
-                startIcon={<UpdateIcon />}
-                onClick={handleUpdateDaysAtLocation}
-                disabled={updatingDays}
-              >
-                {updatingDays ? 'Updating...' : 'Update Days At Location'}
-              </Button>
-              <Button
-                variant="outlined"
-                onClick={setDefaultLocations}
-              >
-                Fix Locations
-              </Button>
-              {lastUpdateTime && (
-                <Typography variant="caption" color="text.secondary" sx={{ ml: 1, alignSelf: 'center' }}>
-                  Last update: {new Date(lastUpdateTime).toLocaleString()}
-                </Typography>
-              )}
               {selected.length > 0 && (
                 <Button
                   variant="outlined"

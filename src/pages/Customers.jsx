@@ -5,6 +5,7 @@ import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination
 } from '@mui/material';
 import { ErrorBoundary } from 'react-error-boundary';
+import { useAuth } from '../hooks/useAuth';
 
 // Remove CustomersErrorBoundary and replace with a FallbackComponent
 function CustomersErrorFallback({ error, resetErrorBoundary }) {
@@ -61,11 +62,12 @@ function exportToCSV(customers) {
   URL.revokeObjectURL(url);
 }
 
-async function exportAllCustomersToCSV() {
+async function exportAllCustomersToCSV(organizationId) {
   try {
     const { data: allCustomers, error } = await supabase
       .from('customers')
       .select('*')
+      .eq('organization_id', organizationId)
       .order('name');
     
     if (error) throw error;
@@ -101,9 +103,11 @@ function Customers({ profile }) {
 
   const canEdit = profile?.role === 'admin' || profile?.role === 'manager';
   const navigate = useNavigate();
+  const { organization } = useAuth();
 
   // Fetch customers with pagination
   useEffect(() => {
+    if (!organization?.id) return;
     const fetchCustomers = async () => {
       console.log('Fetching customers...');
       setLoading(true);
@@ -114,7 +118,8 @@ function Customers({ profile }) {
         // Build query with filters
         let query = supabase
           .from('customers')
-          .select('*', { count: 'exact', head: true });
+          .select('*', { count: 'exact', head: true })
+          .eq('organization_id', organization.id);
 
         // Apply location filter
         if (locationFilter !== 'All') {
@@ -136,7 +141,8 @@ function Customers({ profile }) {
           .from('customers')
           .select('*')
           .order('name')
-          .range(from, to);
+          .range(from, to)
+          .eq('organization_id', organization.id);
 
         // Apply location filter to data query
         if (locationFilter !== 'All') {
@@ -180,7 +186,7 @@ function Customers({ profile }) {
     };
 
     fetchCustomers();
-  }, [page, rowsPerPage, locationFilter]);
+  }, [page, rowsPerPage, locationFilter, organization]);
 
   // Debounced search
   const debouncedSearch = useMemo(() => {
@@ -198,13 +204,14 @@ function Customers({ profile }) {
 
   const handleAdd = async (e) => {
     e.preventDefault();
+    if (!organization?.id) return;
     setError(null);
     if (!form.CustomerListID || !form.CustomerListID.trim()) {
       setError('CustomerListID is required.');
       return;
     }
     try {
-      const { error } = await supabase.from('customers').insert([form]);
+      const { error } = await supabase.from('customers').insert([{ ...form, organization_id: organization.id }]);
       if (error) throw error;
       
       setForm({ CustomerListID: '', name: '', contact_details: '', phone: '' });
@@ -217,7 +224,8 @@ function Customers({ profile }) {
         .from('customers')
         .select('*')
         .order('name')
-        .range(from, to);
+        .range(from, to)
+        .eq('organization_id', organization.id);
       setCustomers(data || []);
       setTotalCount(prev => prev + 1);
     } catch (err) {
@@ -232,13 +240,14 @@ function Customers({ profile }) {
 
   const handleUpdate = async (e) => {
     e.preventDefault();
+    if (!organization?.id) return;
     setError(null);
     if (!form.CustomerListID || !form.CustomerListID.trim()) {
       setError('CustomerListID is required.');
       return;
     }
     try {
-      const { error } = await supabase.from('customers').update(form).eq('CustomerListID', editingId);
+      const { error } = await supabase.from('customers').update(form).eq('CustomerListID', editingId).eq('organization_id', organization.id);
       if (error) throw error;
       
       setEditingId(null);
@@ -252,7 +261,8 @@ function Customers({ profile }) {
         .from('customers')
         .select('*')
         .order('name')
-        .range(from, to);
+        .range(from, to)
+        .eq('organization_id', organization.id);
       setCustomers(data || []);
     } catch (err) {
       setError(err.message);
@@ -260,11 +270,12 @@ function Customers({ profile }) {
   };
 
   const handleDelete = async (id) => {
+    if (!organization?.id) return;
     if (!window.confirm('Are you sure you want to delete this customer?')) return;
     
     setError(null);
     try {
-      const { error } = await supabase.from('customers').delete().eq('CustomerListID', id);
+      const { error } = await supabase.from('customers').delete().eq('CustomerListID', id).eq('organization_id', organization.id);
       if (error) throw error;
       
       setSuccessMsg('Customer deleted successfully!');
@@ -277,7 +288,8 @@ function Customers({ profile }) {
         .from('customers')
         .select('*')
         .order('name')
-        .range(from, to);
+        .range(from, to)
+        .eq('organization_id', organization.id);
       setCustomers(data || []);
       setTotalCount(prev => prev - 1);
     } catch (err) {
@@ -300,11 +312,12 @@ function Customers({ profile }) {
   };
 
   const handleBulkDelete = async () => {
+    if (!organization?.id) return;
     if (!window.confirm(`Delete ${selected.length} selected customers? This cannot be undone.`)) return;
     
     setError(null);
     try {
-      const { error } = await supabase.from('customers').delete().in('CustomerListID', selected);
+      const { error } = await supabase.from('customers').delete().in('CustomerListID', selected).eq('organization_id', organization.id);
       if (error) throw error;
       
       setSuccessMsg(`${selected.length} customers deleted successfully!`);
@@ -317,7 +330,8 @@ function Customers({ profile }) {
         .from('customers')
         .select('*')
         .order('name')
-        .range(from, to);
+        .range(from, to)
+        .eq('organization_id', organization.id);
       setCustomers(data || []);
       setTotalCount(prev => prev - selected.length);
     } catch (err) {
@@ -325,27 +339,30 @@ function Customers({ profile }) {
     }
   };
 
-  // Filter customers based on search term
-  const filteredCustomers = customers.filter(c => 
-    c.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.CustomerListID?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.contact_details?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Defensive filter: only show customers for this organization
+  const filteredCustomers = customers
+    .filter(c => c.organization_id === organization?.id)
+    .filter(c => 
+      c.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.CustomerListID?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.contact_details?.toLowerCase().includes(searchTerm.toLowerCase())
+    );
 
   const pageCount = Math.ceil(totalCount / rowsPerPage);
 
+  if (!organization?.id) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
   if (loading) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
   if (error) return <Box p={4} color="error.main">Error: {error}</Box>;
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
+      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
           <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>Customers</Typography>
           <Button
             variant="contained"
             color="secondary"
-            onClick={exportAllCustomersToCSV}
+            onClick={() => exportAllCustomersToCSV(organization.id)}
             sx={{ ml: 2 }}
           >
             Export All Customers

@@ -19,7 +19,6 @@ import LandingPage from './pages/LandingPage';
 import DebugAuth from './pages/DebugAuth';
 import TestSupabase from './pages/TestSupabase';
 import CustomerBillingPortal from './pages/CustomerBillingPortal';
-import OwnerPortal from './pages/OwnerPortal';
 import ResetPassword from './pages/ResetPassword';
 import ContactUs from './pages/ContactUs';
 import PrivacyPolicy from './pages/PrivacyPolicy';
@@ -31,13 +30,25 @@ import ImportApprovals from './pages/ImportApprovals';
 import ImportApprovalDetail from './pages/ImportApprovalDetail';
 import ImportApprovalsHistory from './pages/ImportApprovalsHistory';
 import Home from './pages/Home';
+import DataUtilities from './pages/OwnerPortal/DataUtilities';
+import OwnerPortalLanding from './pages/OwnerPortalLanding';
+import Analytics from './pages/OwnerPortal/Analytics';
+import SupportTickets from './pages/OwnerPortal/SupportTickets';
+import BillingManagement from './pages/OwnerPortal/BillingManagement';
+import SystemHealth from './pages/OwnerPortal/SystemHealth';
+import SecurityEvents from './pages/OwnerPortal/SecurityEvents';
+import UserManagementAllOrgs from './pages/OwnerPortal/UserManagementAllOrgs';
+import AuditLog from './pages/OwnerPortal/AuditLog';
+import Impersonation from './pages/OwnerPortal/Impersonation';
+import PlanManagement from './pages/OwnerPortal/PlanManagement';
+import RoleManagement from './pages/OwnerPortal/RoleManagement';
+import PageBuilder from './pages/OwnerPortal/PageBuilder';
 
 // Lazy load all page components
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const Customers = lazy(() => import('./pages/Customers'));
 const Cylinders = lazy(() => import('./pages/Cylinders'));
 const Rentals = lazy(() => import('./pages/Rentals'));
-const Invoices = lazy(() => import('./pages/Invoices'));
 const Favorites = lazy(() => import('./pages/Favorites'));
 const CustomReports = lazy(() => import('./pages/CustomReports'));
 const AllAssetsReport = lazy(() => import('./pages/management-reports/AllAssetsReport'));
@@ -68,7 +79,7 @@ const Rental = lazy(() => import('./pages/Rental'));
 const CustomerDetail = lazy(() => import('./pages/CustomerDetail'));
 const AssetHistory = lazy(() => import('./pages/AssetHistory'));
 const AssetHistoryLookup = lazy(() => import('./pages/AssetHistoryLookup'));
-const ImportHistory = lazy(() => import('./pages/ImportHistory'));
+
 const AllAssetMovements = lazy(() => import('./pages/AllAssetMovements'));
 const Import = lazy(() => import('./pages/Import'));
 const Settings = lazy(() => import('./pages/Settings'));
@@ -81,6 +92,9 @@ const Integrations = lazy(() => import('./pages/Integrations'));
 const BottleDetail = lazy(() => import('./pages/BottleDetail'));
 const Assets = lazy(() => import('./pages/Assets'));
 const BottleManagement = lazy(() => import('./pages/BottleManagement'));
+const SupportCenter = lazy(() => import('./pages/SupportCenter'));
+const OrganizationAnalytics = lazy(() => import('./pages/OrganizationAnalytics'));
+const OrganizationTools = lazy(() => import('./pages/OrganizationTools'));
 
 // Import background service for automatic daily updates
 // import './utils/backgroundService';
@@ -170,21 +184,17 @@ function AppContent() {
       <Route path="/customer-register" element={<CustomerRegistration />} />
       <Route path="/portal" element={<CustomerPortal />} />
 
-      {/* --- Semi-Protected Owner Portal --- */}
-      <Route path="/owner-portal/*" element={<OwnerPortal />} />
-
       {/* --- Debug Routes --- */}
       <Route path="/debug" element={<DebugAuth />} />
       <Route path="/test" element={<TestSupabase />} />
 
       {/* --- ALL Protected Routes Go Here --- */}
       <Route element={<ProtectedRoute />}>
-        <Route path="/dashboard" element={<Home />} />
+        <Route path="/dashboard" element={profile?.role === 'owner' ? <OwnerDashboard /> : <Home />} />
         <Route path="/customers" element={<Customers />} />
         <Route path="/cylinders" element={<Cylinders />} />
         <Route path="/assets" element={<Assets />} />
         <Route path="/rentals" element={<Rentals />} />
-        <Route path="/invoices" element={<Invoices />} />
         <Route path="/favorites" element={<Favorites />} />
         <Route path="/custom-reports" element={<CustomReports />} />
         <Route path="/analytics" element={<AnalyticsDashboard />} />
@@ -218,7 +228,7 @@ function AppContent() {
         <Route path="/customer/:id" element={<CustomerDetail />} />
         <Route path="/asset-history" element={<AssetHistory />} />
         <Route path="/asset-history-lookup" element={<AssetHistoryLookup />} />
-        <Route path="/import-history" element={<ImportHistory />} />
+
         <Route path="/all-asset-movements" element={<AllAssetMovements />} />
         <Route path="/import" element={<Import />} />
         <Route path="/settings" element={<Settings />} />
@@ -236,6 +246,24 @@ function AppContent() {
         <Route path="/orders" element={<ScannedOrders />} />
         <Route path="/billing" element={<Billing />} />
         <Route path="/bottle-management" element={<BottleManagement />} />
+        <Route path="/support" element={<SupportCenter />} />
+        <Route path="/organization-analytics" element={<OrganizationAnalytics />} />
+        <Route path="/organization-tools" element={<OrganizationTools />} />
+        <Route path="/data-utilities" element={<DataUtilities />} />
+        <Route path="/owner-portal" element={<OwnerPortalLanding />} />
+        <Route path="/owner-portal/analytics" element={<Analytics />} />
+        <Route path="/owner-portal/tools" element={<DataUtilities />} />
+        <Route path="/owner-portal/support" element={<SupportTickets />} />
+        <Route path="/owner-portal/customers" element={<OwnerDashboard />} />
+        <Route path="/owner-portal/billing" element={<BillingManagement />} />
+        <Route path="/owner-portal/system-health" element={<SystemHealth />} />
+        <Route path="/owner-portal/security" element={<SecurityEvents />} />
+        <Route path="/owner-portal/user-management" element={<UserManagementAllOrgs />} />
+        <Route path="/owner-portal/audit-log" element={<AuditLog />} />
+        <Route path="/owner-portal/impersonation" element={<Impersonation />} />
+        <Route path="/owner-portal/plans" element={<PlanManagement />} />
+        <Route path="/owner-portal/roles" element={<RoleManagement />} />
+        <Route path="/owner-portal/page-builder" element={<PageBuilder />} />
       </Route>
       
       {/* Catch-all for any other unmatched routes */}

@@ -1181,8 +1181,14 @@ export default function Billing() {
                       variant={currentPlan?.id === plan.id ? "outlined" : "contained"}
                       color="primary"
                       fullWidth
-                      onClick={() => handlePlanSelection(plan)}
-                      disabled={currentPlan?.id === plan.id || plan.name.toLowerCase().includes('enterprise')}
+                      onClick={() => {
+                        if (plan.name.toLowerCase().includes('enterprise')) {
+                          navigate('/contact');
+                        } else {
+                          handlePlanSelection(plan);
+                        }
+                      }}
+                      disabled={currentPlan?.id === plan.id}
                     >
                       {currentPlan?.id === plan.id ? 'Current Plan' : 
                        plan.name.toLowerCase().includes('enterprise') ? 'Contact Sales' : 'Select Plan'}
