@@ -38,6 +38,7 @@ import BillingManagement from './pages/OwnerPortal/BillingManagement';
 import SystemHealth from './pages/OwnerPortal/SystemHealth';
 import SecurityEvents from './pages/OwnerPortal/SecurityEvents';
 import UserManagementAllOrgs from './pages/OwnerPortal/UserManagementAllOrgs';
+import OwnerCustomers from './pages/OwnerPortal/OwnerCustomers';
 import AuditLog from './pages/OwnerPortal/AuditLog';
 import Impersonation from './pages/OwnerPortal/Impersonation';
 import PlanManagement from './pages/OwnerPortal/PlanManagement';
@@ -254,7 +255,7 @@ function AppContent() {
         <Route path="/owner-portal/analytics" element={<Analytics />} />
         <Route path="/owner-portal/tools" element={<DataUtilities />} />
         <Route path="/owner-portal/support" element={<SupportTickets />} />
-        <Route path="/owner-portal/customers" element={<OwnerDashboard />} />
+        <Route path="/owner-portal/customers" element={<OwnerCustomers />} />
         <Route path="/owner-portal/billing" element={<BillingManagement />} />
         <Route path="/owner-portal/system-health" element={<SystemHealth />} />
         <Route path="/owner-portal/security" element={<SecurityEvents />} />
