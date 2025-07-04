@@ -593,13 +593,13 @@ export default function Settings() {
           <Tab label="Notifications" />
           <Tab label="Billing & Subscription" />
           {profile?.role === 'admin' && <Tab label="User Management" />}
-          {profile?.role === 'owner' && <Tab label="User Invites" />}
+          {(profile?.role === 'owner' || profile?.role === 'admin') && <Tab label="User Invites" />}
         </Tabs>
         
         {/* Debug info - remove this later */}
         <Box sx={{ mb: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
           <Typography variant="body2" color="text.secondary">
-            Debug: Your role is "{profile?.role}" | Organization ID: {profile?.organization_id}
+            Debug: Your role is "{profile?.role}" | Organization: {organization?.name || 'Unknown'} | ID: {profile?.organization_id}
           </Typography>
         </Box>
 
@@ -856,8 +856,8 @@ export default function Settings() {
           </TabPanel>
         )}
 
-        {/* User Invites Tab (Owners Only) */}
-        {profile?.role === 'owner' && (
+        {/* User Invites Tab (Owners and Admins) */}
+        {(profile?.role === 'owner' || profile?.role === 'admin') && (
           <TabPanel value={activeTab} index={profile?.role === 'admin' ? 6 : 5}>
             <Stack spacing={3}>
               {inviteError && (
