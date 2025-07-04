@@ -34,7 +34,7 @@ export default function OwnerPortalLanding() {
       description: 'Manage all customer organizations, subscriptions, and billing',
       icon: <PeopleIcon sx={{ fontSize: 40 }} />,
       color: '#1976d2',
-      path: '/owner-portal/customers'
+      path: '/owner-portal/customer-management'
     },
     {
       title: 'Analytics Dashboard',

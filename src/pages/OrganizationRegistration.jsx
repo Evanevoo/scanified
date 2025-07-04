@@ -105,10 +105,21 @@ export default function OrganizationRegistration() {
     setSuccess('');
 
     try {
-      // 0. Ensure slug is unique (double-check)
+      // 0. Check if email already exists
+      const { data: existingUser, error: emailCheckError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', userData.email)
+        .single();
+
+      if (existingUser) {
+        throw new Error('This email address is already registered. Please use a different email or try logging in.');
+      }
+
+      // 1. Ensure slug is unique (double-check)
       const finalSlug = await generateUniqueSlug(orgData.slug);
       
-      // 1. Create organization
+      // 2. Create organization
       const { data: org, error: orgError } = await supabase
         .from('organizations')
         .insert({
@@ -133,7 +144,7 @@ export default function OrganizationRegistration() {
         throw orgError;
       }
 
-      // 2. Create user account
+      // 3. Create user account
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: userData.email,
         password: userData.password,
@@ -146,9 +157,14 @@ export default function OrganizationRegistration() {
         }
       });
 
-      if (authError) throw authError;
+      if (authError) {
+        if (authError.message.includes('already registered')) {
+          throw new Error('This email address is already registered. Please use a different email or try logging in.');
+        }
+        throw authError;
+      }
 
-      // 3. Create profile
+      // 4. Create profile
       const { error: profileError } = await supabase
         .from('profiles')
         .insert({
@@ -159,7 +175,12 @@ export default function OrganizationRegistration() {
           organization_id: org.id
         });
 
-      if (profileError) throw profileError;
+      if (profileError) {
+        if (profileError.code === '23505' && profileError.message.includes('profiles_email_key')) {
+          throw new Error('This email address is already registered. Please use a different email or try logging in.');
+        }
+        throw profileError;
+      }
 
       // 4. Set up payment if required
       if (trialData.payment_required) {

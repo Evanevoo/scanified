@@ -44,6 +44,8 @@ import Impersonation from './pages/OwnerPortal/Impersonation';
 import PlanManagement from './pages/OwnerPortal/PlanManagement';
 import RoleManagement from './pages/OwnerPortal/RoleManagement';
 import PageBuilder from './pages/OwnerPortal/PageBuilder';
+import UserInvites from './pages/UserInvites';
+import AcceptInvite from './pages/AcceptInvite';
 
 // Lazy load all page components
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -184,6 +186,7 @@ function AppContent() {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/customer-register" element={<CustomerRegistration />} />
       <Route path="/portal" element={<CustomerPortal />} />
+      <Route path="/accept-invite" element={<AcceptInvite />} />
 
       {/* --- Debug Routes --- */}
       <Route path="/debug" element={<DebugAuth />} />
@@ -255,7 +258,7 @@ function AppContent() {
         <Route path="/owner-portal/analytics" element={<Analytics />} />
         <Route path="/owner-portal/tools" element={<DataUtilities />} />
         <Route path="/owner-portal/support" element={<SupportTickets />} />
-        <Route path="/owner-portal/customers" element={<OwnerCustomers />} />
+        <Route path="/owner-portal/customer-management" element={<OwnerCustomers />} />
         <Route path="/owner-portal/billing" element={<BillingManagement />} />
         <Route path="/owner-portal/system-health" element={<SystemHealth />} />
         <Route path="/owner-portal/security" element={<SecurityEvents />} />
@@ -265,6 +268,7 @@ function AppContent() {
         <Route path="/owner-portal/plans" element={<PlanManagement />} />
         <Route path="/owner-portal/roles" element={<RoleManagement />} />
         <Route path="/owner-portal/page-builder" element={<PageBuilder />} />
+        <Route path="/user-invites" element={<UserInvites />} />
       </Route>
       
       {/* Catch-all for any other unmatched routes */}
