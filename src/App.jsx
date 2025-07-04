@@ -44,7 +44,6 @@ import Impersonation from './pages/OwnerPortal/Impersonation';
 import PlanManagement from './pages/OwnerPortal/PlanManagement';
 import RoleManagement from './pages/OwnerPortal/RoleManagement';
 import PageBuilder from './pages/OwnerPortal/PageBuilder';
-import UserInvites from './pages/UserInvites';
 import AcceptInvite from './pages/AcceptInvite';
 
 // Lazy load all page components
@@ -268,7 +267,6 @@ function AppContent() {
         <Route path="/owner-portal/plans" element={<PlanManagement />} />
         <Route path="/owner-portal/roles" element={<RoleManagement />} />
         <Route path="/owner-portal/page-builder" element={<PageBuilder />} />
-        <Route path="/user-invites" element={<UserInvites />} />
       </Route>
       
       {/* Catch-all for any other unmatched routes */}

@@ -54,6 +54,17 @@ import PaymentIcon from '@mui/icons-material/Payment';
 import { useThemeContext } from '../context/ThemeContext';
 import UserManagement from './UserManagement';
 import { usePermissions } from '../context/PermissionsContext';
+import {
+  People as PeopleIcon,
+  Email as EmailIcon,
+  Add as AddIcon,
+  Delete as DeleteIcon,
+  Refresh as RefreshIcon,
+  Warning as WarningIcon,
+  CheckCircle as CheckCircleIcon,
+  Schedule as ScheduleIcon,
+  Copy as CopyIcon
+} from '@mui/icons-material';
 
 const themeColors = [
   { name: 'Blue', value: 'blue-600' },
@@ -198,6 +209,18 @@ export default function Settings() {
   // Dialogs
   const [exportDialog, setExportDialog] = useState(false);
   const [backupDialog, setBackupDialog] = useState(false);
+
+  // User Invites
+  const [invites, setInvites] = useState([]);
+  const [inviteDialog, setInviteDialog] = useState(false);
+  const [newInvite, setNewInvite] = useState({
+    email: '',
+    role: 'user'
+  });
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState('');
+  const [inviteSuccess, setInviteSuccess] = useState('');
+  const [copiedToken, setCopiedToken] = useState('');
   const [securityDialog, setSecurityDialog] = useState(false);
 
   const [logoUploading, setLogoUploading] = useState(false);
@@ -209,6 +232,12 @@ export default function Settings() {
     setEmail(user?.email || '');
     setLogoUrl(organization?.logo_url || '');
   }, [profile, user, organization]);
+
+  useEffect(() => {
+    if (profile?.role === 'owner') {
+      fetchInvites();
+    }
+  }, [profile]);
 
   // Profile update
   const handleProfileSave = async (e) => {
@@ -366,6 +395,127 @@ export default function Settings() {
   }, [fullName, profile?.full_name]);
 
   // Admin-only logo upload handler
+  // User Invite Functions
+  const fetchInvites = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('organization_invites')
+        .select(`
+          *,
+          invited_by:profiles!organization_invites_invited_by_fkey(full_name, email)
+        `)
+        .eq('organization_id', profile.organization_id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setInvites(data || []);
+    } catch (error) {
+      console.error('Error fetching invites:', error);
+      setInviteError('Failed to load invites: ' + error.message);
+    }
+  };
+
+  const handleCreateInvite = async () => {
+    if (!newInvite.email || !newInvite.role) {
+      setInviteError('Please fill in all fields');
+      return;
+    }
+
+    setInviteLoading(true);
+    setInviteError('');
+
+    try {
+      // Check if email already exists in the organization
+      const { data: existingUser } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('organization_id', profile.organization_id)
+        .eq('email', newInvite.email)
+        .single();
+
+      if (existingUser) {
+        throw new Error('This email is already registered in your organization');
+      }
+
+      // Check if there's already a pending invite for this email
+      const { data: existingInvite } = await supabase
+        .from('organization_invites')
+        .select('id')
+        .eq('organization_id', profile.organization_id)
+        .eq('email', newInvite.email)
+        .is('accepted_at', null)
+        .single();
+
+      if (existingInvite) {
+        throw new Error('An invite has already been sent to this email');
+      }
+
+      // Create the invite using the database function
+      const { data, error } = await supabase.rpc('create_organization_invite', {
+        p_organization_id: profile.organization_id,
+        p_email: newInvite.email,
+        p_role: newInvite.role,
+        p_expires_in_days: 7
+      });
+
+      if (error) throw error;
+
+      setInviteSuccess(`Invite sent to ${newInvite.email}`);
+      setNewInvite({ email: '', role: 'user' });
+      setInviteDialog(false);
+      fetchInvites();
+    } catch (error) {
+      console.error('Error creating invite:', error);
+      setInviteError(error.message);
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  const handleDeleteInvite = async (inviteId) => {
+    try {
+      const { error } = await supabase
+        .from('organization_invites')
+        .delete()
+        .eq('id', inviteId);
+
+      if (error) throw error;
+
+      setInviteSuccess('Invite deleted successfully');
+      fetchInvites();
+    } catch (error) {
+      console.error('Error deleting invite:', error);
+      setInviteError('Failed to delete invite: ' + error.message);
+    }
+  };
+
+  const copyInviteLink = (token) => {
+    const inviteLink = `${window.location.origin}/accept-invite?token=${token}`;
+    navigator.clipboard.writeText(inviteLink);
+    setCopiedToken(token);
+    setInviteSuccess('Invite link copied to clipboard!');
+    setTimeout(() => setCopiedToken(''), 2000);
+  };
+
+  const getInviteStatus = (invite) => {
+    if (invite.accepted_at) {
+      return { status: 'accepted', color: 'success', icon: <CheckCircleIcon />, label: 'Accepted' };
+    } else if (new Date(invite.expires_at) < new Date()) {
+      return { status: 'expired', color: 'error', icon: <WarningIcon />, label: 'Expired' };
+    } else {
+      return { status: 'pending', color: 'warning', icon: <ScheduleIcon />, label: 'Pending' };
+    }
+  };
+
+  const getRoleColor = (role) => {
+    switch (role) {
+      case 'owner': return 'error';
+      case 'admin': return 'warning';
+      case 'manager': return 'info';
+      default: return 'default';
+    }
+  };
+
   const handleLogoUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -443,6 +593,7 @@ export default function Settings() {
           <Tab label="Notifications" />
           <Tab label="Billing & Subscription" />
           {profile?.role === 'admin' && <Tab label="User Management" />}
+          {profile?.role === 'owner' && <Tab label="User Invites" />}
         </Tabs>
 
         {/* Profile Tab */}
@@ -697,6 +848,190 @@ export default function Settings() {
             <UserManagement />
           </TabPanel>
         )}
+
+        {/* User Invites Tab (Owners Only) */}
+        {profile?.role === 'owner' && (
+          <TabPanel value={activeTab} index={profile?.role === 'admin' ? 6 : 5}>
+            <Stack spacing={3}>
+              {inviteError && (
+                <Alert severity="error" onClose={() => setInviteError('')}>
+                  {inviteError}
+                </Alert>
+              )}
+
+              {inviteSuccess && (
+                <Alert severity="success" onClose={() => setInviteSuccess('')}>
+                  {inviteSuccess}
+                </Alert>
+              )}
+
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="h6">
+                  Pending Invites ({invites.filter(i => !i.accepted_at && new Date(i.expires_at) > new Date()).length})
+                </Typography>
+                <Box>
+                  <Button
+                    variant="outlined"
+                    startIcon={<RefreshIcon />}
+                    onClick={fetchInvites}
+                    sx={{ mr: 2 }}
+                  >
+                    Refresh
+                  </Button>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => setInviteDialog(true)}
+                  >
+                    Invite User
+                  </Button>
+                </Box>
+              </Box>
+
+              {invites.length === 0 ? (
+                <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    No invites found. Create your first invite to get started.
+                  </Typography>
+                </Box>
+              ) : (
+                <Box>
+                  {invites.map((invite) => {
+                    const status = getInviteStatus(invite);
+                    return (
+                      <Paper key={invite.id} sx={{ p: 2, mb: 2 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                              <EmailIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                              <Typography variant="subtitle1">
+                                {invite.email}
+                              </Typography>
+                            </Box>
+                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                              <Chip
+                                label={invite.role}
+                                color={getRoleColor(invite.role)}
+                                size="small"
+                              />
+                              <Chip
+                                icon={status.icon}
+                                label={status.label}
+                                color={status.color}
+                                size="small"
+                              />
+                              <Typography variant="caption" color="text.secondary">
+                                Expires: {new Date(invite.expires_at).toLocaleDateString()}
+                              </Typography>
+                            </Box>
+                          </Box>
+                          <Box sx={{ display: 'flex', gap: 1 }}>
+                            {status.status === 'pending' && (
+                              <>
+                                <Tooltip title="Copy Invite Link">
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => copyInviteLink(invite.token)}
+                                    color={copiedToken === invite.token ? 'success' : 'primary'}
+                                  >
+                                    <CopyIcon />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Delete Invite">
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleDeleteInvite(invite.id)}
+                                    sx={{ color: 'error.main' }}
+                                  >
+                                    <DeleteIcon />
+                                  </IconButton>
+                                </Tooltip>
+                              </>
+                            )}
+                            {status.status === 'expired' && (
+                              <Tooltip title="Delete Expired Invite">
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleDeleteInvite(invite.id)}
+                                  sx={{ color: 'error.main' }}
+                                >
+                                  <DeleteIcon />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </Box>
+                        </Box>
+                      </Paper>
+                    );
+                  })}
+                </Box>
+              )}
+            </Stack>
+          </TabPanel>
+        )}
+
+        {/* Create Invite Dialog */}
+        <Dialog
+          open={inviteDialog}
+          onClose={() => setInviteDialog(false)}
+          maxWidth="sm"
+          fullWidth
+        >
+          <DialogTitle>
+            <Typography variant="h6">
+              Invite New User
+            </Typography>
+          </DialogTitle>
+          <DialogContent>
+            <Grid container spacing={2} sx={{ mt: 1 }}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Email Address"
+                  type="email"
+                  value={newInvite.email}
+                  onChange={(e) => setNewInvite({ ...newInvite, email: e.target.value })}
+                  required
+                  helperText="The user will receive an invite link at this email address"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <InputLabel>Role</InputLabel>
+                  <Select
+                    value={newInvite.role}
+                    onChange={(e) => setNewInvite({ ...newInvite, role: e.target.value })}
+                    label="Role"
+                  >
+                    <MenuItem value="user">User</MenuItem>
+                    <MenuItem value="manager">Manager</MenuItem>
+                    <MenuItem value="admin">Admin</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12}>
+                <Alert severity="info">
+                  <Typography variant="body2">
+                    The invite will expire in 7 days. The user will receive a secure link to join your organization.
+                  </Typography>
+                </Alert>
+              </Grid>
+            </Grid>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setInviteDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleCreateInvite}
+              disabled={inviteLoading || !newInvite.email || !newInvite.role}
+              startIcon={inviteLoading ? <CircularProgress size={20} /> : <AddIcon />}
+            >
+              Send Invite
+            </Button>
+          </DialogActions>
+        </Dialog>
 
         {/* Snackbars */}
         <Snackbar open={profileSnackbar} autoHideDuration={3000} onClose={() => setProfileSnackbar(false)}>
