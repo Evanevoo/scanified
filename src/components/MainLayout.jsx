@@ -63,6 +63,7 @@ export default function MainLayout() {
         { label: 'All Gas Assets', icon: <SwapVertIcon />, to: '/assets' },
         { label: 'Bottle Management', icon: <AssignmentIcon />, to: '/bottle-management' },
         { label: 'Scanned Orders', icon: <AssignmentIcon />, to: '/scanned-orders' },
+        { label: 'Support', icon: <AssignmentIcon />, to: '/support' },
         {
           label: 'Integrations', icon: <SwapVertIcon />, to: null, subItems: [
             { label: 'Import', to: '/import' },
