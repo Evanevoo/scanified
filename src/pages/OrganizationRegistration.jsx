@@ -111,6 +111,10 @@ function OrganizationRegistration() {
     setError('');
     setSuccess('');
 
+    // DEBUG: Log email confirmation requirement and environment
+    console.log('isEmailConfirmationRequired:', isEmailConfirmationRequired());
+    console.log('NODE_ENV:', import.meta.env.MODE, 'VITE_NODE_ENV:', import.meta.env.VITE_NODE_ENV);
+
     try {
       // 0. Check if email already exists
       const { data: existingUser, error: emailCheckError } = await supabase

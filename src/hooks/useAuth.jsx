@@ -82,30 +82,55 @@ export const AuthProvider = ({ children }) => {
 
       try {
         // Step 1: Fetch the user's profile
-        const { data: profileData, error: profileError } = await supabase
+        let { data: profileData, error: profileError } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', sessionUser.id)
           .single();
 
         if (profileError) {
-          // If profile not found, sign out the user and clear state
+          // If profile not found, auto-create it
           if (profileError.code === 'PGRST116') {
-            console.error('Auth: Profile not found, signing out user.');
-            await supabase.auth.signOut();
-            setUser(null);
+            console.warn('Auth: Profile not found, auto-creating profile for user:', sessionUser.id);
+            // Insert a new profile with minimal info
+            const { error: insertError } = await supabase
+              .from('profiles')
+              .insert({
+                id: sessionUser.id,
+                email: sessionUser.email,
+                full_name: sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || '',
+                role: 'user',
+              });
+            if (insertError) {
+              console.error('Auth: Failed to auto-create profile:', insertError);
+              setProfile(null);
+              setOrganization(null);
+              setLoading(false);
+              authFlowInProgressRef.current = false;
+              return;
+            }
+            // Try fetching the profile again
+            ({ data: profileData, error: profileError } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', sessionUser.id)
+              .single());
+            if (profileError) {
+              console.error('Auth: Still failed to fetch profile after insert:', profileError);
+              setProfile(null);
+              setOrganization(null);
+              setLoading(false);
+              authFlowInProgressRef.current = false;
+              return;
+            }
+          } else {
+            // Other errors: log and clear state
+            console.error('Auth: Error fetching profile:', profileError);
             setProfile(null);
             setOrganization(null);
-            setLoading(false);
             authFlowInProgressRef.current = false;
             return;
           }
-          // Other errors: log and clear state
-          console.error('Auth: Error fetching profile:', profileError);
-          setProfile(null);
-          setOrganization(null);
-          authFlowInProgressRef.current = false;
-          return;
         }
 
         setProfile(profileData);
