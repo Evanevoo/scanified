@@ -10,7 +10,8 @@ import {
 import {
   Dashboard, LocalShipping, Assessment,
   Receipt, Settings, Business, Notifications,
-  Inventory, Map, Schedule, AccountCircle, Security, Support, Build as BuildIcon, CheckCircle
+  Inventory, Map, Schedule, AccountCircle, Security, Support, Build as BuildIcon, CheckCircle,
+  LocationOn as LocationIcon
 } from '@mui/icons-material';
 
 const drawerWidth = 280;
@@ -145,6 +146,24 @@ const Sidebar = ({ open, onClose }) => {
       title: 'Invoices',
       path: '/invoices',
       icon: <Receipt />, 
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Bottle Management',
+      path: '/bottle-management',
+      icon: <Inventory />, 
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Smart Inventory',
+      path: '/smart-inventory',
+      icon: <InventoryIcon />, 
+      roles: ['admin', 'user', 'manager', 'owner']
+    },
+    {
+      title: 'Customer Portal',
+      path: '/customer-portal',
+      icon: <PersonIcon />, 
       roles: ['admin', 'user', 'manager', 'owner']
     },
     {

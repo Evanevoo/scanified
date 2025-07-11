@@ -2,12 +2,13 @@ import { useState, useCallback, useRef } from 'react';
 import { useErrorHandler } from './useErrorHandler';
 
 /**
- * Custom hook for rate-limited API calls
+ * Enhanced rate-limited API hook with improved error handling and retry logic
  * @param {Object} options - Configuration options
  * @param {number} options.delay - Delay between requests in milliseconds
  * @param {number} options.maxConcurrent - Maximum concurrent requests
  * @param {boolean} options.retryOnFailure - Whether to retry failed requests
  * @param {number} options.maxRetries - Maximum number of retries
+ * @param {number} options.backoffMultiplier - Backoff multiplier for retries
  * @returns {Object} Rate-limited API utilities
  */
 export const useRateLimitedApi = (options = {}) => {
@@ -15,7 +16,8 @@ export const useRateLimitedApi = (options = {}) => {
     delay = 1000,
     maxConcurrent = 3,
     retryOnFailure = true,
-    maxRetries = 3
+    maxRetries = 3,
+    backoffMultiplier = 2
   } = options;
 
   const [isLoading, setIsLoading] = useState(false);
@@ -26,114 +28,120 @@ export const useRateLimitedApi = (options = {}) => {
 
   /**
    * Execute a rate-limited API call
-   * @param {Function} apiCall - The API function to execute
+   * @param {Function} apiCall - The API call function
    * @param {Object} callOptions - Options for this specific call
-   * @returns {Promise} The result of the API call
+   * @returns {Promise<any>} API response
    */
   const executeApiCall = useCallback(async (apiCall, callOptions = {}) => {
     const {
       skipRateLimit = false,
-      customDelay = delay,
-      showError = true,
-      retry = retryOnFailure
+      retryOnFailure: callRetryOnFailure = retryOnFailure,
+      maxRetries: callMaxRetries = maxRetries
     } = callOptions;
 
     // Check if we can make the request immediately
     const now = Date.now();
     const timeSinceLastRequest = now - lastRequestTime.current;
     
-    if (!skipRateLimit && timeSinceLastRequest < customDelay) {
-      const waitTime = customDelay - timeSinceLastRequest;
+    if (!skipRateLimit && timeSinceLastRequest < delay) {
+      const waitTime = delay - timeSinceLastRequest;
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
 
     // Check concurrent request limit
     if (activeRequests >= maxConcurrent) {
-      // Add to queue
       return new Promise((resolve, reject) => {
-        requestQueue.current.push({
-          apiCall,
-          callOptions,
-          resolve,
-          reject,
-          timestamp: Date.now()
-        });
+        requestQueue.current.push({ apiCall, resolve, reject, callOptions });
       });
     }
 
-    // Execute the request
+    setIsLoading(true);
     setActiveRequests(prev => prev + 1);
     lastRequestTime.current = Date.now();
 
     try {
       let result;
       
-      if (retry) {
-        result = await executeWithRetry(apiCall, { maxRetries, baseDelay: 500 });
+      if (callRetryOnFailure) {
+        result = await executeWithRetry(apiCall, {
+          maxRetries: callMaxRetries,
+          baseDelay: delay,
+          backoffMultiplier
+        });
       } else {
         result = await apiCall();
       }
 
       return result;
     } catch (error) {
-      if (showError) {
-        handleError(error, {
-          showToast: true,
-          logToConsole: true
-        });
-      }
+      handleError(error, {
+        showToast: true,
+        toastMessage: 'API request failed. Please try again.',
+        logToConsole: true
+      });
       throw error;
     } finally {
       setActiveRequests(prev => prev - 1);
+      setIsLoading(false);
       
-      // Process queue
+      // Process queued requests
       if (requestQueue.current.length > 0) {
         const nextRequest = requestQueue.current.shift();
         if (nextRequest) {
-          // Execute the next queued request
           executeApiCall(nextRequest.apiCall, nextRequest.callOptions)
             .then(nextRequest.resolve)
             .catch(nextRequest.reject);
         }
       }
     }
-  }, [delay, maxConcurrent, retryOnFailure, maxRetries, activeRequests, executeWithRetry, handleError]);
+  }, [delay, maxConcurrent, retryOnFailure, maxRetries, backoffMultiplier, activeRequests, executeWithRetry, handleError]);
 
   /**
    * Execute multiple API calls with rate limiting
-   * @param {Array} apiCalls - Array of API functions to execute
-   * @param {Object} callOptions - Options for all calls
+   * @param {Array<Function>} apiCalls - Array of API call functions
+   * @param {Object} options - Options for batch execution
    * @returns {Promise<Array>} Array of results
    */
-  const executeBatchApiCalls = useCallback(async (apiCalls, callOptions = {}) => {
+  const executeBatch = useCallback(async (apiCalls, options = {}) => {
     const {
-      batchSize = 5,
-      batchDelay = delay * 2,
-      showProgress = false
-    } = callOptions;
+      parallel = false,
+      batchSize = maxConcurrent,
+      delayBetweenBatches = delay
+    } = options;
 
-    const results = [];
-    const totalCalls = apiCalls.length;
-
-    for (let i = 0; i < totalCalls; i += batchSize) {
-      const batch = apiCalls.slice(i, i + batchSize);
+    if (parallel) {
+      // Execute all calls in parallel with rate limiting
+      const promises = apiCalls.map((apiCall, index) => {
+        return new Promise(resolve => {
+          setTimeout(() => {
+            executeApiCall(apiCall, options)
+              .then(resolve)
+              .catch(resolve); // Resolve with error to maintain array structure
+          }, index * delay);
+        });
+      });
       
-      // Execute batch
-      const batchPromises = batch.map(apiCall => 
-        executeApiCall(apiCall, { ...callOptions, skipRateLimit: true })
-      );
+      return Promise.all(promises);
+    } else {
+      // Execute calls sequentially in batches
+      const results = [];
       
-      const batchResults = await Promise.allSettled(batchPromises);
-      results.push(...batchResults);
-
-      // Add delay between batches
-      if (i + batchSize < totalCalls) {
-        await new Promise(resolve => setTimeout(resolve, batchDelay));
+      for (let i = 0; i < apiCalls.length; i += batchSize) {
+        const batch = apiCalls.slice(i, i + batchSize);
+        const batchPromises = batch.map(apiCall => executeApiCall(apiCall, options));
+        
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults);
+        
+        // Add delay between batches
+        if (i + batchSize < apiCalls.length) {
+          await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
+        }
       }
+      
+      return results;
     }
-
-    return results;
-  }, [executeApiCall, delay]);
+  }, [executeApiCall, maxConcurrent, delay]);
 
   /**
    * Clear the request queue
@@ -143,50 +151,24 @@ export const useRateLimitedApi = (options = {}) => {
   }, []);
 
   /**
-   * Get queue status
+   * Get current queue status
+   * @returns {Object} Queue status
    */
-  const getQueueStatus = useCallback(() => ({
-    queueLength: requestQueue.current.length,
-    activeRequests,
-    lastRequestTime: lastRequestTime.current,
-    isProcessing: activeRequests > 0 || requestQueue.current.length > 0
-  }), [activeRequests]);
-
-  /**
-   * Debounced API call
-   * @param {Function} apiCall - The API function to execute
-   * @param {number} debounceDelay - Debounce delay in milliseconds
-   * @param {Object} callOptions - Options for the call
-   * @returns {Promise} The result of the API call
-   */
-  const executeDebouncedApiCall = useCallback((apiCall, debounceDelay = 500, callOptions = {}) => {
-    return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(async () => {
-        try {
-          const result = await executeApiCall(apiCall, callOptions);
-          resolve(result);
-        } catch (error) {
-          reject(error);
-        }
-      }, debounceDelay);
-
-      // Return a function to cancel the debounced call
-      return () => {
-        clearTimeout(timeoutId);
-        reject(new Error('Debounced call cancelled'));
-      };
-    });
-  }, [executeApiCall]);
+  const getQueueStatus = useCallback(() => {
+    return {
+      queueLength: requestQueue.current.length,
+      activeRequests,
+      isLoading,
+      lastRequestTime: lastRequestTime.current
+    };
+  }, [activeRequests, isLoading]);
 
   return {
-    isLoading,
-    activeRequests,
     executeApiCall,
-    executeBatchApiCalls,
-    executeDebouncedApiCall,
+    executeBatch,
     clearQueue,
-    getQueueStatus
+    getQueueStatus,
+    isLoading,
+    activeRequests
   };
-};
-
-export default useRateLimitedApi; 
+}; 

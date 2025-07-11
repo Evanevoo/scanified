@@ -38,7 +38,8 @@ import {
   Badge,
   Accordion,
   AccordionSummary,
-  AccordionDetails
+  AccordionDetails,
+  CircularProgress
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -64,7 +65,8 @@ import {
   CheckCircle as CheckCircleIcon,
   Schedule as ScheduleIcon,
   ContentCopy as CopyIcon,
-  ContactSupport as ContactSupportIcon
+  ContactSupport as ContactSupportIcon,
+  Edit as EditIcon
 } from '@mui/icons-material';
 
 const themeColors = [
@@ -207,24 +209,7 @@ export default function Settings() {
   );
   const [dataChanged, setDataChanged] = useState(false);
 
-  // Contact Information Settings
-  const [contactInfo, setContactInfo] = useState(
-    JSON.parse(localStorage.getItem('contactInfo')) || {
-      email: 'contact@lessannoyingscan.com',
-      phone: '+1 (555) 123-4567',
-      address: '123 Business St, Suite 100, City, State 12345',
-      businessHours: {
-        monday: '9:00 AM - 6:00 PM',
-        tuesday: '9:00 AM - 6:00 PM',
-        wednesday: '9:00 AM - 6:00 PM',
-        thursday: '9:00 AM - 6:00 PM',
-        friday: '9:00 AM - 6:00 PM',
-        saturday: '10:00 AM - 2:00 PM',
-        sunday: 'Closed'
-      }
-    }
-  );
-  const [contactChanged, setContactChanged] = useState(false);
+
 
   // Dialogs
   const [exportDialog, setExportDialog] = useState(false);
@@ -247,6 +232,35 @@ export default function Settings() {
   const [logoUrl, setLogoUrl] = useState(organization?.logo_url || '');
   const [logoMsg, setLogoMsg] = useState('');
 
+  // Role Management
+  const [roles, setRoles] = useState([]);
+  const [roleDialog, setRoleDialog] = useState(false);
+  const [editingRole, setEditingRole] = useState(null);
+  const [roleLoading, setRoleLoading] = useState(false);
+  const [roleError, setRoleError] = useState('');
+  const [roleSuccess, setRoleSuccess] = useState('');
+
+  // A predefined list of all possible permissions in the system
+  const allPermissions = [
+    'manage:users', 'manage:billing', 'manage:roles',
+    'read:customers', 'write:customers', 'delete:customers',
+    'read:cylinders', 'write:cylinders', 'delete:cylinders',
+    'read:invoices', 'write:invoices', 'delete:invoices',
+    'read:rentals', 'write:rentals',
+    'update:cylinder_location'
+  ];
+
+  // Add state for role name
+  const [roleName, setRoleName] = useState('');
+
+  // Initialize theme from localStorage if available
+  useEffect(() => {
+    const storedMode = localStorage.getItem('themeMode');
+    const storedAccent = localStorage.getItem('themeAccent');
+    if (storedMode) setMode(storedMode);
+    if (storedAccent) setAccent(storedAccent);
+  }, [setMode, setAccent]);
+
   useEffect(() => {
     setFullName(profile?.full_name || '');
     setEmail(user?.email || '');
@@ -254,10 +268,29 @@ export default function Settings() {
   }, [profile, user, organization]);
 
   useEffect(() => {
-    if (profile?.role === 'owner') {
+    if (profile?.role === 'owner' || profile?.role === 'admin') {
       fetchInvites();
+      fetchRoles();
     }
   }, [profile]);
+
+  // Fetch the role name from the roles table
+  useEffect(() => {
+    async function fetchRoleName() {
+      if (profile?.role_id) {
+        const { data, error } = await supabase
+          .from('roles')
+          .select('name')
+          .eq('id', profile.role_id)
+          .single();
+        if (data) setRoleName(data.name);
+        else setRoleName('');
+      } else {
+        setRoleName('');
+      }
+    }
+    fetchRoleName();
+  }, [profile?.role_id]);
 
   // Profile update
   const handleProfileSave = async (e) => {
@@ -306,6 +339,7 @@ export default function Settings() {
   // Theme update
   const handleThemeChange = (t) => {
     setMode(t);
+    localStorage.setItem('themeMode', t);
     setProfileChanged(true);
     setNotifMsg('Theme updated successfully!');
     setNotifSnackbar(true);
@@ -313,6 +347,7 @@ export default function Settings() {
 
   const handleColorChange = (c) => {
     setAccent(c);
+    localStorage.setItem('themeAccent', c);
     setProfileChanged(true);
     setNotifMsg('Accent color updated successfully!');
     setNotifSnackbar(true);
@@ -387,31 +422,7 @@ export default function Settings() {
     setNotifSnackbar(true);
   };
 
-  // Contact information update
-  const handleContactChange = (key, value) => {
-    const updated = { ...contactInfo, [key]: value };
-    setContactInfo(updated);
-    setContactChanged(true);
-  };
 
-  const handleBusinessHoursChange = (day, value) => {
-    const updated = { 
-      ...contactInfo, 
-      businessHours: { 
-        ...contactInfo.businessHours, 
-        [day]: value 
-      } 
-    };
-    setContactInfo(updated);
-    setContactChanged(true);
-  };
-
-  const handleContactSave = () => {
-    localStorage.setItem('contactInfo', JSON.stringify(contactInfo));
-    setContactChanged(false);
-    setNotifMsg('Contact information saved!');
-    setNotifSnackbar(true);
-  };
 
   // Export data
   const handleExportData = async (format) => {
@@ -483,6 +494,17 @@ export default function Settings() {
         throw new Error('This email is already registered in your organization');
       }
 
+      // Check if email is already registered with any other organization
+      const { data: existingProfile, error: profileCheckError } = await supabase
+        .from('profiles')
+        .select('email, organization_id, organizations(name)')
+        .eq('email', newInvite.email)
+        .single();
+
+      if (existingProfile && existingProfile.organization_id && existingProfile.organization_id !== profile.organization_id) {
+        throw new Error(`This email (${newInvite.email}) is already registered with organization "${existingProfile.organizations?.name}". Each email can only be associated with one organization. Please use a different email address.`);
+      }
+
       // Check if there's already a pending invite for this email
       const { data: existingInvite } = await supabase
         .from('organization_invites')
@@ -505,6 +527,35 @@ export default function Settings() {
       });
 
       if (error) throw error;
+
+      // Fetch the invite row to get the token
+      const { data: inviteRow } = await supabase
+        .from('organization_invites')
+        .select('token')
+        .eq('organization_id', profile.organization_id)
+        .eq('email', newInvite.email)
+        .is('accepted_at', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (inviteRow && inviteRow.token) {
+        const inviteLink = `${window.location.origin}/accept-invite?token=${inviteRow.token}`;
+        await fetch('/.netlify/functions/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: newInvite.email,
+            subject: `You're invited to join ${organization.name}`,
+            template: 'invite',
+            data: {
+              inviteLink,
+              organizationName: organization.name,
+              inviter: profile.full_name || profile.email,
+            }
+          })
+        });
+      }
 
       setInviteSuccess(`Invite sent to ${newInvite.email}`);
       setNewInvite({ email: '', role: 'user' });
@@ -620,6 +671,125 @@ export default function Settings() {
     }
   };
 
+  const fetchRoles = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('roles')
+        .select('*')
+        .order('name');
+
+      if (error) throw error;
+      setRoles(data || []);
+    } catch (error) {
+      console.error('Error fetching roles:', error);
+      setRoleError('Failed to load roles: ' + error.message);
+    }
+  };
+
+  const handleCreateRole = async () => {
+    if (!editingRole.name || !editingRole.description) {
+      setRoleError('Please fill in all required fields');
+      return;
+    }
+
+    setRoleLoading(true);
+    setRoleError('');
+
+    try {
+      const { error } = await supabase
+        .from('roles')
+        .insert({
+          name: editingRole.name,
+          description: editingRole.description,
+          permissions: editingRole.permissions || []
+        });
+
+      if (error) throw error;
+
+      setRoleSuccess(`Role "${editingRole.name}" created successfully`);
+      setEditingRole({ name: '', description: '', permissions: [] });
+      setRoleDialog(false);
+      fetchRoles();
+    } catch (error) {
+      console.error('Error creating role:', error);
+      setRoleError(error.message);
+    } finally {
+      setRoleLoading(false);
+    }
+  };
+
+  const handleUpdateRole = async () => {
+    if (!editingRole.name || !editingRole.description) {
+      setRoleError('Please fill in all required fields');
+      return;
+    }
+
+    setRoleLoading(true);
+    setRoleError('');
+
+    try {
+      const { error } = await supabase
+        .from('roles')
+        .update({
+          name: editingRole.name,
+          description: editingRole.description,
+          permissions: editingRole.permissions || []
+        })
+        .eq('id', editingRole.id);
+
+      if (error) throw error;
+
+      setRoleSuccess(`Role "${editingRole.name}" updated successfully`);
+      setEditingRole({ name: '', description: '', permissions: [] });
+      setRoleDialog(false);
+      fetchRoles();
+    } catch (error) {
+      console.error('Error updating role:', error);
+      setRoleError(error.message);
+    } finally {
+      setRoleLoading(false);
+    }
+  };
+
+  const handleDeleteRole = async (roleId, roleName) => {
+    if (!window.confirm(`Are you sure you want to delete the role "${roleName}"? This could affect users currently assigned to it.`)) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('roles')
+        .delete()
+        .eq('id', roleId);
+
+      if (error) throw error;
+
+      setRoleSuccess(`Role "${roleName}" deleted successfully`);
+      fetchRoles();
+    } catch (error) {
+      console.error('Error deleting role:', error);
+      setRoleError('Failed to delete role: ' + error.message);
+    }
+  };
+
+  const handlePermissionToggle = (permission) => {
+    setEditingRole(prev => {
+      const permissions = prev.permissions.includes(permission)
+        ? prev.permissions.filter(p => p !== permission)
+        : [...prev.permissions, permission];
+      return { ...prev, permissions };
+    });
+  };
+
+  const openRoleDialog = (role = null) => {
+    if (role) {
+      setEditingRole(role);
+    } else {
+      setEditingRole({ name: '', description: '', permissions: [] });
+    }
+    setRoleDialog(true);
+  };
+
   return (
     <Box maxWidth={1200} mx="auto" mt={8} mb={4}>
       <Paper elevation={3} sx={{ p: 4, borderRadius: 4, bgcolor: 'background.default' }}>
@@ -638,15 +808,15 @@ export default function Settings() {
           <Tab label="Appearance" />
           <Tab label="Notifications" />
           <Tab label="Billing & Subscription" />
-          {profile?.role === 'admin' && <Tab label="User Management" />}
-          {(profile?.role === 'owner' || profile?.role === 'admin') && <Tab label="User Invites" />}
-        {(profile?.role === 'owner' || profile?.role === 'admin') && <Tab label="Contact Information" />}
+          {(roleName === 'admin') && <Tab label="User Management" />}
+          {(roleName === 'owner' || roleName === 'admin') && <Tab label="User Invites" />}
+          {(roleName === 'owner' || roleName === 'admin') && <Tab label="Role Management" />}
         </Tabs>
         
         {/* Debug info - remove this later */}
         <Box sx={{ mb: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
           <Typography variant="body2" color="text.secondary">
-            Debug: Your role is "{profile?.role}" | Organization: {organization?.name || 'Unknown'}
+            Debug: Your role is "{roleName || profile?.role || profile?.role_id}" | Organization: {organization?.name || 'Unknown'}
           </Typography>
         </Box>
 
@@ -897,15 +1067,15 @@ export default function Settings() {
         </TabPanel>
 
         {/* User Management Tab (Admins Only) */}
-        {profile?.role === 'admin' && (
+        {(roleName === 'admin') && (
           <TabPanel value={activeTab} index={5}>
             <UserManagement />
           </TabPanel>
         )}
 
         {/* User Invites Tab (Owners and Admins) */}
-        {(profile?.role === 'owner' || profile?.role === 'admin') && (
-          <TabPanel value={activeTab} index={profile?.role === 'admin' ? 6 : 5}>
+        {(roleName === 'owner' || roleName === 'admin') && (
+          <TabPanel value={activeTab} index={roleName === 'admin' ? 6 : 5}>
             <Stack spacing={3}>
               {inviteError && (
                 <Alert severity="error" onClose={() => setInviteError('')}>
@@ -1024,129 +1194,94 @@ export default function Settings() {
           </TabPanel>
         )}
 
-        {/* Contact Information Tab (Owners and Admins) */}
-        {(profile?.role === 'owner' || profile?.role === 'admin') && (
-          <TabPanel value={activeTab} index={profile?.role === 'admin' ? 7 : 6}>
+        {/* Role Management Tab (Owners and Admins) */}
+        {(roleName === 'owner' || roleName === 'admin') && (
+          <TabPanel value={activeTab} index={roleName === 'admin' ? 7 : 6}>
             <Stack spacing={3}>
+              {roleError && (
+                <Alert severity="error" onClose={() => setRoleError('')}>
+                  {roleError}
+                </Alert>
+              )}
+              
+              {roleSuccess && (
+                <Alert severity="success" onClose={() => setRoleSuccess('')}>
+                  {roleSuccess}
+                </Alert>
+              )}
+
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="h6">
-                  Contact Information
+                  Custom Roles
                 </Typography>
                 <Button
                   variant="contained"
-                  startIcon={<SaveIcon />}
-                  onClick={handleContactSave}
-                  disabled={!contactChanged}
+                  startIcon={<AddIcon />}
+                  onClick={() => openRoleDialog()}
                 >
-                  Save Changes
+                  Create New Role
                 </Button>
               </Box>
 
-              <Alert severity="info">
-                <Typography variant="body2">
-                  This contact information will be displayed on your public contact page and used for customer inquiries.
-                </Typography>
-              </Alert>
-
-              <Grid container spacing={3}>
-                {/* Basic Contact Info */}
-                <Grid item xs={12} md={6}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="h6" gutterBottom>
-                        Basic Information
-                      </Typography>
-                      
-                      <TextField
-                        fullWidth
-                        label="Contact Email"
-                        type="email"
-                        value={contactInfo.email}
-                        onChange={(e) => handleContactChange('email', e.target.value)}
-                        sx={{ mb: 2 }}
-                        helperText="Primary contact email for customers"
-                      />
-                      
-                      <TextField
-                        fullWidth
-                        label="Phone Number"
-                        value={contactInfo.phone}
-                        onChange={(e) => handleContactChange('phone', e.target.value)}
-                        sx={{ mb: 2 }}
-                        helperText="Business phone number"
-                      />
-                      
-                      <TextField
-                        fullWidth
-                        label="Business Address"
-                        multiline
-                        rows={3}
-                        value={contactInfo.address}
-                        onChange={(e) => handleContactChange('address', e.target.value)}
-                        helperText="Full business address"
-                      />
-                    </CardContent>
-                  </Card>
-                </Grid>
-
-                {/* Business Hours */}
-                <Grid item xs={12} md={6}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="h6" gutterBottom>
-                        Business Hours
-                      </Typography>
-                      
-                      {Object.entries(contactInfo.businessHours).map(([day, hours]) => (
-                        <Box key={day} sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                          <Typography variant="body2" sx={{ minWidth: 80, textTransform: 'capitalize' }}>
-                            {day}:
+              {roles.length === 0 ? (
+                <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    No custom roles found. Create your first role to get started.
+                  </Typography>
+                </Box>
+              ) : (
+                <Box>
+                  {roles.map((role) => (
+                    <Paper key={role.id} sx={{ p: 2, mb: 2 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                            <AdminPanelSettingsIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                            <Typography variant="subtitle1">
+                              {role.name}
+                            </Typography>
+                          </Box>
+                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                            {role.description}
                           </Typography>
-                          <TextField
-                            size="small"
-                            value={hours}
-                            onChange={(e) => handleBusinessHoursChange(day, e.target.value)}
-                            sx={{ flexGrow: 1 }}
-                          />
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                            {role.permissions?.map((permission) => (
+                              <Chip
+                                key={permission}
+                                label={permission}
+                                size="small"
+                                color="primary"
+                                variant="outlined"
+                              />
+                            ))}
+                          </Box>
                         </Box>
-                      ))}
-                    </CardContent>
-                  </Card>
-                </Grid>
-
-                {/* Preview */}
-                <Grid item xs={12}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="h6" gutterBottom>
-                        Preview
-                      </Typography>
-                      <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
-                        <Typography variant="body2" sx={{ mb: 1 }}>
-                          <strong>Email:</strong> {contactInfo.email}
-                        </Typography>
-                        <Typography variant="body2" sx={{ mb: 1 }}>
-                          <strong>Phone:</strong> {contactInfo.phone}
-                        </Typography>
-                        <Typography variant="body2" sx={{ mb: 2 }}>
-                          <strong>Address:</strong> {contactInfo.address}
-                        </Typography>
-                        <Typography variant="body2" sx={{ mb: 1 }}>
-                          <strong>Business Hours:</strong>
-                        </Typography>
-                        {Object.entries(contactInfo.businessHours).map(([day, hours]) => (
-                          <Typography key={day} variant="body2" sx={{ ml: 2 }}>
-                            {day.charAt(0).toUpperCase() + day.slice(1)}: {hours}
-                          </Typography>
-                        ))}
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <IconButton
+                            size="small"
+                            onClick={() => openRoleDialog(role)}
+                            color="primary"
+                          >
+                            <EditIcon />
+                          </IconButton>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleDeleteRole(role.id, role.name)}
+                            color="error"
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </Box>
                       </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
+                    </Paper>
+                  ))}
+                </Box>
+              )}
             </Stack>
           </TabPanel>
         )}
+
+
 
         {/* Create Invite Dialog */}
         <Dialog
@@ -1181,9 +1316,11 @@ export default function Settings() {
                     onChange={(e) => setNewInvite({ ...newInvite, role: e.target.value })}
                     label="Role"
                   >
-                    <MenuItem value="user">User</MenuItem>
-                    <MenuItem value="manager">Manager</MenuItem>
-                    <MenuItem value="admin">Admin</MenuItem>
+                    {roles.map((role) => (
+                      <MenuItem key={role.id} value={role.id}>
+                        {role.name}
+                      </MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
               </Grid>
@@ -1207,6 +1344,75 @@ export default function Settings() {
               startIcon={inviteLoading ? <CircularProgress size={20} /> : <AddIcon />}
             >
               Send Invite
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Role Management Dialog */}
+        <Dialog
+          open={roleDialog}
+          onClose={() => setRoleDialog(false)}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogTitle>
+            <Typography variant="h6">
+              {editingRole?.id ? 'Edit Role' : 'Create New Role'}
+            </Typography>
+          </DialogTitle>
+          <DialogContent>
+            <Grid container spacing={2} sx={{ mt: 1 }}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Role Name"
+                  value={editingRole?.name || ''}
+                  onChange={(e) => setEditingRole({ ...editingRole, name: e.target.value })}
+                  required
+                  helperText="Enter a descriptive name for this role"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Description"
+                  value={editingRole?.description || ''}
+                  onChange={(e) => setEditingRole({ ...editingRole, description: e.target.value })}
+                  required
+                  multiline
+                  rows={3}
+                  helperText="Describe what this role is for"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>
+                  Permissions
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {allPermissions.map(permission => (
+                    <Chip
+                      key={permission}
+                      label={permission}
+                      clickable
+                      color={editingRole?.permissions?.includes(permission) ? 'primary' : 'default'}
+                      onClick={() => handlePermissionToggle(permission)}
+                      onDelete={editingRole?.permissions?.includes(permission) ? () => handlePermissionToggle(permission) : undefined}
+                    />
+                  ))}
+                </Box>
+              </Grid>
+            </Grid>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setRoleDialog(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={editingRole?.id ? handleUpdateRole : handleCreateRole}
+              variant="contained"
+              disabled={roleLoading}
+            >
+              {roleLoading ? 'Saving...' : (editingRole?.id ? 'Update Role' : 'Create Role')}
             </Button>
           </DialogActions>
         </Dialog>

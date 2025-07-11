@@ -26,7 +26,8 @@ import {
   DialogTitle,
   DialogContent,
   DialogContentText,
-  DialogActions
+  DialogActions,
+  Grid
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
@@ -40,6 +41,7 @@ import * as XLSX from 'xlsx';
 import { supabase } from '../supabase/client';
 import { updateDaysAtLocation } from '../utils/daysAtLocationUpdater';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 
 const columns = [
   { label: 'Barcode', key: 'barcode_number' },
@@ -54,6 +56,7 @@ const columns = [
 export default function BottleManagement() {
   console.log('=== BOTTLE MANAGEMENT COMPONENT RENDERING ===');
   
+  const { profile: userProfile, organization } = useAuth();
   const [bottles, setBottles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
@@ -76,66 +79,18 @@ export default function BottleManagement() {
     description: ''
   });
   const [editBottle, setEditBottle] = useState({});
-  const [userProfile, setUserProfile] = useState(null);
-  const [organization, setOrganization] = useState(null);
   const [updatingDays, setUpdatingDays] = useState(false);
   const [lastUpdateTime, setLastUpdateTime] = useState(null);
   const fileInputRef = useRef();
   const navigate = useNavigate();
+  const [locations, setLocations] = useState([]);
 
   console.log('BottleManagement state initialized');
 
   useEffect(() => {
     console.log('=== LOADING USER PROFILE AND ORGANIZATION ===');
     
-    const loadUserData = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        console.log('Current user:', user);
-        
-        if (user) {
-          const { data: profile, error: profileError } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', user.id)
-            .single();
-          
-          if (profileError) {
-            console.error('Error loading profile:', profileError);
-          } else {
-            console.log('User profile loaded:', profile);
-            setUserProfile(profile);
-            
-            if (profile.organization_id) {
-              const { data: org, error: orgError } = await supabase
-                .from('organizations')
-                .select('*')
-                .eq('id', profile.organization_id)
-                .single();
-              
-              if (orgError) {
-                console.error('Error loading organization:', orgError);
-              } else {
-                console.log('Organization loaded:', org);
-                setOrganization(org);
-              }
-            } else {
-              console.log('No organization_id in profile');
-            }
-          }
-        } else {
-          console.log('No authenticated user found');
-        }
-      } catch (error) {
-        console.error('Error in loadUserData:', error);
-      }
-    };
-    
-    loadUserData();
-  }, []);
-
-  useEffect(() => {
-    if (userProfile) {
+    if (userProfile && userProfile.organization_id) {
       fetchOrganization();
       fetchBottles();
       setDefaultLocations(); // Set default locations for bottles without location
@@ -178,40 +133,17 @@ export default function BottleManagement() {
     handleUpdateDaysAtLocation();
   }, []);
 
-  const fetchUserProfile = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: profile, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single();
-        
-        if (error) throw error;
-        
-        if (!profile?.organization_id) {
-          setSnackbar({ 
-            open: true, 
-            message: 'Your account is not assigned to an organization. Please contact your administrator.', 
-            severity: 'warning' 
-          });
-        }
-        
-        setUserProfile(profile);
-      }
-    } catch (error) {
-      console.error('Error fetching user profile:', error);
-      setSnackbar({ 
-        open: true, 
-        message: 'Failed to load user profile: ' + error.message, 
-        severity: 'error' 
-      });
-    }
-  };
+  useEffect(() => {
+    const fetchLocations = async () => {
+      const { data, error } = await supabase.from('locations').select('name');
+      if (!error && data) setLocations(data.map(loc => loc.name.toLowerCase()));
+    };
+    fetchLocations();
+  }, []);
 
   const fetchOrganization = async () => {
     if (!userProfile?.organization_id) {
+      console.log('NO ORG ERROR: userProfile is', userProfile);
       setSnackbar({ 
         open: true, 
         message: 'No organization assigned to your account. Please contact your administrator.', 
@@ -229,7 +161,7 @@ export default function BottleManagement() {
       
       if (error) throw error;
       
-      setOrganization(org);
+      // setOrganization(org);
     } catch (error) {
       console.error('Error fetching organization:', error);
       setSnackbar({ 
@@ -242,6 +174,7 @@ export default function BottleManagement() {
 
   const fetchBottles = async () => {
     if (!userProfile?.organization_id) {
+      console.log('NO ORG ERROR: userProfile is', userProfile);
       setSnackbar({ 
         open: true, 
         message: 'No organization assigned to your account. Please contact your administrator.', 
@@ -320,6 +253,8 @@ export default function BottleManagement() {
       return;
     }
 
+    console.log('userProfile at delete:', userProfile);
+
     setDeleting(true);
     try {
       console.log('=== DELETING ALL BOTTLES AND RENTALS ===');
@@ -386,6 +321,8 @@ export default function BottleManagement() {
       return;
     }
 
+    console.log('userProfile at deleteSelected:', userProfile);
+
     setDeleting(true);
     try {
       console.log('=== DELETING SELECTED BOTTLES AND RENTALS ===');
@@ -446,6 +383,8 @@ export default function BottleManagement() {
       });
       return;
     }
+
+    console.log('userProfile at deleteSingle:', userProfile);
 
     try {
       console.log('=== DELETING SINGLE BOTTLE AND RENTAL ===');
@@ -579,198 +518,351 @@ export default function BottleManagement() {
 
   const handleFileUpload = async (event) => {
     console.log('=== FILE UPLOAD STARTED ===');
+    console.log('User profile:', userProfile);
+    console.log('Organization ID:', userProfile?.organization_id);
     
     if (!userProfile?.organization_id) {
-      console.log('No organization_id found in userProfile:', userProfile);
-      setSnackbar({ 
-        open: true, 
-        message: 'No organization assigned to user', 
-        severity: 'error' 
-      });
+      setSnackbar({ open: true, message: 'No organization assigned to user', severity: 'error' });
       return;
     }
-
     const file = event.target.files[0];
-    if (!file) {
-      console.log('No file selected');
-      return;
-    }
-
-    console.log('File selected:', file.name, 'Size:', file.size);
+    if (!file) return;
     setImporting(true);
-    
     try {
       const data = await readExcelFile(file);
-      console.log('Excel data parsed:', data.length, 'rows');
+      console.log('Excel data loaded:', data.length, 'rows');
       console.log('First row sample:', data[0]);
       
-      // 1. Extract and create customers first
+      // Fetch all location names (case-insensitive)
+      const { data: locationRows, error: locError } = await supabase.from('locations').select('name');
+      const locationNames = (locationRows || []).map(l => l.name.toLowerCase());
+      console.log('Available locations:', locationNames);
+      
+      // Step 1: Collect all unique ownership values from the data
+      const allOwnershipNames = Array.from(new Set(data.map(row => getOwnershipValue(row)).filter(Boolean)));
+
+      // Step 1.5: Insert all unique ownership values into the owners table for this organization (skip duplicates)
+      if (allOwnershipNames.length > 0) {
+        // Fetch existing owners for this org
+        const { data: existingOwners, error: fetchOwnersError } = await supabase
+          .from('owners')
+          .select('name')
+          .eq('organization_id', userProfile.organization_id);
+        if (fetchOwnersError) {
+          console.error('FETCH OWNERS ERROR:', fetchOwnersError);
+        }
+        const existingNames = new Set((existingOwners || []).map(o => o.name.trim().toLowerCase()));
+        const missingOwners = allOwnershipNames.filter(name => !existingNames.has(name.toLowerCase()));
+        console.log('IMPORT DEBUG - missingOwners:', missingOwners);
+        if (missingOwners.length > 0) {
+          const { error: insertError } = await supabase
+            .from('owners')
+            .insert(missingOwners.map(name => ({ name, organization_id: userProfile.organization_id })));
+          if (insertError) {
+            console.error('IMPORT DEBUG - OWNER INSERT ERROR:', insertError);
+          } else {
+            console.log('IMPORT DEBUG - Successfully inserted owners:', missingOwners);
+          }
+        } else {
+          console.log('IMPORT DEBUG - No missing owners to insert.');
+        }
+      }
+      // Step 2: Ensure all ownership values exist in the owners table
+      const { data: existingOwners, error: fetchOwnersError } = await supabase
+        .from('owners')
+        .select('*')
+        .eq('organization_id', userProfile.organization_id);
+      if (fetchOwnersError) throw fetchOwnersError;
+      const existingOwnerNames = new Set((existingOwners || []).map(o => (o.name || '').trim().toLowerCase()));
+      const missingOwners = allOwnershipNames.filter(name => !existingOwnerNames.has(name.toLowerCase()));
+      if (missingOwners.length > 0) {
+        // Insert all missing owners for this organization (no 'type' column)
+        await supabase
+          .from('owners')
+          .insert(missingOwners.map(name => ({ name, organization_id: userProfile.organization_id })));
+      }
+      // Step 3: Fetch all owners again to get their IDs
+      const { data: allOwners, error: allOwnersError } = await supabase
+        .from('owners')
+        .select('*')
+        .eq('organization_id', userProfile.organization_id);
+      if (allOwnersError) throw allOwnersError;
+      const ownershipNameToOwner = {};
+      allOwners.forEach(o => { if (o.name) ownershipNameToOwner[o.name.trim().toLowerCase()] = o; });
+      
+      // Fetch all owners for the organization before processing rows
+      const { data: allOwnersList, error: ownersError } = await supabase
+        .from('owners')
+        .select('*')
+        .eq('organization_id', userProfile.organization_id);
+      if (ownersError) throw ownersError;
+      let ownersList = allOwnersList || [];
+      
+      // Build customer map using existing customer IDs from the file
       const customerMap = {};
-      for (let i = 0; i < data.length; i++) {
-        const row = data[i];
-        const customerId = row.assigned_customer;
-        const customerName = row.customer_name;
+      const customerIdMap = {};
+      
+      for (const row of data) {
+        const customerName = row['Customer']?.trim() || row['customer_name']?.trim();
+        // Check both original row data and mapped data for customer ID
+        const customerId = row['CustomerListID']?.trim() || row['Customer ID']?.trim() || row['CustomerID']?.trim() || 
+                          row['Customer #']?.trim() || row['Customer Number']?.trim() || row['CUSTOMER_NUMBER']?.trim() ||
+                          row['assigned_customer']?.trim();
         
-        if (customerId && customerName) {
-          customerMap[customerId] = customerName;
+        console.log('Processing row with customer:', customerName, 'ID:', customerId);
+        
+        if (customerName && !locationNames.includes(customerName.toLowerCase())) {
+          customerMap[customerName] = true;
+          if (customerId) {
+            customerIdMap[customerName.toLowerCase()] = customerId;
+            console.log('Using existing customer ID:', customerId, 'for customer:', customerName);
+          }
+          console.log('Added to customer map:', customerName);
         }
       }
       
-      console.log('Customer map extracted:', customerMap);
+      console.log('Customer map:', customerMap);
+      console.log('Customer ID map:', customerIdMap);
+      console.log('Customer names to process:', Object.keys(customerMap));
       
-      // 2. Check existing customers and create missing ones
-      const customerIds = Object.keys(customerMap);
-      if (customerIds.length > 0) {
-        console.log('Checking for existing customers:', customerIds);
+      // Check/create missing customers using existing IDs from file
+      const customerNames = Object.keys(customerMap);
+      let customersList = [];
+      let toCreate = [];
+      
+      if (customerNames.length > 0) {
+        console.log('🔍 Checking for existing customers...');
         
-        // Get existing customers
-        const { data: existingCustomers, error: custError } = await supabase
+        // Get existing customers by name (case-insensitive)
+        const { data: existingCustomers, error: existingError } = await supabase
           .from('customers')
           .select('*')
-          .in('CustomerListID', customerIds);
+          .eq('organization_id', userProfile.organization_id);
         
-        if (custError) {
-          console.error('Error checking existing customers:', custError);
+        if (existingError) {
+          console.error('Error fetching existing customers:', existingError);
+          throw existingError;
+        }
+        
+        // Filter existing customers by name (case-insensitive)
+        const existingCustomersFiltered = (existingCustomers || []).filter(customer => 
+          customerNames.some(name => customer.name.toLowerCase() === name.toLowerCase())
+        );
+        
+        console.log('✅ Found existing customers:', existingCustomersFiltered.map(c => c.name));
+        customersList = existingCustomersFiltered;
+        
+        const existingNames = customersList.map(c => c.name.toLowerCase());
+        toCreate = customerNames.filter(n => !existingNames.includes(n.toLowerCase()));
+        
+        console.log('📝 Customers to create:', toCreate);
+        console.log('🔄 Customers to reuse:', existingNames);
+        
+        if (toCreate.length > 0) {
+          console.log('🆕 Creating new customers with existing IDs from file:', toCreate);
+          
+          // Use existing CustomerListID from file, or generate if not present
+          const inserts = toCreate.map((name) => {
+            const existingId = customerIdMap[name.toLowerCase()];
+            const customerId = existingId || `1370000-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            
+            console.log(`Creating customer "${name}" with ID: ${customerId} (${existingId ? 'from file' : 'generated'})`);
+            
+            return {
+              CustomerListID: customerId,
+              name: name,
+              organization_id: userProfile.organization_id,
+              customer_number: customerId,
+              barcode: `*%${customerId}*`,
+              customer_barcode: `*%${customerId}*`,
+              AccountNumber: customerId
+            };
+          });
+          
+          console.log('💾 Inserting new customers:', inserts);
+          const { data: insertResult, error: insertError } = await supabase.from('customers').insert(inserts);
+          
+          if (insertError) {
+            console.error('❌ Error creating customers:', insertError);
+            throw insertError;
+          }
+          
+          console.log('✅ Successfully created customers:', insertResult);
+          
+          // Add newly created customers to the list
+          customersList = [...customersList, ...(insertResult || [])];
         } else {
-          console.log('Existing customers found:', existingCustomers);
-          const existingIds = (existingCustomers || []).map(c => c.CustomerListID);
-          const missingCustomers = customerIds.filter(id => !existingIds.includes(id));
-          
-          console.log('Missing customers to create:', missingCustomers);
-          
-          if (missingCustomers.length > 0) {
-            console.log('Creating missing customers:', missingCustomers);
-            
-            const customersToInsert = missingCustomers.map(id => ({
-              CustomerListID: id,
-              name: customerMap[id],
-              organization_id: userProfile.organization_id
-            }));
-            
-            console.log('Customers to insert:', customersToInsert);
-            
-            const { error: insertError } = await supabase
-              .from('customers')
-              .insert(customersToInsert);
-            
-            if (insertError) {
-              console.error('Error creating customers:', insertError);
-              setSnackbar({ 
-                open: true, 
-                message: 'Warning: Some customers could not be created: ' + insertError.message, 
-                severity: 'warning' 
-              });
-            } else {
-              console.log('Successfully created customers:', missingCustomers);
-            }
+          console.log('✅ All customers already exist - no new customers created');
+        }
+      }
+      
+      // Map for quick lookup - prioritize existing IDs from file
+      const customerNameToId = {};
+      for (const c of customersList) {
+        // Use existing ID from file if available, otherwise use from database
+        const existingId = customerIdMap[c.name.toLowerCase()];
+        customerNameToId[c.name.toLowerCase()] = existingId || c.CustomerListID;
+      }
+      console.log('Customer name to ID mapping:', customerNameToId);
+      // Prepare bottles and rentals using existing customer IDs from file
+      const bottlesToInsert = [];
+      const rentalsToInsert = [];
+      for (const row of data) {
+        // Always set owner_name to the value from the Ownership column (case-insensitive)
+        row.owner_name = getOwnershipValue(row);
+        // Debug log to verify owner_name and row content
+        console.log('IMPORT DEBUG - owner_name:', row.owner_name, 'ROW:', row);
+        // Always use owners table for owner_id
+        const ownerObj = ownershipNameToOwner[row.owner_name.trim().toLowerCase()];
+        row.owner_type = ownerObj?.type || 'external_company';
+        row.owner_id = ownerObj?.id || null;
+        row.owner_name = ownerObj?.name || row.owner_name;
+        const customerName = row['Customer']?.trim();
+        // Check both original row data and mapped data for customer ID
+        const customerId = row['CustomerListID']?.trim() || row['Customer ID']?.trim() || row['CustomerID']?.trim() || 
+                          row['Customer #']?.trim() || row['Customer Number']?.trim() || row['CUSTOMER_NUMBER']?.trim() ||
+                          row['assigned_customer']?.trim();
+        const isCustomer = customerName && !locationNames.includes(customerName.toLowerCase());
+        
+        console.log(`Processing bottle: ${row.barcode_number} | Customer: ${customerName} | Customer ID: ${customerId}`);
+        
+        // Ownership logic
+        if (row.owner_name.toUpperCase() === 'CUSTOMER OWNED') {
+          row.owner_type = 'customer';
+          // owner_name already set above
+          row.owner_id = isCustomer ? (customerId || customerNameToId[customerName.toLowerCase()]) : null;
+          if (isCustomer) {
+            row.assigned_customer = customerId || customerNameToId[customerName.toLowerCase()];
+            console.log(`✅ Customer owned bottle ${row.barcode_number} assigned to customer: ${row.assigned_customer}`);
+          }
+          // No rental record
+        } else if (row.owner_name.toLowerCase() === 'weldcor') {
+          row.owner_type = 'organization';
+          // owner_name already set above
+          row.owner_id = userProfile.organization_id;
+          // Rental if customer
+          if (isCustomer) {
+            row.assigned_customer = customerId || customerNameToId[customerName.toLowerCase()];
+            console.log(`✅ WeldCor owned bottle ${row.barcode_number} assigned to customer: ${row.assigned_customer}`);
+            rentalsToInsert.push({
+              customer_id: customerId || customerNameToId[customerName.toLowerCase()],
+              bottle_id: row.id, // will update after insert
+              rental_start_date: new Date().toISOString().split('T')[0],
+              rental_type: 'monthly',
+              rental_amount: 10,
+              location: row.location || 'SASKATOON',
+              tax_code: 'pst+gst',
+              tax_rate: 0.11
+            });
+          }
+        } else if (row.owner_name.toLowerCase() === 'central welding') {
+          row.owner_type = 'external';
+          // owner_name already set above
+          row.owner_id = null;
+          // Rental if customer
+          if (isCustomer) {
+            row.assigned_customer = customerId || customerNameToId[customerName.toLowerCase()];
+            console.log(`✅ Central Welding owned bottle ${row.barcode_number} assigned to customer: ${row.assigned_customer}`);
+            rentalsToInsert.push({
+              customer_id: customerId || customerNameToId[customerName.toLowerCase()],
+              bottle_id: row.id, // will update after insert
+              rental_start_date: new Date().toISOString().split('T')[0],
+              rental_type: 'monthly',
+              rental_amount: 10,
+              location: row.location || 'SASKATOON',
+              tax_code: 'pst+gst',
+              tax_rate: 0.11
+            });
+          }
+        } else if (row.owner_name) {
+          // Try to find owner in owners table (case-insensitive)
+          let owner = ownersList.find(o => o.name.trim().toLowerCase() === row.owner_name.toLowerCase());
+          if (!owner) {
+            // Create owner if not found
+            const { data: newOwner, error: newOwnerError } = await supabase
+              .from('owners')
+              .insert({ name: row.owner_name, organization_id: userProfile.organization_id })
+              .select()
+              .single();
+            if (newOwnerError) throw newOwnerError;
+            owner = newOwner;
+            ownersList.push(owner);
+          }
+          // Ensure owner_id is always set to the actual id from the owners table
+          row.owner_type = owner.type || 'external_company';
+          row.owner_id = owner.id;
+          row.owner_name = owner.name;
+        } else {
+          row.owner_type = 'organization';
+          // owner_name already set above (will be empty string)
+          row.owner_id = userProfile.organization_id;
+          if (isCustomer) {
+            row.assigned_customer = customerId || customerNameToId[customerName.toLowerCase()];
+            console.log(`✅ Default owned bottle ${row.barcode_number} assigned to customer: ${row.assigned_customer}`);
+            rentalsToInsert.push({
+              customer_id: customerId || customerNameToId[customerName.toLowerCase()],
+              bottle_id: row.id, // will update after insert
+              rental_start_date: new Date().toISOString().split('T')[0],
+              rental_type: 'monthly',
+              rental_amount: 10,
+              location: row.location || 'SASKATOON',
+              tax_code: 'pst+gst',
+              tax_rate: 0.11
+            });
           }
         }
+        bottlesToInsert.push(row);
       }
-      
-      // 3. Insert bottles (the trigger will automatically set organization_id)
-      console.log('Inserting bottles:', data.length, 'bottles');
-      const { data: insertedBottles, error } = await supabase
-        .from('bottles')
-        .insert(data)
-        .select();
-      
-      if (error) {
-        console.error('Error inserting bottles:', error);
-        throw error;
-      }
-      
-      console.log('Bottles inserted successfully:', insertedBottles);
-      
-      // 4. Create rental records for ALL bottles (both customer-assigned and location-assigned)
-      console.log('Creating rental records for all bottles:', insertedBottles.length);
-      
-      const rentalRecords = insertedBottles.map(bottle => {
-        // Determine if this is a customer-assigned or location-assigned bottle
-        const isCustomerAssigned = bottle.assigned_customer && bottle.assigned_customer !== '';
-        const isLocationAssigned = bottle.location && bottle.location !== '';
-        
-        let customerId = null;
-        let location = 'SASKATOON'; // Default location
-        
-        if (isCustomerAssigned) {
-          customerId = bottle.assigned_customer;
-          location = bottle.location || 'SASKATOON';
-        } else if (isLocationAssigned) {
-          // For location-assigned bottles, create rental with null customer_id
-          customerId = null;
-          location = bottle.location;
-        } else {
-          // For bottles with no assignment, use default location
-          customerId = null;
-          location = 'SASKATOON';
-        }
-        
-        return {
-          customer_id: customerId,
-          bottle_id: bottle.id,
-          rental_start_date: new Date().toISOString().split('T')[0], // Today's date
-          rental_type: 'monthly',
-          rental_amount: 10, // Default rental amount
-          location: location,
-          tax_code: 'pst+gst',
-          tax_rate: 0.11 // Default tax rate
-        };
-      });
-      
-      console.log('Rental records to create:', rentalRecords);
-      
-      const { error: rentalError } = await supabase
-        .from('rentals')
-        .insert(rentalRecords);
-      
-      if (rentalError) {
-        console.error('Error creating rental records:', rentalError);
-        setSnackbar({ 
-          open: true, 
-          message: 'Warning: Bottles imported but rental records could not be created: ' + rentalError.message, 
-          severity: 'warning' 
-        });
+      // Insert bottles
+      const { data: insertedBottles, error } = await supabase.from('bottles').insert(bottlesToInsert).select();
+      if (error) throw error;
+      // Debug: Fetch and log all owners for this organization after import
+      const { data: allOwnersAfter, error: ownersAfterError } = await supabase
+        .from('owners')
+        .select('*')
+        .eq('organization_id', userProfile.organization_id);
+      if (ownersAfterError) {
+        console.error('IMPORT DEBUG - Error fetching owners after import:', ownersAfterError);
       } else {
-        console.log('Rental records created successfully');
-        
-        // Ensure all bottles have the correct location set based on their rental location
-        for (const rentalRecord of rentalRecords) {
-          if (rentalRecord.location && rentalRecord.bottle_id) {
-            await supabase
-              .from('bottles')
-              .update({ location: rentalRecord.location })
-              .eq('id', rentalRecord.bottle_id);
-          }
+        console.log('IMPORT DEBUG - All owners for org after import:', allOwnersAfter);
+      }
+      // Update rental records with bottle IDs
+      const bottleIdMap = {};
+      for (let i = 0; i < bottlesToInsert.length; i++) {
+        if (insertedBottles[i]) bottleIdMap[i] = insertedBottles[i].id;
+      }
+      for (let i = 0; i < rentalsToInsert.length; i++) {
+        rentalsToInsert[i].bottle_id = bottleIdMap[i];
+      }
+      if (rentalsToInsert.length > 0) {
+        const { error: rentalError } = await supabase.from('rentals').insert(rentalsToInsert);
+        if (rentalError) {
+          setSnackbar({ open: true, message: 'Warning: Bottles imported but rental records could not be created: ' + rentalError.message, severity: 'warning' });
         }
-        
-        // Debug: Check what rental records were actually created
-        const { data: createdRentals, error: checkError } = await supabase
-          .from('rentals')
-          .select('*')
-          .in('bottle_id', insertedBottles.map(b => b.id))
-          .limit(5);
-        
-        console.log('Created rental records sample:', createdRentals, checkError);
+      }
+      // Create summary message
+      const existingCustomersCount = customerNames.length - toCreate.length;
+      const newCustomersCount = toCreate.length;
+      const bottlesCount = bottlesToInsert.length;
+      const rentalsCount = rentalsToInsert.length;
+      
+      let summaryMessage = `✅ ${bottlesCount} bottles imported successfully.`;
+      if (existingCustomersCount > 0) {
+        summaryMessage += ` 🔄 ${existingCustomersCount} existing customers reused.`;
+      }
+      if (newCustomersCount > 0) {
+        summaryMessage += ` 🆕 ${newCustomersCount} new customers created.`;
+      }
+      if (rentalsCount > 0) {
+        summaryMessage += ` 📋 ${rentalsCount} rental records created.`;
       }
       
-      setSnackbar({ 
-        open: true, 
-        message: `${data.length} bottles imported successfully and ${rentalRecords.length} rental records created`, 
-        severity: 'success' 
-      });
+      setSnackbar({ open: true, message: summaryMessage, severity: 'success' });
       fetchBottles();
     } catch (error) {
-      console.error('Error importing bottles:', error);
-      setSnackbar({ 
-        open: true, 
-        message: 'Failed to import bottles: ' + error.message, 
-        severity: 'error' 
-      });
-    } finally {
-      setImporting(false);
-      event.target.value = '';
-      console.log('=== FILE UPLOAD COMPLETED ===');
+      setSnackbar({ open: true, message: 'Failed to import bottles: ' + error.message, severity: 'error' });
     }
+    setImporting(false);
   };
 
   const readExcelFile = (file) => {
@@ -795,7 +887,7 @@ export default function BottleManagement() {
             const mapped = {
               barcode_number: row['Barcode'] || row['barcode_number'] || row['Barcode Number'] || row['BARCODE'] || row['BARCODE_NUMBER'] || row['Barcode Number'] || '',
               serial_number: (row['Serial Number'] || row['serial_number'] || row['Serial'] || row['SERIAL'] || row['SERIAL_NUMBER'] || row['Serial'] || '').toString().trim(),
-              assigned_customer: row['CustomerListID'] || row['assigned_customer'] || row['Customer ID'] || row['CustomerID'] || row['CUSTOMER_ID'] || '',
+              assigned_customer: row['CustomerListID'] || row['assigned_customer'] || row['Customer ID'] || row['CustomerID'] || row['CUSTOMER_ID'] || row['Customer #'] || row['Customer Number'] || row['CUSTOMER_NUMBER'] || '',
               customer_name: row['Customer'] || row['customer_name'] || row['Customer Name'] || row['CUSTOMER'] || row['CUSTOMER_NAME'] || '',
               location: row['Location'] || row['location'] || row['LOCATION'] || '',
               product_code: row['Product Code'] || row['product_code'] || row['Product'] || row['PRODUCT'] || row['PRODUCT_CODE'] || '',
@@ -804,7 +896,10 @@ export default function BottleManagement() {
               in_house_total: cleanInt(row['In-House Total'] || row['in_house_total'] || row['In House'] || row['IN_HOUSE'] || 0),
               with_customer_total: cleanInt(row['With Customer Total'] || row['with_customer_total'] || row['With Customer'] || row['WITH_CUSTOMER'] || 0),
               lost_total: cleanInt(row['Lost Total'] || row['lost_total'] || row['Lost'] || row['LOST'] || 0),
-              total: cleanInt(row['Total'] || row['total'] || row['TOTAL'] || 0)
+              total: cleanInt(row['Total'] || row['total'] || row['TOTAL'] || 0),
+              owner_type: row['Ownership Type'] || row['ownership_type'] || row['Ownership'] || row['ownership'] || '',
+              owner_id: '',
+              owner_name: '',
             };
             
             // If serial_number is empty after trimming, set to 'Not Set'
@@ -830,14 +925,16 @@ export default function BottleManagement() {
               }
             }
             
-            // Log the first few rows for debugging
+            // Debug: Log the first few rows for debugging
             if (data.indexOf(row) < 3) {
               console.log('Excel row mapping:', {
                 original: row,
                 mapped: mapped,
                 hasCustomer: !!mapped.assigned_customer,
                 hasSerial: !!mapped.serial_number,
-                hasProductCode: !!mapped.product_code
+                hasProductCode: !!mapped.product_code,
+                customerIdFromFile: row['Customer #'] || row['CustomerListID'] || row['Customer ID'],
+                customerNameFromFile: row['Customer'] || row['customer_name']
               });
             }
             
@@ -953,6 +1050,18 @@ export default function BottleManagement() {
     }
   };
 
+  // Helper to get ownership value from a row, case-insensitive
+  function getOwnershipValue(row) {
+    // Find any key that matches 'ownership' case-insensitively and trims spaces
+    const key = Object.keys(row).find(
+      k => k.replace(/\s+/g, '').toLowerCase() === 'ownership'
+    );
+    return key ? (row[key] || '').trim() : '';
+  }
+
+  // Handler to trigger file input for import
+  const handleImport = () => fileInputRef.current?.click();
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -976,6 +1085,8 @@ export default function BottleManagement() {
       </Box>
     );
   }
+
+  console.log('Current userProfile in render:', userProfile);
 
   return (
     <div className="p-6">
@@ -1040,7 +1151,7 @@ export default function BottleManagement() {
               <Button
                 variant="outlined"
                 startIcon={<UploadIcon />}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={handleImport}
                 disabled={importing}
               >
                 {importing ? 'Importing...' : 'Import Excel'}
@@ -1176,7 +1287,25 @@ export default function BottleManagement() {
         <DialogTitle>Edit Bottle</DialogTitle>
         <DialogContent>
           <Box display="flex" flexDirection="column" gap={2} mt={1}>
-            {columns.map((column) => (
+            <Grid container spacing={2}>
+              <Grid item xs={6}>
+                <TextField
+                  label="Location"
+                  value={editBottle.location || ''}
+                  onChange={e => setEditBottle({ ...editBottle, location: e.target.value })}
+                  fullWidth
+                />
+              </Grid>
+              <Grid item xs={6}>
+                <TextField
+                  label="Owner"
+                  value={editBottle.owner_name || ''}
+                  onChange={e => setEditBottle({ ...editBottle, owner_name: e.target.value })}
+                  fullWidth
+                />
+              </Grid>
+            </Grid>
+            {columns.filter(c => c.key !== 'location' && c.key !== 'owner_name').map((column) => (
               <TextField
                 key={column.key}
                 label={column.label}
@@ -1202,7 +1331,25 @@ export default function BottleManagement() {
         <DialogTitle>Add New Bottle</DialogTitle>
         <DialogContent>
           <Box display="flex" flexDirection="column" gap={2} mt={1}>
-            {columns.map((column) => (
+            <Grid container spacing={2}>
+              <Grid item xs={6}>
+                <TextField
+                  label="Location"
+                  value={newBottle.location || ''}
+                  onChange={e => setNewBottle({ ...newBottle, location: e.target.value })}
+                  fullWidth
+                />
+              </Grid>
+              <Grid item xs={6}>
+                <TextField
+                  label="Owner"
+                  value={newBottle.owner_name || ''}
+                  onChange={e => setNewBottle({ ...newBottle, owner_name: e.target.value })}
+                  fullWidth
+                />
+              </Grid>
+            </Grid>
+            {columns.filter(c => c.key !== 'location' && c.key !== 'owner_name').map((column) => (
               <TextField
                 key={column.key}
                 label={column.label}
@@ -1274,8 +1421,25 @@ export default function BottleManagement() {
         open={snackbar.open}
         autoHideDuration={6000}
         onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        sx={{
+          maxWidth: 400,
+          width: 'auto',
+          right: 24,
+          left: 'auto',
+          bottom: 24,
+        }}
+        ContentProps={{
+          sx: {
+            maxWidth: 400,
+            width: 'auto',
+            wordBreak: 'break-word',
+            whiteSpace: 'pre-line',
+            boxSizing: 'border-box',
+          }
+        }}
       >
-        <Alert onClose={handleCloseSnackbar} severity={snackbar.severity}>
+        <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ alignItems: 'center', wordBreak: 'break-word', whiteSpace: 'pre-line' }}>
           {snackbar.message}
         </Alert>
       </Snackbar>

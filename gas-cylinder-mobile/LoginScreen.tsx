@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as AuthSession from 'expo-auth-session';
+import * as SecureStore from 'expo-secure-store';
 
 const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com'; // TODO: Replace with your client ID
 
@@ -66,7 +67,7 @@ export default function LoginScreen() {
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const { handleError, isLoading, withErrorHandling } = useErrorHandler();
-  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword, setShowPassword] = useState(true); // Start with password visible
   const [rememberMe, setRememberMe] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [biometricSupported, setBiometricSupported] = useState(false);
@@ -85,6 +86,11 @@ export default function LoginScreen() {
       if (savedEmail) {
         setEmail(savedEmail);
         setRememberMe(true);
+      }
+      // Load password from SecureStore if Remember Me is checked
+      const savedPassword = await SecureStore.getItemAsync('rememberedPassword');
+      if (savedPassword) {
+        setPassword(savedPassword);
       }
       // Check for biometric support
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
@@ -110,8 +116,10 @@ export default function LoginScreen() {
     }
     if (rememberMe) {
       await AsyncStorage.setItem('rememberedEmail', email);
+      await SecureStore.setItemAsync('rememberedPassword', password);
     } else {
       await AsyncStorage.removeItem('rememberedEmail');
+      await SecureStore.deleteItemAsync('rememberedPassword');
     }
     await withErrorHandling(async () => {
       const { error } = await supabase.auth.signInWithPassword({ 
@@ -267,10 +275,11 @@ export default function LoginScreen() {
           <View style={styles.formContainer}>
             <Text style={styles.label}>{t.email}</Text>
             <TextInput
-              style={[styles.input, emailError && styles.inputError]}
+              style={[styles.input, emailError && styles.inputError, { color: '#000000' }]}
               value={email}
               onChangeText={handleEmailChange}
               placeholder={t.email}
+              placeholderTextColor="#666666"
               autoCapitalize="none"
               keyboardType="email-address"
               autoComplete="email"
@@ -281,17 +290,22 @@ export default function LoginScreen() {
             <Text style={styles.label}>{t.password}</Text>
             <View style={{ position: 'relative' }}>
               <TextInput
-                style={[styles.input, passwordError && styles.inputError, { paddingRight: 48 }]}
+                style={[styles.input, passwordError && styles.inputError, { paddingRight: 48, color: '#000000' }]}
                 value={password}
                 onChangeText={handlePasswordChange}
                 placeholder={t.password}
+                placeholderTextColor="#666666"
                 secureTextEntry={!showPassword}
                 autoComplete="password"
                 editable={!isLoading}
+                textContentType="password"
               />
               <TouchableOpacity
                 style={styles.eyeButton}
-                onPress={() => setShowPassword(v => !v)}
+                onPress={() => {
+                  console.log('Password visibility toggled:', !showPassword);
+                  setShowPassword(v => !v);
+                }}
                 activeOpacity={0.7}
               >
                 <Ionicons
@@ -443,6 +457,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: '#fff',
     marginBottom: 8,
+    color: '#000000',
   },
   inputError: {
     borderColor: '#dc3545',

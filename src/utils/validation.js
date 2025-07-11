@@ -1,178 +1,127 @@
 /**
- * Input validation utilities for the gas cylinder application
+ * Comprehensive validation utilities for the gas cylinder application
  */
 
-/**
- * Email validation
- * @param {string} email - Email to validate
- * @returns {boolean} True if valid email
- */
-export const isValidEmail = (email) => {
+// Email validation
+export const validateEmail = (email) => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email);
 };
 
-/**
- * Phone number validation (basic)
- * @param {string} phone - Phone number to validate
- * @returns {boolean} True if valid phone number
- */
-export const isValidPhone = (phone) => {
+// Phone number validation
+export const validatePhone = (phone) => {
   const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
-  return phoneRegex.test(phone.replace(/[\s\-\(\)]/g, ''));
+  return phoneRegex.test(phone.replace(/\s/g, ''));
 };
 
-/**
- * Customer ID validation
- * @param {string} customerId - Customer ID to validate
- * @returns {boolean} True if valid customer ID
- */
-export const isValidCustomerId = (customerId) => {
-  return customerId && customerId.trim().length > 0 && /^[A-Z0-9\-_]+$/i.test(customerId);
+// Barcode validation
+export const validateBarcode = (barcode) => {
+  if (!barcode || typeof barcode !== 'string') return false;
+  return barcode.length >= 8 && barcode.length <= 50;
 };
 
-/**
- * Barcode validation
- * @param {string} barcode - Barcode to validate
- * @returns {boolean} True if valid barcode
- */
-export const isValidBarcode = (barcode) => {
-  return barcode && barcode.trim().length > 0 && /^[A-Z0-9\-_]+$/i.test(barcode);
+// Serial number validation
+export const validateSerialNumber = (serial) => {
+  if (!serial || typeof serial !== 'string') return false;
+  return serial.length >= 3 && serial.length <= 20;
 };
 
-/**
- * Serial number validation
- * @param {string} serialNumber - Serial number to validate
- * @returns {boolean} True if valid serial number
- */
-export const isValidSerialNumber = (serialNumber) => {
-  return serialNumber && serialNumber.trim().length > 0 && /^[A-Z0-9\-_]+$/i.test(serialNumber);
+// Customer ID validation
+export const validateCustomerId = (customerId) => {
+  if (!customerId || typeof customerId !== 'string') return false;
+  // Check if it matches the expected format (e.g., 1370000-XXXXXXXXX)
+  const customerIdRegex = /^1370000-\d+(-[a-zA-Z0-9]+)?$/;
+  return customerIdRegex.test(customerId);
 };
 
-/**
- * Required field validation
- * @param {any} value - Value to validate
- * @param {string} fieldName - Name of the field for error message
- * @returns {Object} Validation result
- */
-export const validateRequired = (value, fieldName) => {
-  const isValid = value !== null && value !== undefined && value !== '';
-  return {
-    isValid,
-    error: isValid ? null : `${fieldName} is required`
-  };
+// Product code validation
+export const validateProductCode = (productCode) => {
+  if (!productCode || typeof productCode !== 'string') return false;
+  const validCodes = ['PROPANE', 'OXYGEN', 'NITROGEN', 'ARGON', 'CO2', 'ACETYLENE', 'HELIUM'];
+  return validCodes.includes(productCode.toUpperCase()) || productCode.length <= 20;
 };
 
-/**
- * String length validation
- * @param {string} value - Value to validate
- * @param {number} minLength - Minimum length
- * @param {number} maxLength - Maximum length
- * @param {string} fieldName - Name of the field for error message
- * @returns {Object} Validation result
- */
-export const validateStringLength = (value, minLength, maxLength, fieldName) => {
-  if (!value) {
-    return { isValid: false, error: `${fieldName} is required` };
-  }
-  
-  const length = value.trim().length;
-  
-  if (minLength && length < minLength) {
-    return { isValid: false, error: `${fieldName} must be at least ${minLength} characters` };
-  }
-  
-  if (maxLength && length > maxLength) {
-    return { isValid: false, error: `${fieldName} must be no more than ${maxLength} characters` };
-  }
-  
-  return { isValid: true, error: null };
+// Location validation
+export const validateLocation = (location) => {
+  if (!location || typeof location !== 'string') return false;
+  return location.length >= 2 && location.length <= 50;
 };
 
-/**
- * Number range validation
- * @param {number} value - Value to validate
- * @param {number} min - Minimum value
- * @param {number} max - Maximum value
- * @param {string} fieldName - Name of the field for error message
- * @returns {Object} Validation result
- */
-export const validateNumberRange = (value, min, max, fieldName) => {
-  const num = parseFloat(value);
-  
-  if (isNaN(num)) {
-    return { isValid: false, error: `${fieldName} must be a valid number` };
-  }
-  
-  if (min !== undefined && num < min) {
-    return { isValid: false, error: `${fieldName} must be at least ${min}` };
-  }
-  
-  if (max !== undefined && num > max) {
-    return { isValid: false, error: `${fieldName} must be no more than ${max}` };
-  }
-  
-  return { isValid: true, error: null };
+// Price validation
+export const validatePrice = (price) => {
+  if (price === null || price === undefined) return false;
+  const numPrice = parseFloat(price);
+  return !isNaN(numPrice) && numPrice >= 0 && numPrice <= 999999.99;
 };
 
-/**
- * Date validation
- * @param {string|Date} date - Date to validate
- * @param {string} fieldName - Name of the field for error message
- * @returns {Object} Validation result
- */
-export const validateDate = (date, fieldName) => {
-  if (!date) {
-    return { isValid: false, error: `${fieldName} is required` };
-  }
-  
+// Date validation
+export const validateDate = (date) => {
+  if (!date) return false;
   const dateObj = new Date(date);
+  return !isNaN(dateObj.getTime());
+};
+
+// Required field validation
+export const validateRequired = (value) => {
+  return value !== null && value !== undefined && value !== '';
+};
+
+// String length validation
+export const validateStringLength = (value, minLength = 1, maxLength = 255) => {
+  if (!value || typeof value !== 'string') return false;
+  return value.length >= minLength && value.length <= maxLength;
+};
+
+// Number range validation
+export const validateNumberRange = (value, min = 0, max = 999999) => {
+  const num = parseFloat(value);
+  return !isNaN(num) && num >= min && num <= max;
+};
+
+// Excel file validation
+export const validateExcelFile = (file) => {
+  if (!file) return { isValid: false, error: 'No file selected' };
   
-  if (isNaN(dateObj.getTime())) {
-    return { isValid: false, error: `${fieldName} must be a valid date` };
+  const allowedTypes = [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+    'text/csv'
+  ];
+  
+  if (!allowedTypes.includes(file.type)) {
+    return { isValid: false, error: 'Invalid file type. Please upload an Excel or CSV file.' };
+  }
+  
+  const maxSize = 10 * 1024 * 1024; // 10MB
+  if (file.size > maxSize) {
+    return { isValid: false, error: 'File size too large. Please upload a file smaller than 10MB.' };
   }
   
   return { isValid: true, error: null };
 };
 
-/**
- * Customer data validation
- * @param {Object} customer - Customer data to validate
- * @returns {Object} Validation result with errors array
- */
-export const validateCustomer = (customer) => {
+// Bottle data validation
+export const validateBottleData = (bottle) => {
   const errors = [];
   
-  // Required fields
-  const requiredFields = ['name', 'CustomerListID'];
-  requiredFields.forEach(field => {
-    const result = validateRequired(customer[field], field);
-    if (!result.isValid) {
-      errors.push(result.error);
-    }
-  });
-  
-  // Customer ID format
-  if (customer.CustomerListID && !isValidCustomerId(customer.CustomerListID)) {
-    errors.push('Customer ID must contain only letters, numbers, hyphens, and underscores');
+  if (!validateBarcode(bottle.barcode_number)) {
+    errors.push('Invalid barcode number');
   }
   
-  // Email validation
-  if (customer.email && !isValidEmail(customer.email)) {
-    errors.push('Email must be a valid email address');
+  if (!validateSerialNumber(bottle.serial_number)) {
+    errors.push('Invalid serial number');
   }
   
-  // Phone validation
-  if (customer.phone && !isValidPhone(customer.phone)) {
-    errors.push('Phone number must be a valid phone number');
+  if (bottle.customer_name && !validateStringLength(bottle.customer_name, 1, 100)) {
+    errors.push('Invalid customer name');
   }
   
-  // Name length
-  if (customer.name) {
-    const result = validateStringLength(customer.name, 2, 100, 'Name');
-    if (!result.isValid) {
-      errors.push(result.error);
-    }
+  if (bottle.product_code && !validateProductCode(bottle.product_code)) {
+    errors.push('Invalid product code');
+  }
+  
+  if (bottle.location && !validateLocation(bottle.location)) {
+    errors.push('Invalid location');
   }
   
   return {
@@ -181,39 +130,28 @@ export const validateCustomer = (customer) => {
   };
 };
 
-/**
- * Cylinder data validation
- * @param {Object} cylinder - Cylinder data to validate
- * @returns {Object} Validation result with errors array
- */
-export const validateCylinder = (cylinder) => {
+// Customer data validation
+export const validateCustomerData = (customer) => {
   const errors = [];
   
-  // Required fields
-  const requiredFields = ['barcode_number', 'serial_number'];
-  requiredFields.forEach(field => {
-    const result = validateRequired(cylinder[field], field);
-    if (!result.isValid) {
-      errors.push(result.error);
-    }
-  });
-  
-  // Barcode validation
-  if (cylinder.barcode_number && !isValidBarcode(cylinder.barcode_number)) {
-    errors.push('Barcode must contain only letters, numbers, hyphens, and underscores');
+  if (!validateRequired(customer.name)) {
+    errors.push('Customer name is required');
   }
   
-  // Serial number validation
-  if (cylinder.serial_number && !isValidSerialNumber(cylinder.serial_number)) {
-    errors.push('Serial number must contain only letters, numbers, hyphens, and underscores');
+  if (!validateStringLength(customer.name, 1, 100)) {
+    errors.push('Customer name must be between 1 and 100 characters');
   }
   
-  // Capacity validation
-  if (cylinder.capacity) {
-    const result = validateNumberRange(cylinder.capacity, 0, 10000, 'Capacity');
-    if (!result.isValid) {
-      errors.push(result.error);
-    }
+  if (customer.email && !validateEmail(customer.email)) {
+    errors.push('Invalid email address');
+  }
+  
+  if (customer.phone && !validatePhone(customer.phone)) {
+    errors.push('Invalid phone number');
+  }
+  
+  if (customer.CustomerListID && !validateCustomerId(customer.CustomerListID)) {
+    errors.push('Invalid customer ID format');
   }
   
   return {
@@ -222,139 +160,55 @@ export const validateCylinder = (cylinder) => {
   };
 };
 
-/**
- * Rental data validation
- * @param {Object} rental - Rental data to validate
- * @returns {Object} Validation result with errors array
- */
-export const validateRental = (rental) => {
-  const errors = [];
-  
-  // Required fields
-  const requiredFields = ['customer_id', 'cylinder_id'];
-  requiredFields.forEach(field => {
-    const result = validateRequired(rental[field], field);
-    if (!result.isValid) {
-      errors.push(result.error);
-    }
-  });
-  
-  // Date validation
-  if (rental.rental_start_date) {
-    const result = validateDate(rental.rental_start_date, 'Rental start date');
-    if (!result.isValid) {
-      errors.push(result.error);
-    }
-  }
-  
-  if (rental.rental_end_date) {
-    const result = validateDate(rental.rental_end_date, 'Rental end date');
-    if (!result.isValid) {
-      errors.push(result.error);
-    }
-  }
-  
-  // Date logic validation
-  if (rental.rental_start_date && rental.rental_end_date) {
-    const startDate = new Date(rental.rental_start_date);
-    const endDate = new Date(rental.rental_end_date);
-    
-    if (endDate <= startDate) {
-      errors.push('Rental end date must be after rental start date');
-    }
-  }
-  
-  return {
-    isValid: errors.length === 0,
-    errors
-  };
-};
-
-/**
- * Form validation helper
- * @param {Object} formData - Form data to validate
- * @param {Object} validationRules - Validation rules object
- * @returns {Object} Validation result
- */
-export const validateForm = (formData, validationRules) => {
+// Form validation helper
+export const validateForm = (data, rules) => {
   const errors = {};
-  let isValid = true;
   
-  Object.keys(validationRules).forEach(fieldName => {
-    const rules = validationRules[fieldName];
-    const value = formData[fieldName];
+  Object.keys(rules).forEach(field => {
+    const value = data[field];
+    const fieldRules = rules[field];
     
-    // Required validation
-    if (rules.required) {
-      const result = validateRequired(value, fieldName);
-      if (!result.isValid) {
-        errors[fieldName] = result.error;
-        isValid = false;
-        return;
-      }
-    }
-    
-    // Skip other validations if field is empty and not required
-    if (!value && !rules.required) {
+    if (fieldRules.required && !validateRequired(value)) {
+      errors[field] = `${field} is required`;
       return;
     }
     
-    // String length validation
-    if (rules.minLength || rules.maxLength) {
-      const result = validateStringLength(value, rules.minLength, rules.maxLength, fieldName);
-      if (!result.isValid) {
-        errors[fieldName] = result.error;
-        isValid = false;
-        return;
-      }
-    }
-    
-    // Number range validation
-    if (rules.min !== undefined || rules.max !== undefined) {
-      const result = validateNumberRange(value, rules.min, rules.max, fieldName);
-      if (!result.isValid) {
-        errors[fieldName] = result.error;
-        isValid = false;
-        return;
-      }
-    }
-    
-    // Email validation
-    if (rules.email && !isValidEmail(value)) {
-      errors[fieldName] = 'Must be a valid email address';
-      isValid = false;
+    if (value && fieldRules.email && !validateEmail(value)) {
+      errors[field] = 'Invalid email address';
       return;
     }
     
-    // Phone validation
-    if (rules.phone && !isValidPhone(value)) {
-      errors[fieldName] = 'Must be a valid phone number';
-      isValid = false;
+    if (value && fieldRules.phone && !validatePhone(value)) {
+      errors[field] = 'Invalid phone number';
       return;
     }
     
-    // Custom validation
-    if (rules.custom) {
-      const result = rules.custom(value, formData);
-      if (!result.isValid) {
-        errors[fieldName] = result.error;
-        isValid = false;
+    if (value && fieldRules.minLength && !validateStringLength(value, fieldRules.minLength)) {
+      errors[field] = `${field} must be at least ${fieldRules.minLength} characters`;
+      return;
+    }
+    
+    if (value && fieldRules.maxLength && !validateStringLength(value, 1, fieldRules.maxLength)) {
+      errors[field] = `${field} must be no more than ${fieldRules.maxLength} characters`;
+      return;
+    }
+    
+    if (value && fieldRules.numberRange) {
+      const { min, max } = fieldRules.numberRange;
+      if (!validateNumberRange(value, min, max)) {
+        errors[field] = `${field} must be between ${min} and ${max}`;
         return;
       }
     }
   });
   
   return {
-    isValid,
+    isValid: Object.keys(errors).length === 0,
     errors
   };
 };
 
-/**
- * Sanitize input data
- * @param {string} input - Input to sanitize
- * @returns {string} Sanitized input
- */
+// Sanitize input data
 export const sanitizeInput = (input) => {
   if (typeof input !== 'string') return input;
   
@@ -365,19 +219,65 @@ export const sanitizeInput = (input) => {
     .replace(/on\w+=/gi, ''); // Remove event handlers
 };
 
+// Validate and sanitize Excel data
+export const validateAndSanitizeExcelData = (data) => {
+  const sanitizedData = [];
+  const errors = [];
+  
+  data.forEach((row, index) => {
+    const sanitizedRow = {};
+    let rowHasErrors = false;
+    
+    Object.keys(row).forEach(key => {
+      const value = row[key];
+      sanitizedRow[key] = typeof value === 'string' ? sanitizeInput(value) : value;
+    });
+    
+    // Validate required fields
+    if (!validateRequired(sanitizedRow['Customer'])) {
+      errors.push(`Row ${index + 1}: Customer name is required`);
+      rowHasErrors = true;
+    }
+    
+    if (!validateRequired(sanitizedRow['Barcode'])) {
+      errors.push(`Row ${index + 1}: Barcode is required`);
+      rowHasErrors = true;
+    }
+    
+    if (!validateBarcode(sanitizedRow['Barcode'])) {
+      errors.push(`Row ${index + 1}: Invalid barcode format`);
+      rowHasErrors = true;
+    }
+    
+    if (!rowHasErrors) {
+      sanitizedData.push(sanitizedRow);
+    }
+  });
+  
+  return {
+    data: sanitizedData,
+    errors,
+    isValid: errors.length === 0
+  };
+};
+
 export default {
-  isValidEmail,
-  isValidPhone,
-  isValidCustomerId,
-  isValidBarcode,
-  isValidSerialNumber,
+  validateEmail,
+  validatePhone,
+  validateBarcode,
+  validateSerialNumber,
+  validateCustomerId,
+  validateProductCode,
+  validateLocation,
+  validatePrice,
+  validateDate,
   validateRequired,
   validateStringLength,
   validateNumberRange,
-  validateDate,
-  validateCustomer,
-  validateCylinder,
-  validateRental,
+  validateExcelFile,
+  validateBottleData,
+  validateCustomerData,
   validateForm,
-  sanitizeInput
+  sanitizeInput,
+  validateAndSanitizeExcelData
 }; 

@@ -8,10 +8,13 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { subscriptionService } from '../services/subscriptionService';
+import { isEmailConfirmationRequired } from '../config/email';
 
 const steps = ['Organization Details', 'Account Setup', 'Trial & Payment'];
 
-export default function OrganizationRegistration() {
+export default OrganizationRegistration;
+
+function OrganizationRegistration() {
   const navigate = useNavigate();
   const [activeStep, setActiveStep] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -116,10 +119,48 @@ export default function OrganizationRegistration() {
         throw new Error('This email address is already registered. Please use a different email or try logging in.');
       }
 
-      // 1. Ensure slug is unique (double-check)
+      // 1. Create user account (sign up)
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: userData.email,
+        password: userData.password,
+        options: {
+          data: {
+            full_name: userData.full_name,
+            role: userData.role
+          },
+          emailRedirectTo: `${window.location.origin}/login`,
+          // Use configuration to determine if email confirmation is required
+          emailConfirm: isEmailConfirmationRequired()
+        }
+      });
+      if (authError) {
+        if (authError.message.includes('already registered')) {
+          throw new Error('This email address is already registered. Please use a different email or try logging in.');
+        }
+        throw authError;
+      }
+
+      // 2. If no session, show confirmation message and stop
+      if (!authData.session) {
+        setSuccess('Registration successful! Please check your email to confirm your account before logging in.');
+        setLoading(false);
+        return;
+      }
+
+      // 3. Wait for session to be established
+      let session = authData.session;
+      for (let i = 0; i < 10 && !session; i++) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        session = sessionData.session;
+        if (session) break;
+        await new Promise(res => setTimeout(res, 300));
+      }
+      if (!session) throw new Error('Failed to establish session after sign up. Please try logging in.');
+
+      // 4. Ensure slug is unique (double-check)
       const finalSlug = await generateUniqueSlug(orgData.slug);
-      
-      // 2. Create organization
+
+      // 5. Create organization (now as authenticated user)
       const { data: org, error: orgError } = await supabase
         .from('organizations')
         .insert({
@@ -144,27 +185,7 @@ export default function OrganizationRegistration() {
         throw orgError;
       }
 
-      // 3. Create user account
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: userData.email,
-        password: userData.password,
-        options: {
-          data: {
-            full_name: userData.full_name,
-            role: userData.role,
-            organization_id: org.id
-          }
-        }
-      });
-
-      if (authError) {
-        if (authError.message.includes('already registered')) {
-          throw new Error('This email address is already registered. Please use a different email or try logging in.');
-        }
-        throw authError;
-      }
-
-      // 4. Create profile
+      // 6. Create profile, link to org
       const { error: profileError } = await supabase
         .from('profiles')
         .insert({
@@ -174,7 +195,6 @@ export default function OrganizationRegistration() {
           role: userData.role,
           organization_id: org.id
         });
-
       if (profileError) {
         if (profileError.code === '23505' && profileError.message.includes('profiles_email_key')) {
           throw new Error('This email address is already registered. Please use a different email or try logging in.');
@@ -182,7 +202,7 @@ export default function OrganizationRegistration() {
         throw profileError;
       }
 
-      // 4. Set up payment if required
+      // 7. Set up payment if required
       if (trialData.payment_required) {
         try {
           await subscriptionService.createCustomer({
@@ -197,12 +217,9 @@ export default function OrganizationRegistration() {
       }
 
       setSuccess('Organization registered successfully! You can now log in.');
-      
-      // Redirect to login after a short delay
       setTimeout(() => {
         navigate('/login');
       }, 2000);
-
     } catch (err) {
       console.error('Registration error:', err);
       setError(err.message);
@@ -425,6 +442,11 @@ export default function OrganizationRegistration() {
           {success && (
             <Alert severity="success" sx={{ mb: 2 }}>
               {success}
+              <Box mt={2}>
+                <Button variant="contained" color="primary" onClick={() => navigate('/login')}>
+                  Go to Login
+                </Button>
+              </Box>
             </Alert>
           )}
 

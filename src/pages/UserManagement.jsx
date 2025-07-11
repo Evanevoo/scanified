@@ -5,10 +5,10 @@ import { subscriptionService } from '../services/subscriptionService';
 import {
   Box, Paper, Typography, Table, TableHead, TableRow, TableCell, TableBody, TableContainer, TextField, Button, Select, MenuItem, Snackbar, Alert, Stack, Chip, LinearProgress, Dialog, DialogTitle, DialogContent, DialogActions, IconButton, Tooltip, FormControl, InputLabel
 } from '@mui/material';
-import { Delete as DeleteIcon, Edit as EditIcon, Add as AddIcon } from '@mui/icons-material';
+import { Delete as DeleteIcon, Edit as EditIcon, Add as AddIcon, ContentCopy as CopyIcon } from '@mui/icons-material';
 import { usePermissions } from '../context/PermissionsContext';
 
-const ROLES = ['admin', 'user', 'manager'];
+// Roles are now fetched from the database
 
 export default function UserManagement() {
   const { profile, organization } = useAuth();
@@ -20,18 +20,19 @@ export default function UserManagement() {
   const [success, setSuccess] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newRoleId, setNewRoleId] = useState('');
-  const [newFullName, setNewFullName] = useState('');
   const [adding, setAdding] = useState(false);
   const [usage, setUsage] = useState(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
+  const [pendingInvites, setPendingInvites] = useState([]);
 
   useEffect(() => {
     if (organization && can('manage:users')) {
       fetchUsers();
       fetchUsage();
       fetchRoles();
+      fetchPendingInvites();
     }
   }, [profile, organization, can]);
 
@@ -69,6 +70,16 @@ export default function UserManagement() {
     }
   }
 
+  async function fetchPendingInvites() {
+    const { data, error } = await supabase
+      .from('organization_invites')
+      .select('*')
+      .eq('organization_id', organization.id)
+      .is('accepted_at', null)
+      .order('created_at', { ascending: false });
+    if (!error) setPendingInvites(data || []);
+  }
+
   async function handleAddUser(e) {
     e.preventDefault();
     setAdding(true);
@@ -76,51 +87,87 @@ export default function UserManagement() {
     setSuccess('');
 
     try {
-      const { data: existingUser, error: checkError } = await supabase.auth.admin.getUserByEmail(newEmail);
-      
-      if (existingUser.user) {
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .insert({
-            id: existingUser.user.id,
-            email: newEmail,
-            full_name: newFullName,
-            role_id: newRoleId,
-            organization_id: organization.id
-          });
+      // Check if email already exists in the organization
+      const { data: existingUser } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('organization_id', organization.id)
+        .eq('email', newEmail)
+        .single();
 
-        if (profileError) throw profileError;
-        setSuccess('User added to organization successfully!');
-      } else {
-        const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(newEmail, {
-          data: {
-            full_name: newFullName,
-            role_id: newRoleId,
-            organization_id: organization.id
-          }
-        });
-
-        if (inviteError) throw inviteError;
-
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .insert({
-            id: inviteData.user.id,
-            email: newEmail,
-            full_name: newFullName,
-            role_id: newRoleId,
-            organization_id: organization.id
-          });
-
-        if (profileError) throw profileError;
-        setSuccess('User invited and added to organization!');
+      if (existingUser) {
+        throw new Error('This email is already registered in your organization');
       }
 
+      // Check if email is already registered with any other organization
+      const { data: existingProfile, error: profileCheckError } = await supabase
+        .from('profiles')
+        .select('email, organization_id, organizations(name)')
+        .eq('email', newEmail)
+        .single();
+
+      if (existingProfile && existingProfile.organization_id && existingProfile.organization_id !== organization.id) {
+        throw new Error(`This email (${newEmail}) is already registered with organization "${existingProfile.organizations?.name}". Each email can only be associated with one organization. Please use a different email address.`);
+      }
+
+      // Check if there's already a pending invite for this email
+      const { data: existingInvite } = await supabase
+        .from('organization_invites')
+        .select('id')
+        .eq('organization_id', organization.id)
+        .eq('email', newEmail)
+        .is('accepted_at', null)
+        .single();
+
+      if (existingInvite) {
+        throw new Error('An invite has already been sent to this email');
+      }
+
+      // Create the invite using the database function
+      const { data, error } = await supabase.rpc('create_organization_invite', {
+        p_organization_id: organization.id,
+        p_email: newEmail,
+        p_role: newRoleId,
+        p_expires_in_days: 7
+      });
+
+      if (error) throw error;
+
+      // Fetch the invite row to get the token
+      const { data: inviteRow } = await supabase
+        .from('organization_invites')
+        .select('token')
+        .eq('organization_id', organization.id)
+        .eq('email', newEmail)
+        .is('accepted_at', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (inviteRow && inviteRow.token) {
+        const inviteLink = `${window.location.origin}/accept-invite?token=${inviteRow.token}`;
+        await fetch('/.netlify/functions/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: newEmail,
+            subject: `You're invited to join ${organization.name}`,
+            template: 'invite',
+            data: {
+              inviteLink,
+              organizationName: organization.name,
+              inviter: profile.full_name || profile.email,
+            }
+          })
+        });
+      }
+
+      setSuccess(`Invite sent to ${newEmail}. The user will receive an email with instructions to join your organization.`);
       setNewEmail('');
       setNewRoleId(roles.length > 0 ? roles[0].id : '');
-      setNewFullName('');
       setShowAddDialog(false);
       fetchUsers();
+      fetchPendingInvites();
     } catch (err) {
       console.error('Error adding user:', err);
       setError(err.message);
@@ -167,6 +214,31 @@ export default function UserManagement() {
       console.error('Error deleting user:', err);
       setError(err.message);
     }
+  }
+
+  async function handleCancelInvite(inviteId) {
+    try {
+      const { error } = await supabase
+        .from('organization_invites')
+        .delete()
+        .eq('id', inviteId);
+      if (error) throw error;
+      setSuccess('Invite cancelled successfully.');
+      fetchPendingInvites();
+    } catch (err) {
+      setError('Failed to cancel invite: ' + err.message);
+    }
+  }
+
+  function handleCopyInviteLink(token) {
+    const inviteLink = `${window.location.origin}/accept-invite?token=${token}`;
+    navigator.clipboard.writeText(inviteLink);
+    setSuccess('Invite link copied to clipboard!');
+  }
+
+  function getRoleName(roleId) {
+    const role = roles.find(r => r.id === roleId);
+    return role ? role.name : roleId;
   }
 
   const handleEditUser = (user) => {
@@ -239,7 +311,7 @@ export default function UserManagement() {
           onClick={() => setShowAddDialog(true)}
           disabled={(organization.max_users !== 999999 && users.length >= organization.max_users) || !can('manage:users')}
         >
-          Add User
+          Invite User
         </Button>
         {organization.max_users !== 999999 && users.length >= organization.max_users && (
           <Typography variant="caption" color="error" sx={{ ml: 2 }}>
@@ -308,19 +380,60 @@ export default function UserManagement() {
         </Table>
       </TableContainer>
 
+      {/* Pending Invites Section */}
+      {pendingInvites.length > 0 && (
+        <Box sx={{ mt: 4 }}>
+          <Typography variant="h6" gutterBottom>Pending Invites</Typography>
+          <TableContainer component={Paper}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Email</TableCell>
+                  <TableCell>Role</TableCell>
+                  <TableCell>Sent</TableCell>
+                  <TableCell>Expires</TableCell>
+                  <TableCell>Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {pendingInvites.map((invite) => (
+                  <TableRow key={invite.id}>
+                    <TableCell>{invite.email}</TableCell>
+                    <TableCell>{getRoleName(invite.role)}</TableCell>
+                    <TableCell>{new Date(invite.created_at).toLocaleDateString()}</TableCell>
+                    <TableCell>{new Date(invite.expires_at).toLocaleDateString()}</TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={1}>
+                        <Tooltip title="Copy Invite Link">
+                          <span>
+                            <IconButton size="small" onClick={() => handleCopyInviteLink(invite.token)}>
+                              <CopyIcon />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                        <Tooltip title="Cancel Invite">
+                          <span>
+                            <IconButton size="small" color="error" onClick={() => handleCancelInvite(invite.id)}>
+                              <DeleteIcon />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+      )}
+
       {/* Add User Dialog */}
       <Dialog open={showAddDialog} onClose={() => setShowAddDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Add User to Organization</DialogTitle>
+        <DialogTitle>Invite User to Organization</DialogTitle>
         <form onSubmit={handleAddUser}>
           <DialogContent>
             <Stack spacing={2}>
-              <TextField
-                fullWidth
-                label="Full Name"
-                value={newFullName}
-                onChange={(e) => setNewFullName(e.target.value)}
-                required
-              />
               <TextField
                 fullWidth
                 label="Email Address"
@@ -328,6 +441,7 @@ export default function UserManagement() {
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}
                 required
+                helperText="The user will receive an invite link at this email address"
               />
               <FormControl fullWidth margin="normal">
                 <InputLabel>Role</InputLabel>
@@ -343,6 +457,11 @@ export default function UserManagement() {
                   ))}
                 </Select>
               </FormControl>
+              <Alert severity="info">
+                <Typography variant="body2">
+                  The invite will expire in 7 days. The user will receive a secure link to join your organization.
+                </Typography>
+              </Alert>
             </Stack>
           </DialogContent>
           <DialogActions>
@@ -354,7 +473,7 @@ export default function UserManagement() {
               variant="contained"
               disabled={adding}
             >
-              {adding ? 'Adding...' : 'Add User'}
+              {adding ? 'Sending Invite...' : 'Send Invite'}
             </Button>
           </DialogActions>
         </form>
@@ -404,7 +523,9 @@ export default function UserManagement() {
         </DialogActions>
       </Dialog>
 
-      <Snackbar open={!!success} autoHideDuration={6000} onClose={() => setSuccess('')}>
+      <Snackbar open={!!success} autoHideDuration={6000} onClose={() => setSuccess('')}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
         <Alert onClose={() => setSuccess('')} severity="success">
           {success}
         </Alert>

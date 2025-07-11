@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from './LoadingSpinner';
 import MainLayout from './MainLayout';
@@ -7,6 +7,7 @@ import { Alert, Box } from '@mui/material';
 
 const ProtectedRoute = () => {
   const { user, profile, organization, loading, trialExpired } = useAuth();
+  const location = useLocation();
 
   // Log the state for debugging purposes.
   console.log('ProtectedRoute:', { 
@@ -46,11 +47,23 @@ const ProtectedRoute = () => {
   }
 
   if (user && profile && !organization) {
-    // If the user is authenticated and has a profile but no organization,
-    // they must complete the setup process.
-    return <Navigate to="/setup" replace />;
+    // Allow access to organization registration page
+    if (location.pathname === '/organization-registration') {
+      return <Outlet />;
+    }
+    // Otherwise, show the error message
+    return (
+      <Box sx={{ p: 6 }}>
+        <Alert severity="error">
+          Your organization could not be found or was deleted.<br />
+          Please contact support or create a new organization.<br />
+          <br />
+          <a href="/organization-registration">Create a new organization</a>
+        </Alert>
+      </Box>
+    );
   }
-  
+
   if (user && profile && organization) {
     // If the user is fully authenticated and has an organization,
     // render the requested page within the main layout, passing the profile.
@@ -62,7 +75,6 @@ const ProtectedRoute = () => {
   }
 
   // As a fallback, if the state is somehow inconsistent, redirect to login.
-  // This prevents the app from getting stuck on a blank page.
   console.warn("ProtectedRoute: Fallback triggered. Auth state is inconsistent. Redirecting to login.");
   return <Navigate to="/login" replace />;
 };

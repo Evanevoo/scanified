@@ -21,13 +21,23 @@ exports.handler = async (event, context) => {
     }
 
     // Create transporter (configure with your email service)
-    const transporter = nodemailer.createTransporter({
-      service: 'gmail', // or your preferred service
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD
-      }
-    });
+    let transporter;
+    try {
+      console.log('Creating transporter for user:', process.env.EMAIL_USER);
+      transporter = nodemailer.createTransport({
+        service: 'gmail', // or your preferred service
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASSWORD
+        }
+      });
+    } catch (transporterError) {
+      console.error('Error creating transporter:', transporterError);
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ error: 'Failed to create transporter', details: transporterError.message })
+      };
+    }
 
     // Generate email content based on template
     const emailContent = generateEmailContent(template, data);
@@ -37,10 +47,21 @@ exports.handler = async (event, context) => {
       from: process.env.EMAIL_FROM || 'noreply@gascylinderapp.com',
       to: to,
       subject: subject,
-      html: emailContent
+      html: emailContent,
+      replyTo: data && data.inviter ? data.inviter : undefined
     };
 
-    await transporter.sendMail(mailOptions);
+    try {
+      console.log('About to send email to:', to);
+      await transporter.sendMail(mailOptions);
+      console.log('Email sent to:', to);
+    } catch (sendError) {
+      console.error('Error sending email:', sendError);
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ error: 'Failed to send email', details: sendError.message })
+      };
+    }
 
     return {
       statusCode: 200,
@@ -145,6 +166,24 @@ function generateEmailContent(template, data) {
             <p><strong>Next Maintenance Due:</strong> ${data.nextMaintenance}</p>
           </div>
           <p>Please schedule maintenance to ensure safety and compliance.</p>
+        </div>
+      `;
+
+    case 'invite':
+      return `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2196F3;">You're Invited to Join ${data.organizationName}</h2>
+          <p>Hello,</p>
+          <p><strong>${data.inviter}</strong> has invited you to join the organization <strong>${data.organizationName}</strong> on the Gas Cylinder Management System.</p>
+          <p>To accept the invitation and create your account, please click the link below:</p>
+          <div style="margin: 20px 0;">
+            <a href="${data.inviteLink}" style="background: #2196F3; color: #fff; padding: 12px 24px; border-radius: 4px; text-decoration: none; font-weight: bold;">Accept Invitation</a>
+          </div>
+          <p>If the button above does not work, copy and paste this link into your browser:</p>
+          <p><a href="${data.inviteLink}">${data.inviteLink}</a></p>
+          <p>This invite will expire in 7 days or once it is used.</p>
+          <p>If you did not expect this invitation, you can ignore this email.</p>
+          <p style="color: #888; font-size: 12px; margin-top: 32px;">Sent by Gas Cylinder Management System</p>
         </div>
       `;
 

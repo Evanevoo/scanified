@@ -89,13 +89,21 @@ export const AuthProvider = ({ children }) => {
           .single();
 
         if (profileError) {
-          // Using PGRST116 (Not Found) to create a default profile is risky,
-          // as a temporary network error could trigger a profile overwrite.
-          // It's better to fail and log the error.
+          // If profile not found, sign out the user and clear state
+          if (profileError.code === 'PGRST116') {
+            console.error('Auth: Profile not found, signing out user.');
+            await supabase.auth.signOut();
+            setUser(null);
+            setProfile(null);
+            setOrganization(null);
+            setLoading(false);
+            authFlowInProgressRef.current = false;
+            return;
+          }
+          // Other errors: log and clear state
           console.error('Auth: Error fetching profile:', profileError);
           setProfile(null);
           setOrganization(null);
-          // Don't throw here, just end the flow.
           authFlowInProgressRef.current = false;
           return;
         }

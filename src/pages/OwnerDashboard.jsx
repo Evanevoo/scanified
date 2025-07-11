@@ -28,6 +28,16 @@ export default function OwnerDashboard() {
       title: 'Support Center',
       description: 'Customer support and ticket management',
       icon: <SupportIcon sx={{ fontSize: 40 }} />, color: '#9c27b0', path: '/owner-portal/support'
+    },
+    {
+      title: 'Smart Inventory',
+      description: 'Advanced inventory management with analytics',
+      icon: <AnalyticsIcon sx={{ fontSize: 40 }} />, color: '#ff6b35', path: '/smart-inventory'
+    },
+    {
+      title: 'Customer Portal',
+      description: 'Customer self-service portal demo',
+      icon: <BusinessIcon sx={{ fontSize: 40 }} />, color: '#4caf50', path: '/customer-portal'
     }
   ];
   return (

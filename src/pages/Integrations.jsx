@@ -9,6 +9,7 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DownloadIcon from '@mui/icons-material/Download';
 import QrCodeIcon from '@mui/icons-material/QrCode';
+import { useAuth } from '../hooks/useAuth';
 
 export default function Integrations() {
   const [customers, setCustomers] = useState([]);
@@ -24,9 +25,7 @@ export default function Integrations() {
   const [uploadedData, setUploadedData] = useState([]);
   const [processingUpload, setProcessingUpload] = useState(false);
   const [recentlyGeneratedCustomers, setRecentlyGeneratedCustomers] = useState([]);
-  const [trackaboutApiKey, setTrackaboutApiKey] = useState('');
-  const [trackaboutCompanyId, setTrackaboutCompanyId] = useState('');
-  const [trackaboutSyncStatus, setTrackaboutSyncStatus] = useState('');
+  const { organization } = useAuth();
 
   useEffect(() => {
     loadCustomers();
@@ -116,7 +115,8 @@ export default function Integrations() {
           customer_number: customer.CustomerListID,
           barcode: `*%${customer.CustomerListID}*`,
           customer_barcode: `*%${customer.CustomerListID}*`,
-          AccountNumber: customer.CustomerListID
+          AccountNumber: customer.CustomerListID,
+          organization_id: organization?.id,
         };
 
         if (customer.fromExistingCustomer && customer.originalId) {
@@ -289,16 +289,49 @@ export default function Integrations() {
     const newIds = [];
 
     uploadedData.forEach((row, index) => {
+      // Normalize keys for robust matching
+      const normalizedRow = {};
+      Object.keys(row).forEach(key => {
+        normalizedRow[key.trim().toLowerCase()] = row[key];
+      });
+      const customerName =
+        normalizedRow['name'] ||
+        normalizedRow['customername'] ||
+        normalizedRow['customer name'] ||
+        normalizedRow['customer'] ||
+        normalizedRow['customerfullname'] ||
+        normalizedRow['customer full name'] ||
+        `Customer ${index + 1}`;
+      const customerFullName =
+        normalizedRow['customerfullname'] ||
+        normalizedRow['customer full name'] ||
+        normalizedRow['customername'] ||
+        normalizedRow['customer name'] ||
+        normalizedRow['name'] ||
+        normalizedRow['customer'] ||
+        customerName;
+      const customerContactDetails =
+        normalizedRow['contact_details'] ||
+        normalizedRow['contactdetails'] ||
+        normalizedRow['address'] ||
+        normalizedRow['customer address'] ||
+        '';
+      const customerPhone =
+        normalizedRow['phone'] ||
+        normalizedRow['phonenumber'] ||
+        normalizedRow['customer phone'] ||
+        '';
       const timestamp = Date.now() + index;
-      const customerId = `${idFormat}-${timestamp}`;
-      
+      const randomLetter = String.fromCharCode(65 + Math.floor(Math.random() * 26)); // A-Z
+      const customerId = `${idFormat}-${timestamp}${randomLetter}`;
       if (!existingIds.has(customerId) && !batchIds.has(customerId)) {
         batchIds.add(customerId);
         newIds.push({
           CustomerListID: customerId,
-          name: row.name || row.Name || row.CustomerName || `Customer ${index + 1}`,
-          contact_details: row.contact_details || row.ContactDetails || row.Address || '',
-          phone: row.phone || row.Phone || '',
+          name: customerName,
+          fullName: customerFullName,
+          contact_details: customerContactDetails,
+          phone: customerPhone,
           generated: true,
           fromUpload: true
         });
@@ -321,8 +354,8 @@ export default function Integrations() {
 
     customersWithoutIds.forEach((customer, index) => {
       const timestamp = Date.now() + index;
-      const customerId = `${idFormat}-${timestamp}`;
-      
+      const randomLetter = String.fromCharCode(65 + Math.floor(Math.random() * 26)); // A-Z
+      const customerId = `${idFormat}-${timestamp}${randomLetter}`;
       if (!existingIds.has(customerId) && !batchIds.has(customerId)) {
         batchIds.add(customerId);
         newIds.push({
@@ -349,12 +382,11 @@ export default function Integrations() {
 
     // Zed Axis format: Customer ID, Customer Name, Contact Details, Phone, Barcode
     const zedAxisData = generatedIds.map(customer => ({
-      'Customer ID': customer.CustomerListID,
-      'Customer Name': customer.name,
-      'Contact Details': customer.contact_details,
-      'Phone': customer.phone,
-      'Barcode': `*%${customer.CustomerListID}*`,
-      'Account Number': customer.CustomerListID
+      'CustomerListID': customer.CustomerListID,
+      'CustomerName': customer.name,
+      'CustomerFullName': customer.fullName || customer.name,
+      'Customer barcode': `*%${customer.CustomerListID}*`,
+      'Customer Number': customer.CustomerListID,
     }));
 
     // Create worksheet with proper Excel formatting
@@ -407,12 +439,11 @@ export default function Integrations() {
       }
 
       const zedAxisData = data.map(customer => ({
-        'Customer ID': customer.CustomerListID,
-        'Customer Name': customer.name,
-        'Contact Details': customer.contact_details,
-        'Phone': customer.phone,
-        'Barcode': `*%${customer.CustomerListID}*`,
-        'Account Number': customer.CustomerListID
+        'CustomerListID': customer.CustomerListID,
+        'CustomerName': customer.name,
+        'CustomerFullName': customer.fullName || customer.name,
+        'Customer barcode': `*%${customer.CustomerListID}*`,
+        'Customer Number': customer.CustomerListID,
       }));
 
       // Create worksheet with proper Excel formatting
@@ -447,113 +478,6 @@ export default function Integrations() {
       setSnackbar(`Exported ${data.length} recently generated customers for Zed Axis import`);
     } catch (error) {
       setSnackbar(`Error exporting customers: ${error.message}`);
-    }
-  };
-
-  const exportForTrackAbout = () => {
-    if (generatedIds.length === 0) {
-      setSnackbar('No generated customer IDs to export');
-      return;
-    }
-
-    // TrackAbout format: Asset ID, Description, Customer ID, Customer Name, Location
-    const trackaboutData = generatedIds.map(customer => ({
-      'Asset ID': customer.CustomerListID,
-      'Description': customer.name,
-      'Customer ID': customer.CustomerListID,
-      'Customer Name': customer.name,
-      'Location': customer.contact_details || '',
-      'Barcode': `*%${customer.CustomerListID}*`,
-      'Asset Type': 'Customer',
-      'Status': 'Active'
-    }));
-
-    // Create worksheet with proper Excel formatting
-    const ws = XLSX.utils.json_to_sheet(trackaboutData);
-    
-    // Set column widths for TrackAbout compatibility
-    const colWidths = [
-      { wch: 15 }, // Asset ID
-      { wch: 25 }, // Description
-      { wch: 15 }, // Customer ID
-      { wch: 25 }, // Customer Name
-      { wch: 30 }, // Location
-      { wch: 20 }, // Barcode
-      { wch: 15 }, // Asset Type
-      { wch: 10 }  // Status
-    ];
-    ws['!cols'] = colWidths;
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'TrackAbout Import');
-    
-    // Write with proper Excel formatting
-    const excelBuffer = XLSX.write(wb, { 
-      bookType: 'xlsx', 
-      type: 'array',
-      compression: true
-    });
-    const dataBlob = new Blob([excelBuffer], { 
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
-    });
-    
-    const fileName = `trackabout_customers_${idFormat}_${new Date().toISOString().split('T')[0]}.xlsx`;
-    saveAs(dataBlob, fileName);
-    setSnackbar(`Exported ${generatedIds.length} customers for TrackAbout import`);
-  };
-
-  const syncToTrackAbout = async () => {
-    if (!trackaboutApiKey || !trackaboutCompanyId) {
-      setSnackbar('Please enter TrackAbout API credentials');
-      return;
-    }
-
-    if (generatedIds.length === 0) {
-      setSnackbar('No generated customer IDs to sync');
-      return;
-    }
-
-    setTrackaboutSyncStatus('Syncing to TrackAbout...');
-    
-    try {
-      // TrackAbout API endpoint (you'll need to replace with actual endpoint)
-      const trackaboutEndpoint = `https://api.trackabout.com/v1/companies/${trackaboutCompanyId}/assets`;
-      
-      const syncPromises = generatedIds.map(async (customer) => {
-        const assetData = {
-          assetId: customer.CustomerListID,
-          description: customer.name,
-          customerId: customer.CustomerListID,
-          customerName: customer.name,
-          location: customer.contact_details || '',
-          barcode: `*%${customer.CustomerListID}*`,
-          assetType: 'Customer',
-          status: 'Active'
-        };
-
-        const response = await fetch(trackaboutEndpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${trackaboutApiKey}`,
-            'X-API-Key': trackaboutApiKey
-          },
-          body: JSON.stringify(assetData)
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to sync customer ${customer.CustomerListID}: ${response.statusText}`);
-        }
-
-        return response.json();
-      });
-
-      await Promise.all(syncPromises);
-      setTrackaboutSyncStatus('Successfully synced to TrackAbout!');
-      setSnackbar(`Successfully synced ${generatedIds.length} customers to TrackAbout`);
-    } catch (error) {
-      setTrackaboutSyncStatus('Sync failed');
-      setSnackbar(`Error syncing to TrackAbout: ${error.message}`);
     }
   };
 
@@ -669,79 +593,6 @@ export default function Integrations() {
           </Typography>
         </Paper>
 
-        {/* TrackAbout Integration Section */}
-        <Paper variant="outlined" sx={{ p: 3, mb: 4, borderRadius: 2 }}>
-          <Typography variant="h6" fontWeight={800} color="success" mb={3}>
-            TrackAbout Integration
-          </Typography>
-          <Typography variant="body2" color="text.secondary" mb={3}>
-            Direct integration with TrackAbout.com to eliminate Excel barcode generation
-          </Typography>
-          
-          {/* TrackAbout API Configuration */}
-          <Grid container spacing={2} sx={{ mb: 3 }}>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                label="TrackAbout API Key"
-                value={trackaboutApiKey}
-                onChange={(e) => setTrackaboutApiKey(e.target.value)}
-                fullWidth
-                variant="outlined"
-                type="password"
-                placeholder="Enter your TrackAbout API key"
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                label="TrackAbout Company ID"
-                value={trackaboutCompanyId}
-                onChange={(e) => setTrackaboutCompanyId(e.target.value)}
-                fullWidth
-                variant="outlined"
-                placeholder="Enter your TrackAbout company ID"
-              />
-            </Grid>
-          </Grid>
-
-          {/* TrackAbout Actions */}
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} sm={4}>
-              <Button
-                onClick={exportForTrackAbout}
-                variant="outlined"
-                color="success"
-                startIcon={<DownloadIcon />}
-                sx={{ borderRadius: 2, fontWeight: 700 }}
-                fullWidth
-              >
-                Export for TrackAbout
-              </Button>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <Button
-                onClick={syncToTrackAbout}
-                variant="contained"
-                color="success"
-                startIcon={<QrCodeIcon />}
-                sx={{ borderRadius: 2, fontWeight: 700 }}
-                fullWidth
-                disabled={!trackaboutApiKey || !trackaboutCompanyId}
-              >
-                Sync to TrackAbout
-              </Button>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
-                {trackaboutSyncStatus}
-              </Typography>
-            </Grid>
-          </Grid>
-          
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
-            Direct sync eliminates the need for Excel barcode generation. Customers are automatically added to TrackAbout with proper barcodes.
-          </Typography>
-        </Paper>
-
         {/* ID Generation Controls */}
         <Paper variant="outlined" sx={{ p: 3, mb: 4, borderRadius: 2 }}>
           <Typography variant="h6" fontWeight={800} color="primary" mb={3}>Generate Customer IDs</Typography>
@@ -819,14 +670,6 @@ export default function Integrations() {
                     sx={{ mr: 2, borderRadius: 2 }}
                   >
                     Clear All
-                  </Button>
-                  <Button
-                    onClick={exportToExcel}
-                    variant="contained"
-                    color="success"
-                    sx={{ mr: 2, borderRadius: 2, fontWeight: 700 }}
-                  >
-                    Export to Excel
                   </Button>
                   <Button
                     onClick={exportForZedAxis}
@@ -912,8 +755,6 @@ export default function Integrations() {
             </TableContainer>
           </Paper>
         )}
-
-
 
         {/* Customers Without IDs */}
         {customersWithoutIds.length > 0 && (

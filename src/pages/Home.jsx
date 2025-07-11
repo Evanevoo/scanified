@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAppStore } from '../store/appStore';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { useAuth } from '../hooks/useAuth';
 
 /**
  * Home dashboard component
@@ -11,7 +12,8 @@ import LoadingSpinner from '../components/LoadingSpinner';
  * @param {Object} props.profile - User profile data
  * @returns {JSX.Element} Home dashboard component
  */
-export default function Home({ profile }) {
+export default function Home() {
+  const { user, profile, organization } = useAuth();
   const navigate = useNavigate();
   const { addNotification } = useAppStore();
   
@@ -21,6 +23,25 @@ export default function Home({ profile }) {
     totalCustomers: 0,
     loading: true
   });
+
+  // If user is logged in but has no organization, show create org option
+  if (user && profile && !organization) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Paper elevation={3} sx={{ p: 4, borderRadius: 4, textAlign: 'center' }}>
+          <Typography variant="h4" gutterBottom>
+            Welcome!
+          </Typography>
+          <Typography gutterBottom>
+            You are not part of any organization yet.
+          </Typography>
+          <Button variant="contained" color="primary" href="/organization-registration">
+            Create a new organization
+          </Button>
+        </Paper>
+      </Box>
+    );
+  }
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -339,14 +360,38 @@ export default function Home({ profile }) {
                 Use the navigation bar to manage customers, cylinders, rentals, and invoices.
               </Typography>
               
-              <Button 
-                variant="contained" 
-                color="primary" 
-                sx={{ mt: 4 }} 
-                onClick={handleViewScannedOrders}
-              >
-                View Scanned Orders
-              </Button>
+              <Grid container spacing={2} sx={{ mt: 4 }}>
+                <Grid item xs={12} md={4}>
+                  <Button 
+                    variant="contained" 
+                    color="primary" 
+                    fullWidth
+                    onClick={handleViewScannedOrders}
+                  >
+                    View Scanned Orders
+                  </Button>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Button 
+                    variant="outlined" 
+                    color="primary" 
+                    fullWidth
+                    onClick={() => navigate('/smart-inventory')}
+                  >
+                    🧠 Smart Inventory
+                  </Button>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Button 
+                    variant="outlined" 
+                    color="primary" 
+                    fullWidth
+                    onClick={() => navigate('/customer-portal')}
+                  >
+                    👤 Customer Portal
+                  </Button>
+                </Grid>
+              </Grid>
             </CardContent>
           </Card>
         </Box>

@@ -52,6 +52,8 @@ export default function HomeScreen() {
   const [customers, setCustomers] = useState([]);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [customerResults, setCustomerResults] = useState([]);
+  const [bottleResults, setBottleResults] = useState([]);
+  const [loadingBottles, setLoadingBottles] = useState(false);
   const [recentScans, setRecentScans] = useState([]);
 
   useEffect(() => {
@@ -72,10 +74,12 @@ export default function HomeScreen() {
   useEffect(() => {
     if (search.trim().length === 0) {
       setCustomerResults([]);
+      setBottleResults([]);
       return;
     }
+    
+    // Search for customers
     setLoadingCustomers(true);
-    // Fetch customers matching the search
     const fetchCustomers = async () => {
       let query = supabase
         .from('customers')
@@ -87,7 +91,7 @@ export default function HomeScreen() {
         // If more than one character, match names containing the word
         query = query.ilike('name', `%${search.trim()}%`);
       }
-      query = query.limit(10);
+      query = query.limit(5);
       const { data: custs, error } = await query;
       if (error || !custs) {
         setCustomerResults([]);
@@ -109,6 +113,26 @@ export default function HomeScreen() {
       setLoadingCustomers(false);
     };
     fetchCustomers();
+
+    // Search for bottles by barcode
+    setLoadingBottles(true);
+    const fetchBottles = async () => {
+      const { data: bottles, error } = await supabase
+        .from('bottles')
+        .select('barcode_number, serial_number, assigned_customer, customer_name, product_code, description')
+        .ilike('barcode_number', `%${search.trim()}%`)
+        .limit(5);
+      
+      if (error || !bottles) {
+        setBottleResults([]);
+        setLoadingBottles(false);
+        return;
+      }
+      
+      setBottleResults(bottles);
+      setLoadingBottles(false);
+    };
+    fetchBottles();
   }, [search]);
 
   useEffect(() => {
@@ -159,36 +183,70 @@ export default function HomeScreen() {
             </TouchableOpacity>
           ))}
         </View>
-        {/* Customer Search Bar */}
+        {/* Enhanced Search Bar */}
         <View style={styles.searchRow}>
           <TextInput
             style={[styles.searchInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-            placeholder="Search customers by name"
+            placeholder="Search customers by name or bottles by barcode"
             placeholderTextColor={colors.textSecondary}
             value={search}
             onChangeText={setSearch}
           />
           <TouchableOpacity style={[styles.micCircle, { backgroundColor: colors.primary }]}><Text style={styles.micIcon}>🔍</Text></TouchableOpacity>
         </View>
+        
+        {/* Search Results */}
         {search.trim().length > 0 && (
-          <View style={[styles.customerDropdown, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            {loadingCustomers ? (
-              <Text style={{ padding: 12, color: colors.primary }}>Loading...</Text>
-            ) : customerResults.length === 0 ? (
-              <Text style={{ padding: 12, color: colors.textSecondary }}>No customers found.</Text>
-            ) : (
-              customerResults.map(item => (
-                <TouchableOpacity
-                  key={item.CustomerListID}
-                  style={[styles.customerItem, { borderBottomColor: colors.border }]}
-                  onPress={() => navigation.navigate('CustomerDetails', { customerId: item.CustomerListID })}
-                >
-                  <Text style={[styles.customerName, { color: colors.text }]}>{item.name}</Text>
-                  <Text style={[styles.customerDetail, { color: colors.textSecondary }]}>Barcode: {item.barcode}</Text>
-                  <Text style={[styles.customerDetail, { color: colors.textSecondary }]}>Contact: {item.contact_details}</Text>
-                  <Text style={[styles.customerDetail, { color: colors.textSecondary }]}>Gases: {item.gases.length > 0 ? item.gases.join(', ') : 'None'}</Text>
-                </TouchableOpacity>
-              ))
+          <View style={[styles.searchResults, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            {/* Customer Results */}
+            {customerResults.length > 0 && (
+              <View style={styles.resultsSection}>
+                <Text style={[styles.resultsHeader, { color: colors.primary }]}>Customers</Text>
+                {loadingCustomers ? (
+                  <Text style={{ padding: 12, color: colors.primary }}>Loading customers...</Text>
+                ) : (
+                  customerResults.map(item => (
+                    <TouchableOpacity
+                      key={item.CustomerListID}
+                      style={[styles.customerItem, { borderBottomColor: colors.border }]}
+                      onPress={() => navigation.navigate('CustomerDetails', { customerId: item.CustomerListID })}
+                    >
+                      <Text style={[styles.customerName, { color: colors.text }]}>{item.name}</Text>
+                      <Text style={[styles.customerDetail, { color: colors.textSecondary }]}>Barcode: {item.barcode}</Text>
+                      <Text style={[styles.customerDetail, { color: colors.textSecondary }]}>Contact: {item.contact_details}</Text>
+                      <Text style={[styles.customerDetail, { color: colors.textSecondary }]}>Gases: {item.gases.length > 0 ? item.gases.join(', ') : 'None'}</Text>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </View>
+            )}
+
+            {/* Bottle Results */}
+            {bottleResults.length > 0 && (
+              <View style={styles.resultsSection}>
+                <Text style={[styles.resultsHeader, { color: colors.primary }]}>Bottles</Text>
+                {loadingBottles ? (
+                  <Text style={{ padding: 12, color: colors.primary }}>Loading bottles...</Text>
+                ) : (
+                  bottleResults.map(item => (
+                    <TouchableOpacity
+                      key={item.barcode_number}
+                      style={[styles.bottleItem, { borderBottomColor: colors.border }]}
+                      onPress={() => navigation.navigate('EditCylinder', { barcode: item.barcode_number })}
+                    >
+                      <Text style={[styles.bottleBarcode, { color: colors.text }]}>Barcode: {item.barcode_number}</Text>
+                      <Text style={[styles.bottleDetail, { color: colors.textSecondary }]}>Serial: {item.serial_number}</Text>
+                      <Text style={[styles.bottleDetail, { color: colors.textSecondary }]}>Customer: {item.customer_name || 'Unassigned'}</Text>
+                      <Text style={[styles.bottleDetail, { color: colors.textSecondary }]}>Product: {item.product_code} - {item.description}</Text>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </View>
+            )}
+
+            {/* No Results */}
+            {!loadingCustomers && !loadingBottles && customerResults.length === 0 && bottleResults.length === 0 && (
+              <Text style={{ padding: 12, color: colors.textSecondary }}>No customers or bottles found.</Text>
             )}
           </View>
         )}
@@ -334,7 +392,7 @@ const styles = StyleSheet.create({
   fileName: {
     fontSize: 14,
   },
-  customerDropdown: {
+  searchResults: {
     borderRadius: 14,
     borderWidth: 1,
     marginBottom: 12,
@@ -343,6 +401,17 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 2,
     zIndex: 10,
+  },
+  resultsSection: {
+    marginBottom: 8,
+  },
+  resultsHeader: {
+    fontWeight: 'bold',
+    fontSize: 14,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 4,
+    textTransform: 'uppercase',
   },
   customerItem: {
     padding: 14,
@@ -354,6 +423,19 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   customerDetail: {
+    fontSize: 13,
+    marginBottom: 1,
+  },
+  bottleItem: {
+    padding: 14,
+    borderBottomWidth: 1,
+  },
+  bottleBarcode: {
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginBottom: 2,
+  },
+  bottleDetail: {
     fontSize: 13,
     marginBottom: 1,
   },

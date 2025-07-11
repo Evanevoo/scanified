@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Vibration, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
@@ -14,6 +14,8 @@ const ScanArea: React.FC<ScanAreaProps> = ({ onScanned, label = 'SCAN HERE', sty
   const [scanned, setScanned] = useState(false);
   const [lastScanned, setLastScanned] = useState('');
   const [error, setError] = useState('');
+  const [pendingBarcode, setPendingBarcode] = useState<string | null>(null);
+  const holdTimeout = useRef<NodeJS.Timeout | null>(null);
 
   const playBeep = async () => {
     try {
@@ -28,12 +30,31 @@ const ScanArea: React.FC<ScanAreaProps> = ({ onScanned, label = 'SCAN HERE', sty
   const handleBarcodeScanned = (event: any) => {
     const barcode = event.data.trim();
     if (!barcode) return;
-    setScanned(true);
-    setLastScanned(barcode);
-    playBeep();
-    onScanned(barcode);
-    setTimeout(() => setScanned(false), 800);
+
+    // If the same barcode is detected, do nothing (wait for hold)
+    if (pendingBarcode === barcode) {
+      return;
+    }
+
+    setPendingBarcode(barcode);
+    if (holdTimeout.current) clearTimeout(holdTimeout.current);
+
+    // Require the barcode to be stable for 800ms before accepting
+    holdTimeout.current = setTimeout(() => {
+      setScanned(true);
+      setLastScanned(barcode);
+      playBeep();
+      onScanned(barcode);
+      setTimeout(() => setScanned(false), 1500); // Increase cooldown
+      setPendingBarcode(null);
+    }, 800);
   };
+
+  useEffect(() => {
+    return () => {
+      if (holdTimeout.current) clearTimeout(holdTimeout.current);
+    };
+  }, []);
 
   return (
     <View style={[styles.wrapper, style]}>

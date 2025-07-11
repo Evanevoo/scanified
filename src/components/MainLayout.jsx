@@ -61,18 +61,17 @@ export default function MainLayout() {
         { label: 'Customers', icon: <PeopleIcon />, to: '/customers' },
         { label: 'Locations', icon: <LocationOnIcon />, to: '/locations' },
         { label: 'All Gas Assets', icon: <SwapVertIcon />, to: '/assets' },
-        { label: 'Bottle Management', icon: <AssignmentIcon />, to: '/bottle-management' },
         { label: 'Scanned Orders', icon: <AssignmentIcon />, to: '/scanned-orders' },
-        { label: 'Support', icon: <AssignmentIcon />, to: '/support' },
         {
           label: 'Integrations', icon: <SwapVertIcon />, to: null, subItems: [
             { label: 'Import', to: '/import' },
             { label: 'Import Customers', to: '/import-customer-info' },
-
             { label: 'Import Approvals', to: '/import-approvals' },
-            { label: 'Customer ID Generator', to: '/integrations' },
+            { label: 'Customer ID Generator', to: '/generateid' },
+            { label: 'Bottle Management', to: '/bottle-management' },
           ]
         },
+        { label: 'Support', icon: <AssignmentIcon />, to: '/support' },
       ];
 
   useEffect(() => {

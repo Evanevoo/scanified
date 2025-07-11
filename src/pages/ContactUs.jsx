@@ -44,10 +44,21 @@ function ContactUs() {
     setError('');
     
     try {
-      // Here you would typically send the contact form data to your backend
-      // For now, we'll just simulate a successful submission
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
+      // Send the contact form data to our Netlify function
+      const response = await fetch('/.netlify/functions/send-contact-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData)
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to send message');
+      }
+
       setSuccess(true);
       setFormData({
         name: '',
@@ -60,7 +71,8 @@ function ContactUs() {
       // Reset success message after 5 seconds
       setTimeout(() => setSuccess(false), 5000);
     } catch (err) {
-      setError('Failed to send message. Please try again or contact us directly.');
+      console.error('Contact form error:', err);
+      setError(err.message || 'Failed to send message. Please try again or contact us directly.');
     } finally {
       setLoading(false);
     }

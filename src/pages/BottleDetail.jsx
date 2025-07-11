@@ -6,10 +6,19 @@ import {
   CircularProgress, Button, Chip, Divider, Grid, Card, CardContent, TextField, MenuItem, Snackbar, Alert, Select
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import Autocomplete from '@mui/material/Autocomplete';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
+import IconButton from '@mui/material/IconButton';
+import DeleteIcon from '@mui/icons-material/Delete';
+import { useAuth } from '../hooks/useAuth';
 
 export default function BottleDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { profile: userProfile, organization } = useAuth();
   const [bottle, setBottle] = useState(null);
   const [assetInfo, setAssetInfo] = useState(null);
   const [rentals, setRentals] = useState([]);
@@ -20,6 +29,23 @@ export default function BottleDetail() {
   const [saving, setSaving] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [locations, setLocations] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [selectedCustomer, setSelectedCustomer] = useState('');
+  const [assigning, setAssigning] = useState(false);
+  const [ownerType, setOwnerType] = useState('organization');
+  const [ownerCustomerId, setOwnerCustomerId] = useState('');
+  const [ownerName, setOwnerName] = useState('');
+  const [ownerList, setOwnerList] = useState([]);
+  const [newOwnerName, setNewOwnerName] = useState('');
+  const [manageOwnersOpen, setManageOwnersOpen] = useState(false);
+  const [deletingOwnerId, setDeletingOwnerId] = useState(null);
+  const [ownerCustomerIds, setOwnerCustomerIds] = useState([]);
+  const [owners, setOwners] = useState([]);
+  const [ownersLoading, setOwnersLoading] = useState(false);
+  const [ownersError, setOwnersError] = useState('');
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [ownerToDelete, setOwnerToDelete] = useState(null);
+  const [selectedOwner, setSelectedOwner] = useState('');
 
   useEffect(() => {
     const fetchBottleDetails = async () => {
@@ -141,6 +167,13 @@ export default function BottleDetail() {
         };
         fetchLocations();
         
+        // Fetch owner information
+        if (bottleData.owner_type && bottleData.owner_id && bottleData.owner_name) {
+          setOwnerType(bottleData.owner_type);
+          setOwnerCustomerId(bottleData.owner_id);
+          setOwnerName(bottleData.owner_name);
+        }
+        
       } catch (err) {
         setError(err.message);
       }
@@ -152,6 +185,85 @@ export default function BottleDetail() {
       fetchBottleDetails();
     }
   }, [id]);
+
+  // Fetch customers for assignment
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      const { data, error } = await supabase.from('customers').select('CustomerListID, name').order('name');
+      if (!error && data) setCustomers(data);
+    };
+    fetchCustomers();
+  }, []);
+
+  // In useEffect, after fetching customers and locations, build the owner list
+  useEffect(() => {
+    const externalOwners = customers.filter(c => c.CustomerListID === 'Not Set').map(c => c.name);
+    setOwnerList([
+      { type: 'organization', label: organization?.name || 'This Organization', value: 'organization' },
+      ...locations.map(loc => ({ type: 'location', label: loc.name, value: loc.name })),
+      ...externalOwners.map(name => ({ type: 'external_company', label: name, value: name })),
+    ]);
+  }, [customers, locations, organization]);
+
+  // Fetch owner customer IDs on mount or when bottles/customers change
+  useEffect(() => {
+    const fetchOwnerCustomerIds = async () => {
+      const { data: bottlesData } = await supabase
+        .from('bottles')
+        .select('owner_id')
+        .eq('organization_id', userProfile.organization_id);
+      const ids = Array.from(new Set((bottlesData || []).map(b => b.owner_id).filter(Boolean)));
+      setOwnerCustomerIds(ids);
+    };
+    if (userProfile?.organization_id) fetchOwnerCustomerIds();
+  }, [userProfile, customers]);
+
+  useEffect(() => {
+    if (bottle) {
+      setOwnerType(bottle.owner_type || 'organization');
+      setOwnerCustomerId(bottle.owner_id || '');
+      setOwnerName(bottle.owner_name || '');
+      // Only show the current bottle's owner in the ownerList
+      let ownerValue = '';
+      let ownerLabel = '';
+      if (bottle.owner_type === 'organization') {
+        ownerValue = 'organization';
+        ownerLabel = bottle.owner_name || 'This Organization';
+      } else if (bottle.owner_type === 'customer') {
+        ownerValue = bottle.owner_id;
+        ownerLabel = bottle.owner_name + (bottle.owner_id ? ` (${bottle.owner_id})` : '');
+      } else if (bottle.owner_type === 'external_company') {
+        ownerValue = bottle.owner_name;
+        ownerLabel = bottle.owner_name;
+      }
+      if (ownerValue) {
+        setOwnerList([{ type: bottle.owner_type, label: ownerLabel, value: ownerValue }]);
+      } else {
+        setOwnerList([]);
+      }
+      // Set selectedOwner to bottle.owner_id if present
+      setSelectedOwner(bottle.owner_id || '');
+    }
+  }, [bottle]);
+
+  // Fetch owners from the owners table
+  useEffect(() => {
+    const fetchOwners = async () => {
+      setOwnersLoading(true);
+      let orgId = bottle?.organization_id || userProfile?.organization_id;
+      const { data, error } = await supabase
+        .from('owners')
+        .select('*')
+        .eq('organization_id', orgId)
+        .order('name');
+      if (error) setOwnersError('Failed to load owners');
+      else setOwners(data || []);
+      setOwnersLoading(false);
+      // Debug log
+      console.log('Bottle owner_id:', bottle?.owner_id, 'Fetched owners:', data);
+    };
+    fetchOwners();
+  }, [bottle, userProfile]);
 
   const handleEditChange = (field, value) => {
     setEditBottle(prev => ({ ...prev, [field]: value }));
@@ -171,6 +283,26 @@ export default function BottleDetail() {
       setSnackbar({ open: true, message: err.message, severity: 'error' });
     }
     setSaving(false);
+  };
+
+  // Add owner input handler
+  const handleAddOwner = () => {
+    if (newOwnerName.trim() && !ownerList.some(o => o.value === newOwnerName.trim())) {
+      setOwnerList([...ownerList, { type: 'external_company', label: newOwnerName.trim(), value: newOwnerName.trim() }]);
+      setNewOwnerName('');
+    }
+  };
+
+  // Delete owner handler
+  const handleDeleteOwner = async (ownerId) => {
+    setDeletingOwnerId(ownerId);
+    // Remove owner from customers table
+    await supabase.from('customers').delete().eq('CustomerListID', ownerId);
+    // Update bottles owned by this customer to be organization-owned
+    await supabase.from('bottles').update({ owner_type: 'organization', owner_id: userProfile.organization_id, owner_name: organization?.name || '' }).eq('owner_id', ownerId);
+    setDeletingOwnerId(null);
+    setManageOwnersOpen(false);
+    // Optionally, refetch customers/owners
   };
 
   if (loading) {
@@ -287,21 +419,57 @@ export default function BottleDetail() {
                   />
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Location</Typography>
+                  <Typography variant="body2" color="text.secondary">Owner</Typography>
                   <Select
-                    value={editBottle?.location || ''}
-                    onChange={e => handleEditChange('location', e.target.value)}
+                    value={editBottle?.owner_id || ''}
+                    onChange={e => {
+                      const selectedId = e.target.value;
+                      const selectedOwner = owners.find(o => o.id === selectedId);
+                      setEditBottle(prev => ({
+                        ...prev,
+                        owner_id: selectedId,
+                        owner_name: selectedOwner ? selectedOwner.name : prev.owner_name
+                      }));
+                    }}
                     fullWidth
                     size="small"
-                    displayEmpty
+                    sx={{ mb: 1 }}
+                    renderValue={selected => {
+                      const owner = owners.find(o => o.id === selected);
+                      return owner ? owner.name : 'Select owner...';
+                    }}
                   >
-                    <MenuItem value=""><em>None</em></MenuItem>
-                    {locations.map(loc => (
-                      <MenuItem key={loc.id} value={loc.name}>{loc.name}</MenuItem>
+                    {owners.map(o => (
+                      <MenuItem key={o.id} value={o.id}>{o.name}</MenuItem>
                     ))}
                   </Select>
                 </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Ownership</Typography>
+                  <TextField
+                    value={editBottle?.owner_name || ''}
+                    onChange={e => setEditBottle(prev => ({ ...prev, owner_name: e.target.value }))}
+                    fullWidth
+                    size="small"
+                  />
+                </Grid>
                 <Grid item xs={12}>
+                  <Grid container spacing={2} alignItems="flex-end">
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="text.secondary">Location</Typography>
+                      <Select
+                        value={editBottle?.location || ''}
+                        onChange={e => handleEditChange('location', e.target.value)}
+                        fullWidth
+                        size="small"
+                      >
+                        <MenuItem value=""><em>None</em></MenuItem>
+                        {locations.map(loc => (
+                          <MenuItem key={loc.name} value={loc.name}>{loc.name}</MenuItem>
+                        ))}
+                      </Select>
+                    </Grid>
+                  </Grid>
                   <Button
                     variant="outlined"
                     color="secondary"
@@ -420,9 +588,60 @@ export default function BottleDetail() {
                   </Grid>
                 </Grid>
               ) : (
-                <Typography variant="body1" color="text.secondary">
-                  No customer assigned to this bottle.
-                </Typography>
+                <Box>
+                  <Typography variant="body2" color="text.secondary" mb={1}>Assign to Customer</Typography>
+                  <Select
+                    value={selectedCustomer}
+                    onChange={e => setSelectedCustomer(e.target.value)}
+                    fullWidth
+                    displayEmpty
+                    size="small"
+                    sx={{ mb: 2 }}
+                  >
+                    <MenuItem value=""><em>Select a customer...</em></MenuItem>
+                    <em style={{ fontStyle: 'normal', fontWeight: 600, color: '#888' }}>Locations (Owner/In House)</em>
+                    {locations.map(loc => (
+                      <MenuItem key={`loc-${loc.id}`} value={loc.name}>{loc.name}</MenuItem>
+                    ))}
+                    <em style={{ fontStyle: 'normal', fontWeight: 600, color: '#888' }}>Owner (In House, Not Set)</em>
+                    {customers.filter(c => c.CustomerListID === 'Not Set').map(c => (
+                      <MenuItem key={`owner-${c.name}`} value={c.CustomerListID}>{c.name} (Not Set)</MenuItem>
+                    ))}
+                    <MenuItem value="Customer Owned">Customer Owned</MenuItem>
+                    <em style={{ fontStyle: 'normal', fontWeight: 600, color: '#888' }}>Customers</em>
+                    {customers.filter(c => c.CustomerListID !== 'Not Set').map(c => (
+                      <MenuItem key={c.CustomerListID} value={c.CustomerListID}>{c.name} ({c.CustomerListID})</MenuItem>
+                    ))}
+                  </Select>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    disabled={!selectedCustomer || assigning}
+                    onClick={async () => {
+                      setAssigning(true);
+                      try {
+                        const { error } = await supabase
+                          .from('bottles')
+                          .update({ assigned_customer: selectedCustomer })
+                          .eq('id', bottle.id);
+                        if (error) throw error;
+                        setSnackbar({ open: true, message: 'Customer assigned successfully!', severity: 'success' });
+                        // Refetch bottle details to update UI
+                        const { data: customerData, error: customerError } = await supabase
+                          .from('customers')
+                          .select('*')
+                          .eq('CustomerListID', selectedCustomer)
+                          .single();
+                        if (!customerError && customerData) setCustomer(customerData);
+                      } catch (err) {
+                        setSnackbar({ open: true, message: err.message, severity: 'error' });
+                      }
+                      setAssigning(false);
+                    }}
+                  >
+                    {assigning ? 'Assigning...' : 'Assign Customer'}
+                  </Button>
+                </Box>
               )}
             </Paper>
           </Grid>
@@ -491,9 +710,18 @@ export default function BottleDetail() {
               )}
             </Paper>
           </Grid>
+
+          {/* Owner Information */}
+          {/* --- Entire Owner Information section removed --- */}
         </Grid>
       </Box>
-      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        ContentProps={{ sx: { zIndex: 20000 } }}
+      >
         <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>
           {snackbar.message}
         </Alert>

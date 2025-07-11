@@ -25,43 +25,18 @@ import {
   Email as EmailIcon,
   Phone as PhoneIcon,
   ExpandMore as ExpandMoreIcon,
-  Delete as DeleteIcon
+  Delete as DeleteIcon,
+  Restore as RestoreIcon
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
-
-const mockTickets = [
-  {
-    id: 1,
-    subject: 'Cannot access cylinder data',
-    status: 'open',
-    category: 'technical',
-    priority: 'high',
-    created_at: new Date(Date.now() - 1000 * 60 * 60 * 2).toLocaleString(),
-  },
-  {
-    id: 2,
-    subject: 'Billing question',
-    status: 'pending',
-    category: 'billing',
-    priority: 'medium',
-    created_at: new Date(Date.now() - 1000 * 60 * 60 * 24).toLocaleString(),
-  },
-  {
-    id: 3,
-    subject: 'Feature request: Mobile app improvements',
-    status: 'closed',
-    category: 'feature',
-    priority: 'low',
-    created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toLocaleString(),
-  }
-];
+import { notificationService } from '../services/notificationService';
 
 export default function SupportCenter() {
-  const { profile } = useAuth();
+  const { profile, organization } = useAuth();
   
   const [loading, setLoading] = useState(false);
-  const [tickets, setTickets] = useState(mockTickets);
+  const [tickets, setTickets] = useState([]);
   const [newTicketDialog, setNewTicketDialog] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [ticketDialog, setTicketDialog] = useState(false);
@@ -82,6 +57,8 @@ export default function SupportCenter() {
 
   // Reply form state
   const [replyMessage, setReplyMessage] = useState('');
+  const [ticketMessages, setTicketMessages] = useState([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
 
   useEffect(() => {
     if (profile) {
@@ -92,83 +69,18 @@ export default function SupportCenter() {
   const fetchTickets = async () => {
     setLoading(true);
     try {
-      // In production, this would fetch tickets for the current organization
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Mock data - in production this would come from Supabase
-      const mockTickets = [
-        {
-          id: 1,
-          subject: 'Cannot access cylinder data',
-          status: 'open',
-          category: 'technical',
-          priority: 'high',
-          created_at: new Date(Date.now() - 1000 * 60 * 60 * 2).toLocaleString(),
-          updated_at: new Date(Date.now() - 1000 * 60 * 30).toLocaleString(),
-          messages: [
-            { 
-              id: 1,
-              sender: 'user', 
-              message: 'I cannot access the cylinder data in my dashboard. Getting an error message.', 
-              timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2).toLocaleString() 
-            },
-            { 
-              id: 2,
-              sender: 'support', 
-              message: 'We are investigating this issue. Can you provide more details about the error message?', 
-              timestamp: new Date(Date.now() - 1000 * 60 * 30).toLocaleString() 
-            }
-          ]
-        },
-        {
-          id: 2,
-          subject: 'Billing question',
-          status: 'pending',
-          category: 'billing',
-          priority: 'medium',
-          created_at: new Date(Date.now() - 1000 * 60 * 60 * 24).toLocaleString(),
-          updated_at: new Date(Date.now() - 1000 * 60 * 60 * 12).toLocaleString(),
-          messages: [
-            { 
-              id: 1,
-              sender: 'user', 
-              message: 'I have a question about my monthly billing. Can you explain the charges?', 
-              timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24).toLocaleString() 
-            },
-            { 
-              id: 2,
-              sender: 'support', 
-              message: 'I\'ll review your billing statement and get back to you with a detailed breakdown.', 
-              timestamp: new Date(Date.now() - 1000 * 60 * 60 * 12).toLocaleString() 
-            }
-          ]
-        },
-        {
-          id: 3,
-          subject: 'Feature request: Mobile app improvements',
-          status: 'closed',
-          category: 'feature',
-          priority: 'low',
-          created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toLocaleString(),
-          updated_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 6).toLocaleString(),
-          messages: [
-            { 
-              id: 1,
-              sender: 'user', 
-              message: 'It would be great to have offline scanning capabilities in the mobile app.', 
-              timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toLocaleString() 
-            },
-            { 
-              id: 2,
-              sender: 'support', 
-              message: 'Thank you for the suggestion! This feature is on our roadmap for Q2 2024.', 
-              timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24 * 6).toLocaleString() 
-            }
-          ]
-        }
-      ];
-      
-      setTickets(mockTickets);
+      if (!organization) {
+        setTickets([]);
+        setLoading(false);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('support_tickets')
+        .select(`*, profiles(email, full_name)`)
+        .eq('organization_id', organization.id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setTickets(data || []);
     } catch (error) {
       console.error('Error fetching tickets:', error);
       setSnackbar({ open: true, message: 'Error loading tickets', severity: 'error' });
@@ -180,31 +92,32 @@ export default function SupportCenter() {
   const handleSubmitTicket = async () => {
     setLoading(true);
     try {
-      // In production, this would submit to Supabase
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      const newTicketData = {
-        id: Date.now(),
-        subject: newTicket.subject,
-        status: 'open',
-        category: newTicket.category,
-        priority: newTicket.priority,
-        created_at: new Date().toLocaleString(),
-        updated_at: new Date().toLocaleString(),
-        messages: [
-          {
-            id: 1,
-            sender: 'user',
-            message: newTicket.description,
-            timestamp: new Date().toLocaleString()
-          }
-        ]
-      };
-      
-      setTickets(prev => [newTicketData, ...prev]);
+      if (!organization || !profile) throw new Error('Missing organization or profile');
+      const { data, error } = await supabase
+        .from('support_tickets')
+        .insert({
+          subject: newTicket.subject,
+          status: 'open',
+          category: newTicket.category,
+          priority: newTicket.priority,
+          description: newTicket.description,
+          organization_id: organization.id,
+          user_id: profile.id
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      setTickets(prev => [data, ...prev]);
       setNewTicketDialog(false);
       setNewTicket({ subject: '', category: '', priority: 'medium', description: '' });
       setSnackbar({ open: true, message: 'Ticket submitted successfully', severity: 'success' });
+      
+      // Notify owners of new ticket
+      try {
+        await notificationService.notifyOwnerOfNewTicket(data);
+      } catch (error) {
+        console.error('Error notifying owners:', error);
+      }
     } catch (error) {
       console.error('Error submitting ticket:', error);
       setSnackbar({ open: true, message: 'Error submitting ticket', severity: 'error' });
@@ -215,32 +128,32 @@ export default function SupportCenter() {
 
   const handleReply = async () => {
     if (!replyMessage.trim() || !selectedTicket) return;
-    
     setLoading(true);
     try {
-      // In production, this would submit to Supabase
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const newMessage = {
-        id: Date.now(),
-        sender: 'user',
-        message: replyMessage,
-        timestamp: new Date().toLocaleString()
-      };
-      
-      setTickets(prev => prev.map(ticket => 
-        ticket.id === selectedTicket.id 
-          ? { 
-              ...ticket, 
-              messages: [...ticket.messages, newMessage],
-              updated_at: new Date().toLocaleString()
-            }
-          : ticket
-      ));
-      
+      if (!profile) throw new Error('Missing profile');
+      const { error } = await supabase
+        .from('support_ticket_messages')
+        .insert({
+          ticket_id: selectedTicket.id,
+          sender: 'user',
+          message: replyMessage,
+          sender_email: profile.email
+        });
+      if (error) throw error;
+      // Optionally update ticket status
+      await supabase
+        .from('support_tickets')
+        .update({ status: 'pending', updated_at: new Date().toISOString() })
+        .eq('id', selectedTicket.id);
       setReplyMessage('');
       setReplyDialog(false);
       setSnackbar({ open: true, message: 'Reply sent successfully', severity: 'success' });
+      
+      // Refresh messages if ticket dialog is open
+      if (selectedTicket) {
+        await fetchTicketMessages(selectedTicket.id);
+      }
+      fetchTickets();
     } catch (error) {
       console.error('Error sending reply:', error);
       setSnackbar({ open: true, message: 'Error sending reply', severity: 'error' });
@@ -249,19 +162,74 @@ export default function SupportCenter() {
     }
   };
 
+  const handleViewTicket = async (ticket) => {
+    setSelectedTicket(ticket);
+    setTicketDialog(true);
+    await fetchTicketMessages(ticket.id);
+  };
+
+  const fetchTicketMessages = async (ticketId) => {
+    setLoadingMessages(true);
+    try {
+      const { data, error } = await supabase
+        .from('support_ticket_messages')
+        .select('*')
+        .eq('ticket_id', ticketId)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      setTicketMessages(data || []);
+    } catch (error) {
+      console.error('Error fetching ticket messages:', error);
+      setSnackbar({ open: true, message: 'Error loading messages', severity: 'error' });
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+
   const handleDeleteTicket = (ticket) => {
     setTicketToDelete(ticket);
     setDeleteDialog(true);
   };
 
+  const handleReopenTicket = async (ticketId) => {
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('support_tickets')
+        .update({ 
+          status: 'open',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', ticketId);
+
+      if (error) throw error;
+
+      setSnackbar({ open: true, message: 'Ticket reopened successfully', severity: 'success' });
+      fetchTickets();
+      
+      // Update selected ticket if it's the current one
+      if (selectedTicket && selectedTicket.id === ticketId) {
+        setSelectedTicket(prev => ({ ...prev, status: 'open' }));
+      }
+    } catch (error) {
+      console.error('Error reopening ticket:', error);
+      setSnackbar({ open: true, message: 'Error reopening ticket', severity: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const confirmDeleteTicket = async () => {
     setLoading(true);
     try {
-      // In production, this would delete from Supabase
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const updatedTickets = tickets.filter(ticket => ticket.id !== ticketToDelete.id);
-      setTickets(updatedTickets);
+      if (!ticketToDelete) return;
+      const { error } = await supabase
+        .from('support_tickets')
+        .delete()
+        .eq('id', ticketToDelete.id);
+      if (error) throw error;
+      setTickets(tickets.filter(ticket => ticket.id !== ticketToDelete.id));
       setDeleteDialog(false);
       setTicketToDelete(null);
       setSnackbar({ open: true, message: 'Ticket deleted successfully', severity: 'success' });
@@ -423,16 +391,24 @@ export default function SupportCenter() {
                     <Grid item xs={12} sm={4} sx={{ textAlign: 'right' }}>
                       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
                         <Button
-                          onClick={() => {
-                            setSelectedTicket(ticket);
-                            setTicketDialog(true);
-                          }}
+                          onClick={() => handleViewTicket(ticket)}
                           variant="outlined"
                           startIcon={<ViewIcon />}
                           size="small"
                         >
                           View Details
                         </Button>
+                        {ticket.status === 'closed' && (
+                          <Button
+                            onClick={() => handleReopenTicket(ticket.id)}
+                            variant="outlined"
+                            color="primary"
+                            startIcon={<RestoreIcon />}
+                            size="small"
+                          >
+                            Reopen
+                          </Button>
+                        )}
                         <IconButton
                           onClick={() => handleDeleteTicket(ticket)}
                           color="error"
@@ -528,26 +504,41 @@ export default function SupportCenter() {
         {selectedTicket && (
           <>
             <DialogTitle>
-              <Typography variant="h6" fontWeight={700}>
-                {selectedTicket.subject}
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                <Chip
-                  icon={getStatusIcon(selectedTicket.status)}
-                  label={selectedTicket.status}
-                  color={getStatusColor(selectedTicket.status)}
-                  size="small"
-                />
-                <Chip
-                  label={selectedTicket.priority}
-                  color={getPriorityColor(selectedTicket.priority)}
-                  size="small"
-                />
-                <Chip
-                  label={selectedTicket.category}
-                  variant="outlined"
-                  size="small"
-                />
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <Box>
+                  <Typography variant="h6" fontWeight={700}>
+                    {selectedTicket.subject}
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                    <Chip
+                      icon={getStatusIcon(selectedTicket.status)}
+                      label={selectedTicket.status}
+                      color={getStatusColor(selectedTicket.status)}
+                      size="small"
+                    />
+                    <Chip
+                      label={selectedTicket.priority}
+                      color={getPriorityColor(selectedTicket.priority)}
+                      size="small"
+                    />
+                    <Chip
+                      label={selectedTicket.category}
+                      variant="outlined"
+                      size="small"
+                    />
+                  </Box>
+                </Box>
+                {selectedTicket.status === 'closed' && (
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    onClick={() => handleReopenTicket(selectedTicket.id)}
+                    disabled={loading}
+                    startIcon={<RestoreIcon />}
+                  >
+                    Reopen
+                  </Button>
+                )}
               </Box>
             </DialogTitle>
             <DialogContent>
@@ -558,39 +549,52 @@ export default function SupportCenter() {
               <Divider sx={{ my: 2 }} />
               
               <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
-                Messages
+                Chat History
               </Typography>
               
-              <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
-                {selectedTicket.messages?.map((message, index) => (
-                  <Box key={index} sx={{ mb: 2 }}>
-                    <Box sx={{ 
-                      display: 'flex', 
-                      justifyContent: message.sender === 'user' ? 'flex-end' : 'flex-start',
-                      mb: 1
-                    }}>
-                      <Chip
-                        label={message.sender === 'user' ? 'You' : 'Support'}
-                        color={message.sender === 'user' ? 'primary' : 'secondary'}
-                        size="small"
-                      />
-                    </Box>
-                    <Paper
-                      variant="outlined"
-                      sx={{
-                        p: 2,
-                        backgroundColor: message.sender === 'user' ? 'primary.light' : 'grey.50',
-                        ml: message.sender === 'user' ? 4 : 0,
-                        mr: message.sender === 'user' ? 0 : 4,
-                      }}
-                    >
-                      <Typography variant="body2">{message.message}</Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                        {message.timestamp}
-                      </Typography>
-                    </Paper>
+              <Box sx={{ maxHeight: 400, overflow: 'auto', mb: 2 }}>
+                {loadingMessages ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
+                    <CircularProgress />
                   </Box>
-                ))}
+                ) : ticketMessages.length === 0 ? (
+                  <Typography variant="body2" sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+                    {selectedTicket.description}
+                  </Typography>
+                ) : (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {/* Original ticket description */}
+                    <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+                      <Typography variant="body2" fontWeight={500} color="text.secondary" sx={{ mb: 1 }}>
+                        You - {new Date(selectedTicket.created_at).toLocaleString()}
+                      </Typography>
+                      <Typography variant="body2">
+                        {selectedTicket.description}
+                      </Typography>
+                    </Box>
+                    
+                    {/* Chat messages */}
+                    {ticketMessages.map((message) => (
+                      <Box
+                        key={message.id}
+                        sx={{
+                          p: 2,
+                          bgcolor: message.sender === 'support' ? 'primary.50' : 'grey.50',
+                          borderRadius: 1,
+                          alignSelf: message.sender === 'support' ? 'flex-end' : 'flex-start',
+                          maxWidth: '80%'
+                        }}
+                      >
+                        <Typography variant="body2" fontWeight={500} color="text.secondary" sx={{ mb: 1 }}>
+                          {message.sender === 'support' ? 'Support Team' : 'You'} - {new Date(message.created_at).toLocaleString()}
+                        </Typography>
+                        <Typography variant="body2">
+                          {message.message}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
               </Box>
             </DialogContent>
             <DialogActions>
