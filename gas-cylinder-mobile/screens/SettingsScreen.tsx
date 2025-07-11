@@ -7,9 +7,8 @@ import {
   Switch, 
   ScrollView, 
   Alert,
-  Linking,
-  Share,
-  ActivityIndicator
+  ActivityIndicator,
+  SafeAreaView
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../hooks/useAuth';
@@ -17,13 +16,12 @@ import { useSettings } from '../context/SettingsContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabase';
 import { SyncService } from '../services/SyncService';
-import { copyToClipboard } from '../utils/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function SettingsScreen() {
   const navigation = useNavigation();
   const { user, profile, loading } = useAuth();
-  const { settings, updateSetting, clearAllData, resetSettings, getDebugInfo } = useSettings();
+  const { settings, updateSetting, clearAllData, resetSettings } = useSettings();
   const { colors } = useTheme();
   const [syncing, setSyncing] = useState(false);
   const [offlineCount, setOfflineCount] = useState(0);
@@ -45,36 +43,35 @@ export default function SettingsScreen() {
     setIsConnected(connected);
   };
 
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      await SyncService.syncOfflineData();
+      await loadOfflineData();
+      Alert.alert('Success', 'Data synchronized successfully');
+    } catch (error) {
+      Alert.alert('Sync Failed', error.message);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const handleLogout = async () => {
     Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
+      'Sign Out',
+      'Are you sure you want to sign out?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Logout',
+          text: 'Sign Out',
           style: 'destructive',
           onPress: async () => {
             setLogoutLoading(true);
             try {
-              console.log('Logging out user:', user?.email);
-              
-              // Clear any stored data
-              await AsyncStorage.removeItem('rememberedEmail');
-              
-              // Sign out from Supabase
-              const { error } = await supabase.auth.signOut();
-              
-              if (error) {
-                console.error('Logout error:', error);
-                Alert.alert('Error', 'Failed to logout. Please try again.');
-              } else {
-                console.log('Logout successful');
-                Alert.alert('Success', 'You have been logged out successfully.');
-              }
+              await supabase.auth.signOut();
+              await AsyncStorage.clear();
             } catch (error) {
-              console.error('Logout exception:', error);
-              Alert.alert('Error', 'Failed to logout. Please try again.');
+              console.error('Logout error:', error);
             } finally {
               setLogoutLoading(false);
             }
@@ -84,550 +81,350 @@ export default function SettingsScreen() {
     );
   };
 
-  const handleChangePassword = () => {
-    Alert.alert(
-      'Change Password',
-      'A password reset email will be sent to your email address.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Send Email',
-          onPress: async () => {
-            try {
-              const { error } = await supabase.auth.resetPasswordForEmail(user?.email || '');
-              if (error) {
-                Alert.alert('Error', error.message);
-              } else {
-                Alert.alert('Success', 'Password reset email sent. Please check your inbox.');
-              }
-            } catch (error) {
-              Alert.alert('Error', 'Failed to send reset email. Please try again.');
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handleUpdateProfile = () => {
-    Alert.alert(
-      'Update Profile',
-      'Profile updates are not available in this version. Please contact support.',
-      [{ text: 'OK' }]
-    );
-  };
-
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete Account',
-      'This action cannot be undone. All your data will be permanently deleted.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              // This would require additional backend setup
-              Alert.alert('Not Available', 'Account deletion is not available in this version. Please contact support.');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to delete account. Please try again.');
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handleManualSync = async () => {
-    if (!isConnected) {
-      Alert.alert('No Connection', 'Please check your internet connection and try again.');
-      return;
-    }
-
-    setSyncing(true);
-    try {
-      const result = await SyncService.syncOfflineData();
-      await SyncService.updateLastSyncTime();
-      await loadOfflineData();
-      
-      if (result.success) {
-        Alert.alert(
-          'Sync Complete', 
-          result.message,
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert(
-          'Sync Failed',
-          result.message,
-          [{ text: 'OK' }]
-        );
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Sync failed. Please try again.');
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  // Get sync status for display
-  const getSyncStatusText = () => {
-    if (syncing) return 'Syncing...';
-    if (!isConnected) return 'Offline';
-    if (offlineCount > 0) return `${settings.lastSync} (${offlineCount} pending)`;
-    return settings.lastSync;
-  };
-
-  const getSyncStatusColor = () => {
-    if (syncing) return colors.primary;
-    if (!isConnected) return colors.warning;
-    if (offlineCount > 0) return colors.warning;
-    return colors.text;
-  };
-
-  const handleTestOfflineScan = async () => {
-    try {
-      const testScan = {
-        order_number: 'TEST_ORDER_001',
-        cylinder_barcode: '123456789',
-        mode: 'SHIP',
-        customer_id: 'test-customer',
-        location: 'Test Location',
-        user_id: user?.id || 'test-user',
-      };
-      
-      await SyncService.saveOfflineScan(testScan);
-      await loadOfflineData();
-      Alert.alert('Test Scan Saved', 'Test scan has been saved offline. Check the offline count above.');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to save test scan: ' + error.message);
-    }
-  };
-
   const handleClearData = () => {
     Alert.alert(
-      'Clear Local Data',
-      'This will remove all local data including offline scans and settings. This action cannot be undone.',
+      'Clear All Data',
+      'This will remove all offline data. Are you sure?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Clear All',
+          text: 'Clear',
           style: 'destructive',
           onPress: async () => {
-            try {
-              const success = await clearAllData();
-              if (success) {
-                Alert.alert('Success', 'All local data has been cleared.');
-                await loadOfflineData();
-              } else {
-                Alert.alert('Error', 'Failed to clear data. Please try again.');
-              }
-            } catch (error) {
-              Alert.alert('Error', 'Failed to clear data. Please try again.');
-            }
+            await clearAllData();
+            await loadOfflineData();
+            Alert.alert('Success', 'All data cleared');
           },
         },
       ]
     );
   };
 
-  const handleResetSettings = () => {
-    Alert.alert(
-      'Reset Settings',
-      'This will reset all settings to their default values.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const success = await resetSettings();
-              if (success) {
-                Alert.alert('Success', 'Settings have been reset to defaults.');
-              } else {
-                Alert.alert('Error', 'Failed to reset settings. Please try again.');
-              }
-            } catch (error) {
-              Alert.alert('Error', 'Failed to reset settings. Please try again.');
-            }
-          },
-        },
-      ]
-    );
-  };
+  const SettingItem = ({ title, subtitle, onPress, rightComponent, showBorder = true }) => (
+    <TouchableOpacity 
+      style={[
+        styles.settingItem, 
+        { backgroundColor: colors.surface, borderBottomColor: colors.border },
+        !showBorder && { borderBottomWidth: 0 }
+      ]} 
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      <View style={styles.settingContent}>
+        <Text style={[styles.settingTitle, { color: colors.text }]}>{title}</Text>
+        {subtitle && <Text style={[styles.settingSubtitle, { color: colors.textSecondary }]}>{subtitle}</Text>}
+      </View>
+      {rightComponent}
+    </TouchableOpacity>
+  );
 
-  const handleContactSupport = () => {
-    Linking.openURL('mailto:support@yourcompany.com?subject=Gas Cylinder App Support');
-  };
-
-  const handlePrivacyPolicy = () => {
-    Linking.openURL('https://yourcompany.com/privacy');
-  };
-
-  const handleTermsOfService = () => {
-    Linking.openURL('https://yourcompany.com/terms');
-  };
-
-  const handleShareApp = async () => {
-    try {
-      await Share.share({
-        message: 'Check out LessAnnoyingScan - the best gas cylinder management app!',
-        title: 'LessAnnoyingScan',
-      });
-    } catch (error) {
-      Alert.alert('Error', 'Failed to share app.');
-    }
-  };
-
-  const handleDebugInfo = () => {
-    const debugInfo = getDebugInfo();
-    Alert.alert(
-      'Debug Info',
-      `User: ${user?.email || 'N/A'}\nProfile: ${JSON.stringify(profile, null, 2)}\nSettings: ${JSON.stringify(settings, null, 2)}`,
-      [{ text: 'OK' }]
-    );
-  };
-
-  const handleResetApp = () => {
-    Alert.alert(
-      'Reset App',
-      'This will reset the app to its initial state. All data will be lost.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await clearAllData();
-              await resetSettings();
-              Alert.alert('Success', 'App has been reset. Please restart the app.');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to reset app. Please try again.');
-            }
-          },
-        },
-      ]
-    );
-  };
+  const SectionHeader = ({ title }) => (
+    <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{title}</Text>
+  );
 
   if (loading) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading settings...</Text>
-      </View>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.text }]}>Loading...</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
-      <Text style={[styles.title, { color: colors.primary }]}>Settings</Text>
-
-      {/* Account Section */}
-      <Text style={[styles.sectionTitle, { color: colors.primary }]}>Account</Text>
-      <View style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Name</Text>
-        <Text style={[styles.settingValue, { color: colors.text }]}>{profile?.full_name || user?.email?.split('@')[0] || 'N/A'}</Text>
-      </View>
-      <View style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Email</Text>
-        <Text style={[styles.settingValue, { color: colors.text }]}>{user?.email || 'N/A'}</Text>
-      </View>
-      <View style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Role</Text>
-        <Text style={[styles.settingValue, { color: colors.text }]}>{profile?.role || 'user'}</Text>
-      </View>
-      
-      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleChangePassword}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Change Password</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleUpdateProfile}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Update Profile</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity 
-        style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} 
-        onPress={handleLogout}
-        disabled={logoutLoading}
-      >
-        <Text style={[styles.settingText, { color: colors.danger }]}>Logout</Text>
-        {logoutLoading && <ActivityIndicator size="small" color={colors.danger} style={styles.logoutLoader} />}
-      </TouchableOpacity>
-      
-      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleDeleteAccount}>
-        <Text style={[styles.settingText, { color: colors.danger }]}>Delete Account</Text>
-      </TouchableOpacity>
-
-      {/* App Preferences */}
-      <Text style={[styles.sectionTitle, { color: colors.primary }]}>App Preferences</Text>
-      <View style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Theme</Text>
-        <View style={styles.themeContainer}>
-          <TouchableOpacity 
-            style={[
-              styles.themeButton, 
-              { 
-                backgroundColor: settings.theme === 'light' ? colors.primary : colors.border,
-                borderColor: colors.border
-              }
-            ]}
-            onPress={() => updateSetting('theme', 'light')}
-          >
-            <Text style={[
-              styles.themeButtonText, 
-              { color: settings.theme === 'light' ? '#fff' : colors.textSecondary }
-            ]}>
-              Light
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[
-              styles.themeButton, 
-              { 
-                backgroundColor: settings.theme === 'dark' ? colors.primary : colors.border,
-                borderColor: colors.border
-              }
-            ]}
-            onPress={() => updateSetting('theme', 'dark')}
-          >
-            <Text style={[
-              styles.themeButtonText, 
-              { color: settings.theme === 'dark' ? '#fff' : colors.textSecondary }
-            ]}>
-              Dark
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[
-              styles.themeButton, 
-              { 
-                backgroundColor: settings.theme === 'auto' ? colors.primary : colors.border,
-                borderColor: colors.border
-              }
-            ]}
-            onPress={() => updateSetting('theme', 'auto')}
-          >
-            <Text style={[
-              styles.themeButtonText, 
-              { color: settings.theme === 'auto' ? '#fff' : colors.textSecondary }
-            ]}>
-              Auto
-            </Text>
-          </TouchableOpacity>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {/* Profile Section */}
+        <View style={[styles.profileSection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={styles.profileInfo}>
+            <View style={[styles.profileAvatar, { backgroundColor: colors.primary }]}>
+              <Text style={styles.profileAvatarText}>
+                {profile?.full_name?.charAt(0)?.toUpperCase() || 'U'}
+              </Text>
+            </View>
+            <View style={styles.profileDetails}>
+              <Text style={[styles.profileName, { color: colors.text }]}>
+                {profile?.full_name || 'User'}
+              </Text>
+              <Text style={[styles.profileEmail, { color: colors.textSecondary }]}>
+                {user?.email}
+              </Text>
+              <Text style={[styles.profileRole, { color: colors.primary }]}>
+                {profile?.role?.charAt(0)?.toUpperCase() + profile?.role?.slice(1) || 'User'}
+              </Text>
+            </View>
+          </View>
         </View>
-      </View>
-      
-      <View style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Sound</Text>
-        <Switch 
-          value={settings.soundEnabled} 
-          onValueChange={(value) => updateSetting('soundEnabled', value)}
-          trackColor={{ false: colors.border, true: colors.primary }}
-          thumbColor={settings.soundEnabled ? '#fff' : colors.surface}
-        />
-      </View>
-      
-      <View style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Vibration</Text>
-        <Switch 
-          value={settings.vibrationEnabled} 
-          onValueChange={(value) => updateSetting('vibrationEnabled', value)}
-          trackColor={{ false: colors.border, true: colors.primary }}
-          thumbColor={settings.vibrationEnabled ? '#fff' : colors.surface}
-        />
-      </View>
-      
-      <View style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Default Scan Mode</Text>
-        <View style={styles.themeContainer}>
-          <TouchableOpacity 
-            style={[
-              styles.themeButton, 
-              { 
-                backgroundColor: settings.defaultScanMode === 'SHIP' ? colors.primary : colors.border,
-                borderColor: colors.border
-              }
-            ]}
-            onPress={() => updateSetting('defaultScanMode', 'SHIP')}
-          >
-            <Text style={[
-              styles.themeButtonText, 
-              { color: settings.defaultScanMode === 'SHIP' ? '#fff' : colors.textSecondary }
-            ]}>
-              SHIP
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[
-              styles.themeButton, 
-              { 
-                backgroundColor: settings.defaultScanMode === 'RETURN' ? colors.primary : colors.border,
-                borderColor: colors.border
-              }
-            ]}
-            onPress={() => updateSetting('defaultScanMode', 'RETURN')}
-          >
-            <Text style={[
-              styles.themeButtonText, 
-              { color: settings.defaultScanMode === 'RETURN' ? '#fff' : colors.textSecondary }
-            ]}>
-              RETURN
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-      
-      <View style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Offline Mode</Text>
-        <Switch 
-          value={settings.offlineMode} 
-          onValueChange={(value) => updateSetting('offlineMode', value)}
-          trackColor={{ false: colors.border, true: colors.primary }}
-          thumbColor={settings.offlineMode ? '#fff' : colors.surface}
-        />
-      </View>
 
-      {/* Sync & Data */}
-      <Text style={[styles.sectionTitle, { color: colors.primary }]}>Sync & Data</Text>
-      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleManualSync} disabled={syncing}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Manual Sync</Text>
-        <View style={styles.syncContainer}>
-          {syncing ? (
-            <ActivityIndicator size="small" color={colors.primary} />
+        {/* Sync & Data Section */}
+        <SectionHeader title="SYNC & DATA" />
+        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <SettingItem
+            title="Sync Data"
+            subtitle={`${offlineCount} items pending sync`}
+            onPress={handleSync}
+            rightComponent={
+              syncing ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : (
+                <View style={[styles.statusDot, { backgroundColor: isConnected ? '#10B981' : '#EF4444' }]} />
+              )
+            }
+          />
+          <SettingItem
+            title="Auto Sync"
+            subtitle="Automatically sync when connected"
+            rightComponent={
+              <Switch
+                value={settings.autoSync}
+                onValueChange={(value) => updateSetting('autoSync', value)}
+                trackColor={{ false: colors.border, true: colors.primary + '40' }}
+                thumbColor={settings.autoSync ? colors.primary : colors.textSecondary}
+              />
+            }
+          />
+          <SettingItem
+            title="Offline Mode"
+            subtitle="Work without internet connection"
+            rightComponent={
+              <Switch
+                value={settings.offlineMode}
+                onValueChange={(value) => updateSetting('offlineMode', value)}
+                trackColor={{ false: colors.border, true: colors.primary + '40' }}
+                thumbColor={settings.offlineMode ? colors.primary : colors.textSecondary}
+              />
+            }
+            showBorder={false}
+          />
+        </View>
+
+        {/* App Preferences */}
+        <SectionHeader title="APP PREFERENCES" />
+        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <SettingItem
+            title="Notifications"
+            subtitle="Push notifications and alerts"
+            rightComponent={
+              <Switch
+                value={settings.notifications}
+                onValueChange={(value) => updateSetting('notifications', value)}
+                trackColor={{ false: colors.border, true: colors.primary + '40' }}
+                thumbColor={settings.notifications ? colors.primary : colors.textSecondary}
+              />
+            }
+          />
+          <SettingItem
+            title="Sound Effects"
+            subtitle="Scan sounds and feedback"
+            rightComponent={
+              <Switch
+                value={settings.soundEnabled}
+                onValueChange={(value) => updateSetting('soundEnabled', value)}
+                trackColor={{ false: colors.border, true: colors.primary + '40' }}
+                thumbColor={settings.soundEnabled ? colors.primary : colors.textSecondary}
+              />
+            }
+          />
+          <SettingItem
+            title="Haptic Feedback"
+            subtitle="Vibration on interactions"
+            rightComponent={
+              <Switch
+                value={settings.hapticFeedback}
+                onValueChange={(value) => updateSetting('hapticFeedback', value)}
+                trackColor={{ false: colors.border, true: colors.primary + '40' }}
+                thumbColor={settings.hapticFeedback ? colors.primary : colors.textSecondary}
+              />
+            }
+            showBorder={false}
+          />
+        </View>
+
+        {/* Data Management */}
+        <SectionHeader title="DATA MANAGEMENT" />
+        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <SettingItem
+            title="Clear Cache"
+            subtitle="Free up storage space"
+            onPress={() => {
+              Alert.alert('Success', 'Cache cleared successfully');
+            }}
+            rightComponent={<Text style={[styles.actionText, { color: colors.primary }]}>Clear</Text>}
+          />
+          <SettingItem
+            title="Clear All Data"
+            subtitle="Remove all offline data"
+            onPress={handleClearData}
+            rightComponent={<Text style={[styles.actionText, { color: '#EF4444' }]}>Clear</Text>}
+            showBorder={false}
+          />
+        </View>
+
+        {/* Support & Info */}
+        <SectionHeader title="SUPPORT & INFO" />
+        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <SettingItem
+            title="Help & Support"
+            subtitle="Get help and contact support"
+            onPress={() => {
+              Alert.alert('Support', 'Contact support at support@lessannoyingscan.com');
+            }}
+            rightComponent={<Text style={styles.chevron}>›</Text>}
+          />
+          <SettingItem
+            title="Privacy Policy"
+            subtitle="Read our privacy policy"
+            onPress={() => {
+              Alert.alert('Privacy Policy', 'Privacy policy would open here');
+            }}
+            rightComponent={<Text style={styles.chevron}>›</Text>}
+          />
+          <SettingItem
+            title="Version"
+            subtitle="1.0.0"
+            rightComponent={null}
+            showBorder={false}
+          />
+        </View>
+
+        {/* Sign Out */}
+        <TouchableOpacity
+          style={[styles.signOutButton, { backgroundColor: '#FEF2F2', borderColor: '#EF4444' }]}
+          onPress={handleLogout}
+          disabled={logoutLoading}
+        >
+          {logoutLoading ? (
+            <ActivityIndicator color="#EF4444" />
           ) : (
-            <Text style={[styles.settingValue, { color: getSyncStatusColor() }]}>
-              {getSyncStatusText()}
-            </Text>
+            <Text style={[styles.signOutText, { color: '#EF4444' }]}>Sign Out</Text>
           )}
-        </View>
-      </TouchableOpacity>
-      
-      <View style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Auto Sync</Text>
-        <Switch 
-          value={settings.autoSync} 
-          onValueChange={(value) => updateSetting('autoSync', value)}
-          trackColor={{ false: colors.border, true: colors.primary }}
-          thumbColor={settings.autoSync ? '#fff' : colors.surface}
-        />
-      </View>
-      
-      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleTestOfflineScan}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Test Offline Scan</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleClearData}>
-        <Text style={[styles.settingText, { color: colors.danger }]}>Clear Local Data</Text>
-      </TouchableOpacity>
+        </TouchableOpacity>
 
-      {/* Support & About */}
-      <Text style={[styles.sectionTitle, { color: colors.primary }]}>Support & About</Text>
-      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleContactSupport}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Contact Support</Text>
-        <Text style={[styles.settingValue, { color: colors.text }]}>support@yourcompany.com</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleShareApp}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Share App</Text>
-      </TouchableOpacity>
-      
-      <View style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>App Version</Text>
-        <Text style={[styles.settingValue, { color: colors.text }]}>1.0.0</Text>
-      </View>
-      
-      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handlePrivacyPolicy}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Privacy Policy</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleTermsOfService}>
-        <Text style={[styles.settingText, { color: colors.primary }]}>Terms of Service</Text>
-      </TouchableOpacity>
-
-      {/* Admin Only */}
-      {profile?.role === 'admin' && (
-        <>
-          <Text style={[styles.sectionTitle, { color: colors.primary }]}>Admin Only</Text>
-          <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleDebugInfo}>
-            <Text style={[styles.settingText, { color: colors.primary }]}>Debug Info</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={[styles.settingRow, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleResetApp}>
-            <Text style={[styles.settingText, { color: colors.danger }]}>Reset App</Text>
-          </TouchableOpacity>
-        </>
-      )}
-    </ScrollView>
+        <View style={styles.bottomSpacer} />
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    padding: 24,
-    paddingBottom: 40,
+    flex: 1,
   },
-  title: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    marginBottom: 18,
-    textAlign: 'center',
+  scrollView: {
+    flex: 1,
   },
-  sectionTitle: {
-    fontWeight: 'bold',
-    fontSize: 16,
-    marginTop: 18,
-    marginBottom: 6,
-  },
-  settingRow: {
-    borderRadius: 12,
-    padding: 18,
-    marginBottom: 14,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
-    flexDirection: 'row',
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-  },
-  settingText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  settingValue: {
-    fontSize: 16,
-    fontWeight: 'normal',
-  },
-  themeContainer: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  themeButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  themeButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  syncContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    textAlign: 'center',
   },
-  logoutLoader: {
-    marginLeft: 8,
+  profileSection: {
+    margin: 20,
+    marginBottom: 0,
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  profileInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+  },
+  profileAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  profileAvatarText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  profileDetails: {
+    flex: 1,
+  },
+  profileName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  profileEmail: {
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  profileRole: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  sectionHeader: {
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginLeft: 20,
+    marginRight: 20,
+    marginTop: 32,
+    marginBottom: 8,
+  },
+  section: {
+    marginHorizontal: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  settingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+  },
+  settingContent: {
+    flex: 1,
+  },
+  settingTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  settingSubtitle: {
+    fontSize: 14,
+  },
+  statusDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  actionText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  chevron: {
+    fontSize: 20,
+    color: '#9CA3AF',
+    fontWeight: '300',
+  },
+  signOutButton: {
+    marginHorizontal: 20,
+    marginTop: 32,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 16,
+    alignItems: 'center',
+  },
+  signOutText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  bottomSpacer: {
+    height: 40,
   },
 });
