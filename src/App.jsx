@@ -44,7 +44,11 @@ import Impersonation from './pages/OwnerPortal/Impersonation';
 import PlanManagement from './pages/OwnerPortal/PlanManagement';
 import RoleManagement from './pages/OwnerPortal/RoleManagement';
 import PageBuilder from './pages/OwnerPortal/PageBuilder';
+import ContactManagement from './pages/OwnerPortal/ContactManagement';
 import AcceptInvite from './pages/AcceptInvite';
+import Snackbar from '@mui/material/Snackbar';
+import Alert from '@mui/material/Alert';
+import { supabase } from './supabase/client';
 
 // Lazy load all page components
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -94,6 +98,8 @@ const Integrations = lazy(() => import('./pages/Integrations'));
 const BottleDetail = lazy(() => import('./pages/BottleDetail'));
 const Assets = lazy(() => import('./pages/Assets'));
 const BottleManagement = lazy(() => import('./pages/BottleManagement'));
+const SmartInventory = lazy(() => import('./pages/SmartInventory'));
+const CustomerSelfService = lazy(() => import('./pages/CustomerSelfService'));
 const SupportCenter = lazy(() => import('./pages/SupportCenter'));
 const OrganizationAnalytics = lazy(() => import('./pages/OrganizationAnalytics'));
 const OrganizationTools = lazy(() => import('./pages/OrganizationTools'));
@@ -102,7 +108,7 @@ const OrganizationTools = lazy(() => import('./pages/OrganizationTools'));
 // import './utils/backgroundService';
 
 function AppContent() {
-  const { profile } = useAuth();
+  const { profile, organization } = useAuth();
   
   // Page visibility handler to prevent reloads when switching tabs
   useEffect(() => {
@@ -166,14 +172,30 @@ function AppContent() {
     });
     */
   }, []);
+
+  useEffect(() => {
+    const handleUnload = async () => {
+      // This will sign out the user from Supabase
+      await supabase.auth.signOut();
+      // Optionally, clear localStorage/sessionStorage if you use them for auth
+      // localStorage.clear();
+      // sessionStorage.clear();
+    };
+
+    window.addEventListener('unload', handleUnload);
+
+    return () => {
+      window.removeEventListener('unload', handleUnload);
+    };
+  }, []);
   
   // Memoize the routes to prevent unnecessary re-renders
   const routes = useMemo(() => (
     <Routes>
-      {/* Redirect root to dashboard for authenticated users, landing page for others */}
-      <Route path="/" element={profile ? <Navigate to="/dashboard" replace /> : <LandingPage />} />
+      {/* Redirect root to dashboard for authenticated users with org, landing page for others */}
+      <Route path="/" element={profile && organization ? <Navigate to="/dashboard" replace /> : <LandingPage />} />
       <Route path="/landing" element={<LandingPage />} />
-      <Route path="/login" element={<LoginPage />} />
+      <Route path="/login" element={profile && !organization ? <LoginPage /> : profile && organization ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
       <Route path="/register" element={<OrganizationRegistration />} />
       <Route path="/setup" element={<OrganizationSetup />} />
       <Route path="/contact" element={<ContactUs />} />
@@ -243,12 +265,14 @@ function AppContent() {
         <Route path="/import-approval/:invoiceNumber/detail" element={<ImportApprovalDetail />} />
         <Route path="/import-approvals-history" element={<ImportApprovalsHistory />} />
         <Route path="/import-approvals/history" element={<ImportApprovalsHistory />} />
-        <Route path="/integrations" element={<Integrations />} />
+        <Route path="/generateid" element={<Integrations />} />
         <Route path="/bottle/:id" element={<BottleDetail />} />
         <Route path="/assets/:id" element={<BottleDetail />} />
         <Route path="/orders" element={<ScannedOrders />} />
         <Route path="/billing" element={<Billing />} />
         <Route path="/bottle-management" element={<BottleManagement />} />
+        <Route path="/smart-inventory" element={<SmartInventory />} />
+        <Route path="/customer-portal" element={<CustomerSelfService />} />
         <Route path="/support" element={<SupportCenter />} />
         <Route path="/organization-analytics" element={<OrganizationAnalytics />} />
         <Route path="/organization-tools" element={<OrganizationTools />} />
@@ -267,12 +291,22 @@ function AppContent() {
         <Route path="/owner-portal/plans" element={<PlanManagement />} />
         <Route path="/owner-portal/roles" element={<RoleManagement />} />
         <Route path="/owner-portal/page-builder" element={<PageBuilder />} />
+        <Route path="/owner-portal/contact-management" element={<ContactManagement />} />
       </Route>
       
       {/* Catch-all for any other unmatched routes */}
-      <Route path="*" element={profile ? <Navigate to="/dashboard" replace /> : <Navigate to="/" replace />} />
+      <Route path="*" element={profile && organization ? <Navigate to="/dashboard" replace /> : <Navigate to="/" replace />} />
     </Routes>
-  ), [profile]);
+  ), [profile, organization]);
+
+  // Global snackbar state
+  const [globalSnackbar, setGlobalSnackbar] = React.useState({ open: false, message: '', severity: 'success' });
+  React.useEffect(() => {
+    // Expose a global helper for any page/component to trigger the snackbar
+    window.showGlobalSnackbar = (message, severity = 'success') => {
+      setGlobalSnackbar({ open: true, message, severity });
+    };
+  }, []);
 
   return (
     <ErrorBoundary>
@@ -303,6 +337,18 @@ function AppContent() {
                 },
               }}
             />
+            {/* Global Snackbar always on top */}
+            <Snackbar
+              open={globalSnackbar.open}
+              autoHideDuration={4000}
+              onClose={() => setGlobalSnackbar({ ...globalSnackbar, open: false })}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              ContentProps={{ sx: { zIndex: 2147483647, position: 'relative' } }}
+            >
+              <Alert onClose={() => setGlobalSnackbar({ ...globalSnackbar, open: false })} severity={globalSnackbar.severity} sx={{ width: '100%' }}>
+                {globalSnackbar.message}
+              </Alert>
+            </Snackbar>
             <Suspense fallback={<LoadingSpinner />}>
               {routes}
             </Suspense>

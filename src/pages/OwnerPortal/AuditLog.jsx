@@ -19,7 +19,8 @@ import {
   Error as ErrorIcon,
   Info as InfoIcon,
   ExpandMore as ExpandMoreIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
@@ -38,6 +39,8 @@ export default function AuditLog() {
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [selectedLog, setSelectedLog] = useState(null);
   const [logDetailDialog, setLogDetailDialog] = useState(false);
+  const [deleteDialog, setDeleteDialog] = useState(false);
+  const [logToDelete, setLogToDelete] = useState(null);
   const [organizations, setOrganizations] = useState([]);
   const [users, setUsers] = useState([]);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -208,6 +211,30 @@ export default function AuditLog() {
   const handleViewDetails = (log) => {
     setSelectedLog(log);
     setLogDetailDialog(true);
+  };
+
+  const handleDeleteLog = (log) => {
+    setLogToDelete(log);
+    setDeleteDialog(true);
+  };
+
+  const confirmDeleteLog = async () => {
+    setLoading(true);
+    try {
+      // In production, this would delete from the database
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const updatedLogs = auditLogs.filter(log => log.id !== logToDelete.id);
+      setAuditLogs(updatedLogs);
+      setDeleteDialog(false);
+      setLogToDelete(null);
+      setSnackbar({ open: true, message: 'Audit log deleted successfully', severity: 'success' });
+    } catch (error) {
+      console.error('Error deleting audit log:', error);
+      setSnackbar({ open: true, message: 'Error deleting audit log', severity: 'error' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleExportLogs = () => {
@@ -554,14 +581,25 @@ export default function AuditLog() {
                   </Typography>
                 </TableCell>
                 <TableCell>
-                  <Tooltip title="View details">
-                    <IconButton
-                      size="small"
-                      onClick={() => handleViewDetails(log)}
-                    >
-                      <ViewIcon />
-                    </IconButton>
-                  </Tooltip>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Tooltip title="View details">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleViewDetails(log)}
+                      >
+                        <ViewIcon />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Delete log">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDeleteLog(log)}
+                        color="error"
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
                 </TableCell>
               </TableRow>
             ))}
@@ -631,6 +669,78 @@ export default function AuditLog() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setLogDetailDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialog} onClose={() => setDeleteDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Typography variant="h6" fontWeight={700} color="error">
+            Delete Audit Log
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" sx={{ mt: 1 }}>
+            Are you sure you want to delete this audit log entry?
+          </Typography>
+          {logToDelete && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                <strong>User:</strong> {logToDelete.user_email}
+              </Typography>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                <strong>Action:</strong> {logToDelete.action.replace('_', ' ')}
+              </Typography>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                <strong>Timestamp:</strong> {formatDate(logToDelete.timestamp)}
+              </Typography>
+            </Box>
+          )}
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            This action cannot be undone. The log entry will be permanently removed.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialog(false)}>Cancel</Button>
+          <Button
+            onClick={confirmDeleteLog}
+            variant="contained"
+            color="error"
+            disabled={loading}
+          >
+            {loading ? <CircularProgress size={20} /> : 'Delete Log'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialog} onClose={() => setDeleteDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Typography variant="h6" fontWeight={700} color="error">
+            Delete Audit Log
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" sx={{ mt: 1 }}>
+            Are you sure you want to delete this audit log entry?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Action: {logToDelete?.action} | User: {logToDelete?.user_email}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialog(false)}>Cancel</Button>
+          <Button
+            onClick={confirmDeleteLog}
+            variant="contained"
+            color="error"
+            disabled={loading}
+          >
+            {loading ? <CircularProgress size={20} /> : 'Delete Log'}
+          </Button>
         </DialogActions>
       </Dialog>
 

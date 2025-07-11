@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Support Tables SQL</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .sql-block {
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 20px 0;
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+        }
+        .step {
+            background-color: #e8f4fd;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .warning {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .copy-btn {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        .copy-btn:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>Create Support Tables in Supabase</h1>
+    
+    <div class="warning">
+        <strong>Important:</strong> Follow these steps to create the support ticket tables in your Supabase database.
+    </div>
+
+    <div class="step">
+        <h2>Step 1: Open Supabase Dashboard</h2>
+        <p>Go to your Supabase project dashboard and navigate to the SQL Editor.</p>
+    </div>
+
+    <div class="step">
+        <h2>Step 2: Create Support Tables</h2>
+        <p>Copy and paste the following SQL into your Supabase SQL Editor and run it:</p>
+        
+        <button class="copy-btn" onclick="copyToClipboard('createTables')">Copy SQL</button>
+        <div id="createTables" class="sql-block">-- Create support_tickets table
+CREATE TABLE IF NOT EXISTS support_tickets (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    subject TEXT NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('technical', 'billing', 'feature', 'account', 'general')),
+    priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'pending', 'closed')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create support_ticket_messages table for conversation history
+CREATE TABLE IF NOT EXISTS support_ticket_messages (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    ticket_id UUID REFERENCES support_tickets(id) ON DELETE CASCADE,
+    sender TEXT NOT NULL CHECK (sender IN ('user', 'support')),
+    message TEXT NOT NULL,
+    sender_email TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);</div>
+    </div>
+
+    <div class="step">
+        <h2>Step 3: Create Indexes</h2>
+        <p>Run this SQL to create indexes for better performance:</p>
+        
+        <button class="copy-btn" onclick="copyToClipboard('createIndexes')">Copy SQL</button>
+        <div id="createIndexes" class="sql-block">-- Create indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_support_tickets_organization_id ON support_tickets(organization_id);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_user_id ON support_tickets(user_id);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets(status);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_created_at ON support_tickets(created_at);
+CREATE INDEX IF NOT EXISTS idx_support_ticket_messages_ticket_id ON support_ticket_messages(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_support_ticket_messages_created_at ON support_ticket_messages(created_at);</div>
+    </div>
+
+    <div class="step">
+        <h2>Step 4: Enable Row Level Security</h2>
+        <p>Run this SQL to enable RLS:</p>
+        
+        <button class="copy-btn" onclick="copyToClipboard('enableRLS')">Copy SQL</button>
+        <div id="enableRLS" class="sql-block">-- Enable Row Level Security
+ALTER TABLE support_tickets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE support_ticket_messages ENABLE ROW LEVEL SECURITY;</div>
+    </div>
+
+    <div class="step">
+        <h2>Step 5: Create RLS Policies</h2>
+        <p>Run this SQL to create the security policies:</p>
+        
+        <button class="copy-btn" onclick="copyToClipboard('createPolicies')">Copy SQL</button>
+        <div id="createPolicies" class="sql-block">-- RLS Policies for support_tickets
+-- Users can view tickets from their organization
+CREATE POLICY "Users can view their organization's tickets" ON support_tickets
+    FOR SELECT USING (
+        organization_id IN (
+            SELECT organization_id FROM profiles 
+            WHERE id = auth.uid()
+        )
+    );
+
+-- Users can create tickets for their organization
+CREATE POLICY "Users can create tickets for their organization" ON support_tickets
+    FOR INSERT WITH CHECK (
+        organization_id IN (
+            SELECT organization_id FROM profiles 
+            WHERE id = auth.uid()
+        )
+    );
+
+-- Users can update their own tickets
+CREATE POLICY "Users can update their own tickets" ON support_tickets
+    FOR UPDATE USING (
+        user_id = auth.uid()
+    );
+
+-- Users can delete their own tickets
+CREATE POLICY "Users can delete their own tickets" ON support_tickets
+    FOR DELETE USING (
+        user_id = auth.uid()
+    );
+
+-- Owners can view all tickets
+CREATE POLICY "Owners can view all tickets" ON support_tickets
+    FOR ALL USING (
+        EXISTS (
+            SELECT 1 FROM profiles 
+            WHERE id = auth.uid() AND role = 'owner'
+        )
+    );
+
+-- RLS Policies for support_ticket_messages
+-- Users can view messages for their organization's tickets
+CREATE POLICY "Users can view messages for their organization's tickets" ON support_ticket_messages
+    FOR SELECT USING (
+        ticket_id IN (
+            SELECT id FROM support_tickets 
+            WHERE organization_id IN (
+                SELECT organization_id FROM profiles 
+                WHERE id = auth.uid()
+            )
+        )
+    );
+
+-- Users can create messages for their organization's tickets
+CREATE POLICY "Users can create messages for their organization's tickets" ON support_ticket_messages
+    FOR INSERT WITH CHECK (
+        ticket_id IN (
+            SELECT id FROM support_tickets 
+            WHERE organization_id IN (
+                SELECT organization_id FROM profiles 
+                WHERE id = auth.uid()
+            )
+        )
+    );
+
+-- Owners can manage all ticket messages
+CREATE POLICY "Owners can manage all ticket messages" ON support_ticket_messages
+    FOR ALL USING (
+        EXISTS (
+            SELECT 1 FROM profiles 
+            WHERE id = auth.uid() AND role = 'owner'
+        )
+    );</div>
+    </div>
+
+    <div class="step">
+        <h2>Step 6: Create Trigger Function</h2>
+        <p>Run this SQL to create the trigger function for updating timestamps:</p>
+        
+        <button class="copy-btn" onclick="copyToClipboard('createTriggerFunction')">Copy SQL</button>
+        <div id="createTriggerFunction" class="sql-block">-- Function to update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_support_ticket_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;</div>
+    </div>
+
+    <div class="step">
+        <h2>Step 7: Create Trigger</h2>
+        <p>Run this SQL to create the trigger:</p>
+        
+        <button class="copy-btn" onclick="copyToClipboard('createTrigger')">Copy SQL</button>
+        <div id="createTrigger" class="sql-block">-- Trigger to automatically update updated_at
+CREATE TRIGGER update_support_tickets_updated_at
+    BEFORE UPDATE ON support_tickets
+    FOR EACH ROW
+    EXECUTE FUNCTION update_support_ticket_updated_at();</div>
+    </div>
+
+    <div class="step">
+        <h2>Step 8: Test the Setup</h2>
+        <p>After running all the SQL commands above, you should be able to:</p>
+        <ul>
+            <li>Submit support tickets as an organization user</li>
+            <li>View all tickets as an owner in the Owner Portal</li>
+            <li>Reply to tickets and manage them</li>
+        </ul>
+    </div>
+
+    <script>
+        function copyToClipboard(elementId) {
+            const element = document.getElementById(elementId);
+            const text = element.textContent;
+            
+            navigator.clipboard.writeText(text).then(function() {
+                const button = event.target;
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.style.backgroundColor = '#28a745';
+                
+                setTimeout(function() {
+                    button.textContent = originalText;
+                    button.style.backgroundColor = '#007bff';
+                }, 2000);
+            }).catch(function(err) {
+                console.error('Could not copy text: ', err);
+                alert('Failed to copy to clipboard. Please select and copy the text manually.');
+            });
+        }
+    </script>
+</body>
+</html> 

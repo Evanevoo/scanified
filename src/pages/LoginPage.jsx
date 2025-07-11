@@ -11,35 +11,51 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 function LoginPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const [loading, setLoading] = useState(false);
+  const { user, profile, organization, loading } = useAuth();
+  const [loadingLocal, setLoadingLocal] = useState(false);
   const [error, setError] = useState('');
+  const [showOrgError, setShowOrgError] = useState(false);
   const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
   const [resetError, setResetError] = useState('');
+  const [profileNotFound, setProfileNotFound] = useState(false);
 
   useEffect(() => {
-    if (user) navigate('/dashboard');
-  }, [user, navigate]);
+    // Only navigate if user and organization exist
+    if (!loading && user && organization) {
+      navigate('/dashboard');
+    }
+    // Show error if user is logged in but has no organization
+    else if (!loading && user && profile && !organization) {
+      setShowOrgError(true);
+      setError('Your account is not linked to any organization. Please contact support or register a new organization.');
+      console.log('Setting org error!');
+    } else if (!loading && !user && !organization && !profile && loadingLocal) {
+      setProfileNotFound(true);
+      setError('This user is not registered. Please contact support or register your organization.');
+      setLoadingLocal(false);
+    }
+  }, [user, profile, organization, loading, loadingLocal, navigate]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    setLoading(true);
+    setLoadingLocal(true);
     setError('');
-    
+    setShowOrgError(false);
+    setProfileNotFound(false);
+
     const formData = new FormData(e.target);
     const email = formData.get('email');
     const password = formData.get('password');
-    
+
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       setError(error.message);
-    } else {
-      navigate('/dashboard');
     }
-    setLoading(false);
+    // Do NOT navigate here! Let the useEffect handle it.
+    setLoadingLocal(false);
   };
 
   const handleForgotPassword = async (e) => {
@@ -78,6 +94,23 @@ function LoginPage() {
     }}>
       <Card sx={{ maxWidth: 400, width: '100%' }}>
         <CardContent sx={{ p: 4 }}>
+          {/* Error Message - always visible at the top */}
+          {(error || showOrgError || profileNotFound) && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+              {(showOrgError || profileNotFound) && (
+                <Box mt={1}>
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    onClick={() => navigate('/register')}
+                  >
+                    Register New Organization
+                  </Button>
+                </Box>
+              )}
+            </Alert>
+          )}
           {/* Back to Home Button */}
           <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 2 }}>
             <Button
@@ -102,12 +135,6 @@ function LoginPage() {
           <Typography variant="body1" align="center" color="text.secondary" sx={{ mb: 4 }}>
             Sign in to your gas cylinder management account
           </Typography>
-
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
-            </Alert>
-          )}
 
           <Box component="form" onSubmit={handleLogin}>
             <TextField
@@ -152,8 +179,8 @@ function LoginPage() {
               fullWidth
               variant="contained"
               size="large"
-              disabled={loading}
-              endIcon={loading ? <CircularProgress size={20} /> : null}
+              disabled={loadingLocal}
+              endIcon={loadingLocal ? <CircularProgress size={20} /> : null}
               sx={{ mb: 3 }}
             >
               Sign In

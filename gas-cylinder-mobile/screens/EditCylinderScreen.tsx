@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { supabase } from '../supabase';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { Picker } from '@react-native-picker/picker';
 
 export default function EditCylinderScreen() {
   const [step, setStep] = useState(1);
@@ -13,6 +14,37 @@ export default function EditCylinderScreen() {
   const [scanned, setScanned] = useState(false);
   const [scannerVisible, setScannerVisible] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
+  const [ownerType, setOwnerType] = useState('organization');
+  const [ownerCustomerId, setOwnerCustomerId] = useState('');
+  const [ownerName, setOwnerName] = useState('');
+  const [customers, setCustomers] = useState([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [customersError, setCustomersError] = useState('');
+
+  // Fetch customers when cylinder is loaded (step 2)
+  React.useEffect(() => {
+    if (step === 2) {
+      setCustomersLoading(true);
+      supabase
+        .from('customers')
+        .select('CustomerListID, name')
+        .order('name')
+        .then(({ data, error }) => {
+          if (error) setCustomersError('Failed to load customers');
+          else setCustomers(data || []);
+          setCustomersLoading(false);
+        });
+    }
+  }, [step]);
+
+  // Set initial owner fields when cylinder is loaded
+  React.useEffect(() => {
+    if (cylinder) {
+      setOwnerType(cylinder.owner_type || 'organization');
+      setOwnerCustomerId(cylinder.owner_id || '');
+      setOwnerName(cylinder.owner_name || '');
+    }
+  }, [cylinder]);
 
   const scanDelay = 1500; // ms
 
@@ -88,10 +120,28 @@ export default function EditCylinderScreen() {
       setError('Serial number already exists on another cylinder.');
       return;
     }
-    // Update cylinder
+    // Update cylinder with ownership fields
+    const updateFields = { barcode, serial_number: serial };
+    if (ownerType === 'organization') {
+      updateFields.owner_type = 'organization';
+      updateFields.owner_id = null;
+      updateFields.owner_name = '';
+      updateFields.assigned_customer = null;
+    } else if (ownerType === 'customer') {
+      updateFields.owner_type = 'customer';
+      updateFields.owner_id = ownerCustomerId;
+      const selectedCustomer = customers.find(c => c.CustomerListID === ownerCustomerId);
+      updateFields.owner_name = selectedCustomer ? selectedCustomer.name : '';
+      updateFields.assigned_customer = ownerCustomerId;
+    } else if (ownerType === 'external') {
+      updateFields.owner_type = 'external';
+      updateFields.owner_id = null;
+      updateFields.owner_name = ownerName;
+      updateFields.assigned_customer = null;
+    }
     const { error: updateError } = await supabase
       .from('bottles')
-      .update({ barcode, serial_number: serial })
+      .update(updateFields)
       .eq('id', cylinder.id);
     setLoading(false);
     if (updateError) {
@@ -149,6 +199,57 @@ export default function EditCylinderScreen() {
             onChangeText={setSerial}
             autoCapitalize="none"
           />
+          {/* Ownership Management UI */}
+          <Text style={styles.label}>Owner Type</Text>
+          <Picker
+            selectedValue={ownerType}
+            onValueChange={setOwnerType}
+            style={{ marginBottom: 12 }}
+          >
+            <Picker.Item label="Organization" value="organization" />
+            <Picker.Item label="Customer" value="customer" />
+            <Picker.Item label="External Company" value="external" />
+          </Picker>
+          {ownerType === 'customer' && (
+            <>
+              <Text style={styles.label}>Assign to Customer</Text>
+              {customersLoading ? (
+                <Text>Loading customers...</Text>
+              ) : customersError ? (
+                <Text style={styles.error}>{customersError}</Text>
+              ) : (
+                <Picker
+                  selectedValue={ownerCustomerId}
+                  onValueChange={setOwnerCustomerId}
+                  style={{ marginBottom: 12 }}
+                >
+                  <Picker.Item label="Select a customer..." value="" />
+                  {customers.map(c => (
+                    <Picker.Item key={c.CustomerListID} label={c.name} value={c.CustomerListID} />
+                  ))}
+                </Picker>
+              )}
+            </>
+          )}
+          {ownerType === 'external' && (
+            <>
+              <Text style={styles.label}>External Company Name</Text>
+              <TextInput
+                style={styles.input}
+                value={ownerName}
+                onChangeText={setOwnerName}
+                placeholder="Enter company name"
+                autoCapitalize="words"
+              />
+            </>
+          )}
+          {/* Show current ownership info */}
+          <Text style={styles.label}>Current Ownership</Text>
+          <Text style={{ marginBottom: 8 }}>
+            {cylinder.owner_type === 'organization' && 'Organization'}
+            {cylinder.owner_type === 'customer' && `Customer: ${cylinder.owner_name || cylinder.assigned_customer}`}
+            {cylinder.owner_type === 'external' && `External: ${cylinder.owner_name}`}
+          </Text>
           <TouchableOpacity
             style={styles.nextButton}
             onPress={handleSave}
@@ -281,5 +382,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 100,
+  },
+  removeButton: {
+    backgroundColor: '#ff5a1f',
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  removeButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
 }); 

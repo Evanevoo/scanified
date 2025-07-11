@@ -74,8 +74,36 @@ export default function AcceptInvite() {
         throw new Error('This invite has expired. Please request a new invite.');
       }
 
-      setInvite(inviteData);
+      // Fetch the role name if it's a role ID
+      let roleName = inviteData.role;
+      if (inviteData.role && inviteData.role.includes('-')) {
+        // This looks like a UUID, fetch the role name
+        const { data: roleData } = await supabase
+          .from('roles')
+          .select('name')
+          .eq('id', inviteData.role)
+          .single();
+        
+        if (roleData) {
+          roleName = roleData.name;
+        }
+      }
+
+      setInvite({ ...inviteData, role: roleName });
       setOrganization(inviteData.organization);
+
+      // Check if the email is already registered in any organization
+      const { data: existingProfile, error: profileCheckError } = await supabase
+        .from('profiles')
+        .select('email, organization_id, organizations(name)')
+        .eq('email', inviteData.email)
+        .single();
+
+      if (existingProfile) {
+        if (existingProfile.organization_id) {
+          throw new Error(`This email (${inviteData.email}) is already registered with organization "${existingProfile.organizations?.name}". Each email can only be associated with one organization. Please use a different email address or contact the organization administrator.`);
+        }
+      }
 
       // If user is already logged in, check if they can accept this invite
       if (user) {
@@ -122,7 +150,13 @@ export default function AcceptInvite() {
       case 0:
         return invite && !invite.accepted_at && new Date(invite.expires_at) > new Date();
       case 1:
-        return formData.full_name && formData.password && formData.password === formData.confirmPassword;
+        if (user) {
+          // If user is already logged in, only require full name
+          return formData.full_name && formData.full_name.trim().length > 0;
+        } else {
+          // If user needs to sign up, require all fields
+          return formData.full_name && formData.password && formData.password === formData.confirmPassword;
+        }
       case 2:
         return true;
       default:
@@ -158,30 +192,38 @@ export default function AcceptInvite() {
             id: authData.user.id,
             email: invite.email,
             full_name: formData.full_name,
-            role: invite.role,
+            role_id: invite.role, // Store the role ID
             organization_id: invite.organization_id
           });
 
         if (profileError) throw profileError;
       } else {
-        // User is already logged in, just update their profile
+        // Only allow if the logged-in user's email matches the invite email
+        if (user.email !== invite.email) {
+          throw new Error(
+            `This invite was sent to ${invite.email}, but you are logged in as ${user.email}. Please log out and sign in with the correct email.`
+          );
+        }
+        // Now it's safe to update the profile
         const { error: profileError } = await supabase
           .from('profiles')
           .update({
             full_name: formData.full_name,
-            role: invite.role,
-            organization_id: invite.organization_id,
-            updated_at: new Date().toISOString()
+            role_id: invite.role,
+            organization_id: invite.organization_id
           })
           .eq('id', user.id);
 
         if (profileError) throw profileError;
       }
 
-      // Accept the invite
-      const { error: acceptError } = await supabase.rpc('accept_organization_invite', {
-        p_token: token
-      });
+      // Accept the invite by updating the invite record directly
+      const { error: acceptError } = await supabase
+        .from('organization_invites')
+        .update({
+          accepted_at: new Date().toISOString()
+        })
+        .eq('token', token);
 
       if (acceptError) throw acceptError;
 
@@ -300,9 +342,9 @@ export default function AcceptInvite() {
                       <Typography variant="subtitle2" fontWeight={600}>
                         Role
                       </Typography>
-                      <Typography variant="body1" sx={{ textTransform: 'capitalize' }}>
-                        {invite?.role}
-                      </Typography>
+                                        <Typography variant="body1" sx={{ textTransform: 'capitalize' }}>
+                    {invite?.role || 'User'}
+                  </Typography>
                     </Box>
                   </Box>
                 </Grid>
@@ -412,7 +454,7 @@ export default function AcceptInvite() {
                     Email: {invite?.email}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Role: {invite?.role}
+                    Role: {invite?.role || 'User'}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Name: {formData.full_name}

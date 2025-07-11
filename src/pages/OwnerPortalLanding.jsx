@@ -19,7 +19,8 @@ import {
   History as HistoryIcon,
   Person as PersonIcon,
   Assignment as AssignmentIcon,
-  Build as BuildIcon
+  Build as BuildIcon,
+  ContactSupport as ContactSupportIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -112,6 +113,13 @@ export default function OwnerPortalLanding() {
       icon: <BuildIcon sx={{ fontSize: 40 }} />,
       color: '#795548',
       path: '/owner-portal/page-builder'
+    },
+    {
+      title: 'Contact Management',
+      description: 'Manage organization contact information for customer inquiries',
+      icon: <ContactSupportIcon sx={{ fontSize: 40 }} />,
+      color: '#2196f3',
+      path: '/owner-portal/contact-management'
     }
   ];
 

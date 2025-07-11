@@ -101,20 +101,9 @@ export default function Impersonation() {
         timestamp: new Date().toISOString()
       }));
 
-      // Create impersonation session
-      const { data, error } = await supabase.auth.admin.generateLink({
-        type: 'magiclink',
-        email: selectedUser.email,
-        options: {
-          data: {
-            impersonated_by: profile.id,
-            impersonation_start: new Date().toISOString(),
-            original_owner: profile.email
-          }
-        }
-      });
-
-      if (error) throw error;
+      // For demo purposes, we'll simulate the impersonation
+      // In production, you'd use a server-side function to generate impersonation links
+      console.log('Impersonation requested for:', selectedUser.email);
 
       // For demo purposes, we'll simulate the impersonation
       // In production, you'd use the generated link or a more secure method

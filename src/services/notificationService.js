@@ -674,5 +674,205 @@ export const notificationService = {
       console.error('Error sending maintenance reminder:', error);
       throw error;
     }
+  },
+
+  // Create a new notification
+  async createNotification(notification) {
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .insert(notification)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error creating notification:', error);
+      throw error;
+    }
+  },
+
+  // Get notifications for a user
+  async getNotifications(userId, organizationId, limit = 50) {
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .or(`user_id.eq.${userId},organization_id.eq.${organizationId}`)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+      throw error;
+    }
+  },
+
+  // Mark all notifications as read for a user
+  async markAllAsRead(userId, organizationId) {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ read: true, read_at: new Date().toISOString() })
+        .or(`user_id.eq.${userId},organization_id.eq.${organizationId}`)
+        .eq('read', false);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error marking all notifications as read:', error);
+      throw error;
+    }
+  },
+
+  // Get unread notification count
+  async getUnreadCount(userId, organizationId) {
+    try {
+      const { count, error } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .or(`user_id.eq.${userId},organization_id.eq.${organizationId}`)
+        .eq('read', false);
+
+      if (error) throw error;
+      return count || 0;
+    } catch (error) {
+      console.error('Error getting unread count:', error);
+      return 0;
+    }
+  },
+
+  // Delete notification
+  async deleteNotification(notificationId) {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('id', notificationId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+      throw error;
+    }
+  },
+
+  // Support ticket specific notifications
+  async createSupportTicketNotification(ticket, type, recipientUserId = null, recipientOrgId = null) {
+    const notification = {
+      type: 'support_ticket',
+      title: '',
+      message: '',
+      data: {
+        ticket_id: ticket.id,
+        ticket_subject: ticket.subject,
+        ticket_status: ticket.status
+      },
+      read: false,
+      created_at: new Date().toISOString()
+    };
+
+    // Set notification content based on type
+    switch (type) {
+      case 'new_ticket':
+        notification.title = 'New Support Ticket';
+        notification.message = `New ticket: "${ticket.subject}"`;
+        notification.data.action = 'new_ticket';
+        break;
+      
+      case 'ticket_reply':
+        notification.title = 'Support Ticket Reply';
+        notification.message = `New reply to ticket: "${ticket.subject}"`;
+        notification.data.action = 'ticket_reply';
+        break;
+      
+      case 'ticket_status_change':
+        notification.title = 'Support Ticket Updated';
+        notification.message = `Ticket "${ticket.subject}" status changed to ${ticket.status}`;
+        notification.data.action = 'status_change';
+        break;
+      
+      default:
+        notification.title = 'Support Ticket Update';
+        notification.message = `Update for ticket: "${ticket.subject}"`;
+        notification.data.action = 'update';
+    }
+
+    // Set recipient
+    if (recipientUserId) {
+      notification.user_id = recipientUserId;
+    }
+    if (recipientOrgId) {
+      notification.organization_id = recipientOrgId;
+    }
+
+    return this.createNotification(notification);
+  },
+
+  // Create notification for new ticket (notify owner)
+  async notifyOwnerOfNewTicket(ticket) {
+    try {
+      // Get all owners
+      const { data: owners, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'owner');
+
+      if (error) throw error;
+
+      // Create notifications for all owners
+      const notifications = owners.map(owner => ({
+        type: 'support_ticket',
+        title: 'New Support Ticket',
+        message: `New ticket from organization: "${ticket.subject}"`,
+        user_id: owner.id,
+        data: {
+          ticket_id: ticket.id,
+          ticket_subject: ticket.subject,
+          ticket_status: ticket.status,
+          action: 'new_ticket'
+        },
+        read: false,
+        created_at: new Date().toISOString()
+      }));
+
+      // Insert all notifications
+      if (notifications.length > 0) {
+        const { error: insertError } = await supabase
+          .from('notifications')
+          .insert(notifications);
+
+        if (insertError) throw insertError;
+      }
+    } catch (error) {
+      console.error('Error notifying owner of new ticket:', error);
+    }
+  },
+
+  // Create notification for ticket reply (notify ticket creator)
+  async notifyUserOfTicketReply(ticket, replyMessage) {
+    try {
+      const notification = {
+        type: 'support_ticket',
+        title: 'Support Ticket Reply',
+        message: `New reply to your ticket: "${ticket.subject}"`,
+        user_id: ticket.user_id,
+        data: {
+          ticket_id: ticket.id,
+          ticket_subject: ticket.subject,
+          ticket_status: ticket.status,
+          action: 'ticket_reply',
+          reply_preview: replyMessage.substring(0, 100) + (replyMessage.length > 100 ? '...' : '')
+        },
+        read: false,
+        created_at: new Date().toISOString()
+      };
+
+      return this.createNotification(notification);
+    } catch (error) {
+      console.error('Error notifying user of ticket reply:', error);
+    }
   }
 }; 

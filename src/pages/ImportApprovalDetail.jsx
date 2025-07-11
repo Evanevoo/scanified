@@ -82,13 +82,17 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           return;
         }
         
-        // Fallback: try to get from auth.users (if accessible)
-        const { data: user, error: userError } = await supabase.auth.admin.getUserById(importRecord.uploaded_by);
+        // Fallback: try to get from profiles table
+        const { data: fallbackProfile, error: fallbackProfileError } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', importRecord.uploaded_by)
+          .single();
         
-        if (!userError && user?.user) {
+        if (!fallbackProfileError && fallbackProfile) {
           setUploadedByUser({
-            full_name: user.user.user_metadata?.full_name || user.user.email,
-            email: user.user.email
+            full_name: fallbackProfile.full_name || fallbackProfile.email,
+            email: fallbackProfile.email
           });
           return;
         }

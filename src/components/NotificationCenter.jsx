@@ -15,26 +15,26 @@ import { useAuth } from '../hooks/useAuth';
 import { notificationService } from '../services/notificationService';
 
 export default function NotificationCenter() {
-  const { user } = useAuth();
+  const { profile, organization } = useAuth();
   const [anchorEl, setAnchorEl] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (user) {
+    if (profile) {
       loadNotifications();
       // Refresh notifications every 30 seconds
       const interval = setInterval(loadNotifications, 30000);
       return () => clearInterval(interval);
     }
-  }, [user]);
+  }, [profile]);
 
   const loadNotifications = async () => {
     try {
       const [recentNotifications, count] = await Promise.all([
-        notificationService.getRecentNotifications(user.id, 10),
-        notificationService.getUnreadNotificationCount(user.id)
+        notificationService.getNotifications(profile.id, organization?.id, 10),
+        notificationService.getUnreadCount(profile.id, organization?.id)
       ]);
       
       setNotifications(recentNotifications);
@@ -64,10 +64,40 @@ export default function NotificationCenter() {
     }
   };
 
+  const handleNotificationClick = async (notification) => {
+    try {
+      // Mark as read if not already read
+      if (!notification.read) {
+        await notificationService.markAsRead(notification.id);
+        setNotifications(prev => 
+          prev.map(n => 
+            n.id === notification.id ? { ...n, read: true } : n
+          )
+        );
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      }
+
+      // Handle navigation based on notification type
+      if (notification.type === 'support_ticket') {
+        if (notification.data?.action === 'new_ticket' && profile?.role === 'owner') {
+          // Navigate to owner portal support tickets
+          window.location.href = '/owner-portal/support';
+        } else if (notification.data?.action === 'ticket_reply') {
+          // Navigate to support center
+          window.location.href = '/support';
+        }
+      }
+
+      handleClose();
+    } catch (error) {
+      console.error('Error handling notification click:', error);
+    }
+  };
+
   const handleMarkAllAsRead = async () => {
     try {
       setLoading(true);
-      await notificationService.markAllAsRead(user.id);
+      await notificationService.markAllAsRead(profile.id, organization?.id);
       await loadNotifications(); // Refresh the list
     } catch (error) {
       console.error('Error marking all notifications as read:', error);
@@ -76,8 +106,12 @@ export default function NotificationCenter() {
     }
   };
 
-  const getNotificationIcon = (type) => {
+  const getNotificationIcon = (type, action) => {
     switch (type) {
+      case 'support_ticket':
+        if (action === 'new_ticket') return <CheckCircleIcon color="primary" />;
+        if (action === 'ticket_reply') return <CheckCircleIcon color="secondary" />;
+        return <CheckCircleIcon color="info" />;
       case 'success':
         return <CheckCircleIcon color="success" />;
       case 'warning':
@@ -152,15 +186,17 @@ export default function NotificationCenter() {
             {notifications.map((notification, index) => (
               <React.Fragment key={notification.id}>
                 <ListItem
+                  onClick={() => handleNotificationClick(notification)}
                   sx={{
                     backgroundColor: notification.read ? 'transparent' : 'action.hover',
                     '&:hover': {
                       backgroundColor: 'action.selected'
-                    }
+                    },
+                    cursor: 'pointer'
                   }}
                 >
                   <ListItemIcon>
-                    {getNotificationIcon(notification.type)}
+                    {getNotificationIcon(notification.type, notification.data?.action)}
                   </ListItemIcon>
                   <ListItemText
                     primary={

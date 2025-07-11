@@ -2,13 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate, Link } from 'react-router-dom';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Collapse, IconButton, TextField, CircularProgress, FormControl, InputLabel, Select, MenuItem
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Collapse, IconButton, TextField, CircularProgress, FormControl, InputLabel, Select, MenuItem, Alert
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import ArrowDropUpIcon from '@mui/icons-material/ArrowDropUp';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
+import { useAuth } from '../hooks/useAuth';
 
 function exportToCSV(customers) {
   const rows = [];
@@ -120,6 +121,7 @@ function exportInvoices(customers) {
 }
 
 function Rentals() {
+  const { profile: userProfile } = useAuth();
   const [rentals, setRentals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -131,50 +133,57 @@ function Rentals() {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [page, setPage] = useState(0);
   const rowsPerPage = 20;
+  const [sortField, setSortField] = useState('customer');
+  const [sortDirection, setSortDirection] = useState('asc');
+
+  // Check if user is admin
+  const isAdmin = userProfile?.role === 'admin' || userProfile?.is_admin === true;
+
+  const fetchRentals = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Fetch all rentals
+      const { data: rentalsData, error: rentalsError } = await supabase
+        .from('rentals')
+        .select('*, bottles(*)')
+        .not('bottle_id', 'is', null)
+        .order('rental_start_date', { ascending: false });
+      if (rentalsError) throw rentalsError;
+      
+      console.log('Rentals: Sample rental data:', rentalsData?.slice(0, 3));
+      console.log('Rentals: Total rentals fetched:', rentalsData?.length || 0);
+      console.log('Rentals: First rental fields:', Object.keys(rentalsData?.[0] || {}));
+      // Get unique customer_ids
+      const customerIds = Array.from(new Set((rentalsData || []).map(r => r.customer_id).filter(Boolean)));
+      let customersMap = {};
+      if (customerIds.length > 0) {
+        // Fetch all customers in one query
+        const { data: customersData, error: customersError } = await supabase
+          .from('customers')
+          .select('*')
+          .in('CustomerListID', customerIds);
+        if (!customersError && customersData) {
+          customersMap = customersData.reduce((map, c) => {
+            map[c.CustomerListID] = c;
+            return map;
+          }, {});
+        }
+      }
+      // Attach customer info to each rental
+      const rentalsWithCustomer = (rentalsData || []).map(r => ({
+        ...r,
+        customer: customersMap[r.customer_id] || null
+      }));
+      const filteredRentals = (rentalsWithCustomer || []).filter(r => r.customer_id && r.customer_id !== 'Not Set');
+      setRentals(filteredRentals);
+    } catch (err) {
+      setError(err.message);
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    const fetchRentals = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // Fetch all rentals
-        const { data: rentalsData, error: rentalsError } = await supabase
-          .from('rentals')
-          .select('*, bottles(*)')
-          .not('bottle_id', 'is', null)
-          .order('rental_start_date', { ascending: false });
-        if (rentalsError) throw rentalsError;
-        
-        console.log('Rentals: Sample rental data:', rentalsData?.slice(0, 3));
-        console.log('Rentals: Total rentals fetched:', rentalsData?.length || 0);
-        console.log('Rentals: First rental fields:', Object.keys(rentalsData?.[0] || {}));
-        // Get unique customer_ids
-        const customerIds = Array.from(new Set((rentalsData || []).map(r => r.customer_id).filter(Boolean)));
-        let customersMap = {};
-        if (customerIds.length > 0) {
-          // Fetch all customers in one query
-          const { data: customersData, error: customersError } = await supabase
-            .from('customers')
-            .select('*')
-            .in('CustomerListID', customerIds);
-          if (!customersError && customersData) {
-            customersMap = customersData.reduce((map, c) => {
-              map[c.CustomerListID] = c;
-              return map;
-            }, {});
-          }
-        }
-        // Attach customer info to each rental
-        const rentalsWithCustomer = (rentalsData || []).map(r => ({
-          ...r,
-          customer: customersMap[r.customer_id] || null
-        }));
-        setRentals(rentalsWithCustomer);
-      } catch (err) {
-        setError(err.message);
-      }
-      setLoading(false);
-    };
     fetchRentals();
   }, []);
 
@@ -194,8 +203,52 @@ function Rentals() {
     }
     customerMap[custId].rentals.push(rental);
   }
-  
-  const paginatedCustomers = customers.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
+
+  // Sort customers based on selected field
+  const sortCustomers = (customers, field, direction) => {
+    return customers.sort((a, b) => {
+      let aValue, bValue;
+      
+      switch (field) {
+        case 'customer':
+          aValue = a.customer.name || '';
+          bValue = b.customer.name || '';
+          break;
+        case 'location':
+          aValue = a.rentals[0]?.location || '';
+          bValue = b.rentals[0]?.location || '';
+          break;
+        case 'rental_type':
+          aValue = a.rentals[0]?.rental_type || '';
+          bValue = b.rentals[0]?.rental_type || '';
+          break;
+        case 'total_bottles':
+          aValue = a.rentals.length;
+          bValue = b.rentals.length;
+          break;
+        case 'rental_amount':
+          aValue = a.rentals[0]?.rental_amount || 0;
+          bValue = b.rentals[0]?.rental_amount || 0;
+          break;
+        case 'start_date':
+          aValue = a.rentals[0]?.rental_start_date || '';
+          bValue = b.rentals[0]?.rental_start_date || '';
+          break;
+        default:
+          aValue = a.customer.name || '';
+          bValue = b.customer.name || '';
+      }
+      
+      if (direction === 'asc') {
+        return aValue > bValue ? 1 : -1;
+      } else {
+        return aValue < bValue ? 1 : -1;
+      }
+    });
+  };
+
+  const sortedCustomers = sortCustomers(customers, sortField, sortDirection);
+  const paginatedCustomers = sortedCustomers.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
 
   const handleEditChange = (custId, field, value) => {
     setEditMap(prev => ({
@@ -211,20 +264,38 @@ function Rentals() {
     setSavingMap(prev => ({ ...prev, [custId]: true }));
     const edit = editMap[custId] || defaultEdit(rentals);
     try {
+      // Get tax rate for the location
+      let taxRate = 0;
+      let taxCode = edit.taxCode;
+      
+      if (edit.location && edit.location !== 'None') {
+        try {
+          const { data: locationData } = await supabase
+            .from('locations')
+            .select('total_tax_rate')
+            .eq('id', edit.location.toLowerCase())
+            .single();
+          
+          if (locationData) {
+            taxRate = locationData.total_tax_rate;
+            taxCode = 'GST+PST'; // Use combined tax code for location-based rates
+          }
+        } catch (e) {
+          console.warn('Could not fetch tax rate for location:', edit.location);
+        }
+      }
+
       await Promise.all(rentals.map(rental =>
         supabase.from('rentals').update({
           rental_amount: edit.rentalRate,
           rental_type: edit.rentalType,
-          tax_code: edit.taxCode,
+          tax_code: taxCode,
+          tax_rate: taxRate,
           location: edit.location
         }).eq('id', rental.id)
       ));
-      // Refresh data
-      const { data } = await supabase
-        .from('rentals')
-        .select('*')
-        .order('rental_start_date', { ascending: false });
-      setRentals(data);
+      // Refresh data properly
+      await fetchRentals();
     } catch (error) {
       // Error handling for rental updates
     }
@@ -313,6 +384,32 @@ function Rentals() {
     setLoading(false);
   };
 
+  // Admin access check
+  if (!isAdmin) {
+    return (
+      <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
+        <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
+          <Alert severity="error" sx={{ mb: 3 }}>
+            Access Denied: This page is only available to administrators.
+          </Alert>
+          <Typography variant="h4" component="h1" gutterBottom>
+            Rentals Management
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            You do not have permission to access the rentals management page. Please contact your administrator if you believe this is an error.
+          </Typography>
+          <Button 
+            variant="contained" 
+            onClick={() => navigate('/')}
+            sx={{ mt: 2 }}
+          >
+            Return to Dashboard
+          </Button>
+        </Paper>
+      </Box>
+    );
+  }
+
   if (loading) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
   if (error) return <Box p={4} color="error.main">Error: {error}</Box>;
 
@@ -320,6 +417,41 @@ function Rentals() {
     <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
       <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
         <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Rentals</Typography>
+        
+        {/* Sort Controls */}
+        <Box display="flex" gap={2} alignItems="center" mb={3} sx={{ flexWrap: 'wrap' }}>
+          <Typography variant="body2" color="text.secondary">
+            Sort by:
+          </Typography>
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <Select
+              value={sortField}
+              onChange={(e) => setSortField(e.target.value)}
+              size="small"
+            >
+              <MenuItem value="customer">Customer Name</MenuItem>
+              <MenuItem value="location">Location</MenuItem>
+              <MenuItem value="rental_type">Rental Type</MenuItem>
+              <MenuItem value="total_bottles">Total Bottles</MenuItem>
+              <MenuItem value="rental_amount">Rental Amount</MenuItem>
+              <MenuItem value="start_date">Start Date</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 100 }}>
+            <Select
+              value={sortDirection}
+              onChange={(e) => setSortDirection(e.target.value)}
+              size="small"
+            >
+              <MenuItem value="asc">Ascending</MenuItem>
+              <MenuItem value="desc">Descending</MenuItem>
+            </Select>
+          </FormControl>
+          <Typography variant="body2" color="text.secondary">
+            ({customers.length} customers)
+          </Typography>
+        </Box>
+        
         <Box display="flex" alignItems="center" justifyContent="space-between" mb={4}>
           <Button
             variant="contained"
@@ -579,7 +711,35 @@ function Rentals() {
                                                   value={rental.location || 'None'}
                                                   size="small"
                                                   onChange={async e => {
-                                                    await supabase.from('rentals').update({ location: e.target.value }).eq('id', rental.id);
+                                                    const newLocation = e.target.value;
+                                                    let taxRate = 0;
+                                                    let taxCode = rental.tax_code;
+                                                    
+                                                    if (newLocation && newLocation !== 'None') {
+                                                      try {
+                                                        const { data: locationData } = await supabase
+                                                          .from('locations')
+                                                          .select('total_tax_rate')
+                                                          .eq('id', newLocation.toLowerCase())
+                                                          .single();
+                                                        
+                                                        if (locationData) {
+                                                          taxRate = locationData.total_tax_rate;
+                                                          taxCode = 'GST+PST';
+                                                        }
+                                                      } catch (e) {
+                                                        console.warn('Could not fetch tax rate for location:', newLocation);
+                                                      }
+                                                    }
+                                                    
+                                                    await supabase.from('rentals').update({ 
+                                                      location: newLocation,
+                                                      tax_rate: taxRate,
+                                                      tax_code: taxCode
+                                                    }).eq('id', rental.id);
+                                                    
+                                                    // Refresh the data after update
+                                                    await fetchRentals();
                                                   }}
                                                 >
                                                   <MenuItem value="SASKATOON">SASKATOON</MenuItem>

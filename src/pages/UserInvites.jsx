@@ -35,10 +35,12 @@ export default function UserInvites() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [copiedToken, setCopiedToken] = useState('');
+  const [roles, setRoles] = useState([]);
 
   useEffect(() => {
     if (profile?.role === 'owner') {
       fetchInvites();
+      fetchRoles();
     }
   }, [profile]);
 
@@ -64,6 +66,21 @@ export default function UserInvites() {
     }
   };
 
+  const fetchRoles = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('roles')
+        .select('*')
+        .order('name');
+
+      if (error) throw error;
+      setRoles(data || []);
+    } catch (error) {
+      console.error('Error fetching roles:', error);
+      setError('Failed to load roles: ' + error.message);
+    }
+  };
+
   const handleCreateInvite = async () => {
     if (!newInvite.email || !newInvite.role) {
       setError('Please fill in all fields');
@@ -84,6 +101,17 @@ export default function UserInvites() {
 
       if (existingUser) {
         throw new Error('This email is already registered in your organization');
+      }
+
+      // Check if email is already registered with any other organization
+      const { data: existingProfile, error: profileCheckError } = await supabase
+        .from('profiles')
+        .select('email, organization_id, organizations(name)')
+        .eq('email', newInvite.email)
+        .single();
+
+      if (existingProfile && existingProfile.organization_id && existingProfile.organization_id !== profile.organization_id) {
+        throw new Error(`This email (${newInvite.email}) is already registered with organization "${existingProfile.organizations?.name}". Each email can only be associated with one organization. Please use a different email address.`);
       }
 
       // Check if there's already a pending invite for this email
@@ -358,15 +386,17 @@ export default function UserInvites() {
             <Grid item xs={12}>
               <FormControl fullWidth>
                 <InputLabel>Role</InputLabel>
-                <Select
-                  value={newInvite.role}
-                  onChange={(e) => setNewInvite({ ...newInvite, role: e.target.value })}
-                  label="Role"
-                >
-                  <MenuItem value="user">User</MenuItem>
-                  <MenuItem value="manager">Manager</MenuItem>
-                  <MenuItem value="admin">Admin</MenuItem>
-                </Select>
+                                  <Select
+                    value={newInvite.role}
+                    onChange={(e) => setNewInvite({ ...newInvite, role: e.target.value })}
+                    label="Role"
+                  >
+                    {roles.map((role) => (
+                      <MenuItem key={role.id} value={role.id}>
+                        {role.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
               </FormControl>
             </Grid>
             <Grid item xs={12}>

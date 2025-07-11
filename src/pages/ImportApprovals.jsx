@@ -65,6 +65,7 @@ export default function ImportApprovals() {
   const [historyDialog, setHistoryDialog] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
   const [productCodeToAssetInfo, setProductCodeToAssetInfo] = useState({});
+  const [rentalWarningDialog, setRentalWarningDialog] = useState({ open: false, warnings: [], onConfirm: null });
 
   const recordOptions = [
     'Verify This Record',
@@ -268,25 +269,55 @@ export default function ImportApprovals() {
   }
 
   // Real approval logic for invoices
-  async function processInvoice(invoice) {
+  async function processInvoice(invoiceData) {
     try {
+      // Parse the data structure - invoiceData is the row.data from imported_invoices
+      const parsedData = parseDataField(invoiceData);
+      const rows = parsedData.rows || parsedData.line_items || [];
+      
+      if (!rows || rows.length === 0) {
+        return { success: false, error: 'No data found in import' };
+      }
+
+      // Get customer info from the first row
+      const firstRow = rows[0];
+      const customerId = firstRow.customer_id;
+      const customerName = firstRow.customer_name;
+
+      // Get invoice number from first row
+      const invoiceNumber = firstRow.invoice_number || firstRow.reference_number || firstRow.order_number;
+      if (!invoiceNumber) {
+        return { success: false, error: 'No invoice number found' };
+      }
+
+      // Check if scanning has been done for this invoice
+      const { data: scannedData } = await supabase
+        .from('cylinder_scans')
+        .select('*')
+        .eq('order_number', invoiceNumber)
+        .or(`invoice_number.eq.${invoiceNumber}`);
+
+      if (!scannedData || scannedData.length === 0) {
+        return { success: false, error: 'No scanning has been done for this invoice. Please scan the bottles before verification.' };
+      }
+
       // Get or create customer
       let customer = null;
-      if (invoice.customer_id) {
-        const { data: existing } = await supabase.from('customers').select('CustomerListID, name').eq('CustomerListID', invoice.customer_id);
+      if (customerId) {
+        const { data: existing } = await supabase.from('customers').select('CustomerListID, name').eq('CustomerListID', customerId);
         if (existing && existing.length > 0) {
           customer = existing[0];
         }
       }
-      if (!customer && invoice.customer_name) {
-        const { data: existing } = await supabase.from('customers').select('CustomerListID, name').ilike('name', invoice.customer_name);
+      if (!customer && customerName) {
+        const { data: existing } = await supabase.from('customers').select('CustomerListID, name').ilike('name', customerName);
         if (existing && existing.length > 0) {
           customer = existing[0];
         } else {
           // Create new customer
           const { data: created } = await supabase.from('customers').insert({
-            name: invoice.customer_name,
-            CustomerListID: `80000448-${Date.now()}S`
+            name: customerName,
+            CustomerListID: customerId || `80000448-${Date.now()}S`
           }).select('CustomerListID, name').single();
           customer = created;
         }
@@ -295,46 +326,327 @@ export default function ImportApprovals() {
 
       // Create invoice
       const { data: inv, error: invErr } = await supabase.from('invoices').insert({
-        invoice_number: invoice.invoice_number,
+        details: invoiceNumber,
         customer_id: customer.CustomerListID,
-        date: invoice.date,
-        total_amount: invoice.total_amount || 0
+        invoice_date: firstRow.date || new Date().toISOString().split('T')[0],
+        amount: 0
       }).select('id').single();
       if (invErr) return { success: false, error: invErr.message };
 
-      return { success: true };
+      // Create line items
+      for (const row of rows) {
+        const { error: lineItemError } = await supabase.from('invoice_line_items').insert({
+          invoice_id: inv.id,
+          product_code: row.product_code,
+          qty_out: row.qty_out || 0,
+          qty_in: row.qty_in || 0,
+          description: row.description || row.product_code,
+          rate: row.rate || 0,
+          amount: row.amount || 0,
+          serial_number: row.serial_number || row.product_code
+        });
+        if (lineItemError) {
+          console.error('Error creating line item:', lineItemError);
+        }
+      }
+
+      const warnings = [];
+      for (const scan of scannedData) {
+        if (scan.cylinder_barcode) {
+          // Check for existing open rental
+          const { data: existingRental } = await supabase
+            .from('rentals')
+            .select('customer_id, rental_start_date')
+            .eq('bottle_barcode', scan.cylinder_barcode)
+            .is('rental_end_date', null)
+            .single();
+
+          if (existingRental && existingRental.customer_id !== customer.CustomerListID) {
+            warnings.push({
+              bottle: scan.cylinder_barcode,
+              existingCustomer: existingRental.customer_id,
+              newCustomer: customer.CustomerListID,
+              message: `Bottle ${scan.cylinder_barcode} is currently rented to customer ${existingRental.customer_id} and will be reassigned to ${customer.CustomerListID}`
+            });
+          }
+
+          // Update bottle assignment
+          const { error: bottleError } = await supabase
+            .from('bottles')
+            .update({ 
+              assigned_customer: customer.CustomerListID,
+              last_location_update: new Date().toISOString()
+            })
+            .eq('barcode_number', scan.cylinder_barcode);
+          
+          if (bottleError) {
+            console.error('Error assigning bottle to customer:', bottleError);
+          }
+
+          // Create rental record for delivered bottles (qty_out > 0)
+          if (scan.qty && scan.qty > 0) {
+            // Get tax rate for the location
+            let taxRate = 0;
+            let taxCode = 'GST+PST';
+            const rentalLocation = scan.location || 'SASKATOON';
+            
+            try {
+              const { data: locationData } = await supabase
+                .from('locations')
+                .select('total_tax_rate')
+                .eq('id', rentalLocation.toLowerCase())
+                .single();
+              
+              if (locationData) {
+                taxRate = locationData.total_tax_rate;
+              }
+            } catch (e) {
+              console.warn('Could not fetch tax rate for location:', rentalLocation);
+            }
+
+            const { error: rentalError } = await supabase
+              .from('rentals')
+              .insert({
+                bottle_barcode: scan.cylinder_barcode,
+                customer_id: customer.CustomerListID,
+                rental_start_date: new Date().toISOString().split('T')[0],
+                rental_end_date: null,
+                rental_type: 'monthly',
+                rental_amount: 0,
+                location: rentalLocation,
+                tax_code: taxCode,
+                tax_rate: taxRate
+              });
+            
+            if (rentalError) {
+              console.error('Error creating rental record:', rentalError);
+            }
+          }
+
+          // End rental for returned bottles (qty_in > 0)
+          if (scan.qty && scan.qty < 0) {
+            const { error: rentalUpdateError } = await supabase
+              .from('rentals')
+              .update({ 
+                rental_end_date: new Date().toISOString().split('T')[0]
+              })
+              .eq('bottle_barcode', scan.cylinder_barcode)
+              .is('rental_end_date', null);
+            
+            if (rentalUpdateError) {
+              console.error('Error ending rental record:', rentalUpdateError);
+            }
+
+            // Remove customer assignment and mark as empty for returned bottles
+            const { error: bottleUnassignError } = await supabase
+              .from('bottles')
+              .update({ 
+                assigned_customer: null,
+                status: 'empty',
+                last_location_update: new Date().toISOString()
+              })
+              .eq('barcode_number', scan.cylinder_barcode);
+            
+            if (bottleUnassignError) {
+              console.error('Error unassigning bottle from customer:', bottleUnassignError);
+            }
+          }
+        }
+      }
+
+      return { success: true, warnings: warnings };
     } catch (e) {
       return { success: false, error: e.message };
     }
   }
 
   // Real approval logic for receipts
-  async function processReceipt(receipt) {
+  async function processReceipt(receiptData) {
     try {
+      // Parse the data structure - receiptData is the row.data from imported_sales_receipts
+      const parsedData = parseDataField(receiptData);
+      const rows = parsedData.rows || parsedData.line_items || [];
+      
+      if (!rows || rows.length === 0) {
+        return { success: false, error: 'No data found in import' };
+      }
+
+      // Get customer info from the first row
+      const firstRow = rows[0];
+      const customerId = firstRow.customer_id;
+      const customerName = firstRow.customer_name;
+
+      // Get receipt number from first row
+      const receiptNumber = firstRow.sales_receipt_number || firstRow.reference_number || firstRow.order_number;
+      if (!receiptNumber) {
+        return { success: false, error: 'No receipt number found' };
+      }
+
+      // Check if scanning has been done for this receipt
+      const { data: scannedData } = await supabase
+        .from('cylinder_scans')
+        .select('*')
+        .eq('order_number', receiptNumber)
+        .or(`invoice_number.eq.${receiptNumber}`);
+
+      if (!scannedData || scannedData.length === 0) {
+        return { success: false, error: 'No scanning has been done for this receipt. Please scan the bottles before verification.' };
+      }
+
       // Get or create customer
       let customer = null;
-      if (receipt.customer_id) {
-        const { data: existing } = await supabase.from('customers').select('CustomerListID, name').eq('CustomerListID', receipt.customer_id);
+      if (customerId) {
+        const { data: existing } = await supabase.from('customers').select('CustomerListID, name').eq('CustomerListID', customerId);
         if (existing && existing.length > 0) {
           customer = existing[0];
         }
       }
-      if (!customer && receipt.customer_name) {
-        const { data: existing } = await supabase.from('customers').select('CustomerListID, name').ilike('name', receipt.customer_name);
+      if (!customer && customerName) {
+        const { data: existing } = await supabase.from('customers').select('CustomerListID, name').ilike('name', customerName);
         if (existing && existing.length > 0) {
           customer = existing[0];
         } else {
           // Create new customer
           const { data: created } = await supabase.from('customers').insert({
-            name: receipt.customer_name,
-            CustomerListID: `80000448-${Date.now()}S`
+            name: customerName,
+            CustomerListID: customerId || `80000448-${Date.now()}S`
           }).select('CustomerListID, name').single();
           customer = created;
         }
       }
       if (!customer) return { success: false, error: 'No customer found or created' };
 
-      return { success: true };
+      // Create receipt (using invoices table)
+      const { data: receipt, error: receiptErr } = await supabase.from('invoices').insert({
+        details: receiptNumber,
+        customer_id: customer.CustomerListID,
+        invoice_date: firstRow.date || new Date().toISOString().split('T')[0],
+        amount: 0
+      }).select('id').single();
+      if (receiptErr) return { success: false, error: receiptErr.message };
+
+      // Create line items
+      for (const row of rows) {
+        const { error: lineItemError } = await supabase.from('invoice_line_items').insert({
+          invoice_id: receipt.id,
+          product_code: row.product_code,
+          qty_out: row.qty_out || 0,
+          qty_in: row.qty_in || 0,
+          description: row.description || row.product_code,
+          rate: row.rate || 0,
+          amount: row.amount || 0,
+          serial_number: row.serial_number || row.product_code
+        });
+        if (lineItemError) {
+          console.error('Error creating line item:', lineItemError);
+        }
+      }
+
+      const warnings = [];
+      for (const scan of scannedData) {
+        if (scan.cylinder_barcode) {
+          // Check for existing open rental
+          const { data: existingRental } = await supabase
+            .from('rentals')
+            .select('customer_id, rental_start_date')
+            .eq('bottle_barcode', scan.cylinder_barcode)
+            .is('rental_end_date', null)
+            .single();
+
+          if (existingRental && existingRental.customer_id !== customer.CustomerListID) {
+            warnings.push({
+              bottle: scan.cylinder_barcode,
+              existingCustomer: existingRental.customer_id,
+              newCustomer: customer.CustomerListID,
+              message: `Bottle ${scan.cylinder_barcode} is currently rented to customer ${existingRental.customer_id} and will be reassigned to ${customer.CustomerListID}`
+            });
+          }
+
+          // Update bottle assignment
+          const { error: bottleError } = await supabase
+            .from('bottles')
+            .update({ 
+              assigned_customer: customer.CustomerListID,
+              last_location_update: new Date().toISOString()
+            })
+            .eq('barcode_number', scan.cylinder_barcode);
+          
+          if (bottleError) {
+            console.error('Error assigning bottle to customer:', bottleError);
+          }
+
+          // Create rental record for delivered bottles (qty_out > 0)
+          if (scan.qty && scan.qty > 0) {
+            // Get tax rate for the location
+            let taxRate = 0;
+            let taxCode = 'GST+PST';
+            const rentalLocation = scan.location || 'SASKATOON';
+            
+            try {
+              const { data: locationData } = await supabase
+                .from('locations')
+                .select('total_tax_rate')
+                .eq('id', rentalLocation.toLowerCase())
+                .single();
+              
+              if (locationData) {
+                taxRate = locationData.total_tax_rate;
+              }
+            } catch (e) {
+              console.warn('Could not fetch tax rate for location:', rentalLocation);
+            }
+
+            const { error: rentalError } = await supabase
+              .from('rentals')
+              .insert({
+                bottle_barcode: scan.cylinder_barcode,
+                customer_id: customer.CustomerListID,
+                rental_start_date: new Date().toISOString().split('T')[0],
+                rental_end_date: null,
+                rental_type: 'monthly',
+                rental_amount: 0,
+                location: rentalLocation,
+                tax_code: taxCode,
+                tax_rate: taxRate
+              });
+            
+            if (rentalError) {
+              console.error('Error creating rental record:', rentalError);
+            }
+          }
+
+          // End rental for returned bottles (qty_in > 0)
+          if (scan.qty && scan.qty < 0) {
+            const { error: rentalUpdateError } = await supabase
+              .from('rentals')
+              .update({ 
+                rental_end_date: new Date().toISOString().split('T')[0]
+              })
+              .eq('bottle_barcode', scan.cylinder_barcode)
+              .is('rental_end_date', null);
+            
+            if (rentalUpdateError) {
+              console.error('Error ending rental record:', rentalUpdateError);
+            }
+
+            // Remove customer assignment and mark as empty for returned bottles
+            const { error: bottleUnassignError } = await supabase
+              .from('bottles')
+              .update({ 
+                assigned_customer: null,
+                status: 'empty',
+                last_location_update: new Date().toISOString()
+              })
+              .eq('barcode_number', scan.cylinder_barcode);
+            
+            if (bottleUnassignError) {
+              console.error('Error unassigning bottle from customer:', bottleUnassignError);
+            }
+          }
+        }
+      }
+
+      return { success: true, warnings: warnings };
     } catch (e) {
       return { success: false, error: e.message };
     }
@@ -465,6 +777,21 @@ export default function ImportApprovals() {
       if (type === 'invoice') result = await processInvoice(row.data);
       else result = await processReceipt(row.data);
       if (!result.success) throw new Error(result.error || 'Processing failed');
+      if (result.warnings && result.warnings.length > 0) {
+        setRentalWarningDialog({
+          open: true,
+          warnings: result.warnings,
+          onConfirm: async () => {
+            setRentalWarningDialog({ open: false, warnings: [], onConfirm: null });
+            await supabase
+              .from(type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts')
+              .update({ status: 'approved', approved_at: new Date().toISOString(), approved_by: null })
+              .eq('id', row.id);
+            setSnackbar(`${type === 'invoice' ? 'Invoice' : 'Sales Receipt'} #${row.id} approved.`);
+          }
+        });
+        return;
+      }
       // Mark as approved
       await supabase
         .from(type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts')
@@ -780,6 +1107,24 @@ export default function ImportApprovals() {
         onClose={() => setSnackbar('')}
         message={snackbar}
       />
+      {rentalWarningDialog.open && (
+        <Dialog open onClose={() => setRentalWarningDialog({ open: false, warnings: [], onConfirm: null })}>
+          <DialogTitle>Rental Conflict Warning</DialogTitle>
+          <DialogContent>
+            <Typography color="warning.main">Some bottles are already rented to another customer:</Typography>
+            <ul>
+              {rentalWarningDialog.warnings.map((w, i) => (
+                <li key={i}>{w.message}</li>
+              ))}
+            </ul>
+            <Typography>Do you want to proceed and approve anyway?</Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setRentalWarningDialog({ open: false, warnings: [], onConfirm: null })}>Cancel</Button>
+            <Button onClick={rentalWarningDialog.onConfirm} color="primary" variant="contained">Approve Anyway</Button>
+          </DialogActions>
+        </Dialog>
+      )}
     </Box>
   );
 } 
