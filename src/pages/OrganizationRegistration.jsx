@@ -91,14 +91,18 @@ function OrganizationRegistration() {
     }
   };
 
-  // Handle organization name change and auto-generate slug
-  const handleOrgNameChange = async (name) => {
+  // Handle organization name change (sync)
+  const handleOrgNameInputChange = (name) => {
+    setOrgData(prev => ({ ...prev, name }));
+  };
+
+  // Generate slug onBlur (async)
+  const handleOrgNameBlur = async () => {
+    const name = orgData.name;
     const baseSlug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    setOrgData({ ...orgData, name });
-    
     if (baseSlug) {
       const uniqueSlug = await generateUniqueSlug(baseSlug);
-      setOrgData(prev => ({ ...prev, name, slug: uniqueSlug }));
+      setOrgData(prev => ({ ...prev, slug: uniqueSlug }));
     }
   };
 
@@ -242,7 +246,8 @@ function OrganizationRegistration() {
                   fullWidth
                   label="Organization Name"
                   value={orgData.name}
-                  onChange={(e) => handleOrgNameChange(e.target.value)}
+                  onChange={(e) => handleOrgNameInputChange(e.target.value)}
+                  onBlur={handleOrgNameBlur}
                   required
                   helperText="The name of your company or organization"
                 />
