@@ -1,67 +1,39 @@
 import React from 'react';
 import { Box, CircularProgress, Typography } from '@mui/material';
 
-/**
- * Reusable loading spinner component
- * @param {Object} props - Component props
- * @param {string} props.message - Optional loading message
- * @param {string} props.size - Size of the spinner ('small', 'medium', 'large')
- * @param {boolean} props.fullScreen - Whether to display full screen
- * @returns {JSX.Element} Loading spinner component
- */
-const LoadingSpinner = ({ 
-  message = 'Loading...', 
-  size = 'medium', 
-  fullScreen = true 
-}) => {
-  const sizeMap = {
-    small: 24,
-    medium: 40,
-    large: 60
-  };
-
-  const spinnerSize = sizeMap[size] || sizeMap.medium;
-
-  const content = (
+const LoadingSpinner = ({ message = "Loading..." }) => {
+  return (
     <Box
-      display="flex"
-      flexDirection="column"
-      alignItems="center"
-      justifyContent="center"
-      gap={2}
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        color: 'white'
+      }}
     >
-      <CircularProgress 
-        size={spinnerSize} 
-        thickness={4}
-        sx={{ color: 'primary.main' }}
-      />
-      {message && (
-        <Typography 
-          variant="body2" 
-          color="text.secondary"
-          sx={{ fontWeight: 500 }}
-        >
-          {message}
-        </Typography>
-      )}
+      <Box sx={{ mb: 3 }}>
+        <CircularProgress 
+          size={60} 
+          thickness={4}
+          sx={{ 
+            color: 'white',
+            '& .MuiCircularProgress-circle': {
+              strokeLinecap: 'round',
+            }
+          }} 
+        />
+      </Box>
+      <Typography variant="h6" sx={{ fontWeight: 300, opacity: 0.9 }}>
+        {message}
+      </Typography>
+      <Typography variant="body2" sx={{ mt: 1, opacity: 0.7 }}>
+        LessAnnoyingScan
+      </Typography>
     </Box>
   );
-
-  if (fullScreen) {
-    return (
-      <Box
-        display="flex"
-        alignItems="center"
-        justifyContent="center"
-        minHeight="100vh"
-        bgcolor="background.default"
-      >
-        {content}
-      </Box>
-    );
-  }
-
-  return content;
 };
 
 export default LoadingSpinner; 

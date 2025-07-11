@@ -91,7 +91,7 @@ export const AuthProvider = ({ children }) => {
         if (profileError) {
           // If profile not found, auto-create it
           if (profileError.code === 'PGRST116') {
-            console.warn('Auth: Profile not found, auto-creating profile for user:', sessionUser.id);
+            console.log('Auth: Creating profile for new user...');
             // Insert a new profile with minimal info
             const { error: insertError } = await supabase
               .from('profiles')
@@ -102,7 +102,7 @@ export const AuthProvider = ({ children }) => {
                 role: 'user',
               });
             if (insertError) {
-              console.error('Auth: Failed to auto-create profile:', insertError);
+              console.error('Auth: Failed to create profile:', insertError);
               setProfile(null);
               setOrganization(null);
               setLoading(false);
@@ -116,7 +116,7 @@ export const AuthProvider = ({ children }) => {
               .eq('id', sessionUser.id)
               .single());
             if (profileError) {
-              console.error('Auth: Still failed to fetch profile after insert:', profileError);
+              console.error('Auth: Profile creation failed:', profileError);
               setProfile(null);
               setOrganization(null);
               setLoading(false);
@@ -125,7 +125,7 @@ export const AuthProvider = ({ children }) => {
             }
           } else {
             // Other errors: log and clear state
-            console.error('Auth: Error fetching profile:', profileError);
+            console.error('Auth: Error loading profile:', profileError);
             setProfile(null);
             setOrganization(null);
             authFlowInProgressRef.current = false;
@@ -134,7 +134,7 @@ export const AuthProvider = ({ children }) => {
         }
 
         setProfile(profileData);
-        console.log('Auth: Profile loaded:', profileData);
+        console.log('Auth: Profile loaded successfully');
 
         // Step 2: If profile has an organization_id, fetch the organization
         if (profileData?.organization_id) {
