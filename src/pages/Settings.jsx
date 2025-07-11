@@ -791,651 +791,705 @@ export default function Settings() {
   };
 
   return (
-    <Box maxWidth={1200} mx="auto" mt={8} mb={4}>
-      <Paper elevation={3} sx={{ p: 4, borderRadius: 4, bgcolor: 'background.default' }}>
-        <Stack direction="row" alignItems="center" spacing={2} mb={4}>
-          <IconButton color="primary" onClick={() => navigate('/dashboard')}>
-            <ArrowBackIcon />
-          </IconButton>
-          <Typography variant="h4" fontWeight={700}>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc', py: 4 }}>
+      <Box sx={{ maxWidth: '1200px', mx: 'auto', px: 3 }}>
+        <Box sx={{ mb: 4 }}>
+          <Typography variant="h3" fontWeight={700} color="primary" sx={{ mb: 1 }}>
             Settings
           </Typography>
-        </Stack>
-
-        <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 3 }} variant="scrollable" scrollButtons="auto">
-          <Tab label="Profile" />
-          <Tab label="Security" />
-          <Tab label="Appearance" />
-          <Tab label="Notifications" />
-          <Tab label="Billing & Subscription" />
-          {(roleName === 'admin') && <Tab label="User Management" />}
-          {(roleName === 'owner' || roleName === 'admin') && <Tab label="User Invites" />}
-          {(roleName === 'owner' || roleName === 'admin') && <Tab label="Role Management" />}
-        </Tabs>
-        
-        {/* Debug info - remove this later */}
-        <Box sx={{ mb: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
-          <Typography variant="body2" color="text.secondary">
-            Debug: Your role is "{roleName || profile?.role || profile?.role_id}" | Organization: {organization?.name || 'Unknown'}
+          <Typography variant="h6" color="text.secondary">
+            Manage your account, organization, and preferences
           </Typography>
         </Box>
 
-        {/* Profile Tab */}
-        <TabPanel value={activeTab} index={0}>
-          <Box component="form" onSubmit={handleProfileSave} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <TextField
-              label="Full Name"
-              value={fullName}
-              onChange={(e) => {
-                setFullName(e.target.value);
-                setProfileChanged(true);
-              }}
-              fullWidth
-            />
-            <TextField
-              label="Email"
-              value={email}
-              fullWidth
-              disabled
-            />
-            <Button 
-              type="submit" 
-              variant="contained" 
-              color="primary"
-              disabled={!profileChanged}
-              startIcon={<SaveIcon />}
-            >
-              Save Profile
-            </Button>
-          </Box>
-        </TabPanel>
+        <Card sx={{ border: '1px solid #e2e8f0', borderRadius: 3 }}>
+          <Tabs 
+            value={activeTab} 
+            onChange={handleTabChange} 
+            sx={{ 
+              borderBottom: '1px solid #e2e8f0',
+              px: 3,
+              '& .MuiTab-root': {
+                textTransform: 'none',
+                fontWeight: 600,
+                minHeight: 64
+              }
+            }} 
+            variant="scrollable" 
+            scrollButtons="auto"
+          >
+            <Tab label="Profile" icon={<AccountCircleIcon />} iconPosition="start" />
+            <Tab label="Security" icon={<SecurityIcon />} iconPosition="start" />
+            <Tab label="Appearance" icon={<BusinessIcon />} iconPosition="start" />
+            <Tab label="Notifications" icon={<NotificationsIcon />} iconPosition="start" />
+            <Tab label="Billing" icon={<PaymentIcon />} iconPosition="start" />
+            {(roleName === 'admin') && <Tab label="Team" icon={<PeopleIcon />} iconPosition="start" />}
+            {(roleName === 'owner' || roleName === 'admin') && <Tab label="Invites" icon={<EmailIcon />} iconPosition="start" />}
+          </Tabs>
+          
+          <Box sx={{ p: 4 }}>
+            {/* Profile Tab */}
+            <TabPanel value={activeTab} index={0}>
+              <Box sx={{ maxWidth: 600 }}>
+                <Typography variant="h5" fontWeight={600} sx={{ mb: 3 }}>
+                  Profile Information
+                </Typography>
+                <Grid container spacing={3}>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Full Name"
+                      value={profileData.full_name}
+                      onChange={(e) => {
+                        setProfileData({ ...profileData, full_name: e.target.value });
+                        setProfileChanged(true);
+                      }}
+                      variant="outlined"
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Email"
+                      value={profileData.email}
+                      disabled
+                      variant="outlined"
+                      helperText="Contact support to change your email"
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TextField
+                      fullWidth
+                      label="Bio"
+                      multiline
+                      rows={3}
+                      value={profileData.bio || ''}
+                      onChange={(e) => {
+                        setProfileData({ ...profileData, bio: e.target.value });
+                        setProfileChanged(true);
+                      }}
+                      variant="outlined"
+                      placeholder="Tell us about yourself..."
+                    />
+                  </Grid>
+                </Grid>
+                {profileChanged && (
+                  <Box sx={{ mt: 3 }}>
+                    <Button
+                      variant="contained"
+                      onClick={handleProfileSave}
+                      disabled={profileLoading}
+                      startIcon={profileLoading ? <CircularProgress size={20} /> : <SaveIcon />}
+                    >
+                      Save Changes
+                    </Button>
+                  </Box>
+                )}
+              </Box>
+            </TabPanel>
 
-        {/* Security Tab */}
-        <TabPanel value={activeTab} index={1}>
-          <Stack spacing={3}>
-            {/* Password Change */}
-            <Box component="form" onSubmit={handlePasswordSave}>
-              <Typography variant="subtitle1" gutterBottom>Change Password</Typography>
-              <Stack spacing={2}>
-                <TextField
-                  type="password"
-                  label="New Password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  fullWidth
-                />
-                <TextField
-                  type="password"
-                  label="Confirm Password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  fullWidth
-                />
-                <Button type="submit" variant="contained" color="primary">
-                  Update Password
+            {/* Billing Tab */}
+            <TabPanel value={activeTab} index={4}>
+              <Box sx={{ maxWidth: 600 }}>
+                <Typography variant="h5" fontWeight={600} sx={{ mb: 2 }}>
+                  Billing & Subscription
+                </Typography>
+                <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+                  Manage your subscription plan and billing information.
+                </Typography>
+                
+                {organization && (
+                  <Card sx={{ p: 3, mb: 3, bgcolor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                    <Grid container spacing={2} alignItems="center">
+                      <Grid item xs={12} sm={6}>
+                        <Typography variant="body2" color="text.secondary">Current Plan</Typography>
+                        <Typography variant="h6" fontWeight={600}>
+                          {organization.subscription_plan || 'Free Trial'}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <Typography variant="body2" color="text.secondary">Organization</Typography>
+                        <Typography variant="body1">{organization.name}</Typography>
+                      </Grid>
+                      {organization.trial_end_date && (
+                        <Grid item xs={12}>
+                          <Typography variant="body2" color="text.secondary">
+                            Trial ends: {new Date(organization.trial_end_date).toLocaleDateString()}
+                          </Typography>
+                        </Grid>
+                      )}
+                    </Grid>
+                  </Card>
+                )}
+                
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  onClick={() => navigate('/billing')}
+                  size="large"
+                  startIcon={<PaymentIcon />}
+                  sx={{ py: 1.5 }}
+                >
+                  Manage Billing & Plans
                 </Button>
-              </Stack>
-            </Box>
-            
-            <Divider />
-            
-            {/* Security Preferences */}
-            <Box>
-              <Typography variant="subtitle1" gutterBottom>Security Preferences</Typography>
-              <Stack spacing={2}>
-                <FormControlLabel
-                  control={<Switch checked={securitySettings.loginHistory} onChange={(e) => handleSecurityChange('loginHistory', e.target.checked)} />}
-                  label="Track Login History"
-                />
-                <FormControlLabel
-                  control={<Switch checked={securitySettings.twoFactorEnabled} onChange={(e) => handleSecurityChange('twoFactorEnabled', e.target.checked)} />}
-                  label="Two-Factor Authentication"
-                />
-                <Box>
-                  <Typography gutterBottom>Session Timeout (minutes)</Typography>
-                  <Slider
-                    value={securitySettings.sessionTimeout}
-                    onChange={(e, value) => handleSecurityChange('sessionTimeout', value)}
-                    min={15}
-                    max={120}
-                    step={15}
-                    marks
-                    valueLabelDisplay="auto"
-                  />
-                  <Typography variant="caption" color="text.secondary">
-                    Current: {securitySettings.sessionTimeout} minutes
-                  </Typography>
+              </Box>
+            </TabPanel>
+
+            {/* Security Tab */}
+            <TabPanel value={activeTab} index={1}>
+              <Stack spacing={3}>
+                {/* Password Change */}
+                <Box component="form" onSubmit={handlePasswordSave}>
+                  <Typography variant="subtitle1" gutterBottom>Change Password</Typography>
+                  <Stack spacing={2}>
+                    <TextField
+                      type="password"
+                      label="New Password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      fullWidth
+                    />
+                    <TextField
+                      type="password"
+                      label="Confirm Password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      fullWidth
+                    />
+                    <Button type="submit" variant="contained" color="primary">
+                      Update Password
+                    </Button>
+                  </Stack>
                 </Box>
+                
+                <Divider />
+                
+                {/* Security Preferences */}
+                <Box>
+                  <Typography variant="subtitle1" gutterBottom>Security Preferences</Typography>
+                  <Stack spacing={2}>
+                    <FormControlLabel
+                      control={<Switch checked={securitySettings.loginHistory} onChange={(e) => handleSecurityChange('loginHistory', e.target.checked)} />}
+                      label="Track Login History"
+                    />
+                    <FormControlLabel
+                      control={<Switch checked={securitySettings.twoFactorEnabled} onChange={(e) => handleSecurityChange('twoFactorEnabled', e.target.checked)} />}
+                      label="Two-Factor Authentication"
+                    />
+                    <Box>
+                      <Typography gutterBottom>Session Timeout (minutes)</Typography>
+                      <Slider
+                        value={securitySettings.sessionTimeout}
+                        onChange={(e, value) => handleSecurityChange('sessionTimeout', value)}
+                        min={15}
+                        max={120}
+                        step={15}
+                        marks
+                        valueLabelDisplay="auto"
+                      />
+                      <Typography variant="caption" color="text.secondary">
+                        Current: {securitySettings.sessionTimeout} minutes
+                      </Typography>
+                    </Box>
+                    <Button 
+                      variant="outlined" 
+                      color="primary"
+                      onClick={handleSecuritySave}
+                      disabled={!securityChanged}
+                      startIcon={<SaveIcon />}
+                    >
+                      Save Security Settings
+                    </Button>
+                  </Stack>
+                </Box>
+              </Stack>
+            </TabPanel>
+
+            {/* Appearance Tab */}
+            <TabPanel value={activeTab} index={2}>
+              <Stack spacing={3}>
+                <FormControl fullWidth>
+                  <InputLabel>Theme</InputLabel>
+                  <Select
+                    value={mode}
+                    label="Theme"
+                    onChange={(e) => handleThemeChange(e.target.value)}
+                  >
+                    <MenuItem value="light">Light</MenuItem>
+                    <MenuItem value="dark">Dark</MenuItem>
+                    <MenuItem value="system">System</MenuItem>
+                  </Select>
+                </FormControl>
+                
+                <FormControl fullWidth>
+                  <InputLabel>Import Customers Page Theme</InputLabel>
+                  <Select
+                    value={importCustomersTheme}
+                    label="Import Customers Page Theme"
+                    onChange={(e) => setImportCustomersTheme(e.target.value)}
+                  >
+                    <MenuItem value="system">System/Global</MenuItem>
+                    <MenuItem value="light">Light</MenuItem>
+                    <MenuItem value="dark">Dark</MenuItem>
+                  </Select>
+                </FormControl>
+                
+                <Box>
+                  <Typography variant="subtitle1" mb={1}>Accent Color</Typography>
+                  <Stack direction="row" spacing={2}>
+                    {themeColors.map(tc => (
+                      <IconButton
+                        key={tc.value}
+                        onClick={() => handleColorChange(tc.value)}
+                        sx={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: '50%',
+                          border: accent === tc.value ? `3px solid #fff` : '2px solid #ccc',
+                          background: colorMap[tc.value],
+                          boxShadow: accent === tc.value ? '0 0 0 4px rgba(0,0,0,0.1)' : 'none',
+                        }}
+                      >
+                        {accent === tc.value && (
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+                        )}
+                      </IconButton>
+                    ))}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary">Your accent color is used for highlights, buttons, and tabs.</Typography>
+                </Box>
+                
                 <Button 
                   variant="outlined" 
                   color="primary"
-                  onClick={handleSecuritySave}
-                  disabled={!securityChanged}
+                  onClick={handleImportThemeSave}
                   startIcon={<SaveIcon />}
                 >
-                  Save Security Settings
+                  Save Appearance Settings
                 </Button>
-              </Stack>
-            </Box>
-          </Stack>
-        </TabPanel>
 
-        {/* Appearance Tab */}
-        <TabPanel value={activeTab} index={2}>
-          <Stack spacing={3}>
-            <FormControl fullWidth>
-              <InputLabel>Theme</InputLabel>
-              <Select
-                value={mode}
-                label="Theme"
-                onChange={(e) => handleThemeChange(e.target.value)}
-              >
-                <MenuItem value="light">Light</MenuItem>
-                <MenuItem value="dark">Dark</MenuItem>
-                <MenuItem value="system">System</MenuItem>
-              </Select>
-            </FormControl>
-            
-            <FormControl fullWidth>
-              <InputLabel>Import Customers Page Theme</InputLabel>
-              <Select
-                value={importCustomersTheme}
-                label="Import Customers Page Theme"
-                onChange={(e) => setImportCustomersTheme(e.target.value)}
-              >
-                <MenuItem value="system">System/Global</MenuItem>
-                <MenuItem value="light">Light</MenuItem>
-                <MenuItem value="dark">Dark</MenuItem>
-              </Select>
-            </FormControl>
-            
-            <Box>
-              <Typography variant="subtitle1" mb={1}>Accent Color</Typography>
-              <Stack direction="row" spacing={2}>
-                {themeColors.map(tc => (
-                  <IconButton
-                    key={tc.value}
-                    onClick={() => handleColorChange(tc.value)}
-                    sx={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: '50%',
-                      border: accent === tc.value ? `3px solid #fff` : '2px solid #ccc',
-                      background: colorMap[tc.value],
-                      boxShadow: accent === tc.value ? '0 0 0 4px rgba(0,0,0,0.1)' : 'none',
-                    }}
-                  >
-                    {accent === tc.value && (
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+                {isOrgAdmin && (
+                  <Box sx={{ mb: 3 }}>
+                    <Typography variant="h6" sx={{ mb: 1 }}>Organization Logo</Typography>
+                    {logoUrl && (
+                      <Box sx={{ mb: 1 }}>
+                        <img src={logoUrl} alt="Organization Logo" style={{ maxHeight: 64, maxWidth: 128, borderRadius: 8, border: '1px solid #eee' }} />
+                      </Box>
                     )}
-                  </IconButton>
-                ))}
-              </Stack>
-              <Typography variant="caption" color="text.secondary">Your accent color is used for highlights, buttons, and tabs.</Typography>
-            </Box>
-            
-            <Button 
-              variant="outlined" 
-              color="primary"
-              onClick={handleImportThemeSave}
-              startIcon={<SaveIcon />}
-            >
-              Save Appearance Settings
-            </Button>
-
-            {isOrgAdmin && (
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="h6" sx={{ mb: 1 }}>Organization Logo</Typography>
-                {logoUrl && (
-                  <Box sx={{ mb: 1 }}>
-                    <img src={logoUrl} alt="Organization Logo" style={{ maxHeight: 64, maxWidth: 128, borderRadius: 8, border: '1px solid #eee' }} />
+                    <Button
+                      variant="contained"
+                      component="label"
+                      disabled={logoUploading}
+                      sx={{ mb: 1 }}
+                    >
+                      {logoUploading ? 'Uploading...' : 'Upload Logo'}
+                      <input type="file" accept="image/*" hidden onChange={handleLogoUpload} />
+                    </Button>
+                    {logoMsg && <Alert severity={logoMsg.startsWith('Error') ? 'error' : 'success'} sx={{ mt: 1 }}>{logoMsg}</Alert>}
+                    <Typography variant="body2" color="text.secondary">Recommended: PNG, JPG, or SVG. Max 1MB.</Typography>
                   </Box>
                 )}
-                <Button
-                  variant="contained"
-                  component="label"
-                  disabled={logoUploading}
-                  sx={{ mb: 1 }}
+              </Stack>
+            </TabPanel>
+
+            {/* Notifications Tab */}
+            <TabPanel value={activeTab} index={3}>
+              <Stack spacing={3}>
+                <FormControlLabel
+                  control={<Switch checked={notifications.email} onChange={() => handleNotifChange('email')} color="primary" />}
+                  label="Email Notifications"
+                />
+                <FormControlLabel
+                  control={<Switch checked={notifications.inApp} onChange={() => handleNotifChange('inApp')} color="primary" />}
+                  label="In-App Notifications"
+                />
+                <FormControlLabel
+                  control={<Switch checked={notifications.sms} onChange={() => handleNotifChange('sms')} color="primary" />}
+                  label="SMS Notifications"
+                />
+                <Button 
+                  variant="outlined" 
+                  color="primary"
+                  onClick={handleNotificationsSave}
+                  startIcon={<SaveIcon />}
                 >
-                  {logoUploading ? 'Uploading...' : 'Upload Logo'}
-                  <input type="file" accept="image/*" hidden onChange={handleLogoUpload} />
+                  Save Notification Settings
                 </Button>
-                {logoMsg && <Alert severity={logoMsg.startsWith('Error') ? 'error' : 'success'} sx={{ mt: 1 }}>{logoMsg}</Alert>}
-                <Typography variant="body2" color="text.secondary">Recommended: PNG, JPG, or SVG. Max 1MB.</Typography>
-              </Box>
+              </Stack>
+            </TabPanel>
+
+            {/* User Management Tab (Admins Only) */}
+            {(roleName === 'admin') && (
+              <TabPanel value={activeTab} index={5}>
+                <UserManagement />
+              </TabPanel>
             )}
-          </Stack>
-        </TabPanel>
 
-        {/* Notifications Tab */}
-        <TabPanel value={activeTab} index={3}>
-          <Stack spacing={3}>
-            <FormControlLabel
-              control={<Switch checked={notifications.email} onChange={() => handleNotifChange('email')} color="primary" />}
-              label="Email Notifications"
-            />
-            <FormControlLabel
-              control={<Switch checked={notifications.inApp} onChange={() => handleNotifChange('inApp')} color="primary" />}
-              label="In-App Notifications"
-            />
-            <FormControlLabel
-              control={<Switch checked={notifications.sms} onChange={() => handleNotifChange('sms')} color="primary" />}
-              label="SMS Notifications"
-            />
-            <Button 
-              variant="outlined" 
-              color="primary"
-              onClick={handleNotificationsSave}
-              startIcon={<SaveIcon />}
-            >
-              Save Notification Settings
-            </Button>
-          </Stack>
-        </TabPanel>
+            {/* User Invites Tab (Owners and Admins) */}
+            {(roleName === 'owner' || roleName === 'admin') && (
+              <TabPanel value={activeTab} index={roleName === 'admin' ? 6 : 5}>
+                <Stack spacing={3}>
+                  {inviteError && (
+                    <Alert severity="error" onClose={() => setInviteError('')}>
+                      {inviteError}
+                    </Alert>
+                  )}
 
-        {/* Billing & Subscription Tab */}
-        <TabPanel value={activeTab} index={4}>
-          <Stack spacing={2}>
-            <Typography variant="body2" color="text.secondary">
-              Manage your subscription plan and billing information.
-            </Typography>
-            <Button 
-              variant="contained" 
-              color="primary"
-              onClick={() => navigate('/billing')}
-              fullWidth
-              startIcon={<PaymentIcon />}
-            >
-              Manage Billing & Plans
-            </Button>
-            {organization && (
-              <Box>
-                <Typography variant="body2" color="text.secondary">
-                  Current Plan: <Chip label={organization.subscription_plan || 'Trial'} size="small" />
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Organization: {organization.name}
-                </Typography>
-                {organization.trial_end_date && (
-                  <Typography variant="body2" color="text.secondary">
-                    Trial ends: {new Date(organization.trial_end_date).toLocaleDateString()}
-                  </Typography>
-                )}
-              </Box>
+                  {inviteSuccess && (
+                    <Alert severity="success" onClose={() => setInviteSuccess('')}>
+                      {inviteSuccess}
+                    </Alert>
+                  )}
+
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="h6">
+                      Pending Invites ({invites.filter(i => !i.accepted_at && new Date(i.expires_at) > new Date()).length})
+                    </Typography>
+                    <Box>
+                      <Button
+                        variant="outlined"
+                        startIcon={<RefreshIcon />}
+                        onClick={fetchInvites}
+                        sx={{ mr: 2 }}
+                      >
+                        Refresh
+                      </Button>
+                      <Button
+                        variant="contained"
+                        startIcon={<AddIcon />}
+                        onClick={() => setInviteDialog(true)}
+                      >
+                        Invite User
+                      </Button>
+                    </Box>
+                  </Box>
+
+                  {invites.length === 0 ? (
+                    <Box sx={{ textAlign: 'center', py: 4 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        No invites found. Create your first invite to get started.
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <Box>
+                      {invites.map((invite) => {
+                        const status = getInviteStatus(invite);
+                        return (
+                          <Paper key={invite.id} sx={{ p: 2, mb: 2 }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Box>
+                                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                                  <EmailIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                                  <Typography variant="subtitle1">
+                                    {invite.email}
+                                  </Typography>
+                                </Box>
+                                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                                  <Chip
+                                    label={invite.role}
+                                    color={getRoleColor(invite.role)}
+                                    size="small"
+                                  />
+                                  <Chip
+                                    icon={status.icon}
+                                    label={status.label}
+                                    color={status.color}
+                                    size="small"
+                                  />
+                                  <Typography variant="caption" color="text.secondary">
+                                    Expires: {new Date(invite.expires_at).toLocaleDateString()}
+                                  </Typography>
+                                </Box>
+                              </Box>
+                              <Box sx={{ display: 'flex', gap: 1 }}>
+                                {status.status === 'pending' && (
+                                  <>
+                                    <Tooltip title="Copy Invite Link">
+                                      <IconButton
+                                        size="small"
+                                        onClick={() => copyInviteLink(invite.token)}
+                                        color={copiedToken === invite.token ? 'success' : 'primary'}
+                                      >
+                                        <CopyIcon />
+                                      </IconButton>
+                                    </Tooltip>
+                                    <Tooltip title="Delete Invite">
+                                      <IconButton
+                                        size="small"
+                                        onClick={() => handleDeleteInvite(invite.id)}
+                                        sx={{ color: 'error.main' }}
+                                      >
+                                        <DeleteIcon />
+                                      </IconButton>
+                                    </Tooltip>
+                                  </>
+                                )}
+                                {status.status === 'expired' && (
+                                  <Tooltip title="Delete Expired Invite">
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => handleDeleteInvite(invite.id)}
+                                      sx={{ color: 'error.main' }}
+                                    >
+                                      <DeleteIcon />
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                              </Box>
+                            </Box>
+                          </Paper>
+                        );
+                      })}
+                    </Box>
+                  )}
+                </Stack>
+              </TabPanel>
             )}
-          </Stack>
-        </TabPanel>
 
-        {/* User Management Tab (Admins Only) */}
-        {(roleName === 'admin') && (
-          <TabPanel value={activeTab} index={5}>
-            <UserManagement />
-          </TabPanel>
-        )}
+            {/* Role Management Tab (Owners and Admins) */}
+            {(roleName === 'owner' || roleName === 'admin') && (
+              <TabPanel value={activeTab} index={roleName === 'admin' ? 7 : 6}>
+                <Stack spacing={3}>
+                  {roleError && (
+                    <Alert severity="error" onClose={() => setRoleError('')}>
+                      {roleError}
+                    </Alert>
+                  )}
+                  
+                  {roleSuccess && (
+                    <Alert severity="success" onClose={() => setRoleSuccess('')}>
+                      {roleSuccess}
+                    </Alert>
+                  )}
 
-        {/* User Invites Tab (Owners and Admins) */}
-        {(roleName === 'owner' || roleName === 'admin') && (
-          <TabPanel value={activeTab} index={roleName === 'admin' ? 6 : 5}>
-            <Stack spacing={3}>
-              {inviteError && (
-                <Alert severity="error" onClose={() => setInviteError('')}>
-                  {inviteError}
-                </Alert>
-              )}
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="h6">
+                      Custom Roles
+                    </Typography>
+                    <Button
+                      variant="contained"
+                      startIcon={<AddIcon />}
+                      onClick={() => openRoleDialog()}
+                    >
+                      Create New Role
+                    </Button>
+                  </Box>
 
-              {inviteSuccess && (
-                <Alert severity="success" onClose={() => setInviteSuccess('')}>
-                  {inviteSuccess}
-                </Alert>
-              )}
-
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h6">
-                  Pending Invites ({invites.filter(i => !i.accepted_at && new Date(i.expires_at) > new Date()).length})
-                </Typography>
-                <Box>
-                  <Button
-                    variant="outlined"
-                    startIcon={<RefreshIcon />}
-                    onClick={fetchInvites}
-                    sx={{ mr: 2 }}
-                  >
-                    Refresh
-                  </Button>
-                  <Button
-                    variant="contained"
-                    startIcon={<AddIcon />}
-                    onClick={() => setInviteDialog(true)}
-                  >
-                    Invite User
-                  </Button>
-                </Box>
-              </Box>
-
-              {invites.length === 0 ? (
-                <Box sx={{ textAlign: 'center', py: 4 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    No invites found. Create your first invite to get started.
-                  </Typography>
-                </Box>
-              ) : (
-                <Box>
-                  {invites.map((invite) => {
-                    const status = getInviteStatus(invite);
-                    return (
-                      <Paper key={invite.id} sx={{ p: 2, mb: 2 }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                              <EmailIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                              <Typography variant="subtitle1">
-                                {invite.email}
+                  {roles.length === 0 ? (
+                    <Box sx={{ textAlign: 'center', py: 4 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        No custom roles found. Create your first role to get started.
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <Box>
+                      {roles.map((role) => (
+                        <Paper key={role.id} sx={{ p: 2, mb: 2 }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Box>
+                              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                                <AdminPanelSettingsIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                                <Typography variant="subtitle1">
+                                  {role.name}
+                                </Typography>
+                              </Box>
+                              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                {role.description}
                               </Typography>
-                            </Box>
-                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                              <Chip
-                                label={invite.role}
-                                color={getRoleColor(invite.role)}
-                                size="small"
-                              />
-                              <Chip
-                                icon={status.icon}
-                                label={status.label}
-                                color={status.color}
-                                size="small"
-                              />
-                              <Typography variant="caption" color="text.secondary">
-                                Expires: {new Date(invite.expires_at).toLocaleDateString()}
-                              </Typography>
-                            </Box>
-                          </Box>
-                          <Box sx={{ display: 'flex', gap: 1 }}>
-                            {status.status === 'pending' && (
-                              <>
-                                <Tooltip title="Copy Invite Link">
-                                  <IconButton
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                {role.permissions?.map((permission) => (
+                                  <Chip
+                                    key={permission}
+                                    label={permission}
                                     size="small"
-                                    onClick={() => copyInviteLink(invite.token)}
-                                    color={copiedToken === invite.token ? 'success' : 'primary'}
-                                  >
-                                    <CopyIcon />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Delete Invite">
-                                  <IconButton
-                                    size="small"
-                                    onClick={() => handleDeleteInvite(invite.id)}
-                                    sx={{ color: 'error.main' }}
-                                  >
-                                    <DeleteIcon />
-                                  </IconButton>
-                                </Tooltip>
-                              </>
-                            )}
-                            {status.status === 'expired' && (
-                              <Tooltip title="Delete Expired Invite">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleDeleteInvite(invite.id)}
-                                  sx={{ color: 'error.main' }}
-                                >
-                                  <DeleteIcon />
-                                </IconButton>
-                              </Tooltip>
-                            )}
-                          </Box>
-                        </Box>
-                      </Paper>
-                    );
-                  })}
-                </Box>
-              )}
-            </Stack>
-          </TabPanel>
-        )}
-
-        {/* Role Management Tab (Owners and Admins) */}
-        {(roleName === 'owner' || roleName === 'admin') && (
-          <TabPanel value={activeTab} index={roleName === 'admin' ? 7 : 6}>
-            <Stack spacing={3}>
-              {roleError && (
-                <Alert severity="error" onClose={() => setRoleError('')}>
-                  {roleError}
-                </Alert>
-              )}
-              
-              {roleSuccess && (
-                <Alert severity="success" onClose={() => setRoleSuccess('')}>
-                  {roleSuccess}
-                </Alert>
-              )}
-
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h6">
-                  Custom Roles
-                </Typography>
-                <Button
-                  variant="contained"
-                  startIcon={<AddIcon />}
-                  onClick={() => openRoleDialog()}
-                >
-                  Create New Role
-                </Button>
-              </Box>
-
-              {roles.length === 0 ? (
-                <Box sx={{ textAlign: 'center', py: 4 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    No custom roles found. Create your first role to get started.
-                  </Typography>
-                </Box>
-              ) : (
-                <Box>
-                  {roles.map((role) => (
-                    <Paper key={role.id} sx={{ p: 2, mb: 2 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Box>
-                          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                            <AdminPanelSettingsIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                            <Typography variant="subtitle1">
-                              {role.name}
-                            </Typography>
-                          </Box>
-                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                            {role.description}
-                          </Typography>
-                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                            {role.permissions?.map((permission) => (
-                              <Chip
-                                key={permission}
-                                label={permission}
+                                    color="primary"
+                                    variant="outlined"
+                                  />
+                                ))}
+                              </Box>
+                            </Box>
+                            <Box sx={{ display: 'flex', gap: 1 }}>
+                              <IconButton
                                 size="small"
+                                onClick={() => openRoleDialog(role)}
                                 color="primary"
-                                variant="outlined"
-                              />
-                            ))}
+                              >
+                                <EditIcon />
+                              </IconButton>
+                              <IconButton
+                                size="small"
+                                onClick={() => handleDeleteRole(role.id, role.name)}
+                                color="error"
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </Box>
                           </Box>
-                        </Box>
-                        <Box sx={{ display: 'flex', gap: 1 }}>
-                          <IconButton
-                            size="small"
-                            onClick={() => openRoleDialog(role)}
-                            color="primary"
-                          >
-                            <EditIcon />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleDeleteRole(role.id, role.name)}
-                            color="error"
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        </Box>
-                      </Box>
-                    </Paper>
-                  ))}
-                </Box>
-              )}
-            </Stack>
-          </TabPanel>
-        )}
+                        </Paper>
+                      ))}
+                    </Box>
+                  )}
+                </Stack>
+              </TabPanel>
+            )}
 
 
 
-        {/* Create Invite Dialog */}
-        <Dialog
-          open={inviteDialog}
-          onClose={() => setInviteDialog(false)}
-          maxWidth="sm"
-          fullWidth
-        >
-          <DialogTitle>
-            <Typography variant="h6">
-              Invite New User
-            </Typography>
-          </DialogTitle>
-          <DialogContent>
-            <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Email Address"
-                  type="email"
-                  value={newInvite.email}
-                  onChange={(e) => setNewInvite({ ...newInvite, email: e.target.value })}
-                  required
-                  helperText="The user will receive an invite link at this email address"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <FormControl fullWidth>
-                  <InputLabel>Role</InputLabel>
-                  <Select
-                    value={newInvite.role}
-                    onChange={(e) => setNewInvite({ ...newInvite, role: e.target.value })}
-                    label="Role"
-                  >
-                    {roles.map((role) => (
-                      <MenuItem key={role.id} value={role.id}>
-                        {role.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12}>
-                <Alert severity="info">
-                  <Typography variant="body2">
-                    The invite will expire in 7 days. The user will receive a secure link to join your organization.
-                  </Typography>
-                </Alert>
-              </Grid>
-            </Grid>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setInviteDialog(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="contained"
-              onClick={handleCreateInvite}
-              disabled={inviteLoading || !newInvite.email || !newInvite.role}
-              startIcon={inviteLoading ? <CircularProgress size={20} /> : <AddIcon />}
+            {/* Create Invite Dialog */}
+            <Dialog
+              open={inviteDialog}
+              onClose={() => setInviteDialog(false)}
+              maxWidth="sm"
+              fullWidth
             >
-              Send Invite
-            </Button>
-          </DialogActions>
-        </Dialog>
-
-        {/* Role Management Dialog */}
-        <Dialog
-          open={roleDialog}
-          onClose={() => setRoleDialog(false)}
-          maxWidth="md"
-          fullWidth
-        >
-          <DialogTitle>
-            <Typography variant="h6">
-              {editingRole?.id ? 'Edit Role' : 'Create New Role'}
-            </Typography>
-          </DialogTitle>
-          <DialogContent>
-            <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Role Name"
-                  value={editingRole?.name || ''}
-                  onChange={(e) => setEditingRole({ ...editingRole, name: e.target.value })}
-                  required
-                  helperText="Enter a descriptive name for this role"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Description"
-                  value={editingRole?.description || ''}
-                  onChange={(e) => setEditingRole({ ...editingRole, description: e.target.value })}
-                  required
-                  multiline
-                  rows={3}
-                  helperText="Describe what this role is for"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>
-                  Permissions
+              <DialogTitle>
+                <Typography variant="h6">
+                  Invite New User
                 </Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                  {allPermissions.map(permission => (
-                    <Chip
-                      key={permission}
-                      label={permission}
-                      clickable
-                      color={editingRole?.permissions?.includes(permission) ? 'primary' : 'default'}
-                      onClick={() => handlePermissionToggle(permission)}
-                      onDelete={editingRole?.permissions?.includes(permission) ? () => handlePermissionToggle(permission) : undefined}
+              </DialogTitle>
+              <DialogContent>
+                <Grid container spacing={2} sx={{ mt: 1 }}>
+                  <Grid item xs={12}>
+                    <TextField
+                      fullWidth
+                      label="Email Address"
+                      type="email"
+                      value={newInvite.email}
+                      onChange={(e) => setNewInvite({ ...newInvite, email: e.target.value })}
+                      required
+                      helperText="The user will receive an invite link at this email address"
                     />
-                  ))}
-                </Box>
-              </Grid>
-            </Grid>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setRoleDialog(false)}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={editingRole?.id ? handleUpdateRole : handleCreateRole}
-              variant="contained"
-              disabled={roleLoading}
-            >
-              {roleLoading ? 'Saving...' : (editingRole?.id ? 'Update Role' : 'Create Role')}
-            </Button>
-          </DialogActions>
-        </Dialog>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <FormControl fullWidth>
+                      <InputLabel>Role</InputLabel>
+                      <Select
+                        value={newInvite.role}
+                        onChange={(e) => setNewInvite({ ...newInvite, role: e.target.value })}
+                        label="Role"
+                      >
+                        {roles.map((role) => (
+                          <MenuItem key={role.id} value={role.id}>
+                            {role.name}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Alert severity="info">
+                      <Typography variant="body2">
+                        The invite will expire in 7 days. The user will receive a secure link to join your organization.
+                      </Typography>
+                    </Alert>
+                  </Grid>
+                </Grid>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setInviteDialog(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={handleCreateInvite}
+                  disabled={inviteLoading || !newInvite.email || !newInvite.role}
+                  startIcon={inviteLoading ? <CircularProgress size={20} /> : <AddIcon />}
+                >
+                  Send Invite
+                </Button>
+              </DialogActions>
+            </Dialog>
 
-        {/* Snackbars */}
-        <Snackbar open={profileSnackbar} autoHideDuration={3000} onClose={() => setProfileSnackbar(false)}>
-          <Alert onClose={() => setProfileSnackbar(false)} severity={profileMsg === 'Profile updated!' ? 'success' : 'error'} sx={{ width: '100%' }}>
-            {profileMsg}
-          </Alert>
-        </Snackbar>
-        
-        <Snackbar open={passwordSnackbar} autoHideDuration={3000} onClose={() => setPasswordSnackbar(false)}>
-          <Alert onClose={() => setPasswordSnackbar(false)} severity={passwordMsg === 'Password updated!' ? 'success' : 'error'} sx={{ width: '100%' }}>
-            {passwordMsg}
-          </Alert>
-        </Snackbar>
-        
-        <Snackbar open={notifSnackbar} autoHideDuration={3000} onClose={() => setNotifSnackbar(false)}>
-          <Alert onClose={() => setNotifSnackbar(false)} severity="success" sx={{ width: '100%' }}>
-            {notifMsg}
-          </Alert>
-        </Snackbar>
-      </Paper>
+            {/* Role Management Dialog */}
+            <Dialog
+              open={roleDialog}
+              onClose={() => setRoleDialog(false)}
+              maxWidth="md"
+              fullWidth
+            >
+              <DialogTitle>
+                <Typography variant="h6">
+                  {editingRole?.id ? 'Edit Role' : 'Create New Role'}
+                </Typography>
+              </DialogTitle>
+              <DialogContent>
+                <Grid container spacing={2} sx={{ mt: 1 }}>
+                  <Grid item xs={12}>
+                    <TextField
+                      fullWidth
+                      label="Role Name"
+                      value={editingRole?.name || ''}
+                      onChange={(e) => setEditingRole({ ...editingRole, name: e.target.value })}
+                      required
+                      helperText="Enter a descriptive name for this role"
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TextField
+                      fullWidth
+                      label="Description"
+                      value={editingRole?.description || ''}
+                      onChange={(e) => setEditingRole({ ...editingRole, description: e.target.value })}
+                      required
+                      multiline
+                      rows={3}
+                      helperText="Describe what this role is for"
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>
+                      Permissions
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                      {allPermissions.map(permission => (
+                        <Chip
+                          key={permission}
+                          label={permission}
+                          clickable
+                          color={editingRole?.permissions?.includes(permission) ? 'primary' : 'default'}
+                          onClick={() => handlePermissionToggle(permission)}
+                          onDelete={editingRole?.permissions?.includes(permission) ? () => handlePermissionToggle(permission) : undefined}
+                        />
+                      ))}
+                    </Box>
+                  </Grid>
+                </Grid>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setRoleDialog(false)}>
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={editingRole?.id ? handleUpdateRole : handleCreateRole}
+                  variant="contained"
+                  disabled={roleLoading}
+                >
+                  {roleLoading ? 'Saving...' : (editingRole?.id ? 'Update Role' : 'Create Role')}
+                </Button>
+              </DialogActions>
+            </Dialog>
+
+            {/* Snackbars */}
+            <Snackbar open={profileSnackbar} autoHideDuration={3000} onClose={() => setProfileSnackbar(false)}>
+              <Alert onClose={() => setProfileSnackbar(false)} severity={profileMsg === 'Profile updated!' ? 'success' : 'error'} sx={{ width: '100%' }}>
+                {profileMsg}
+              </Alert>
+            </Snackbar>
+            
+            <Snackbar open={passwordSnackbar} autoHideDuration={3000} onClose={() => setPasswordSnackbar(false)}>
+              <Alert onClose={() => setPasswordSnackbar(false)} severity={passwordMsg === 'Password updated!' ? 'success' : 'error'} sx={{ width: '100%' }}>
+                {passwordMsg}
+              </Alert>
+            </Snackbar>
+            
+            <Snackbar open={notifSnackbar} autoHideDuration={3000} onClose={() => setNotifSnackbar(false)}>
+              <Alert onClose={() => setNotifSnackbar(false)} severity="success" sx={{ width: '100%' }}>
+                {notifMsg}
+              </Alert>
+            </Snackbar>
+          </Box>
+        </Card>
+      </Box>
     </Box>
   );
 } 
