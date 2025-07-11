@@ -20,7 +20,8 @@ import {
   Person as PersonIcon,
   Assignment as AssignmentIcon,
   Build as BuildIcon,
-  ContactSupport as ContactSupportIcon
+  ContactSupport as ContactSupportIcon,
+  ArtificialIntelligence as AIIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -30,6 +31,14 @@ export default function OwnerPortalLanding() {
   const { user } = useAuth();
 
   const quickActions = [
+    {
+      title: 'Command Center',
+      description: 'AI-powered insights, competitive intelligence, and growth tools',
+      icon: <AIIcon sx={{ fontSize: 40 }} />,
+      color: '#7c3aed',
+      path: '/owner-portal/command-center',
+      featured: true
+    },
     {
       title: 'Customer Management',
       description: 'Manage all customer organizations, subscriptions, and billing',

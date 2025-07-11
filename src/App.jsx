@@ -45,6 +45,7 @@ import PlanManagement from './pages/OwnerPortal/PlanManagement';
 import RoleManagement from './pages/OwnerPortal/RoleManagement';
 import PageBuilder from './pages/OwnerPortal/PageBuilder';
 import ContactManagement from './pages/OwnerPortal/ContactManagement';
+import OwnerCommandCenter from './pages/OwnerPortal/OwnerCommandCenter';
 import AcceptInvite from './pages/AcceptInvite';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
@@ -299,6 +300,7 @@ function AppContent() {
         <Route path="/owner-portal/roles" element={<RoleManagement />} />
         <Route path="/owner-portal/page-builder" element={<PageBuilder />} />
         <Route path="/owner-portal/contact-management" element={<ContactManagement />} />
+        <Route path="/owner-portal/command-center" element={<OwnerCommandCenter />} />
       </Route>
       
       {/* Catch-all for any other unmatched routes */}
