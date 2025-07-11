@@ -5,6 +5,11 @@ import { supabase } from '../supabase/client';
 import { useAppStore } from '../store/appStore';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { useAuth } from '../hooks/useAuth';
+import AssignmentIcon from '@mui/icons-material/Assignment';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 /**
  * Home dashboard component
@@ -306,48 +311,162 @@ export default function Home() {
         </Grid>
 
         {/* Quick Actions */}
-        <Card sx={{ p: 4, border: '1px solid #e2e8f0' }}>
-          <Typography variant="h5" fontWeight={600} sx={{ mb: 3 }}>
-            Quick Actions
-          </Typography>
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={4}>
-              <Button 
-                variant="contained" 
-                color="primary" 
-                fullWidth
-                size="large"
-                onClick={handleViewScannedOrders}
-                sx={{ py: 2 }}
-              >
-                View Recent Orders
+        <Grid container spacing={3} sx={{ mb: 4 }}>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ p: 3, textAlign: 'center', border: '1px solid #e2e8f0' }}>
+              <AssignmentIcon sx={{ fontSize: 48, color: '#3B82F6', mb: 2 }} />
+              <Typography variant="h6" fontWeight={600} sx={{ mb: 1 }}>
+                Quick Scan
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Scan cylinders instantly with AI-powered recognition
+              </Typography>
+              <Button variant="contained" size="small" onClick={() => navigate('/assets')}>
+                Start Scanning
               </Button>
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <Button 
-                variant="outlined" 
-                color="primary" 
-                fullWidth
-                size="large"
-                onClick={() => navigate('/assets')}
-                sx={{ py: 2 }}
-              >
-                Manage Inventory
-              </Button>
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <Button 
-                variant="outlined" 
-                color="primary" 
-                fullWidth
-                size="large"
-                onClick={() => navigate('/customers')}
-                sx={{ py: 2 }}
-              >
-                View Customers
-              </Button>
-            </Grid>
+            </Card>
           </Grid>
+          
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ p: 3, textAlign: 'center', border: '1px solid #e2e8f0' }}>
+              <TrendingUpIcon sx={{ fontSize: 48, color: '#10B981', mb: 2 }} />
+              <Typography variant="h6" fontWeight={600} sx={{ mb: 1 }}>
+                Smart Analytics
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                AI-powered insights and predictive maintenance
+              </Typography>
+              <Button variant="contained" size="small" color="success" onClick={() => navigate('/analytics')}>
+                View Insights
+              </Button>
+            </Card>
+          </Grid>
+          
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ p: 3, textAlign: 'center', border: '1px solid #e2e8f0' }}>
+              <LocationOnIcon sx={{ fontSize: 48, color: '#F59E0B', mb: 2 }} />
+              <Typography variant="h6" fontWeight={600} sx={{ mb: 1 }}>
+                Real-Time Tracking
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Live GPS tracking and automated alerts
+              </Typography>
+              <Button variant="contained" size="small" sx={{ bgcolor: '#F59E0B' }} onClick={() => navigate('/tracking')}>
+                Track Assets
+              </Button>
+            </Card>
+          </Grid>
+          
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ p: 3, textAlign: 'center', border: '1px solid #e2e8f0' }}>
+              <AutoFixHighIcon sx={{ fontSize: 48, color: '#8B5CF6', mb: 2 }} />
+              <Typography variant="h6" fontWeight={600} sx={{ mb: 1 }}>
+                Auto-Maintenance
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Automated scheduling and compliance tracking
+              </Typography>
+              <Button variant="contained" size="small" sx={{ bgcolor: '#8B5CF6' }} onClick={() => navigate('/maintenance')}>
+                Schedule Now
+              </Button>
+            </Card>
+          </Grid>
+        </Grid>
+
+        {/* Competitive Advantage Banner */}
+        <Card sx={{ 
+          p: 4, 
+          mb: 4, 
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          color: 'white',
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          <Box sx={{ position: 'relative', zIndex: 2 }}>
+            <Typography variant="h4" fontWeight={700} sx={{ mb: 2 }}>
+              Why Choose LessAnnoyingScan?
+            </Typography>
+            <Typography variant="h6" sx={{ mb: 3, opacity: 0.9 }}>
+              Modern, intelligent gas cylinder tracking that's actually easy to use
+            </Typography>
+            
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={4}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <CheckCircleIcon sx={{ mr: 2, color: '#10B981' }} />
+                  <Typography variant="body1" fontWeight={500}>
+                    Modern UI (not stuck in 2010)
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <CheckCircleIcon sx={{ mr: 2, color: '#10B981' }} />
+                  <Typography variant="body1" fontWeight={500}>
+                    Self-service setup in minutes
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <CheckCircleIcon sx={{ mr: 2, color: '#10B981' }} />
+                  <Typography variant="body1" fontWeight={500}>
+                    Transparent pricing
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={12} md={4}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <CheckCircleIcon sx={{ mr: 2, color: '#10B981' }} />
+                  <Typography variant="body1" fontWeight={500}>
+                    AI-powered predictive maintenance
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <CheckCircleIcon sx={{ mr: 2, color: '#10B981' }} />
+                  <Typography variant="body1" fontWeight={500}>
+                    Real-time GPS tracking
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <CheckCircleIcon sx={{ mr: 2, color: '#10B981' }} />
+                  <Typography variant="body1" fontWeight={500}>
+                    Mobile-first design
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={12} md={4}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <CheckCircleIcon sx={{ mr: 2, color: '#10B981' }} />
+                  <Typography variant="body1" fontWeight={500}>
+                    Smart automated alerts
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <CheckCircleIcon sx={{ mr: 2, color: '#10B981' }} />
+                  <Typography variant="body1" fontWeight={500}>
+                    Superior customer portal
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <CheckCircleIcon sx={{ mr: 2, color: '#10B981' }} />
+                  <Typography variant="body1" fontWeight={500}>
+                    No expensive hardware required
+                  </Typography>
+                </Box>
+              </Grid>
+            </Grid>
+          </Box>
+          
+          {/* Background decoration */}
+          <Box sx={{
+            position: 'absolute',
+            top: -50,
+            right: -50,
+            width: 200,
+            height: 200,
+            borderRadius: '50%',
+            background: 'rgba(255, 255, 255, 0.1)',
+            zIndex: 1
+          }} />
         </Card>
       </Box>
     </Box>
