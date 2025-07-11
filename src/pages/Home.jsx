@@ -27,16 +27,22 @@ export default function Home() {
   // If user is logged in but has no organization, show create org option
   if (user && profile && !organization) {
     return (
-      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Paper elevation={3} sx={{ p: 4, borderRadius: 4, textAlign: 'center' }}>
-          <Typography variant="h4" gutterBottom>
-            Welcome!
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}>
+        <Paper elevation={3} sx={{ p: 6, borderRadius: 4, textAlign: 'center', maxWidth: 500 }}>
+          <Typography variant="h4" gutterBottom color="primary">
+            Welcome to LessAnnoyingScan!
           </Typography>
-          <Typography gutterBottom>
-            You are not part of any organization yet.
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
+            You're almost ready to start managing your gas cylinders. Let's complete your organization setup.
           </Typography>
-          <Button variant="contained" color="primary" href="/organization-registration">
-            Create a new organization
+          <Button 
+            variant="contained" 
+            color="primary" 
+            size="large"
+            onClick={() => navigate('/setup')}
+            sx={{ px: 4, py: 1.5 }}
+          >
+            Complete Setup
           </Button>
         </Paper>
       </Box>

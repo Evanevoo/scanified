@@ -52,7 +52,14 @@ function LoginPage() {
 
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      setError(error.message);
+      // Make error messages more user-friendly
+      if (error.message.includes('Invalid login credentials')) {
+        setError('Email or password is incorrect. Please try again.');
+      } else if (error.message.includes('Email not confirmed')) {
+        setError('Please check your email and click the confirmation link before signing in.');
+      } else {
+        setError(error.message);
+      }
     }
     // Do NOT navigate here! Let the useEffect handle it.
     setLoadingLocal(false);
@@ -105,7 +112,7 @@ function LoginPage() {
                     color="primary"
                     onClick={() => navigate('/register')}
                   >
-                    Register New Organization
+                    Create New Organization
                   </Button>
                 </Box>
               )}
@@ -133,7 +140,7 @@ function LoginPage() {
           </Typography>
           
           <Typography variant="body1" align="center" color="text.secondary" sx={{ mb: 4 }}>
-            Sign in to your gas cylinder management account
+            Sign in to your account
           </Typography>
 
           <Box component="form" onSubmit={handleLogin}>
@@ -195,16 +202,16 @@ function LoginPage() {
 
           <Box sx={{ textAlign: 'center' }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Don't have an account?
+              New to LessAnnoyingScan?
             </Typography>
             
             <Button
-              variant="outlined"
+              variant="contained"
               fullWidth
               onClick={() => navigate('/register')}
-              sx={{ mb: 3 }}
+              sx={{ mb: 2 }}
             >
-              Register Your Organization
+              Start Free Trial
             </Button>
             
             <Button
@@ -220,7 +227,7 @@ function LoginPage() {
                 }
               }}
             >
-              Contact Us
+              Need Help? Contact Us
             </Button>
           </Box>
         </CardContent>

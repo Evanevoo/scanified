@@ -192,10 +192,17 @@ function AppContent() {
   // Memoize the routes to prevent unnecessary re-renders
   const routes = useMemo(() => (
     <Routes>
-      {/* Redirect root to dashboard for authenticated users with org, landing page for others */}
-      <Route path="/" element={profile && organization ? <Navigate to="/dashboard" replace /> : <LandingPage />} />
+      {/* Smart root redirect based on user state */}
+      <Route path="/" element={
+        profile && organization ? <Navigate to="/dashboard" replace /> : 
+        profile && !organization ? <Navigate to="/setup" replace /> :
+        <LandingPage />
+      } />
       <Route path="/landing" element={<LandingPage />} />
-      <Route path="/login" element={profile && !organization ? <LoginPage /> : profile && organization ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+      <Route path="/login" element={
+        profile && organization ? <Navigate to="/dashboard" replace /> : 
+        <LoginPage />
+      } />
       <Route path="/register" element={<OrganizationRegistration />} />
       <Route path="/setup" element={<OrganizationSetup />} />
       <Route path="/contact" element={<ContactUs />} />

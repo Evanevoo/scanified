@@ -47,21 +47,11 @@ const ProtectedRoute = () => {
   }
 
   if (user && profile && !organization) {
-    // Allow access to organization registration page
-    if (location.pathname === '/organization-registration') {
-      return <Outlet />;
+    // Redirect to organization setup if not already there
+    if (location.pathname !== '/setup') {
+      return <Navigate to="/setup" replace />;
     }
-    // Otherwise, show the error message
-    return (
-      <Box sx={{ p: 6 }}>
-        <Alert severity="error">
-          Your organization could not be found or was deleted.<br />
-          Please contact support or create a new organization.<br />
-          <br />
-          <a href="/organization-registration">Create a new organization</a>
-        </Alert>
-      </Box>
-    );
+    return <Outlet />;
   }
 
   if (user && profile && organization) {

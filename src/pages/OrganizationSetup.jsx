@@ -265,7 +265,11 @@ export default function OrganizationSetup() {
   return (
     <Box sx={{ maxWidth: 800, mx: 'auto', p: 3 }}>
       <Typography variant="h4" gutterBottom>
-        Set Up Your Organization
+        Welcome! Let's Set Up Your Organization
+      </Typography>
+      
+      <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
+        You're almost ready to start managing your gas cylinders. Just a few quick steps to complete your setup.
       </Typography>
       
       <Stepper activeStep={activeStep} sx={{ mb: 4 }}>

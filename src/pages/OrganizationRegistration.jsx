@@ -427,11 +427,11 @@ function OrganizationRegistration() {
       <Card sx={{ maxWidth: 600, width: '100%' }}>
         <CardContent sx={{ p: 4 }}>
           <Typography variant="h4" align="center" gutterBottom>
-            Register Your Organization
+            Start Your Free Trial
           </Typography>
           
           <Typography variant="body1" align="center" color="text.secondary" sx={{ mb: 4 }}>
-            Set up your gas cylinder management system
+            Get started with your gas cylinder management system in minutes
           </Typography>
 
           <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
@@ -453,7 +453,7 @@ function OrganizationRegistration() {
               {success}
               <Box mt={2}>
                 <Button variant="contained" color="primary" onClick={() => navigate('/login')}>
-                  Go to Login
+                  Continue to Sign In
                 </Button>
               </Box>
             </Alert>
@@ -488,7 +488,7 @@ function OrganizationRegistration() {
                 disabled={!validateStep(activeStep) || loading}
                 endIcon={loading ? <CircularProgress size={20} /> : null}
               >
-                {activeStep === steps.length - 1 ? 'Create Organization' : 'Next'}
+                {activeStep === steps.length - 1 ? 'Start Free Trial' : 'Continue'}
               </Button>
             </Box>
           </Box>
