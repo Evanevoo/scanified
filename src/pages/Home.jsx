@@ -250,158 +250,106 @@ export default function Home() {
   const availableCylinders = totalCylinders - rentedCylinders;
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
-        <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>
-          Dashboard
-        </Typography>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc', py: 4 }}>
+      <Box sx={{ maxWidth: '1200px', mx: 'auto', px: 3 }}>
+        <Box sx={{ mb: 4 }}>
+          <Typography variant="h3" fontWeight={700} color="primary" sx={{ mb: 1 }}>
+            Welcome back, {profile?.full_name?.split(' ')[0] || 'User'}
+          </Typography>
+          <Typography variant="h6" color="text.secondary">
+            Here's what's happening with your gas cylinder operations today
+          </Typography>
+        </Box>
         
-        <Box sx={{ width: '100%', maxWidth: 1200, mx: 'auto' }}>
-          {/* Stats Cards */}
-          <Grid container spacing={3} mb={4}>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card elevation={3} sx={{ borderRadius: 3, bgcolor: 'var(--bg-card)' }}>
-                <CardContent sx={{ textAlign: 'center', py: 3 }}>
-                  <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
-                    {totalCylinders.toLocaleString()}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Total Cylinders
-                  </Typography>
-                </CardContent>
-              </Card>
+        {/* Stats Cards */}
+        <Grid container spacing={3} sx={{ mb: 4 }}>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ p: 3, textAlign: 'center', border: '1px solid #e2e8f0' }}>
+              <Typography variant="h4" fontWeight={700} color="primary">
+                {totalCylinders.toLocaleString()}
+              </Typography>
+              <Typography variant="body1" color="text.secondary">
+                Total Cylinders
+              </Typography>
+            </Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ p: 3, textAlign: 'center', border: '1px solid #e2e8f0' }}>
+              <Typography variant="h4" fontWeight={700} color="success.main">
+                {availableCylinders.toLocaleString()}
+              </Typography>
+              <Typography variant="body1" color="text.secondary">
+                Available
+              </Typography>
+            </Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ p: 3, textAlign: 'center', border: '1px solid #e2e8f0' }}>
+              <Typography variant="h4" fontWeight={700} color="warning.main">
+                {rentedCylinders.toLocaleString()}
+              </Typography>
+              <Typography variant="body1" color="text.secondary">
+                In Use
+              </Typography>
+            </Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ p: 3, textAlign: 'center', border: '1px solid #e2e8f0' }}>
+              <Typography variant="h4" fontWeight={700} color="info.main">
+                {totalCustomers.toLocaleString()}
+              </Typography>
+              <Typography variant="body1" color="text.secondary">
+                Active Customers
+              </Typography>
+            </Card>
+          </Grid>
+        </Grid>
+
+        {/* Quick Actions */}
+        <Card sx={{ p: 4, border: '1px solid #e2e8f0' }}>
+          <Typography variant="h5" fontWeight={600} sx={{ mb: 3 }}>
+            Quick Actions
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={4}>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                fullWidth
+                size="large"
+                onClick={handleViewScannedOrders}
+                sx={{ py: 2 }}
+              >
+                View Recent Orders
+              </Button>
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card elevation={3} sx={{ borderRadius: 3, bgcolor: 'var(--bg-card)' }}>
-                <CardContent sx={{ textAlign: 'center', py: 3 }}>
-                  <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
-                    {rentedCylinders.toLocaleString()}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Rented Cylinders
-                  </Typography>
-                </CardContent>
-              </Card>
+            <Grid item xs={12} md={4}>
+              <Button 
+                variant="outlined" 
+                color="primary" 
+                fullWidth
+                size="large"
+                onClick={() => navigate('/assets')}
+                sx={{ py: 2 }}
+              >
+                Manage Inventory
+              </Button>
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card elevation={3} sx={{ borderRadius: 3, bgcolor: 'var(--bg-card)' }}>
-                <CardContent sx={{ textAlign: 'center', py: 3 }}>
-                  <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
-                    {availableCylinders.toLocaleString()}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Available Cylinders
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card elevation={3} sx={{ borderRadius: 3, bgcolor: 'var(--bg-card)' }}>
-                <CardContent sx={{ textAlign: 'center', py: 3 }}>
-                  <Typography variant="h4" fontWeight={900} color="primary" mb={1}>
-                    {totalCustomers.toLocaleString()}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Total Customers
-                  </Typography>
-                </CardContent>
-              </Card>
+            <Grid item xs={12} md={4}>
+              <Button 
+                variant="outlined" 
+                color="primary" 
+                fullWidth
+                size="large"
+                onClick={() => navigate('/customers')}
+                sx={{ py: 2 }}
+              >
+                View Customers
+              </Button>
             </Grid>
           </Grid>
-
-          {/* User Info Card */}
-          <Card elevation={6} sx={{ borderRadius: 4, mb: 4 }}>
-            <CardContent>
-              <Grid container spacing={2} mb={2}>
-                <Grid item xs={12} md={6}>
-                  <Card variant="outlined" sx={{ bgcolor: 'primary.lighter', borderRadius: 3 }}>
-                    <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <Box sx={{ fontSize: 32, color: 'primary.main' }}>👤</Box>
-                      <Box>
-                        <Typography fontWeight={700}>
-                          {profile?.full_name || 'User'}
-                        </Typography>
-                        <Typography variant="caption" color="primary">
-                          Logged in
-                        </Typography>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <Card variant="outlined" sx={{ bgcolor: 'primary.lighter', borderRadius: 3 }}>
-                    <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <Box sx={{ fontSize: 32, color: 'primary.main' }}>⭐</Box>
-                      <Box>
-                        <Typography fontWeight={700} textTransform="capitalize">
-                          {profile?.role || 'user'}
-                        </Typography>
-                        <Typography variant="caption" color="primary">
-                          Role
-                        </Typography>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
-              
-              {/* Role-based access information */}
-              {profile?.role === 'admin' && (
-                <Typography color="primary" fontWeight={600}>
-                  You have full access to all features.
-                </Typography>
-              )}
-              {profile?.role === 'manager' && (
-                <Typography color="primary" fontWeight={600}>
-                  You can view, assign cylinders, and generate invoices.
-                </Typography>
-              )}
-              {profile?.role === 'user' && (
-                <Typography color="primary" fontWeight={600}>
-                  You have view-only access to customers and assigned cylinders.
-                </Typography>
-              )}
-              
-              <Typography mt={3}>
-                Use the navigation bar to manage customers, cylinders, rentals, and invoices.
-              </Typography>
-              
-              <Grid container spacing={2} sx={{ mt: 4 }}>
-                <Grid item xs={12} md={4}>
-                  <Button 
-                    variant="contained" 
-                    color="primary" 
-                    fullWidth
-                    onClick={handleViewScannedOrders}
-                  >
-                    View Scanned Orders
-                  </Button>
-                </Grid>
-                <Grid item xs={12} md={4}>
-                  <Button 
-                    variant="outlined" 
-                    color="primary" 
-                    fullWidth
-                    onClick={() => navigate('/smart-inventory')}
-                  >
-                    🧠 Smart Inventory
-                  </Button>
-                </Grid>
-                <Grid item xs={12} md={4}>
-                  <Button 
-                    variant="outlined" 
-                    color="primary" 
-                    fullWidth
-                    onClick={() => navigate('/customer-portal')}
-                  >
-                    👤 Customer Portal
-                  </Button>
-                </Grid>
-              </Grid>
-            </CardContent>
-          </Card>
-        </Box>
-      </Paper>
+        </Card>
+      </Box>
     </Box>
   );
 } 

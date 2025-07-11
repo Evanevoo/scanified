@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Button, Typography, Paper, Alert } from '@mui/material';
+import { Box, Button, Typography, Paper, Alert, Link } from '@mui/material';
 import { Error as ErrorIcon, Refresh as RefreshIcon } from '@mui/icons-material';
 
 /**
@@ -52,36 +52,72 @@ class ErrorBoundary extends React.Component {
           alignItems="center"
           justifyContent="center"
           minHeight="100vh"
-          bgcolor="background.default"
+          bgcolor="#f8fafc"
           p={3}
         >
           <Paper
-            elevation={3}
+            elevation={0}
             sx={{
-              p: 4,
-              maxWidth: 600,
+              p: 6,
+              maxWidth: 500,
               textAlign: 'center',
-              borderRadius: 2
+              borderRadius: 3,
+              border: '1px solid #e2e8f0'
             }}
           >
             <ErrorIcon 
               sx={{ 
                 fontSize: 64, 
-                color: 'error.main', 
-                mb: 2 
+                color: '#ef4444', 
+                mb: 3,
+                opacity: 0.8
               }} 
             />
             
-            <Typography variant="h4" gutterBottom color="error.main">
-              Something went wrong
+            <Typography variant="h4" gutterBottom sx={{ fontWeight: 600, color: '#1f2937' }}>
+              Oops! Something went wrong
             </Typography>
             
-            <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-              We're sorry, but something unexpected happened. Please try refreshing the page or contact support if the problem persists.
+            <Typography variant="body1" color="text.secondary" sx={{ mb: 4, lineHeight: 1.6 }}>
+              We encountered an unexpected error. Don't worry - your data is safe. Please try refreshing the page or contact our support team if the issue persists.
+            </Typography>
+
+            <Box display="flex" gap={2} justifyContent="center" sx={{ mb: 3 }}>
+              <Button
+                variant="contained"
+                startIcon={<RefreshIcon />}
+                onClick={() => window.location.reload()}
+                sx={{ 
+                  minWidth: 140,
+                  py: 1.5,
+                  borderRadius: 2
+                }}
+              >
+                Refresh Page
+              </Button>
+              
+              <Button
+                variant="outlined"
+                onClick={() => window.history.back()}
+                sx={{ 
+                  minWidth: 120,
+                  py: 1.5,
+                  borderRadius: 2
+                }}
+              >
+                Go Back
+              </Button>
+            </Box>
+
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+              Need help? Contact our support team at{' '}
+              <Link href="mailto:support@lessannoyingscan.com" color="primary">
+                support@lessannoyingscan.com
+              </Link>
             </Typography>
 
             {process.env.NODE_ENV === 'development' && this.state.error && (
-              <Alert severity="error" sx={{ mb: 3, textAlign: 'left' }}>
+              <Alert severity="error" sx={{ mt: 3, textAlign: 'left' }}>
                 <Typography variant="subtitle2" gutterBottom>
                   Error Details (Development):
                 </Typography>
@@ -97,29 +133,6 @@ class ErrorBoundary extends React.Component {
                 </Typography>
               </Alert>
             )}
-
-            <Box display="flex" gap={2} justifyContent="center">
-              <Button
-                variant="contained"
-                startIcon={<RefreshIcon />}
-                onClick={this.handleReset}
-                sx={{ minWidth: 120 }}
-              >
-                Refresh Page
-              </Button>
-              
-              <Button
-                variant="outlined"
-                onClick={() => window.history.back()}
-                sx={{ minWidth: 120 }}
-              >
-                Go Back
-              </Button>
-            </Box>
-
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 3, display: 'block' }}>
-              If this problem continues, please contact support with the error details.
-            </Typography>
           </Paper>
         </Box>
       );

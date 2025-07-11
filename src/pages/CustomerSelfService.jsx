@@ -253,399 +253,274 @@ export default function CustomerSelfService() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h4" gutterBottom>
-          👤 Customer Self-Service Portal
-        </Typography>
-        <Alert severity="info" sx={{ mb: 2 }}>
-          <strong>Customer Portal:</strong> This portal shows your actual profile data and will display real rentals, deliveries, and invoices when those tables are available in your database.
-        </Alert>
-      </Box>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc', py: 4 }}>
+      <Box sx={{ maxWidth: '1200px', mx: 'auto', px: 3 }}>
+        <Box sx={{ mb: 4 }}>
+          <Typography variant="h3" fontWeight={700} color="primary" sx={{ mb: 1 }}>
+            Customer Portal
+          </Typography>
+          <Typography variant="h6" color="text.secondary">
+            Welcome back, {customer?.name || 'Customer'}! Manage your account and track your gas cylinder services.
+          </Typography>
+        </Box>
 
-      {/* Customer Profile Card */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={8}>
-              <Typography variant="h5" gutterBottom>
-                Welcome, {customer.name}!
+        <Alert severity="info" sx={{ mb: 4, borderRadius: 2 }}>
+          <Typography variant="body1" fontWeight={500}>
+            Your Self-Service Hub
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            View your active rentals, request deliveries, manage your profile, and access billing information all in one place.
+          </Typography>
+        </Alert>
+
+        {/* Customer Info Card */}
+        <Card sx={{ mb: 4, border: '1px solid #e2e8f0', borderRadius: 3 }}>
+          <CardContent sx={{ p: 4 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h5" fontWeight={600}>
+                Account Information
               </Typography>
-              <Typography variant="body1" color="textSecondary" gutterBottom>
-                Customer ID: {customer.CustomerListID}
-              </Typography>
-              <Box display="flex" alignItems="center" gap={2} sx={{ mt: 2 }}>
-                {customer.phone && (
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <PhoneIcon fontSize="small" color="action" />
-                    <Typography variant="body2">{customer.phone}</Typography>
+              <Button
+                variant="outlined"
+                startIcon={<EditIcon />}
+                onClick={() => {
+                  setEditProfile({ ...customer });
+                  setEditProfileDialog(true);
+                }}
+                sx={{ borderRadius: 2 }}
+              >
+                Edit Profile
+              </Button>
+            </Box>
+            
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <PersonIcon sx={{ mr: 2, color: 'primary.main' }} />
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">Customer Name</Typography>
+                    <Typography variant="body1" fontWeight={500}>{customer?.name || 'Not provided'}</Typography>
                   </Box>
-                )}
-                {customer.email && (
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <EmailIcon fontSize="small" color="action" />
-                    <Typography variant="body2">{customer.email}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <PhoneIcon sx={{ mr: 2, color: 'primary.main' }} />
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">Phone</Typography>
+                    <Typography variant="body1" fontWeight={500}>{customer?.phone || 'Not provided'}</Typography>
                   </Box>
-                )}
-                {customer.address && (
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <LocationIcon fontSize="small" color="action" />
-                    <Typography variant="body2">{customer.address}</Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <EmailIcon sx={{ mr: 2, color: 'primary.main' }} />
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">Email</Typography>
+                    <Typography variant="body1" fontWeight={500}>{customer?.email || 'Not provided'}</Typography>
                   </Box>
-                )}
-              </Box>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <LocationIcon sx={{ mr: 2, color: 'primary.main' }} />
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">Address</Typography>
+                    <Typography variant="body1" fontWeight={500}>{customer?.address || 'Not provided'}</Typography>
+                  </Box>
+                </Box>
+              </Grid>
             </Grid>
-            <Grid item xs={12} md={4}>
-              <Box display="flex" justifyContent="flex-end" gap={2}>
-                <Button
-                  variant="outlined"
-                  startIcon={<EditIcon />}
-                  onClick={() => {
-                    setEditProfile(customer);
-                    setEditProfileDialog(true);
-                  }}
-                >
-                  Edit Profile
-                </Button>
+          </CardContent>
+        </Card>
+
+        {/* Tabs */}
+        <Card sx={{ border: '1px solid #e2e8f0', borderRadius: 3 }}>
+          <Box sx={{ borderBottom: '1px solid #e2e8f0' }}>
+            <Tabs 
+              value={activeTab} 
+              onChange={(e, newValue) => setActiveTab(newValue)}
+              sx={{
+                px: 3,
+                '& .MuiTab-root': {
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  minHeight: 64
+                }
+              }}
+            >
+              <Tab label="Active Rentals" icon={<ShippingIcon />} iconPosition="start" />
+              <Tab label="Delivery Requests" icon={<ScheduleIcon />} iconPosition="start" />
+              <Tab label="Billing & Invoices" icon={<ReceiptIcon />} iconPosition="start" />
+            </Tabs>
+          </Box>
+
+          <Box sx={{ p: 4 }}>
+            {/* Active Rentals Tab */}
+            <TabPanel value={activeTab} index={0}>
+              <Box sx={{ display: 'flex', justifyContent: 'between', alignItems: 'center', mb: 3 }}>
+                <Typography variant="h6" fontWeight={600}>
+                  Your Active Rentals
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {rentals.length} active rental{rentals.length !== 1 ? 's' : ''}
+                </Typography>
+              </Box>
+              
+              {rentals.length === 0 ? (
+                <Box sx={{ textAlign: 'center', py: 6 }}>
+                  <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+                    No Active Rentals
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    You don't have any active gas cylinder rentals at the moment.
+                  </Typography>
+                </Box>
+              ) : (
+                <TableContainer component={Paper} sx={{ border: '1px solid #e2e8f0' }}>
+                  <Table>
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: '#f8fafc' }}>
+                        <TableCell sx={{ fontWeight: 600 }}>Cylinder ID</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Gas Type</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Size</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Rental Date</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Actions</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {rentals.map((rental) => (
+                        <TableRow key={rental.id}>
+                          <TableCell sx={{ fontFamily: 'monospace' }}>{rental.cylinder_id}</TableCell>
+                          <TableCell>{rental.gas_type}</TableCell>
+                          <TableCell>{rental.size}</TableCell>
+                          <TableCell>{new Date(rental.rental_date).toLocaleDateString()}</TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={getRentalStatus(rental)} 
+                              color={getRentalStatusColor(getRentalStatus(rental))}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Button size="small" variant="outlined">
+                              View Details
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </TabPanel>
+
+            {/* Delivery Requests Tab */}
+            <TabPanel value={activeTab} index={1}>
+              <Box sx={{ display: 'flex', justifyContent: 'between', alignItems: 'center', mb: 3 }}>
+                <Typography variant="h6" fontWeight={600}>
+                  Delivery Requests
+                </Typography>
                 <Button
                   variant="contained"
                   startIcon={<AddIcon />}
                   onClick={() => setDeliveryDialog(true)}
+                  sx={{ borderRadius: 2 }}
                 >
                   Request Delivery
                 </Button>
               </Box>
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-
-      {/* Quick Stats */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="space-between">
-                <Box>
-                  <Typography color="textSecondary" gutterBottom>
-                    Active Rentals
+              
+              {deliveries.length === 0 ? (
+                <Box sx={{ textAlign: 'center', py: 6 }}>
+                  <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+                    No Delivery Requests
                   </Typography>
-                  <Typography variant="h4" color="primary.main">
-                    {rentals.filter(r => getRentalStatus(r) === 'Active').length}
+                  <Typography variant="body2" color="text.secondary">
+                    You haven't made any delivery requests yet.
                   </Typography>
                 </Box>
-                <ScheduleIcon color="primary" sx={{ fontSize: 40 }} />
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="space-between">
-                <Box>
-                  <Typography color="textSecondary" gutterBottom>
-                    Pending Deliveries
-                  </Typography>
-                  <Typography variant="h4" color="warning.main">
-                    {deliveries.filter(d => d.status === 'pending').length}
-                  </Typography>
-                </Box>
-                <ShippingIcon color="warning" sx={{ fontSize: 40 }} />
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="space-between">
-                <Box>
-                  <Typography color="textSecondary" gutterBottom>
-                    Total Invoices
-                  </Typography>
-                  <Typography variant="h4" color="info.main">
-                    {invoices.length}
-                  </Typography>
-                </Box>
-                <ReceiptIcon color="info" sx={{ fontSize: 40 }} />
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="space-between">
-                <Box>
-                  <Typography color="textSecondary" gutterBottom>
-                    Account Status
-                  </Typography>
-                  <Chip
-                    label={customer.status || 'Active'}
-                    color={customer.status === 'Active' ? 'success' : 'warning'}
-                    size="small"
-                  />
-                </Box>
-                <PersonIcon color="success" sx={{ fontSize: 40 }} />
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Tabs */}
-      <Paper sx={{ mb: 3 }}>
-        <Tabs value={activeTab} onChange={(e, newValue) => setActiveTab(newValue)}>
-          <Tab label="Rentals" />
-          <Tab label="Deliveries" />
-          <Tab label="Invoices" />
-          <Tab label="Account" />
-        </Tabs>
-      </Paper>
-
-      {/* Tab Content */}
-      {activeTab === 0 && (
-        <Paper>
-          <Box sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              My Rentals
-            </Typography>
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Bottle</TableCell>
-                    <TableCell>Product</TableCell>
-                    <TableCell>Start Date</TableCell>
-                    <TableCell>End Date</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {rentals.map((rental) => (
-                    <TableRow key={rental.id} hover>
-                      <TableCell>{rental.bottles?.barcode_number || rental.serial_number}</TableCell>
-                      <TableCell>{rental.bottles?.description || rental.product_code}</TableCell>
-                      <TableCell>
-                        {new Date(rental.rental_start_date).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        {rental.rental_end_date 
-                          ? new Date(rental.rental_end_date).toLocaleDateString()
-                          : 'Ongoing'
-                        }
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={getRentalStatus(rental)}
-                          color={getRentalStatusColor(getRentalStatus(rental))}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Tooltip title="View Details">
-                          <IconButton size="small">
-                            <ViewIcon />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-        </Paper>
-      )}
-
-      {activeTab === 1 && (
-        <Paper>
-          <Box sx={{ p: 2 }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">
-                Delivery Requests
-              </Typography>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => setDeliveryDialog(true)}
-              >
-                New Request
-              </Button>
-            </Box>
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Request Date</TableCell>
-                    <TableCell>Delivery Date</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Contact</TableCell>
-                    <TableCell>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
+              ) : (
+                <Grid container spacing={2}>
                   {deliveries.map((delivery) => (
-                    <TableRow key={delivery.id} hover>
-                      <TableCell>
-                        {new Date(delivery.created_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        {delivery.delivery_date 
-                          ? new Date(delivery.delivery_date).toLocaleDateString()
-                          : 'TBD'
-                        }
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={delivery.status}
-                          color={getDeliveryStatusColor(delivery.status)}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>{delivery.contact_person}</TableCell>
-                      <TableCell>
-                        <Tooltip title="View Details">
-                          <IconButton size="small">
-                            <ViewIcon />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
+                    <Grid item xs={12} md={6} key={delivery.id}>
+                      <Card sx={{ border: '1px solid #e2e8f0' }}>
+                        <CardContent>
+                          <Box sx={{ display: 'flex', justifyContent: 'between', alignItems: 'center', mb: 2 }}>
+                            <Typography variant="h6" fontWeight={600}>
+                              Delivery #{delivery.id}
+                            </Typography>
+                            <Chip 
+                              label={delivery.status} 
+                              color={getDeliveryStatusColor(delivery.status)}
+                              size="small"
+                            />
+                          </Box>
+                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                            Requested: {new Date(delivery.requested_date).toLocaleDateString()}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Delivery Date: {new Date(delivery.delivery_date).toLocaleDateString()}
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
                   ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-        </Paper>
-      )}
+                </Grid>
+              )}
+            </TabPanel>
 
-      {activeTab === 2 && (
-        <Paper>
-          <Box sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              Invoices
-            </Typography>
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Invoice #</TableCell>
-                    <TableCell>Date</TableCell>
-                    <TableCell>Amount</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {invoices.map((invoice) => (
-                    <TableRow key={invoice.id} hover>
-                      <TableCell>{invoice.invoice_number}</TableCell>
-                      <TableCell>
-                        {new Date(invoice.invoice_date).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>${invoice.total_amount?.toFixed(2)}</TableCell>
-                      <TableCell>
-                        <Chip
-                          label={invoice.status || 'Paid'}
-                          color={invoice.status === 'Paid' ? 'success' : 'warning'}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Tooltip title="View Invoice">
-                          <IconButton size="small">
-                            <ViewIcon />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+            {/* Billing Tab */}
+            <TabPanel value={activeTab} index={2}>
+              <Typography variant="h6" fontWeight={600} sx={{ mb: 3 }}>
+                Billing & Invoices
+              </Typography>
+              
+              {invoices.length === 0 ? (
+                <Box sx={{ textAlign: 'center', py: 6 }}>
+                  <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+                    No Invoices
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    You don't have any invoices yet.
+                  </Typography>
+                </Box>
+              ) : (
+                <TableContainer component={Paper} sx={{ border: '1px solid #e2e8f0' }}>
+                  <Table>
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: '#f8fafc' }}>
+                        <TableCell sx={{ fontWeight: 600 }}>Invoice #</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Amount</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Actions</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {invoices.map((invoice) => (
+                        <TableRow key={invoice.id}>
+                          <TableCell sx={{ fontFamily: 'monospace' }}>#{invoice.id}</TableCell>
+                          <TableCell>{new Date(invoice.created_at).toLocaleDateString()}</TableCell>
+                          <TableCell>${invoice.amount}</TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={invoice.status} 
+                              color={invoice.status === 'paid' ? 'success' : 'warning'}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Button size="small" variant="outlined">
+                              Download
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </TabPanel>
           </Box>
-        </Paper>
-      )}
-
-      {activeTab === 3 && (
-        <Paper>
-          <Box sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              Account Information
-            </Typography>
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <List>
-                  <ListItem>
-                    <ListItemIcon>
-                      <PersonIcon />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary="Name"
-                      secondary={customer.name}
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemIcon>
-                      <PhoneIcon />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary="Phone"
-                      secondary={customer.phone || 'Not provided'}
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemIcon>
-                      <EmailIcon />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary="Email"
-                      secondary={customer.email || 'Not provided'}
-                    />
-                  </ListItem>
-                </List>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <List>
-                  <ListItem>
-                    <ListItemIcon>
-                      <LocationIcon />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary="Address"
-                      secondary={customer.address || 'Not provided'}
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemIcon>
-                      <CalendarIcon />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary="Member Since"
-                      secondary={customer.created_at 
-                        ? new Date(customer.created_at).toLocaleDateString()
-                        : 'Unknown'
-                      }
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemIcon>
-                      <CheckCircleIcon />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary="Status"
-                      secondary={customer.status || 'Active'}
-                    />
-                  </ListItem>
-                </List>
-              </Grid>
-            </Grid>
-          </Box>
-        </Paper>
-      )}
+        </Card>
 
       {/* Delivery Request Dialog */}
       <Dialog open={deliveryDialog} onClose={() => setDeliveryDialog(false)} maxWidth="sm" fullWidth>

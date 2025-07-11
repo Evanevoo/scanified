@@ -54,24 +54,23 @@ export default function MainLayout() {
   // Sidebar logic - only show owner links for owner, show full navigation for organizations
   const sidebarPages = profile?.role === 'owner'
     ? [
-        { label: 'Owner Dashboard', icon: <BusinessIcon />, to: '/owner-portal/locations' },
-        { label: 'Home', icon: <AdminPanelSettingsIcon />, to: '/owner-portal' },
+        { label: 'Platform Overview', icon: <BusinessIcon />, to: '/owner-portal' },
+        { label: 'Customer Management', icon: <PeopleIcon />, to: '/owner-portal/customer-management' },
       ]
     : [
+        { label: 'Dashboard', icon: <AdminPanelSettingsIcon />, to: '/dashboard' },
         { label: 'Customers', icon: <PeopleIcon />, to: '/customers' },
-        { label: 'Locations', icon: <LocationOnIcon />, to: '/locations' },
-        { label: 'All Gas Assets', icon: <SwapVertIcon />, to: '/assets' },
-        { label: 'Scanned Orders', icon: <AssignmentIcon />, to: '/scanned-orders' },
+        { label: 'Inventory', icon: <SwapVertIcon />, to: '/assets' },
+        { label: 'Orders & Scans', icon: <AssignmentIcon />, to: '/scanned-orders' },
         {
-          label: 'Integrations', icon: <SwapVertIcon />, to: null, subItems: [
-            { label: 'Import', to: '/import' },
+          label: 'Data & Import', icon: <SwapVertIcon />, to: null, subItems: [
+            { label: 'Import Data', to: '/import' },
             { label: 'Import Customers', to: '/import-customer-info' },
-            { label: 'Import Approvals', to: '/import-approvals' },
-            { label: 'Customer ID Generator', to: '/generateid' },
+            { label: 'Approval Queue', to: '/import-approvals' },
             { label: 'Bottle Management', to: '/bottle-management' },
           ]
         },
-        { label: 'Support', icon: <AssignmentIcon />, to: '/support' },
+        { label: 'Help & Support', icon: <AssignmentIcon />, to: '/support' },
       ];
 
   useEffect(() => {
@@ -324,8 +323,8 @@ export default function MainLayout() {
   const topNavLinks = profile?.role === 'owner' 
     ? [] 
     : [
-        { label: 'Home', to: '/dashboard' },
-        { label: 'Rentals', to: '/rentals' },
+        { label: 'Dashboard', to: '/dashboard' },
+        { label: 'Inventory', to: '/rentals' },
         { label: 'Orders', to: '/import-approvals' },
         { label: 'Billing', to: '/billing' },
       ];
