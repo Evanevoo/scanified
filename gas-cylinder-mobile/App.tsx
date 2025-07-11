@@ -93,11 +93,31 @@ function AppContent() {
         initialRouteName={user ? "Home" : "Login"}
         screenOptions={{
           headerStyle: {
-            backgroundColor: '#2563eb',
+            backgroundColor: '#3B82F6',
+            elevation: 0,
+            shadowOpacity: 0,
+            borderBottomWidth: 0,
           },
           headerTintColor: '#fff',
           headerTitleStyle: {
-            fontWeight: 'bold',
+            fontWeight: '600',
+            fontSize: 18,
+          },
+          headerBackTitleVisible: false,
+          gestureEnabled: true,
+          cardStyleInterpolator: ({ current, layouts }) => {
+            return {
+              cardStyle: {
+                transform: [
+                  {
+                    translateX: current.progress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [layouts.screen.width, 0],
+                    }),
+                  },
+                ],
+              },
+            };
           },
         }}
       >
@@ -117,7 +137,16 @@ function AppContent() {
             <Stack.Screen 
               name="Home" 
               component={HomeScreen} 
-              options={{ title: 'LessAnnoyingScan' }}
+              options={{ 
+                title: 'Dashboard',
+                headerStyle: {
+                  backgroundColor: '#3B82F6',
+                  elevation: 4,
+                  shadowOpacity: 0.1,
+                  shadowRadius: 4,
+                  shadowOffset: { width: 0, height: 2 },
+                },
+              }}
             />
             <Stack.Screen 
               name="ScanCylinders" 
@@ -142,7 +171,7 @@ function AppContent() {
             <Stack.Screen 
               name="FillCylinder" 
               component={FillCylinderScreen} 
-              options={{ title: 'Fill Cylinder' }}
+              options={{ title: 'Update Fill Status' }}
             />
             <Stack.Screen 
               name="LocateCylinder" 
@@ -157,7 +186,7 @@ function AppContent() {
             <Stack.Screen 
               name="History" 
               component={HistoryScreen} 
-              options={{ title: 'History' }}
+              options={{ title: 'Scan History' }}
             />
             <Stack.Screen 
               name="RecentScans" 

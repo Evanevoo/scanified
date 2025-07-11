@@ -246,159 +246,210 @@ export default function LoginScreen() {
       <ScrollView 
         contentContainerStyle={styles.scrollContainer}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         <View style={styles.loginContainer}>
-          {/* Language Selector */}
-          <View style={styles.languageRow}>
-            <Text style={styles.languageLabel}>{t.selectLanguage}:</Text>
-            <TouchableOpacity onPress={() => setLanguage('en')} style={[styles.languageButton, language === 'en' && styles.languageButtonActive]}><Text>EN</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => setLanguage('es')} style={[styles.languageButton, language === 'es' && styles.languageButtonActive]}><Text>ES</Text></TouchableOpacity>
+          {/* App Branding */}
+          <View style={styles.brandingSection}>
+            <Text style={styles.appTitle}>LessAnnoyingScan</Text>
+            <Text style={styles.appSubtitle}>Gas Cylinder Management</Text>
+            <Text style={styles.welcomeMessage}>Welcome back! Sign in to continue</Text>
           </View>
 
-          <Text style={styles.title}>Gas Cylinder App</Text>
-          <Text style={styles.subtitle}>{t.signIn} {language === 'en' ? 'to your account' : 'en tu cuenta'}</Text>
-
-          {/* Google Login Button */}
-          <TouchableOpacity style={styles.googleButton} onPress={handleGoogleLogin} disabled={socialLoading}>
-            <Ionicons name="logo-google" size={24} color="#ea4335" style={{ marginRight: 8 }} />
-            <Text style={styles.googleButtonText}>{socialLoading ? 'Signing in...' : 'Sign in with Google'}</Text>
-          </TouchableOpacity>
-
-          {/* Biometric Login Button */}
-          {biometricSupported && biometricAvailable && rememberMe && email ? (
-            <TouchableOpacity style={styles.biometricButton} onPress={handleBiometricLogin}>
-              <Ionicons name="finger-print" size={24} color="#2563eb" style={{ marginRight: 8 }} />
-              <Text style={styles.biometricButtonText}>Login with Fingerprint/FaceID</Text>
+          {/* Social Login Options */}
+          <View style={styles.socialSection}>
+            <TouchableOpacity style={styles.googleButton} onPress={handleGoogleLogin} disabled={socialLoading}>
+              <Ionicons name="logo-google" size={20} color="#ea4335" style={{ marginRight: 8 }} />
+              <Text style={styles.googleButtonText}>
+                {socialLoading ? 'Signing in...' : 'Continue with Google'}
+              </Text>
             </TouchableOpacity>
-          ) : null}
 
+            {biometricSupported && biometricAvailable && rememberMe && email && (
+              <TouchableOpacity style={styles.biometricButton} onPress={handleBiometricLogin}>
+                <Ionicons name="finger-print" size={20} color="#3B82F6" style={{ marginRight: 8 }} />
+                <Text style={styles.biometricButtonText}>Use Biometric Login</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Divider */}
+          <View style={styles.dividerContainer}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or continue with email</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          {/* Login Form */}
           <View style={styles.formContainer}>
-            <Text style={styles.label}>{t.email}</Text>
-            <TextInput
-              style={[styles.input, emailError && styles.inputError, { color: '#000000' }]}
-              value={email}
-              onChangeText={handleEmailChange}
-              placeholder={t.email}
-              placeholderTextColor="#666666"
-              autoCapitalize="none"
-              keyboardType="email-address"
-              autoComplete="email"
-              editable={!isLoading}
-            />
-            {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
-            
-            <Text style={styles.label}>{t.password}</Text>
-            <View style={{ position: 'relative' }}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Email Address</Text>
               <TextInput
-                style={[styles.input, passwordError && styles.inputError, { paddingRight: 48, color: '#000000' }]}
-                value={password}
-                onChangeText={handlePasswordChange}
-                placeholder={t.password}
-                placeholderTextColor="#666666"
-                secureTextEntry={!showPassword}
-                autoComplete="password"
+                style={[styles.input, emailError && styles.inputError]}
+                value={email}
+                onChangeText={handleEmailChange}
+                placeholder="Enter your email"
+                placeholderTextColor="#9CA3AF"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                autoComplete="email"
                 editable={!isLoading}
-                textContentType="password"
               />
-              <TouchableOpacity
-                style={styles.eyeButton}
-                onPress={() => {
-                  console.log('Password visibility toggled:', !showPassword);
-                  setShowPassword(v => !v);
-                }}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name={showPassword ? 'eye-off' : 'eye'}
-                  size={24}
-                  color="#6b7280"
-                />
-              </TouchableOpacity>
+              {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
             </View>
-            {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Password</Text>
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  style={[styles.input, styles.passwordInput, passwordError && styles.inputError]}
+                  value={password}
+                  onChangeText={handlePasswordChange}
+                  placeholder="Enter your password"
+                  placeholderTextColor="#9CA3AF"
+                  secureTextEntry={!showPassword}
+                  autoComplete="password"
+                  editable={!isLoading}
+                  textContentType="password"
+                />
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowPassword(v => !v)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={showPassword ? 'eye-off' : 'eye'}
+                    size={20}
+                    color="#6B7280"
+                  />
+                </TouchableOpacity>
+              </View>
+              {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
+            </View>
 
-            <View style={styles.rowBetween}>
-              <TouchableOpacity onPress={handleForgotPassword} disabled={resetting}>
-                <Text style={styles.forgotText}>{resetting ? 'Sending...' : t.forgotPassword}</Text>
-              </TouchableOpacity>
+            {/* Form Options */}
+            <View style={styles.formOptions}>
               <TouchableOpacity style={styles.rememberMe} onPress={() => setRememberMe(v => !v)}>
                 <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
-                  {rememberMe ? <Ionicons name="checkmark" size={16} color="#fff" /> : null}
+                  {rememberMe ? <Ionicons name="checkmark" size={14} color="#fff" /> : null}
                 </View>
-                <Text style={styles.rememberMeText}>{t.rememberMe}</Text>
+                <Text style={styles.rememberMeText}>Remember me</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity onPress={handleForgotPassword} disabled={resetting}>
+                <Text style={styles.forgotText}>
+                  {resetting ? 'Sending...' : 'Forgot password?'}
+                </Text>
               </TouchableOpacity>
             </View>
 
+            {/* Sign In Button */}
             <TouchableOpacity
-              style={[styles.loginButton, isLoading && styles.loginButtonDisabled]}
+              style={[styles.signInButton, isLoading && styles.signInButtonDisabled]}
               onPress={handleLogin}
               disabled={isLoading}
             >
               {isLoading ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Text style={styles.loginButtonText}>{t.signIn}</Text>
+                <Text style={styles.signInButtonText}>Sign In</Text>
               )}
             </TouchableOpacity>
 
             {/* Sign Up Link */}
             <TouchableOpacity style={styles.signUpLink} onPress={() => setRegisterModal(true)}>
-              <Text style={styles.signUpText}>{t.createAccount}</Text>
+              <Text style={styles.signUpText}>
+                Don't have an account? <Text style={styles.signUpTextBold}>Sign Up</Text>
+              </Text>
             </TouchableOpacity>
           </View>
           
-          <View style={styles.legalLinks}>
-            <TouchableOpacity onPress={() => Linking.openURL('https://yourdomain.com/terms')}><Text style={styles.legalLink}>{t.terms}</Text></TouchableOpacity>
-            <Text style={{ marginHorizontal: 8 }}>|</Text>
-            <TouchableOpacity onPress={() => Linking.openURL('https://yourdomain.com/privacy')}><Text style={styles.legalLink}>{t.privacy}</Text></TouchableOpacity>
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>
+              Use the same credentials as the web app
+            </Text>
+            <View style={styles.legalLinks}>
+              <TouchableOpacity onPress={() => Linking.openURL('https://yourdomain.com/terms')}>
+                <Text style={styles.legalLink}>Terms</Text>
+              </TouchableOpacity>
+              <Text style={styles.legalSeparator}>•</Text>
+              <TouchableOpacity onPress={() => Linking.openURL('https://yourdomain.com/privacy')}>
+                <Text style={styles.legalLink}>Privacy</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-
-          <Text style={styles.footer}>
-            Use the same login credentials as the website
-          </Text>
         </View>
 
         {/* Registration Modal */}
         <Modal visible={registerModal} animationType="slide" transparent>
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <Text style={styles.title}>{t.signUp}</Text>
-              <TextInput
-                style={styles.input}
-                value={registerForm.name}
-                onChangeText={v => setRegisterForm(f => ({ ...f, name: v }))}
-                placeholder={t.enterName}
-                autoCapitalize="words"
-              />
-              <TextInput
-                style={styles.input}
-                value={registerForm.email}
-                onChangeText={v => setRegisterForm(f => ({ ...f, email: v }))}
-                placeholder={t.email}
-                autoCapitalize="none"
-                keyboardType="email-address"
-              />
-              <TextInput
-                style={styles.input}
-                value={registerForm.password}
-                onChangeText={v => setRegisterForm(f => ({ ...f, password: v }))}
-                placeholder={t.password}
-                secureTextEntry
-              />
-              <TextInput
-                style={styles.input}
-                value={registerForm.confirm}
-                onChangeText={v => setRegisterForm(f => ({ ...f, confirm: v }))}
-                placeholder={t.confirmPassword}
-                secureTextEntry
-              />
-              {registerError ? <Text style={styles.errorText}>{registerError}</Text> : null}
-              <TouchableOpacity style={styles.loginButton} onPress={handleRegister} disabled={registerLoading}>
-                <Text style={styles.loginButtonText}>{registerLoading ? '...' : t.signUp}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.signUpLink} onPress={() => setRegisterModal(false)}>
-                <Text style={styles.signUpText}>{t.alreadyHaveAccount}</Text>
-              </TouchableOpacity>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Create Account</Text>
+                <TouchableOpacity onPress={() => setRegisterModal(false)}>
+                  <Ionicons name="close" size={24} color="#6B7280" />
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.modalForm}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Full Name</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={registerForm.name}
+                    onChangeText={v => setRegisterForm(f => ({ ...f, name: v }))}
+                    placeholder="Enter your full name"
+                    autoCapitalize="words"
+                  />
+                </View>
+                
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Email Address</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={registerForm.email}
+                    onChangeText={v => setRegisterForm(f => ({ ...f, email: v }))}
+                    placeholder="Enter your email"
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                  />
+                </View>
+                
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Password</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={registerForm.password}
+                    onChangeText={v => setRegisterForm(f => ({ ...f, password: v }))}
+                    placeholder="Create a password"
+                    secureTextEntry
+                  />
+                </View>
+                
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Confirm Password</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={registerForm.confirm}
+                    onChangeText={v => setRegisterForm(f => ({ ...f, confirm: v }))}
+                    placeholder="Confirm your password"
+                    secureTextEntry
+                  />
+                </View>
+                
+                {registerError ? <Text style={styles.errorText}>{registerError}</Text> : null}
+                
+                <TouchableOpacity 
+                  style={[styles.signInButton, registerLoading && styles.signInButtonDisabled]} 
+                  onPress={handleRegister} 
+                  disabled={registerLoading}
+                >
+                  <Text style={styles.signInButtonText}>
+                    {registerLoading ? 'Creating Account...' : 'Create Account'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>
@@ -415,80 +466,122 @@ const styles = StyleSheet.create({
   scrollContainer: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 20,
+    padding: 24,
   },
   loginContainer: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 32,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  title: {
+  brandingSection: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  appTitle: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#2563eb',
-    textAlign: 'center',
-    marginBottom: 8,
+    color: '#3B82F6',
+    marginBottom: 4,
   },
-  subtitle: {
+  appSubtitle: {
     fontSize: 16,
-    color: '#6b7280',
+    color: '#6B7280',
+    marginBottom: 16,
+  },
+  welcomeMessage: {
+    fontSize: 18,
+    color: '#374151',
     textAlign: 'center',
-    marginBottom: 32,
+  },
+  socialSection: {
+    marginBottom: 24,
+  },
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    backgroundColor: '#fff',
+  },
+  googleButtonText: {
+    color: '#374151',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  biometricButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+    borderRadius: 12,
+    padding: 16,
+    backgroundColor: '#EFF6FF',
+  },
+  biometricButtonText: {
+    color: '#3B82F6',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E5E7EB',
+  },
+  dividerText: {
+    marginHorizontal: 16,
+    color: '#6B7280',
+    fontSize: 14,
   },
   formContainer: {
     marginBottom: 24,
   },
-  label: {
-    fontSize: 16,
+  inputGroup: {
+    marginBottom: 20,
+  },
+  inputLabel: {
+    fontSize: 14,
     fontWeight: '600',
     color: '#374151',
     marginBottom: 8,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: '#D1D5DB',
     borderRadius: 12,
     padding: 16,
     fontSize: 16,
     backgroundColor: '#fff',
-    marginBottom: 8,
-    color: '#000000',
+    color: '#000',
+  },
+  passwordContainer: {
+    position: 'relative',
+  },
+  passwordInput: {
+    paddingRight: 48,
   },
   inputError: {
-    borderColor: '#dc3545',
-    backgroundColor: '#fff5f5',
+    borderColor: '#EF4444',
+    backgroundColor: '#FEF2F2',
   },
   errorText: {
-    color: '#dc3545',
+    color: '#EF4444',
     fontSize: 14,
-    marginBottom: 12,
-    marginLeft: 4,
-  },
-  loginButton: {
-    backgroundColor: '#2563eb',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
     marginTop: 8,
-  },
-  loginButtonDisabled: {
-    backgroundColor: '#9ca3af',
-  },
-  loginButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  footer: {
-    fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
-    fontStyle: 'italic',
   },
   eyeButton: {
     position: 'absolute',
@@ -497,138 +590,117 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
-    height: '100%',
     width: 40,
   },
-  rowBetween: {
+  formOptions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
-  },
-  forgotText: {
-    color: '#2563eb',
-    fontWeight: 'bold',
-    fontSize: 15,
-    paddingVertical: 8,
+    marginBottom: 24,
   },
   rememberMe: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 5,
+    width: 18,
+    height: 18,
+    borderRadius: 4,
     borderWidth: 2,
-    borderColor: '#2563eb',
+    borderColor: '#3B82F6',
     marginRight: 8,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#fff',
   },
   checkboxChecked: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
+    backgroundColor: '#3B82F6',
+    borderColor: '#3B82F6',
   },
   rememberMeText: {
-    fontSize: 15,
+    fontSize: 14,
     color: '#374151',
   },
-  biometricButton: {
-    flexDirection: 'row',
+  forgotText: {
+    color: '#3B82F6',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  signInButton: {
+    backgroundColor: '#3B82F6',
+    borderRadius: 12,
+    padding: 16,
     alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#2563eb',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
-    backgroundColor: '#F0F6FF',
+    marginBottom: 20,
   },
-  biometricButtonText: {
-    color: '#2563eb',
-    fontWeight: 'bold',
-    fontSize: 16,
+  signInButtonDisabled: {
+    backgroundColor: '#9CA3AF',
   },
-  googleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#ea4335',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
-    backgroundColor: '#fff',
-  },
-  googleButtonText: {
-    color: '#ea4335',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  languageRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginBottom: 8,
-  },
-  languageLabel: {
-    fontSize: 15,
-    marginRight: 8,
-    color: '#374151',
-  },
-  languageButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    marginHorizontal: 2,
-    backgroundColor: '#fff',
-  },
-  languageButtonActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
+  signInButtonText: {
     color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   signUpLink: {
     alignItems: 'center',
-    marginTop: 12,
   },
   signUpText: {
-    color: '#2563eb',
-    fontWeight: 'bold',
-    fontSize: 15,
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  signUpTextBold: {
+    color: '#3B82F6',
+    fontWeight: '600',
+  },
+  footer: {
+    alignItems: 'center',
+  },
+  footerText: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 12,
+    fontStyle: 'italic',
   },
   legalLinks: {
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 16,
-    marginBottom: 8,
   },
   legalLink: {
-    color: '#2563eb',
-    fontSize: 14,
-    textDecorationLine: 'underline',
+    fontSize: 12,
+    color: '#3B82F6',
+  },
+  legalSeparator: {
+    marginHorizontal: 8,
+    color: '#9CA3AF',
+    fontSize: 12,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   modalContent: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 24,
-    width: '90%',
+    width: '100%',
     maxWidth: 400,
-    alignItems: 'stretch',
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#374151',
+  },
+  modalForm: {
+    // No additional styles needed
   },
 });

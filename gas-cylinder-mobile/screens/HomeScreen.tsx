@@ -4,44 +4,49 @@ import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabase';
 
-const BUTTONS = [
+const QUICK_ACTIONS = [
   {
-    title: 'Scan',
-    color: '#F5F5DC',
-    icon: '🛢️',
+    title: 'Scan Cylinders',
+    subtitle: 'Scan barcodes',
+    icon: '📷',
     action: 'ScanCylinders',
+    color: '#3B82F6',
   },
   {
-    title: 'Edit',
-    color: '#FFF3B0',
-    icon: '📝',
-  },
-  {
-    title: 'Locate',
-    color: '#E6F4D8',
-    icon: '📍',
-  },
-  {
-    title: 'Add New',
-    color: '#FFE4B8',
+    title: 'Add Cylinder',
+    subtitle: 'Register new',
     icon: '➕',
+    action: 'AddCylinder',
+    color: '#10B981',
   },
   {
-    title: 'History',
-    color: '#D1E8FF',
-    icon: '🕓',
+    title: 'Edit Details',
+    subtitle: 'Update info',
+    icon: '✏️',
+    action: 'EditCylinder',
+    color: '#F59E0B',
   },
   {
-    title: 'Fill',
-    color: '#D1FFD6',
-    icon: '💧',
+    title: 'Locate Item',
+    subtitle: 'Find location',
+    icon: '📍',
+    action: 'LocateCylinder',
+    color: '#EF4444',
   },
-];
-
-const FILES = [
-  { name: 'Strategy-Pitch-Final.xls', icon: '📄', color: '#E6F4D8' },
-  { name: 'user-journey-01.jpg', icon: '🖼️', color: '#E6F4D8' },
-  { name: 'Invoice-oct-2024.doc', icon: '📄', color: '#FFE4B8' },
+  {
+    title: 'View History',
+    subtitle: 'Past scans',
+    icon: '📋',
+    action: 'History',
+    color: '#8B5CF6',
+  },
+  {
+    title: 'Fill Status',
+    subtitle: 'Update fill',
+    icon: '🔧',
+    action: 'FillCylinder',
+    color: '#06B6D4',
+  },
 ];
 
 export default function HomeScreen() {
@@ -49,27 +54,56 @@ export default function HomeScreen() {
   const { colors } = useTheme();
   const [unreadCount, setUnreadCount] = useState(0);
   const [search, setSearch] = useState('');
-  const [customers, setCustomers] = useState([]);
-  const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [customerResults, setCustomerResults] = useState([]);
   const [bottleResults, setBottleResults] = useState([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [loadingBottles, setLoadingBottles] = useState(false);
-  const [recentScans, setRecentScans] = useState([]);
+  const [stats, setStats] = useState({
+    totalScans: 0,
+    todayScans: 0,
+    pendingActions: 0,
+  });
 
   useEffect(() => {
-    const fetchUnreadCount = async () => {
-      // Adjust the filter as needed for your schema
+    fetchDashboardStats();
+    fetchUnreadCount();
+  }, []);
+
+  const fetchDashboardStats = async () => {
+    try {
+      // Get total scans
+      const { count: totalScans } = await supabase
+        .from('bottle_scans')
+        .select('*', { count: 'exact', head: true });
+
+      // Get today's scans
+      const today = new Date().toISOString().split('T')[0];
+      const { count: todayScans } = await supabase
+        .from('bottle_scans')
+        .select('*', { count: 'exact', head: true })
+        .gte('created_at', today);
+
+      setStats({
+        totalScans: totalScans || 0,
+        todayScans: todayScans || 0,
+        pendingActions: 3, // Mock data
+      });
+    } catch (error) {
+      console.error('Error fetching stats:', error);
+    }
+  };
+
+  const fetchUnreadCount = async () => {
+    try {
       const { count, error } = await supabase
         .from('bottle_scans')
         .select('*', { count: 'exact', head: true })
         .is('read', false);
       if (!error) setUnreadCount(count || 0);
-    };
-    fetchUnreadCount();
-    // Optionally, poll every 10s for updates
-    const interval = setInterval(fetchUnreadCount, 10000);
-    return () => clearInterval(interval);
-  }, []);
+    } catch (error) {
+      console.error('Error fetching unread count:', error);
+    }
+  };
 
   useEffect(() => {
     if (search.trim().length === 0) {
@@ -78,178 +112,216 @@ export default function HomeScreen() {
       return;
     }
     
-    // Search for customers
+    searchCustomers();
+    searchBottles();
+  }, [search]);
+
+  const searchCustomers = async () => {
     setLoadingCustomers(true);
-    const fetchCustomers = async () => {
+    try {
       let query = supabase
         .from('customers')
         .select('CustomerListID, name, barcode, contact_details');
+      
       if (search.trim().length === 1) {
-        // If only one letter, match names starting with that letter
         query = query.ilike('name', `${search.trim()}%`);
       } else {
-        // If more than one character, match names containing the word
         query = query.ilike('name', `%${search.trim()}%`);
       }
-      query = query.limit(5);
-      const { data: custs, error } = await query;
-      if (error || !custs) {
-        setCustomerResults([]);
-        setLoadingCustomers(false);
-        return;
+      
+      const { data: customers, error } = await query.limit(5);
+      if (!error && customers) {
+        const results = await Promise.all(customers.map(async (customer) => {
+          const { data: bottles } = await supabase
+            .from('bottles')
+            .select('group_name')
+            .eq('assigned_customer', customer.CustomerListID);
+          return {
+            ...customer,
+            gases: Array.from(new Set((bottles || []).map(c => c.group_name))).filter(Boolean),
+          };
+        }));
+        setCustomerResults(results);
       }
-      // For each customer, fetch their rented gases
-      const results = await Promise.all(custs.map(async (cust) => {
-        const { data: bottles } = await supabase
-          .from('bottles')
-          .select('group_name')
-          .eq('assigned_customer', cust.CustomerListID);
-        return {
-          ...cust,
-          gases: Array.from(new Set((bottles || []).map(c => c.group_name))).filter(Boolean),
-        };
-      }));
-      setCustomerResults(results);
+    } catch (error) {
+      console.error('Error searching customers:', error);
+    } finally {
       setLoadingCustomers(false);
-    };
-    fetchCustomers();
+    }
+  };
 
-    // Search for bottles by barcode
+  const searchBottles = async () => {
     setLoadingBottles(true);
-    const fetchBottles = async () => {
+    try {
       const { data: bottles, error } = await supabase
         .from('bottles')
         .select('barcode_number, serial_number, assigned_customer, customer_name, product_code, description')
         .ilike('barcode_number', `%${search.trim()}%`)
         .limit(5);
       
-      if (error || !bottles) {
-        setBottleResults([]);
-        setLoadingBottles(false);
-        return;
+      if (!error && bottles) {
+        setBottleResults(bottles);
       }
-      
-      setBottleResults(bottles);
+    } catch (error) {
+      console.error('Error searching bottles:', error);
+    } finally {
       setLoadingBottles(false);
-    };
-    fetchBottles();
-  }, [search]);
+    }
+  };
 
-  useEffect(() => {
-    // Fetch recent scans for the bottom grid
-    const fetchRecentScans = async () => {
-      const { data, error } = await supabase
-        .from('bottle_scans')
-        .select('bottle_barcode, customer_name, created_at')
-        .order('created_at', { ascending: false })
-        .limit(6);
-      if (!error && data) setRecentScans(data);
-    };
-    fetchRecentScans();
-  }, []);
+  const handleQuickAction = (action: string) => {
+    switch (action) {
+      case 'ScanCylinders':
+        navigation.navigate('ScanCylinders');
+        break;
+      case 'AddCylinder':
+        navigation.navigate('AddCylinder');
+        break;
+      case 'EditCylinder':
+        navigation.navigate('EditCylinder');
+        break;
+      case 'LocateCylinder':
+        navigation.navigate('LocateCylinder');
+        break;
+      case 'History':
+        navigation.navigate('History');
+        break;
+      case 'FillCylinder':
+        navigation.navigate('FillCylinder');
+        break;
+      default:
+        break;
+    }
+  };
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
-      <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}>
-        {/* Top Row: Settings and Notification */}
-        <View style={styles.topRow}>
-          <TouchableOpacity style={[styles.iconCircle, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => navigation.navigate('Settings')}>
-            <Text style={styles.topIcon}>⚙️</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.iconCircle, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => navigation.navigate('RecentScans')}>
-            <Text style={styles.topIcon}>🔔</Text>
-            {unreadCount > 0 && (
-              <View style={[styles.badge, { backgroundColor: colors.error }]}><Text style={[styles.badgeText, { color: colors.surface }]}>{unreadCount}</Text></View>
-            )}
-          </TouchableOpacity>
-        </View>
-        {/* 2x2 Button Grid */}
-        <View style={styles.grid}>
-          {BUTTONS.map((btn, idx) => (
-            <TouchableOpacity
-              key={btn.title}
-              style={[styles.gridButton, { backgroundColor: colors.surface, borderColor: colors.border, marginRight: idx % 2 === 0 ? 12 : 0, marginBottom: idx < 2 ? 12 : 0 }]}
-              onPress={() => {
-                if (btn.action === 'ScanCylinders') navigation.navigate('ScanCylinders');
-                else if (btn.title === 'Edit') navigation.navigate('EditCylinder');
-                else if (btn.title === 'Add New') navigation.navigate('AddCylinder');
-                else if (btn.title === 'Locate') navigation.navigate('LocateCylinder');
-                else if (btn.title === 'History') navigation.navigate('History');
-                else if (btn.title === 'Fill') navigation.navigate('FillCylinder');
-              }}
+      <ScrollView 
+        style={[styles.container, { backgroundColor: colors.background }]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.headerContent}>
+            <Text style={[styles.welcomeText, { color: colors.text }]}>Welcome back!</Text>
+            <Text style={[styles.appName, { color: colors.primary }]}>LessAnnoyingScan</Text>
+          </View>
+          <View style={styles.headerActions}>
+            <TouchableOpacity 
+              style={[styles.headerButton, { backgroundColor: colors.surface, borderColor: colors.border }]} 
+              onPress={() => navigation.navigate('RecentScans')}
             >
-              <View style={[styles.gridIconCircle, { backgroundColor: colors.primary }]}><Text style={styles.gridIcon}>{btn.icon}</Text></View>
-              <Text style={[styles.gridTitle, { color: colors.text }]}>{btn.title}</Text>
+              <Text style={styles.headerButtonIcon}>🔔</Text>
+              {unreadCount > 0 && (
+                <View style={[styles.badge, { backgroundColor: colors.error }]}>
+                  <Text style={[styles.badgeText, { color: colors.surface }]}>{unreadCount}</Text>
+                </View>
+              )}
             </TouchableOpacity>
-          ))}
+            <TouchableOpacity 
+              style={[styles.headerButton, { backgroundColor: colors.surface, borderColor: colors.border }]} 
+              onPress={() => navigation.navigate('Settings')}
+            >
+              <Text style={styles.headerButtonIcon}>⚙️</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-        {/* Enhanced Search Bar */}
-        <View style={styles.searchRow}>
-          <TextInput
-            style={[styles.searchInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-            placeholder="Search customers by name or bottles by barcode"
-            placeholderTextColor={colors.textSecondary}
-            value={search}
-            onChangeText={setSearch}
-          />
-          <TouchableOpacity style={[styles.micCircle, { backgroundColor: colors.primary }]}><Text style={styles.micIcon}>🔍</Text></TouchableOpacity>
+
+        {/* Stats Cards */}
+        <View style={styles.statsContainer}>
+          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.statNumber, { color: colors.primary }]}>{stats.totalScans}</Text>
+            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Total Scans</Text>
+          </View>
+          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.statNumber, { color: '#10B981' }]}>{stats.todayScans}</Text>
+            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Today</Text>
+          </View>
+          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.statNumber, { color: '#F59E0B' }]}>{stats.pendingActions}</Text>
+            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Pending</Text>
+          </View>
         </View>
-        
+
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={styles.searchIcon}>🔍</Text>
+            <TextInput
+              style={[styles.searchInput, { color: colors.text }]}
+              placeholder="Search customers or cylinders..."
+              placeholderTextColor={colors.textSecondary}
+              value={search}
+              onChangeText={setSearch}
+            />
+          </View>
+        </View>
+
         {/* Search Results */}
         {search.trim().length > 0 && (
           <View style={[styles.searchResults, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            {/* Customer Results */}
             {customerResults.length > 0 && (
               <View style={styles.resultsSection}>
                 <Text style={[styles.resultsHeader, { color: colors.primary }]}>Customers</Text>
-                {loadingCustomers ? (
-                  <Text style={{ padding: 12, color: colors.primary }}>Loading customers...</Text>
-                ) : (
-                  customerResults.map(item => (
-                    <TouchableOpacity
-                      key={item.CustomerListID}
-                      style={[styles.customerItem, { borderBottomColor: colors.border }]}
-                      onPress={() => navigation.navigate('CustomerDetails', { customerId: item.CustomerListID })}
-                    >
-                      <Text style={[styles.customerName, { color: colors.text }]}>{item.name}</Text>
-                      <Text style={[styles.customerDetail, { color: colors.textSecondary }]}>Barcode: {item.barcode}</Text>
-                      <Text style={[styles.customerDetail, { color: colors.textSecondary }]}>Contact: {item.contact_details}</Text>
-                      <Text style={[styles.customerDetail, { color: colors.textSecondary }]}>Gases: {item.gases.length > 0 ? item.gases.join(', ') : 'None'}</Text>
-                    </TouchableOpacity>
-                  ))
-                )}
+                {customerResults.map(item => (
+                  <TouchableOpacity
+                    key={item.CustomerListID}
+                    style={[styles.resultItem, { borderBottomColor: colors.border }]}
+                    onPress={() => navigation.navigate('CustomerDetails', { customerId: item.CustomerListID })}
+                  >
+                    <Text style={[styles.resultTitle, { color: colors.text }]}>{item.name}</Text>
+                    <Text style={[styles.resultSubtitle, { color: colors.textSecondary }]}>
+                      ID: {item.CustomerListID} • Gases: {item.gases.length > 0 ? item.gases.join(', ') : 'None'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             )}
 
-            {/* Bottle Results */}
             {bottleResults.length > 0 && (
               <View style={styles.resultsSection}>
-                <Text style={[styles.resultsHeader, { color: colors.primary }]}>Bottles</Text>
-                {loadingBottles ? (
-                  <Text style={{ padding: 12, color: colors.primary }}>Loading bottles...</Text>
-                ) : (
-                  bottleResults.map(item => (
-                    <TouchableOpacity
-                      key={item.barcode_number}
-                      style={[styles.bottleItem, { borderBottomColor: colors.border }]}
-                      onPress={() => navigation.navigate('EditCylinder', { barcode: item.barcode_number })}
-                    >
-                      <Text style={[styles.bottleBarcode, { color: colors.text }]}>Barcode: {item.barcode_number}</Text>
-                      <Text style={[styles.bottleDetail, { color: colors.textSecondary }]}>Serial: {item.serial_number}</Text>
-                      <Text style={[styles.bottleDetail, { color: colors.textSecondary }]}>Customer: {item.customer_name || 'Unassigned'}</Text>
-                      <Text style={[styles.bottleDetail, { color: colors.textSecondary }]}>Product: {item.product_code} - {item.description}</Text>
-                    </TouchableOpacity>
-                  ))
-                )}
+                <Text style={[styles.resultsHeader, { color: colors.primary }]}>Cylinders</Text>
+                {bottleResults.map(item => (
+                  <TouchableOpacity
+                    key={item.barcode_number}
+                    style={[styles.resultItem, { borderBottomColor: colors.border }]}
+                    onPress={() => navigation.navigate('EditCylinder', { barcode: item.barcode_number })}
+                  >
+                    <Text style={[styles.resultTitle, { color: colors.text }]}>#{item.barcode_number}</Text>
+                    <Text style={[styles.resultSubtitle, { color: colors.textSecondary }]}>
+                      {item.customer_name || 'Unassigned'} • {item.product_code}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             )}
 
-            {/* No Results */}
             {!loadingCustomers && !loadingBottles && customerResults.length === 0 && bottleResults.length === 0 && (
-              <Text style={{ padding: 12, color: colors.textSecondary }}>No customers or bottles found.</Text>
+              <Text style={[styles.noResults, { color: colors.textSecondary }]}>No results found</Text>
             )}
           </View>
         )}
+
+        {/* Quick Actions */}
+        <View style={styles.quickActionsContainer}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Quick Actions</Text>
+          <View style={styles.actionsGrid}>
+            {QUICK_ACTIONS.map((action, index) => (
+              <TouchableOpacity
+                key={index}
+                style={[styles.actionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={() => handleQuickAction(action.action)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                  <Text style={styles.actionIconText}>{action.icon}</Text>
+                </View>
+                <Text style={[styles.actionTitle, { color: colors.text }]}>{action.title}</Text>
+                <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>{action.subtitle}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -260,183 +332,175 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   container: {
-    padding: 20,
-    paddingTop: 10,
-    flexGrow: 1,
+    flex: 1,
   },
-  topRow: {
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 18,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
-  iconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
-    borderWidth: 1,
+  headerContent: {
+    flex: 1,
   },
-  topIcon: {
-    fontSize: 20,
+  welcomeText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  appName: {
+    fontSize: 24,
     fontWeight: 'bold',
+    marginTop: 2,
   },
-  badge: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    borderRadius: 8,
-    minWidth: 16,
-    height: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 3,
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  grid: {
+  headerActions: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    marginBottom: 24,
+    gap: 12,
   },
-  gridButton: {
-    width: '47%',
-    aspectRatio: 1,
-    borderRadius: 24,
-    padding: 18,
-    justifyContent: 'flex-start',
-    alignItems: 'flex-start',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
-    borderWidth: 1,
-  },
-  gridIconCircle: {
+  headerButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
+    borderWidth: 1,
+    position: 'relative',
   },
-  gridIcon: {
-    fontSize: 24,
+  headerButtonIcon: {
+    fontSize: 20,
   },
-  gridTitle: {
-    fontSize: 18,
+  badge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    fontSize: 12,
     fontWeight: 'bold',
-    marginBottom: 4,
   },
-  searchRow: {
+  statsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    marginBottom: 24,
+    gap: 12,
+  },
+  statCard: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  statNumber: {
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  statLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  searchContainer: {
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
+  searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 18,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  searchIcon: {
+    fontSize: 20,
+    marginRight: 12,
   },
   searchInput: {
     flex: 1,
-    borderRadius: 16,
-    paddingVertical: 10,
-    paddingHorizontal: 18,
     fontSize: 16,
-    marginRight: 10,
-    borderWidth: 1,
-  },
-  micCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  micIcon: {
-    fontSize: 20,
-  },
-  filesRow: {
-    flexGrow: 0,
-    marginBottom: 10,
-  },
-  fileCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 16,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    marginRight: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  fileIcon: {
-    fontSize: 20,
-    marginRight: 8,
-  },
-  fileName: {
-    fontSize: 14,
   },
   searchResults: {
-    borderRadius: 14,
+    marginHorizontal: 20,
+    marginBottom: 24,
+    borderRadius: 16,
     borderWidth: 1,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
-    zIndex: 10,
+    overflow: 'hidden',
   },
   resultsSection: {
-    marginBottom: 8,
+    paddingVertical: 8,
   },
   resultsHeader: {
-    fontWeight: 'bold',
     fontSize: 14,
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 4,
+    fontWeight: 'bold',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     textTransform: 'uppercase',
   },
-  customerItem: {
-    padding: 14,
+  resultItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
   },
-  customerName: {
-    fontWeight: 'bold',
+  resultTitle: {
     fontSize: 16,
-    marginBottom: 2,
+    fontWeight: '600',
   },
-  customerDetail: {
-    fontSize: 13,
-    marginBottom: 1,
+  resultSubtitle: {
+    fontSize: 14,
+    marginTop: 4,
   },
-  bottleItem: {
-    padding: 14,
-    borderBottomWidth: 1,
-  },
-  bottleBarcode: {
-    fontWeight: 'bold',
+  noResults: {
+    textAlign: 'center',
+    padding: 20,
     fontSize: 16,
-    marginBottom: 2,
   },
-  bottleDetail: {
-    fontSize: 13,
-    marginBottom: 1,
+  quickActionsContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  actionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  actionCard: {
+    width: '48%',
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  actionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  actionIconText: {
+    fontSize: 24,
+  },
+  actionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  actionSubtitle: {
+    fontSize: 12,
+    textAlign: 'center',
   },
 }); 
