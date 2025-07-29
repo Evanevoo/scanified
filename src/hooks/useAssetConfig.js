@@ -9,7 +9,7 @@ const defaultConfig = {
   assetDisplayNamePlural: 'Gas Cylinders',
   primaryColor: '#2563eb',
   secondaryColor: '#1e40af',
-  appName: 'LessAnnoyingScan',
+  appName: 'Scanified',
   customTerminology: {
     scan: 'scan',
     track: 'track',
