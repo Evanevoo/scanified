@@ -74,13 +74,31 @@ export function PermissionsProvider({ children }) {
   }, [profile]);
 
   const can = (permission) => {
-    if (permissions.includes('*')) {
-      return true;
-    }
+    if (loading) return false;
+    // Check for wildcard permission (admins have all permissions)
+    if (permissions.includes('*')) return true;
+    // Check for specific permission
     return permissions.includes(permission);
   };
 
-  const value = { permissions, can, loading, isOrgAdmin };
+  // Helper functions for role checking
+  const isAdmin = () => {
+    return profile?.role === 'admin' || profile?.role === 'owner';
+  };
+
+  const isManager = () => {
+    return profile?.role === 'manager' || profile?.role === 'admin' || profile?.role === 'owner';
+  };
+
+  const isUser = () => {
+    return profile?.role === 'user';
+  };
+
+  const hasRole = (role) => {
+    return profile?.role === role;
+  };
+
+  const value = { permissions, can, loading, isOrgAdmin, isAdmin, isManager, isUser, hasRole };
 
   return (
     <PermissionsContext.Provider value={value}>

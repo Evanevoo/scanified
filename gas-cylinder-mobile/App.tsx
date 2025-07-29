@@ -20,8 +20,9 @@ import SettingsScreen from './screens/SettingsScreen';
 import UserManagementScreen from './screens/UserManagementScreen';
 
 // Import contexts
-import { ThemeProvider } from './context/ThemeContext';
+import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { SettingsProvider } from './context/SettingsContext';
+import { AssetProvider, useAssetConfig } from './context/AssetContext';
 
 // Import components
 import ErrorBoundary from './components/ErrorBoundary';
@@ -35,8 +36,17 @@ const Stack = createNativeStackNavigator();
 
 function AppContent() {
   const { user, organization, loading } = useAuth();
+  const { config: assetConfig, loading: assetLoading } = useAssetConfig();
   const [isInitializing, setIsInitializing] = useState(true);
   const [checkingOrg, setCheckingOrg] = useState(false);
+  const { theme } = useTheme();
+
+  // Provide default theme if undefined
+  const safeTheme = theme || {
+    primary: '#2563eb',
+    background: '#ffffff',
+    statusBar: 'dark-content' as const,
+  };
 
   useEffect(() => {
     // Simulate app initialization
@@ -83,143 +93,157 @@ function AppContent() {
   }, [user, organization]);
 
   // Show loading screen while initializing or checking auth
-  if (isInitializing || loading || checkingOrg) {
+  if (isInitializing || loading || checkingOrg || assetLoading) {
     return <LoadingScreen />;
   }
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator
-        initialRouteName={user ? "Home" : "Login"}
-        screenOptions={{
-          headerStyle: {
-            backgroundColor: '#3B82F6',
-            elevation: 0,
-            shadowOpacity: 0,
-            borderBottomWidth: 0,
-          },
-          headerTintColor: '#fff',
-          headerTitleStyle: {
-            fontWeight: '600',
-            fontSize: 18,
-          },
-          headerBackTitleVisible: false,
-          gestureEnabled: true,
-          cardStyleInterpolator: ({ current, layouts }) => {
-            return {
-              cardStyle: {
-                transform: [
-                  {
-                    translateX: current.progress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [layouts.screen.width, 0],
-                    }),
-                  },
-                ],
-              },
-            };
-          },
-        }}
-      >
-        {!user ? (
-          // Auth screens
-          <Stack.Screen 
-            name="Login" 
-            component={LoginScreen} 
-            options={{ 
-              title: 'LessAnnoyingScan',
-              headerShown: false 
-            }}
-          />
-        ) : (
-          // App screens (only shown when authenticated)
-          <>
-            <Stack.Screen 
-              name="Home" 
-              component={HomeScreen} 
-              options={{ 
-                title: 'Dashboard',
-                headerStyle: {
-                  backgroundColor: '#3B82F6',
-                  elevation: 4,
-                  shadowOpacity: 0.1,
-                  shadowRadius: 4,
-                  shadowOffset: { width: 0, height: 2 },
+    <>
+      <StatusBar style={safeTheme.statusBar as any} />
+      <NavigationContainer>
+        <Stack.Navigator
+          initialRouteName={user ? "Home" : "Login"}
+          screenOptions={{
+            headerStyle: {
+              backgroundColor: safeTheme.primary,
+              borderBottomWidth: 0,
+            } as any,
+            headerTintColor: '#ffffff',
+            headerTitleStyle: {
+              fontWeight: '600',
+              fontSize: 18,
+            },
+            headerBackTitleVisible: false,
+            gestureEnabled: true,
+            cardStyle: {
+              backgroundColor: safeTheme.background,
+            },
+            cardStyleInterpolator: ({ current, layouts }: any) => {
+              return {
+                cardStyle: {
+                  transform: [
+                    {
+                      translateX: current.progress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [layouts.screen.width, 0],
+                      }),
+                    },
+                  ],
                 },
+              };
+            },
+          }}
+        >
+          {!user ? (
+            // Auth screens
+            <Stack.Screen 
+              name="Login" 
+              component={LoginScreen} 
+              options={{ 
+                title: assetConfig.appName,
+                headerShown: false 
               }}
             />
-            <Stack.Screen 
-              name="ScanCylinders" 
-              component={ScanCylindersScreen} 
-              options={{ title: 'Scan Cylinders' }}
-            />
-            <Stack.Screen 
-              name="ScanCylindersAction" 
-              component={ScanCylindersActionScreen} 
-              options={{ title: 'Cylinder Actions' }}
-            />
-            <Stack.Screen 
-              name="AddCylinder" 
-              component={AddCylinderScreen} 
-              options={{ title: 'Add Cylinder' }}
-            />
-            <Stack.Screen 
-              name="EditCylinder" 
-              component={EditCylinderScreen} 
-              options={{ title: 'Edit Cylinder' }}
-            />
-            <Stack.Screen 
-              name="FillCylinder" 
-              component={FillCylinderScreen} 
-              options={{ title: 'Update Fill Status' }}
-            />
-            <Stack.Screen 
-              name="LocateCylinder" 
-              component={LocateCylinderScreen} 
-              options={{ title: 'Locate Cylinder' }}
-            />
-            <Stack.Screen 
-              name="CustomerDetails" 
-              component={CustomerDetailsScreen} 
-              options={{ title: 'Customer Details' }}
-            />
-            <Stack.Screen 
-              name="History" 
-              component={HistoryScreen} 
-              options={{ title: 'Scan History' }}
-            />
-            <Stack.Screen 
-              name="RecentScans" 
-              component={RecentScansScreen} 
-              options={{ title: 'Recent Scans' }}
-            />
-            <Stack.Screen 
-              name="Settings" 
-              component={SettingsScreen} 
-              options={{ title: 'Settings' }}
-            />
-            <Stack.Screen 
-              name="UserManagement" 
-              component={UserManagementScreen} 
-              options={{ title: 'User Management' }}
-            />
-          </>
-        )}
-      </Stack.Navigator>
-      <StatusBar style="auto" />
-    </NavigationContainer>
+          ) : (
+            // App screens (only shown when authenticated)
+            <>
+              <Stack.Screen 
+                name="Home" 
+                component={HomeScreen} 
+                options={{ 
+                  title: 'Dashboard',
+                  headerStyle: {
+                    backgroundColor: safeTheme.primary,
+                    shadowOpacity: 0.1,
+                    shadowRadius: 4,
+                    shadowOffset: { width: 0, height: 2 },
+                  } as any,
+                }}
+              />
+              <Stack.Screen 
+                name="ScanCylinders" 
+                component={ScanCylindersScreen} 
+                options={{ title: `Scan ${assetConfig.assetDisplayNamePlural}` }}
+              />
+              <Stack.Screen 
+                name="ScanCylindersAction" 
+                component={ScanCylindersActionScreen} 
+                options={{ title: `${assetConfig.assetDisplayName} Actions` }}
+              />
+              <Stack.Screen 
+                name="AddCylinder" 
+                component={AddCylinderScreen} 
+                options={{ title: `Add ${assetConfig.assetDisplayName}` }}
+              />
+              <Stack.Screen 
+                name="EditCylinder" 
+                component={EditCylinderScreen} 
+                options={{ title: `Edit ${assetConfig.assetDisplayName}` }}
+              />
+              <Stack.Screen 
+                name="FillCylinder" 
+                component={FillCylinderScreen} 
+                options={{ title: 'Update Status' }}
+              />
+              <Stack.Screen 
+                name="LocateCylinder" 
+                component={LocateCylinderScreen} 
+                options={{ title: `Locate ${assetConfig.assetDisplayName}` }}
+              />
+              <Stack.Screen 
+                name="CustomerDetails" 
+                component={CustomerDetailsScreen} 
+                options={{ title: 'Customer Details' }}
+              />
+              <Stack.Screen 
+                name="History" 
+                component={HistoryScreen} 
+                options={{ title: 'Scan History' }}
+              />
+              <Stack.Screen 
+                name="RecentScans" 
+                component={RecentScansScreen} 
+                options={{ title: 'Recent Scans' }}
+              />
+              <Stack.Screen 
+                name="Settings" 
+                component={SettingsScreen} 
+                options={{ title: 'Settings' }}
+              />
+              <Stack.Screen 
+                name="UserManagement" 
+                component={UserManagementScreen} 
+                options={{ title: 'User Management' }}
+              />
+            </>
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
+    </>
   );
+}
+
+// AuthGate component to delay children until user is authenticated
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const { loading, user } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <LoginScreen />;
+  return <>{children}</>;
 }
 
 export default function App() {
   return (
-    <ErrorBoundary>
+    <ThemeProvider>
       <SettingsProvider>
-        <ThemeProvider>
-          <AppContent />
-        </ThemeProvider>
+        <ErrorBoundary>
+          <AuthGate>
+            <AssetProvider>
+              <AppContent />
+            </AssetProvider>
+          </AuthGate>
+        </ErrorBoundary>
       </SettingsProvider>
-    </ErrorBoundary>
+    </ThemeProvider>
   );
 }
 

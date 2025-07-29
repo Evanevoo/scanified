@@ -7,7 +7,7 @@ export const useAuth = () => {
   const context = useContext(AuthContext);
   
   // Add debugging to track hook usage
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     console.log('useAuth hook called from:', new Error().stack?.split('\n')[2]?.trim() || 'unknown location');
   }
   
@@ -92,15 +92,22 @@ export const AuthProvider = ({ children }) => {
           // If profile not found, auto-create it
           if (profileError.code === 'PGRST116') {
             console.log('Auth: Creating profile for new user...');
+            
+            // Determine default role
+            const defaultRole = sessionUser.email?.endsWith('@yourcompany.com') ? 'admin' : 'user';
+            
             // Insert a new profile with minimal info
-            const { error: insertError } = await supabase
+            const { data: newProfile, error: insertError } = await supabase
               .from('profiles')
               .insert({
                 id: sessionUser.id,
                 email: sessionUser.email,
                 full_name: sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || '',
-                role: 'user',
-              });
+                role: defaultRole,
+              })
+              .select()
+              .single();
+              
             if (insertError) {
               console.error('Auth: Failed to create profile:', insertError);
               setProfile(null);
@@ -109,25 +116,14 @@ export const AuthProvider = ({ children }) => {
               authFlowInProgressRef.current = false;
               return;
             }
-            // Try fetching the profile again
-            ({ data: profileData, error: profileError } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', sessionUser.id)
-              .single());
-            if (profileError) {
-              console.error('Auth: Profile creation failed:', profileError);
-              setProfile(null);
-              setOrganization(null);
-              setLoading(false);
-              authFlowInProgressRef.current = false;
-              return;
-            }
+            
+            profileData = newProfile;
           } else {
             // Other errors: log and clear state
             console.error('Auth: Error loading profile:', profileError);
             setProfile(null);
             setOrganization(null);
+            setLoading(false);
             authFlowInProgressRef.current = false;
             return;
           }
@@ -147,25 +143,23 @@ export const AuthProvider = ({ children }) => {
           if (orgError) {
             console.error('Auth: Error fetching organization:', orgError);
             setOrganization(null);
-            authFlowInProgressRef.current = false;
-            return;
-          }
+          } else {
+            setOrganization(orgData);
+            console.log('Auth: Organization loaded:', orgData);
+            console.log('Auth: Organization logo_url:', orgData.logo_url);
 
-          setOrganization(orgData);
-          console.log('Auth: Organization loaded:', orgData);
-          console.log('Auth: Organization logo_url:', orgData.logo_url);
-
-          // Block access if trial expired
-          if (orgData.subscription_status === 'trial' && orgData.trial_end_date) {
-            const now = new Date();
-            const trialEnd = new Date(orgData.trial_end_date);
-            if (trialEnd < now) {
-              setTrialExpired(true);
+            // Block access if trial expired
+            if (orgData.subscription_status === 'trial' && orgData.trial_end_date) {
+              const now = new Date();
+              const trialEnd = new Date(orgData.trial_end_date);
+              if (trialEnd < now) {
+                setTrialExpired(true);
+              } else {
+                setTrialExpired(false);
+              }
             } else {
               setTrialExpired(false);
             }
-          } else {
-            setTrialExpired(false);
           }
         } else {
           // No organization associated with this profile
@@ -263,34 +257,29 @@ export const AuthProvider = ({ children }) => {
 
         // If organization data is provided, create organization
         if (organizationData && data.user) {
-          const { error: orgError } = await supabase
+          const { data: orgData, error: orgError } = await supabase
             .from('organizations')
             .insert({
               name: organizationData.name,
               slug: organizationData.slug,
               subscription_status: 'trial',
-              trial_ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+              trial_end_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
               max_users: 5,
               max_customers: 100,
               max_cylinders: 1000,
-            });
+            })
+            .select()
+            .single();
 
           if (orgError) throw orgError;
-
-          // Get the created organization
-          const { data: org } = await supabase
-            .from('organizations')
-            .select('id')
-            .eq('slug', organizationData.slug)
-            .single();
 
           // Update user profile with organization_id
           const { error: profileError } = await supabase
             .from('profiles')
             .update({
-              organization_id: org.id,
-              role: 'owner',
-              name,
+              organization_id: orgData.id,
+              role: 'admin',
+              full_name: name,
             })
             .eq('id', data.user.id);
 
@@ -347,11 +336,18 @@ export const AuthProvider = ({ children }) => {
     },
     updateProfile: async (updates) => {
       try {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('profiles')
           .update(updates)
-          .eq('id', user.id);
+          .eq('id', user.id)
+          .select()
+          .single();
+          
         if (error) throw error;
+        
+        // Update local state
+        setProfile(data);
+        
         return { error: null };
       } catch (error) {
         return { error };

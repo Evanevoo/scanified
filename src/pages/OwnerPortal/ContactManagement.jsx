@@ -21,17 +21,17 @@ export default function ContactManagement() {
 
   const [loading, setLoading] = useState(false);
   const [contactInfo, setContactInfo] = useState({
-    email: 'contact@lessannoyingscan.com',
-    phone: '+1 (555) 123-4567',
-    address: '123 Business St, Suite 100, City, State 12345',
-    businessName: 'Gas Cylinder Management',
+    email: '',
+    phone: '',
+    address: '',
+    businessName: '',
     businessHours: {
-      monday: '9:00 AM - 6:00 PM',
-      tuesday: '9:00 AM - 6:00 PM',
-      wednesday: '9:00 AM - 6:00 PM',
-      thursday: '9:00 AM - 6:00 PM',
-      friday: '9:00 AM - 6:00 PM',
-      saturday: '10:00 AM - 2:00 PM',
+      monday: '9:00 AM - 5:00 PM',
+      tuesday: '9:00 AM - 5:00 PM',
+      wednesday: '9:00 AM - 5:00 PM',
+      thursday: '9:00 AM - 5:00 PM',
+      friday: '9:00 AM - 5:00 PM',
+      saturday: 'Closed',
       sunday: 'Closed'
     }
   });

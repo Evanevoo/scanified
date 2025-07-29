@@ -2,81 +2,51 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
-import { ListItem, ListItemButton, ListItemIcon, ListItemText } from '@mui/material';
-import { AdminPanelSettings, Payment, People, Analytics, Storefront } from '@mui/icons-material';
+import { usePermissions } from '../context/PermissionsContext';
+import { ListItem, ListItemButton, ListItemIcon, ListItemText, TextField, InputAdornment } from '@mui/material';
 import {
-  Drawer, List, Divider, Box, Typography, Collapse
+  Drawer, List, Divider, Box, Typography, Collapse, Chip, IconButton, Tooltip
 } from '@mui/material';
 import {
-  Dashboard, LocalShipping, Assessment,
-  Receipt, Settings, Business, Notifications,
-  Inventory, Map, Schedule, AccountCircle, Security, Support, Build as BuildIcon, CheckCircle,
-  LocationOn as LocationIcon
+  Dashboard, People, Inventory, LocalShipping, Schedule, Receipt, 
+  AdminPanelSettings, Analytics, Payment, Settings, Assessment,
+  TrendingUp, Build as BuildIcon, Business as BusinessIcon,
+  LocalGasStation as TruckIcon, AutoFixHigh as AutomationIcon,
+  Navigation as RouteOptimizationIcon, People as CustomerServiceIcon, 
+  ExpandLess, ExpandMore, Work as WorkIcon, Person as PersonIcon,
+  Palette as PaletteIcon, Store as StoreIcon, Upload, History, CheckCircle,
+  Home as HomeIcon, LocationOn as LocationIcon, Search as SearchIcon,
+  Assignment as OrdersIcon, IntegrationInstructions as IntegrationIcon,
+  Report as ReportIcon, Inventory2 as InventoryIcon, Support,
+  Security as ShieldIcon, Build as WrenchIcon, Description as FileTextIcon,
+  Inventory as PackageIcon, Calculate as CalculatorIcon, Psychology as BrainIcon,
+  ChevronLeft, ChevronRight, Menu as MenuIcon
 } from '@mui/icons-material';
 
 const drawerWidth = 280;
+const collapsedWidth = 64;
 
 const Sidebar = ({ open, onClose }) => {
   const { profile, organization } = useAuth();
-  console.log('Sidebar profile:', profile);
+  const { can, isOrgAdmin } = usePermissions();
+  
   if (!profile) return null;
-  const [search, setSearch] = useState('');
-  const [suggestions, setSuggestions] = useState([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
+  
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [sections, setSections] = useState({
+    core: true,
+    operations: true,
+    analytics: false,
+    inventory: true,
+    advanced: false,
+    admin: false
+  });
   const navigate = useNavigate();
   const location = useLocation();
 
-  useEffect(() => {
-    if (!search) {
-      setSuggestions([]);
-      return;
-    }
-    const fetchSuggestions = async () => {
-      // Search assets (barcode/serial), customers (name/ID/phone), sales orders (number)
-      const [assets, customers, salesOrders] = await Promise.all([
-        supabase.from('bottles').select('id, barcode_number, serial_number, product_code, description').or(`barcode_number.ilike.%${search}%,serial_number.ilike.%${search}%,product_code.ilike.%${search}%`).limit(5),
-        supabase.from('customers').select('CustomerListID, name, phone').or(`CustomerListID.ilike.%${search}%,name.ilike.%${search}%,phone.ilike.%${search}%`).limit(5),
-        supabase.from('sales_orders').select('id, sales_order_number, customer_name').or(`sales_order_number.ilike.%${search}%,customer_name.ilike.%${search}%`).limit(5),
-      ]);
-      const assetResults = (assets.data || []).map(a => ({
-        type: 'asset',
-        id: a.barcode_number || a.serial_number || a.product_code,
-        label: a.description || a.product_code || a.barcode_number || a.serial_number,
-        sub: a.barcode_number || a.serial_number,
-      }));
-      const customerResults = (customers.data || []).map(c => ({
-        type: 'customer',
-        id: c.CustomerListID,
-        label: c.name,
-        sub: c.phone,
-      }));
-      const orderResults = (salesOrders.data || []).map(o => ({
-        type: 'order',
-        id: o.id,
-        label: o.sales_order_number,
-        sub: o.customer_name,
-      }));
-      setSuggestions([...assetResults, ...customerResults, ...orderResults]);
-    };
-    fetchSuggestions();
-  }, [search]);
-
-  const handleSelect = (item) => {
-    setShowSuggestions(false);
-    setSearch('');
-    if (item.type === 'asset') navigate(`/bottle/${item.id}`);
-    else if (item.type === 'customer') navigate(`/customer/${item.id}`);
-    else if (item.type === 'order') navigate(`/integration`); // Adjust to actual order detail page if exists
-    else alert('Unknown type');
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (suggestions.length > 0) {
-      handleSelect(suggestions[0]);
-    } else {
-      alert('No matching asset, customer, or order found.');
-    }
+  const toggleSection = (section) => {
+    setSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
   const handleNavigation = (path) => {
@@ -86,180 +56,282 @@ const Sidebar = ({ open, onClose }) => {
 
   const isActive = (path) => location.pathname === path;
 
-  const menuItems = profile?.role === 'owner' ? [
-    {
-      title: 'Dashboard',
-      path: '/dashboard',
-      icon: <Dashboard />, 
-      roles: ['owner']
+  // Owner gets special navigation ONLY if they don't have an organization
+  if (profile?.role === 'owner' && !organization) {
+    const ownerMenuItems = [
+      {
+        title: 'Dashboard',
+        path: '/dashboard',
+        icon: <Dashboard />, 
+        roles: ['owner']
+      },
+      {
+        title: 'Owner Portal',
+        path: '/owner-portal',
+        icon: <BusinessIcon />, 
+        roles: ['owner']
+      }
+    ];
+
+    return (
+      <Drawer
+        variant="permanent"
+        sx={{
+          width: drawerWidth,
+          flexShrink: 0,
+          '& .MuiDrawer-paper': {
+            width: drawerWidth,
+            boxSizing: 'border-box',
+            top: 0,
+            height: '100%',
+            zIndex: (theme) => theme.zIndex.drawer
+          },
+        }}
+      >
+        <Box sx={{ overflow: 'auto', mt: 8 }}>
+          {/* Organization Info */}
+          {organization && (
+            <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 2 }}>
+              {organization.logo_url ? (
+                <img 
+                  key={organization.logo_url}
+                  src={organization.logo_url} 
+                  alt="Org Logo" 
+                  style={{ height: 40, width: 40, objectFit: 'contain', borderRadius: 6, background: '#fff', border: '1px solid #eee' }}
+                  onError={(e) => {
+                    console.error('Failed to load logo:', organization.logo_url);
+                    e.target.style.display = 'none';
+                  }}
+                  onLoad={() => {
+                    console.log('Logo loaded successfully:', organization.logo_url);
+                  }}
+                />
+              ) : (
+                <Box 
+                  sx={{ 
+                    height: 40, 
+                    width: 40, 
+                    borderRadius: 6, 
+                    background: '#f0f0f0', 
+                    border: '1px solid #eee',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#999',
+                    fontSize: '12px'
+                  }}
+                >
+                  {organization.name?.charAt(0)?.toUpperCase() || '?'}
+                </Box>
+              )}
+              <Box>
+                <Typography variant="h6" color="primary">
+                  {organization.name}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Platform Owner • {profile?.full_name}
+                </Typography>
+              </Box>
+            </Box>
+          )}
+
+          {/* Main Menu */}
+          <List>
+            {ownerMenuItems.map((item) => (
+              <ListItem key={item.path} disablePadding>
+                <ListItemButton
+                  selected={isActive(item.path)}
+                  onClick={() => handleNavigation(item.path)}
+                  sx={{
+                    '&.Mui-selected': {
+                      backgroundColor: 'primary.light',
+                      '&:hover': {
+                        backgroundColor: 'primary.light',
+                      },
+                    },
+                  }}
+                >
+                  <ListItemIcon sx={{ color: isActive(item.path) ? 'primary.main' : 'inherit' }}>
+                    {item.icon}
+                  </ListItemIcon>
+                  <ListItemText 
+                    primary={item.title}
+                    sx={{ 
+                      '& .MuiListItemText-primary': {
+                        fontWeight: isActive(item.path) ? 600 : 400,
+                      }
+                    }}
+                  />
+                </ListItemButton>
+              </ListItem>
+            ))}
+          </List>
+        </Box>
+      </Drawer>
+    );
+  }
+
+  // Organized menu structure
+  const menuSections = {
+    core: {
+      title: 'Core',
+      icon: <HomeIcon />,
+      items: [
+        { title: 'Dashboard', path: '/dashboard', icon: <Dashboard />, roles: ['admin', 'user', 'manager'] },
+        { title: 'TrackAbout Dashboard', path: '/trackabout-dashboard', icon: <Analytics />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Customers', path: '/customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Locations', path: '/locations', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] }
+      ]
     },
-    {
-      title: 'Owner Portal',
-      path: '/owner-portal',
-      icon: <Business />, 
-      roles: ['owner']
-    }
-  ] : [
-    {
-      title: 'Dashboard',
-      path: '/dashboard',
-      icon: <Dashboard />, 
-      roles: ['admin', 'user', 'manager', 'owner']
+    operations: {
+      title: 'Operations',
+      icon: <LocalShipping />,
+      items: [
+        { title: 'Deliveries', path: '/deliveries', icon: <LocalShipping />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Rentals', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Scanned Orders', path: '/scanned-orders', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Lease Agreements', path: '/lease-agreements', icon: <WorkIcon />, roles: ['admin', 'manager'] },
+        { title: 'Generate Customer ID', path: '/generateid', icon: <IntegrationIcon />, roles: ['admin', 'user', 'manager'] }
+      ]
     },
-    {
-      title: 'Analytics',
-      path: '/analytics',
-      icon: <Analytics />, 
-      roles: ['admin', 'manager', 'owner']
-    },
-    {
-      title: 'Organization Analytics',
-      path: '/organization-analytics',
-      icon: <Analytics />, 
-      roles: ['admin', 'user', 'manager', 'owner']
-    },
-    {
-      title: 'Customers',
-      path: '/customers',
-      icon: <People />, 
-      roles: ['admin', 'user', 'manager', 'owner']
-    },
-    {
+    inventory: {
       title: 'Inventory',
-      path: '/inventory',
-      icon: <Inventory />, 
-      roles: ['admin', 'user', 'manager', 'owner']
+      icon: <Inventory />,
+      items: [
+        { title: 'Assets', path: '/assets', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Asset Management', path: '/inventory-management', icon: <Inventory />, roles: ['admin', 'user', 'manager'], dynamic: true, termKey: 'itemManagement' },
+        { title: 'Smart Inventory', path: '/smart-inventory', icon: <InventoryIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Asset History Lookup', path: '/asset-history-lookup', icon: <SearchIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'All Asset Movements', path: '/all-asset-movements', icon: <TrendingUp />, roles: ['admin', 'user', 'manager'] }
+      ]
     },
-    {
-      title: 'Deliveries',
-      path: '/deliveries',
-      icon: <LocalShipping />, 
-      roles: ['admin', 'user', 'manager', 'owner']
+    analytics: {
+      title: 'Analytics & Reports',
+      icon: <Analytics />,
+      items: [
+        { title: 'Analytics', path: '/analytics', icon: <Analytics />, roles: ['admin', 'manager'] },
+        { title: 'Organization Analytics', path: '/organization-analytics', icon: <Analytics />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Custom Reports', path: '/custom-reports', icon: <ReportIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Predictive Analytics', path: '/predictive-analytics', icon: <BrainIcon />, roles: ['admin', 'manager'] },
+        { title: 'Audit Management', path: '/audit-management', icon: <Assessment />, roles: ['admin', 'manager'] }
+      ]
     },
-    {
-      title: 'Rentals',
-      path: '/rentals',
-      icon: <Schedule />, 
-      roles: ['admin', 'user', 'manager', 'owner']
+    advanced: {
+      title: 'Advanced Features',
+      icon: <BuildIcon />,
+      items: [
+        { title: 'Hazmat Compliance', path: '/hazmat-compliance', icon: <ShieldIcon />, roles: ['admin', 'manager'] },
+        { title: 'Maintenance Workflows', path: '/maintenance-workflows', icon: <WrenchIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Truck Reconciliation', path: '/truck-reconciliation', icon: <TruckIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Chain of Custody', path: '/chain-of-custody', icon: <FileTextIcon />, roles: ['admin', 'manager'] },
+        { title: 'Palletization System', path: '/palletization-system', icon: <PackageIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Advanced Rental Calculations', path: '/advanced-rental-calculations', icon: <CalculatorIcon />, roles: ['admin', 'manager'] },
+        { title: 'Web Scanning', path: '/web-scanning', icon: <SearchIcon />, roles: ['admin', 'user', 'manager'] }
+      ]
     },
-    {
-      title: 'Invoices',
-      path: '/invoices',
-      icon: <Receipt />, 
-      roles: ['admin', 'user', 'manager', 'owner']
-    },
-    {
-      title: 'Bottle Management',
-      path: '/bottle-management',
-      icon: <Inventory />, 
-      roles: ['admin', 'user', 'manager', 'owner']
-    },
-    {
-      title: 'Smart Inventory',
-      path: '/smart-inventory',
-      icon: <InventoryIcon />, 
-      roles: ['admin', 'user', 'manager', 'owner']
-    },
-    {
-      title: 'Customer Portal',
-      path: '/customer-portal',
-      icon: <PersonIcon />, 
-      roles: ['admin', 'user', 'manager', 'owner']
-    },
-    {
-      title: 'Organization Tools',
-      path: '/organization-tools',
-      icon: <BuildIcon />, 
-      roles: ['admin', 'manager', 'owner']
-    },
-    {
-      title: 'User Management',
-      path: '/user-management',
-      icon: <AdminPanelSettings />, 
-      roles: ['admin', 'owner']
-    },
-    {
-      title: 'Billing',
-      path: '/billing',
-      icon: <Payment />, 
-      roles: ['admin', 'owner']
-    },
-    {
-      title: 'Reports',
-      path: '/reports',
-      icon: <Assessment />, 
-      roles: ['admin', 'manager', 'owner']
-    },
-    {
-      title: 'Settings',
-      path: '/settings',
-      icon: <Settings />, 
-      roles: ['admin', 'owner']
-    },
-    {
-      title: 'Support Center',
-      path: '/support',
-      icon: <Support />, 
-      roles: ['admin', 'user', 'manager', 'owner']
-    },
-    {
-      title: 'Data Utilities',
-      path: '/data-utilities',
-      icon: <BuildIcon />, 
-      roles: ['owner']
+    admin: {
+      title: 'Administration',
+      icon: <AdminPanelSettings />,
+      items: [
+        { title: 'Import Data', path: '/import', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Import Customers', path: '/import-customer-info', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
+        { title: 'File Format Manager', path: '/file-format-manager', icon: <Settings />, roles: ['admin', 'manager'] },
+        { title: 'Import Asset Balance', path: '/import-asset-balance', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Import Approvals', path: '/import-approvals', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Import History', path: '/import-approvals-history', icon: <History />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Organization Tools', path: '/organization-tools', icon: <BuildIcon />, roles: ['admin', 'manager'] },
+        { title: 'User Management', path: '/user-management', icon: <AdminPanelSettings />, roles: ['admin', 'manager'] },
+        { title: 'Customer Portal', path: '/customer-portal', icon: <PersonIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Billing', path: '/billing', icon: <Payment />, roles: ['admin'] },
+        { title: 'Settings', path: '/settings', icon: <Settings />, roles: ['admin'] },
+        { title: 'Support Center', path: '/support', icon: <Support />, roles: ['admin', 'user', 'manager'] }
+      ]
     }
-  ];
+  };
 
-  const filteredMenuItems = menuItems.filter(item => 
-    item.roles.includes(profile?.role)
-  );
+  // Filter items based on user role and search
+  const filteredSections = Object.entries(menuSections).reduce((acc, [key, section]) => {
+    const filteredItems = section.items.filter(item => {
+      const hasRole = item.roles.includes(profile?.role);
+      const matchesSearch = !searchTerm || 
+        item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.path.toLowerCase().includes(searchTerm.toLowerCase());
+      return hasRole && matchesSearch;
+    });
 
-  // Debug logging for organization and logo
-  console.log('Sidebar - Organization data:', organization);
-  console.log('Sidebar - Organization logo_url:', organization?.logo_url);
-  console.log('Sidebar - Organization name:', organization?.name);
-  console.log('Sidebar - Profile role:', profile?.role);
-  console.log('Sidebar - Profile organization_id:', profile?.organization_id);
+    if (filteredItems.length > 0) {
+      acc[key] = { ...section, items: filteredItems };
+    }
+    return acc;
+  }, {});
+
+  // Get user's role display name
+  const getRoleDisplayName = (role) => {
+    switch(role) {
+      case 'admin': return 'Administrator';
+      case 'manager': return 'Manager';
+      case 'user': return 'User';
+      default: return role;
+    }
+  };
 
   return (
     <Drawer
       variant="permanent"
       sx={{
-        width: drawerWidth,
+        width: isCollapsed ? collapsedWidth : drawerWidth,
         flexShrink: 0,
+        transition: 'width 0.3s ease',
         '& .MuiDrawer-paper': {
-          width: drawerWidth,
+          width: isCollapsed ? collapsedWidth : drawerWidth,
           boxSizing: 'border-box',
           top: 0,
           height: '100%',
-          zIndex: (theme) => theme.zIndex.drawer
+          zIndex: (theme) => theme.zIndex.drawer,
+          transition: 'width 0.3s ease',
+          overflowX: 'hidden'
         },
       }}
     >
-      <Box sx={{ overflow: 'auto', mt: 8 }}>
+      <Box sx={{ overflow: 'auto', mt: 8, height: 'calc(100% - 64px)' }}>
+        {/* Collapse Toggle */}
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: isCollapsed ? 'center' : 'flex-end', 
+          p: 1, 
+          borderBottom: 1, 
+          borderColor: 'divider' 
+        }}>
+          <Tooltip title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+            <IconButton 
+              onClick={() => setIsCollapsed(!isCollapsed)}
+              size="small"
+            >
+              {isCollapsed ? <ChevronRight /> : <ChevronLeft />}
+            </IconButton>
+          </Tooltip>
+        </Box>
+
         {/* Organization Info */}
-        {organization && (
+        {organization && !isCollapsed && (
           <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 2 }}>
             {organization.logo_url ? (
               <img 
                 key={organization.logo_url}
                 src={organization.logo_url} 
                 alt="Org Logo" 
-                style={{ height: 40, width: 40, objectFit: 'contain', borderRadius: 6, background: '#fff', border: '1px solid #eee' }}
+                style={{ height: 32, width: 32, objectFit: 'contain', borderRadius: 4, background: '#fff', border: '1px solid #eee' }}
                 onError={(e) => {
                   console.error('Failed to load logo:', organization.logo_url);
                   e.target.style.display = 'none';
-                }}
-                onLoad={() => {
-                  console.log('Logo loaded successfully:', organization.logo_url);
                 }}
               />
             ) : (
               <Box 
                 sx={{ 
-                  height: 40, 
-                  width: 40, 
-                  borderRadius: 6, 
+                  height: 32, 
+                  width: 32, 
+                  borderRadius: 4, 
                   background: '#f0f0f0', 
                   border: '1px solid #eee',
                   display: 'flex',
@@ -272,60 +344,115 @@ const Sidebar = ({ open, onClose }) => {
                 {organization.name?.charAt(0)?.toUpperCase() || '?'}
               </Box>
             )}
-            <Box>
-              <Typography variant="h6" color="primary">
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="subtitle2" color="primary" noWrap>
                 {organization.name}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {profile?.role} • {profile?.full_name}
+              <Typography variant="caption" color="text.secondary" noWrap>
+                {getRoleDisplayName(profile?.role)} • {profile?.full_name}
               </Typography>
             </Box>
           </Box>
         )}
 
-        {/* Main Menu */}
-        <List>
-          {filteredMenuItems.map((item) => (
-            <ListItem key={item.path} disablePadding>
-              <ListItemButton
-                selected={isActive(item.path)}
-                onClick={() => handleNavigation(item.path)}
-                sx={{
-                  '&.Mui-selected': {
-                    backgroundColor: 'primary.light',
-                    '&:hover': {
-                      backgroundColor: 'primary.light',
-                    },
-                  },
-                }}
-              >
-                <ListItemIcon sx={{ color: isActive(item.path) ? 'primary.main' : 'inherit' }}>
-                  {item.icon}
-                </ListItemIcon>
-                <ListItemText 
-                  primary={item.title}
-                  sx={{ 
-                    '& .MuiListItemText-primary': {
-                      fontWeight: isActive(item.path) ? 600 : 400,
-                    }
-                  }}
-                />
-              </ListItemButton>
-            </ListItem>
-          ))}
-        </List>
+        {/* Search */}
+        {!isCollapsed && (
+          <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
+            <TextField
+              size="small"
+              placeholder="Search menu..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              fullWidth
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" />
+                  </InputAdornment>
+                ),
+              }}
+            />
+          </Box>
+        )}
 
-        {/* Support */}
-        <Divider />
-        <List>
-          <ListItem disablePadding>
-            <ListItemButton>
-              <ListItemIcon>
-                <Support />
-              </ListItemIcon>
-              <ListItemText primary="Support" />
-            </ListItemButton>
-          </ListItem>
+        {/* Menu Sections */}
+        <List sx={{ py: 0 }}>
+          {Object.entries(filteredSections).map(([sectionKey, section]) => (
+            <React.Fragment key={sectionKey}>
+              {/* Section Header */}
+              <ListItem disablePadding>
+                <ListItemButton
+                  onClick={() => !isCollapsed && toggleSection(sectionKey)}
+                  sx={{ 
+                    py: 0.5,
+                    bgcolor: 'action.hover',
+                    borderBottom: 1,
+                    borderColor: 'divider'
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: isCollapsed ? 'auto' : 40 }}>
+                    <Tooltip title={isCollapsed ? section.title : ''} placement="right">
+                      {section.icon}
+                    </Tooltip>
+                  </ListItemIcon>
+                  {!isCollapsed && (
+                    <>
+                      <ListItemText 
+                        primary={section.title}
+                        primaryTypographyProps={{ 
+                          variant: 'body2', 
+                          fontWeight: 600,
+                          color: 'text.secondary'
+                        }}
+                      />
+                      {sections[sectionKey] ? <ExpandLess /> : <ExpandMore />}
+                    </>
+                  )}
+                </ListItemButton>
+              </ListItem>
+
+              {/* Section Items */}
+              <Collapse in={isCollapsed || sections[sectionKey]} timeout="auto" unmountOnExit>
+                <List component="div" disablePadding>
+                  {section.items.map((item) => (
+                    <ListItem key={item.path} disablePadding>
+                      <ListItemButton
+                        selected={isActive(item.path)}
+                        onClick={() => handleNavigation(item.path)}
+                        sx={{
+                          pl: isCollapsed ? 1 : 3,
+                          py: 0.5,
+                          '&.Mui-selected': {
+                            backgroundColor: 'primary.light',
+                            '&:hover': {
+                              backgroundColor: 'primary.light',
+                            },
+                          },
+                        }}
+                      >
+                        <ListItemIcon sx={{ minWidth: isCollapsed ? 'auto' : 40 }}>
+                          <Tooltip title={isCollapsed ? item.title : ''} placement="right">
+                            <Box sx={{ color: isActive(item.path) ? 'primary.main' : 'inherit' }}>
+                              {item.icon}
+                            </Box>
+                          </Tooltip>
+                        </ListItemIcon>
+                        {!isCollapsed && (
+                          <ListItemText 
+                            primary={item.title}
+                            primaryTypographyProps={{
+                              variant: 'body2',
+                              fontWeight: isActive(item.path) ? 600 : 400,
+                            }}
+                          />
+                        )}
+                      </ListItemButton>
+                    </ListItem>
+                  ))}
+                </List>
+              </Collapse>
+            </React.Fragment>
+          ))}
         </List>
       </Box>
     </Drawer>

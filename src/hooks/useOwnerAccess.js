@@ -22,8 +22,8 @@ export const useOwnerAccess = () => {
       // Check if user has owner role or is a super admin
       // You can customize this logic based on your requirements
       const isOwnerUser = profile?.role === 'owner' || 
-                         profile?.email === 'admin@yourcompany.com' || // Replace with your admin email
-                         user.email === 'admin@yourcompany.com'; // Replace with your admin email
+                         profile?.email === 'evankorial7@gmail.com' || // Owner email
+                         user.email === 'evankorial7@gmail.com'; // Owner email
 
       setIsOwner(isOwnerUser);
     } catch (error) {

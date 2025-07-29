@@ -8,6 +8,7 @@ import throttle from 'lodash.throttle';
 import debounce from 'lodash.debounce';
 import { toast } from 'react-hot-toast';
 import { getImportWorker, addImportWorkerListener, removeImportWorkerListener } from '../utils/ImportWorkerManager';
+import { TableSkeleton } from '../components/SmoothLoading';
 
 const REQUIRED_FIELDS = [
   { key: 'customer_id', label: 'Customer ID' },
@@ -677,11 +678,8 @@ export default function ImportInvoices() {
         </div>
       )}
       {loading && (
-        <div className="w-full bg-gray-200 rounded-full h-4 mb-4">
-          <div
-            className="bg-blue-600 h-4 rounded-full transition-all"
-            style={{ width: `${progress}%` }}
-          ></div>
+        <div className="w-full mb-4">
+          <TableSkeleton rows={5} columns={ALL_FIELDS.length + 3} />
         </div>
       )}
       {importing && (

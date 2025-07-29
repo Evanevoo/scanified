@@ -6,7 +6,7 @@ class PerformanceMonitor {
   constructor() {
     this.metrics = new Map();
     this.observers = new Map();
-    this.isEnabled = process.env.NODE_ENV === 'development';
+    this.isEnabled = import.meta.env.DEV;
   }
 
   /**
@@ -94,7 +94,7 @@ class PerformanceMonitor {
     const { name, duration } = metric;
     
     // Log to console in development
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       const color = duration > 1000 ? '🔴' : duration > 500 ? '🟡' : '🟢';
       console.log(`${color} ${name}: ${duration.toFixed(2)}ms`);
     }
@@ -315,4 +315,262 @@ export const getPerformanceStats = (name) => performanceMonitor.getStats(name);
 export const clearPerformanceMetrics = () => performanceMonitor.clearMetrics();
 export const exportPerformanceMetrics = () => performanceMonitor.exportMetrics();
 
-export default performanceMonitor; 
+// Performance optimization utilities
+import { useCallback, useMemo, useRef, useEffect, useState } from 'react';
+
+// Debounce hook for search inputs
+export const useDebounce = (value, delay) => {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+};
+
+// Throttle hook for scroll events
+export const useThrottle = (callback, delay) => {
+  const throttleRef = useRef(null);
+
+  return useCallback((...args) => {
+    if (!throttleRef.current) {
+      throttleRef.current = setTimeout(() => {
+        callback(...args);
+        throttleRef.current = null;
+      }, delay);
+    }
+  }, [callback, delay]);
+};
+
+// Virtual scrolling hook for large lists
+export const useVirtualScroll = (items, itemHeight, containerHeight) => {
+  const [scrollTop, setScrollTop] = useState(0);
+  
+  const visibleItems = useMemo(() => {
+    const startIndex = Math.floor(scrollTop / itemHeight);
+    const endIndex = Math.min(
+      startIndex + Math.ceil(containerHeight / itemHeight) + 1,
+      items.length
+    );
+    
+    return items.slice(startIndex, endIndex).map((item, index) => ({
+      ...item,
+      index: startIndex + index,
+      top: (startIndex + index) * itemHeight
+    }));
+  }, [items, itemHeight, containerHeight, scrollTop]);
+
+  const totalHeight = items.length * itemHeight;
+
+  return {
+    visibleItems,
+    totalHeight,
+    setScrollTop
+  };
+};
+
+// Optimized data fetching with caching
+export const useOptimizedFetch = (fetchFn, dependencies = [], cacheKey = null) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const cacheRef = useRef(new Map());
+
+  const fetchData = useCallback(async (...args) => {
+    const key = cacheKey || JSON.stringify(args);
+    
+    // Check cache first
+    if (cacheRef.current.has(key)) {
+      const cached = cacheRef.current.get(key);
+      if (Date.now() - cached.timestamp < 5 * 60 * 1000) { // 5 minutes cache
+        setData(cached.data);
+        return cached.data;
+      }
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await fetchFn(...args);
+      
+      // Cache the result
+      cacheRef.current.set(key, {
+        data: result,
+        timestamp: Date.now()
+      });
+      
+      setData(result);
+      return result;
+    } catch (err) {
+      setError(err);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchFn, cacheKey]);
+
+  useEffect(() => {
+    fetchData();
+  }, dependencies);
+
+  return { data, loading, error, refetch: fetchData };
+};
+
+// Optimistic updates hook
+export const useOptimisticUpdate = (initialData, updateFn) => {
+  const [data, setData] = useState(initialData);
+  const [pendingUpdates, setPendingUpdates] = useState(new Set());
+
+  const optimisticUpdate = useCallback(async (id, newData, serverUpdateFn) => {
+    // Add to pending updates
+    setPendingUpdates(prev => new Set([...prev, id]));
+    
+    // Optimistically update UI
+    setData(prevData => 
+      prevData.map(item => 
+        item.id === id ? { ...item, ...newData } : item
+      )
+    );
+
+    try {
+      // Perform server update
+      const result = await serverUpdateFn(id, newData);
+      
+      // Update with server response
+      setData(prevData => 
+        prevData.map(item => 
+          item.id === id ? { ...item, ...result } : item
+        )
+      );
+    } catch (error) {
+      // Revert optimistic update on error
+      setData(prevData => 
+        prevData.map(item => 
+          item.id === id ? { ...item, ...initialData.find(i => i.id === id) } : item
+        )
+      );
+      throw error;
+    } finally {
+      // Remove from pending updates
+      setPendingUpdates(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+    }
+  }, [initialData]);
+
+  return { data, optimisticUpdate, pendingUpdates };
+};
+
+// Smooth transitions utility
+export const createSmoothTransition = (duration = 300) => ({
+  transition: `all ${duration}ms cubic-bezier(0.4, 0, 0.2, 1)`,
+  willChange: 'transform, opacity'
+});
+
+// Intersection observer hook for lazy loading
+export const useIntersectionObserver = (callback, options = {}) => {
+  const targetRef = useRef(null);
+
+  useEffect(() => {
+    const target = targetRef.current;
+    if (!target) return;
+
+    const observer = new IntersectionObserver(callback, {
+      threshold: 0.1,
+      rootMargin: '50px',
+      ...options
+    });
+
+    observer.observe(target);
+
+    return () => observer.disconnect();
+  }, [callback, options]);
+
+  return targetRef;
+};
+
+// Preload images for smooth loading
+export const preloadImages = (urls) => {
+  return Promise.all(
+    urls.map(url => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = url;
+      });
+    })
+  );
+};
+
+// Memory efficient pagination
+export const usePagination = (data, pageSize = 20) => {
+  const [currentPage, setCurrentPage] = useState(1);
+  
+  const paginatedData = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    return data.slice(startIndex, endIndex);
+  }, [data, currentPage, pageSize]);
+
+  const totalPages = Math.ceil(data.length / pageSize);
+
+  const goToPage = useCallback((page) => {
+    setCurrentPage(Math.max(1, Math.min(page, totalPages)));
+  }, [totalPages]);
+
+  return {
+    currentPage,
+    totalPages,
+    paginatedData,
+    goToPage,
+    hasNext: currentPage < totalPages,
+    hasPrev: currentPage > 1
+  };
+};
+
+// Batch operations for better performance
+export const useBatchOperations = (batchSize = 100, delay = 10) => {
+  const [queue, setQueue] = useState([]);
+  const [processing, setProcessing] = useState(false);
+
+  const processBatch = useCallback(async (operations) => {
+    setProcessing(true);
+    
+    for (let i = 0; i < operations.length; i += batchSize) {
+      const batch = operations.slice(i, i + batchSize);
+      
+      await Promise.all(batch.map(op => op()));
+      
+      // Small delay between batches to prevent blocking
+      if (i + batchSize < operations.length) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    setProcessing(false);
+  }, [batchSize, delay]);
+
+  const addToQueue = useCallback((operation) => {
+    setQueue(prev => [...prev, operation]);
+  }, []);
+
+  const processQueue = useCallback(() => {
+    if (queue.length > 0) {
+      processBatch(queue);
+      setQueue([]);
+    }
+  }, [queue, processBatch]);
+
+  return { addToQueue, processQueue, processing, queueSize: queue.length };
+}; 

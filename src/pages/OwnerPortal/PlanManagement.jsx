@@ -8,6 +8,7 @@ import {
 import { Edit as EditIcon, Add as AddIcon } from '@mui/icons-material';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
+import { clearPlansCache } from '../../services/subscriptionService';
 import toast from 'react-hot-toast';
 
 const PlanManagement = () => {
@@ -96,6 +97,8 @@ const PlanManagement = () => {
       toast.error(`Failed to save plan: ${error.message}`);
     } else {
       toast.success(`Plan successfully ${isNewPlan ? 'created' : 'updated'}!`);
+      // Clear the plans cache so other components get fresh data
+      clearPlansCache();
       setIsModalOpen(false);
       fetchPlans();
     }

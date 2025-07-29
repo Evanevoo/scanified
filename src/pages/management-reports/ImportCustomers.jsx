@@ -2,7 +2,8 @@ import { useRef, useState } from 'react';
 import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
 import { supabase } from '../../supabase/client';
-import { Box, Paper, Typography } from '@mui/material';
+import { Box, Paper, Typography, Card, CardContent, Alert } from '@mui/material';
+import { TableSkeleton } from '../../components/SmoothLoading';
 
 const REQUIRED_FIELDS = [
   'Customer ID',
@@ -269,7 +270,12 @@ export default function ImportCustomers() {
         {step === 2 && (
           <div className="mb-4">
             {checkingExisting ? (
-              <div className="text-blue-600 font-semibold mb-2">Checking for existing customers...</div>
+              <Card sx={{ mb: 4 }}>
+                <CardContent>
+                  <Typography variant="h6" color="primary" mb={2}>Checking for existing customers...</Typography>
+                  <TableSkeleton rows={5} columns={4} />
+                </CardContent>
+              </Card>
             ) : (
               <>
                 {/* Mapping UI */}

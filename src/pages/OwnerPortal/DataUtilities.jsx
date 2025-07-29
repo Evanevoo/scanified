@@ -354,31 +354,13 @@ export default function DataUtilities() {
     
     // If manual review is selected and it's a dry run, show the review dialog
     if (strategy === 'manual_review' && utilityParams.dry_run) {
-      // Simulate finding duplicate cylinders that need manual review
-      const mockCylinderDuplicates = {
-        cylinders: [
-          {
-            id: 'cylinder_1',
-            serial: 'CYL-001-2024',
-            duplicates: [
-              { id: 'cyl_1', type: 'Oxygen', location: 'Warehouse A', status: 'In Service', created_at: '2024-01-15' },
-              { id: 'cyl_2', type: 'Oxygen', location: 'Warehouse B', status: 'In Service', created_at: '2024-01-20' },
-              { id: 'cyl_3', type: 'Oxygen', location: 'Customer Site', status: 'In Service', created_at: '2024-02-01' }
-            ]
-          },
-          {
-            id: 'cylinder_2',
-            serial: 'CYL-002-2024',
-            duplicates: [
-              { id: 'cyl_4', type: 'Nitrogen', location: 'Warehouse A', status: 'Available', created_at: '2024-01-10' },
-              { id: 'cyl_5', type: 'Nitrogen', location: 'Warehouse A', status: 'Available', created_at: '2024-01-25' }
-            ]
-          }
-        ]
+      // In a real implementation, this would fetch actual duplicate data from the database
+      const mockDuplicates = {
+        emails: []
       };
       
       // Set the duplicates and show the review dialog
-      setDuplicateResults(mockCylinderDuplicates);
+      setDuplicateResults(mockDuplicates);
       setDuplicateReviewDialog(true);
       setConfirmDialog(false);
       
@@ -386,7 +368,7 @@ export default function DataUtilities() {
         merged_duplicates: 0,
         dry_run: true,
         merge_strategy: strategy,
-        message: `Would merge ${mockCylinderDuplicates.cylinders.reduce((sum, group) => sum + group.duplicates.length, 0)} duplicate cylinders using ${strategy} strategy${orgFilter}`,
+        message: `Would merge ${mockDuplicates.emails.length} duplicate emails using ${strategy} strategy${orgFilter}`,
         requires_manual_review: true
       };
     }
@@ -466,27 +448,9 @@ export default function DataUtilities() {
     
     // If manual review is selected and it's a dry run, show the review dialog
     if (strategy === 'manual_review' && utilityParams.dry_run) {
-      // Simulate finding duplicates that need manual review
+      // In a real implementation, this would fetch actual duplicate data from the database
       const mockDuplicates = {
-        emails: [
-          {
-            id: 'email_1',
-            email: 'john.doe@example.com',
-            duplicates: [
-              { id: 'cust_1', name: 'John Doe', phone: '555-0101', created_at: '2024-01-15', organization: 'ABC Corp' },
-              { id: 'cust_2', name: 'John Doe', phone: '555-0102', created_at: '2024-01-20', organization: 'ABC Corp' },
-              { id: 'cust_3', name: 'John Doe', phone: '555-0103', created_at: '2024-02-01', organization: 'ABC Corp' }
-            ]
-          },
-          {
-            id: 'email_2',
-            email: 'jane.smith@example.com',
-            duplicates: [
-              { id: 'cust_4', name: 'Jane Smith', phone: '555-0201', created_at: '2024-01-10', organization: 'XYZ Inc' },
-              { id: 'cust_5', name: 'Jane Smith', phone: '555-0202', created_at: '2024-01-25', organization: 'XYZ Inc' }
-            ]
-          }
-        ]
+        emails: []
       };
       
       // Set the duplicates and show the review dialog
@@ -498,7 +462,7 @@ export default function DataUtilities() {
         fixed_duplicates: 0,
         dry_run: true,
         merge_strategy: strategy,
-        message: `Would fix ${mockDuplicates.emails.reduce((sum, group) => sum + group.duplicates.length, 0)} duplicate emails using ${strategy} strategy`,
+        message: `Would fix ${mockDuplicates.emails.length} duplicate emails using ${strategy} strategy`,
         requires_manual_review: true
       };
     }

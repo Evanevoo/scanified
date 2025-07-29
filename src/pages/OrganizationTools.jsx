@@ -76,41 +76,206 @@ export default function OrganizationTools() {
   const loadValidationResults = async () => {
     setLoading(true);
     try {
-      // In production, these would be real Supabase queries filtered by organization
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      if (!organization?.id) {
+        console.error('No organization ID available');
+        return;
+      }
+
+      // Fetch real data from Supabase
+      const [customersResult, cylindersResult, deliveriesResult, locationsResult] = await Promise.all([
+        // Customers
+        supabase
+          .from('customers')
+          .select('id, name, email, phone')
+          .eq('organization_id', organization.id),
+        
+        // Cylinders/Bottles
+        supabase
+          .from('bottles')
+          .select('id, serial_number, cylinder_type, status')
+          .eq('organization_id', organization.id),
+        
+        // Deliveries
+        supabase
+          .from('deliveries')
+          .select('id, delivery_date, status, customer_id')
+          .eq('organization_id', organization.id),
+        
+        // Locations
+        supabase
+          .from('locations')
+          .select('id, name, address, city, state')
+          .eq('organization_id', organization.id)
+      ]);
+
+      // Process customers
+      const customers = customersResult.data || [];
+      const customerIssues = [];
+      let validCustomers = 0;
       
+      customers.forEach(customer => {
+        let hasIssue = false;
+        if (!customer.email) {
+          hasIssue = true;
+        }
+        if (!customer.name) {
+          hasIssue = true;
+        }
+        if (!hasIssue) validCustomers++;
+      });
+
+      const missingEmails = customers.filter(c => !c.email).length;
+      const missingNames = customers.filter(c => !c.name).length;
+      
+      if (missingEmails > 0) {
+        customerIssues.push({
+          type: 'missing_email',
+          count: missingEmails,
+          description: 'Customers missing email addresses'
+        });
+      }
+      if (missingNames > 0) {
+        customerIssues.push({
+          type: 'missing_name',
+          count: missingNames,
+          description: 'Customers missing names'
+        });
+      }
+
+      // Process cylinders
+      const cylinders = cylindersResult.data || [];
+      const cylinderIssues = [];
+      let validCylinders = 0;
+      
+      cylinders.forEach(cylinder => {
+        let hasIssue = false;
+        if (!cylinder.serial_number) {
+          hasIssue = true;
+        }
+        if (!cylinder.cylinder_type) {
+          hasIssue = true;
+        }
+        if (!hasIssue) validCylinders++;
+      });
+
+      const missingSerials = cylinders.filter(c => !c.serial_number).length;
+      const missingTypes = cylinders.filter(c => !c.cylinder_type).length;
+      
+      if (missingSerials > 0) {
+        cylinderIssues.push({
+          type: 'missing_serial',
+          count: missingSerials,
+          description: 'Cylinders missing serial numbers'
+        });
+      }
+      if (missingTypes > 0) {
+        cylinderIssues.push({
+          type: 'missing_type',
+          count: missingTypes,
+          description: 'Cylinders missing type information'
+        });
+      }
+
+      // Process deliveries
+      const deliveries = deliveriesResult.data || [];
+      const deliveryIssues = [];
+      let validDeliveries = 0;
+      
+      deliveries.forEach(delivery => {
+        let hasIssue = false;
+        if (!delivery.delivery_date) {
+          hasIssue = true;
+        }
+        if (!delivery.customer_id) {
+          hasIssue = true;
+        }
+        if (!hasIssue) validDeliveries++;
+      });
+
+      const missingDates = deliveries.filter(d => !d.delivery_date).length;
+      const missingCustomers = deliveries.filter(d => !d.customer_id).length;
+      
+      if (missingDates > 0) {
+        deliveryIssues.push({
+          type: 'missing_date',
+          count: missingDates,
+          description: 'Deliveries missing delivery dates'
+        });
+      }
+      if (missingCustomers > 0) {
+        deliveryIssues.push({
+          type: 'missing_customer',
+          count: missingCustomers,
+          description: 'Deliveries missing customer information'
+        });
+      }
+
+      // Process locations
+      const locations = locationsResult.data || [];
+      const locationIssues = [];
+      let validLocations = 0;
+      
+      locations.forEach(location => {
+        let hasIssue = false;
+        if (!location.address) {
+          hasIssue = true;
+        }
+        if (!location.name) {
+          hasIssue = true;
+        }
+        if (!hasIssue) validLocations++;
+      });
+
+      const missingAddresses = locations.filter(l => !l.address).length;
+      const missingLocationNames = locations.filter(l => !l.name).length;
+      
+      if (missingAddresses > 0) {
+        locationIssues.push({
+          type: 'missing_address',
+          count: missingAddresses,
+          description: 'Locations missing addresses'
+        });
+      }
+      if (missingLocationNames > 0) {
+        locationIssues.push({
+          type: 'missing_name',
+          count: missingLocationNames,
+          description: 'Locations missing names'
+        });
+      }
+
+      // Set validation results with real data
       setValidationResults({
         customers: { 
-          valid: 245, 
-          invalid: 2, 
-          issues: [
-            { type: 'missing_email', count: 1, description: 'Customer missing email address' },
-            { type: 'duplicate_name', count: 1, description: 'Duplicate customer names found' }
-          ] 
+          valid: validCustomers, 
+          invalid: customers.length - validCustomers, 
+          issues: customerIssues
         },
         cylinders: { 
-          valid: 890, 
-          invalid: 5, 
-          issues: [
-            { type: 'missing_serial', count: 3, description: 'Cylinders missing serial numbers' },
-            { type: 'invalid_type', count: 2, description: 'Invalid cylinder types' }
-          ] 
+          valid: validCylinders, 
+          invalid: cylinders.length - validCylinders, 
+          issues: cylinderIssues
         },
         deliveries: { 
-          valid: 156, 
-          invalid: 0, 
-          issues: [] 
+          valid: validDeliveries, 
+          invalid: deliveries.length - validDeliveries, 
+          issues: deliveryIssues
         },
         locations: { 
-          valid: 89, 
-          invalid: 1, 
-          issues: [
-            { type: 'missing_address', count: 1, description: 'Location missing address' }
-          ] 
+          valid: validLocations, 
+          invalid: locations.length - validLocations, 
+          issues: locationIssues
         }
       });
     } catch (error) {
       console.error('Error loading validation results:', error);
+      // Set empty results on error
+      setValidationResults({
+        customers: { valid: 0, invalid: 0, issues: [] },
+        cylinders: { valid: 0, invalid: 0, issues: [] },
+        deliveries: { valid: 0, invalid: 0, issues: [] },
+        locations: { valid: 0, invalid: 0, issues: [] }
+      });
     } finally {
       setLoading(false);
     }
@@ -151,30 +316,10 @@ export default function OrganizationTools() {
       await new Promise(resolve => setTimeout(resolve, 5000));
       
       if (cleanupParams.dryRun) {
-        // Simulate finding duplicates that need manual review
+        // In a real implementation, this would fetch actual duplicate data from the database
         const mockDuplicates = {
-          emails: [
-            {
-              id: 'email_1',
-              email: 'john.doe@example.com',
-              duplicates: [
-                { id: 'cust_1', name: 'John Doe', phone: '555-0101', created_at: '2024-01-15' },
-                { id: 'cust_2', name: 'John Doe', phone: '555-0102', created_at: '2024-01-20' },
-                { id: 'cust_3', name: 'John Doe', phone: '555-0103', created_at: '2024-02-01' }
-              ]
-            }
-          ],
-          customers: [
-            {
-              id: 'customer_1',
-              name: 'ABC Company',
-              duplicates: [
-                { id: 'cust_4', address: '123 Main St', phone: '555-0201', created_at: '2024-01-10' },
-                { id: 'cust_5', address: '123 Main Street', phone: '555-0201', created_at: '2024-01-15' }
-              ]
-            }
-          ],
-          cylinders: []
+          emails: [],
+          customers: []
         };
         
         setDuplicateResults(mockDuplicates);

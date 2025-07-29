@@ -3,11 +3,15 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from './LoadingSpinner';
 import MainLayout from './MainLayout';
-import { Alert, Box } from '@mui/material';
+import { Alert, Box, Button, Card, CardContent, Typography, Grid } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
+import PaymentIcon from '@mui/icons-material/Payment';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 
-const ProtectedRoute = () => {
-  const { user, profile, organization, loading, trialExpired } = useAuth();
+const ProtectedRoute = ({ children }) => {
+  const { user, profile, organization, loading, trialExpired, signOut } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
 
   // Log the state for debugging purposes.
   console.log('ProtectedRoute:', { 
@@ -30,11 +34,125 @@ const ProtectedRoute = () => {
   }
 
   if (trialExpired) {
+    // Development bypass for trial expired check
+    if (import.meta.env.DEV && location.search.includes('bypass-trial')) {
+      console.log('Dev: Bypassing trial expired check via URL parameter');
+      return children || <Outlet />;
+    }
+    
     return (
-      <Box sx={{ p: 6 }}>
-        <Alert severity="error">
-          Your trial has expired. Please contact support or upgrade to a paid plan to regain access.
-        </Alert>
+      <Box sx={{ 
+        minHeight: '100vh', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center',
+        bgcolor: '#f5f5f5',
+        p: 3
+      }}>
+        <Card sx={{ maxWidth: 800, width: '100%' }}>
+          <CardContent sx={{ p: 4 }}>
+            <Typography variant="h4" gutterBottom align="center" color="error">
+              Your Trial Has Expired
+            </Typography>
+            
+            <Typography variant="body1" paragraph align="center" color="text.secondary">
+              To continue using LessAnnoyingScan, please choose one of the options below:
+            </Typography>
+
+            <Grid container spacing={3} sx={{ mt: 2 }}>
+              {/* Upgrade to Paid Plan */}
+              <Grid item xs={12} md={6}>
+                <Card variant="outlined" sx={{ height: '100%', bgcolor: 'primary.light', borderColor: 'primary.main' }}>
+                  <CardContent sx={{ textAlign: 'center', p: 3 }}>
+                    <PaymentIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
+                    <Typography variant="h5" gutterBottom>
+                      Upgrade to Full Access
+                    </Typography>
+                    <Typography variant="body2" paragraph color="text.secondary">
+                      Get unlimited access with our affordable monthly or yearly plans. 
+                      Full features, no restrictions.
+                    </Typography>
+                    <Typography variant="h6" color="primary" gutterBottom>
+                      Starting at $29/month
+                    </Typography>
+                    <Button 
+                      variant="contained" 
+                      color="primary" 
+                      size="large"
+                      fullWidth
+                      onClick={() => navigate('/billing')}
+                      sx={{ mt: 2 }}
+                    >
+                      View Plans & Upgrade
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* Extend Trial */}
+              <Grid item xs={12} md={6}>
+                <Card variant="outlined" sx={{ height: '100%' }}>
+                  <CardContent sx={{ textAlign: 'center', p: 3 }}>
+                    <AccessTimeIcon sx={{ fontSize: 48, color: 'warning.main', mb: 2 }} />
+                    <Typography variant="h5" gutterBottom>
+                      Extend Your Trial
+                    </Typography>
+                    <Typography variant="body2" paragraph color="text.secondary">
+                      Need more time to evaluate? Extend your trial for 7 more days 
+                      with a one-time payment.
+                    </Typography>
+                    <Typography variant="h6" color="warning.dark" gutterBottom>
+                      $10 for 7 days
+                    </Typography>
+                    <Button 
+                      variant="outlined" 
+                      color="warning" 
+                      size="large"
+                      fullWidth
+                      onClick={() => navigate('/billing?action=extend-trial')}
+                      sx={{ mt: 2 }}
+                    >
+                      Extend Trial
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+
+            <Box sx={{ mt: 4, textAlign: 'center' }}>
+              <Typography variant="body2" color="text.secondary">
+                Questions? <Button size="small" onClick={() => navigate('/contact')}>Contact Support</Button>
+              </Typography>
+              <Box sx={{ mt: 2 }}>
+                <Button 
+                  variant="text" 
+                  size="small" 
+                  onClick={async () => {
+                    await signOut();
+                    navigate('/');
+                  }}
+                  sx={{ mr: 2 }}
+                >
+                  Logout
+                </Button>
+                {import.meta.env.DEV && (
+                  <Button 
+                    variant="text" 
+                    size="small" 
+                    color="warning"
+                    onClick={async () => {
+                      // Development bypass - clear trial expired state and go to dashboard
+                      console.log('Dev: Bypassing trial check');
+                      navigate('/dashboard');
+                    }}
+                  >
+                    Dev: Bypass Trial Check
+                  </Button>
+                )}
+              </Box>
+            </Box>
+          </CardContent>
+        </Card>
       </Box>
     );
   }
@@ -47,11 +165,24 @@ const ProtectedRoute = () => {
   }
 
   if (user && profile && !organization) {
-    // Redirect to organization setup if not already there
-    if (location.pathname !== '/setup') {
-      return <Navigate to="/setup" replace />;
+    // Platform owners don't need an organization
+    if (profile.role === 'owner') {
+      return (
+        <MainLayout profile={profile}>
+          {children || <Outlet />}
+        </MainLayout>
+      );
     }
-    return <Outlet />;
+    
+    // Only redirect to organization setup for routes that require an organization
+    // Allow access to public pages and registration pages
+    const publicRoutes = ['/', '/landing', '/login', '/register', '/setup', '/contact', '/pricing', '/faq', '/reviews', '/privacy-policy', '/terms-of-service', '/documentation'];
+    const isPublicRoute = publicRoutes.includes(location.pathname);
+    
+    if (!isPublicRoute && location.pathname !== '/register' && location.pathname !== '/setup') {
+      return <Navigate to="/register" replace />;
+    }
+    return children || <Outlet />;
   }
 
   if (user && profile && organization) {
@@ -59,7 +190,7 @@ const ProtectedRoute = () => {
     // render the requested page within the main layout, passing the profile.
     return (
       <MainLayout profile={profile}>
-        <Outlet />
+        {children || <Outlet />}
       </MainLayout>
     );
   }

@@ -1,20 +1,56 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-
-const mockData = [
-  { id: 1, asset: 'Cylinder A', type: 'Fill', date: '2024-05-01', quantity: 10, user: 'John Doe' },
-  { id: 2, asset: 'Cylinder B', type: 'Rental', date: '2024-05-02', quantity: 5, user: 'Jane Smith' },
-  { id: 3, asset: 'Cylinder C', type: 'Return', date: '2024-05-03', quantity: 2, user: 'John Doe' },
-];
+import { supabase } from '../supabase/client';
+import { useAuth } from '../hooks/useAuth';
 
 export default function AssetTransactionsReport() {
   const [filter, setFilter] = useState('');
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-  const filtered = mockData.filter(row =>
-    row.asset.toLowerCase().includes(filter.toLowerCase()) ||
-    row.type.toLowerCase().includes(filter.toLowerCase()) ||
-    row.user.toLowerCase().includes(filter.toLowerCase())
+  const { profile } = useAuth();
+
+  useEffect(() => {
+    fetchTransactions();
+  }, [profile]);
+
+  const fetchTransactions = async () => {
+    if (!profile?.organization_id) return;
+    
+    setLoading(true);
+    try {
+      // Fetch asset transactions from database
+      const { data: transactions, error } = await supabase
+        .from('asset_transactions')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setData(transactions || []);
+    } catch (error) {
+      console.error('Error fetching transactions:', error);
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filtered = data.filter(row =>
+    row.asset_name?.toLowerCase().includes(filter.toLowerCase()) ||
+    row.transaction_type?.toLowerCase().includes(filter.toLowerCase()) ||
+    row.user_name?.toLowerCase().includes(filter.toLowerCase())
   );
+
+  if (loading) {
+    return (
+      <div className="p-8">
+        <div className="flex justify-center items-center h-64">
+          <div className="text-lg">Loading transactions...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8">
@@ -28,28 +64,35 @@ export default function AssetTransactionsReport() {
           onChange={e => setFilter(e.target.value)}
         />
       </div>
-      <table className="min-w-full bg-white border">
-        <thead>
-          <tr>
-            <th className="border px-4 py-2">Asset</th>
-            <th className="border px-4 py-2">Type</th>
-            <th className="border px-4 py-2">Date</th>
-            <th className="border px-4 py-2">Quantity</th>
-            <th className="border px-4 py-2">User</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map(row => (
-            <tr key={row.id}>
-              <td className="border px-4 py-2">{row.asset}</td>
-              <td className="border px-4 py-2">{row.type}</td>
-              <td className="border px-4 py-2">{row.date}</td>
-              <td className="border px-4 py-2">{row.quantity}</td>
-              <td className="border px-4 py-2">{row.user}</td>
+      
+      {filtered.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-gray-500">No transactions found.</p>
+        </div>
+      ) : (
+        <table className="min-w-full bg-white border">
+          <thead>
+            <tr className="bg-gray-100">
+              <th className="border px-4 py-2">Asset</th>
+              <th className="border px-4 py-2">Type</th>
+              <th className="border px-4 py-2">Date</th>
+              <th className="border px-4 py-2">Quantity</th>
+              <th className="border px-4 py-2">User</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {filtered.map(row => (
+              <tr key={row.id}>
+                <td className="border px-4 py-2">{row.asset_name}</td>
+                <td className="border px-4 py-2">{row.transaction_type}</td>
+                <td className="border px-4 py-2">{new Date(row.created_at).toLocaleDateString()}</td>
+                <td className="border px-4 py-2">{row.quantity}</td>
+                <td className="border px-4 py-2">{row.user_name}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 } 

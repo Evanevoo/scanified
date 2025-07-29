@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import Papa from 'papaparse';
 import { Box, Paper, Typography, Button, TextField, Alert, MenuItem, Snackbar } from '@mui/material';
 import { findCustomer, normalizeCustomerName, extractCustomerId } from '../utils/customerMatching';
+import { TableSkeleton } from '../components/SmoothLoading';
 
 const colorMap = {
   'blue-600': '#2563eb',
@@ -599,6 +600,12 @@ const ImportCustomerInfo = () => {
                 Cancel
               </Button>
             </Box>
+          </Box>
+        )}
+
+        {loading && (
+          <Box sx={{ my: 4 }}>
+            <TableSkeleton rows={5} columns={3} />
           </Box>
         )}
 

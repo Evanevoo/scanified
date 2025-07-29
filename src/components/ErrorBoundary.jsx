@@ -116,7 +116,7 @@ class ErrorBoundary extends React.Component {
               </Link>
             </Typography>
 
-            {process.env.NODE_ENV === 'development' && this.state.error && (
+            {import.meta.env.DEV && this.state.error && (
               <Alert severity="error" sx={{ mt: 3, textAlign: 'left' }}>
                 <Typography variant="subtitle2" gutterBottom>
                   Error Details (Development):

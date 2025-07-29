@@ -10,10 +10,10 @@ export const generateInvoicePDF = (invoice, customer, rentals) => {
   
   // Company Info
   doc.setFontSize(10);
-  doc.text('Gas Cylinder Rental Company', 20, 40);
-  doc.text('123 Business Street', 20, 45);
-  doc.text('City, State 12345', 20, 50);
-  doc.text('Phone: (555) 123-4567', 20, 55);
+  doc.text(import.meta.env.VITE_COMPANY_NAME || 'Your Company Name', 20, 40);
+  doc.text(import.meta.env.VITE_COMPANY_ADDRESS || 'Your Business Address', 20, 45);
+  doc.text(import.meta.env.VITE_COMPANY_CITY || 'City, State ZIP', 20, 50);
+  doc.text(`Phone: ${import.meta.env.VITE_COMPANY_PHONE || 'Your Phone Number'}`, 20, 55);
   
   // Invoice Details
   doc.setFontSize(12);

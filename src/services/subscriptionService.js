@@ -1,30 +1,81 @@
 import { supabase } from '../supabase/client';
 
-const SUBSCRIPTION_PLANS = {
-  basic: {
-    name: 'Basic',
-    price: 29,
-    users: 5,
-    customers: 100,
-    bottles: 1000,
-    features: ['Basic reporting', 'Email support', 'Mobile app access']
-  },
-  pro: {
-    name: 'Pro',
-    price: 99,
-    users: 15,
-    customers: 500,
-    bottles: 5000,
-    features: ['Advanced reporting', 'Priority support', 'API access', 'Custom branding']
-  },
-  enterprise: {
-    name: 'Enterprise',
-    price: 299,
-    users: 999999, // Very high number to represent unlimited
-    customers: 999999, // Very high number to represent unlimited
-    bottles: 999999, // Very high number to represent unlimited
-    features: ['All Pro features', 'Dedicated support', 'Custom integrations', 'SLA guarantee']
+// Cache for subscription plans to avoid repeated database calls
+let cachedPlans = null;
+let cacheTimestamp = null;
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+const fetchSubscriptionPlans = async () => {
+  // Check if cache is valid
+  if (cachedPlans && cacheTimestamp && (Date.now() - cacheTimestamp < CACHE_DURATION)) {
+    return cachedPlans;
   }
+
+  try {
+    const { data, error } = await supabase
+      .from('subscription_plans')
+      .select('*')
+      .eq('is_active', true)
+      .order('price', { ascending: true });
+
+    if (error) throw error;
+
+    // Convert to legacy format for compatibility
+    const plansObject = {};
+    (data || []).forEach(plan => {
+      const key = plan.name.toLowerCase().replace(/\s+/g, '');
+      plansObject[key] = {
+        id: plan.id,
+        name: plan.name,
+        price: plan.price,
+        users: plan.max_users || 999999,
+        customers: plan.max_customers || 999999,
+        bottles: plan.max_cylinders || 999999,
+        features: Array.isArray(plan.features) ? plan.features : []
+      };
+    });
+
+    // Update cache
+    cachedPlans = plansObject;
+    cacheTimestamp = Date.now();
+    
+    return plansObject;
+  } catch (error) {
+    console.error('Error fetching subscription plans:', error);
+    // Return fallback plans if database fetch fails
+    return {
+      basic: {
+        name: 'Basic',
+        price: 29,
+        users: 5,
+        customers: 100,
+        bottles: 1000,
+        features: ['Basic reporting', 'Email support', 'Mobile app access']
+      },
+      pro: {
+        name: 'Pro',
+        price: 99,
+        users: 15,
+        customers: 500,
+        bottles: 5000,
+        features: ['Advanced reporting', 'Priority support', 'API access', 'Custom branding']
+      },
+      enterprise: {
+        name: 'Enterprise',
+        price: 299,
+        users: 999999,
+        customers: 999999,
+        bottles: 999999,
+        features: ['All Pro features', 'Dedicated support', 'Custom integrations', 'SLA guarantee']
+      }
+    };
+  }
+};
+
+// Function to clear cache when plans are updated
+export const clearPlansCache = () => {
+  cachedPlans = null;
+  cacheTimestamp = null;
 };
 
 // Helper function to check if a limit is effectively unlimited
@@ -67,8 +118,9 @@ export const subscriptionService = {
     
     if (orgError) throw orgError;
 
-    // Get plan details
-    const planDetails = SUBSCRIPTION_PLANS[plan];
+    // Get plan details from database
+    const plans = await fetchSubscriptionPlans();
+    const planDetails = plans[plan];
     if (!planDetails) throw new Error('Invalid plan');
 
     // Check if payment is required
@@ -193,7 +245,7 @@ export const subscriptionService = {
   },
 
   async getSubscriptionPlans() {
-    return SUBSCRIPTION_PLANS;
+    return await fetchSubscriptionPlans();
   },
 
   async cancelSubscription(organizationId) {

@@ -80,7 +80,26 @@ async function fixBottleAssignments() {
     console.log(`⏭️  Skipped: ${skippedCount} bottles`);
     
     // 5. Verify the fix by checking a specific customer
-    const testCustomerId = '1370000-1751921174831';
+    // Remove hardcoded test customer ID - this should be looked up from actual data
+    // const testCustomerId = '1370000-1751921174831';
+    
+    // Instead, let's find an actual customer ID from the database
+    const { data: customers, error: customerError } = await supabase
+      .from('customers')
+      .select('CustomerListID')
+      .limit(1);
+    
+    if (customerError) {
+      console.error('Error fetching customers:', customerError);
+      return;
+    }
+    
+    const testCustomerId = customers?.[0]?.CustomerListID;
+    if (!testCustomerId) {
+      console.log('No customers found in database to test with');
+      return;
+    }
+
     const { data: testBottles, error: testError } = await supabase
       .from('bottles')
       .select('barcode_number, customer_name, assigned_customer')

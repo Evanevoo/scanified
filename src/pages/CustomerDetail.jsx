@@ -19,9 +19,12 @@ import {
   Alert,
   FormControl,
   Select,
-  MenuItem
+  MenuItem,
+  Card,
+  CardContent
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { TableSkeleton, CardSkeleton } from '../components/SmoothLoading';
 
 // Helper to check if a string looks like an address
 function looksLikeAddress(str) {
@@ -125,8 +128,10 @@ export default function CustomerDetail() {
   };
 
   if (loading) return (
-    <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-      <Typography>Loading...</Typography>
+    <Box sx={{ p: 4, maxWidth: 900, mx: 'auto' }}>
+      <CardSkeleton count={1} />
+      <Box mt={4}><TableSkeleton rows={4} columns={5} /></Box>
+      <Box mt={4}><TableSkeleton rows={3} columns={7} /></Box>
     </Box>
   );
   

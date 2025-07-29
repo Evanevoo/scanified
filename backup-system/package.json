@@ -1,0 +1,42 @@
+{
+  "name": "gas-cylinder-backup-system",
+  "version": "1.0.0",
+  "description": "Comprehensive backup and recovery system for Gas Cylinder Management App",
+  "main": "backup-script.js",
+  "scripts": {
+    "backup": "node backup-script.js",
+    "db-backup": "node database-backup.js backup",
+    "db-restore": "node database-backup.js restore",
+    "db-service": "node database-backup.js service",
+    "install-deps": "npm install",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "backup",
+    "database",
+    "recovery",
+    "gas-cylinder-app",
+    "supabase"
+  ],
+  "author": "Gas Cylinder Management Team",
+  "license": "MIT",
+  "dependencies": {
+    "archiver": "^5.3.1",
+    "@supabase/supabase-js": "^2.38.0",
+    "yauzl": "^2.10.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-org/gas-cylinder-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/gas-cylinder-app/issues"
+  },
+  "homepage": "https://github.com/your-org/gas-cylinder-app#readme"
+} 

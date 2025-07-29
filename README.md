@@ -1,6 +1,21 @@
 # Gas Cylinder Management Application
 
-A comprehensive gas cylinder management system with both web and mobile applications for tracking, managing, and monitoring gas cylinders throughout their lifecycle.
+A comprehensive gas cylinder tracking and management platform with web and mobile components.
+
+## Recent Updates
+
+### Landing Page Routing Fix (Latest)
+- **Issue**: Landing page was automatically redirecting to `/register` for authenticated users without organizations
+- **Solution**: Modified routing logic to be less aggressive about redirects
+  - Removed automatic redirect from root route (`/`) for users without organizations
+  - Updated `ProtectedRoute` to only redirect to register for routes that actually require an organization
+  - Added notification banner on landing page for users who need to complete organization setup
+  - Users can now browse the landing page freely while being gently prompted to complete setup
+
+### Key Changes Made:
+1. **App.jsx**: Removed automatic redirect to `/register` from root route
+2. **ProtectedRoute.jsx**: Added whitelist of public routes that don't require organization setup
+3. **LandingPage.jsx**: Added notification banner for users who need to complete organization setup
 
 ## Project Structure
 

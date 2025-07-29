@@ -21,7 +21,9 @@ import {
   Assignment as AssignmentIcon,
   Build as BuildIcon,
   ContactSupport as ContactSupportIcon,
-  ArtificialIntelligence as AIIcon
+  Psychology as AIIcon,
+  AutoAwesome as AutoAwesomeIcon,
+  Storage as StorageIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -61,6 +63,22 @@ export default function OwnerPortalLanding() {
       path: '/owner-portal/tools'
     },
     {
+      title: 'Asset Configuration',
+      description: 'Configure asset types, terminology, branding, and barcode formats for organizations',
+      icon: <SettingsIcon sx={{ fontSize: 40 }} />,
+      color: '#00bcd4',
+      path: '/owner-portal/asset-configuration',
+      featured: true
+    },
+    {
+      title: 'File Format Manager',
+      description: 'Configure custom file formats for organization data imports with validation rules',
+      icon: <StorageIcon sx={{ fontSize: 40 }} />,
+      color: '#8b5cf6',
+      path: '/owner-portal/file-format-manager',
+      featured: true
+    },
+    {
       title: 'Support Center',
       description: 'Customer support tools and ticket management',
       icon: <SupportIcon sx={{ fontSize: 40 }} />,
@@ -75,10 +93,17 @@ export default function OwnerPortalLanding() {
       path: '/owner-portal/system-health'
     },
     {
+      title: 'Disaster Recovery',
+      description: 'Manage backups, system recovery, and data protection',
+      icon: <SecurityIcon sx={{ fontSize: 40 }} />,
+      color: '#d32f2f',
+      path: '/owner-portal/disaster-recovery'
+    },
+    {
       title: 'Security Events',
       description: 'Track security events, login attempts, and system access logs',
       icon: <SecurityIcon sx={{ fontSize: 40 }} />,
-      color: '#d32f2f',
+      color: '#c62828',
       path: '/owner-portal/security'
     },
     {
@@ -124,11 +149,41 @@ export default function OwnerPortalLanding() {
       path: '/owner-portal/page-builder'
     },
     {
+      title: 'Landing Page Editor',
+      description: 'Edit your landing page content, testimonials, and features',
+      icon: <BuildIcon sx={{ fontSize: 40 }} />,
+      color: '#4caf50',
+      path: '/owner-portal/landing-editor'
+    },
+    {
       title: 'Contact Management',
       description: 'Manage organization contact information for customer inquiries',
       icon: <ContactSupportIcon sx={{ fontSize: 40 }} />,
       color: '#2196f3',
       path: '/owner-portal/contact-management'
+    },
+    {
+      title: 'Review Management',
+      description: 'Approve and manage customer reviews and testimonials',
+      icon: <ContactSupportIcon sx={{ fontSize: 40 }} />,
+      color: '#ff9800',
+      path: '/owner-portal/reviews'
+    },
+    {
+      title: 'Website Management',
+      description: 'Edit all website content, navigation, features, pricing, and SEO',
+      icon: <BuildIcon sx={{ fontSize: 40 }} />,
+      color: '#9c27b0',
+      path: '/owner-portal/website-management',
+      featured: true
+    },
+    {
+      title: 'Visual Page Builder',
+      description: 'Drag-and-drop visual editor like WordPress but better',
+      icon: <AutoAwesomeIcon sx={{ fontSize: 40 }} />,
+      color: '#e91e63',
+      path: '/owner-portal/visual-builder',
+      featured: true
     }
   ];
 
@@ -319,6 +374,22 @@ export default function OwnerPortalLanding() {
                 sx={{ justifyContent: 'flex-start' }}
               >
                 Security Events
+              </Button>
+              <Button 
+                variant="text" 
+                startIcon={<BuildIcon />}
+                onClick={() => navigate('/owner-portal/website-management')}
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                Website Management
+              </Button>
+              <Button 
+                variant="text" 
+                startIcon={<AutoAwesomeIcon />}
+                onClick={() => navigate('/owner-portal/visual-builder')}
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                Visual Page Builder
               </Button>
               <Button 
                 variant="text" 

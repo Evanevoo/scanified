@@ -2,56 +2,62 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, TextInput, ScrollView, FlatList } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
+import { useAssetConfig } from '../context/AssetContext';
+import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase';
-
-const QUICK_ACTIONS = [
-  {
-    title: 'Scan Cylinders',
-    subtitle: 'Scan barcodes',
-    icon: '📷',
-    action: 'ScanCylinders',
-    color: '#3B82F6',
-  },
-  {
-    title: 'Add Cylinder',
-    subtitle: 'Register new',
-    icon: '➕',
-    action: 'AddCylinder',
-    color: '#10B981',
-  },
-  {
-    title: 'Edit Details',
-    subtitle: 'Update info',
-    icon: '✏️',
-    action: 'EditCylinder',
-    color: '#F59E0B',
-  },
-  {
-    title: 'Locate Item',
-    subtitle: 'Find location',
-    icon: '📍',
-    action: 'LocateCylinder',
-    color: '#EF4444',
-  },
-  {
-    title: 'View History',
-    subtitle: 'Past scans',
-    icon: '📋',
-    action: 'History',
-    color: '#8B5CF6',
-  },
-  {
-    title: 'Fill Status',
-    subtitle: 'Update fill',
-    icon: '🔧',
-    action: 'FillCylinder',
-    color: '#06B6D4',
-  },
-];
 
 export default function HomeScreen() {
   const navigation = useNavigation();
   const { colors } = useTheme();
+  const { config: assetConfig } = useAssetConfig();
+  const { user, organization } = useAuth();
+  
+  // Create dynamic quick actions based on asset configuration
+  const QUICK_ACTIONS = [
+    {
+      title: `Scan ${assetConfig.assetDisplayNamePlural}`,
+      subtitle: 'Scan barcodes',
+      icon: '📷',
+      action: 'ScanCylinders',
+      color: assetConfig.primaryColor,
+    },
+    {
+      title: `Add ${assetConfig.assetDisplayName}`,
+      subtitle: 'Register new',
+      icon: '➕',
+      action: 'AddCylinder',
+      color: '#10B981',
+    },
+    {
+      title: 'Edit Details',
+      subtitle: 'Update info',
+      icon: '✏️',
+      action: 'EditCylinder',
+      color: '#F59E0B',
+    },
+    {
+      title: 'Locate Item',
+      subtitle: 'Find location',
+      icon: '📍',
+      action: 'LocateCylinder',
+      color: '#EF4444',
+    },
+    {
+      title: 'View History',
+      subtitle: 'Past scans',
+      icon: '📋',
+      action: 'History',
+      color: '#8B5CF6',
+    },
+    {
+      title: 'Fill Status',
+      subtitle: 'Update fill',
+      icon: '🔧',
+      action: 'FillCylinder',
+      color: '#06B6D4',
+    },
+  ];
+
   const [unreadCount, setUnreadCount] = useState(0);
   const [search, setSearch] = useState('');
   const [customerResults, setCustomerResults] = useState([]);
@@ -61,7 +67,7 @@ export default function HomeScreen() {
   const [stats, setStats] = useState({
     totalScans: 0,
     todayScans: 0,
-    pendingActions: 0,
+    pendingActions: 0, // TODO: Implement real pending actions count
   });
 
   useEffect(() => {
@@ -86,7 +92,7 @@ export default function HomeScreen() {
       setStats({
         totalScans: totalScans || 0,
         todayScans: todayScans || 0,
-        pendingActions: 3, // Mock data
+        pendingActions: 0, // TODO: Implement real pending actions count
       });
     } catch (error) {
       console.error('Error fetching stats:', error);
@@ -131,7 +137,12 @@ export default function HomeScreen() {
       
       const { data: customers, error } = await query.limit(5);
       if (!error && customers) {
-        const results = await Promise.all(customers.map(async (customer) => {
+        // Deduplicate customers by CustomerListID
+        const uniqueCustomers = customers.filter((customer, index, self) =>
+          index === self.findIndex((c) => c.CustomerListID === customer.CustomerListID)
+        );
+        
+        const results = await Promise.all(uniqueCustomers.map(async (customer) => {
           const { data: bottles } = await supabase
             .from('bottles')
             .select('group_name')
@@ -203,8 +214,10 @@ export default function HomeScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerContent}>
-            <Text style={[styles.welcomeText, { color: colors.text }]}>Welcome back!</Text>
-            <Text style={[styles.appName, { color: colors.primary }]}>LessAnnoyingScan</Text>
+            <Text style={[styles.welcomeText, { color: colors.text }]}>
+              Welcome back{user?.full_name ? `, ${user.full_name}` : ''}!
+            </Text>
+            <Text style={[styles.appName, { color: colors.primary }]}>{assetConfig.appName}</Text>
           </View>
           <View style={styles.headerActions}>
             <TouchableOpacity 
@@ -246,10 +259,10 @@ export default function HomeScreen() {
         {/* Search Bar */}
         <View style={styles.searchContainer}>
           <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={styles.searchIcon}>🔍</Text>
+            <Text style={styles.searchIcon}></Text>
             <TextInput
               style={[styles.searchInput, { color: colors.text }]}
-              placeholder="Search customers or cylinders..."
+              placeholder={`Search customers or ${assetConfig.assetTypePlural}...`}
               placeholderTextColor={colors.textSecondary}
               value={search}
               onChangeText={setSearch}
@@ -263,9 +276,9 @@ export default function HomeScreen() {
             {customerResults.length > 0 && (
               <View style={styles.resultsSection}>
                 <Text style={[styles.resultsHeader, { color: colors.primary }]}>Customers</Text>
-                {customerResults.map(item => (
+                {customerResults.map((item, index) => (
                   <TouchableOpacity
-                    key={item.CustomerListID}
+                    key={`${item.CustomerListID}_${index}`}
                     style={[styles.resultItem, { borderBottomColor: colors.border }]}
                     onPress={() => navigation.navigate('CustomerDetails', { customerId: item.CustomerListID })}
                   >
@@ -280,10 +293,10 @@ export default function HomeScreen() {
 
             {bottleResults.length > 0 && (
               <View style={styles.resultsSection}>
-                <Text style={[styles.resultsHeader, { color: colors.primary }]}>Cylinders</Text>
-                {bottleResults.map(item => (
+                                 <Text style={[styles.resultsHeader, { color: colors.primary }]}>{assetConfig.assetDisplayNamePlural}</Text>
+                {bottleResults.map((item, index) => (
                   <TouchableOpacity
-                    key={item.barcode_number}
+                    key={`${item.barcode_number}_${index}`}
                     style={[styles.resultItem, { borderBottomColor: colors.border }]}
                     onPress={() => navigation.navigate('EditCylinder', { barcode: item.barcode_number })}
                   >

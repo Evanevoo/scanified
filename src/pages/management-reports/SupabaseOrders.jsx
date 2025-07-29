@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabase/client';
 import {
-  Box, Paper, Typography, Table, TableHead, TableRow, TableCell, TableBody, TableContainer, TextField, Alert, CircularProgress
+  Box, Paper, Typography, Table, TableHead, TableRow, TableCell, TableBody, TableContainer, TextField, Alert
 } from '@mui/material';
+import { TableSkeleton } from '../../components/SmoothLoading';
 
 const COLUMNS = [
   { key: 'customer_id', label: 'Customer ID' },
@@ -131,7 +132,7 @@ export default function SupabaseOrders() {
             InputLabelProps={{ shrink: true }}
           />
         </Box>
-        {loading && <Box p={4} textAlign="center"><CircularProgress /></Box>}
+        {loading && <Box p={4} textAlign="center"><TableSkeleton rows={8} columns={COLUMNS.length} /></Box>}
         {error && <Alert severity="error">Error: {error}</Alert>}
         {!loading && !error && (
           <TableContainer component={Paper} sx={{ borderRadius: 2 }}>
