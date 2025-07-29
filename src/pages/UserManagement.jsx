@@ -13,6 +13,15 @@ import { usePermissions } from '../context/PermissionsContext';
 export default function UserManagement() {
   const { profile, organization } = useAuth();
   const { can, isOrgAdmin } = usePermissions();
+  
+  // Debug logging
+  console.log('UserManagement Debug:');
+  console.log('- Profile:', profile);
+  console.log('- Organization:', organization);
+  console.log('- Can manage users:', can('manage:users'));
+  console.log('- IsOrgAdmin:', isOrgAdmin);
+  console.log('- Profile role:', profile?.role);
+  
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -247,13 +256,27 @@ export default function UserManagement() {
   };
 
   if (!can('manage:users')) {
-    return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="error">
-          Access Denied. You do not have permission to manage users.
-        </Alert>
-      </Box>
-    );
+    console.log('UserManagement Access Check:');
+    console.log('- Profile:', profile);
+    console.log('- Profile role:', profile?.role);
+    console.log('- Can manage users:', can('manage:users'));
+    console.log('- Is org admin:', isOrgAdmin);
+    
+    // Fallback for admin users
+    if (profile?.role === 'admin' || isOrgAdmin) {
+      console.log('- Allowing access via admin fallback');
+    } else {
+      return (
+        <Box sx={{ p: 3 }}>
+          <Alert severity="error">
+            Access Denied. You do not have permission to manage users.
+          </Alert>
+          <Typography variant="body2" sx={{ mt: 2 }}>
+            Debug info: Role = {profile?.role}, IsOrgAdmin = {isOrgAdmin.toString()}
+          </Typography>
+        </Box>
+      );
+    }
   }
 
   return (

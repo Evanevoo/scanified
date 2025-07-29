@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   Box, Card, CardContent, Typography, TextField, Button, 
   Alert, CircularProgress, Stepper, Step, StepLabel,
@@ -6,6 +6,7 @@ import {
   Divider, Chip
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 import { subscriptionService } from '../services/subscriptionService';
 import { isEmailConfirmationRequired } from '../config/email';
@@ -16,10 +17,24 @@ export default OrganizationRegistration;
 
 function OrganizationRegistration() {
   const navigate = useNavigate();
+  const { user } = useAuth(); // Check if user is already logged in
   const [activeStep, setActiveStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // Conditional steps based on user login status
+  const getSteps = () => {
+    if (user) {
+      // User is logged in, skip account setup
+      return ['Organization Details', 'Plan Selection', 'Complete'];
+    } else {
+      // New user, include account setup
+      return ['Organization Details', 'Account Setup', 'Trial & Payment'];
+    }
+  };
+  
+  const currentSteps = getSteps();
 
   // Organization details
   const [orgData, setOrgData] = useState({
@@ -43,8 +58,42 @@ function OrganizationRegistration() {
     payment_required: true
   });
 
+  // Optimized input handlers using useCallback
+  const handleOrgNameChange = useCallback((value) => {
+    setOrgData(prev => ({ ...prev, name: value }));
+  }, []);
+
+  const handleOrgSlugChange = useCallback((value) => {
+    const cleanSlug = value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    setOrgData(prev => ({ ...prev, slug: cleanSlug }));
+  }, []);
+
+  const handleOrgDomainChange = useCallback((value) => {
+    setOrgData(prev => ({ ...prev, domain: value }));
+  }, []);
+
+  const handleOrgPlanChange = useCallback((value) => {
+    setOrgData(prev => ({ ...prev, subscription_plan: value }));
+  }, []);
+
+  const handleUserNameChange = useCallback((value) => {
+    setUserData(prev => ({ ...prev, full_name: value }));
+  }, []);
+
+  const handleUserEmailChange = useCallback((value) => {
+    setUserData(prev => ({ ...prev, email: value }));
+  }, []);
+
+  const handleUserRoleChange = useCallback((value) => {
+    setUserData(prev => ({ ...prev, role: value }));
+  }, []);
+
+  const handleUserPasswordChange = useCallback((value) => {
+    setUserData(prev => ({ ...prev, password: value }));
+  }, []);
+
   const handleNext = () => {
-    if (activeStep === steps.length - 1) {
+    if (activeStep === currentSteps.length - 1) {
       handleRegistration();
     } else {
       setActiveStep((prevActiveStep) => prevActiveStep + 1);
@@ -91,20 +140,18 @@ function OrganizationRegistration() {
     }
   };
 
-  // Handle organization name change (sync)
-  const handleOrgNameInputChange = (name) => {
-    setOrgData(prev => ({ ...prev, name }));
-  };
-
-  // Generate slug onBlur (async)
-  const handleOrgNameBlur = async () => {
-    const name = orgData.name;
-    const baseSlug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    if (baseSlug) {
-      const uniqueSlug = await generateUniqueSlug(baseSlug);
-      setOrgData(prev => ({ ...prev, slug: uniqueSlug }));
+  // Generate slug onBlur (async) - separated from onChange
+  const handleOrgNameBlur = useCallback(async () => {
+    if (orgData.name && !orgData.slug) {
+      const baseSlug = orgData.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+      try {
+        const uniqueSlug = await generateUniqueSlug(baseSlug);
+        setOrgData(prev => ({ ...prev, slug: uniqueSlug }));
+      } catch (error) {
+        console.error('Error generating slug:', error);
+      }
     }
-  };
+  }, [orgData.name, orgData.slug]);
 
   const handleRegistration = async () => {
     setLoading(true);
@@ -250,7 +297,7 @@ function OrganizationRegistration() {
                   fullWidth
                   label="Organization Name"
                   value={orgData.name}
-                  onChange={(e) => handleOrgNameInputChange(e.target.value)}
+                  onChange={(e) => handleOrgNameChange(e.target.value)}
                   onBlur={handleOrgNameBlur}
                   required
                   helperText="The name of your company or organization"
@@ -261,7 +308,7 @@ function OrganizationRegistration() {
                   fullWidth
                   label="Organization Slug"
                   value={orgData.slug}
-                  onChange={(e) => setOrgData({ ...orgData, slug: e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') })}
+                  onChange={(e) => handleOrgSlugChange(e.target.value)}
                   required
                   helperText="A unique identifier for your organization (auto-generated from name)"
                 />
@@ -271,7 +318,7 @@ function OrganizationRegistration() {
                   fullWidth
                   label="Domain (Optional)"
                   value={orgData.domain}
-                  onChange={(e) => setOrgData({ ...orgData, domain: e.target.value })}
+                  onChange={(e) => handleOrgDomainChange(e.target.value)}
                   helperText="Your company's website domain"
                 />
               </Grid>
@@ -280,7 +327,7 @@ function OrganizationRegistration() {
                   <InputLabel>Subscription Plan</InputLabel>
                   <Select
                     value={orgData.subscription_plan}
-                    onChange={(e) => setOrgData({ ...orgData, subscription_plan: e.target.value })}
+                    onChange={(e) => handleOrgPlanChange(e.target.value)}
                     label="Subscription Plan"
                   >
                     <MenuItem value="basic">
@@ -326,7 +373,7 @@ function OrganizationRegistration() {
                   fullWidth
                   label="Full Name"
                   value={userData.full_name}
-                  onChange={(e) => setUserData({ ...userData, full_name: e.target.value })}
+                  onChange={(e) => handleUserNameChange(e.target.value)}
                   required
                 />
               </Grid>
@@ -336,7 +383,7 @@ function OrganizationRegistration() {
                   label="Email Address"
                   type="email"
                   value={userData.email}
-                  onChange={(e) => setUserData({ ...userData, email: e.target.value })}
+                  onChange={(e) => handleUserEmailChange(e.target.value)}
                   required
                   helperText="This will be your login email"
                 />
@@ -347,7 +394,7 @@ function OrganizationRegistration() {
                   label="Password"
                   type="password"
                   value={userData.password}
-                  onChange={(e) => setUserData({ ...userData, password: e.target.value })}
+                  onChange={(e) => handleUserPasswordChange(e.target.value)}
                   required
                   helperText="Minimum 8 characters"
                 />
@@ -357,7 +404,7 @@ function OrganizationRegistration() {
                   <InputLabel>Role</InputLabel>
                   <Select
                     value={userData.role}
-                    onChange={(e) => setUserData({ ...userData, role: e.target.value })}
+                    onChange={(e) => handleUserRoleChange(e.target.value)}
                     label="Role"
                   >
                     <MenuItem value="admin">Admin</MenuItem>
@@ -435,7 +482,7 @@ function OrganizationRegistration() {
           </Typography>
 
           <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
-            {steps.map((label) => (
+            {currentSteps.map((label) => (
               <Step key={label}>
                 <StepLabel>{label}</StepLabel>
               </Step>
@@ -488,7 +535,7 @@ function OrganizationRegistration() {
                 disabled={!validateStep(activeStep) || loading}
                 endIcon={loading ? <CircularProgress size={20} /> : null}
               >
-                {activeStep === steps.length - 1 ? 'Start Free Trial' : 'Continue'}
+                {activeStep === currentSteps.length - 1 ? 'Start Free Trial' : 'Continue'}
               </Button>
             </Box>
           </Box>

@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert } from 'react-native';
 import { supabase } from '../supabase';
 import { Picker } from '@react-native-picker/picker';
 import { useTheme } from '../context/ThemeContext';
 import ScanArea from '../components/ScanArea';
 import { useAuth } from '../hooks/useAuth';
+import { CylinderLimitService } from '../services/CylinderLimitService';
 
 interface GasType {
   id: number;
@@ -121,6 +122,23 @@ export default function AddCylinderScreen() {
       return;
     }
     setLoading(true);
+    
+    // Check cylinder limits before adding
+    if (profile?.organization_id) {
+      const validation = await CylinderLimitService.validateCylinderAddition(profile.organization_id, 1);
+      
+      if (!validation.isValid) {
+        setLoading(false);
+        Alert.alert(
+          validation.message.title,
+          validation.message.message,
+          [
+            { text: 'OK', style: 'default' }
+          ]
+        );
+        return;
+      }
+    }
     
     // Get the selected gas type details
     const selectedGasTypeData = gasTypes.find(gt => gt.id.toString() === selectedGasType);

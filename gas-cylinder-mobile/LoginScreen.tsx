@@ -167,25 +167,34 @@ export default function LoginScreen() {
   const handleBiometricLogin = async () => {
     try {
       const savedEmail = await AsyncStorage.getItem('rememberedEmail');
-      if (!savedEmail) {
+      const savedPassword = await SecureStore.getItemAsync('rememberedPassword');
+      
+      if (!savedEmail || !savedPassword) {
         Alert.alert('No saved login', 'Please login with email and password first and enable Remember Me.');
         return;
       }
+      
       const biometricResult = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Login with Fingerprint/FaceID',
         fallbackLabel: 'Enter Password',
       });
+      
       if (biometricResult.success) {
+        // Set the saved credentials
         setEmail(savedEmail);
+        setPassword(savedPassword);
         setRememberMe(true);
-        // Prompt for password (for security, we do not store password)
-        Alert.alert('Enter Password', 'Please enter your password to complete login.', [
-          {
-            text: 'OK',
-            onPress: () => {},
-          },
-        ]);
-        // Optionally, you could store password securely with expo-secure-store, but for now, just pre-fill email
+        
+        // Automatically attempt login
+        await withErrorHandling(async () => {
+          const { error } = await supabase.auth.signInWithPassword({ 
+            email: savedEmail.trim(), 
+            password: savedPassword 
+          });
+          if (error) {
+            throw new Error(error.message);
+          }
+        }, 'Biometric Login Failed');
       }
     } catch (err) {
       Alert.alert('Biometric Login Failed', err.message);
@@ -368,6 +377,15 @@ export default function LoginScreen() {
           <View style={styles.footer}>
             <Text style={styles.footerText}>
               Use the same credentials as the web app
+            </Text>
+            <Text style={styles.organizationText}>
+              Need to create an organization? Sign up at{' '}
+              <Text 
+                style={styles.websiteLink}
+                onPress={() => Linking.openURL('https://yourdomain.com/register')}
+              >
+                yourdomain.com
+              </Text>
             </Text>
             <View style={styles.legalLinks}>
               <TouchableOpacity onPress={() => Linking.openURL('https://yourdomain.com/terms')}>
@@ -674,6 +692,16 @@ const styles = StyleSheet.create({
     marginHorizontal: 8,
     color: '#9CA3AF',
     fontSize: 12,
+  },
+  organizationText: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  websiteLink: {
+    color: '#3B82F6',
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,

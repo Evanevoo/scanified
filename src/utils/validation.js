@@ -100,35 +100,35 @@ export const validateExcelFile = (file) => {
   return { isValid: true, error: null };
 };
 
-// Bottle data validation
-export const validateBottleData = (bottle) => {
+// Asset data validation (formerly bottle data validation)
+export const validateAssetData = (asset) => {
   const errors = [];
-  
-  if (!validateBarcode(bottle.barcode_number)) {
+
+  if (!validateBarcode(asset.barcode_number)) {
     errors.push('Invalid barcode number');
   }
-  
-  if (!validateSerialNumber(bottle.serial_number)) {
+
+  if (!validateSerialNumber(asset.serial_number)) {
     errors.push('Invalid serial number');
   }
-  
-  if (bottle.customer_name && !validateStringLength(bottle.customer_name, 1, 100)) {
-    errors.push('Invalid customer name');
+
+  if (asset.customer_name && !validateStringLength(asset.customer_name, 1, 100)) {
+    errors.push('Customer name must be between 1 and 100 characters');
   }
-  
-  if (bottle.product_code && !validateProductCode(bottle.product_code)) {
+
+  if (asset.product_code && !validateProductCode(asset.product_code)) {
     errors.push('Invalid product code');
   }
-  
-  if (bottle.location && !validateLocation(bottle.location)) {
+
+  if (asset.location && !validateLocation(asset.location)) {
     errors.push('Invalid location');
   }
-  
-  return {
-    isValid: errors.length === 0,
-    errors
-  };
+
+  return { isValid: errors.length === 0, errors };
 };
+
+// Keep backward compatibility
+export const validateBottleData = validateAssetData;
 
 // Customer data validation
 export const validateCustomerData = (customer) => {
@@ -275,7 +275,8 @@ export default {
   validateStringLength,
   validateNumberRange,
   validateExcelFile,
-  validateBottleData,
+  validateAssetData,
+  validateBottleData, // backward compatibility
   validateCustomerData,
   validateForm,
   sanitizeInput,

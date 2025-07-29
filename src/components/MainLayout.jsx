@@ -26,7 +26,7 @@ import LogoutIcon from '@mui/icons-material/LogoutOutlined';
 import SearchIcon from '@mui/icons-material/Search';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import { useThemeContext } from '../context/ThemeContext';
+import { useTheme } from '../context/ThemeContext';
 import GlobalImportProgress from './GlobalImportProgress';
 import ImportNotification from './ImportNotification';
 import { useOwnerAccess } from '../hooks/useOwnerAccess';
@@ -34,9 +34,10 @@ import { supabase } from '../supabase/client';
 import { usePermissions } from '../context/PermissionsContext';
 import { useAuth } from '../hooks/useAuth';
 import TextField from '@mui/material/TextField';
+import Sidebar from './Sidebar';
 
 
-const drawerWidth = 250;
+const drawerWidth = 280;
 
 export default function MainLayout() {
   const { profile, organization } = useAuth();
@@ -47,30 +48,18 @@ export default function MainLayout() {
   const searchRef = useRef();
   const navigate = useNavigate();
   const location = useLocation();
-  const { mode } = useThemeContext();
-  const { isOwner } = useOwnerAccess();
+  const { isDarkMode } = useTheme();
   const { can } = usePermissions();
+  const { isOwner } = useOwnerAccess();
 
-  // Sidebar logic - only show owner links for owner, show full navigation for organizations
-  const sidebarPages = profile?.role === 'owner'
-    ? [
-        { label: 'Platform Overview', icon: <BusinessIcon />, to: '/owner-portal' },
-        { label: 'Customer Management', icon: <PeopleIcon />, to: '/owner-portal/customer-management' },
-      ]
+  // Top navigation links - only show for organizations, not for owner
+  const topNavLinks = profile?.role === 'owner' 
+    ? [] 
     : [
-        { label: 'Dashboard', icon: <AdminPanelSettingsIcon />, to: '/dashboard' },
-        { label: 'Customers', icon: <PeopleIcon />, to: '/customers' },
-        { label: 'Inventory', icon: <SwapVertIcon />, to: '/assets' },
-        { label: 'Orders & Scans', icon: <AssignmentIcon />, to: '/scanned-orders' },
-        {
-          label: 'Data & Import', icon: <SwapVertIcon />, to: null, subItems: [
-            { label: 'Import Data', to: '/import' },
-            { label: 'Import Customers', to: '/import-customer-info' },
-            { label: 'Approval Queue', to: '/import-approvals' },
-            { label: 'Bottle Management', to: '/bottle-management' },
-          ]
-        },
-        { label: 'Help & Support', icon: <AssignmentIcon />, to: '/support' },
+        { label: 'Dashboard', to: '/dashboard' },
+        { label: 'Inventory', to: '/inventory' },
+        { label: 'Orders', to: '/import-approvals' },
+        { label: 'Billing', to: '/billing' },
       ];
 
   useEffect(() => {
@@ -169,166 +158,6 @@ export default function MainLayout() {
     }
   };
 
-  const drawer = (
-    <Box sx={{ 
-      bgcolor: '#fff', 
-      height: '100%', 
-      display: 'flex', 
-      flexDirection: 'column', 
-      borderRight: '1.5px solid #eaeaea', 
-      minHeight: '100vh', 
-      width: drawerWidth, 
-      position: 'relative', 
-      overflowY: 'hidden', 
-      overflowX: 'hidden',
-      boxShadow: '2px 0 10px rgba(0,0,0,0.1)'
-    }}>
-      <Box sx={{ 
-        position: 'sticky', 
-        top: 0, 
-        zIndex: 2, 
-        bgcolor: '#fff', 
-        borderBottom: '1.5px solid #eaeaea',
-        background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)'
-      }}>
-        <Toolbar sx={{ minHeight: 56, px: 2, py: 0, justifyContent: 'flex-start', bgcolor: 'transparent' }}>
-          <Button
-            sx={{ 
-              color: '#1976d2', 
-              fontWeight: 700, 
-              fontSize: '1rem', 
-              textTransform: 'none', 
-              pl: 0, 
-              bgcolor: 'transparent', 
-              minHeight: 40, 
-              minWidth: 0, 
-              boxShadow: 'none', 
-              borderRadius: 2, 
-              '&:hover': { 
-                bgcolor: 'rgba(25, 118, 210, 0.1)',
-                color: '#1565c0'
-              } 
-            }}
-            startIcon={<MenuOpenIcon />}
-          >
-            Hide Sidebar
-          </Button>
-        </Toolbar>
-      </Box>
-      <Divider sx={{ my: 1, bgcolor: 'var(--divider)' }} />
-      <List sx={{ flex: 1 }}>
-        {sidebarPages.map((item, idx) => (
-          <React.Fragment key={item.label}>
-            {item.label !== 'Integrations' ? (
-              <ListItem disablePadding sx={{ mb: 0.5 }}>
-                <ListItemButton
-                  selected={item.to && location.pathname === item.to}
-                  onClick={() => item.to && navigate(item.to)}
-                  sx={{
-                    borderRadius: 8,
-                    mx: 1,
-                    my: 0.5,
-                    py: 1.1,
-                    px: 2,
-                    fontWeight: 700,
-                    color: location.pathname === item.to ? '#00aaff' : '#111',
-                    backgroundColor: location.pathname === item.to ? '#f5faff' : 'transparent',
-                    '&:hover': {
-                      backgroundColor: '#f5faff',
-                      color: '#00aaff',
-                    },
-                    fontFamily: 'Inter, Montserrat, Arial, sans-serif',
-                    fontSize: '1.05rem',
-                    textTransform: 'none',
-                    letterSpacing: 0,
-                  }}
-                >
-                  <ListItemIcon sx={{ color: '#888', minWidth: 36 }}>{item.icon}</ListItemIcon>
-                  <ListItemText primary={item.label} primaryTypographyProps={{ fontWeight: 700, fontFamily: 'Inter, Montserrat, Arial, sans-serif', fontSize: '1.05rem' }} />
-                </ListItemButton>
-              </ListItem>
-            ) : (
-              <>
-                <ListItem disablePadding sx={{ mb: 0.5 }}>
-                  <ListItemButton
-                    onClick={() => setIntegrationsOpen(open => !open)}
-                    sx={{
-                      borderRadius: 8,
-                      mx: 1,
-                      my: 0.5,
-                      py: 1.1,
-                      px: 2,
-                      fontWeight: 700,
-                      color: '#111',
-                      backgroundColor: 'transparent',
-                      '&:hover': {
-                        backgroundColor: '#f5faff',
-                        color: '#00aaff',
-                      },
-                      fontFamily: 'Inter, Montserrat, Arial, sans-serif',
-                      fontSize: '1.05rem',
-                      textTransform: 'none',
-                      letterSpacing: 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <ListItemIcon sx={{ color: '#888', minWidth: 36 }}>{item.icon}</ListItemIcon>
-                    <ListItemText primary={item.label} primaryTypographyProps={{ fontWeight: 700, fontFamily: 'Inter, Montserrat, Arial, sans-serif', fontSize: '1.05rem' }} />
-                    {integrationsOpen ? <ExpandMoreIcon sx={{ ml: 'auto' }} /> : <ChevronRightIcon sx={{ ml: 'auto' }} />}
-                  </ListItemButton>
-                </ListItem>
-                {integrationsOpen && (
-                  <List disablePadding sx={{ pl: 5, mb: 0.5 }}>
-                    {item.subItems.map(sub => (
-                      <ListItem key={sub.label} disablePadding>
-                        <ListItemButton
-                          selected={location.pathname === sub.to}
-                          onClick={() => navigate(sub.to)}
-                          sx={{
-                            borderRadius: 8,
-                            mx: 0.5,
-                            my: 0.2,
-                            py: 0.9,
-                            px: 2,
-                            fontWeight: 500,
-                            color: location.pathname === sub.to ? '#00aaff' : '#111',
-                            backgroundColor: location.pathname === sub.to ? '#f5faff' : 'transparent',
-                            '&:hover': {
-                              backgroundColor: '#f5faff',
-                              color: '#00aaff',
-                            },
-                            fontFamily: 'Inter, Montserrat, Arial, sans-serif',
-                            fontSize: '1rem',
-                            textTransform: 'none',
-                            letterSpacing: 0,
-                          }}
-                        >
-                          <ListItemText primary={sub.label} primaryTypographyProps={{ fontWeight: 500, fontFamily: 'Inter, Montserrat, Arial, sans-serif', fontSize: '1rem' }} />
-                        </ListItemButton>
-                      </ListItem>
-                    ))}
-                  </List>
-                )}
-              </>
-            )}
-          </React.Fragment>
-        ))}
-      </List>
-      <Box sx={{ flexGrow: 0, height: 24 }} />
-    </Box>
-  );
-
-  // Top navigation links - only show for organizations, not for owner
-  const topNavLinks = profile?.role === 'owner' 
-    ? [] 
-    : [
-        { label: 'Dashboard', to: '/dashboard' },
-        { label: 'Inventory', to: '/rentals' },
-        { label: 'Orders', to: '/import-approvals' },
-        { label: 'Billing', to: '/billing' },
-      ];
-
   return (
     <Box sx={{
       display: 'flex',
@@ -366,9 +195,7 @@ export default function MainLayout() {
           },
         }}
       >
-        <Box sx={{ height: '100vh', overflowY: 'auto', overflowX: 'hidden' }}>
-          {drawer}
-        </Box>
+        <Sidebar />
       </Drawer>
       <AppBar
         position="fixed"

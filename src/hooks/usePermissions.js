@@ -22,6 +22,46 @@ export function usePermissions() {
       return;
     }
 
+    // Legacy admin role
+    if (profile.role === 'admin') {
+      setPermissions([
+        'manage:users', 'manage:billing', 'manage:roles', 'manage:organization', 'manage:settings',
+        'read:customers', 'write:customers', 'delete:customers',
+        'read:cylinders', 'write:cylinders', 'delete:cylinders',
+        'read:invoices', 'write:invoices', 'delete:invoices',
+        'read:rentals', 'write:rentals', 'read:analytics', 'read:reports',
+        'update:cylinder_location'
+      ]);
+      setIsOrgAdmin(true);
+      setLoading(false);
+      return;
+    }
+
+    // Legacy manager role
+    if (profile.role === 'manager') {
+      setPermissions([
+        'read:customers', 'write:customers',
+        'read:cylinders', 'write:cylinders',
+        'read:invoices', 'write:invoices',
+        'read:rentals', 'write:rentals',
+        'read:analytics', 'read:reports'
+      ]);
+      setIsOrgAdmin(false);
+      setLoading(false);
+      return;
+    }
+
+    // Legacy user role
+    if (profile.role === 'user') {
+      setPermissions([
+        'read:customers', 'read:cylinders', 'read:invoices', 'read:rentals'
+      ]);
+      setIsOrgAdmin(false);
+      setLoading(false);
+      return;
+    }
+
+    // New RBAC system with role_id
     if (profile.role_id) {
       setLoading(true);
       supabase
@@ -33,17 +73,24 @@ export function usePermissions() {
           if (error) {
             console.error('Error fetching role permissions:', error);
             setPermissions([]);
+            setIsOrgAdmin(false);
           } else {
             setPermissions(data.permissions || []);
             // Check if the role is an 'Admin' role
-            if (data.name.toLowerCase() === 'admin') {
+            if (data.name && data.name.toLowerCase() === 'admin') {
               setIsOrgAdmin(true);
+            } else {
+              setIsOrgAdmin(false);
             }
           }
           setLoading(false);
         });
     } else {
-      setPermissions([]);
+      // Default permissions for unknown roles
+      setPermissions([
+        'read:customers', 'read:cylinders', 'read:invoices', 'read:rentals'
+      ]);
+      setIsOrgAdmin(false);
       setLoading(false);
     }
   }, [profile]);
@@ -55,5 +102,32 @@ export function usePermissions() {
     return permissions.includes(permission);
   };
 
-  return { permissions, can, loading, isOrgAdmin };
+  const hasRole = (role) => {
+    if (profile?.role === 'owner') return true;
+    if (profile?.role === role) return true;
+    return false;
+  };
+
+  const isAdmin = () => {
+    return profile?.role === 'owner' || profile?.role === 'admin' || isOrgAdmin;
+  };
+
+  const isManager = () => {
+    return profile?.role === 'manager' || isAdmin();
+  };
+
+  const isUser = () => {
+    return profile?.role === 'user' || isManager();
+  };
+
+  return { 
+    permissions, 
+    can, 
+    loading, 
+    isOrgAdmin,
+    hasRole,
+    isAdmin,
+    isManager,
+    isUser
+  };
 } 

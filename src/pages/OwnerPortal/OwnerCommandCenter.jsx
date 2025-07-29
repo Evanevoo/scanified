@@ -12,7 +12,7 @@ import {
   AutoAwesome as AutomationIcon,
   Store as MarketplaceIcon,
   AttachMoney as RevenueIcon,
-  PredictiveText as PredictIcon,
+  Insights as PredictIcon,
   Warning as WarningIcon,
   CheckCircle as SuccessIcon,
   Speed as SpeedIcon,
@@ -72,12 +72,12 @@ export default function OwnerCommandCenter() {
   const [competitiveIntel, setCompetitiveIntel] = useState({
     marketPosition: 'Strong',
     competitorActivity: [
-      { competitor: 'TrackAbout', activity: 'Price increase announced', impact: 'Positive', date: '2 days ago' },
-      { competitor: 'CylTracker', activity: 'New mobile app released', impact: 'Neutral', date: '1 week ago' },
-      { competitor: 'TrackAbout', activity: 'Customer complaints about UI', impact: 'Positive', date: '3 days ago' }
+      { competitor: 'Legacy System A', activity: 'Price increase announced', impact: 'Positive', date: '2 days ago' },
+      { competitor: 'Competitor B', activity: 'Service outage reported', impact: 'Positive', date: '1 week ago' },
+      { competitor: 'Legacy System A', activity: 'Customer complaints about UI', impact: 'Positive', date: '3 days ago' }
     ],
     opportunities: [
-      'TrackAbout customers frustrated with outdated interface',
+      'Legacy System A customers frustrated with outdated interface',
       'Market gap in AI-powered predictive maintenance',
       'Growing demand for mobile-first solutions'
     ]

@@ -1,12 +1,94 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Modal, Dimensions } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Modal, Dimensions, Alert } from 'react-native';
 import { supabase } from '../supabase';
 import { useNavigation } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useTheme } from '../context/ThemeContext';
+import { useAssetConfig } from '../context/AssetContext';
+import { useAuth } from '../hooks/useAuth';
 import ScanArea from '../components/ScanArea';
 
 const { width, height } = Dimensions.get('window');
+
+// Barcode validation utility
+const validateBarcode = (barcode: string, config: any): { isValid: boolean; error?: string } => {
+  if (!barcode || !barcode.trim()) {
+    return { isValid: false, error: 'Barcode cannot be empty' };
+  }
+
+  const trimmedBarcode = barcode.trim();
+
+  // Check if organization has specific barcode format
+  if (config?.barcodeFormat?.pattern) {
+    try {
+      const regex = new RegExp(config.barcodeFormat.pattern);
+      if (!regex.test(trimmedBarcode)) {
+        return { 
+          isValid: false, 
+          error: `Invalid barcode format. Expected: ${config.barcodeFormat.description || 'matches organization pattern'}`
+        };
+      }
+    } catch (error) {
+      console.warn('Invalid regex pattern in barcode config:', error);
+      // Fall back to basic validation if regex is invalid
+    }
+  }
+
+  // Basic validation - no special characters that could cause issues
+  const basicPattern = /^[A-Za-z0-9\-_*%]+$/;
+  if (!basicPattern.test(trimmedBarcode)) {
+    return { 
+      isValid: false, 
+      error: 'Barcode contains invalid characters. Only letters, numbers, and basic symbols are allowed.' 
+    };
+  }
+
+  // Length validation
+  if (trimmedBarcode.length < 3) {
+    return { isValid: false, error: 'Barcode too short (minimum 3 characters)' };
+  }
+  
+  if (trimmedBarcode.length > 50) {
+    return { isValid: false, error: 'Barcode too long (maximum 50 characters)' };
+  }
+
+  return { isValid: true };
+};
+
+// Order number validation utility
+const validateOrderNumber = (orderNumber: string, config: any): { isValid: boolean; error?: string } => {
+  if (!orderNumber || !orderNumber.trim()) {
+    return { isValid: false, error: 'Order number cannot be empty' };
+  }
+
+  const trimmedOrder = orderNumber.trim();
+
+  // Check if organization has specific order number format
+  if (config?.orderNumberFormat?.pattern) {
+    try {
+      const regex = new RegExp(config.orderNumberFormat.pattern);
+      if (!regex.test(trimmedOrder)) {
+        return { 
+          isValid: false, 
+          error: `Invalid order format. Expected: ${config.orderNumberFormat.description || 'matches organization pattern'}`
+        };
+      }
+    } catch (error) {
+      console.warn('Invalid regex pattern in order number config:', error);
+    }
+  }
+
+  // Basic alphanumeric validation
+  const basicPattern = /^[A-Za-z0-9\-_]+$/;
+  if (!basicPattern.test(trimmedOrder)) {
+    return { 
+      isValid: false, 
+      error: 'Order number contains invalid characters. Only letters, numbers, hyphens, and underscores are allowed.' 
+    };
+  }
+
+  return { isValid: true };
+};
 
 export default function ScanCylindersScreen() {
   const [search, setSearch] = useState('');
@@ -19,6 +101,8 @@ export default function ScanCylindersScreen() {
   const [customerBarcodeError, setCustomerBarcodeError] = useState('');
   const navigation = useNavigation();
   const { colors } = useTheme();
+  const { config: assetConfig } = useAssetConfig();
+  const { organization } = useAuth();
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scannerTarget, setScannerTarget] = useState<'customer' | 'order' | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -51,6 +135,26 @@ export default function ScanCylindersScreen() {
       setScanned(false);
     }
   }, [scannerVisible]);
+
+  // Validate order number when it changes
+  useEffect(() => {
+    if (orderNumber.trim()) {
+      const validation = validateOrderNumber(orderNumber, assetConfig);
+      setOrderError(validation.isValid ? '' : validation.error || '');
+    } else {
+      setOrderError('');
+    }
+  }, [orderNumber, assetConfig]);
+
+  // Validate customer barcode when search changes
+  useEffect(() => {
+    if (search.trim() && !selectedCustomer) {
+      const validation = validateBarcode(search, assetConfig);
+      setCustomerBarcodeError(validation.isValid ? '' : validation.error || '');
+    } else {
+      setCustomerBarcodeError('');
+    }
+  }, [search, selectedCustomer, assetConfig]);
 
   const filteredCustomers = (() => {
     if (!search.trim()) return customers;
@@ -94,241 +198,263 @@ export default function ScanCylindersScreen() {
     return uniqueMatches;
   })();
 
-  const orderNumberValid = /^[A-Za-z0-9]+$/.test(orderNumber);
+  const handleBarcodeScanned = ({ type, data }: { type: string; data: string }) => {
+    if (scanned) return;
+    setScanned(true);
+    
+    // Validate the scanned barcode
+    const validation = validateBarcode(data, assetConfig);
+    
+    if (!validation.isValid) {
+      Alert.alert(
+        'Invalid Barcode',
+        validation.error || 'The scanned barcode is not valid for this organization.',
+        [
+          { text: 'Try Again', onPress: () => setScanned(false) },
+          { text: 'Cancel', onPress: () => setScannerVisible(false) }
+        ]
+      );
+      return;
+    }
+
+    if (scannerTarget === 'customer') {
+      setSearch(data);
+      setShowCustomerScan(false);
+    } else if (scannerTarget === 'order') {
+      setOrderNumber(data);
+      setShowOrderScan(false);
+    }
+    
+    setScannerVisible(false);
+    setScannerTarget(null);
+    
+    // Reset scanned state after delay
+    setTimeout(() => setScanned(false), scanDelay);
+  };
+
+  const openScanner = async (target: 'customer' | 'order') => {
+    if (!permission?.granted) {
+      const result = await requestPermission();
+      if (!result.granted) {
+        Alert.alert('Camera Permission', 'Camera permission is required to scan barcodes.');
+        return;
+      }
+    }
+    
+    setScannerTarget(target);
+    if (target === 'customer') {
+      setShowCustomerScan(true);
+    } else {
+      setShowOrderScan(true);
+    }
+    setScannerVisible(true);
+  };
+
+  const canProceed = selectedCustomer && orderNumber.trim() && !orderError && !customerBarcodeError;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }, (showCustomerScan || showOrderScan) && styles.fullscreenContainer]}>
-      {showCustomerScan ? (
-        <View style={styles.fullscreenWrapper}>
-          <CameraView
-            style={styles.fullscreenCamera}
-            facing="back"
-            onBarcodeScanned={(event) => {
-              const barcode = event.data.trim();
-              if (barcode) {
-                // Normalize barcode to handle both 'A' and 'a' endings
-                let normalizedBarcode = barcode;
-                
-                // If barcode ends with 'a', try both 'a' and 'A' versions
-                if (barcode.endsWith('a')) {
-                  const uppercaseVersion = barcode.slice(0, -1) + 'A';
-                  // Check if uppercase version exists in customers
-                  const uppercaseMatch = customers.find(c => 
-                    c.barcode && c.barcode.trim() === uppercaseVersion
-                  );
-                  if (uppercaseMatch) {
-                    normalizedBarcode = uppercaseVersion;
-                  }
-                }
-                // If barcode ends with 'A', try both 'A' and 'a' versions
-                else if (barcode.endsWith('A')) {
-                  const lowercaseVersion = barcode.slice(0, -1) + 'a';
-                  // Check if lowercase version exists in customers
-                  const lowercaseMatch = customers.find(c => 
-                    c.barcode && c.barcode.trim() === lowercaseVersion
-                  );
-                  if (lowercaseMatch) {
-                    normalizedBarcode = lowercaseVersion;
-                  }
-                }
-                
-                setSearch(normalizedBarcode);
-                setShowCustomerScan(false);
-              }
-            }}
-            barcodeScannerSettings={{
-              barcodeTypes: [
-                'qr', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 'code128', 'pdf417', 'aztec', 'datamatrix', 'itf14',
-              ],
-              regionOfInterest: {
-                x: 0.075, // 7.5% from left
-                y: 0.4,   // 40% from top
-                width: 0.85, // 85% width
-                height: 0.2, // 20% height
-              },
-            }}
-          />
-          <View style={styles.scanRectangle} />
-          <View style={styles.scanAreaOverlay} />
-          <TouchableOpacity 
-            style={styles.closeButton} 
-            onPress={() => setShowCustomerScan(false)}
-          >
-            <Text style={styles.closeButtonText}>✕ Close</Text>
-          </TouchableOpacity>
-        </View>
-      ) : showOrderScan ? (
-        <View style={styles.fullscreenWrapper}>
-          <CameraView
-            style={styles.fullscreenCamera}
-            facing="back"
-            onBarcodeScanned={(event) => {
-              const barcode = event.data.trim();
-              if (barcode) {
-                setOrderNumber(barcode);
-                setShowOrderScan(false);
-              }
-            }}
-            barcodeScannerSettings={{
-              barcodeTypes: [
-                'qr', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 'code128', 'pdf417', 'aztec', 'datamatrix', 'itf14',
-              ],
-              regionOfInterest: {
-                x: 0.075, // 7.5% from left
-                y: 0.4,   // 40% from top
-                width: 0.85, // 85% width
-                height: 0.2, // 20% height
-              },
-            }}
-          />
-          <View style={styles.scanRectangle} />
-          <View style={styles.scanAreaOverlay} />
-          <TouchableOpacity 
-            style={styles.closeButton} 
-            onPress={() => setShowOrderScan(false)}
-          >
-            <Text style={styles.closeButtonText}>✕ Close</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
+      {!showCustomerScan && !showOrderScan && (
         <>
-          <Text style={[styles.title, { color: colors.primary }]}>Scan or Search for Customer</Text>
-          <View style={{ width: '100%', maxWidth: 600, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-            <TextInput
-              style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-              placeholder="Search customer name or scan barcode"
-              placeholderTextColor={colors.textSecondary}
-              value={search}
-              onChangeText={text => {
-                setSearch(text);
-                setCustomerBarcodeError('');
-                setSelectedCustomer(null); // Clear selection when typing
-              }}
-            />
-            {/* Customer not found popup */}
-            {showCustomerPopup && (
-              <View style={{
-                position: 'absolute',
-                top: 40,
-                left: 0,
-                right: 0,
-                zIndex: 100,
-                alignItems: 'center',
-              }}>
-                <View style={{
-                  backgroundColor: colors.error,
-                  paddingVertical: 12,
-                  paddingHorizontal: 28,
-                  borderRadius: 16,
-                  shadowColor: '#000',
-                  shadowOpacity: 0.08,
-                  shadowRadius: 8,
-                  elevation: 3,
-                }}>
-                  <Text style={{ color: colors.surface, fontWeight: 'bold', fontSize: 16 }}>This customer does not exist.</Text>
-                </View>
-              </View>
-            )}
-            <TouchableOpacity
-              style={[styles.scanButton, { backgroundColor: colors.primary }]}
-              onPress={() => setShowCustomerScan(true)}
-            >
-              <Text style={styles.scanIcon}>📷</Text>
-            </TouchableOpacity>
+          {/* Header */}
+          <View style={styles.header}>
+            <Text style={[styles.title, { color: colors.text }]}>
+              Scan {assetConfig.assetDisplayNamePlural}
+            </Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+              Select customer and enter order details to begin scanning
+            </Text>
           </View>
 
-          {/* Customer Suggestions Dropdown */}
-          {search.trim() && !selectedCustomer && (
-            <View style={[styles.suggestionsContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              {loading ? (
-                <View style={styles.suggestionItem}>
-                  <ActivityIndicator size="small" color={colors.primary} />
-                  <Text style={[styles.suggestionText, { color: colors.textSecondary }]}>Loading customers...</Text>
-                </View>
-              ) : filteredCustomers.length > 0 ? (
-                filteredCustomers.slice(0, 10).map((customer) => (
-                  <TouchableOpacity
-                    key={customer.CustomerListID}
-                    style={[styles.suggestionItem, { borderBottomColor: colors.border }]}
-                    onPress={() => {
-                      setSelectedCustomer(customer);
-                      setSearch(customer.name);
-                    }}
-                  >
-                    <Text style={[styles.suggestionName, { color: colors.text }]}>{customer.name}</Text>
-                    {customer.barcode && (
-                      <Text style={[styles.suggestionBarcode, { color: colors.textSecondary }]}>Barcode: {customer.barcode}</Text>
-                    )}
-                  </TouchableOpacity>
-                ))
-              ) : (
-                <View style={styles.suggestionItem}>
-                  <Text style={[styles.suggestionText, { color: colors.textSecondary }]}>No customers found</Text>
-                </View>
-              )}
-            </View>
-          )}
-
-          {/* Selected Customer Display */}
-          {selectedCustomer && (
-            <View style={[styles.customerItem, { backgroundColor: colors.surface, borderColor: colors.primary }]}>
-              <Text style={[styles.customerName, { color: colors.text }]}>✓ {selectedCustomer.name}</Text>
-              {selectedCustomer.barcode && (
-                <Text style={[styles.customerBarcode, { color: colors.textSecondary }]}>Barcode: {selectedCustomer.barcode}</Text>
-              )}
+          {/* Order Number Input */}
+          <View style={styles.inputSection}>
+            <Text style={[styles.label, { color: colors.text }]}>Order Number</Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={[
+                  styles.input, 
+                  { 
+                    backgroundColor: colors.surface, 
+                    borderColor: orderError ? colors.error : colors.border,
+                    color: colors.text 
+                  }
+                ]}
+                placeholder={assetConfig?.orderNumberFormat?.description || "Enter order number"}
+                placeholderTextColor={colors.textSecondary}
+                value={orderNumber}
+                onChangeText={setOrderNumber}
+                autoCapitalize="characters"
+              />
               <TouchableOpacity
-                style={[styles.clearButton, { backgroundColor: colors.border }]}
-                onPress={() => {
-                  setSelectedCustomer(null);
-                  setSearch('');
-                }}
+                style={[styles.scanButton, { backgroundColor: colors.primary }]}
+                onPress={() => openScanner('order')}
               >
-                <Text style={[styles.clearButtonText, { color: colors.textSecondary }]}>Clear</Text>
+                <Text style={styles.scanButtonText}>📷</Text>
               </TouchableOpacity>
             </View>
+            {orderError ? (
+              <Text style={[styles.errorText, { color: colors.error }]}>{orderError}</Text>
+            ) : assetConfig?.orderNumberFormat?.examples?.length > 0 ? (
+              <Text style={[styles.helperText, { color: colors.textSecondary }]}>
+                Examples: {assetConfig.orderNumberFormat.examples.slice(0, 2).join(', ')}
+              </Text>
+            ) : null}
+          </View>
+
+          {/* Customer Selection */}
+          <View style={styles.inputSection}>
+            <Text style={[styles.label, { color: colors.text }]}>Customer</Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={[
+                  styles.input, 
+                  { 
+                    backgroundColor: colors.surface, 
+                    borderColor: customerBarcodeError ? colors.error : colors.border,
+                    color: colors.text 
+                  }
+                ]}
+                placeholder={assetConfig?.barcodeFormat?.description || "Search customer or scan barcode"}
+                placeholderTextColor={colors.textSecondary}
+                value={selectedCustomer ? selectedCustomer.name : search}
+                onChangeText={(text) => {
+                  setSearch(text);
+                  setSelectedCustomer(null);
+                }}
+                autoCapitalize="characters"
+              />
+              <TouchableOpacity
+                style={[styles.scanButton, { backgroundColor: colors.primary }]}
+                onPress={() => openScanner('customer')}
+              >
+                <Text style={styles.scanButtonText}>📷</Text>
+              </TouchableOpacity>
+            </View>
+            {customerBarcodeError ? (
+              <Text style={[styles.errorText, { color: colors.error }]}>{customerBarcodeError}</Text>
+            ) : assetConfig?.barcodeFormat?.examples?.length > 0 ? (
+              <Text style={[styles.helperText, { color: colors.textSecondary }]}>
+                Barcode examples: {assetConfig.barcodeFormat.examples.slice(0, 2).join(', ')}
+              </Text>
+            ) : null}
+          </View>
+
+          {/* Customer List */}
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading customers...</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.errorContainer}>
+              <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={filteredCustomers}
+              keyExtractor={(item) => item.CustomerListID}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.customerItem,
+                    { 
+                      backgroundColor: colors.surface, 
+                      borderColor: colors.border,
+                      borderWidth: selectedCustomer?.CustomerListID === item.CustomerListID ? 2 : 1,
+                      borderColor: selectedCustomer?.CustomerListID === item.CustomerListID ? colors.primary : colors.border
+                    }
+                  ]}
+                  onPress={() => {
+                    setSelectedCustomer(item);
+                    setSearch(item.name);
+                    setCustomerBarcodeError('');
+                  }}
+                >
+                  <Text style={[styles.customerName, { color: colors.text }]}>{item.name}</Text>
+                  <Text style={[styles.customerId, { color: colors.textSecondary }]}>{item.CustomerListID}</Text>
+                  {item.barcode && (
+                    <Text style={[styles.customerBarcode, { color: colors.textSecondary }]}>Barcode: {item.barcode}</Text>
+                  )}
+                </TouchableOpacity>
+              )}
+              style={styles.customerList}
+              showsVerticalScrollIndicator={false}
+            />
           )}
 
-          <Text style={[styles.title, { color: colors.primary }]}>Order Number</Text>
-          <View style={{ width: '100%', maxWidth: 600, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', marginBottom: 0 }}>
-            <TextInput
-              style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-              placeholder="Enter or scan order number (letters and/or numbers)"
-              placeholderTextColor={colors.textSecondary}
-              value={orderNumber}
-              onChangeText={text => {
-                setOrderNumber(text);
-                setOrderError('');
-              }}
-            />
-            <TouchableOpacity
-              style={[styles.scanButton, { backgroundColor: colors.primary }]}
-              onPress={() => setShowOrderScan(true)}
-            >
-              <Text style={styles.scanIcon}>📷</Text>
-            </TouchableOpacity>
-          </View>
-          {!orderNumberValid && orderNumber.length > 0 && (
-            <Text style={{ color: colors.error, marginBottom: 8 }}>
-              Order number must contain only letters and/or numbers.
-            </Text>
-          )}
+          {/* Continue Button */}
           <TouchableOpacity
-            style={[styles.nextButton, { backgroundColor: colors.primary }, !(selectedCustomer && orderNumberValid) && { backgroundColor: colors.border }]}
-            disabled={!(selectedCustomer && orderNumberValid)}
+            style={[
+              styles.continueButton,
+              {
+                backgroundColor: canProceed ? colors.primary : colors.border,
+                opacity: canProceed ? 1 : 0.6
+              }
+            ]}
             onPress={() => {
-              if (selectedCustomer && orderNumberValid) {
+              if (canProceed) {
                 navigation.navigate('ScanCylindersAction', {
                   customer: selectedCustomer,
-                  orderNumber,
+                  orderNumber: orderNumber.trim()
                 });
-              } else if (!orderNumberValid) {
-                setOrderError('Order number must contain only letters and/or numbers.');
               }
             }}
+            disabled={!canProceed}
           >
-            <Text style={[styles.nextButtonText, { color: colors.surface }]}>Next</Text>
+            <Text style={[styles.continueButtonText, { color: canProceed ? '#FFFFFF' : colors.textSecondary }]}>
+              Continue to Scanning
+            </Text>
           </TouchableOpacity>
         </>
+      )}
+
+      {/* Camera Scanner Modals */}
+      {showCustomerScan && (
+        <Modal visible={showCustomerScan} animationType="slide">
+          <View style={styles.scannerContainer}>
+            <CameraView
+              style={styles.camera}
+              facing="back"
+              onBarcodeScanned={handleBarcodeScanned}
+              barcodeScannerSettings={{
+                barcodeTypes: ['qr', 'pdf417', 'code128', 'code39', 'code93', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e'],
+              }}
+            >
+              <ScanArea 
+                title="Scan Customer Barcode"
+                subtitle="Position the barcode within the frame"
+                onClose={() => {
+                  setShowCustomerScan(false);
+                  setScannerVisible(false);
+                }}
+              />
+            </CameraView>
+          </View>
+        </Modal>
+      )}
+
+      {showOrderScan && (
+        <Modal visible={showOrderScan} animationType="slide">
+          <View style={styles.scannerContainer}>
+            <CameraView
+              style={styles.camera}
+              facing="back"
+              onBarcodeScanned={handleBarcodeScanned}
+              barcodeScannerSettings={{
+                barcodeTypes: ['qr', 'pdf417', 'code128', 'code39', 'code93', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e'],
+              }}
+            >
+              <ScanArea 
+                title="Scan Order Number"
+                subtitle="Position the order barcode within the frame"
+                onClose={() => {
+                  setShowOrderScan(false);
+                  setScannerVisible(false);
+                }}
+              />
+            </CameraView>
+          </View>
+        </Modal>
       )}
     </View>
   );
@@ -337,146 +463,113 @@ export default function ScanCylindersScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
+    padding: 20,
+  },
+  fullscreenContainer: {
+    padding: 0,
+  },
+  header: {
+    marginBottom: 30,
+    alignItems: 'center',
   },
   title: {
-    fontSize: 18,
+    fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 8,
   },
-  input: {
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 12,
+  subtitle: {
     fontSize: 16,
-    marginBottom: 12,
+    textAlign: 'center',
+  },
+  inputSection: {
+    marginBottom: 24,
+  },
+  label: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  input: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 16,
+  },
+  scanButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scanButtonText: {
+    fontSize: 20,
+  },
+  errorText: {
+    fontSize: 14,
+    marginTop: 4,
+  },
+  helperText: {
+    fontSize: 12,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  customerList: {
+    flex: 1,
+    marginBottom: 20,
   },
   customerItem: {
-    borderRadius: 10,
-    padding: 12,
+    padding: 16,
+    borderRadius: 8,
     marginBottom: 8,
     borderWidth: 1,
   },
   customerName: {
-    fontWeight: 'bold',
     fontSize: 16,
-  },
-  customerBarcode: {
-    fontSize: 13,
-  },
-  nextButton: {
-    marginTop: 24,
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: 'center',
-  },
-  nextButtonText: {
-    fontWeight: 'bold',
-    fontSize: 18,
-    letterSpacing: 1,
-  },
-  scanButton: {
-    borderRadius: 10,
-    padding: 10,
-    marginLeft: 8,
-  },
-  scanIcon: {
-    fontSize: 20,
-  },
-  suggestionsContainer: {
-    borderRadius: 10,
-    borderWidth: 1,
-    maxHeight: 200,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  suggestionItem: {
-    padding: 12,
-    borderBottomWidth: 1,
-  },
-  suggestionText: {
-    fontSize: 14,
-    textAlign: 'center',
-    padding: 8,
-  },
-  suggestionName: {
     fontWeight: '600',
-    fontSize: 16,
+    marginBottom: 4,
+  },
+  customerId: {
+    fontSize: 14,
     marginBottom: 2,
   },
-  suggestionBarcode: {
-    fontSize: 13,
-  },
-  clearButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  clearButtonText: {
+  customerBarcode: {
     fontSize: 12,
-    fontWeight: '600',
   },
-  fullscreenContainer: {
-    padding: 0,
-    backgroundColor: '#000',
-  },
-  fullscreenScanArea: {
-    width: '100%',
-    height: '100%',
-  },
-  closeButton: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    zIndex: 1000,
-  },
-  closeButtonText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2563eb',
-  },
-  fullscreenWrapper: {
-    flex: 1,
-    backgroundColor: '#000',
-    justifyContent: 'center',
+  continueButton: {
+    borderRadius: 8,
+    paddingVertical: 16,
     alignItems: 'center',
   },
-  fullscreenCamera: {
-    width: width,
-    height: height,
-    position: 'absolute',
-    top: 0,
-    left: 0,
+  continueButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
-  scanRectangle: {
-    position: 'absolute',
-    top: '40%',
-    left: '7.5%',
-    width: '85%',
-    height: '20%',
-    borderWidth: 2,
-    borderColor: '#2563eb',
-    backgroundColor: 'transparent',
+  scannerContainer: {
+    flex: 1,
   },
-  scanAreaOverlay: {
-    position: 'absolute',
-    top: '40%',
-    left: '7.5%',
-    width: '85%',
-    height: '20%',
-    borderWidth: 2,
-    borderColor: '#2563eb',
-    backgroundColor: 'transparent',
+  camera: {
+    flex: 1,
   },
 }); 

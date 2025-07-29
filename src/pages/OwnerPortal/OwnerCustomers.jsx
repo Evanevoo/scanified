@@ -50,7 +50,7 @@ export default function OwnerCustomers() {
     plan_id: '',
     status: 'active',
     trial_ends_at: null,
-    subscription_ends_at: null
+    subscription_end_date: null
   });
   const [deleteDialog, setDeleteDialog] = useState(false);
   const [orgToDelete, setOrgToDelete] = useState(null);
@@ -246,7 +246,7 @@ export default function OwnerCustomers() {
       plan_id: org.subscription_plan_id || '',
       status: org.subscription_status || 'active',
       trial_ends_at: org.trial_ends_at || null,
-      subscription_ends_at: org.subscription_ends_at || null
+              subscription_end_date: org.subscription_end_date || null
     });
     setSubscriptionDialog(true);
   };
@@ -261,7 +261,7 @@ export default function OwnerCustomers() {
           subscription_plan_id: subscriptionForm.plan_id,
           subscription_status: subscriptionForm.status,
           trial_ends_at: subscriptionForm.trial_ends_at,
-          subscription_ends_at: subscriptionForm.subscription_ends_at,
+          subscription_end_date: subscriptionForm.subscription_end_date,
           updated_at: new Date().toISOString()
         })
         .eq('id', selectedOrgForSubscription.id);
@@ -276,7 +276,7 @@ export default function OwnerCustomers() {
               subscription_plan_id: subscriptionForm.plan_id,
               subscription_status: subscriptionForm.status,
               trial_ends_at: subscriptionForm.trial_ends_at,
-              subscription_ends_at: subscriptionForm.subscription_ends_at,
+              subscription_end_date: subscriptionForm.subscription_end_date,
               updated_at: new Date().toISOString() 
             }
           : org
@@ -284,7 +284,7 @@ export default function OwnerCustomers() {
 
       setSubscriptionDialog(false);
       setSelectedOrgForSubscription(null);
-      setSubscriptionForm({ plan_id: '', status: 'active', trial_ends_at: null, subscription_ends_at: null });
+      setSubscriptionForm({ plan_id: '', status: 'active', trial_ends_at: null, subscription_end_date: null });
       
       // Refresh the data
       fetchOrganizations();
@@ -875,8 +875,8 @@ export default function OwnerCustomers() {
                  fullWidth
                  label="Subscription Ends At"
                  type="datetime-local"
-                 value={subscriptionForm.subscription_ends_at ? subscriptionForm.subscription_ends_at.slice(0, 16) : ''}
-                 onChange={(e) => setSubscriptionForm({ ...subscriptionForm, subscription_ends_at: e.target.value })}
+                                 value={subscriptionForm.subscription_end_date ? subscriptionForm.subscription_end_date.slice(0, 16) : ''}
+                onChange={(e) => setSubscriptionForm({ ...subscriptionForm, subscription_end_date: e.target.value })}
                  InputLabelProps={{ shrink: true }}
                />
              </Grid>
@@ -912,7 +912,7 @@ export default function OwnerCustomers() {
                        setSubscriptionForm({
                          ...subscriptionForm,
                          status: 'active',
-                         subscription_ends_at: subEnd.toISOString().slice(0, 16)
+                         subscription_end_date: subEnd.toISOString().slice(0, 16)
                        });
                      }}
                    >

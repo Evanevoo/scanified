@@ -1118,18 +1118,30 @@ export default function Import() {
       
       if (!preview.length) throw new Error('No data to import.');
       
+      // Get user's organization_id for proper filtering
+      const { data: userProfile, error: profileError } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single();
+      
+      if (profileError || !userProfile?.organization_id) {
+        throw new Error('User not assigned to an organization');
+      }
+      
       const CHUNK_SIZE = 500;
       for (let chunkStart = 0; chunkStart < preview.length; chunkStart += CHUNK_SIZE) {
         const chunk = preview.slice(chunkStart, chunkStart + CHUNK_SIZE);
 
-        // --- Bulk check for existing customers ---
+        // --- Bulk check for existing customers within the organization ---
         const customerIds = [...new Set(chunk.map(row => row.customer_id).filter(Boolean))];
         const { data: existingCustomers = [] } = await supabase
           .from('customers')
           .select('CustomerListID')
-          .in('CustomerListID', customerIds);
+          .in('CustomerListID', customerIds)
+          .eq('organization_id', userProfile.organization_id);
         const existingCustomerIds = new Set((existingCustomers || []).map(c => c.CustomerListID));
-
+        
         // --- Bulk insert new customers with better duplicate handling ---
         const newCustomers = [];
         const seenInChunk = new Set();
@@ -1157,19 +1169,67 @@ export default function Import() {
         
         if (newCustomers.length) {
           console.log(`Creating ${newCustomers.length} new customers...`);
+          
+          // Validate organization_id before attempting insert
+          if (!userProfile.organization_id) {
+            throw new Error('User profile missing organization_id - cannot create customers');
+          }
+          
+          // Enhanced customer creation with RLS-friendly approach
           const { error: customerError } = await supabase.from('customers').insert(newCustomers);
           if (customerError) {
             console.error('Error creating customers:', customerError);
-            // Try one-by-one if batch fails
-            for (const customer of newCustomers) {
-              const { error: singleError } = await supabase.from('customers').insert([customer]);
-              if (singleError && singleError.code !== '23505') { // Ignore duplicate errors
-                console.error('Error creating customer:', customer.CustomerListID, singleError);
-                errors++;
-              } else if (singleError && singleError.code === '23505') {
-                console.log('Customer already exists (ignoring):', customer.CustomerListID);
-              } else {
-                customersCreated++;
+            
+            // Handle RLS policy errors specifically
+            if (customerError.message.includes('row-level security policy')) {
+              console.log('RLS policy error detected. Trying individual inserts with explicit organization context...');
+              
+              // Try one-by-one with explicit organization context
+              for (const customer of newCustomers) {
+                try {
+                  // Double-check organization_id is set
+                  const customerWithOrgId = {
+                    ...customer,
+                    organization_id: userProfile.organization_id
+                  };
+                  
+                  const { error: singleError } = await supabase
+                    .from('customers')
+                    .insert([customerWithOrgId]);
+                    
+                  if (singleError) {
+                    if (singleError.code === '23505') {
+                      // Duplicate key error - customer already exists
+                      console.log('Customer already exists (ignoring):', customer.CustomerListID);
+                    } else if (singleError.message.includes('row-level security policy')) {
+                      console.error('RLS policy violation for customer:', customer.CustomerListID);
+                      console.error('Customer data:', customerWithOrgId);
+                      console.error('User profile:', userProfile);
+                      errors++;
+                    } else {
+                      console.error('Error creating customer:', customer.CustomerListID, singleError);
+                      errors++;
+                    }
+                  } else {
+                    customersCreated++;
+                  }
+                } catch (err) {
+                  console.error('Unexpected error creating customer:', customer.CustomerListID, err);
+                  errors++;
+                }
+              }
+            } else {
+              // Try one-by-one if batch fails for other reasons
+              for (const customer of newCustomers) {
+                const { error: singleError } = await supabase.from('customers').insert([customer]);
+                if (singleError && singleError.code !== '23505') { // Ignore duplicate errors
+                  console.error('Error creating customer:', customer.CustomerListID, singleError);
+                  errors++;
+                } else if (singleError && singleError.code === '23505') {
+                  console.log('Customer already exists (ignoring):', customer.CustomerListID);
+                } else {
+                  customersCreated++;
+                }
               }
             }
           } else {

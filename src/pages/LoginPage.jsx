@@ -8,6 +8,7 @@ import {
   DialogContent, DialogActions, Snackbar, IconButton
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import LogoutIcon from '@mui/icons-material/Logout';
 
 function LoginPage() {
   const navigate = useNavigate();
@@ -20,49 +21,54 @@ function LoginPage() {
   const [resetLoading, setResetLoading] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
   const [resetError, setResetError] = useState('');
-  const [profileNotFound, setProfileNotFound] = useState(false);
 
   useEffect(() => {
-    // Only navigate if user and organization exist
-    if (!loading && user && organization) {
-      navigate('/dashboard');
+    // Simplified navigation logic
+    if (!loading) {
+      if (user && profile && organization) {
+        // Full authenticated user with organization
+        navigate('/dashboard');
+      } else if (user && profile && !organization && profile.role === 'owner') {
+        // Platform owner without organization
+        navigate('/owner-portal');
+      } else if (user && profile && !organization && profile.role !== 'owner') {
+        // User without organization (needs to create or join one)
+        setShowOrgError(true);
+        setError('Your account is not linked to any organization. Please create a new organization or contact support.');
+      }
+      // Otherwise, stay on login page
     }
-    // Show error if user is logged in but has no organization
-    else if (!loading && user && profile && !organization) {
-      setShowOrgError(true);
-      setError('Your account is not linked to any organization. Please contact support or register a new organization.');
-      console.log('Setting org error!');
-    } else if (!loading && !user && !organization && !profile && loadingLocal) {
-      setProfileNotFound(true);
-      setError('This user is not registered. Please contact support or register your organization.');
-      setLoadingLocal(false);
-    }
-  }, [user, profile, organization, loading, loadingLocal, navigate]);
+  }, [user, profile, organization, loading, navigate]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoadingLocal(true);
     setError('');
     setShowOrgError(false);
-    setProfileNotFound(false);
 
     const formData = new FormData(e.target);
     const email = formData.get('email');
     const password = formData.get('password');
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      // Make error messages more user-friendly
-      if (error.message.includes('Invalid login credentials')) {
-        setError('Email or password is incorrect. Please try again.');
-      } else if (error.message.includes('Email not confirmed')) {
-        setError('Please check your email and click the confirmation link before signing in.');
-      } else {
-        setError(error.message);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      
+      if (error) {
+        // Make error messages more user-friendly
+        if (error.message.includes('Invalid login credentials')) {
+          setError('Email or password is incorrect. Please try again.');
+        } else if (error.message.includes('Email not confirmed')) {
+          setError('Please check your email and click the confirmation link before signing in.');
+        } else {
+          setError(error.message);
+        }
       }
+      // Do NOT navigate here! Let the useEffect handle it.
+    } catch (err) {
+      setError('An unexpected error occurred. Please try again.');
+    } finally {
+      setLoadingLocal(false);
     }
-    // Do NOT navigate here! Let the useEffect handle it.
-    setLoadingLocal(false);
   };
 
   const handleForgotPassword = async (e) => {
@@ -90,6 +96,71 @@ function LoginPage() {
     setResetError('');
   };
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setShowOrgError(false);
+    setError('');
+  };
+
+  // Don't show login form if still checking auth state
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  // Show org error state if user is logged in but has no organization
+  if (showOrgError && user) {
+    return (
+      <Box sx={{ 
+        minHeight: '100vh', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center',
+        bgcolor: '#f5f5f5',
+        p: 3
+      }}>
+        <Card sx={{ maxWidth: 500, width: '100%' }}>
+          <CardContent sx={{ p: 4 }}>
+            <Typography variant="h5" gutterBottom>
+              Organization Required
+            </Typography>
+            <Alert severity="warning" sx={{ mb: 3 }}>
+              {error}
+            </Alert>
+            <Box sx={{ display: 'flex', gap: 2, flexDirection: 'column' }}>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                fullWidth
+                onClick={() => navigate('/register')}
+              >
+                Create New Organization
+              </Button>
+              <Button 
+                variant="outlined" 
+                color="secondary" 
+                fullWidth
+                onClick={() => navigate('/contact')}
+              >
+                Contact Support
+              </Button>
+              <Button 
+                variant="text" 
+                startIcon={<LogoutIcon />}
+                onClick={handleLogout}
+              >
+                Sign Out
+              </Button>
+            </Box>
+          </CardContent>
+        </Card>
+      </Box>
+    );
+  }
+
   return (
     <Box sx={{ 
       minHeight: '100vh', 
@@ -97,188 +168,132 @@ function LoginPage() {
       alignItems: 'center', 
       justifyContent: 'center',
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      p: 2
+      p: 3
     }}>
       <Card sx={{ maxWidth: 400, width: '100%' }}>
         <CardContent sx={{ p: 4 }}>
-          {/* Error Message - always visible at the top */}
-          {(error || showOrgError || profileNotFound) && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
-              {(showOrgError || profileNotFound) && (
-                <Box mt={1}>
-                  <Button
-                    variant="outlined"
-                    color="primary"
-                    onClick={() => navigate('/register')}
-                  >
-                    Create New Organization
-                  </Button>
-                </Box>
-              )}
-            </Alert>
-          )}
-          {/* Back to Home Button */}
-          <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 2 }}>
-            <Button
-              startIcon={<ArrowBackIcon />}
-              onClick={() => navigate('/')}
-              sx={{ 
-                color: 'text.secondary',
-                '&:hover': { 
-                  backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                  color: 'text.primary'
-                }
-              }}
-            >
-              Back to Home
-            </Button>
+          <Box sx={{ textAlign: 'center', mb: 4 }}>
+            <Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 600 }}>
+              Welcome Back
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Sign in to your account to continue
+            </Typography>
           </Box>
 
-          <Typography variant="h4" align="center" gutterBottom>
-            Welcome Back
-          </Typography>
-          
-          <Typography variant="body1" align="center" color="text.secondary" sx={{ mb: 4 }}>
-            Sign in to your account
-          </Typography>
+          {error && (
+            <Alert severity="error" sx={{ mb: 3 }}>
+              {error}
+            </Alert>
+          )}
 
-          <Box component="form" onSubmit={handleLogin}>
+          <form onSubmit={handleLogin}>
             <TextField
               fullWidth
+              label="Email"
               name="email"
-              label="Email Address"
               type="email"
               required
-              sx={{ mb: 2 }}
+              margin="normal"
+              autoComplete="email"
+              autoFocus
             />
-            
             <TextField
               fullWidth
-              name="password"
               label="Password"
+              name="password"
               type="password"
               required
-              sx={{ mb: 1 }}
+              margin="normal"
+              autoComplete="current-password"
             />
-
-            {/* Forgot Password Link */}
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 3 }}>
+            
+            <Box sx={{ mt: 2, mb: 2, textAlign: 'right' }}>
               <Link
+                component="button"
+                type="button"
                 variant="body2"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setForgotPasswordOpen(true);
-                }}
-                sx={{ 
-                  textDecoration: 'none',
-                  color: 'primary.main',
-                  cursor: 'pointer',
-                  '&:hover': { textDecoration: 'underline' }
-                }}
+                onClick={() => setForgotPasswordOpen(true)}
+                sx={{ textDecoration: 'none' }}
               >
-                Forgot Password?
+                Forgot password?
               </Link>
             </Box>
-            
+
             <Button
               type="submit"
               fullWidth
               variant="contained"
               size="large"
               disabled={loadingLocal}
-              endIcon={loadingLocal ? <CircularProgress size={20} /> : null}
-              sx={{ mb: 3 }}
-            >
-              Sign In
-            </Button>
-          </Box>
-
-          <Divider sx={{ my: 3 }}>
-            <Typography variant="body2" color="text.secondary">
-              OR
-            </Typography>
-          </Divider>
-
-          <Box sx={{ textAlign: 'center' }}>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              New to LessAnnoyingScan?
-            </Typography>
-            
-            <Button
-              variant="contained"
-              fullWidth
-              onClick={() => navigate('/register')}
               sx={{ mb: 2 }}
             >
-              Start Free Trial
+              {loadingLocal ? <CircularProgress size={24} /> : 'Sign In'}
             </Button>
-            
-            <Button
-              variant="text"
-              fullWidth
-              onClick={() => navigate('/contact')}
-              sx={{ 
-                textTransform: 'none',
-                color: 'text.secondary',
-                '&:hover': { 
-                  backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                  color: 'text.primary'
-                }
-              }}
+          </form>
+
+          <Divider sx={{ my: 3 }}>OR</Divider>
+
+          <Box sx={{ textAlign: 'center' }}>
+            <Typography variant="body2" color="text.secondary">
+              Don't have an account?{' '}
+              <Link
+                component="button"
+                variant="body2"
+                onClick={() => navigate('/register')}
+                sx={{ textDecoration: 'none', fontWeight: 600 }}
+              >
+                Sign up
+              </Link>
+            </Typography>
+          </Box>
+
+          <Box sx={{ mt: 3, textAlign: 'center' }}>
+            <Link
+              component="button"
+              variant="body2"
+              onClick={() => navigate('/')}
+              sx={{ textDecoration: 'none' }}
             >
-              Need Help? Contact Us
-            </Button>
+              <IconButton size="small">
+                <ArrowBackIcon />
+              </IconButton>
+              Back to Home
+            </Link>
           </Box>
         </CardContent>
       </Card>
 
       {/* Forgot Password Dialog */}
-      <Dialog 
-        open={forgotPasswordOpen} 
-        onClose={handleCloseForgotPassword}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>
-          Reset Your Password
-        </DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Enter your email address and we'll send you a link to reset your password.
-          </Typography>
-          
-          {resetError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {resetError}
-            </Alert>
-          )}
-          
-          <Box component="form" onSubmit={handleForgotPassword}>
+      <Dialog open={forgotPasswordOpen} onClose={handleCloseForgotPassword} maxWidth="xs" fullWidth>
+        <DialogTitle>Reset Password</DialogTitle>
+        <form onSubmit={handleForgotPassword}>
+          <DialogContent>
+            <Typography variant="body2" sx={{ mb: 2 }}>
+              Enter your email address and we'll send you a link to reset your password.
+            </Typography>
+            {resetError && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {resetError}
+              </Alert>
+            )}
             <TextField
               fullWidth
-              label="Email Address"
+              label="Email"
               type="email"
               value={resetEmail}
               onChange={(e) => setResetEmail(e.target.value)}
               required
-              sx={{ mb: 3 }}
+              autoFocus
             />
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ p: 3, pt: 0 }}>
-          <Button onClick={handleCloseForgotPassword}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleForgotPassword}
-            variant="contained"
-            disabled={resetLoading || !resetEmail}
-            endIcon={resetLoading ? <CircularProgress size={20} /> : null}
-          >
-            Send Reset Link
-          </Button>
-        </DialogActions>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleCloseForgotPassword}>Cancel</Button>
+            <Button type="submit" variant="contained" disabled={resetLoading}>
+              {resetLoading ? <CircularProgress size={20} /> : 'Send Reset Link'}
+            </Button>
+          </DialogActions>
+        </form>
       </Dialog>
 
       {/* Success Snackbar */}
@@ -286,16 +301,8 @@ function LoginPage() {
         open={resetSuccess}
         autoHideDuration={6000}
         onClose={() => setResetSuccess(false)}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert 
-          onClose={() => setResetSuccess(false)} 
-          severity="success" 
-          sx={{ width: '100%' }}
-        >
-          Password reset link sent! Check your email for instructions.
-        </Alert>
-      </Snackbar>
+        message="Password reset link sent! Check your email."
+      />
     </Box>
   );
 }

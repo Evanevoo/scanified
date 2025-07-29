@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Button, Grid, List, ListItem, ListItemText, Divider, Alert, Chip, IconButton, Tooltip } from '@mui/material';
+import { CardSkeleton } from '../components/SmoothLoading';
 
 export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber }) {
   const params = useParams();
@@ -610,7 +611,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
   if (loading) return (
     <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px" bgcolor="#f5f5f5">
-      <Typography variant="h6" color="primary">Loading...</Typography>
+      <CardSkeleton count={1} />
     </Box>
   );
   

@@ -14,6 +14,7 @@ import DialogActions from '@mui/material/DialogActions';
 import IconButton from '@mui/material/IconButton';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useAuth } from '../hooks/useAuth';
+import { CardSkeleton } from '../components/SmoothLoading';
 
 export default function BottleDetail() {
   const { id } = useParams();
@@ -308,7 +309,7 @@ export default function BottleDetail() {
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-        <CircularProgress />
+        <CardSkeleton count={1} />
       </Box>
     );
   }

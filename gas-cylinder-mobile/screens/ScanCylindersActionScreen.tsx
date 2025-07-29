@@ -31,7 +31,19 @@ export default function ScanCylindersActionScreen() {
   const [isConnected, setIsConnected] = useState(true);
   const [offlineCount, setOfflineCount] = useState(0);
 
-  const isValidBarcode = (barcode) => /^\d{9}$/.test(barcode);
+  const isValidBarcode = (barcode) => {
+    // Enhanced validation with better error messages
+    if (!barcode || typeof barcode !== 'string') return false;
+    const trimmed = barcode.trim();
+    
+    // Check for 9-digit numeric pattern (existing requirement)
+    if (!/^\d{9}$/.test(trimmed)) return false;
+    
+    // Additional validation - check for common invalid patterns
+    if (trimmed === '000000000' || trimmed === '123456789') return false;
+    
+    return true;
+  };
 
   // Check connectivity and offline status
   useEffect(() => {
@@ -59,26 +71,34 @@ export default function ScanCylindersActionScreen() {
 
   const playBeep = async () => {
     try {
-      // Just use vibration for now - more reliable than audio files
-      Vibration.vibrate(80);
-    } catch (e) {
-      // If vibration fails, just continue silently
-      console.log('Vibration failed:', e);
+      // Enhanced feedback with different patterns
+      if (scanError) {
+        // Error pattern: multiple short vibrations
+        Vibration.vibrate([50, 50, 50, 50, 100]);
+      } else {
+        // Success pattern: single strong vibration
+        Vibration.vibrate(100);
+      }
+    } catch (error) {
+      console.log('Vibration failed:', error);
     }
   };
 
   const handleBarcodeScanned = ({ data }) => {
     const barcode = data.trim();
+    
     if (!isValidBarcode(barcode)) {
       setScanError('Invalid barcode: must be exactly 9 numbers');
       setScanned(true);
+      playBeep();
       setTimeout(() => {
         setScanned(false);
         setScanError('');
-      }, 1200);
+      }, 2500); // Slightly longer display time
       return;
     }
-    // If barcode is in the other list, move it
+
+    // Check for duplicate in opposite list and move if found
     if (mode === 'SHIP' && scannedReturn.includes(barcode)) {
       setScannedReturn(list => list.filter(c => c !== barcode));
       setReturnCount(count => Math.max(0, count - 1));
@@ -87,9 +107,10 @@ export default function ScanCylindersActionScreen() {
       setScanned(true);
       setLastScanned(barcode);
       playBeep();
-      setTimeout(() => setScanned(false), 800);
+      setTimeout(() => setScanned(false), 1000);
       return;
     }
+
     if (mode === 'RETURN' && scannedShip.includes(barcode)) {
       setScannedShip(list => list.filter(c => c !== barcode));
       setShipCount(count => Math.max(0, count - 1));
@@ -98,22 +119,28 @@ export default function ScanCylindersActionScreen() {
       setScanned(true);
       setLastScanned(barcode);
       playBeep();
-      setTimeout(() => setScanned(false), 800);
+      setTimeout(() => setScanned(false), 1000);
       return;
     }
-    // Prevent duplicate in the same list
-    if ((mode === 'SHIP' && scannedShip.includes(barcode)) || (mode === 'RETURN' && scannedReturn.includes(barcode))) {
-      setScanError('Barcode already scanned');
+
+    // Check for duplicate in same list
+    if ((mode === 'SHIP' && scannedShip.includes(barcode)) || 
+        (mode === 'RETURN' && scannedReturn.includes(barcode))) {
+      setScanError('Barcode already scanned in this list');
       setScanned(true);
+      playBeep();
       setTimeout(() => {
         setScanned(false);
         setScanError('');
-      }, 1200);
+      }, 2000);
       return;
     }
+
+    // Add to appropriate list
     setScanned(true);
     setLastScanned(barcode);
     playBeep();
+    
     if (mode === 'SHIP') {
       setShipCount(count => count + 1);
       setScannedShip(list => [...list, barcode]);
@@ -121,6 +148,7 @@ export default function ScanCylindersActionScreen() {
       setReturnCount(count => count + 1);
       setScannedReturn(list => [...list, barcode]);
     }
+    
     setTimeout(() => setScanned(false), 800);
   };
 
@@ -252,11 +280,24 @@ export default function ScanCylindersActionScreen() {
       <View style={styles.scanAreaWrapper}>
         {scanError ? (
           <View style={{ position: 'absolute', top: 10, left: 0, right: 0, alignItems: 'center', zIndex: 100 }}>
-            <View style={{ backgroundColor: colors.error, paddingVertical: 10, paddingHorizontal: 24, borderRadius: 14 }}>
-              <Text style={{ color: colors.surface, fontWeight: 'bold', fontSize: 16 }}>{scanError}</Text>
+            <View style={{ 
+              backgroundColor: colors.error, 
+              paddingVertical: 12, 
+              paddingHorizontal: 24, 
+              borderRadius: 20,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.25,
+              shadowRadius: 4,
+              elevation: 5
+            }}>
+              <Text style={{ color: colors.surface, fontWeight: 'bold', fontSize: 16 }}>
+                ⚠️ {scanError}
+              </Text>
             </View>
           </View>
         ) : null}
+        
         {!permission ? (
           <Text style={{ color: colors.text }}>Requesting camera permission...</Text>
         ) : !permission.granted ? (
@@ -274,14 +315,31 @@ export default function ScanCylindersActionScreen() {
               onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
               barcodeScannerSettings={{
                 barcodeTypes: [
-                  'qr', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 'code128', 'pdf417', 'aztec', 'datamatrix', 'itf14',
+                  'qr', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 
+                  'code128', 'pdf417', 'aztec', 'datamatrix', 'itf14', 'interleaved2of5'
                 ],
+                regionOfInterest: {
+                  x: 0.1, // 10% from left
+                  y: 0.35, // 35% from top
+                  width: 0.8, // 80% width
+                  height: 0.3, // 30% height
+                }
               }}
             />
+            
+            {/* Enhanced scanning frame */}
+            <View style={styles.scanningFrame} />
             <View style={styles.cornerTL} />
             <View style={styles.cornerTR} />
             <View style={styles.cornerBL} />
             <View style={styles.cornerBR} />
+            
+            {/* Scanning status indicator */}
+            {lastScanned && !scanError && (
+              <View style={styles.successOverlay}>
+                <Text style={styles.successText}>✓ Scanned: {lastScanned}</Text>
+              </View>
+            )}
           </View>
         )}
       </View>
@@ -534,6 +592,36 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 0,
     overflow: 'hidden',
+  },
+  scanningFrame: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: scanAreaSize * 0.8, // 80% of scan area
+    height: scanAreaSize * 0.6, // 60% of scan area
+    borderWidth: 2,
+    borderColor: '#2563eb',
+    borderRadius: 10,
+    backgroundColor: 'transparent',
+  },
+  successOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 10,
+    zIndex: 10,
+  },
+  successText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    padding: 20,
   },
   cornerTL: {
     position: 'absolute',

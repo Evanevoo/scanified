@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate, Link } from 'react-router-dom';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Collapse, IconButton, TextField, CircularProgress, FormControl, InputLabel, Select, MenuItem, Alert
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Collapse, IconButton, TextField, CircularProgress, FormControl, InputLabel, Select, MenuItem, Alert, Chip
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
@@ -143,25 +143,86 @@ function Rentals() {
     setLoading(true);
     setError(null);
     try {
-      // Fetch all rentals
+      if (!userProfile?.organization_id) {
+        setError('No organization assigned to user');
+        setLoading(false);
+        return;
+      }
+
+      // Fetch all explicit rental records for this organization
       const { data: rentalsData, error: rentalsError } = await supabase
         .from('rentals')
         .select('*, bottles(*)')
+        .eq('organization_id', userProfile.organization_id)
         .not('bottle_id', 'is', null)
         .order('rental_start_date', { ascending: false });
       if (rentalsError) throw rentalsError;
       
+      // Fetch bottles assigned to customers (but not customer-owned) for this organization
+      const { data: assignedBottles, error: bottlesError } = await supabase
+        .from('bottles')
+        .select('*')
+        .eq('organization_id', userProfile.organization_id)
+        .not('assigned_customer', 'is', null)
+        .neq('owner_type', 'customer') // Exclude customer-owned bottles
+        .order('created_at', { ascending: false });
+      if (bottlesError) throw bottlesError;
+      
       console.log('Rentals: Sample rental data:', rentalsData?.slice(0, 3));
       console.log('Rentals: Total rentals fetched:', rentalsData?.length || 0);
-      console.log('Rentals: First rental fields:', Object.keys(rentalsData?.[0] || {}));
+      console.log('Rentals: Assigned bottles fetched:', assignedBottles?.length || 0);
+      
+      // Combine explicit rentals with assigned bottles
+      const allRentalData = [];
+      
+      // Add explicit rentals
+      (rentalsData || []).forEach(rental => {
+        allRentalData.push({
+          ...rental,
+          source: 'rental_record',
+          customer_id: rental.customer_id,
+          bottle_id: rental.bottle_id,
+          rental_start_date: rental.rental_start_date,
+          rental_end_date: rental.rental_end_date,
+          rental_amount: rental.rental_amount,
+          rental_type: rental.rental_type,
+          tax_code: rental.tax_code,
+          location: rental.location
+        });
+      });
+      
+      // Add assigned bottles as implicit rentals (if not already in explicit rentals)
+      const existingBottleIds = new Set((rentalsData || []).map(r => r.bottle_id).filter(Boolean));
+      
+      (assignedBottles || []).forEach(bottle => {
+        if (!existingBottleIds.has(bottle.id)) {
+          allRentalData.push({
+            id: `bottle_${bottle.id}`, // Unique ID for bottle-based rentals
+            source: 'bottle_assignment',
+            customer_id: bottle.assigned_customer,
+            bottle_id: bottle.id,
+            bottles: bottle, // Include bottle data
+            rental_start_date: bottle.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
+            rental_end_date: null,
+            rental_amount: 10, // Default rental amount
+            rental_type: 'monthly',
+            tax_code: 'pst+gst',
+            tax_rate: 0.11,
+            location: bottle.location || 'SASKATOON'
+          });
+        }
+      });
+      
       // Get unique customer_ids
-      const customerIds = Array.from(new Set((rentalsData || []).map(r => r.customer_id).filter(Boolean)));
+      const customerIds = Array.from(new Set(allRentalData.map(r => r.customer_id).filter(Boolean)));
       let customersMap = {};
+      
       if (customerIds.length > 0) {
-        // Fetch all customers in one query
+        // Fetch all customers in one query for this organization
         const { data: customersData, error: customersError } = await supabase
           .from('customers')
           .select('*')
+          .eq('organization_id', userProfile.organization_id)
           .in('CustomerListID', customerIds);
         if (!customersError && customersData) {
           customersMap = customersData.reduce((map, c) => {
@@ -170,13 +231,19 @@ function Rentals() {
           }, {});
         }
       }
+      
       // Attach customer info to each rental
-      const rentalsWithCustomer = (rentalsData || []).map(r => ({
+      const rentalsWithCustomer = allRentalData.map(r => ({
         ...r,
         customer: customersMap[r.customer_id] || null
       }));
-      const filteredRentals = (rentalsWithCustomer || []).filter(r => r.customer_id && r.customer_id !== 'Not Set');
+      
+      const filteredRentals = rentalsWithCustomer.filter(r => r.customer_id && r.customer_id !== 'Not Set' && r.customer);
       setRentals(filteredRentals);
+      
+      console.log('Rentals: Total combined rentals:', filteredRentals.length);
+      console.log('Rentals: Sample combined data:', filteredRentals.slice(0, 3));
+      
     } catch (err) {
       setError(err.message);
     }
@@ -553,6 +620,15 @@ function Rentals() {
                                 <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
                                   ({customer.CustomerListID})
                                 </Typography>
+                                {/* Show source indicator */}
+                                {rentals.some(r => r.source === 'bottle_assignment') && (
+                                  <Chip
+                                    label="From Import"
+                                    size="small"
+                                    color="info"
+                                    sx={{ ml: 1, fontSize: 10, height: 20 }}
+                                  />
+                                )}
                                 <Button
                                   variant="outlined"
                                   sx={{

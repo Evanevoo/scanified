@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useOwnerAccess } from '../hooks/useOwnerAccess';
+import { useAssetConfig } from '../hooks/useAssetConfig';
 import {
   Box, Paper, Typography, Button, Card, CardContent, Grid, Alert,
   LinearProgress, Chip, Dialog, DialogTitle, DialogContent, DialogActions,
@@ -33,7 +34,11 @@ import {
   Refresh as RefreshIcon,
   Download as DownloadIcon,
   Info as InfoIcon,
-  Close as CloseIcon
+  Close as CloseIcon,
+  AccessTime as AccessTimeIcon,
+  Payment as PaymentIcon,
+  Lock as LockIcon,
+  Dashboard as DashboardIcon
 } from '@mui/icons-material';
 import { usePermissions } from '../context/PermissionsContext';
 import { loadStripe } from '@stripe/stripe-js';
@@ -181,43 +186,7 @@ const getDefaultFeatureAvailability = (plan, featureName) => {
   return availability.enterprise;
 };
 
-const SUBSCRIPTION_PLANS = {
-  basic: {
-    name: 'Basic',
-    price: 29,
-    features: [
-      'Up to 100 customers',
-      'Up to 1,000 cylinders',
-      'Basic reporting',
-      'Email support'
-    ],
-    stripe_price_id: import.meta.env.VITE_STRIPE_BASIC_PRICE_ID
-  },
-  pro: {
-    name: 'Professional',
-    price: 79,
-    features: [
-      'Up to 500 customers',
-      'Up to 5,000 cylinders',
-      'Advanced reporting',
-      'Priority support',
-      'API access'
-    ],
-    stripe_price_id: import.meta.env.VITE_STRIPE_PRO_PRICE_ID
-  },
-  enterprise: {
-    name: 'Enterprise',
-    price: 'Contact Sales',
-    features: [
-      'Unlimited customers',
-      'Unlimited cylinders',
-      'Custom integrations',
-      'Dedicated support',
-      'Custom features'
-    ],
-    stripe_price_id: null
-  }
-};
+// Removed hardcoded SUBSCRIPTION_PLANS - now fetched from database
 
 // Luhn algorithm for card number validation
 function isValidCardNumber(number) {
@@ -278,7 +247,9 @@ const validateCVC = (cvc) => {
 export default function Billing() {
   const { organization, profile } = useAuth();
   const { isOwner } = useOwnerAccess();
+  const { config: assetConfig } = useAssetConfig();
   const navigate = useNavigate();
+  const location = useLocation();
   const { isOrgAdmin } = usePermissions();
   const [subscription, setSubscription] = useState(null);
   const [usage, setUsage] = useState(null);
@@ -286,6 +257,7 @@ export default function Billing() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
+  const [showTrialExtensionDialog, setShowTrialExtensionDialog] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [paymentDialog, setPaymentDialog] = useState(false);
@@ -311,7 +283,13 @@ export default function Billing() {
     if (organization) {
       loadBillingData();
     }
-  }, [organization]);
+    
+    // Check if coming from expired trial page
+    const searchParams = new URLSearchParams(location.search);
+    if (searchParams.get('action') === 'extend-trial') {
+      setShowTrialExtensionDialog(true);
+    }
+  }, [organization, location]);
 
   const loadBillingData = async () => {
     try {
@@ -765,6 +743,118 @@ export default function Billing() {
     }
   };
 
+  const handleTrialExtension = async () => {
+    setProcessingPayment(true);
+    setError('');
+    setCardError('');
+
+    try {
+      // Validate payment form
+      if (!validatePaymentForm()) {
+        setProcessingPayment(false);
+        return;
+      }
+
+      // Create payment intent for trial extension ($10)
+      const response = await fetch('/.netlify/functions/create-payment-intent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: 1000, // $10 in cents
+          currency: 'usd',
+          description: 'Trial Extension - 7 days',
+          metadata: {
+            organization_id: organization.id,
+            type: 'trial_extension',
+            days: 7
+          }
+        }),
+      });
+
+      const { clientSecret, error: intentError } = await response.json();
+      if (intentError) throw new Error(intentError);
+
+      // Initialize Stripe
+      const stripe = await loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+      if (!stripe) throw new Error('Stripe failed to load');
+
+      // Confirm payment
+      const { error: paymentError, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
+        payment_method: {
+          card: {
+            number: cardNumber.replace(/\s/g, ''),
+            exp_month: parseInt(expiryDate.split('/')[0]),
+            exp_year: parseInt('20' + expiryDate.split('/')[1]),
+            cvc: cvv,
+          },
+          billing_details: {
+            name: cardholderName,
+            email: organization.email || profile?.email,
+            address: {
+              line1: billingAddress.line1,
+              city: billingAddress.city,
+              state: billingAddress.state,
+              postal_code: billingAddress.postalCode,
+              country: billingAddress.country
+            }
+          }
+        }
+      });
+
+      if (paymentError) {
+        throw new Error(paymentError.message || 'Payment failed. Please check your card details.');
+      }
+
+      if (paymentIntent.status === 'succeeded') {
+        // Payment successful, extend trial
+        const newTrialEnd = new Date();
+        newTrialEnd.setDate(newTrialEnd.getDate() + 7); // Add 7 days
+
+        const { error: updateError } = await supabase
+          .from('organizations')
+          .update({ 
+            trial_end_date: newTrialEnd.toISOString(),
+            subscription_status: 'trial',
+            last_trial_extension: new Date().toISOString()
+          })
+          .eq('id', organization.id);
+
+        if (updateError) {
+          throw new Error('Payment successful but failed to extend trial. Please contact support.');
+        }
+
+        setSuccess('Trial extended successfully! You now have 7 more days.');
+        setShowTrialExtensionDialog(false);
+        
+        // Clear form
+        setCardNumber('');
+        setExpiryDate('');
+        setCvv('');
+        setCardholderName('');
+        setBillingAddress({
+          line1: '',
+          city: '',
+          state: '',
+          postalCode: '',
+          country: ''
+        });
+
+        // Reload data and redirect to dashboard
+        await loadBillingData();
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 2000);
+      }
+    } catch (error) {
+      console.error('Trial extension error:', error);
+      setError(error.message || 'Failed to process payment. Please try again.');
+    } finally {
+      setProcessingPayment(false);
+    }
+  };
+
   const handlePaymentSubmit = async () => {
     if (!selectedPlan || selectedPlan === 'enterprise') {
       setError('Invalid plan selected.');
@@ -784,7 +874,7 @@ export default function Billing() {
         body: JSON.stringify({
           plan: selectedPlan,
           organizationId: organization.id,
-          amount: SUBSCRIPTION_PLANS[selectedPlan].price * 100, // Convert to cents
+          amount: selectedPlan.price * 100, // Convert to cents
           currency: 'usd'
         }),
       });
@@ -796,7 +886,7 @@ export default function Billing() {
       }
 
       // Confirm payment with Stripe
-      const stripe = await loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
+      const stripe = await loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
       const { error: confirmError } = await stripe.confirmCardPayment(clientSecret, {
         payment_method: {
           card: {
@@ -904,6 +994,9 @@ export default function Billing() {
         <Stack direction="row" alignItems="center" spacing={2} mb={4}>
           <IconButton color="primary" onClick={() => navigate('/settings')}>
             <ArrowBackIcon />
+          </IconButton>
+          <IconButton color="primary" onClick={() => navigate('/dashboard')}>
+            <DashboardIcon />
           </IconButton>
           <Typography variant="h4" fontWeight={700}>
             Billing & Subscription
@@ -1025,7 +1118,7 @@ export default function Billing() {
                       />
                     </Grid>
                     <Grid item xs={12} md={4}>
-                      <Typography variant="body2" color="text.secondary">Cylinders</Typography>
+                      <Typography variant="body2" color="text.secondary">{assetConfig.assetDisplayNamePlural}</Typography>
                       <Typography variant="h6">
                         {usage.current_cylinders || 0} / {isUnlimited(currentPlan.max_cylinders) ? '∞' : currentPlan.max_cylinders}
                       </Typography>
@@ -1490,6 +1583,198 @@ export default function Billing() {
           </Box>
         )}
 
+        {/* Trial Extension Dialog */}
+        <Dialog 
+          open={showTrialExtensionDialog} 
+          onClose={() => setShowTrialExtensionDialog(false)}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogTitle>
+            <Box display="flex" alignItems="center" gap={2}>
+              <AccessTimeIcon color="warning" />
+              <Typography variant="h5">Extend Your Trial</Typography>
+            </Box>
+          </DialogTitle>
+          <DialogContent>
+            <Alert severity="info" sx={{ mb: 3 }}>
+              Extend your trial for 7 more days for a one-time payment of $10
+            </Alert>
+
+            {error && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {error}
+              </Alert>
+            )}
+
+            {success && (
+              <Alert severity="success" sx={{ mb: 2 }}>
+                {success}
+              </Alert>
+            )}
+
+            <Grid container spacing={3}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Cardholder Name"
+                  value={cardholderName}
+                  onChange={(e) => setCardholderName(e.target.value)}
+                  required
+                />
+              </Grid>
+              
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Card Number"
+                  value={cardNumber}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\s/g, '');
+                    if (value.length <= 16 && /^\d*$/.test(value)) {
+                      const formatted = value.match(/.{1,4}/g)?.join(' ') || value;
+                      setCardNumber(formatted);
+                    }
+                  }}
+                  placeholder="1234 5678 9012 3456"
+                  inputProps={{ maxLength: 19 }}
+                  required
+                />
+              </Grid>
+
+              <Grid item xs={6}>
+                <TextField
+                  fullWidth
+                  label="Expiry Date"
+                  value={expiryDate}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, '');
+                    if (value.length <= 4) {
+                      const formatted = value.length >= 3 ? `${value.slice(0, 2)}/${value.slice(2)}` : value;
+                      setExpiryDate(formatted);
+                    }
+                  }}
+                  placeholder="MM/YY"
+                  inputProps={{ maxLength: 5 }}
+                  required
+                />
+              </Grid>
+
+              <Grid item xs={6}>
+                <TextField
+                  fullWidth
+                  label="CVV"
+                  value={cvv}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, '');
+                    if (value.length <= 4) {
+                      setCvv(value);
+                    }
+                  }}
+                  placeholder="123"
+                  inputProps={{ maxLength: 4 }}
+                  required
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom>Billing Address</Typography>
+              </Grid>
+
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Address Line 1"
+                  value={billingAddress.line1}
+                  onChange={(e) => setBillingAddress({ ...billingAddress, line1: e.target.value })}
+                  required
+                />
+              </Grid>
+
+              <Grid item xs={6}>
+                <TextField
+                  fullWidth
+                  label="City"
+                  value={billingAddress.city}
+                  onChange={(e) => setBillingAddress({ ...billingAddress, city: e.target.value })}
+                  required
+                />
+              </Grid>
+
+              <Grid item xs={6}>
+                <TextField
+                  fullWidth
+                  label="State/Province"
+                  value={billingAddress.state}
+                  onChange={(e) => setBillingAddress({ ...billingAddress, state: e.target.value })}
+                  required
+                />
+              </Grid>
+
+              <Grid item xs={6}>
+                <TextField
+                  fullWidth
+                  label="Postal Code"
+                  value={billingAddress.postalCode}
+                  onChange={(e) => setBillingAddress({ ...billingAddress, postalCode: e.target.value })}
+                  required
+                />
+              </Grid>
+
+              <Grid item xs={6}>
+                <TextField
+                  fullWidth
+                  label="Country"
+                  value={billingAddress.country}
+                  onChange={(e) => setBillingAddress({ ...billingAddress, country: e.target.value })}
+                  required
+                />
+              </Grid>
+            </Grid>
+
+            {cardError && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                {cardError}
+              </Alert>
+            )}
+
+            <Box sx={{ mt: 3, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                <LockIcon sx={{ fontSize: 16, verticalAlign: 'middle', mr: 0.5 }} />
+                Your payment information is secure and encrypted
+              </Typography>
+            </Box>
+          </DialogContent>
+          <DialogActions sx={{ p: 3 }}>
+            <Button 
+              onClick={() => setShowTrialExtensionDialog(false)}
+              disabled={processingPayment}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleTrialExtension}
+              variant="contained"
+              color="warning"
+              disabled={
+                processingPayment || 
+                !cardNumber || 
+                !expiryDate || 
+                !cvv || 
+                !cardholderName ||
+                !billingAddress.line1 ||
+                !billingAddress.city ||
+                !billingAddress.state ||
+                !billingAddress.postalCode ||
+                !billingAddress.country
+              }
+              startIcon={processingPayment ? <CircularProgress size={20} /> : <PaymentIcon />}
+            >
+              {processingPayment ? 'Processing...' : 'Pay $10 & Extend Trial'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
         {/* Payment Dialog */}
         <Dialog 
           open={paymentDialog} 
@@ -1516,7 +1801,7 @@ export default function Billing() {
             )}
             
             <Typography variant="body1" sx={{ mb: 3 }}>
-              You're upgrading to the {SUBSCRIPTION_PLANS[selectedPlan]?.name} plan for ${SUBSCRIPTION_PLANS[selectedPlan]?.price}/month.
+              You're upgrading to the {selectedPlan?.name} plan for ${selectedPlan?.price}/month.
             </Typography>
 
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

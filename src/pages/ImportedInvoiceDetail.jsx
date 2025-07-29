@@ -4,6 +4,7 @@ import { supabase } from '../supabase/client';
 import {
   Box, Paper, Typography, Button, Alert, CircularProgress, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Checkbox, Tabs, Tab, Snackbar, List, ListItem, ListItemButton, ListItemText
 } from '@mui/material';
+import { CardSkeleton } from '../components/SmoothLoading';
 
 const recordOptions = [
   'Verify This Record',
@@ -103,7 +104,7 @@ export default function ImportedInvoiceDetail() {
           <Grid item xs={12} md={9}>
             <Typography variant="h4" fontWeight={800} mb={2}>Delivery</Typography>
             {loading ? (
-              <Box textAlign="center" py={6}><CircularProgress /></Box>
+              <CardSkeleton count={1} />
             ) : error ? (
               <Alert severity="error">{error}</Alert>
             ) : invoice && (

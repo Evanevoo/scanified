@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
-import { Box, Paper, Typography, CircularProgress, Button, Alert } from '@mui/material';
+import { Box, Paper, Typography, Button, Alert, Card, CardContent } from '@mui/material';
+import { CardSkeleton } from '../components/SmoothLoading';
 
 export default function InvoiceDetail() {
   const { id } = useParams();
@@ -40,7 +41,7 @@ export default function InvoiceDetail() {
           Invoice Detail
         </Typography>
         {loading ? (
-          <Box textAlign="center" py={6}><CircularProgress /></Box>
+          <CardSkeleton count={1} />
         ) : error ? (
           <Alert severity="error">{error}</Alert>
         ) : (
