@@ -33,6 +33,7 @@ import { useOwnerAccess } from '../hooks/useOwnerAccess';
 import { supabase } from '../supabase/client';
 import { usePermissions } from '../context/PermissionsContext';
 import { useAuth } from '../hooks/useAuth';
+import { useAssetConfig } from '../hooks/useAssetConfig';
 import TextField from '@mui/material/TextField';
 import Sidebar from './Sidebar';
 
@@ -41,6 +42,7 @@ const drawerWidth = 280;
 
 export default function MainLayout() {
   const { profile, organization } = useAuth();
+  const { config: assetConfig } = useAssetConfig();
   const [integrationsOpen, setIntegrationsOpen] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -241,7 +243,7 @@ export default function MainLayout() {
               onClick={() => navigate('/dashboard')}
               title="Go to Dashboard"
             >
-              LessAnnoyingScan
+              {assetConfig.appName}
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', ml: 4 }}>

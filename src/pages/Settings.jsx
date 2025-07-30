@@ -254,9 +254,11 @@ export default function Settings() {
         assetType: organization.asset_type || 'cylinder',
         assetDisplayName: organization.asset_display_name || 'Gas Cylinder',
         assetDisplayNamePlural: organization.asset_display_name_plural || 'Gas Cylinders',
-        appName: organization.app_name || 'LessAnnoyingScan',
+        appName: organization.app_name || 'Scanified',
         primaryColor: organization.primary_color || '#2563eb',
         secondaryColor: organization.secondary_color || '#1e40af',
+        appIcon: organization.app_icon || '/landing-icon.png',
+        showAppIcon: organization.show_app_icon !== undefined ? organization.show_app_icon : true,
       });
       
       // Load barcode config from organization
@@ -484,6 +486,8 @@ export default function Settings() {
           app_name: assetConfig.appName,
           primary_color: assetConfig.primaryColor,
           secondary_color: assetConfig.secondaryColor,
+          app_icon: assetConfig.appIcon,
+          show_app_icon: assetConfig.showAppIcon,
         })
         .eq('id', profile.organization_id);
 
@@ -1251,7 +1255,7 @@ export default function Settings() {
                           value={assetConfig.appName || ''}
                           onChange={(e) => setAssetConfig(prev => ({ ...prev, appName: e.target.value }))}
                           sx={{ mb: 2 }}
-                          placeholder="e.g., LessAnnoyingScan"
+                          placeholder="e.g., Scanified"
                         />
                         
                         <TextField
@@ -1269,7 +1273,51 @@ export default function Settings() {
                           type="color"
                           value={assetConfig.secondaryColor || '#1e40af'}
                           onChange={(e) => setAssetConfig(prev => ({ ...prev, secondaryColor: e.target.value }))}
+                          sx={{ mb: 2 }}
                         />
+                        
+                        <TextField
+                          fullWidth
+                          label="App Icon URL"
+                          value={assetConfig.appIcon || ''}
+                          onChange={(e) => setAssetConfig(prev => ({ ...prev, appIcon: e.target.value }))}
+                          sx={{ mb: 2 }}
+                          placeholder="e.g., /landing-icon.png"
+                          helperText="URL path to your app icon image (recommended: 64x64px)"
+                        />
+                        
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              checked={assetConfig.showAppIcon !== false}
+                              onChange={(e) => setAssetConfig(prev => ({ ...prev, showAppIcon: e.target.checked }))}
+                            />
+                          }
+                          label="Show app icon in header"
+                          sx={{ mb: 1 }}
+                        />
+                        
+                        {assetConfig.appIcon && assetConfig.showAppIcon !== false && (
+                          <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                              Icon Preview:
+                            </Typography>
+                            <img 
+                              src={assetConfig.appIcon}
+                              alt="App Icon Preview"
+                              style={{ 
+                                width: 40, 
+                                height: 40, 
+                                borderRadius: 8,
+                                objectFit: 'cover',
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                              }}
+                              onError={(e) => {
+                                e.target.style.display = 'none';
+                              }}
+                            />
+                          </Box>
+                        )}
                       </CardContent>
                     </Card>
                   </Grid>

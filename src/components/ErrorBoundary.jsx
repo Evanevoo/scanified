@@ -111,8 +111,8 @@ class ErrorBoundary extends React.Component {
 
             <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
               Need help? Contact our support team at{' '}
-              <Link href="mailto:support@lessannoyingscan.com" color="primary">
-                support@lessannoyingscan.com
+              <Link href="mailto:support@scanified.com" color="primary">
+support@scanified.com
               </Link>
             </Typography>
 

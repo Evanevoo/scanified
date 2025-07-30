@@ -21,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as AuthSession from 'expo-auth-session';
 import * as SecureStore from 'expo-secure-store';
+import * as AppleAuthentication from 'expo-apple-authentication';
 
 const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com'; // TODO: Replace with your client ID
 
@@ -73,6 +74,7 @@ export default function LoginScreen() {
   const [biometricSupported, setBiometricSupported] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [socialLoading, setSocialLoading] = useState(false);
+  const [appleSignInAvailable, setAppleSignInAvailable] = useState(false);
   const [language, setLanguage] = useState<'en' | 'es'>('en');
   const t = translations[language];
   const [registerModal, setRegisterModal] = useState(false);
@@ -82,21 +84,43 @@ export default function LoginScreen() {
 
   useEffect(() => {
     (async () => {
-      const savedEmail = await AsyncStorage.getItem('rememberedEmail');
-      if (savedEmail) {
-        setEmail(savedEmail);
-        setRememberMe(true);
+      try {
+        const savedEmail = await AsyncStorage.getItem('rememberedEmail');
+        if (savedEmail) {
+          setEmail(savedEmail);
+          setRememberMe(true);
+        }
+        // Load password from SecureStore if Remember Me is checked
+        const savedPassword = await SecureStore.getItemAsync('rememberedPassword');
+        if (savedPassword) {
+          setPassword(savedPassword);
+        }
+      } catch (error) {
+        console.warn('Error loading saved credentials:', error);
       }
-      // Load password from SecureStore if Remember Me is checked
-      const savedPassword = await SecureStore.getItemAsync('rememberedPassword');
-      if (savedPassword) {
-        setPassword(savedPassword);
+
+      try {
+        // Check for biometric support
+        const hasHardware = await LocalAuthentication.hasHardwareAsync();
+        const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+        setBiometricSupported(hasHardware);
+        setBiometricAvailable(isEnrolled);
+      } catch (error) {
+        console.warn('Error checking biometric support:', error);
+        setBiometricSupported(false);
+        setBiometricAvailable(false);
       }
-      // Check for biometric support
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-      setBiometricSupported(hasHardware);
-      setBiometricAvailable(isEnrolled);
+      
+      try {
+        // Check for Apple Sign In availability
+        if (Platform.OS === 'ios') {
+          const isAppleAvailable = await AppleAuthentication.isAvailableAsync();
+          setAppleSignInAvailable(isAppleAvailable);
+        }
+      } catch (error) {
+        console.warn('Error checking Apple Sign In availability:', error);
+        setAppleSignInAvailable(false);
+      }
     })();
   }, []);
 
@@ -114,13 +138,26 @@ export default function LoginScreen() {
     if (!validateForm()) {
       return;
     }
-    if (rememberMe) {
-      await AsyncStorage.setItem('rememberedEmail', email);
-      await SecureStore.setItemAsync('rememberedPassword', password);
-    } else {
-      await AsyncStorage.removeItem('rememberedEmail');
-      await SecureStore.deleteItemAsync('rememberedPassword');
+    
+    // Handle remember me functionality with error handling
+    try {
+      if (rememberMe) {
+        await AsyncStorage.setItem('rememberedEmail', email);
+        await SecureStore.setItemAsync('rememberedPassword', password);
+      } else {
+        await AsyncStorage.removeItem('rememberedEmail');
+        try {
+          await SecureStore.deleteItemAsync('rememberedPassword');
+        } catch (error) {
+          // SecureStore.deleteItemAsync can throw if key doesn't exist, which is fine
+          console.warn('Could not delete remembered password:', error);
+        }
+      }
+    } catch (error) {
+      console.warn('Error managing saved credentials:', error);
+      // Continue with login even if saving credentials fails
     }
+    
     await withErrorHandling(async () => {
       const { error } = await supabase.auth.signInWithPassword({ 
         email: email.trim(), 
@@ -220,6 +257,47 @@ export default function LoginScreen() {
     setSocialLoading(false);
   };
 
+  const handleAppleLogin = async () => {
+    setSocialLoading(true);
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      if (credential.identityToken) {
+        const { error } = await supabase.auth.signInWithIdToken({
+          provider: 'apple',
+          token: credential.identityToken,
+          nonce: credential.nonce,
+        });
+        
+        if (error) throw error;
+        
+        // If this is the first time signing in, we might want to save additional user info
+        if (credential.fullName) {
+          const { error: updateError } = await supabase.auth.updateUser({
+            data: {
+              full_name: `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim(),
+            }
+          });
+          if (updateError) console.warn('Could not update user profile:', updateError);
+        }
+      } else {
+        throw new Error('No identity token received');
+      }
+    } catch (err) {
+      if (err.code === 'ERR_REQUEST_CANCELED') {
+        // User canceled the sign-in flow
+        return;
+      }
+      Alert.alert('Apple Sign In Failed', err.message || 'An error occurred during Apple Sign In');
+    }
+    setSocialLoading(false);
+  };
+
   const handleRegister = async () => {
     setRegisterError('');
     if (!registerForm.name || !registerForm.email || !registerForm.password || !registerForm.confirm) {
@@ -260,8 +338,8 @@ export default function LoginScreen() {
         <View style={styles.loginContainer}>
           {/* App Branding */}
           <View style={styles.brandingSection}>
-            <Text style={styles.appTitle}>LessAnnoyingScan</Text>
-            <Text style={styles.appSubtitle}>Gas Cylinder Management</Text>
+            <Text style={styles.appTitle}>Scanified</Text>
+            <Text style={styles.appSubtitle}>Asset Management Made Simple</Text>
             <Text style={styles.welcomeMessage}>Welcome back! Sign in to continue</Text>
           </View>
 
@@ -273,6 +351,16 @@ export default function LoginScreen() {
                 {socialLoading ? 'Signing in...' : 'Continue with Google'}
               </Text>
             </TouchableOpacity>
+
+            {appleSignInAvailable && (
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                cornerRadius={8}
+                style={styles.appleButton}
+                onPress={handleAppleLogin}
+              />
+            )}
 
             {biometricSupported && biometricAvailable && rememberMe && email && (
               <TouchableOpacity style={styles.biometricButton} onPress={handleBiometricLogin}>
@@ -534,6 +622,11 @@ const styles = StyleSheet.create({
     color: '#374151',
     fontWeight: '600',
     fontSize: 16,
+  },
+  appleButton: {
+    width: '100%',
+    height: 50,
+    marginBottom: 12,
   },
   biometricButton: {
     flexDirection: 'row',

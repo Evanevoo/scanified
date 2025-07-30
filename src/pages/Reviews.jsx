@@ -10,7 +10,7 @@ export default function Reviews() {
           Customer Reviews
         </Typography>
         <Typography variant="h6" color="text.secondary">
-          Share your experience with lessannoyingscan
+          Share your experience with Scanified
         </Typography>
       </Box>
 

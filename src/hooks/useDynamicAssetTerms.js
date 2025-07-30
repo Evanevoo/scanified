@@ -87,7 +87,7 @@ export const useDynamicAssetTerms = () => {
     branding: {
       primaryColor: config.primaryColor || '#2563eb',
       secondaryColor: config.secondaryColor || '#1e40af',
-      appName: config.appName || 'LessAnnoyingScan',
+      appName: config.appName || 'Scanified',
     }
   };
 

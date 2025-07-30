@@ -58,10 +58,10 @@ export default React.memo(function LandingPageEditor() {
     
     // Company Information
     company: {
-      name: 'lessannoyingscan',
-      description: 'The modern alternative to legacy gas cylinder management systems',
+      name: 'scanified',
+      description: 'The modern alternative to legacy asset management systems',
       phone: '(555) 123-4567',
-      email: 'hello@lessannoyingscan.com',
+      email: 'hello@scanified.com',
       address: '123 Business Street, City, State 12345'
     },
 

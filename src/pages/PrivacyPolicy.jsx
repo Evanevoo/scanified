@@ -170,7 +170,7 @@ function PrivacyPolicy() {
               If you have any questions about this Privacy Policy or our data practices, please contact us at:
             </Typography>
             <Typography variant="body2" sx={{ mb: 3 }}>
-              Email: privacy@lessannoyingscan.com<br />
+              Email: privacy@scanified.com<br />
               Address: 123 Business St, Suite 100, City, State 12345
             </Typography>
 
