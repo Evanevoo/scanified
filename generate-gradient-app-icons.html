@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Scanified Gradient App Icons Generator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 18px;
+        }
+        .icon-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+        .icon-item {
+            text-align: center;
+            padding: 25px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 15px;
+            border: 1px solid #e1e8ed;
+            transition: transform 0.2s ease;
+        }
+        .icon-item:hover {
+            transform: translateY(-2px);
+        }
+        .icon-item h3 {
+            margin: 0 0 15px 0;
+            color: #2d3748;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        canvas {
+            border: 2px solid #e2e8f0;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            background: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .instructions {
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            padding: 25px;
+            border-radius: 15px;
+            border-left: 5px solid #2196f3;
+            margin-top: 30px;
+        }
+        .instructions h3 {
+            margin-top: 0;
+            color: #1565c0;
+            font-size: 20px;
+        }
+        .size-info {
+            font-size: 12px;
+            color: #64748b;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+        .preview-large {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 30px;
+        }
+        .preview-large canvas {
+            width: 150px;
+            height: 150px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 Scanified Gradient App Icons</h1>
+        <p class="subtitle">Beautiful gradient icons with circuit board design</p>
+        
+        <div class="preview-large">
+            <canvas id="previewIcon" width="300" height="300"></canvas>
+        </div>
+        
+        <div class="icon-grid">
+            <div class="icon-item">
+                <h3>📱 App Icon</h3>
+                <div class="size-info">1024×1024px - Required for App Store</div>
+                <canvas id="appIcon" width="200" height="200"></canvas>
+                <br>
+                <button onclick="downloadIcon('appIcon', 'icon.png', 1024)">Download App Icon</button>
+            </div>
+            
+            <div class="icon-item">
+                <h3>🤖 Adaptive Icon</h3>
+                <div class="size-info">1024×1024px - Android foreground</div>
+                <canvas id="adaptiveIcon" width="200" height="200"></canvas>
+                <br>
+                <button onclick="downloadIcon('adaptiveIcon', 'adaptive-icon.png', 1024)">Download Adaptive Icon</button>
+            </div>
+            
+            <div class="icon-item">
+                <h3>🚀 Splash Screen</h3>
+                <div class="size-info">1024×1024px - App loading screen</div>
+                <canvas id="splashIcon" width="200" height="200"></canvas>
+                <br>
+                <button onclick="downloadIcon('splashIcon', 'splash-icon.png', 1024)">Download Splash Icon</button>
+            </div>
+            
+            <div class="icon-item">
+                <h3>🌐 Web Favicon</h3>
+                <div class="size-info">192×192px - Browser icon</div>
+                <canvas id="favicon" width="192" height="192"></canvas>
+                <br>
+                <button onclick="downloadIcon('favicon', 'favicon.png', 192)">Download Favicon</button>
+            </div>
+
+            <div class="icon-item">
+                <h3>💻 Landing Page Icon</h3>
+                <div class="size-info">64×64px - Website header</div>
+                <canvas id="landingIcon" width="64" height="64"></canvas>
+                <br>
+                <button onclick="downloadIcon('landingIcon', 'landing-icon.png', 64)">Download Landing Icon</button>
+            </div>
+        </div>
+        
+        <div class="instructions">
+            <h3>📋 Installation Instructions</h3>
+            <ol style="line-height: 1.6;">
+                <li><strong>Download all icons</strong> using the buttons above</li>
+                <li><strong>Replace mobile app icons:</strong>
+                    <ul>
+                        <li>Copy <code>icon.png</code>, <code>adaptive-icon.png</code>, and <code>splash-icon.png</code> to <code>gas-cylinder-mobile/assets/</code></li>
+                    </ul>
+                </li>
+                <li><strong>Replace web favicon:</strong>
+                    <ul>
+                        <li>Copy <code>favicon.png</code> to <code>public/</code></li>
+                    </ul>
+                </li>
+                <li><strong>Add to landing page:</strong>
+                    <ul>
+                        <li>Copy <code>landing-icon.png</code> to <code>public/</code></li>
+                    </ul>
+                </li>
+                <li><strong>Build and deploy:</strong>
+                    <ul>
+                        <li>Run <code>eas build --platform ios</code> for mobile</li>
+                        <li>Deploy website with new icons</li>
+                    </ul>
+                </li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        function drawGradientIcon(canvasId, size) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const scale = canvas.width / size;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Scale all drawing operations
+            ctx.save();
+            ctx.scale(scale, scale);
+            
+            // Create gradient background (orange to blue like the provided image)
+            const gradient = ctx.createLinearGradient(0, 0, size, size);
+            gradient.addColorStop(0, '#ff6b6b');    // Red-orange
+            gradient.addColorStop(0.25, '#ee5a24'); // Orange
+            gradient.addColorStop(0.5, '#a55eea');  // Purple
+            gradient.addColorStop(0.75, '#26de81'); // Green
+            gradient.addColorStop(1, '#2bcbba');    // Teal-blue
+            
+            // Draw rounded rectangle background
+            const borderRadius = size * 0.18; // iOS style corner radius
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.roundRect(0, 0, size, size, borderRadius);
+            ctx.fill();
+            
+            // Add subtle inner shadow/depth
+            const shadowGradient = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+            shadowGradient.addColorStop(0, 'rgba(255,255,255,0.1)');
+            shadowGradient.addColorStop(1, 'rgba(0,0,0,0.1)');
+            ctx.fillStyle = shadowGradient;
+            ctx.beginPath();
+            ctx.roundRect(0, 0, size, size, borderRadius);
+            ctx.fill();
+            
+            // Draw circuit board pattern (simplified)
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = size * 0.008;
+            
+            // Draw grid pattern
+            const gridSize = size / 8;
+            for (let i = 1; i < 8; i++) {
+                // Horizontal lines
+                ctx.beginPath();
+                ctx.moveTo(gridSize, i * gridSize);
+                ctx.lineTo(size - gridSize, i * gridSize);
+                ctx.stroke();
+                
+                // Vertical lines  
+                ctx.beginPath();
+                ctx.moveTo(i * gridSize, gridSize);
+                ctx.lineTo(i * gridSize, size - gridSize);
+                ctx.stroke();
+            }
+            
+            // Add circuit nodes/connection points
+            ctx.fillStyle = 'rgba(255,255,255,0.2)';
+            for (let i = 2; i < 7; i++) {
+                for (let j = 2; j < 7; j++) {
+                    if ((i + j) % 2 === 0) { // Checkerboard pattern
+                        ctx.beginPath();
+                        ctx.arc(i * gridSize, j * gridSize, size * 0.015, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+            
+            // Draw larger circuit elements (QR-code like blocks)
+            ctx.fillStyle = 'rgba(255,255,255,0.25)';
+            
+            // Top-left block
+            ctx.fillRect(gridSize * 1.5, gridSize * 1.5, gridSize * 1.5, gridSize * 1.5);
+            ctx.clearRect(gridSize * 1.8, gridSize * 1.8, gridSize * 0.9, gridSize * 0.9);
+            
+            // Top-right block
+            ctx.fillRect(gridSize * 5, gridSize * 1.5, gridSize * 1.5, gridSize * 1.5);
+            ctx.clearRect(gridSize * 5.3, gridSize * 1.8, gridSize * 0.9, gridSize * 0.9);
+            
+            // Bottom-left block
+            ctx.fillRect(gridSize * 1.5, gridSize * 5, gridSize * 1.5, gridSize * 1.5);
+            ctx.clearRect(gridSize * 1.8, gridSize * 5.3, gridSize * 0.9, gridSize * 0.9);
+            
+            // Central 'S' letter
+            const fontSize = size * 0.35;
+            ctx.fillStyle = 'rgba(255,255,255,0.95)';
+            ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            // Add text shadow for depth
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+            ctx.shadowBlur = size * 0.02;
+            ctx.shadowOffsetX = size * 0.005;
+            ctx.shadowOffsetY = size * 0.005;
+            
+            ctx.fillText('S', size / 2, size / 2);
+            
+            // Reset shadow
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            
+            // Add subtle highlight on the 'S'
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`;
+            ctx.fillText('S', size / 2 - size * 0.003, size / 2 - size * 0.003);
+            
+            ctx.restore();
+        }
+        
+        function downloadIcon(canvasId, filename, targetSize) {
+            // Create a new canvas at target resolution
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = targetSize;
+            tempCanvas.height = targetSize;
+            
+            // Draw the icon at full resolution
+            const tempCtx = tempCanvas.getContext('2d');
+            const size = targetSize;
+            
+            // Create gradient background
+            const gradient = tempCtx.createLinearGradient(0, 0, size, size);
+            gradient.addColorStop(0, '#ff6b6b');    // Red-orange
+            gradient.addColorStop(0.25, '#ee5a24'); // Orange  
+            gradient.addColorStop(0.5, '#a55eea');  // Purple
+            gradient.addColorStop(0.75, '#26de81'); // Green
+            gradient.addColorStop(1, '#2bcbba');    // Teal-blue
+            
+            // Draw rounded rectangle background
+            const borderRadius = size * 0.18;
+            tempCtx.fillStyle = gradient;
+            tempCtx.beginPath();
+            tempCtx.roundRect(0, 0, size, size, borderRadius);
+            tempCtx.fill();
+            
+            // Add subtle inner shadow/depth
+            const shadowGradient = tempCtx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+            shadowGradient.addColorStop(0, 'rgba(255,255,255,0.1)');
+            shadowGradient.addColorStop(1, 'rgba(0,0,0,0.1)');
+            tempCtx.fillStyle = shadowGradient;
+            tempCtx.beginPath();
+            tempCtx.roundRect(0, 0, size, size, borderRadius);
+            tempCtx.fill();
+            
+            // Draw circuit board pattern
+            tempCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+            tempCtx.lineWidth = size * 0.008;
+            
+            const gridSize = size / 8;
+            for (let i = 1; i < 8; i++) {
+                // Horizontal lines
+                tempCtx.beginPath();
+                tempCtx.moveTo(gridSize, i * gridSize);
+                tempCtx.lineTo(size - gridSize, i * gridSize);
+                tempCtx.stroke();
+                
+                // Vertical lines
+                tempCtx.beginPath();
+                tempCtx.moveTo(i * gridSize, gridSize);
+                tempCtx.lineTo(i * gridSize, size - gridSize);
+                tempCtx.stroke();
+            }
+            
+            // Add circuit nodes
+            tempCtx.fillStyle = 'rgba(255,255,255,0.2)';
+            for (let i = 2; i < 7; i++) {
+                for (let j = 2; j < 7; j++) {
+                    if ((i + j) % 2 === 0) {
+                        tempCtx.beginPath();
+                        tempCtx.arc(i * gridSize, j * gridSize, size * 0.015, 0, Math.PI * 2);
+                        tempCtx.fill();
+                    }
+                }
+            }
+            
+            // Draw circuit blocks
+            tempCtx.fillStyle = 'rgba(255,255,255,0.25)';
+            
+            // Top-left block
+            tempCtx.fillRect(gridSize * 1.5, gridSize * 1.5, gridSize * 1.5, gridSize * 1.5);
+            tempCtx.clearRect(gridSize * 1.8, gridSize * 1.8, gridSize * 0.9, gridSize * 0.9);
+            
+            // Top-right block
+            tempCtx.fillRect(gridSize * 5, gridSize * 1.5, gridSize * 1.5, gridSize * 1.5);
+            tempCtx.clearRect(gridSize * 5.3, gridSize * 1.8, gridSize * 0.9, gridSize * 0.9);
+            
+            // Bottom-left block
+            tempCtx.fillRect(gridSize * 1.5, gridSize * 5, gridSize * 1.5, gridSize * 1.5);
+            tempCtx.clearRect(gridSize * 1.8, gridSize * 5.3, gridSize * 0.9, gridSize * 0.9);
+            
+            // Central 'S' letter
+            const fontSize = size * 0.35;
+            tempCtx.fillStyle = 'rgba(255,255,255,0.95)';
+            tempCtx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`;
+            tempCtx.textAlign = 'center';
+            tempCtx.textBaseline = 'middle';
+            
+            // Add text shadow
+            tempCtx.shadowColor = 'rgba(0,0,0,0.3)';
+            tempCtx.shadowBlur = size * 0.02;
+            tempCtx.shadowOffsetX = size * 0.005;
+            tempCtx.shadowOffsetY = size * 0.005;
+            
+            tempCtx.fillText('S', size / 2, size / 2);
+            
+            // Reset shadow
+            tempCtx.shadowColor = 'transparent';
+            tempCtx.shadowBlur = 0;
+            tempCtx.shadowOffsetX = 0;
+            tempCtx.shadowOffsetY = 0;
+            
+            // Add highlight
+            tempCtx.fillStyle = 'rgba(255,255,255,0.3)';
+            tempCtx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`;
+            tempCtx.fillText('S', size / 2 - size * 0.003, size / 2 - size * 0.003);
+            
+            // Download the image
+            tempCanvas.toBlob(function(blob) {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 'image/png');
+        }
+        
+        window.onload = function() {
+            drawGradientIcon('previewIcon', 300);
+            drawGradientIcon('appIcon', 1024);
+            drawGradientIcon('adaptiveIcon', 1024);
+            drawGradientIcon('splashIcon', 1024);
+            drawGradientIcon('favicon', 192);
+            drawGradientIcon('landingIcon', 64);
+        };
+    </script>
+</body>
+</html>

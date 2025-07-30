@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "LessAnnoyingScan",
+    "name": "Scanified",
     "slug": "gas-cylinder-mobile",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -10,26 +10,27 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#2563eb"
+      "backgroundColor": "#000000"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.evanevoo.gascylindermobile",
+      "bundleIdentifier": "com.evanevoo.scanifiedmobile",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "usesAppleSignIn": true
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#2563eb"
+        "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.evanevoo.gascylindermobile",
-      "versionCode": 1,
+      "package": "com.evanevoo.scanifiedmobile",
+      "versionCode": 2,
       "permissions": [
         "CAMERA",
         "INTERNET",
@@ -47,9 +48,10 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow LessAnnoyingScan to access your camera to scan barcodes."
+          "cameraPermission": "Allow Scanified to access your camera to scan barcodes."
         }
-      ]
+      ],
+      "expo-apple-authentication"
     ],
     "extra": {
       "eas": {

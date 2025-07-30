@@ -1,7 +1,7 @@
 {
-  "name": "gas-cylinder-management",
+  "name": "scanified-web",
   "version": "1.0.0",
-  "description": "Comprehensive gas cylinder management system with multi-tenancy",
+  "description": "Scanified - Professional asset management and barcode scanning solution",
   "type": "module",
   "scripts": {
     "dev": "vite",

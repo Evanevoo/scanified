@@ -48,9 +48,9 @@ import {
   SwapHoriz as SwapIcon,
   Transform as TransformIcon,
   Merge as MergeIcon,
-  CallSplit as SplitIcon,
-  Link as LinkIcon,
   Unarchive as UnarchiveIcon,
+  Link as LinkIcon,
+  CallSplit as SplitIcon,
   Archive as ArchiveIcon
 } from '@mui/icons-material';
 import ImportApprovalDetail from './ImportApprovalDetail';
@@ -459,7 +459,20 @@ export default function ImportApprovals() {
       const { data: invoices } = await supabase.from('imported_invoices').select('*').eq('status', 'pending');
       const { data: receipts } = await supabase.from('imported_sales_receipts').select('*').eq('status', 'pending');
       
-      const allRecords = [...(invoices || []), ...(receipts || [])];
+      // Split grouped imports into individual records (same as in fetchPendingInvoices/fetchPendingReceipts)
+      const individualInvoices = [];
+      (invoices || []).forEach(importRecord => {
+        const splitRecords = splitImportIntoIndividualRecords(importRecord);
+        individualInvoices.push(...splitRecords);
+      });
+      
+      const individualReceipts = [];
+      (receipts || []).forEach(importRecord => {
+        const splitRecords = splitImportIntoIndividualRecords(importRecord);
+        individualReceipts.push(...splitRecords);
+      });
+      
+      const allRecords = [...individualInvoices, ...individualReceipts];
       
       const stats = {
         total: allRecords.length,
@@ -1719,6 +1732,165 @@ export default function ImportApprovals() {
         ))}
       </SpeedDial>
 
+      {/* Advanced Filters Dialog */}
+      <Dialog 
+        open={filterDialog.open} 
+        onClose={() => setFilterDialog({ open: false })}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Advanced Filters</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Status</InputLabel>
+                  <Select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    label="Status"
+                  >
+                    <MenuItem value="all">All Statuses</MenuItem>
+                    <MenuItem value="pending">Pending</MenuItem>
+                    <MenuItem value="verified">Verified</MenuItem>
+                    <MenuItem value="exception">Exception</MenuItem>
+                    <MenuItem value="investigation">Investigation</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Location</InputLabel>
+                  <Select
+                    value={locationFilter}
+                    onChange={(e) => setLocationFilter(e.target.value)}
+                    label="Location"
+                  >
+                    {getUniqueLocations().map(location => (
+                      <MenuItem key={location} value={location}>{location}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Search Orders, Customers, Product Codes"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Enter order number, customer name, or product code..."
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setSearch('');
+            setStatusFilter('all');
+            setLocationFilter('All');
+          }}>
+            Clear All
+          </Button>
+          <Button onClick={() => setFilterDialog({ open: false })}>
+            Cancel
+          </Button>
+          <Button 
+            variant="contained" 
+            onClick={() => setFilterDialog({ open: false })}
+          >
+            Apply Filters
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk Action Dialog */}
+      <Dialog 
+        open={bulkActionDialog.open} 
+        onClose={() => setBulkActionDialog({ open: false, action: null })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {bulkActionDialog.action?.label || 'Bulk Action'}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" sx={{ mb: 2 }}>
+            Are you sure you want to {bulkActionDialog.action?.label?.toLowerCase()} {selectedRecords.length} selected record(s)?
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkActionDialog({ open: false, action: null })}>
+            Cancel
+          </Button>
+          <Button 
+            variant="contained" 
+            color={bulkActionDialog.action?.color || 'primary'}
+            onClick={() => {
+              // Handle bulk action here
+              console.log('Bulk action:', bulkActionDialog.action?.id, 'on records:', selectedRecords);
+              setBulkActionDialog({ open: false, action: null });
+              setSelectedRecords([]);
+              setSnackbar(`${bulkActionDialog.action?.label} applied to ${selectedRecords.length} records`);
+            }}
+          >
+            Confirm
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Settings Dialog */}
+      <Dialog 
+        open={settingsDialog.open} 
+        onClose={() => setSettingsDialog({ open: false })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Import Approval Settings</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={autoRefresh}
+                  onChange={(e) => setAutoRefresh(e.target.checked)}
+                />
+              }
+              label="Auto Refresh"
+            />
+            <FormControl fullWidth>
+              <InputLabel>Refresh Interval</InputLabel>
+              <Select
+                value={refreshInterval}
+                onChange={(e) => setRefreshInterval(e.target.value)}
+                label="Refresh Interval"
+                disabled={!autoRefresh}
+              >
+                <MenuItem value={10000}>10 seconds</MenuItem>
+                <MenuItem value={30000}>30 seconds</MenuItem>
+                <MenuItem value={60000}>1 minute</MenuItem>
+                <MenuItem value={300000}>5 minutes</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSettingsDialog({ open: false })}>
+            Cancel
+          </Button>
+          <Button 
+            variant="contained" 
+            onClick={() => setSettingsDialog({ open: false })}
+          >
+            Save Settings
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Snackbar for notifications */}
       <Snackbar
         open={!!snackbar}
@@ -2057,6 +2229,327 @@ export default function ImportApprovals() {
         </Typography>
         {/* Analytics implementation */}
       </Paper>
+    );
+  }
+
+  // Grid and Timeline view functions
+  function renderInvoicesGrid() {
+    return (
+      <Grid container spacing={2}>
+        {filteredInvoices.map((invoice) => {
+          const data = parseDataField(invoice.data);
+          const detailedItems = getDetailedLineItems(data);
+          const orderNum = getOrderNumber(data);
+          const customerInfo = getCustomerInfo(data);
+          const recordDate = getRecordDate(data);
+          const status = determineVerificationStatus(invoice);
+          
+          return (
+            <Grid item xs={12} sm={6} md={4} key={invoice.id}>
+              <Card 
+                sx={{ 
+                  height: '100%', 
+                  display: 'flex', 
+                  flexDirection: 'column',
+                  cursor: 'pointer',
+                  '&:hover': { elevation: 4 }
+                }}
+                onClick={() => navigate(`/import-approval-detail/${invoice.id}`)}
+              >
+                <CardHeader
+                  title={
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Typography variant="h6" component="span">
+                        {orderNum}
+                      </Typography>
+                      <Chip
+                        label={VERIFICATION_STATES[status].label}
+                        color={VERIFICATION_STATES[status].color}
+                        size="small"
+                        icon={VERIFICATION_STATES[status].icon}
+                      />
+                    </Box>
+                  }
+                  subheader={customerInfo}
+                  action={
+                    <Checkbox
+                      checked={selectedRecords.includes(invoice.id)}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleSelectRecord(invoice.id);
+                      }}
+                    />
+                  }
+                />
+                <CardContent sx={{ flexGrow: 1 }}>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    Date: {recordDate}
+                  </Typography>
+                  <Typography variant="body2" gutterBottom>
+                    {detailedItems.length} line item(s)
+                  </Typography>
+                  <Box sx={{ mt: 2 }}>
+                    {detailedItems.slice(0, 3).map((item, index) => (
+                      <Box key={index} sx={{ mb: 1 }}>
+                        <Typography variant="caption" display="block">
+                          <strong>{item.productInfo.productCode}</strong> - {item.productInfo.category}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          SHP: {item.shipped} | RTN: {item.returned}
+                        </Typography>
+                      </Box>
+                    ))}
+                    {detailedItems.length > 3 && (
+                      <Typography variant="caption" color="text.secondary">
+                        +{detailedItems.length - 3} more items...
+                      </Typography>
+                    )}
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          );
+        })}
+      </Grid>
+    );
+  }
+
+  function renderInvoicesTimeline() {
+    const sortedInvoices = [...filteredInvoices].sort((a, b) => 
+      new Date(b.created_at) - new Date(a.created_at)
+    );
+
+    return (
+      <Box>
+        {sortedInvoices.map((invoice, index) => {
+          const data = parseDataField(invoice.data);
+          const orderNum = getOrderNumber(data);
+          const customerInfo = getCustomerInfo(data);
+          const recordDate = getRecordDate(data);
+          const status = determineVerificationStatus(invoice);
+          
+          return (
+            <Box key={invoice.id} sx={{ display: 'flex', mb: 3 }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mr: 2 }}>
+                <Box
+                  sx={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: '50%',
+                    bgcolor: VERIFICATION_STATES[status].color === 'success' ? 'success.main' : 
+                             VERIFICATION_STATES[status].color === 'error' ? 'error.main' :
+                             VERIFICATION_STATES[status].color === 'warning' ? 'warning.main' : 'info.main',
+                    mt: 1
+                  }}
+                />
+                {index < sortedInvoices.length - 1 && (
+                  <Box
+                    sx={{
+                      width: 2,
+                      flexGrow: 1,
+                      bgcolor: 'divider',
+                      minHeight: 60
+                    }}
+                  />
+                )}
+              </Box>
+              <Paper sx={{ flexGrow: 1, p: 2 }}>
+                <Box display="flex" alignItems="center" gap={2} mb={1}>
+                  <Typography variant="h6">{orderNum}</Typography>
+                  <Chip
+                    label={VERIFICATION_STATES[status].label}
+                    color={VERIFICATION_STATES[status].color}
+                    size="small"
+                    icon={VERIFICATION_STATES[status].icon}
+                  />
+                  <Typography variant="caption" color="text.secondary">
+                    {new Date(invoice.created_at).toLocaleString()}
+                  </Typography>
+                </Box>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  Customer: {customerInfo}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Date: {recordDate}
+                </Typography>
+                <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+                  <Button
+                    size="small"
+                    onClick={() => navigate(`/import-approval-detail/${invoice.id}`)}
+                  >
+                    View Details
+                  </Button>
+                  <Checkbox
+                    size="small"
+                    checked={selectedRecords.includes(invoice.id)}
+                    onChange={() => handleSelectRecord(invoice.id)}
+                  />
+                </Box>
+              </Paper>
+            </Box>
+          );
+        })}
+      </Box>
+    );
+  }
+
+  function renderReceiptsGrid() {
+    return (
+      <Grid container spacing={2}>
+        {filteredReceipts.map((receipt) => {
+          const data = parseDataField(receipt.data);
+          const detailedItems = getDetailedLineItems(data);
+          const orderNum = getOrderNumber(data);
+          const customerInfo = getCustomerInfo(data);
+          const recordDate = getRecordDate(data);
+          const status = determineVerificationStatus(receipt);
+          
+          return (
+            <Grid item xs={12} sm={6} md={4} key={receipt.id}>
+              <Card 
+                sx={{ 
+                  height: '100%', 
+                  display: 'flex', 
+                  flexDirection: 'column',
+                  cursor: 'pointer',
+                  '&:hover': { elevation: 4 }
+                }}
+                onClick={() => navigate(`/import-approval-detail/${receipt.id}`)}
+              >
+                <CardHeader
+                  title={
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Typography variant="h6" component="span">
+                        {orderNum}
+                      </Typography>
+                      <Chip
+                        label={VERIFICATION_STATES[status].label}
+                        color={VERIFICATION_STATES[status].color}
+                        size="small"
+                        icon={VERIFICATION_STATES[status].icon}
+                      />
+                    </Box>
+                  }
+                  subheader={customerInfo}
+                  action={
+                    <Checkbox
+                      checked={selectedRecords.includes(receipt.id)}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleSelectRecord(receipt.id);
+                      }}
+                    />
+                  }
+                />
+                <CardContent sx={{ flexGrow: 1 }}>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    Date: {recordDate}
+                  </Typography>
+                  <Typography variant="body2" gutterBottom>
+                    {detailedItems.length} line item(s)
+                  </Typography>
+                  <Box sx={{ mt: 2 }}>
+                    {detailedItems.slice(0, 3).map((item, index) => (
+                      <Box key={index} sx={{ mb: 1 }}>
+                        <Typography variant="caption" display="block">
+                          <strong>{item.productInfo.productCode}</strong> - {item.productInfo.category}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          SHP: {item.shipped} | RTN: {item.returned}
+                        </Typography>
+                      </Box>
+                    ))}
+                    {detailedItems.length > 3 && (
+                      <Typography variant="caption" color="text.secondary">
+                        +{detailedItems.length - 3} more items...
+                      </Typography>
+                    )}
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          );
+        })}
+      </Grid>
+    );
+  }
+
+  function renderReceiptsTimeline() {
+    const sortedReceipts = [...filteredReceipts].sort((a, b) => 
+      new Date(b.created_at) - new Date(a.created_at)
+    );
+
+    return (
+      <Box>
+        {sortedReceipts.map((receipt, index) => {
+          const data = parseDataField(receipt.data);
+          const orderNum = getOrderNumber(data);
+          const customerInfo = getCustomerInfo(data);
+          const recordDate = getRecordDate(data);
+          const status = determineVerificationStatus(receipt);
+          
+          return (
+            <Box key={receipt.id} sx={{ display: 'flex', mb: 3 }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mr: 2 }}>
+                <Box
+                  sx={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: '50%',
+                    bgcolor: VERIFICATION_STATES[status].color === 'success' ? 'success.main' : 
+                             VERIFICATION_STATES[status].color === 'error' ? 'error.main' :
+                             VERIFICATION_STATES[status].color === 'warning' ? 'warning.main' : 'info.main',
+                    mt: 1
+                  }}
+                />
+                {index < sortedReceipts.length - 1 && (
+                  <Box
+                    sx={{
+                      width: 2,
+                      flexGrow: 1,
+                      bgcolor: 'divider',
+                      minHeight: 60
+                    }}
+                  />
+                )}
+              </Box>
+              <Paper sx={{ flexGrow: 1, p: 2 }}>
+                <Box display="flex" alignItems="center" gap={2} mb={1}>
+                  <Typography variant="h6">{orderNum}</Typography>
+                  <Chip
+                    label={VERIFICATION_STATES[status].label}
+                    color={VERIFICATION_STATES[status].color}
+                    size="small"
+                    icon={VERIFICATION_STATES[status].icon}
+                  />
+                  <Typography variant="caption" color="text.secondary">
+                    {new Date(receipt.created_at).toLocaleString()}
+                  </Typography>
+                </Box>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  Customer: {customerInfo}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Date: {recordDate}
+                </Typography>
+                <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+                  <Button
+                    size="small"
+                    onClick={() => navigate(`/import-approval-detail/${receipt.id}`)}
+                  >
+                    View Details
+                  </Button>
+                  <Checkbox
+                    size="small"
+                    checked={selectedRecords.includes(receipt.id)}
+                    onChange={() => handleSelectRecord(receipt.id)}
+                  />
+                </Box>
+              </Paper>
+            </Box>
+          );
+        })}
+      </Box>
     );
   }
 

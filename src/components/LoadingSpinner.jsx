@@ -30,7 +30,7 @@ const LoadingSpinner = ({ message = "Loading..." }) => {
         {message}
       </Typography>
       <Typography variant="body2" sx={{ mt: 1, opacity: 0.7 }}>
-        LessAnnoyingScan
+        Scanified
       </Typography>
     </Box>
   );

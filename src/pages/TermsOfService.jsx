@@ -103,7 +103,7 @@ function TermsOfService() {
             </Typography>
             <Typography variant="body2" paragraph>
               All rights, title, and interest in and to the Service (excluding your data) are and will remain 
-              the exclusive property of LessAnnoyingScan and its licensors. You may not use our branding or 
+              the exclusive property of Scanified and its licensors. You may not use our branding or 
               trademarks without our prior written consent.
             </Typography>
 
@@ -111,7 +111,7 @@ function TermsOfService() {
               7. Limitation of Liability
             </Typography>
             <Typography variant="body2" paragraph>
-              To the fullest extent permitted by law, LessAnnoyingScan shall not be liable for any indirect, 
+              To the fullest extent permitted by law, Scanified shall not be liable for any indirect, 
               incidental, special, consequential, or punitive damages, or any loss of profits or revenues, 
               whether incurred directly or indirectly, or any loss of data, use, goodwill, or other intangible 
               losses, resulting from your use of the Service.
@@ -146,7 +146,7 @@ function TermsOfService() {
             <Divider sx={{ my: 3 }} />
 
             <Typography variant="body2" color="text.secondary" align="center">
-              If you have any questions about these Terms, please contact us at legal@lessannoyingscan.com.
+              If you have any questions about these Terms, please contact us at legal@scanified.com.
             </Typography>
           </Box>
         </CardContent>

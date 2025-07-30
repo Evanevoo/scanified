@@ -56,7 +56,7 @@ const ProtectedRoute = ({ children }) => {
             </Typography>
             
             <Typography variant="body1" paragraph align="center" color="text.secondary">
-              To continue using LessAnnoyingScan, please choose one of the options below:
+              To continue using Scanified, please choose one of the options below:
             </Typography>
 
             <Grid container spacing={3} sx={{ mt: 2 }}>

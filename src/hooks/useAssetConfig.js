@@ -10,6 +10,8 @@ const defaultConfig = {
   primaryColor: '#2563eb',
   secondaryColor: '#1e40af',
   appName: 'Scanified',
+  appIcon: '/landing-icon.png', // Default app icon path
+  showAppIcon: true, // Whether to show the icon in the header
   customTerminology: {
     scan: 'scan',
     track: 'track',
@@ -52,6 +54,8 @@ export const useAssetConfig = () => {
           primary_color,
           secondary_color,
           app_name,
+          app_icon,
+          show_app_icon,
           custom_terminology,
           feature_toggles
         `)
@@ -70,6 +74,8 @@ export const useAssetConfig = () => {
           primaryColor: orgData.primary_color || defaultConfig.primaryColor,
           secondaryColor: orgData.secondary_color || defaultConfig.secondaryColor,
           appName: orgData.app_name || defaultConfig.appName,
+          appIcon: orgData.app_icon || defaultConfig.appIcon,
+          showAppIcon: orgData.show_app_icon !== undefined ? orgData.show_app_icon : defaultConfig.showAppIcon,
           customTerminology: orgData.custom_terminology || defaultConfig.customTerminology,
           featureToggles: orgData.feature_toggles || defaultConfig.featureToggles
         });
