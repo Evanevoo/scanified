@@ -1238,7 +1238,11 @@ export default function Settings() {
               <Typography variant="body2" color="text.secondary" paragraph>
                 Manage your subscription, billing information, and payment methods.
               </Typography>
-              <Button variant="outlined" sx={{ mt: 2 }}>
+              <Button 
+                variant="outlined" 
+                sx={{ mt: 2 }}
+                onClick={() => navigate('/billing')}
+              >
                 View Billing Details
               </Button>
             </Paper>
