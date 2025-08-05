@@ -79,13 +79,13 @@ export default function HomeScreen() {
     try {
       // Get total scans
       const { count: totalScans } = await supabase
-        .from('bottle_scans')
+        .from('asset_scans')
         .select('*', { count: 'exact', head: true });
 
       // Get today's scans
       const today = new Date().toISOString().split('T')[0];
       const { count: todayScans } = await supabase
-        .from('bottle_scans')
+        .from('asset_scans')
         .select('*', { count: 'exact', head: true })
         .gte('created_at', today);
 
@@ -102,7 +102,7 @@ export default function HomeScreen() {
   const fetchUnreadCount = async () => {
     try {
       const { count, error } = await supabase
-        .from('bottle_scans')
+        .from('asset_scans')
         .select('*', { count: 'exact', head: true })
         .is('read', false);
       if (!error) setUnreadCount(count || 0);
@@ -143,13 +143,13 @@ export default function HomeScreen() {
         );
         
         const results = await Promise.all(uniqueCustomers.map(async (customer) => {
-          const { data: bottles } = await supabase
-            .from('bottles')
+              const { data: assets } = await supabase
+      .from('assets')
             .select('group_name')
             .eq('assigned_customer', customer.CustomerListID);
           return {
             ...customer,
-            gases: Array.from(new Set((bottles || []).map(c => c.group_name))).filter(Boolean),
+            gases: Array.from(new Set((assets || []).map(c => c.group_name))).filter(Boolean),
           };
         }));
         setCustomerResults(results);
@@ -164,14 +164,14 @@ export default function HomeScreen() {
   const searchBottles = async () => {
     setLoadingBottles(true);
     try {
-      const { data: bottles, error } = await supabase
-        .from('bottles')
+          const { data: assets, error } = await supabase
+      .from('assets')
         .select('barcode_number, serial_number, assigned_customer, customer_name, product_code, description')
         .ilike('barcode_number', `%${search.trim()}%`)
         .limit(5);
       
-      if (!error && bottles) {
-        setBottleResults(bottles);
+      if (!error && assets) {
+        setBottleResults(assets);
       }
     } catch (error) {
       console.error('Error searching bottles:', error);

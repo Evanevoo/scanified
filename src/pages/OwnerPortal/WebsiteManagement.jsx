@@ -38,7 +38,8 @@ import {
   People as PeopleIcon,
   Refresh as RefreshIcon,
   Launch as LaunchIcon,
-  Build as BuildIcon
+  Build as BuildIcon,
+  Chat as ChatIcon
 } from '@mui/icons-material';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
@@ -202,6 +203,26 @@ export default function WebsiteManagement() {
         }
       ]
     },
+    liveChat: {
+      enabled: true,
+      welcomeMessage: 'Hi there! 👋 Welcome to Scanified. How can I help you today?',
+      quickResponses: [
+        'Tell me about pricing',
+        'How does cylinder tracking work?',
+        'What mobile features do you have?',
+        'Schedule a demo'
+      ],
+      responses: {
+        pricing: 'Our pricing starts at $49/month for the Starter plan (up to 100 assets, 3 users), Professional at $149/month (up to 1,000 assets, 10 users), and Enterprise with custom pricing (unlimited assets and users). All plans include a free trial and mobile app access!',
+        scanning: 'Scanning is super easy! Just open the app on any smartphone, point the camera at a barcode or QR code, and it automatically captures the data. No special hardware needed!',
+        support: 'I\'d be happy to help with technical support. Could you describe the issue you\'re experiencing?',
+        demo: 'I can schedule a personalized demo for you! Please share your email and preferred time, and our team will reach out within 24 hours.',
+        features: 'Our platform includes barcode scanning, real-time inventory tracking, customer management, route optimization, advanced analytics, API access, and mobile app support. What specific feature would you like to know more about?',
+        cylinders: 'Our system is specifically designed for gas cylinder management with features like cylinder tracking, delivery routes, customer management, safety compliance, and maintenance scheduling.',
+        mobile: 'Yes! Our mobile app works on both iOS and Android. Field workers can scan cylinders, update delivery status, and access customer information offline. All data syncs automatically when connected.',
+        default: 'Thanks for your message! I can help you with pricing information, scanning features, technical support, scheduling a demo, or information about our gas cylinder management system. What would you like to know more about?'
+      }
+    },
     footer: {
       companyInfo: {
         name: 'Gas Cylinder Management',
@@ -222,7 +243,7 @@ export default function WebsiteManagement() {
         ],
         company: [
           { label: 'About Us', link: '/about' },
-          { label: 'Careers', link: '/careers' },
+  
           { label: 'Blog', link: '/blog' },
           { label: 'Press', link: '/press' }
         ],
@@ -556,6 +577,26 @@ export default function WebsiteManagement() {
           fontFamily: 'Roboto, sans-serif',
           borderRadius: 8,
           spacing: 16
+        },
+        liveChat: parsedContent.liveChat || {
+          enabled: true,
+          welcomeMessage: 'Hi there! 👋 Welcome to Scanified. How can I help you today?',
+          quickResponses: [
+            'Tell me about pricing',
+            'How does cylinder tracking work?',
+            'What mobile features do you have?',
+            'Schedule a demo'
+          ],
+          responses: {
+            pricing: 'Our pricing starts at $49/month for the Starter plan (up to 100 assets, 3 users), Professional at $149/month (up to 1,000 assets, 10 users), and Enterprise with custom pricing (unlimited assets and users). All plans include a free trial and mobile app access!',
+            scanning: 'Scanning is super easy! Just open the app on any smartphone, point the camera at a barcode or QR code, and it automatically captures the data. No special hardware needed!',
+            support: 'I\'d be happy to help with technical support. Could you describe the issue you\'re experiencing?',
+            demo: 'I can schedule a personalized demo for you! Please share your email and preferred time, and our team will reach out within 24 hours.',
+            features: 'Our platform includes barcode scanning, real-time inventory tracking, customer management, route optimization, advanced analytics, API access, and mobile app support. What specific feature would you like to know more about?',
+            cylinders: 'Our system is specifically designed for gas cylinder management with features like cylinder tracking, delivery routes, customer management, safety compliance, and maintenance scheduling.',
+            mobile: 'Yes! Our mobile app works on both iOS and Android. Field workers can scan cylinders, update delivery status, and access customer information offline. All data syncs automatically when connected.',
+            default: 'Thanks for your message! I can help you with pricing information, scanning features, technical support, scheduling a demo, or information about our gas cylinder management system. What would you like to know more about?'
+          }
         }
       };
       setWebsiteContent(safeContent);
@@ -1836,6 +1877,207 @@ export default function WebsiteManagement() {
     </Box>
   );
 
+  const renderLiveChatEditor = () => (
+    <Box sx={{ p: 3 }}>
+      <Typography variant="h6" gutterBottom>
+        <ChatIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+        Live Chat Configuration
+      </Typography>
+      <Grid container spacing={3}>
+        <Grid item xs={12}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={websiteContent.liveChat.enabled}
+                onChange={(e) => handleNestedContentChange('liveChat', 'enabled', '', e.target.checked)}
+              />
+            }
+            label="Enable Live Chat"
+          />
+        </Grid>
+        
+        <Grid item xs={12}>
+          <TextField
+            fullWidth
+            label="Welcome Message"
+            value={websiteContent.liveChat.welcomeMessage}
+            onChange={(e) => handleNestedContentChange('liveChat', 'welcomeMessage', '', e.target.value)}
+            margin="normal"
+            multiline
+            rows={2}
+          />
+        </Grid>
+
+        <Grid item xs={12}>
+          <Typography variant="subtitle2" gutterBottom>Quick Response Options</Typography>
+          {websiteContent.liveChat.quickResponses.map((response, index) => (
+            <Box key={index} sx={{ display: 'flex', gap: 1, mb: 1 }}>
+              <TextField
+                fullWidth
+                size="small"
+                value={response}
+                onChange={(e) => {
+                  const newResponses = [...websiteContent.liveChat.quickResponses];
+                  newResponses[index] = e.target.value;
+                  handleDirectContentChange('liveChat', 'quickResponses', newResponses);
+                }}
+              />
+              <IconButton
+                size="small"
+                onClick={() => {
+                  const newResponses = websiteContent.liveChat.quickResponses.filter((_, i) => i !== index);
+                  handleDirectContentChange('liveChat', 'quickResponses', newResponses);
+                }}
+              >
+                <DeleteIcon />
+              </IconButton>
+            </Box>
+          ))}
+          <Button
+            startIcon={<AddIcon />}
+            onClick={() => {
+              const newResponses = [...websiteContent.liveChat.quickResponses, 'New quick response'];
+              handleDirectContentChange('liveChat', 'quickResponses', newResponses);
+            }}
+          >
+            Add Quick Response
+          </Button>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Typography variant="subtitle2" gutterBottom>Chat Responses</Typography>
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography>Pricing Response</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                value={websiteContent.liveChat.responses.pricing}
+                onChange={(e) => handleNestedContentChange('liveChat', 'responses', 'pricing', e.target.value)}
+                placeholder="Enter pricing response..."
+              />
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography>Scanning Response</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                value={websiteContent.liveChat.responses.scanning}
+                onChange={(e) => handleNestedContentChange('liveChat', 'responses', 'scanning', e.target.value)}
+                placeholder="Enter scanning response..."
+              />
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography>Support Response</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                value={websiteContent.liveChat.responses.support}
+                onChange={(e) => handleNestedContentChange('liveChat', 'responses', 'support', e.target.value)}
+                placeholder="Enter support response..."
+              />
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography>Demo Response</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                value={websiteContent.liveChat.responses.demo}
+                onChange={(e) => handleNestedContentChange('liveChat', 'responses', 'demo', e.target.value)}
+                placeholder="Enter demo response..."
+              />
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography>Features Response</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                value={websiteContent.liveChat.responses.features}
+                onChange={(e) => handleNestedContentChange('liveChat', 'responses', 'features', e.target.value)}
+                placeholder="Enter features response..."
+              />
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography>Cylinders Response</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                value={websiteContent.liveChat.responses.cylinders}
+                onChange={(e) => handleNestedContentChange('liveChat', 'responses', 'cylinders', e.target.value)}
+                placeholder="Enter cylinders response..."
+              />
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography>Mobile Response</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                value={websiteContent.liveChat.responses.mobile}
+                onChange={(e) => handleNestedContentChange('liveChat', 'responses', 'mobile', e.target.value)}
+                placeholder="Enter mobile response..."
+              />
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography>Default Response</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                value={websiteContent.liveChat.responses.default}
+                onChange={(e) => handleNestedContentChange('liveChat', 'responses', 'default', e.target.value)}
+                placeholder="Enter default response..."
+              />
+            </AccordionDetails>
+          </Accordion>
+        </Grid>
+      </Grid>
+    </Box>
+  );
+
   const tabs = [
     { label: 'Navigation', icon: <NavigationIcon />, component: renderNavigationEditor },
     { label: 'Hero Section', icon: <HeroIcon />, component: renderHeroEditor },
@@ -1844,7 +2086,8 @@ export default function WebsiteManagement() {
     { label: 'Footer', icon: <FooterIcon />, component: renderFooterEditor },
     { label: 'SEO', icon: <SEOIcon />, component: renderSEOEditor },
     { label: 'Analytics', icon: <AnalyticsIcon />, component: renderAnalyticsEditor },
-    { label: 'Theme', icon: <ColorIcon />, component: renderThemeEditor }
+    { label: 'Theme', icon: <ColorIcon />, component: renderThemeEditor },
+    { label: 'Live Chat', icon: <ChatIcon />, component: renderLiveChatEditor }
   ];
 
   return (

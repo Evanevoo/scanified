@@ -59,12 +59,7 @@ const Sidebar = ({ open, onClose }) => {
   // Owner gets special navigation ONLY if they don't have an organization
   if (profile?.role === 'owner' && !organization) {
     const ownerMenuItems = [
-      {
-        title: 'Dashboard',
-        path: '/dashboard',
-        icon: <Dashboard />, 
-        roles: ['owner']
-      },
+
       {
         title: 'Owner Portal',
         path: '/owner-portal',
@@ -195,7 +190,7 @@ const Sidebar = ({ open, onClose }) => {
       title: 'Core',
       icon: <HomeIcon />,
       items: [
-        { title: 'Dashboard', path: '/dashboard', icon: <Dashboard />, roles: ['admin', 'user', 'manager'] },
+
         { title: 'TrackAbout Dashboard', path: '/trackabout-dashboard', icon: <Analytics />, roles: ['admin', 'user', 'manager'] },
         { title: 'Customers', path: '/customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
         { title: 'Locations', path: '/locations', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] }

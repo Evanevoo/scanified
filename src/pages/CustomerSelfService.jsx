@@ -17,7 +17,8 @@ import {
   Download as DownloadIcon, Print as PrintIcon, Star as StarIcon,
   ExpandMore as ExpandMoreIcon, QrCode as QrCodeIcon,
   Visibility as TrackIcon, CalendarToday as CalendarIcon,
-  LocalShipping as DeliveryIcon, Build as ServiceIcon
+  LocalShipping as DeliveryIcon, Build as ServiceIcon,
+  Timeline as TimelineIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
@@ -756,6 +757,7 @@ function ServiceRequests({ customerId }) {
 export default function CustomerSelfService() {
   const { profile, organization } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState(0);
   const [stats, setStats] = useState({
     activeCylinders: 0,
     pendingDeliveries: 0,
@@ -873,10 +875,10 @@ export default function CustomerSelfService() {
         </Tabs>
       </Paper>
 
-      {activeTab === 0 && <CustomerDashboard customer={customer} stats={stats} />}
-      {activeTab === 1 && <CylinderTracking customerId={customer.id} />}
-      {activeTab === 2 && <DeliveryScheduling customerId={customer.id} />}
-      {activeTab === 3 && <ServiceRequests customerId={customer.id} />}
+      {activeTab === 0 && <CustomerDashboard customer={profile} stats={stats} />}
+      {activeTab === 1 && <CylinderTracking customerId={profile?.id} />}
+      {activeTab === 2 && <DeliveryScheduling customerId={profile?.id} />}
+      {activeTab === 3 && <ServiceRequests customerId={profile?.id} />}
       {activeTab === 4 && (
         <Box>
           <Typography variant="h6" gutterBottom>

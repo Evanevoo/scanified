@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Modal } from 'react-native';
 import { supabase } from '../supabase';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useAssetConfig } from '../context/AssetContext';
 
 export default function LocateCylinderScreen() {
+  const { config: assetConfig } = useAssetConfig();
   const [barcode, setBarcode] = useState('');
   const [serial, setSerial] = useState('');
-  const [cylinder, setCylinder] = useState<any>(null);
+  const [asset, setAsset] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [scannerVisible, setScannerVisible] = useState(false);
@@ -33,28 +35,28 @@ export default function LocateCylinderScreen() {
     setTimeout(() => setScanned(false), scanDelay);
     setBarcode(event.data);
     setScannerVisible(false);
-    fetchCylinder(event.data, 'barcode');
+    fetchAsset(event.data, 'barcode');
   };
 
-  const fetchCylinder = async (value: string, mode: 'barcode' | 'serial') => {
+  const fetchAsset = async (value: string, mode: 'barcode' | 'serial') => {
     setLoading(true);
     setError('');
-    setCylinder(null);
-    let query = supabase.from('bottles').select('*');
+    setAsset(null);
+    let query = supabase.from('assets').select('*');
     if (mode === 'barcode') query = query.eq('barcode_number', value);
     else query = query.eq('serial_number', value);
     const { data, error } = await query.single();
     setLoading(false);
     if (error || !data) {
-      setError('Cylinder not found.');
+      setError(`${assetConfig.assetDisplayName} not found.`);
       return;
     }
-    setCylinder(data);
+    setAsset(data);
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Locate Cylinder</Text>
+      <Text style={styles.title}>Locate {assetConfig.assetDisplayName}</Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
         <TextInput
           style={[styles.input, { flex: 1, marginBottom: 0 }]}
@@ -78,8 +80,8 @@ export default function LocateCylinderScreen() {
       <TouchableOpacity
         style={styles.submitBtn}
         onPress={() => {
-          if (barcode) fetchCylinder(barcode, 'barcode');
-          else if (serial) fetchCylinder(serial, 'serial');
+          if (barcode) fetchAsset(barcode, 'barcode');
+          else if (serial) fetchAsset(serial, 'serial');
           else setError('Enter barcode or serial number.');
         }}
         disabled={loading}
@@ -87,15 +89,15 @@ export default function LocateCylinderScreen() {
         {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Locate</Text>}
       </TouchableOpacity>
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      {cylinder && (
+      {asset && (
         <View style={styles.detailsBox}>
-          <Text style={styles.detailsTitle}>Cylinder Details</Text>
-          <Text style={styles.detailsLabel}>Barcode: <Text style={styles.detailsValue}>{cylinder.barcode_number}</Text></Text>
-          <Text style={styles.detailsLabel}>Serial: <Text style={styles.detailsValue}>{cylinder.serial_number}</Text></Text>
-          <Text style={styles.detailsLabel}>Gas Type: <Text style={styles.detailsValue}>{cylinder.group_name}</Text></Text>
-          <Text style={styles.detailsLabel}>Status: <Text style={styles.detailsValue}>{cylinder.status || 'Unknown'}</Text></Text>
-          <Text style={styles.detailsLabel}>Location: <Text style={styles.detailsValue}>{cylinder.assigned_customer || 'Warehouse'}</Text></Text>
-          <Text style={styles.detailsLabel}>Rented By: <Text style={styles.detailsValue}>{cylinder.assigned_customer || 'N/A'}</Text></Text>
+          <Text style={styles.detailsTitle}>{assetConfig.assetDisplayName} Details</Text>
+          <Text style={styles.detailsLabel}>Barcode: <Text style={styles.detailsValue}>{asset.barcode_number}</Text></Text>
+          <Text style={styles.detailsLabel}>Serial: <Text style={styles.detailsValue}>{asset.serial_number}</Text></Text>
+          <Text style={styles.detailsLabel}>Type: <Text style={styles.detailsValue}>{asset.group_name}</Text></Text>
+          <Text style={styles.detailsLabel}>Status: <Text style={styles.detailsValue}>{asset.status || 'Unknown'}</Text></Text>
+          <Text style={styles.detailsLabel}>Location: <Text style={styles.detailsValue}>{asset.assigned_customer || 'Warehouse'}</Text></Text>
+          <Text style={styles.detailsLabel}>Assigned To: <Text style={styles.detailsValue}>{asset.assigned_customer || 'N/A'}</Text></Text>
         </View>
       )}
       {/* Scanner Modal */}

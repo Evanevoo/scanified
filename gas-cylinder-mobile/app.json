@@ -2,11 +2,11 @@
   "expo": {
     "name": "Scanified",
     "slug": "gas-cylinder-mobile",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -18,6 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.evanevoo.scanifiedmobile",
+      "buildNumber": "4",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       },
@@ -30,7 +31,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.evanevoo.scanifiedmobile",
-      "versionCode": 2,
+      "versionCode": 4,
       "permissions": [
         "CAMERA",
         "INTERNET",
@@ -48,7 +49,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Scanified to access your camera to scan barcodes."
+          "cameraPermission": "Allow Scanified to access your camera to scan asset barcodes and manage your organization's inventory with enterprise-grade precision."
         }
       ],
       "expo-apple-authentication"
@@ -57,6 +58,7 @@
       "eas": {
         "projectId": "d71ec042-1fec-4186-ac3b-0ae85a6af345"
       }
-    }
+    },
+    "owner": "evanevoo"
   }
 }

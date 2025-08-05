@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scanified Professional App Icons Generator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-size: 2.5em;
+            font-weight: 700;
+        }
+        .subtitle {
+            text-align: center;
+            color: #6c757d;
+            font-size: 1.1em;
+            margin-bottom: 40px;
+            line-height: 1.5;
+        }
+        .icon-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+        .icon-container {
+            text-align: center;
+            background: rgba(248, 249, 250, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 15px;
+            border: 2px solid rgba(233, 236, 239, 0.5);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .icon-container:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.15);
+        }
+        .icon-container h3 {
+            margin-bottom: 20px;
+            color: #495057;
+            font-size: 1.2em;
+            font-weight: 600;
+        }
+        canvas {
+            border: 1px solid rgba(222, 226, 230, 0.5);
+            border-radius: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            transition: transform 0.2s ease;
+        }
+        canvas:hover {
+            transform: scale(1.05);
+        }
+        .download-btn {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            margin: 5px;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+        }
+        .download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.4);
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+        }
+        .instructions {
+            background: rgba(232, 244, 253, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(179, 217, 255, 0.5);
+            border-radius: 15px;
+            padding: 30px;
+            margin-top: 30px;
+        }
+        .instructions h3 {
+            color: #1e40af;
+            margin-top: 0;
+            font-weight: 600;
+        }
+        .instructions ol {
+            color: #374151;
+            line-height: 1.8;
+        }
+        .instructions code {
+            background: rgba(59, 130, 246, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 0.9em;
+        }
+        .brand-highlight {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 <span class="brand-highlight">Scanified</span> Professional App Icons</h1>
+        <p class="subtitle">
+            Modern gradient design with circuit board patterns<br>
+            Professional branding for your enterprise asset management platform
+        </p>
+        
+        <div class="icon-grid">
+            <div class="icon-container">
+                <h3>App Icon (1024×1024)</h3>
+                <canvas id="appIcon" width="200" height="200"></canvas>
+                <br>
+                <button class="download-btn" onclick="downloadIcon('appIcon', 'scanified-app-icon.png')">Download PNG</button>
+            </div>
+            
+            <div class="icon-container">
+                <h3>Adaptive Icon (1024×1024)</h3>
+                <canvas id="adaptiveIcon" width="200" height="200"></canvas>
+                <br>
+                <button class="download-btn" onclick="downloadIcon('adaptiveIcon', 'scanified-adaptive-icon.png')">Download PNG</button>
+            </div>
+            
+            <div class="icon-container">
+                <h3>Splash Screen Icon (1024×1024)</h3>
+                <canvas id="splashIcon" width="200" height="200"></canvas>
+                <br>
+                <button class="download-btn" onclick="downloadIcon('splashIcon', 'scanified-splash-icon.png')">Download PNG</button>
+            </div>
+            
+            <div class="icon-container">
+                <h3>Favicon (192×192)</h3>
+                <canvas id="favicon" width="192" height="192"></canvas>
+                <br>
+                <button class="download-btn" onclick="downloadIcon('favicon', 'scanified-favicon.png')">Download PNG</button>
+            </div>
+        </div>
+        
+        <div class="instructions">
+            <h3>📋 Installation Instructions</h3>
+            <ol>
+                <li>Download all icon files using the buttons above</li>
+                <li>Replace the following files in your project:
+                    <ul style="margin-top: 10px;">
+                        <li><code>gas-cylinder-mobile/assets/icon.png</code> → App Icon</li>
+                        <li><code>gas-cylinder-mobile/assets/adaptive-icon.png</code> → Adaptive Icon</li>
+                        <li><code>gas-cylinder-mobile/assets/splash-icon.png</code> → Splash Screen Icon</li>
+                        <li><code>gas-cylinder-mobile/assets/favicon.png</code> → Favicon</li>
+                    </ul>
+                </li>
+                <li>Clear cache: <code>expo start --clear</code></li>
+                <li>Build new version: <code>eas build --platform ios --clear-cache</code></li>
+                <li>Update App Store Connect with new build and professional descriptions</li>
+            </ol>
+            <p style="margin-top: 20px; padding: 15px; background: rgba(59, 130, 246, 0.1); border-radius: 8px; border-left: 4px solid #3b82f6;">
+                <strong>💡 Pro Tip:</strong> These icons feature a modern gradient design with circuit board patterns, positioning Scanified as a sophisticated enterprise platform with scanning and connectivity capabilities.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        function drawScanifiedIcon(canvasId, size) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const targetSize = size || 1024;
+            
+            // Set canvas size for high-resolution export
+            canvas.width = targetSize;
+            canvas.height = targetSize;
+            
+            // Scale factor for responsive design
+            const scale = targetSize / 1024;
+            
+            // Create rounded rectangle path
+            function createRoundedRect(x, y, width, height, radius) {
+                ctx.beginPath();
+                ctx.moveTo(x + radius, y);
+                ctx.lineTo(x + width - radius, y);
+                ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+                ctx.lineTo(x + width, y + height - radius);
+                ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+                ctx.lineTo(x + radius, y + height);
+                ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+                ctx.lineTo(x, y + radius);
+                ctx.quadraticCurveTo(x, y, x + radius, y);
+                ctx.closePath();
+            }
+            
+            // Outer gradient background (peachy orange to blue-teal)
+            const outerGradient = ctx.createLinearGradient(0, 0, targetSize, targetSize);
+            outerGradient.addColorStop(0, '#ff9a56');    // Peachy orange
+            outerGradient.addColorStop(0.25, '#ff6b9d'); // Pink
+            outerGradient.addColorStop(0.5, '#c44569');  // Magenta
+            outerGradient.addColorStop(0.75, '#2d3436'); // Dark blue
+            outerGradient.addColorStop(1, '#00b894');    // Teal
+            
+            createRoundedRect(0, 0, targetSize, targetSize, 120 * scale);
+            ctx.fillStyle = outerGradient;
+            ctx.fill();
+            
+            // Inner white-bordered square with shadow
+            const innerSize = targetSize * 0.85;
+            const innerX = (targetSize - innerSize) / 2;
+            const innerY = (targetSize - innerSize) / 2;
+            
+            // Shadow
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+            ctx.shadowBlur = 20 * scale;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 8 * scale;
+            
+            createRoundedRect(innerX, innerY, innerSize, innerSize, 80 * scale);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            
+            // Reset shadow
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            
+            // Inner gradient background
+            const innerGradient = ctx.createLinearGradient(innerX, innerY, innerX + innerSize, innerY + innerSize);
+            innerGradient.addColorStop(0, '#e17055');    // Reddish orange
+            innerGradient.addColorStop(0.3, '#d63031');  // Red
+            innerGradient.addColorStop(0.6, '#6c5ce7');  // Purple
+            innerGradient.addColorStop(1, '#2d3436');    // Dark blue
+            
+            createRoundedRect(innerX + 8 * scale, innerY + 8 * scale, innerSize - 16 * scale, innerSize - 16 * scale, 70 * scale);
+            ctx.fillStyle = innerGradient;
+            ctx.fill();
+            
+            // Circuit board pattern
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.lineWidth = 2 * scale;
+            
+            // Horizontal lines
+            for (let i = 0; i < 8; i++) {
+                const y = innerY + 50 * scale + i * 60 * scale;
+                ctx.beginPath();
+                ctx.moveTo(innerX + 30 * scale, y);
+                ctx.lineTo(innerX + innerSize - 30 * scale, y);
+                ctx.stroke();
+            }
+            
+            // Vertical lines
+            for (let i = 0; i < 8; i++) {
+                const x = innerX + 50 * scale + i * 60 * scale;
+                ctx.beginPath();
+                ctx.moveTo(x, innerY + 30 * scale);
+                ctx.lineTo(x, innerY + innerSize - 30 * scale);
+                ctx.stroke();
+            }
+            
+            // Circuit nodes (dots)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            for (let row = 0; row < 6; row++) {
+                for (let col = 0; col < 6; col++) {
+                    const x = innerX + 80 * scale + col * 80 * scale;
+                    const y = innerY + 80 * scale + row * 80 * scale;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4 * scale, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            
+            // T-junctions and crosses
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 3 * scale;
+            
+            // T-junctions
+            const tJunctions = [
+                { x: innerX + 120 * scale, y: innerY + 120 * scale },
+                { x: innerX + 280 * scale, y: innerY + 200 * scale },
+                { x: innerX + 440 * scale, y: innerY + 280 * scale },
+                { x: innerX + 200 * scale, y: innerY + 360 * scale },
+                { x: innerX + 360 * scale, y: innerY + 440 * scale }
+            ];
+            
+            tJunctions.forEach(junction => {
+                // Horizontal line
+                ctx.beginPath();
+                ctx.moveTo(junction.x - 20 * scale, junction.y);
+                ctx.lineTo(junction.x + 20 * scale, junction.y);
+                ctx.stroke();
+                
+                // Vertical line
+                ctx.beginPath();
+                ctx.moveTo(junction.x, junction.y - 20 * scale);
+                ctx.lineTo(junction.x, junction.y + 20 * scale);
+                ctx.stroke();
+            });
+            
+            // Small squares with patterns
+            const smallSquares = [
+                { x: innerX + 100 * scale, y: innerY + 100 * scale, size: 20 * scale },
+                { x: innerX + 300 * scale, y: innerY + 180 * scale, size: 16 * scale },
+                { x: innerX + 480 * scale, y: innerY + 260 * scale, size: 18 * scale },
+                { x: innerX + 180 * scale, y: innerY + 340 * scale, size: 22 * scale }
+            ];
+            
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            smallSquares.forEach(square => {
+                ctx.fillRect(square.x, square.y, square.size, square.size);
+                
+                // Add internal pattern
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.lineWidth = 1 * scale;
+                ctx.beginPath();
+                ctx.moveTo(square.x + 5 * scale, square.y + square.size / 2);
+                ctx.lineTo(square.x + square.size - 5 * scale, square.y + square.size / 2);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(square.x + square.size / 2, square.y + 5 * scale);
+                ctx.lineTo(square.x + square.size / 2, square.y + square.size - 5 * scale);
+                ctx.stroke();
+            });
+            
+            // Speech bubble in bottom-left
+            const bubbleX = innerX + 60 * scale;
+            const bubbleY = innerY + innerSize - 80 * scale;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.beginPath();
+            ctx.arc(bubbleX, bubbleY, 15 * scale, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Bubble tail
+            ctx.beginPath();
+            ctx.moveTo(bubbleX - 10 * scale, bubbleY + 15 * scale);
+            ctx.lineTo(bubbleX - 5 * scale, bubbleY + 25 * scale);
+            ctx.lineTo(bubbleX + 5 * scale, bubbleY + 15 * scale);
+            ctx.fill();
+            
+            // Central "S" logo
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${180 * scale}px -apple-system, BlinkMacSystemFont, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            // Add subtle shadow
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+            ctx.shadowBlur = 10 * scale;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 2 * scale;
+            
+            ctx.fillText('S', innerX + innerSize / 2, innerY + innerSize / 2);
+            
+            // Reset shadow
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+        }
+
+        function downloadIcon(canvasId, filename) {
+            const canvas = document.getElementById(canvasId);
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL('image/png', 1.0);
+            link.click();
+        }
+
+        // Generate icons when page loads
+        window.onload = function() {
+            // Generate preview icons (smaller size for display)
+            const previewSize = 200;
+            ['appIcon', 'adaptiveIcon', 'splashIcon'].forEach(canvasId => {
+                drawScanifiedIcon(canvasId, previewSize);
+            });
+            
+            // Generate favicon
+            drawScanifiedIcon('favicon', 192);
+            
+            // Override download function to generate full-size icons
+            window.originalDownloadIcon = downloadIcon;
+            window.downloadIcon = function(canvasId, filename) {
+                const originalCanvas = document.getElementById(canvasId);
+                const originalWidth = originalCanvas.width;
+                const originalHeight = originalCanvas.height;
+                
+                // Create temporary canvas for full-size generation
+                const tempCanvas = document.createElement('canvas');
+                const fullSize = filename.includes('favicon') ? 192 : 1024;
+                tempCanvas.width = fullSize;
+                tempCanvas.height = fullSize;
+                const tempCtx = tempCanvas.getContext('2d');
+                
+                // Generate full-size icon on temporary canvas
+                const canvas = tempCanvas;
+                const ctx = tempCtx;
+                const targetSize = fullSize;
+                const scale = targetSize / 1024;
+                
+                // Redraw at full size (copy the drawing code)
+                function createRoundedRect(x, y, width, height, radius) {
+                    ctx.beginPath();
+                    ctx.moveTo(x + radius, y);
+                    ctx.lineTo(x + width - radius, y);
+                    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+                    ctx.lineTo(x + width, y + height - radius);
+                    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+                    ctx.lineTo(x + radius, y + height);
+                    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+                    ctx.lineTo(x, y + radius);
+                    ctx.quadraticCurveTo(x, y, x + radius, y);
+                    ctx.closePath();
+                }
+                
+                // Outer gradient
+                const outerGradient = ctx.createLinearGradient(0, 0, targetSize, targetSize);
+                outerGradient.addColorStop(0, '#ff9a56');
+                outerGradient.addColorStop(0.25, '#ff6b9d');
+                outerGradient.addColorStop(0.5, '#c44569');
+                outerGradient.addColorStop(0.75, '#2d3436');
+                outerGradient.addColorStop(1, '#00b894');
+                
+                createRoundedRect(0, 0, targetSize, targetSize, 120 * scale);
+                ctx.fillStyle = outerGradient;
+                ctx.fill();
+                
+                // Inner white-bordered square
+                const innerSize = targetSize * 0.85;
+                const innerX = (targetSize - innerSize) / 2;
+                const innerY = (targetSize - innerSize) / 2;
+                
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+                ctx.shadowBlur = 20 * scale;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 8 * scale;
+                
+                createRoundedRect(innerX, innerY, innerSize, innerSize, 80 * scale);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+                
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+                
+                // Inner gradient
+                const innerGradient = ctx.createLinearGradient(innerX, innerY, innerX + innerSize, innerY + innerSize);
+                innerGradient.addColorStop(0, '#e17055');
+                innerGradient.addColorStop(0.3, '#d63031');
+                innerGradient.addColorStop(0.6, '#6c5ce7');
+                innerGradient.addColorStop(1, '#2d3436');
+                
+                createRoundedRect(innerX + 8 * scale, innerY + 8 * scale, innerSize - 16 * scale, innerSize - 16 * scale, 70 * scale);
+                ctx.fillStyle = innerGradient;
+                ctx.fill();
+                
+                // Circuit board pattern
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.lineWidth = 2 * scale;
+                
+                for (let i = 0; i < 8; i++) {
+                    const y = innerY + 50 * scale + i * 60 * scale;
+                    ctx.beginPath();
+                    ctx.moveTo(innerX + 30 * scale, y);
+                    ctx.lineTo(innerX + innerSize - 30 * scale, y);
+                    ctx.stroke();
+                }
+                
+                for (let i = 0; i < 8; i++) {
+                    const x = innerX + 50 * scale + i * 60 * scale;
+                    ctx.beginPath();
+                    ctx.moveTo(x, innerY + 30 * scale);
+                    ctx.lineTo(x, innerY + innerSize - 30 * scale);
+                    ctx.stroke();
+                }
+                
+                // Circuit nodes
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                for (let row = 0; row < 6; row++) {
+                    for (let col = 0; col < 6; col++) {
+                        const x = innerX + 80 * scale + col * 80 * scale;
+                        const y = innerY + 80 * scale + row * 80 * scale;
+                        ctx.beginPath();
+                        ctx.arc(x, y, 4 * scale, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+                
+                // T-junctions
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+                ctx.lineWidth = 3 * scale;
+                
+                const tJunctions = [
+                    { x: innerX + 120 * scale, y: innerY + 120 * scale },
+                    { x: innerX + 280 * scale, y: innerY + 200 * scale },
+                    { x: innerX + 440 * scale, y: innerY + 280 * scale },
+                    { x: innerX + 200 * scale, y: innerY + 360 * scale },
+                    { x: innerX + 360 * scale, y: innerY + 440 * scale }
+                ];
+                
+                tJunctions.forEach(junction => {
+                    ctx.beginPath();
+                    ctx.moveTo(junction.x - 20 * scale, junction.y);
+                    ctx.lineTo(junction.x + 20 * scale, junction.y);
+                    ctx.stroke();
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(junction.x, junction.y - 20 * scale);
+                    ctx.lineTo(junction.x, junction.y + 20 * scale);
+                    ctx.stroke();
+                });
+                
+                // Small squares
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+                const smallSquares = [
+                    { x: innerX + 100 * scale, y: innerY + 100 * scale, size: 20 * scale },
+                    { x: innerX + 300 * scale, y: innerY + 180 * scale, size: 16 * scale },
+                    { x: innerX + 480 * scale, y: innerY + 260 * scale, size: 18 * scale },
+                    { x: innerX + 180 * scale, y: innerY + 340 * scale, size: 22 * scale }
+                ];
+                
+                smallSquares.forEach(square => {
+                    ctx.fillRect(square.x, square.y, square.size, square.size);
+                    
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                    ctx.lineWidth = 1 * scale;
+                    ctx.beginPath();
+                    ctx.moveTo(square.x + 5 * scale, square.y + square.size / 2);
+                    ctx.lineTo(square.x + square.size - 5 * scale, square.y + square.size / 2);
+                    ctx.stroke();
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(square.x + square.size / 2, square.y + 5 * scale);
+                    ctx.lineTo(square.x + square.size / 2, square.y + square.size - 5 * scale);
+                    ctx.stroke();
+                });
+                
+                // Speech bubble
+                const bubbleX = innerX + 60 * scale;
+                const bubbleY = innerY + innerSize - 80 * scale;
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.beginPath();
+                ctx.arc(bubbleX, bubbleY, 15 * scale, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.moveTo(bubbleX - 10 * scale, bubbleY + 15 * scale);
+                ctx.lineTo(bubbleX - 5 * scale, bubbleY + 25 * scale);
+                ctx.lineTo(bubbleX + 5 * scale, bubbleY + 15 * scale);
+                ctx.fill();
+                
+                // Central "S"
+                ctx.fillStyle = '#ffffff';
+                ctx.font = `bold ${180 * scale}px -apple-system, BlinkMacSystemFont, sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+                ctx.shadowBlur = 10 * scale;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 2 * scale;
+                ctx.fillText('S', innerX + innerSize / 2, innerY + innerSize / 2);
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+                
+                // Download the full-size version
+                const link = document.createElement('a');
+                link.download = filename;
+                link.href = tempCanvas.toDataURL('image/png', 1.0);
+                link.click();
+            };
+        };
+    </script>
+</body>
+</html>

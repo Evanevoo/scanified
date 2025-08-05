@@ -103,29 +103,38 @@ export default function UserInvites() {
         throw new Error('This email is already registered in your organization');
       }
 
-      // Check if email is already registered with any other organization
+      // Check if email is already registered with ANY organization (global check)
       const { data: existingProfile, error: profileCheckError } = await supabase
         .from('profiles')
         .select('email, organization_id, organizations(name)')
         .eq('email', newInvite.email)
         .single();
 
-      if (existingProfile && existingProfile.organization_id && existingProfile.organization_id !== profile.organization_id) {
-        throw new Error(`This email (${newInvite.email}) is already registered with organization "${existingProfile.organizations?.name}". Each email can only be associated with one organization. Please use a different email address.`);
+      if (existingProfile && existingProfile.organization_id) {
+        if (existingProfile.organization_id === profile.organization_id) {
+          throw new Error(`This email (${newInvite.email}) is already registered in your organization.`);
+        } else {
+          throw new Error(`This email (${newInvite.email}) is already registered with another organization "${existingProfile.organizations?.name}". Each email can only be associated with one organization globally. Please use a different email address.`);
+        }
       }
 
-      // Check if there's already a pending invite for this email
-      const { data: existingInvite } = await supabase
+      // Check if there's already a pending invite for this email in ANY organization
+      const { data: existingGlobalInvite } = await supabase
         .from('organization_invites')
-        .select('id')
-        .eq('organization_id', profile.organization_id)
+        .select('id, organization_id, organizations(name)')
         .eq('email', newInvite.email)
         .is('accepted_at', null)
         .single();
 
-      if (existingInvite) {
-        throw new Error('An invite has already been sent to this email');
+      if (existingGlobalInvite) {
+        if (existingGlobalInvite.organization_id === profile.organization_id) {
+          throw new Error('An invite has already been sent to this email from your organization');
+        } else {
+          throw new Error(`This email already has a pending invite from organization "${existingGlobalInvite.organizations?.name}". Each email can only have one pending invite globally.`);
+        }
       }
+
+
 
       // Create the invite using the database function
       const { data, error } = await supabase.rpc('create_organization_invite', {
@@ -137,7 +146,51 @@ export default function UserInvites() {
 
       if (error) throw error;
 
-      setSuccess(`Invite sent to ${newInvite.email}`);
+      // Fetch the invite row to get the token for email sending
+      const { data: inviteRow } = await supabase
+        .from('organization_invites')
+        .select('token')
+        .eq('organization_id', profile.organization_id)
+        .eq('email', newInvite.email)
+        .is('accepted_at', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (inviteRow && inviteRow.token) {
+        const inviteLink = `${window.location.origin}/accept-invite?token=${inviteRow.token}`;
+        
+        try {
+          const emailResponse = await fetch('/.netlify/functions/send-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              to: newInvite.email,
+              subject: `You're invited to join ${profile.organizations?.name || 'our organization'}`,
+              template: 'invite',
+              data: {
+                inviteLink,
+                organizationName: profile.organizations?.name || 'our organization',
+                inviter: profile.full_name || profile.email,
+              }
+            })
+          });
+
+          if (!emailResponse.ok) {
+            const errorData = await emailResponse.json();
+            console.error('Email sending failed:', errorData);
+            throw new Error(`Failed to send email: ${errorData.error || 'Unknown error'}`);
+          }
+
+          console.log('Invitation email sent successfully to:', newInvite.email);
+        } catch (emailError) {
+          console.error('Error sending invitation email:', emailError);
+          // Don't throw here - the invite was created successfully, just email failed
+          setError(`Invite created but email failed to send: ${emailError.message}. You can copy the invite link manually.`);
+        }
+      }
+
+      setSuccess(`Invite sent to ${newInvite.email}. The user will receive an email with instructions to join your organization.`);
       setNewInvite({ email: '', role: 'user' });
       setInviteDialog(false);
       fetchInvites();

@@ -170,7 +170,7 @@ export default function ScanCylindersActionScreen() {
         const allBarcodes = [
           ...scannedShip.map(bc => ({ 
             order_number: orderNumber, 
-            bottle_barcode: bc, 
+            asset_barcode: bc, 
             mode: 'SHIP',
             customer_id: customer?.id,
             location: customer?.location || 'Unknown',
@@ -178,7 +178,7 @@ export default function ScanCylindersActionScreen() {
           })),
           ...scannedReturn.map(bc => ({ 
             order_number: orderNumber, 
-            bottle_barcode: bc, 
+            asset_barcode: bc, 
             mode: 'RETURN',
             customer_id: customer?.id,
             location: customer?.location || 'Unknown',
@@ -203,11 +203,11 @@ export default function ScanCylindersActionScreen() {
       } else {
         // Online - sync immediately
         const allBarcodes = [
-          ...scannedShip.map(bc => ({ order_number: orderNumber, bottle_barcode: bc, mode: 'SHIP' })),
-          ...scannedReturn.map(bc => ({ order_number: orderNumber, bottle_barcode: bc, mode: 'RETURN' })),
+          ...scannedShip.map(bc => ({ order_number: orderNumber, asset_barcode: bc, mode: 'SHIP' })),
+          ...scannedReturn.map(bc => ({ order_number: orderNumber, asset_barcode: bc, mode: 'RETURN' })),
         ];
 
-        const { error } = await supabase.from('bottle_scans').insert(allBarcodes);
+        const { error } = await supabase.from('asset_scans').insert(allBarcodes);
         
         if (error) {
           setSyncResult('Error: ' + error.message);
@@ -215,7 +215,7 @@ export default function ScanCylindersActionScreen() {
           // Mark returned bottles as empty
           if (scannedReturn.length > 0) {
             const { error: updateError } = await supabase
-              .from('bottles')
+              .from('assets')
               .update({ status: 'empty' })
               .in('barcode_number', scannedReturn);
             

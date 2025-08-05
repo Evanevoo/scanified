@@ -13,8 +13,8 @@ export default function RecentScansScreen() {
       setError('');
       // Use the correct table name: bottle_scans
       const { data, error } = await supabase
-        .from('bottle_scans')
-        .select('id, bottle_barcode, order_number, customer_name, created_at, read')
+        .from('asset_scans')
+        .select('id, asset_barcode, order_number, customer_name, created_at, read')
         .order('created_at', { ascending: false })
         .limit(20);
       if (error) {
@@ -30,7 +30,7 @@ export default function RecentScansScreen() {
         const unreadIds = data.filter(s => !s.read).map(s => s.id);
         if (unreadIds.length > 0) {
           await supabase
-            .from('bottle_scans')
+            .from('asset_scans')
             .update({ read: true })
             .in('id', unreadIds);
         }
@@ -54,7 +54,7 @@ export default function RecentScansScreen() {
           keyExtractor={item => item.id.toString()}
           renderItem={({ item }) => (
             <View style={styles.scanItem}>
-              <Text style={styles.scanBarcode}>Barcode: {item.bottle_barcode}</Text>
+              <Text style={styles.scanBarcode}>Barcode: {item.asset_barcode}</Text>
               <Text style={styles.scanOrder}>Order: {item.order_number}</Text>
               <Text style={styles.scanCustomer}>Customer: {item.customer_name || '-'}</Text>
               <Text style={styles.scanTime}>{new Date(item.created_at).toLocaleString()}</Text>

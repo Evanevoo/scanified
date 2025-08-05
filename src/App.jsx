@@ -16,6 +16,8 @@ import Billing from './pages/Billing';
 import OwnerDashboard from './pages/OwnerDashboard';
 import CustomerPortal from './pages/CustomerPortal';
 import CustomerRegistration from './pages/CustomerRegistration';
+import BarcodeGenerator from './pages/BarcodeGenerator';
+import IntegrationSettings from './pages/OwnerPortal/IntegrationSettings';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import LandingPage from './pages/LandingPage';
 import DebugAuth from './pages/DebugAuth';
@@ -78,6 +80,19 @@ import ThemeShowcase from './pages/ThemeShowcase';
 import FAQ from './pages/FAQ';
 import Reviews from './pages/Reviews';
 import CookieNotice from './components/CookieNotice';
+import NavigationBar from './components/NavigationBar';
+import LiveChat from './components/LiveChat';
+import Demo from './pages/Demo';
+import Features from './pages/Features';
+import Pricing from './pages/Pricing';
+import About from './pages/About';
+import CaseStudies from './pages/CaseStudies';
+import OwnerCMS from './pages/OwnerCMS';
+import CustomerPayments from './pages/CustomerPayments';
+import CompetitorAnalysis from './pages/CompetitorAnalysis';
+import Blog from './pages/Blog';
+import Security from './pages/Security';
+import EmailTest from './pages/EmailTest';
 
 // Lazy load all page components
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -120,7 +135,7 @@ const ScannedOrders = lazy(() => import('./pages/ScannedOrders'));
 const SupabaseOrders = lazy(() => import('./pages/management-reports/SupabaseOrders'));
 const UserManagement = lazy(() => import('./pages/UserManagement'));
 const ImportAssetBalance = lazy(() => import('./pages/ImportAssetBalance'));
-const Integrations = lazy(() => import('./pages/Integrations'));
+const IntegrationsPage = lazy(() => import('./pages/Integrations'));
 const BottleDetail = lazy(() => import('./pages/BottleDetail'));
 const AssetDetail = lazy(() => import('./pages/AssetDetail'));
 const Assets = lazy(() => import('./pages/Assets'));
@@ -166,17 +181,19 @@ function AppContent() {
           <ThemeProvider>
             <Router>
               <AnalyticsTracker />
+              <NavigationBar />
+              <LiveChat />
               <div className="App">
                 <Routes>
                   {/* Smart root redirect based on user state */}
                   <Route path="/" element={
-                    profile && organization ? <Navigate to="/dashboard" replace /> : 
+                    profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
                     profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
                     <LandingPage />
                   } />
                   <Route path="/landing" element={<LandingPage />} />
                   <Route path="/login" element={
-                    profile && organization ? <Navigate to="/dashboard" replace /> : 
+                    profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
                     profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
                     <LoginPage />
                   } />
@@ -199,10 +216,24 @@ function AppContent() {
                   {/* --- Debug Routes --- */}
                   <Route path="/debug" element={<DebugAuth />} />
                   <Route path="/test-landing" element={<LandingPage />} />
+                  <Route path="/demo" element={<Demo />} />
+                  <Route path="/features" element={<Features />} />
+                  <Route path="/pricing" element={<Pricing />} />
+                  <Route path="/about" element={<About />} />
+                  <Route path="/case-studies" element={<CaseStudies />} />
+                  <Route path="/compare" element={<CompetitorAnalysis />} />
+                                  <Route path="/blog" element={<Blog />} />
+                <Route path="/security" element={<Security />} />
+                <Route path="/email-test" element={<EmailTest />} />
+                  <Route path="/integrations" element={
+                    <Suspense fallback={<LoadingSpinner />}>
+                      <IntegrationsPage />
+                    </Suspense>
+                  } />
 
                   {/* --- ALL Protected Routes Go Here --- */}
                   <Route element={<ProtectedRoute />}>
-                    <Route path="/dashboard" element={profile?.role === 'owner' ? <OwnerDashboard /> : <Home />} />
+
                     <Route path="/customers" element={<Customers />} />
                     <Route path="/locations" element={<Locations />} />
                     <Route path="/assets" element={<Assets />} />
@@ -261,12 +292,15 @@ function AppContent() {
                     <Route path="/import-approvals/history" element={<ImportApprovalsHistory />} />
                     <Route path="/import-history" element={<ImportApprovalsHistory />} />
                     <Route path="/orders-report" element={<ScannedOrders />} />
-                    <Route path="/generateid" element={<Integrations />} />
+                    <Route path="/generateid" element={<CustomerRegistration />} />
+                    <Route path="/barcode-generator" element={<BarcodeGenerator />} />
+                    <Route path="/owner-portal/integration-settings" element={<IntegrationSettings />} />
                     <Route path="/bottle/:id" element={<BottleDetail />} />
                     <Route path="/assets/:id" element={<AssetDetail />} />
                     <Route path="/asset/:id" element={<AssetDetail />} />
                     <Route path="/orders" element={<ScannedOrders />} />
                     <Route path="/billing" element={<Billing />} />
+                    <Route path="/payments" element={<CustomerPayments />} />
                     <Route path="/inventory-management" element={<InventoryManagement />} />
                     <Route path="/smart-inventory" element={<SmartInventory />} />
                     <Route path="/customer-portal" element={<CustomerSelfService />} />
@@ -300,6 +334,7 @@ function AppContent() {
                     <Route path="/owner-portal/website-management" element={<WebsiteManagement />} />
                     <Route path="/owner-portal/visual-builder" element={<VisualPageBuilder />} />
                     <Route path="/owner-portal/command-center" element={<OwnerCommandCenter />} />
+                    <Route path="/owner-portal/cms" element={<OwnerCMS />} />
                   </Route>
                   
                   {/* NEW ADVANCED FEATURES ROUTES */}
@@ -345,7 +380,7 @@ function AppContent() {
                   } />
 
                   {/* Catch-all for any other unmatched routes */}
-                  <Route path="*" element={profile && organization ? <Navigate to="/dashboard" replace /> : <Navigate to="/" replace />} />
+                  <Route path="*" element={profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : <Navigate to="/" replace />} />
                 </Routes>
               </div>
               <Toaster 

@@ -38,7 +38,8 @@ import {
   AccessTime as AccessTimeIcon,
   Payment as PaymentIcon,
   Lock as LockIcon,
-  Dashboard as DashboardIcon
+  Dashboard as DashboardIcon,
+  Email as EmailIcon
 } from '@mui/icons-material';
 import { usePermissions } from '../context/PermissionsContext';
 import { loadStripe } from '@stripe/stripe-js';
@@ -1068,23 +1069,10 @@ export default function Billing() {
               </Typography>
               
               <Typography variant="h6" color="text.secondary" gutterBottom>
-                {currentPlan.name.toLowerCase().includes('enterprise') ? (
-                  <>
-                    Contact Sales
-                    <Typography variant="body2" component="span" color="text.secondary">
-                      {' '}(Custom Pricing)
-                    </Typography>
-                  </>
-                ) : (
-                  <>
-                    ${currentPlan.price}/{currentPlan.price_interval}
-                    {currentPlan.price === 0 && (
-                      <Typography variant="body2" component="span" color="text.secondary">
-                        {' '}(Contact Sales)
-                      </Typography>
-                    )}
-                  </>
-                )}
+                Contact Sales
+                <Typography variant="body2" component="span" color="text.secondary">
+                  {' '}(Custom Pricing)
+                </Typography>
               </Typography>
               
               {isSubscriptionCancelled && (
@@ -1166,8 +1154,62 @@ export default function Billing() {
           </Card>
         )}
 
-        {/* Available Plans */}
+        {/* Contact for Pricing */}
+        <Card sx={{ mb: 4, bgcolor: 'primary.light', color: 'primary.contrastText' }}>
+          <CardContent>
+            <Box display="flex" alignItems="center" gap={2} mb={2}>
+              <BusinessIcon sx={{ fontSize: 40 }} />
+              <Box>
+                <Typography variant="h5" fontWeight={600}>
+                  Contact Us for Pricing
+                </Typography>
+                <Typography variant="body1">
+                  All organizations must contact us to discuss pricing and subscription options. 
+                  We'll work with you to find the perfect plan for your needs.
+                </Typography>
+              </Box>
+            </Box>
+            
+            <Grid container spacing={2} sx={{ mt: 2 }}>
+              <Grid item xs={12} md={6}>
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  fullWidth
+                  size="large"
+                  startIcon={<SupportIcon />}
+                  onClick={() => navigate('/contact')}
+                  sx={{ py: 2 }}
+                >
+                  Contact Sales Team
+                </Button>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Button
+                  variant="outlined"
+                  color="inherit"
+                  fullWidth
+                  size="large"
+                  startIcon={<EmailIcon />}
+                  onClick={() => window.open('mailto:sales@gasboss.com', '_blank')}
+                  sx={{ py: 2 }}
+                >
+                  Email Sales
+                </Button>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+
+        {/* Plan Information */}
         <Typography variant="h5" gutterBottom>Available Plans</Typography>
+        <Alert severity="info" sx={{ mb: 3 }}>
+          <Typography variant="body1">
+            <strong>Important:</strong> All plans require contacting our sales team for pricing and activation. 
+            We'll customize the plan based on your specific needs and activate your subscription once payment is received.
+          </Typography>
+        </Alert>
+        
         <Grid container spacing={3} sx={{ mb: 4 }}>
           {plans.map((plan) => {
             const tier = getPlanTier(plan);
@@ -1214,23 +1256,10 @@ export default function Billing() {
                     </Box>
                     
                     <Typography variant="h4" color="primary" gutterBottom>
-                      {plan.name.toLowerCase().includes('enterprise') ? (
-                        <>
-                          Contact Sales
-                          <Typography variant="body2" component="span" color="text.secondary">
-                            {' '}(Custom Pricing)
-                          </Typography>
-                        </>
-                      ) : (
-                        <>
-                          ${plan.price}/{plan.price_interval}
-                          {plan.price === 0 && (
-                            <Typography variant="body2" component="span" color="text.secondary">
-                              {' '}(Contact Sales)
-                            </Typography>
-                          )}
-                        </>
-                      )}
+                      Contact Sales
+                      <Typography variant="body2" component="span" color="text.secondary">
+                        {' '}(Custom Pricing)
+                      </Typography>
                     </Typography>
 
                     <Typography variant="body2" color="text.secondary" gutterBottom>
@@ -1271,20 +1300,13 @@ export default function Billing() {
 
                   <CardActions sx={{ p: 2, pt: 0 }}>
                     <Button 
-                      variant={currentPlan?.id === plan.id ? "outlined" : "contained"}
+                      variant="contained"
                       color="primary"
                       fullWidth
-                      onClick={() => {
-                        if (plan.name.toLowerCase().includes('enterprise')) {
-                          navigate('/contact');
-                        } else {
-                          handlePlanSelection(plan);
-                        }
-                      }}
+                      onClick={() => navigate('/contact')}
                       disabled={currentPlan?.id === plan.id}
                     >
-                      {currentPlan?.id === plan.id ? 'Current Plan' : 
-                       plan.name.toLowerCase().includes('enterprise') ? 'Contact Sales' : 'Select Plan'}
+                      {currentPlan?.id === plan.id ? 'Current Plan' : 'Contact Sales'}
                     </Button>
                   </CardActions>
                 </Card>
@@ -1299,6 +1321,11 @@ export default function Billing() {
             <Typography variant="h6">Detailed Plan Comparison</Typography>
           </AccordionSummary>
           <AccordionDetails>
+            <Alert severity="info" sx={{ mb: 3 }}>
+              <Typography variant="body2">
+                <strong>Note:</strong> All plans require contacting our sales team for custom pricing and activation.
+              </Typography>
+            </Alert>
             <Grid container spacing={2}>
               <Grid item xs={12} md={3}>
                 <Typography variant="subtitle1" fontWeight={600} gutterBottom>Features</Typography>

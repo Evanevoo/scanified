@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, FlatList, Modal, TextInput } from 'react-native';
 import { supabase } from '../supabase';
+import { useAssetConfig } from '../context/AssetContext';
 
 function formatDate(dateStr) {
   const d = new Date(dateStr);
@@ -8,12 +9,13 @@ function formatDate(dateStr) {
 }
 
 export default function HistoryScreen() {
+  const { config: assetConfig } = useAssetConfig();
   const [scans, setScans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [editScan, setEditScan] = useState(null);
   const [editCustomer, setEditCustomer] = useState('');
-  const [editCylinders, setEditCylinders] = useState([]);
+  const [editAssets, setEditAssets] = useState([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -22,7 +24,7 @@ export default function HistoryScreen() {
       setError('');
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabase
-        .from('bottle_scans')
+        .from('asset_scans')
         .select('*')
         .eq('verified', false)
         .gte('created_at', since)
@@ -41,21 +43,21 @@ export default function HistoryScreen() {
   const openEdit = (scan) => {
     setEditScan(scan);
     setEditCustomer(scan.customer_name || '');
-    setEditCylinders(scan.cylinders || scan.bottle_barcode ? [scan.bottle_barcode] : []);
+    setEditAssets(scan.assets || scan.asset_barcode ? [scan.asset_barcode] : []);
   };
 
   const saveEdit = async () => {
     setSaving(true);
     const { error } = await supabase
-      .from('bottle_scans')
-      .update({ customer_name: editCustomer, bottle_barcode: editCylinders[0] })
+      .from('asset_scans')
+      .update({ customer_name: editCustomer, asset_barcode: editAssets[0] })
       .eq('id', editScan.id);
     setSaving(false);
     setEditScan(null);
     // Refresh list
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { data } = await supabase
-      .from('bottle_scans')
+      .from('asset_scans')
       .select('*')
       .eq('verified', false)
       .gte('created_at', since)
@@ -72,7 +74,7 @@ export default function HistoryScreen() {
           keyExtractor={item => item.id}
           renderItem={({ item }) => (
             <TouchableOpacity style={styles.scanItem} onPress={() => openEdit(item)}>
-              <Text style={styles.scanBarcode}>{item.bottle_barcode}</Text>
+              <Text style={styles.scanBarcode}>{item.asset_barcode}</Text>
               <Text style={styles.scanCustomer}>{item.customer_name}</Text>
               <Text style={styles.scanDate}>{formatDate(item.created_at)}</Text>
               <Text style={styles.scanStatus}>Verified: {item.verified ? 'Yes' : 'No'}</Text>
@@ -93,12 +95,12 @@ export default function HistoryScreen() {
               onChangeText={setEditCustomer}
               placeholder="Customer Name"
             />
-            <Text style={styles.label}>Cylinder Barcode</Text>
+            <Text style={styles.label}>{assetConfig?.assetDisplayName || 'Asset'} Barcode</Text>
             <TextInput
               style={styles.input}
               value={editCylinders[0] || ''}
               onChangeText={v => setEditCylinders([v])}
-              placeholder="Cylinder Barcode"
+              placeholder={`${assetConfig?.assetDisplayName || 'Asset'} Barcode`}
             />
             <View style={{ flexDirection: 'row', marginTop: 18 }}>
               <TouchableOpacity style={[styles.btn, { backgroundColor: '#eee', flex: 1, marginRight: 8 }]} onPress={() => setEditScan(null)}>

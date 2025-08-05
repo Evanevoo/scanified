@@ -158,12 +158,12 @@ export default function AddCylinderScreen() {
     
     // Check for duplicate barcode or serial
     const { data: barcodeDup, error: barcodeError } = await supabase
-      .from('bottles')
+              .from('assets')
       .select('id')
       .eq('barcode_number', barcode);
     
     const { data: serialDup, error: serialError } = await supabase
-      .from('bottles')
+              .from('assets')
       .select('id')
       .eq('serial_number', serial);
     
@@ -182,7 +182,7 @@ export default function AddCylinderScreen() {
     
     // Insert new bottle with gas type and location information
     const { error: insertError } = await supabase
-      .from('bottles')
+              .from('assets')
       .insert({ 
         barcode_number: barcode, 
         serial_number: serial, 

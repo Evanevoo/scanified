@@ -27,11 +27,39 @@ body {
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
   overflow-y: auto;
+  /* Improve mobile touch scrolling */
+  -webkit-overflow-scrolling: touch;
+  /* Prevent zoom on iOS when input is focused */
+  -webkit-text-size-adjust: 100%;
 }
 
 html {
   scroll-behavior: smooth;
   overflow-x: hidden;
+  /* Ensure proper mobile font sizing */
+  -webkit-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+}
+
+/* Improve mobile touch targets */
+button, a {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Better mobile form inputs */
+input, textarea, select {
+  font-size: 16px; /* Prevents zoom on iOS */
+}
+
+/* Optimize for mobile gestures */
+* {
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+}
+
+/* Smooth transitions for better mobile UX */
+* {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
 }
 
 .sidebar, .nav, nav {
