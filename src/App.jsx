@@ -233,7 +233,7 @@ function AppContent() {
 
                   {/* --- ALL Protected Routes Go Here --- */}
                   <Route element={<ProtectedRoute />}>
-
+                    <Route path="/home" element={<Home />} />
                     <Route path="/customers" element={<Customers />} />
                     <Route path="/locations" element={<Locations />} />
                     <Route path="/assets" element={<Assets />} />
