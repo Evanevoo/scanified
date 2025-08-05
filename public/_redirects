@@ -1,0 +1,10 @@
+# Static assets should not be redirected
+/assets/* /assets/:splat 200
+/*.js /:splat 200
+/*.css /:splat 200
+/*.mjs /:splat 200
+/*.wasm /:splat 200
+/*.json /:splat 200
+
+# SPA fallback
+/* /index.html 200
