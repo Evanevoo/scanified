@@ -143,8 +143,7 @@ export default function Settings() {
   // Profile Data
   const [profileData, setProfileData] = useState({
     full_name: profile?.full_name || '',
-    email: user?.email || '',
-    bio: profile?.bio || ''
+    email: user?.email || ''
   });
   const [profileChanged, setProfileChanged] = useState(false);
 
@@ -244,8 +243,7 @@ export default function Settings() {
     if (profile) {
       setProfileData({
         full_name: profile.full_name || '',
-        email: user?.email || '',
-        bio: profile.bio || ''
+        email: user?.email || ''
       });
     }
     
@@ -285,8 +283,7 @@ export default function Settings() {
   // Track changes
   useEffect(() => {
     setProfileChanged(
-      profileData.full_name !== (profile?.full_name || '') ||
-      profileData.bio !== (profile?.bio || '')
+      profileData.full_name !== (profile?.full_name || '')
     );
   }, [profileData, profile]);
 
@@ -323,8 +320,7 @@ export default function Settings() {
       const { error } = await supabase
         .from('profiles')
         .update({ 
-          full_name: profileData.full_name,
-          bio: profileData.bio
+          full_name: profileData.full_name
         })
         .eq('id', user.id);
         
@@ -761,20 +757,7 @@ export default function Settings() {
                     helperText="Contact support to change your email"
                   />
                 </Grid>
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="Bio"
-                    multiline
-                    rows={3}
-                    value={profileData.bio || ''}
-                    onChange={(e) => {
-                      setProfileData({ ...profileData, bio: e.target.value });
-                    }}
-                    variant="outlined"
-                    placeholder="Tell us about yourself..."
-                  />
-                </Grid>
+
               </Grid>
               {profileChanged && (
                 <Box sx={{ mt: 3 }}>
