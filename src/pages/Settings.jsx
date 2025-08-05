@@ -100,6 +100,154 @@ const colorMap = {
   'sky-500': '#0ea5e9',
 };
 
+// Predefined barcode types for easy selection
+const barcodeTypes = {
+  'code128': {
+    name: 'Code 128',
+    pattern: '^[A-Za-z0-9\\-_]{1,48}$',
+    description: 'Alphanumeric, up to 48 characters',
+    example: 'ABC123-DEF456'
+  },
+  'code39': {
+    name: 'Code 39',
+    pattern: '^[A-Z0-9\\-\\.\\$\\/\\+\\%\\*\\s]{1,43}$',
+    description: 'Uppercase letters, numbers, and special chars',
+    example: 'ABC-123'
+  },
+  'ean13': {
+    name: 'EAN-13',
+    pattern: '^[0-9]{13}$',
+    description: '13 digits (standard product barcodes)',
+    example: '1234567890123'
+  },
+  'ean8': {
+    name: 'EAN-8',
+    pattern: '^[0-9]{8}$',
+    description: '8 digits (short product barcodes)',
+    example: '12345678'
+  },
+  'upc': {
+    name: 'UPC-A',
+    pattern: '^[0-9]{12}$',
+    description: '12 digits (US product barcodes)',
+    example: '123456789012'
+  },
+  'qr': {
+    name: 'QR Code',
+    pattern: '^.{1,2953}$',
+    description: 'Any characters, up to 2953 chars',
+    example: 'https://example.com/asset/123'
+  },
+  'datamatrix': {
+    name: 'Data Matrix',
+    pattern: '^.{1,2335}$',
+    description: 'Any characters, up to 2335 chars',
+    example: 'ASSET:CYL001:2024'
+  },
+  'alphanumeric': {
+    name: 'Alphanumeric',
+    pattern: '^[A-Z0-9]{4,20}$',
+    description: 'Uppercase letters and numbers, 4-20 chars',
+    example: 'CYL123456'
+  },
+  'numeric': {
+    name: 'Numeric Only',
+    pattern: '^[0-9]{4,15}$',
+    description: 'Numbers only, 4-15 digits',
+    example: '1234567890'
+  },
+  'custom': {
+    name: 'Custom Pattern',
+    pattern: '^[A-Z0-9]{6,12}$',
+    description: 'Define your own regex pattern',
+    example: 'ABC123456'
+  }
+};
+
+const orderNumberTypes = {
+  'ord_numeric': {
+    name: 'ORD + Numbers',
+    pattern: '^ORD[0-9]{4,8}$',
+    description: 'ORD followed by 4-8 digits',
+    prefix: 'ORD',
+    example: 'ORD123456'
+  },
+  'po_numeric': {
+    name: 'PO + Numbers',
+    pattern: '^PO[0-9]{4,8}$',
+    description: 'PO followed by 4-8 digits',
+    prefix: 'PO',
+    example: 'PO123456'
+  },
+  'del_numeric': {
+    name: 'DEL + Numbers',
+    pattern: '^DEL[0-9]{4,8}$',
+    description: 'DEL followed by 4-8 digits',
+    prefix: 'DEL',
+    example: 'DEL123456'
+  },
+  'year_sequence': {
+    name: 'Year + Sequence',
+    pattern: '^[0-9]{4}-[0-9]{4,6}$',
+    description: 'YYYY-NNNNNN format',
+    prefix: '',
+    example: '2024-001234'
+  },
+  'alphanumeric_order': {
+    name: 'Alphanumeric',
+    pattern: '^[A-Z0-9]{6,15}$',
+    description: 'Letters and numbers, 6-15 chars',
+    prefix: '',
+    example: 'ORDER12345'
+  },
+  'custom': {
+    name: 'Custom Pattern',
+    pattern: '^ORD[0-9]{6}$',
+    description: 'Define your own pattern',
+    prefix: 'ORD',
+    example: 'ORD123456'
+  }
+};
+
+const serialNumberTypes = {
+  'letter_number': {
+    name: 'Letters + Numbers',
+    pattern: '^[A-Z]{2}[0-9]{6,10}$',
+    description: '2 letters followed by 6-10 digits',
+    example: 'AB1234567890'
+  },
+  'manufacturer_serial': {
+    name: 'Manufacturer Style',
+    pattern: '^[A-Z]{3}-[0-9]{4}-[0-9]{4}$',
+    description: 'XXX-YYYY-ZZZZ format',
+    example: 'ABC-1234-5678'
+  },
+  'year_serial': {
+    name: 'Year + Serial',
+    pattern: '^[0-9]{4}[A-Z]{2}[0-9]{6}$',
+    description: 'YYYYAANNNNNN format',
+    example: '2024AB123456'
+  },
+  'simple_numeric': {
+    name: 'Numeric Serial',
+    pattern: '^[0-9]{8,15}$',
+    description: '8-15 digit serial number',
+    example: '123456789012'
+  },
+  'hex_style': {
+    name: 'Hexadecimal Style',
+    pattern: '^[A-F0-9]{8,16}$',
+    description: 'Hexadecimal characters, 8-16 chars',
+    example: 'A1B2C3D4E5F6'
+  },
+  'custom': {
+    name: 'Custom Pattern',
+    pattern: '^[A-Z]{2}[0-9]{8}$',
+    description: 'Define your own pattern',
+    example: 'AB12345678'
+  }
+};
+
 function TabPanel({ children, value, index, ...other }) {
   return (
     <div
@@ -191,11 +339,14 @@ export default function Settings() {
 
   // Barcode Format Configuration
   const [barcodeConfig, setBarcodeConfig] = useState({
+    barcodeType: 'custom', // New field for predefined types
     barcodePattern: '^[A-Z0-9]{6,12}$',
     barcodeDescription: '6-12 alphanumeric characters',
+    orderNumberType: 'custom', // New field for order number types
     orderNumberPattern: '^ORD[0-9]{6}$',
     orderNumberDescription: 'ORD followed by 6 digits',
     orderNumberPrefix: 'ORD',
+    serialNumberType: 'custom', // New field for serial number types
     serialNumberPattern: '^[A-Z]{2}[0-9]{8}$',
     serialNumberDescription: '2 letters followed by 8 digits',
   });
@@ -260,12 +411,36 @@ export default function Settings() {
       });
       
       // Load barcode config from organization
+      const detectBarcodeType = (pattern) => {
+        for (const [key, type] of Object.entries(barcodeTypes)) {
+          if (type.pattern === pattern) return key;
+        }
+        return 'custom';
+      };
+
+      const detectOrderNumberType = (pattern) => {
+        for (const [key, type] of Object.entries(orderNumberTypes)) {
+          if (type.pattern === pattern) return key;
+        }
+        return 'custom';
+      };
+
+      const detectSerialNumberType = (pattern) => {
+        for (const [key, type] of Object.entries(serialNumberTypes)) {
+          if (type.pattern === pattern) return key;
+        }
+        return 'custom';
+      };
+
       setBarcodeConfig({
+        barcodeType: organization.barcode_type || detectBarcodeType(organization.barcode_pattern || '^[A-Z0-9]{6,12}$'),
         barcodePattern: organization.barcode_pattern || '^[A-Z0-9]{6,12}$',
         barcodeDescription: organization.barcode_description || '6-12 alphanumeric characters',
+        orderNumberType: organization.order_number_type || detectOrderNumberType(organization.order_number_pattern || '^ORD[0-9]{6}$'),
         orderNumberPattern: organization.order_number_pattern || '^ORD[0-9]{6}$',
         orderNumberDescription: organization.order_number_description || 'ORD followed by 6 digits',
         orderNumberPrefix: organization.order_number_prefix || 'ORD',
+        serialNumberType: organization.serial_number_type || detectSerialNumberType(organization.serial_number_pattern || '^[A-Z]{2}[0-9]{8}$'),
         serialNumberPattern: organization.serial_number_pattern || '^[A-Z]{2}[0-9]{8}$',
         serialNumberDescription: organization.serial_number_description || '2 letters followed by 8 digits',
       });
@@ -504,6 +679,38 @@ export default function Settings() {
     }
   };
 
+  // Barcode type change handlers
+  const handleBarcodeTypeChange = (type) => {
+    const selectedType = barcodeTypes[type];
+    setBarcodeConfig(prev => ({
+      ...prev,
+      barcodeType: type,
+      barcodePattern: selectedType.pattern,
+      barcodeDescription: selectedType.description
+    }));
+  };
+
+  const handleOrderNumberTypeChange = (type) => {
+    const selectedType = orderNumberTypes[type];
+    setBarcodeConfig(prev => ({
+      ...prev,
+      orderNumberType: type,
+      orderNumberPattern: selectedType.pattern,
+      orderNumberDescription: selectedType.description,
+      orderNumberPrefix: selectedType.prefix
+    }));
+  };
+
+  const handleSerialNumberTypeChange = (type) => {
+    const selectedType = serialNumberTypes[type];
+    setBarcodeConfig(prev => ({
+      ...prev,
+      serialNumberType: type,
+      serialNumberPattern: selectedType.pattern,
+      serialNumberDescription: selectedType.description
+    }));
+  };
+
   // Barcode Configuration update
   const handleSaveBarcodeConfig = async () => {
     setBarcodeConfigMsg('');
@@ -513,11 +720,14 @@ export default function Settings() {
       const { error } = await supabase
         .from('organizations')
         .update({
+          barcode_type: barcodeConfig.barcodeType,
           barcode_pattern: barcodeConfig.barcodePattern,
           barcode_description: barcodeConfig.barcodeDescription,
+          order_number_type: barcodeConfig.orderNumberType,
           order_number_pattern: barcodeConfig.orderNumberPattern,
           order_number_description: barcodeConfig.orderNumberDescription,
           order_number_prefix: barcodeConfig.orderNumberPrefix,
+          serial_number_type: barcodeConfig.serialNumberType,
           serial_number_pattern: barcodeConfig.serialNumberPattern,
           serial_number_description: barcodeConfig.serialNumberDescription,
         })
@@ -1346,26 +1556,62 @@ export default function Settings() {
                           Barcode Format
                         </Typography>
                         <Grid container spacing={2}>
-                          <Grid item xs={12} md={6}>
-                            <TextField
-                              fullWidth
-                              label="Barcode Pattern (Regex)"
-                              value={barcodeConfig.barcodePattern}
-                              onChange={(e) => setBarcodeConfig(prev => ({ ...prev, barcodePattern: e.target.value }))}
-                              sx={{ mb: 2 }}
-                              placeholder="^[A-Z0-9]{6,12}$"
-                            />
+                          <Grid item xs={12}>
+                            <FormControl fullWidth sx={{ mb: 2 }}>
+                              <InputLabel>Barcode Type</InputLabel>
+                              <Select
+                                value={barcodeConfig.barcodeType || 'custom'}
+                                onChange={(e) => handleBarcodeTypeChange(e.target.value)}
+                                label="Barcode Type"
+                              >
+                                {Object.entries(barcodeTypes).map(([key, type]) => (
+                                  <MenuItem key={key} value={key}>
+                                    <Box>
+                                      <Typography variant="body1">{type.name}</Typography>
+                                      <Typography variant="caption" color="text.secondary">
+                                        {type.description} - Example: {type.example}
+                                      </Typography>
+                                    </Box>
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
                           </Grid>
-                          <Grid item xs={12} md={6}>
-                            <TextField
-                              fullWidth
-                              label="Barcode Description"
-                              value={barcodeConfig.barcodeDescription}
-                              onChange={(e) => setBarcodeConfig(prev => ({ ...prev, barcodeDescription: e.target.value }))}
-                              sx={{ mb: 2 }}
-                              placeholder="6-12 alphanumeric characters"
-                            />
-                          </Grid>
+                          {barcodeConfig.barcodeType === 'custom' && (
+                            <>
+                              <Grid item xs={12} md={6}>
+                                <TextField
+                                  fullWidth
+                                  label="Barcode Pattern (Regex)"
+                                  value={barcodeConfig.barcodePattern}
+                                  onChange={(e) => setBarcodeConfig(prev => ({ ...prev, barcodePattern: e.target.value }))}
+                                  sx={{ mb: 2 }}
+                                  placeholder="^[A-Z0-9]{6,12}$"
+                                />
+                              </Grid>
+                              <Grid item xs={12} md={6}>
+                                <TextField
+                                  fullWidth
+                                  label="Barcode Description"
+                                  value={barcodeConfig.barcodeDescription}
+                                  onChange={(e) => setBarcodeConfig(prev => ({ ...prev, barcodeDescription: e.target.value }))}
+                                  sx={{ mb: 2 }}
+                                  placeholder="6-12 alphanumeric characters"
+                                />
+                              </Grid>
+                            </>
+                          )}
+                          {barcodeConfig.barcodeType !== 'custom' && (
+                            <Grid item xs={12}>
+                              <Alert severity="info" sx={{ mb: 2 }}>
+                                <Typography variant="body2">
+                                  <strong>Selected:</strong> {barcodeTypes[barcodeConfig.barcodeType]?.name}<br/>
+                                  <strong>Format:</strong> {barcodeTypes[barcodeConfig.barcodeType]?.description}<br/>
+                                  <strong>Example:</strong> {barcodeTypes[barcodeConfig.barcodeType]?.example}
+                                </Typography>
+                              </Alert>
+                            </Grid>
+                          )}
                         </Grid>
                       </CardContent>
                     </Card>
@@ -1378,36 +1624,72 @@ export default function Settings() {
                           Order Number Format
                         </Typography>
                         <Grid container spacing={2}>
-                          <Grid item xs={12} md={4}>
-                            <TextField
-                              fullWidth
-                              label="Order Number Prefix"
-                              value={barcodeConfig.orderNumberPrefix}
-                              onChange={(e) => setBarcodeConfig(prev => ({ ...prev, orderNumberPrefix: e.target.value }))}
-                              sx={{ mb: 2 }}
-                              placeholder="ORD"
-                            />
+                          <Grid item xs={12}>
+                            <FormControl fullWidth sx={{ mb: 2 }}>
+                              <InputLabel>Order Number Type</InputLabel>
+                              <Select
+                                value={barcodeConfig.orderNumberType || 'custom'}
+                                onChange={(e) => handleOrderNumberTypeChange(e.target.value)}
+                                label="Order Number Type"
+                              >
+                                {Object.entries(orderNumberTypes).map(([key, type]) => (
+                                  <MenuItem key={key} value={key}>
+                                    <Box>
+                                      <Typography variant="body1">{type.name}</Typography>
+                                      <Typography variant="caption" color="text.secondary">
+                                        {type.description} - Example: {type.example}
+                                      </Typography>
+                                    </Box>
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
                           </Grid>
-                          <Grid item xs={12} md={4}>
-                            <TextField
-                              fullWidth
-                              label="Order Number Pattern (Regex)"
-                              value={barcodeConfig.orderNumberPattern}
-                              onChange={(e) => setBarcodeConfig(prev => ({ ...prev, orderNumberPattern: e.target.value }))}
-                              sx={{ mb: 2 }}
-                              placeholder="^ORD[0-9]{6}$"
-                            />
-                          </Grid>
-                          <Grid item xs={12} md={4}>
-                            <TextField
-                              fullWidth
-                              label="Order Number Description"
-                              value={barcodeConfig.orderNumberDescription}
-                              onChange={(e) => setBarcodeConfig(prev => ({ ...prev, orderNumberDescription: e.target.value }))}
-                              sx={{ mb: 2 }}
-                              placeholder="ORD followed by 6 digits"
-                            />
-                          </Grid>
+                          {barcodeConfig.orderNumberType === 'custom' && (
+                            <>
+                              <Grid item xs={12} md={4}>
+                                <TextField
+                                  fullWidth
+                                  label="Order Number Prefix"
+                                  value={barcodeConfig.orderNumberPrefix}
+                                  onChange={(e) => setBarcodeConfig(prev => ({ ...prev, orderNumberPrefix: e.target.value }))}
+                                  sx={{ mb: 2 }}
+                                  placeholder="ORD"
+                                />
+                              </Grid>
+                              <Grid item xs={12} md={4}>
+                                <TextField
+                                  fullWidth
+                                  label="Order Number Pattern (Regex)"
+                                  value={barcodeConfig.orderNumberPattern}
+                                  onChange={(e) => setBarcodeConfig(prev => ({ ...prev, orderNumberPattern: e.target.value }))}
+                                  sx={{ mb: 2 }}
+                                  placeholder="^ORD[0-9]{6}$"
+                                />
+                              </Grid>
+                              <Grid item xs={12} md={4}>
+                                <TextField
+                                  fullWidth
+                                  label="Order Number Description"
+                                  value={barcodeConfig.orderNumberDescription}
+                                  onChange={(e) => setBarcodeConfig(prev => ({ ...prev, orderNumberDescription: e.target.value }))}
+                                  sx={{ mb: 2 }}
+                                  placeholder="ORD followed by 6 digits"
+                                />
+                              </Grid>
+                            </>
+                          )}
+                          {barcodeConfig.orderNumberType !== 'custom' && (
+                            <Grid item xs={12}>
+                              <Alert severity="info" sx={{ mb: 2 }}>
+                                <Typography variant="body2">
+                                  <strong>Selected:</strong> {orderNumberTypes[barcodeConfig.orderNumberType]?.name}<br/>
+                                  <strong>Format:</strong> {orderNumberTypes[barcodeConfig.orderNumberType]?.description}<br/>
+                                  <strong>Example:</strong> {orderNumberTypes[barcodeConfig.orderNumberType]?.example}
+                                </Typography>
+                              </Alert>
+                            </Grid>
+                          )}
                         </Grid>
                       </CardContent>
                     </Card>
@@ -1420,26 +1702,62 @@ export default function Settings() {
                           Serial Number Format
                         </Typography>
                         <Grid container spacing={2}>
-                          <Grid item xs={12} md={6}>
-                            <TextField
-                              fullWidth
-                              label="Serial Number Pattern (Regex)"
-                              value={barcodeConfig.serialNumberPattern}
-                              onChange={(e) => setBarcodeConfig(prev => ({ ...prev, serialNumberPattern: e.target.value }))}
-                              sx={{ mb: 2 }}
-                              placeholder="^[A-Z]{2}[0-9]{8}$"
-                            />
+                          <Grid item xs={12}>
+                            <FormControl fullWidth sx={{ mb: 2 }}>
+                              <InputLabel>Serial Number Type</InputLabel>
+                              <Select
+                                value={barcodeConfig.serialNumberType || 'custom'}
+                                onChange={(e) => handleSerialNumberTypeChange(e.target.value)}
+                                label="Serial Number Type"
+                              >
+                                {Object.entries(serialNumberTypes).map(([key, type]) => (
+                                  <MenuItem key={key} value={key}>
+                                    <Box>
+                                      <Typography variant="body1">{type.name}</Typography>
+                                      <Typography variant="caption" color="text.secondary">
+                                        {type.description} - Example: {type.example}
+                                      </Typography>
+                                    </Box>
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
                           </Grid>
-                          <Grid item xs={12} md={6}>
-                            <TextField
-                              fullWidth
-                              label="Serial Number Description"
-                              value={barcodeConfig.serialNumberDescription}
-                              onChange={(e) => setBarcodeConfig(prev => ({ ...prev, serialNumberDescription: e.target.value }))}
-                              sx={{ mb: 2 }}
-                              placeholder="2 letters followed by 8 digits"
-                            />
-                          </Grid>
+                          {barcodeConfig.serialNumberType === 'custom' && (
+                            <>
+                              <Grid item xs={12} md={6}>
+                                <TextField
+                                  fullWidth
+                                  label="Serial Number Pattern (Regex)"
+                                  value={barcodeConfig.serialNumberPattern}
+                                  onChange={(e) => setBarcodeConfig(prev => ({ ...prev, serialNumberPattern: e.target.value }))}
+                                  sx={{ mb: 2 }}
+                                  placeholder="^[A-Z]{2}[0-9]{8}$"
+                                />
+                              </Grid>
+                              <Grid item xs={12} md={6}>
+                                <TextField
+                                  fullWidth
+                                  label="Serial Number Description"
+                                  value={barcodeConfig.serialNumberDescription}
+                                  onChange={(e) => setBarcodeConfig(prev => ({ ...prev, serialNumberDescription: e.target.value }))}
+                                  sx={{ mb: 2 }}
+                                  placeholder="2 letters followed by 8 digits"
+                                />
+                              </Grid>
+                            </>
+                          )}
+                          {barcodeConfig.serialNumberType !== 'custom' && (
+                            <Grid item xs={12}>
+                              <Alert severity="info" sx={{ mb: 2 }}>
+                                <Typography variant="body2">
+                                  <strong>Selected:</strong> {serialNumberTypes[barcodeConfig.serialNumberType]?.name}<br/>
+                                  <strong>Format:</strong> {serialNumberTypes[barcodeConfig.serialNumberType]?.description}<br/>
+                                  <strong>Example:</strong> {serialNumberTypes[barcodeConfig.serialNumberType]?.example}
+                                </Typography>
+                              </Alert>
+                            </Grid>
+                          )}
                         </Grid>
                       </CardContent>
                     </Card>
@@ -1448,8 +1766,8 @@ export default function Settings() {
                   <Grid item xs={12}>
                     <Alert severity="info" sx={{ mb: 2 }}>
                       <Typography variant="body2">
-                        These patterns use regular expressions (regex) to validate scanned codes. 
-                        The mobile app will reject scans that don't match these patterns.
+                        <strong>How it works:</strong> Select predefined barcode types for easy setup, or choose "Custom Pattern" for advanced regex configuration. 
+                        The mobile app will validate all scanned codes against these formats and reject invalid scans.
                       </Typography>
                     </Alert>
                     
