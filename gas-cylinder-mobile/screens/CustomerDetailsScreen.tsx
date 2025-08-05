@@ -29,7 +29,7 @@ export default function CustomerDetailsScreen() {
       setCustomer(cust);
       // Fetch cylinders rented by this customer
       const { data, error } = await supabase
-        .from('bottles')
+        .from('assets')
         .select('*')
         .eq('assigned_customer', customerId);
       if (error) {

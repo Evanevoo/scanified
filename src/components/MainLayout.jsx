@@ -58,7 +58,7 @@ export default function MainLayout() {
   const topNavLinks = profile?.role === 'owner' 
     ? [] 
     : [
-        { label: 'Dashboard', to: '/dashboard' },
+        { label: 'Home', to: '/home' },
         { label: 'Inventory', to: '/inventory' },
         { label: 'Orders', to: '/import-approvals' },
         { label: 'Billing', to: '/billing' },
@@ -283,8 +283,8 @@ export default function MainLayout() {
               variant="h5"
               component="div"
               sx={{ fontFamily: 'Inter, Montserrat, Arial, sans-serif', fontWeight: 900, color: '#111', letterSpacing: '-0.01em', fontSize: '1.6rem', cursor: 'pointer' }}
-              onClick={() => navigate('/dashboard')}
-              title="Go to Dashboard"
+              onClick={() => navigate(profile?.role === 'owner' ? '/owner-portal' : '/home')}
+              title="Go to Home"
             >
               {assetConfig.appName}
             </Typography>

@@ -31,15 +31,6 @@ allprojects {
     mavenCentral()
     maven { url 'https://www.jitpack.io' }
   }
-  
-  // Add ML Kit dependencies to all modules
-  configurations.all {
-    resolutionStrategy {
-      force 'com.google.mlkit:barcode-scanning:17.2.0'
-      force 'com.google.mlkit:vision-common:17.3.0'
-      force 'com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.0'
-    }
-  }
 }
 
 apply plugin: "expo-root-project"

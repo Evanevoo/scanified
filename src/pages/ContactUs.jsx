@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Container,
@@ -17,7 +18,10 @@ import {
   Alert,
   Stack,
   Divider,
-  Chip
+  Chip,
+  IconButton,
+  Breadcrumbs,
+  Link
 } from '@mui/material';
 import {
   Phone as PhoneIcon,
@@ -27,11 +31,124 @@ import {
   Business as BusinessIcon,
   Support as SupportIcon,
   BusinessCenter as SalesIcon,
-  Chat as ChatIcon
+  Chat as ChatIcon,
+  ArrowBack as ArrowBackIcon,
+  Home as HomeIcon
 } from '@mui/icons-material';
 import { trackContactForm, trackPhoneCall, trackEmailClick, trackChatStart, trackDemo } from '../utils/analytics';
 
+// Default configuration
+const defaultConfig = {
+  header: {
+    title: 'Get in Touch',
+    subtitle: 'Ready to modernize your gas cylinder management? We\'re here to help you get started and answer any questions you have.'
+  },
+  contactMethods: [
+    {
+      title: 'Sales Inquiries',
+      icon: 'SalesIcon',
+      contact: '+1 (555) 123-4567',
+      email: 'sales@gascylinder.app',
+      hours: 'Mon-Fri 8AM-6PM PST',
+      description: 'Questions about pricing, demos, or getting started',
+      enabled: true
+    },
+    {
+      title: 'Technical Support',
+      icon: 'SupportIcon',
+      contact: '+1 (555) 987-6543',
+      email: 'support@gascylinder.app',
+      hours: 'Mon-Fri 6AM-8PM PST',
+      description: 'Help with setup, troubleshooting, or technical issues',
+      enabled: true
+    },
+    {
+      title: 'Live Chat',
+      icon: 'ChatIcon',
+      contact: 'Available on website',
+      email: 'chat@gascylinder.app',
+      hours: 'Mon-Fri 8AM-5PM PST',
+      description: 'Quick questions and immediate assistance',
+      enabled: true
+    }
+  ],
+  companyInfo: {
+    name: 'Gas Cylinder Management',
+    address: {
+      street: '123 Innovation Drive',
+      city: 'Tech Valley, CA 94025'
+    },
+    businessHours: {
+      weekdays: 'Monday - Friday: 8AM - 6PM PST',
+      saturday: 'Saturday: 9AM - 2PM PST',
+      sunday: 'Sunday: Closed'
+    }
+  },
+  form: {
+    enabled: true,
+    title: 'Send us a Message',
+    requiredFields: ['firstName', 'lastName', 'email', 'company', 'inquiryType'],
+    companySizeOptions: [
+      '1-10 employees',
+      '11-50 employees', 
+      '51-200 employees',
+      '201-500 employees',
+      '500+ employees'
+    ],
+    currentSolutionOptions: [
+      'TrackAbout',
+      'TIMS Software',
+      'Excel/Manual',
+      'Custom Solution',
+      'No Current Solution',
+      'Other'
+    ],
+    inquiryTypeOptions: [
+      'Request Demo',
+      'Pricing Information',
+      'Migration from Current System',
+      'Feature Questions',
+      'Technical Support',
+      'Partnership Inquiry',
+      'Other'
+    ],
+    timeframeOptions: [
+      'Immediate (within 1 month)',
+      'This Quarter (1-3 months)',
+      'Next 6 months',
+      'Within a year',
+      'Just exploring'
+    ],
+    budgetOptions: [
+      'Under $1,000/month',
+      '$1,000 - $5,000/month',
+      '$5,000 - $10,000/month',
+      '$10,000 - $25,000/month',
+      '$25,000+/month',
+      'Not sure yet'
+    ]
+  },
+  successMessage: {
+    title: 'Thank You for Your Interest!',
+    message: 'We\'ve received your inquiry and will get back to you within 24 hours. If you requested a demo, we\'ll send you a calendar link to schedule at your convenience.',
+    buttonText: 'Back to Home'
+  },
+  footerMessage: 'By submitting this form, you agree to our Privacy Policy and Terms of Service. We\'ll respond within 24 hours.'
+};
+
+// Icon mapping
+const iconMap = {
+  SalesIcon: SalesIcon,
+  SupportIcon: SupportIcon,
+  ChatIcon: ChatIcon,
+  BusinessIcon: BusinessIcon,
+  PhoneIcon: PhoneIcon,
+  EmailIcon: EmailIcon
+};
+
 export default function ContactUs() {
+  const navigate = useNavigate();
+  const [contactConfig, setContactConfig] = useState(defaultConfig);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -50,6 +167,19 @@ export default function ContactUs() {
   });
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Load configuration from localStorage
+  useEffect(() => {
+    const savedConfig = localStorage.getItem('contactConfig');
+    if (savedConfig) {
+      try {
+        const parsedConfig = JSON.parse(savedConfig);
+        setContactConfig(parsedConfig);
+      } catch (error) {
+        console.error('Error parsing contact config:', error);
+      }
+    }
+  }, []);
 
   const handleChange = (e) => {
     const { name, value, checked } = e.target;
@@ -90,52 +220,27 @@ export default function ContactUs() {
     trackChatStart();
   };
 
-  const contactMethods = [
-    {
-      title: 'Sales Inquiries',
-      icon: <SalesIcon sx={{ fontSize: 40, color: '#3B82F6' }} />,
-      contact: '+1 (555) 123-4567',
-      email: 'sales@gascylinder.app',
-      hours: 'Mon-Fri 8AM-6PM PST',
-      description: 'Questions about pricing, demos, or getting started'
-    },
-    {
-      title: 'Technical Support',
-      icon: <SupportIcon sx={{ fontSize: 40, color: '#10B981' }} />,
-      contact: '+1 (555) 987-6543',
-      email: 'support@gascylinder.app',
-      hours: 'Mon-Fri 6AM-8PM PST',
-      description: 'Help with setup, troubleshooting, or technical issues'
-    },
-    {
-      title: 'Live Chat',
-      icon: <ChatIcon sx={{ fontSize: 40, color: '#F59E0B' }} />,
-      contact: 'Available on website',
-      email: 'chat@gascylinder.app',
-      hours: 'Mon-Fri 8AM-5PM PST',
-      description: 'Quick questions and immediate assistance'
-    }
-  ];
+  // Filter enabled contact methods
+  const enabledContactMethods = contactConfig.contactMethods.filter(method => method.enabled);
 
   if (submitted) {
-  return (
+    return (
       <Container maxWidth="md" sx={{ py: 8 }}>
         <Card sx={{ p: 6, textAlign: 'center' }}>
           <Typography variant="h4" fontWeight={600} sx={{ mb: 3, color: '#10B981' }}>
-            Thank You for Your Interest!
+            {contactConfig.successMessage.title}
           </Typography>
           <Typography variant="body1" sx={{ mb: 4, lineHeight: 1.6 }}>
-            We've received your inquiry and will get back to you within 24 hours. 
-            If you requested a demo, we'll send you a calendar link to schedule at your convenience.
+            {contactConfig.successMessage.message}
           </Typography>
-            <Button
+          <Button
             variant="contained"
             size="large"
             onClick={() => window.location.href = '/'}
             sx={{ textTransform: 'none', fontWeight: 600 }}
-            >
-              Back to Home
-            </Button>
+          >
+            {contactConfig.successMessage.buttonText}
+          </Button>
         </Card>
       </Container>
     );
@@ -144,14 +249,48 @@ export default function ContactUs() {
   return (
     <Box sx={{ bgcolor: 'grey.50', minHeight: '100vh', py: 8 }}>
       <Container maxWidth="lg">
+        {/* Navigation */}
+        <Box sx={{ mb: 4 }}>
+          <Stack direction="row" alignItems="center" spacing={2}>
+            <IconButton
+              onClick={() => navigate(-1)}
+              sx={{ 
+                bgcolor: 'white', 
+                boxShadow: 1,
+                '&:hover': { bgcolor: 'grey.100' }
+              }}
+              aria-label="Go back"
+            >
+              <ArrowBackIcon />
+            </IconButton>
+            <Breadcrumbs aria-label="breadcrumb">
+              <Link
+                component="button"
+                variant="body2"
+                onClick={() => navigate('/')}
+                sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  textDecoration: 'none',
+                  color: 'text.secondary',
+                  '&:hover': { color: 'primary.main' }
+                }}
+              >
+                <HomeIcon sx={{ mr: 0.5, fontSize: 16 }} />
+                Home
+              </Link>
+              <Typography color="text.primary">Contact</Typography>
+            </Breadcrumbs>
+          </Stack>
+        </Box>
+
         {/* Header */}
         <Box sx={{ textAlign: 'center', mb: 8 }}>
           <Typography variant="h2" fontWeight={700} sx={{ mb: 3 }}>
-            Get in Touch
+            {contactConfig.header.title}
           </Typography>
           <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto' }}>
-            Ready to modernize your gas cylinder management? We're here to help you 
-            get started and answer any questions you have.
+            {contactConfig.header.subtitle}
           </Typography>
         </Box>
 
@@ -160,43 +299,46 @@ export default function ContactUs() {
           <Grid item xs={12} md={4}>
             <Typography variant="h5" fontWeight={600} sx={{ mb: 4 }}>
               Contact Methods
-          </Typography>
+            </Typography>
 
             <Stack spacing={3}>
-              {contactMethods.map((method, index) => (
-                <Card key={index} sx={{ p: 3, border: '1px solid #e2e8f0' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                    {method.icon}
-                    <Typography variant="h6" fontWeight={600} sx={{ ml: 2 }}>
-                      {method.title}
+              {enabledContactMethods.map((method, index) => {
+                const IconComponent = iconMap[method.icon] || BusinessIcon;
+                return (
+                  <Card key={index} sx={{ p: 3, border: '1px solid #e2e8f0' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                      <IconComponent sx={{ fontSize: 40, color: '#3B82F6' }} />
+                      <Typography variant="h6" fontWeight={600} sx={{ ml: 2 }}>
+                        {method.title}
+                      </Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      {method.description}
                     </Typography>
-                  </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    {method.description}
-                  </Typography>
-                  <Typography variant="body2" fontWeight={600}>
-                    <a 
-                      href={`tel:${method.contact}`} 
-                      onClick={() => handlePhoneClick(method.contact)}
-                      style={{ textDecoration: 'none', color: 'inherit' }}
-                    >
-                      📞 {method.contact}
-                    </a>
-                  </Typography>
-                  <Typography variant="body2" fontWeight={600}>
-                    <a 
-                      href={`mailto:${method.email}`}
-                      onClick={() => handleEmailClick(method.email)}
-                      style={{ textDecoration: 'none', color: 'inherit' }}
-                    >
-                      ✉️ {method.email}
-                    </a>
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    🕒 {method.hours}
-                  </Typography>
-                </Card>
-              ))}
+                    <Typography variant="body2" fontWeight={600}>
+                      <a 
+                        href={`tel:${method.contact}`} 
+                        onClick={() => handlePhoneClick(method.contact)}
+                        style={{ textDecoration: 'none', color: 'inherit' }}
+                      >
+                        📞 {method.contact}
+                      </a>
+                    </Typography>
+                    <Typography variant="body2" fontWeight={600}>
+                      <a 
+                        href={`mailto:${method.email}`}
+                        onClick={() => handleEmailClick(method.email)}
+                        style={{ textDecoration: 'none', color: 'inherit' }}
+                      >
+                        ✉️ {method.email}
+                      </a>
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      🕒 {method.hours}
+                    </Typography>
+                  </Card>
+                );
+              })}
             </Stack>
 
             {/* Company Information */}
@@ -208,11 +350,11 @@ export default function ContactUs() {
                 <LocationIcon sx={{ mr: 2, color: '#3B82F6' }} />
                 <Box>
                   <Typography variant="body2" fontWeight={600}>
-                    Headquarters
+                    {contactConfig.companyInfo.name}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    123 Innovation Drive<br />
-                    Tech Valley, CA 94025
+                    {contactConfig.companyInfo.address.street}<br />
+                    {contactConfig.companyInfo.address.city}
                   </Typography>
                 </Box>
               </Box>
@@ -223,283 +365,294 @@ export default function ContactUs() {
                     Business Hours
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Monday - Friday: 8AM - 6PM PST<br />
-                    Saturday: 9AM - 2PM PST
+                    {contactConfig.companyInfo.businessHours.weekdays}<br />
+                    {contactConfig.companyInfo.businessHours.saturday}<br />
+                    {contactConfig.companyInfo.businessHours.sunday}
                   </Typography>
                 </Box>
               </Box>
             </Card>
           </Grid>
 
-            {/* Contact Form */}
-          <Grid item xs={12} md={8}>
-            <Card sx={{ p: 4 }}>
-              <Typography variant="h5" fontWeight={600} sx={{ mb: 4 }}>
-                Send us a Message
-              </Typography>
-              
-              <form onSubmit={handleSubmit}>
-                <Grid container spacing={3}>
-                  {/* Basic Information */}
-                  <Grid item xs={12}>
-                    <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
-                      Contact Information
-                    </Typography>
-                  </Grid>
-                  
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="First Name"
-                      name="firstName"
-                      value={formData.firstName}
-                      onChange={handleChange}
-                      required
-                    />
-                  </Grid>
-                  
-                  <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                      label="Last Name"
-                      name="lastName"
-                      value={formData.lastName}
-                      onChange={handleChange}
-                required
-              />
-                  </Grid>
-              
-                  <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                      label="Work Email"
-                      name="email"
-                type="email"
-                value={formData.email}
-                      onChange={handleChange}
-                required
-                    />
-                  </Grid>
-                  
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Phone Number"
-                      name="phone"
-                      value={formData.phone}
-                      onChange={handleChange}
-                    />
-                  </Grid>
+          {/* Contact Form */}
+          {contactConfig.form.enabled && (
+            <Grid item xs={12} md={8}>
+              <Card sx={{ p: 4 }}>
+                <Typography variant="h5" fontWeight={600} sx={{ mb: 4 }}>
+                  {contactConfig.form.title}
+                </Typography>
+                
+                <form onSubmit={handleSubmit}>
+                  <Grid container spacing={3}>
+                    {/* Basic Information */}
+                    <Grid item xs={12}>
+                      <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
+                        Contact Information
+                      </Typography>
+                    </Grid>
+                    
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        label="First Name"
+                        name="firstName"
+                        value={formData.firstName}
+                        onChange={handleChange}
+                        required={contactConfig.form.requiredFields.includes('firstName')}
+                      />
+                    </Grid>
+                    
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        label="Last Name"
+                        name="lastName"
+                        value={formData.lastName}
+                        onChange={handleChange}
+                        required={contactConfig.form.requiredFields.includes('lastName')}
+                      />
+                    </Grid>
+                
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        label="Work Email"
+                        name="email"
+                        type="email"
+                        value={formData.email}
+                        onChange={handleChange}
+                        required={contactConfig.form.requiredFields.includes('email')}
+                      />
+                    </Grid>
+                    
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        label="Phone Number"
+                        name="phone"
+                        value={formData.phone}
+                        onChange={handleChange}
+                      />
+                    </Grid>
 
-                  {/* Company Information */}
-                  <Grid item xs={12}>
-                    <Divider sx={{ my: 2 }} />
-                    <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
-                      Company Details
-                    </Typography>
-                  </Grid>
-                  
-                  <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Company Name"
-                      name="company"
-                value={formData.company}
-                      onChange={handleChange}
-                      required
-              />
-                  </Grid>
-              
-                  <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                      label="Job Title"
-                      name="jobTitle"
-                      value={formData.jobTitle}
-                      onChange={handleChange}
-                    />
-                  </Grid>
-                  
-                  <Grid item xs={12} sm={6}>
-                    <FormControl fullWidth>
-                      <InputLabel>Company Size</InputLabel>
-                      <Select
-                        name="companySize"
-                        value={formData.companySize}
+                    {/* Company Information */}
+                    <Grid item xs={12}>
+                      <Divider sx={{ my: 2 }} />
+                      <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
+                        Company Details
+                      </Typography>
+                    </Grid>
+                    
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        label="Company Name"
+                        name="company"
+                        value={formData.company}
                         onChange={handleChange}
-                        label="Company Size"
-                      >
-                        <MenuItem value="1-10">1-10 employees</MenuItem>
-                        <MenuItem value="11-50">11-50 employees</MenuItem>
-                        <MenuItem value="51-200">51-200 employees</MenuItem>
-                        <MenuItem value="201-500">201-500 employees</MenuItem>
-                        <MenuItem value="500+">500+ employees</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  
-                  <Grid item xs={12} sm={6}>
-                    <FormControl fullWidth>
-                      <InputLabel>Current Solution</InputLabel>
-                      <Select
-                        name="currentSolution"
-                        value={formData.currentSolution}
+                        required={contactConfig.form.requiredFields.includes('company')}
+                      />
+                    </Grid>
+                
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        label="Job Title"
+                        name="jobTitle"
+                        value={formData.jobTitle}
                         onChange={handleChange}
-                        label="Current Solution"
-                      >
-                        <MenuItem value="trackabout">TrackAbout</MenuItem>
-                        <MenuItem value="tims">TIMS Software</MenuItem>
-                        <MenuItem value="excel">Excel/Manual</MenuItem>
-                        <MenuItem value="custom">Custom Solution</MenuItem>
-                        <MenuItem value="none">No Current Solution</MenuItem>
-                        <MenuItem value="other">Other</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-
-                  {/* Inquiry Details */}
-                  <Grid item xs={12}>
-                    <Divider sx={{ my: 2 }} />
-                    <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
-                      Inquiry Details
-                    </Typography>
-                  </Grid>
-                  
-                  <Grid item xs={12} sm={6}>
-                    <FormControl fullWidth>
-                      <InputLabel>Inquiry Type</InputLabel>
-                      <Select
-                        name="inquiryType"
-                        value={formData.inquiryType}
-                        onChange={handleChange}
-                        label="Inquiry Type"
-                required
-                      >
-                        <MenuItem value="demo">Request Demo</MenuItem>
-                        <MenuItem value="pricing">Pricing Information</MenuItem>
-                        <MenuItem value="migration">Migration from Current System</MenuItem>
-                        <MenuItem value="features">Feature Questions</MenuItem>
-                        <MenuItem value="support">Technical Support</MenuItem>
-                        <MenuItem value="partnership">Partnership Inquiry</MenuItem>
-                        <MenuItem value="other">Other</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  
-                  <Grid item xs={12} sm={6}>
-                    <FormControl fullWidth>
-                      <InputLabel>Implementation Timeframe</InputLabel>
-                      <Select
-                        name="timeframe"
-                        value={formData.timeframe}
-                        onChange={handleChange}
-                        label="Implementation Timeframe"
-                      >
-                        <MenuItem value="immediate">Immediate (within 1 month)</MenuItem>
-                        <MenuItem value="quarter">This Quarter (1-3 months)</MenuItem>
-                        <MenuItem value="half-year">Next 6 months</MenuItem>
-                        <MenuItem value="year">Within a year</MenuItem>
-                        <MenuItem value="exploring">Just exploring</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  
-                  <Grid item xs={12}>
-                    <FormControl fullWidth>
-                      <InputLabel>Budget Range (Optional)</InputLabel>
-                      <Select
-                        name="budget"
-                        value={formData.budget}
-                        onChange={handleChange}
-                        label="Budget Range (Optional)"
-                      >
-                        <MenuItem value="under-1k">Under $1,000/month</MenuItem>
-                        <MenuItem value="1k-5k">$1,000 - $5,000/month</MenuItem>
-                        <MenuItem value="5k-10k">$5,000 - $10,000/month</MenuItem>
-                        <MenuItem value="10k-25k">$10,000 - $25,000/month</MenuItem>
-                        <MenuItem value="25k+">$25,000+/month</MenuItem>
-                        <MenuItem value="not-sure">Not sure yet</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  
-                  <Grid item xs={12}>
-              <TextField
-                fullWidth
-                multiline
-                rows={4}
-                      label="Message"
-                      name="message"
-                value={formData.message}
-                      onChange={handleChange}
-                      placeholder="Tell us about your current challenges, requirements, or any specific questions you have..."
-                    />
-                  </Grid>
-
-                  {/* Preferences */}
-                  <Grid item xs={12}>
-                    <Divider sx={{ my: 2 }} />
-                    <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
-                      Communication Preferences
-                    </Typography>
-                  </Grid>
-                  
-                  <Grid item xs={12}>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          name="demo"
-                          checked={formData.demo}
+                      />
+                    </Grid>
+                    
+                    <Grid item xs={12} sm={6}>
+                      <FormControl fullWidth>
+                        <InputLabel>Company Size</InputLabel>
+                        <Select
+                          name="companySize"
+                          value={formData.companySize}
                           onChange={handleChange}
-                        />
-                      }
-                      label="I'd like to schedule a personalized demo"
-                    />
-                  </Grid>
-                  
-                  <Grid item xs={12}>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          name="newsletter"
-                          checked={formData.newsletter}
+                          label="Company Size"
+                        >
+                          {contactConfig.form.companySizeOptions.map((option) => (
+                            <MenuItem key={option} value={option}>{option}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Grid>
+                    
+                    <Grid item xs={12} sm={6}>
+                      <FormControl fullWidth>
+                        <InputLabel>Current Solution</InputLabel>
+                        <Select
+                          name="currentSolution"
+                          value={formData.currentSolution}
                           onChange={handleChange}
-                        />
-                      }
-                      label="Subscribe to our newsletter for industry insights and product updates"
-                    />
-                  </Grid>
-                  
-                  <Grid item xs={12}>
-              <Button
-                type="submit"
-                variant="contained"
-                size="large"
-                      fullWidth
-                disabled={loading}
-                      sx={{
-                        py: 2,
-                        fontSize: '16px',
-                        fontWeight: 600,
-                        textTransform: 'none'
-                      }}
-                    >
-                      {loading ? 'Sending...' : 'Send Message'}
-              </Button>
-                  </Grid>
+                          label="Current Solution"
+                        >
+                          {contactConfig.form.currentSolutionOptions.map((option) => (
+                            <MenuItem key={option} value={option}>{option}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Grid>
 
-                  <Grid item xs={12}>
-                    <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', display: 'block' }}>
-                      By submitting this form, you agree to our Privacy Policy and Terms of Service.
-                      We'll respond within 24 hours.
-                    </Typography>
+                    {/* Inquiry Details */}
+                    <Grid item xs={12}>
+                      <Divider sx={{ my: 2 }} />
+                      <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
+                        Inquiry Details
+                      </Typography>
+                    </Grid>
+                    
+                    <Grid item xs={12} sm={6}>
+                      <FormControl fullWidth>
+                        <InputLabel>Inquiry Type</InputLabel>
+                        <Select
+                          name="inquiryType"
+                          value={formData.inquiryType}
+                          onChange={handleChange}
+                          label="Inquiry Type"
+                          required={contactConfig.form.requiredFields.includes('inquiryType')}
+                        >
+                          {contactConfig.form.inquiryTypeOptions.map((option) => (
+                            <MenuItem key={option} value={option}>{option}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Grid>
+                    
+                    <Grid item xs={12} sm={6}>
+                      <FormControl fullWidth>
+                        <InputLabel>Implementation Timeframe</InputLabel>
+                        <Select
+                          name="timeframe"
+                          value={formData.timeframe}
+                          onChange={handleChange}
+                          label="Implementation Timeframe"
+                        >
+                          {contactConfig.form.timeframeOptions.map((option) => (
+                            <MenuItem key={option} value={option}>{option}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Grid>
+                    
+                    <Grid item xs={12}>
+                      <FormControl fullWidth>
+                        <InputLabel>Budget Range (Optional)</InputLabel>
+                        <Select
+                          name="budget"
+                          value={formData.budget}
+                          onChange={handleChange}
+                          label="Budget Range (Optional)"
+                        >
+                          {contactConfig.form.budgetOptions.map((option) => (
+                            <MenuItem key={option} value={option}>{option}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Grid>
+                    
+                    <Grid item xs={12}>
+                      <TextField
+                        fullWidth
+                        multiline
+                        rows={4}
+                        label="Message"
+                        name="message"
+                        value={formData.message}
+                        onChange={handleChange}
+                        placeholder="Tell us about your current challenges, requirements, or any specific questions you have..."
+                      />
+                    </Grid>
+
+                    {/* Preferences */}
+                    <Grid item xs={12}>
+                      <Divider sx={{ my: 2 }} />
+                      <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
+                        Communication Preferences
+                      </Typography>
+                    </Grid>
+                    
+                    <Grid item xs={12}>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            name="demo"
+                            checked={formData.demo}
+                            onChange={handleChange}
+                          />
+                        }
+                        label="I'd like to schedule a personalized demo"
+                      />
+                    </Grid>
+                    
+                    <Grid item xs={12}>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            name="newsletter"
+                            checked={formData.newsletter}
+                            onChange={handleChange}
+                          />
+                        }
+                        label="Subscribe to our newsletter for industry insights and product updates"
+                      />
+                    </Grid>
+                    
+                    <Grid item xs={12}>
+                      <Button
+                        type="submit"
+                        variant="contained"
+                        size="large"
+                        fullWidth
+                        disabled={loading}
+                        sx={{
+                          py: 2,
+                          fontSize: '16px',
+                          fontWeight: 600,
+                          textTransform: 'none'
+                        }}
+                      >
+                        {loading ? 'Sending...' : 'Send Message'}
+                      </Button>
+                    </Grid>
+
+                    <Grid item xs={12}>
+                      <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', display: 'block' }}>
+                        {contactConfig.footerMessage}
+                      </Typography>
+                    </Grid>
                   </Grid>
-                </Grid>
-              </form>
-      </Card>
-          </Grid>
+                </form>
+              </Card>
+            </Grid>
+          )}
         </Grid>
       </Container>
+      
+      {/* Floating Back Button for Mobile */}
+      <Box
+        sx={{
+          position: 'fixed',
+          top: 20,
+          left: 20,
+          zIndex: 1000,
+          display: { xs: 'block', md: 'none' }
+        }}
+      >
+        <IconButton
+          onClick={() => navigate(-1)}
+          sx={{
+            bgcolor: 'white',
+            boxShadow: 3,
+            '&:hover': { bgcolor: 'grey.100' }
+          }}
+          aria-label="Go back"
+        >
+          <ArrowBackIcon />
+        </IconButton>
+      </Box>
     </Box>
   );
 }

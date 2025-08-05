@@ -338,7 +338,7 @@ export default function LoginScreen() {
         <View style={styles.loginContainer}>
           {/* App Branding */}
           <View style={styles.brandingSection}>
-            <Text style={styles.appTitle}>Scanified</Text>
+            <Text style={styles.appTitle}>AssetFlow Pro</Text>
             <Text style={styles.appSubtitle}>Asset Management Made Simple</Text>
             <Text style={styles.welcomeMessage}>Welcome back! Sign in to continue</Text>
           </View>

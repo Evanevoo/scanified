@@ -80,7 +80,7 @@ export default function EditCylinderScreen() {
     setError('');
     setCylinder(null);
     const { data, error } = await supabase
-      .from('bottles')
+      .from('assets')
       .select('*')
       .eq('barcode_number', barcodeValue)
       .single();
@@ -99,7 +99,7 @@ export default function EditCylinderScreen() {
     setError('');
     // Check for duplicate barcode or serial (excluding this cylinder)
     const { data: dupBarcode } = await supabase
-      .from('bottles')
+      .from('assets')
       .select('id')
       .eq('barcode_number', barcode)
       .neq('id', cylinder.id)
@@ -110,7 +110,7 @@ export default function EditCylinderScreen() {
       return;
     }
     const { data: dupSerial } = await supabase
-      .from('bottles')
+      .from('assets')
       .select('id')
       .eq('serial_number', serial)
       .neq('id', cylinder.id)
@@ -140,7 +140,7 @@ export default function EditCylinderScreen() {
       updateFields.assigned_customer = null;
     }
     const { error: updateError } = await supabase
-      .from('bottles')
+      .from('assets')
       .update(updateFields)
       .eq('id', cylinder.id);
     setLoading(false);

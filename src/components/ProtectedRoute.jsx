@@ -141,9 +141,9 @@ const ProtectedRoute = ({ children }) => {
                     size="small" 
                     color="warning"
                     onClick={async () => {
-                      // Development bypass - clear trial expired state and go to dashboard
+                      // Development bypass - clear trial expired state and go to home
                       console.log('Dev: Bypassing trial check');
-                      navigate('/dashboard');
+                      navigate('/home');
                     }}
                   >
                     Dev: Bypass Trial Check
