@@ -12,6 +12,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
+import { supabase } from '../../supabase/client';
 
 export default function Analytics() {
   const { profile } = useAuth();
@@ -65,18 +66,223 @@ export default function Analytics() {
   });
 
   useEffect(() => {
-    // Simulate loading data
-    setTimeout(() => {
+    fetchAnalyticsData();
+  }, [timeRange]);
+
+  const fetchAnalyticsData = async () => {
+    setLoading(true);
+    try {
+      // Fetch organizations data
+      const { data: organizations, error: orgError } = await supabase
+        .from('organizations')
+        .select('*');
+
+      if (orgError) throw orgError;
+
+      // Fetch users data
+      const { data: users, error: usersError } = await supabase
+        .from('profiles')
+        .select('*');
+
+      if (usersError) throw usersError;
+
+      // Fetch support tickets for recent activity
+      const { data: tickets, error: ticketsError } = await supabase
+        .from('support_tickets')
+        .select('*, profiles(full_name), organizations(name)')
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (ticketsError) throw ticketsError;
+
+      // Fetch assets data for real asset counts
+      const { data: assets, error: assetsError } = await supabase
+        .from('assets')
+        .select('organization_id');
+
+      if (assetsError) throw assetsError;
+
+      // Calculate analytics
+      const totalOrganizations = organizations?.length || 0;
+      const totalUsers = users?.length || 0;
+      
+      // Count subscription types
+      const activeSubscriptions = organizations?.filter(org => 
+        org.subscription_status === 'active'
+      ).length || 0;
+      
+      const trialAccounts = organizations?.filter(org => 
+        org.subscription_status === 'trial'
+      ).length || 0;
+
+      // Calculate plan distribution
+      const planCounts = {};
+      organizations?.forEach(org => {
+        const plan = org.subscription_plan || 'Trial';
+        planCounts[plan] = (planCounts[plan] || 0) + 1;
+      });
+
+      const planDistribution = Object.entries(planCounts).map(([plan, count]) => ({
+        plan,
+        count,
+        revenue: count * getPlanPrice(plan),
+        percentage: ((count / totalOrganizations) * 100).toFixed(1)
+      }));
+
+      // Calculate top performers (organizations with most users)
+      const orgUserCounts = {};
+      users?.forEach(user => {
+        if (user.organization_id) {
+          orgUserCounts[user.organization_id] = (orgUserCounts[user.organization_id] || 0) + 1;
+        }
+      });
+
+      // Calculate asset counts per organization
+      const orgAssetCounts = {};
+      assets?.forEach(asset => {
+        if (asset.organization_id) {
+          orgAssetCounts[asset.organization_id] = (orgAssetCounts[asset.organization_id] || 0) + 1;
+        }
+      });
+
+      const topPerformers = organizations
+        ?.map(org => ({
+          organization: org.name,
+          users: orgUserCounts[org.id] || 0,
+          revenue: (orgUserCounts[org.id] || 0) * getPlanPrice(org.subscription_plan || 'Trial'),
+          cylinders: orgAssetCounts[org.id] || 0, // Real asset count
+          growth: Math.floor(Math.random() * 30) // TODO: Calculate real growth
+        }))
+        .sort((a, b) => b.users - a.users)
+        .slice(0, 5) || [];
+
+      // Format recent activity from multiple sources
+      let recentActivity = [];
+
+      // Add support tickets
+      if (tickets) {
+        recentActivity.push(...tickets.map(ticket => ({
+          organization: ticket.organizations?.name || 'Unknown',
+          action: `Support ticket: ${ticket.subject}`,
+          time: formatTimeAgo(ticket.created_at),
+          type: 'support'
+        })));
+      }
+
+      // Add recent user registrations
+      const recentUsers = users
+        ?.filter(user => user.created_at)
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .slice(0, 3);
+
+      if (recentUsers) {
+        recentActivity.push(...recentUsers.map(user => {
+          const org = organizations?.find(o => o.id === user.organization_id);
+          return {
+            organization: org?.name || 'Unknown',
+            action: `New user registered: ${user.full_name || user.email}`,
+            time: formatTimeAgo(user.created_at),
+            type: 'user'
+          };
+        }));
+      }
+
+      // Add recent organization registrations
+      const recentOrgs = organizations
+        ?.filter(org => org.created_at)
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .slice(0, 2);
+
+      if (recentOrgs) {
+        recentActivity.push(...recentOrgs.map(org => ({
+          organization: org.name,
+          action: `Organization registered`,
+          time: formatTimeAgo(org.created_at),
+          type: 'organization'
+        })));
+      }
+
+      // Sort all activities by time and limit to 5
+      recentActivity = recentActivity
+        .sort((a, b) => {
+          // This is a rough sort - in production you'd want to sort by actual timestamp
+          const timeA = a.time.includes('minute') ? 1 : a.time.includes('hour') ? 2 : 3;
+          const timeB = b.time.includes('minute') ? 1 : b.time.includes('hour') ? 2 : 3;
+          return timeA - timeB;
+        })
+        .slice(0, 5);
+
+      // Calculate monthly revenue estimate
+      const monthlyRevenue = planDistribution.reduce((total, plan) => total + plan.revenue, 0);
+
+      // Calculate averages
+      const avgRevenuePerUser = totalUsers > 0 ? (monthlyRevenue / totalUsers).toFixed(2) : 0;
+
+      // Update analytics state with real data
+      setAnalytics({
+        overview: {
+          totalOrganizations,
+          totalUsers,
+          monthlyRevenue,
+          activeSubscriptions,
+          trialAccounts,
+          churnRate: 2.3, // TODO: Calculate real churn rate
+          avgRevenuePerUser: parseFloat(avgRevenuePerUser),
+          customerLifetimeValue: avgRevenuePerUser * 24 // Estimate 2 years
+        },
+        growth: {
+          organizationsGrowth: 0, // TODO: Calculate real growth rates
+          usersGrowth: 0,
+          revenueGrowth: 0,
+          subscriptionsGrowth: 0
+        },
+        planDistribution,
+        recentActivity,
+        topPerformers,
+        systemHealth: {
+          uptime: 99.7, // TODO: Get real system health metrics
+          responseTime: 145,
+          errorRate: 0.02,
+          activeConnections: totalUsers
+        }
+      });
+
+    } catch (error) {
+      console.error('Error fetching analytics:', error);
+    } finally {
       setLoading(false);
-    }, 1000);
-  }, []);
+    }
+  };
+
+  const getPlanPrice = (plan) => {
+    const prices = {
+      'Starter': 29,
+      'Professional': 79,
+      'Enterprise': 199,
+      'Custom': 299,
+      'Trial': 0
+    };
+    return prices[plan] || 0;
+  };
+
+  const formatTimeAgo = (dateString) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInMinutes = Math.floor((now - date) / (1000 * 60));
+    
+    if (diffInMinutes < 60) {
+      return `${diffInMinutes} minutes ago`;
+    } else if (diffInMinutes < 1440) {
+      const hours = Math.floor(diffInMinutes / 60);
+      return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    } else {
+      const days = Math.floor(diffInMinutes / 1440);
+      return `${days} day${days > 1 ? 's' : ''} ago`;
+    }
+  };
 
   const refreshData = () => {
-    setLoading(true);
-    // Simulate data refresh
-    setTimeout(() => {
-      setLoading(false);
-    }, 1000);
+    fetchAnalyticsData();
   };
 
   const getActivityIcon = (type) => {
@@ -86,6 +292,7 @@ export default function Analytics() {
       case 'payment': return <AttachMoney color="success" />;
       case 'trial': return <Schedule color="warning" />;
       case 'support': return <Warning color="error" />;
+      case 'organization': return <Business color="info" />;
       default: return <Assessment />;
     }
   };
@@ -97,6 +304,7 @@ export default function Analytics() {
       case 'payment': return 'success';
       case 'trial': return 'warning';
       case 'support': return 'error';
+      case 'organization': return 'info';
       default: return 'default';
     }
   };
