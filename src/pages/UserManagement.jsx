@@ -35,6 +35,7 @@ export default function UserManagement() {
   const [editingUser, setEditingUser] = useState(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [pendingInvites, setPendingInvites] = useState([]);
+  const [loadingTimeout, setLoadingTimeout] = useState(false);
 
   useEffect(() => {
     if (organization && can('manage:users')) {
@@ -44,6 +45,17 @@ export default function UserManagement() {
       fetchPendingInvites();
     }
   }, [profile, organization, can]);
+
+  // Add timeout detection for loading organization
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!organization && profile) {
+        setLoadingTimeout(true);
+      }
+    }, 10000); // 10 seconds timeout
+
+    return () => clearTimeout(timer);
+  }, [organization, profile]);
 
   async function fetchRoles() {
     const { data, error } = await supabase.from('roles').select('*');
@@ -306,9 +318,33 @@ export default function UserManagement() {
   if (!organization) {
     return (
       <Box sx={{ p: 3 }}>
-        <Alert severity="info">
-          Loading organization data...
+        <Alert severity={loadingTimeout ? "error" : "info"} sx={{ mb: 2 }}>
+          <Typography variant="body2">
+            {loadingTimeout 
+              ? "Unable to load organization data. Please refresh the page or contact support if the issue persists."
+              : "Loading organization data..."
+            }
+          </Typography>
+          {!loadingTimeout && <LinearProgress sx={{ mt: 1 }} />}
         </Alert>
+        {/* Debug info - remove in production */}
+        <Alert severity="warning" sx={{ mt: 2 }}>
+          <Typography variant="caption">
+            Debug: Profile loaded: {profile ? 'Yes' : 'No'} | 
+            Profile org ID: {profile?.organization_id || 'None'} | 
+            Organization: {organization ? 'Loaded' : 'Not loaded'} |
+            Timeout: {loadingTimeout ? 'Yes' : 'No'}
+          </Typography>
+        </Alert>
+        {loadingTimeout && (
+          <Button 
+            variant="outlined" 
+            onClick={() => window.location.reload()} 
+            sx={{ mt: 2 }}
+          >
+            Refresh Page
+          </Button>
+        )}
       </Box>
     );
   }
