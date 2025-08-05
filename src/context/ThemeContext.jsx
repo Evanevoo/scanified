@@ -152,7 +152,10 @@ export const ThemeProvider = ({ children }) => {
   });
   
   const [mode, setMode] = useState(() => {
-    return localStorage.getItem('themeMode') || 'light';
+    const savedMode = localStorage.getItem('themeMode');
+    const savedDarkMode = localStorage.getItem('darkMode') === 'true';
+    // Sync mode with isDarkMode
+    return savedMode || (savedDarkMode ? 'dark' : 'light');
   });
   
   const [accent, setAccent] = useState(() => {
@@ -169,7 +172,12 @@ export const ThemeProvider = ({ children }) => {
   
   useEffect(() => {
     localStorage.setItem('themeMode', mode);
-  }, [mode]);
+    // Sync isDarkMode with mode changes
+    const shouldBeDark = mode === 'dark';
+    if (isDarkMode !== shouldBeDark) {
+      setIsDarkMode(shouldBeDark);
+    }
+  }, [mode, isDarkMode]);
   
   useEffect(() => {
     localStorage.setItem('accentColor', accent);
