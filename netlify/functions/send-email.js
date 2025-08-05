@@ -16,7 +16,19 @@ exports.handler = async (event, context) => {
     if (!to || !subject || !template) {
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: 'Missing required fields' })
+        body: JSON.stringify({ error: 'Missing required fields: to, subject, and template are required' })
+      };
+    }
+
+    // Check environment variables
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+      console.error('Missing email configuration: EMAIL_USER or EMAIL_PASSWORD not set');
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ 
+          error: 'Email service not configured. Please contact administrator.',
+          details: 'EMAIL_USER and EMAIL_PASSWORD environment variables must be set'
+        })
       };
     }
 
@@ -52,14 +64,29 @@ exports.handler = async (event, context) => {
     };
 
     try {
-      console.log('About to send email to:', to);
-      await transporter.sendMail(mailOptions);
-      console.log('Email sent to:', to);
+      console.log('About to send email to:', to, 'with subject:', subject);
+      const info = await transporter.sendMail(mailOptions);
+      console.log('Email sent successfully to:', to, 'Message ID:', info.messageId);
     } catch (sendError) {
       console.error('Error sending email:', sendError);
+      
+      // Provide more specific error messages
+      let errorMessage = 'Failed to send email';
+      if (sendError.code === 'EAUTH') {
+        errorMessage = 'Email authentication failed. Please check your email credentials.';
+      } else if (sendError.code === 'ENOTFOUND') {
+        errorMessage = 'Email server not found. Please check your email service configuration.';
+      } else if (sendError.responseCode === 535) {
+        errorMessage = 'Invalid email username or password. Please check your credentials.';
+      }
+      
       return {
         statusCode: 500,
-        body: JSON.stringify({ error: 'Failed to send email', details: sendError.message })
+        body: JSON.stringify({ 
+          error: errorMessage, 
+          details: sendError.message,
+          code: sendError.code 
+        })
       };
     }
 
@@ -183,6 +210,33 @@ function generateEmailContent(template, data) {
           <p><a href="${data.inviteLink}">${data.inviteLink}</a></p>
           <p>This invite will expire in 7 days or once it is used.</p>
           <p>If you did not expect this invitation, you can ignore this email.</p>
+          <p style="color: #888; font-size: 12px; margin-top: 32px;">Sent by Gas Cylinder Management System</p>
+        </div>
+      `;
+
+    case 'support-ticket':
+      return `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #FF5722;">New Support Ticket Submitted</h2>
+          <p>Hello,</p>
+          <p>A new support ticket has been submitted by <strong>${data.organizationName}</strong>.</p>
+          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <h3>Ticket Details:</h3>
+            <p><strong>Subject:</strong> ${data.subject}</p>
+            <p><strong>Category:</strong> ${data.category}</p>
+            <p><strong>Priority:</strong> ${data.priority}</p>
+            <p><strong>Submitted by:</strong> ${data.submittedBy}</p>
+            <p><strong>Organization:</strong> ${data.organizationName}</p>
+            <p><strong>Date:</strong> ${data.submittedDate}</p>
+          </div>
+          <div style="background-color: #fff3e0; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #FF9800;">
+            <h4>Description:</h4>
+            <p>${data.description}</p>
+          </div>
+          <p>Please review and respond to this ticket as soon as possible.</p>
+          <div style="margin: 20px 0;">
+            <a href="${data.ticketUrl}" style="background: #FF5722; color: #fff; padding: 12px 24px; border-radius: 4px; text-decoration: none; font-weight: bold;">View Ticket</a>
+          </div>
           <p style="color: #888; font-size: 12px; margin-top: 32px;">Sent by Gas Cylinder Management System</p>
         </div>
       `;

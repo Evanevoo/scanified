@@ -817,7 +817,7 @@ export const notificationService = {
       // Get all owners
       const { data: owners, error } = await supabase
         .from('profiles')
-        .select('id')
+        .select('id, email, full_name')
         .eq('role', 'owner');
 
       if (error) throw error;
@@ -845,6 +845,58 @@ export const notificationService = {
           .insert(notifications);
 
         if (insertError) throw insertError;
+      }
+
+      // Send email notifications to all owners
+      if (owners.length > 0) {
+        // Get organization details
+        const { data: organization } = await supabase
+          .from('organizations')
+          .select('name')
+          .eq('id', ticket.organization_id)
+          .single();
+
+        // Get user details who submitted the ticket
+        const { data: user } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', ticket.user_id)
+          .single();
+
+        // Get the base URL for the application
+        const getBaseUrl = () => {
+          if (typeof window !== 'undefined') {
+            return window.location.origin;
+          }
+          // Fallback for server-side rendering or when window is not available
+          return process.env.REACT_APP_BASE_URL || process.env.VITE_BASE_URL || 'https://scanified.netlify.app';
+        };
+
+        const ticketData = {
+          subject: ticket.subject,
+          category: ticket.category || 'General',
+          priority: ticket.priority || 'Medium',
+          description: ticket.description,
+          organizationName: organization?.name || 'Unknown Organization',
+          submittedBy: user?.full_name || user?.email || 'Unknown User',
+          submittedDate: new Date(ticket.created_at).toLocaleString(),
+          ticketUrl: `${getBaseUrl()}/owner-portal/support?ticket=${ticket.id}`
+        };
+
+        // Send email to each owner
+        for (const owner of owners) {
+          try {
+            await this.sendEmail(
+              owner.email,
+              `New Support Ticket: ${ticket.subject}`,
+              'support-ticket',
+              ticketData
+            );
+          } catch (emailError) {
+            console.error(`Error sending email to owner ${owner.email}:`, emailError);
+            // Continue with other owners even if one fails
+          }
+        }
       }
     } catch (error) {
       console.error('Error notifying owner of new ticket:', error);
