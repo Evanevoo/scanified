@@ -76,47 +76,85 @@ export default function MainLayout() {
     }
     let active = true;
     const fetchSuggestions = async () => {
-      // Customers: by name or ID
-      const { data: customers, error: customerError } = await supabase
-        .from('customers')
-        .select('CustomerListID, name, phone')
-        .or(`CustomerListID.ilike.%${searchTerm}%,name.ilike.%${searchTerm}%`)
-        .limit(5);
+      // Different search behavior based on user role and current page
+      const isInOwnerPortal = location.pathname.startsWith('/owner-portal');
       
-      if (customerError) {
-        console.error('Error fetching customers for search:', customerError);
-      }
-      
-      // Bottles: by serial number or barcode
-      const { data: bottles, error: bottleError } = await supabase
-        .from('bottles')
-        .select('id, serial_number, barcode_number, assigned_customer')
-        .or(`serial_number.ilike.%${searchTerm}%,barcode_number.ilike.%${searchTerm}%`)
-        .limit(5);
-      
-      if (bottleError) {
-        console.error('Error fetching bottles for search:', bottleError);
-      }
-      const customerResults = (customers || []).map(c => ({
-        type: 'customer',
-        id: c.CustomerListID,
-        label: c.name,
-        sub: c.CustomerListID,
-      }));
-      const bottleResults = (bottles || []).map(b => ({
-        type: 'bottle',
-        id: b.id,
-        label: b.serial_number || b.barcode_number,
-        sub: b.barcode_number || b.serial_number,
-      }));
-      if (active) {
-        console.log('Setting suggestions:', [...customerResults, ...bottleResults]);
-        setSuggestions([...customerResults, ...bottleResults]);
+      if (isOwner && isInOwnerPortal) {
+        // For owners in owner portal: search organizations and system-wide data
+        const { data: organizations, error: orgError } = await supabase
+          .from('organizations')
+          .select('id, name, subscription_status')
+          .ilike('name', `%${searchTerm}%`)
+          .limit(5);
+        
+        if (orgError) {
+          console.error('Error fetching organizations for search:', orgError);
+        }
+        
+        const orgResults = (organizations || []).map(org => ({
+          type: 'organization',
+          id: org.id,
+          label: org.name,
+          sub: `Status: ${org.subscription_status || 'Unknown'}`,
+        }));
+        
+        if (active) {
+          console.log('Setting owner portal suggestions:', orgResults);
+          setSuggestions(orgResults);
+        }
+      } else if (organization?.id) {
+        // For regular users: only show data from their organization
+        // Customers: by name or ID (filtered by organization)
+        const { data: customers, error: customerError } = await supabase
+          .from('customers')
+          .select('CustomerListID, name, phone')
+          .eq('organization_id', organization.id)
+          .or(`CustomerListID.ilike.%${searchTerm}%,name.ilike.%${searchTerm}%`)
+          .limit(5);
+        
+        if (customerError) {
+          console.error('Error fetching customers for search:', customerError);
+        }
+        
+        // Assets: by serial number or barcode (filtered by organization)
+        const { data: assets, error: assetError } = await supabase
+          .from('assets')
+          .select('id, serial_number, barcode_number, assigned_customer')
+          .eq('organization_id', organization.id)
+          .or(`serial_number.ilike.%${searchTerm}%,barcode_number.ilike.%${searchTerm}%`)
+          .limit(5);
+        
+        if (assetError) {
+          console.error('Error fetching assets for search:', assetError);
+        }
+        
+        const customerResults = (customers || []).map(c => ({
+          type: 'customer',
+          id: c.CustomerListID,
+          label: c.name,
+          sub: c.CustomerListID,
+        }));
+        const assetResults = (assets || []).map(a => ({
+          type: 'asset',
+          id: a.id,
+          label: a.serial_number || a.barcode_number,
+          sub: a.barcode_number || a.serial_number,
+        }));
+        
+        if (active) {
+          console.log('Setting organization suggestions:', [...customerResults, ...assetResults]);
+          setSuggestions([...customerResults, ...assetResults]);
+        }
+      } else {
+        // No organization context - clear suggestions
+        if (active) {
+          setSuggestions([]);
+        }
       }
     };
     fetchSuggestions();
     return () => { active = false; };
-  }, [searchTerm]);
+  }, [searchTerm, isOwner, organization?.id, location.pathname]);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -134,8 +172,13 @@ export default function MainLayout() {
     setSearchTerm('');
     if (item.type === 'customer') {
       navigate(`/customer/${item.id}`);
+    } else if (item.type === 'asset') {
+      navigate(`/asset/${item.id}`);
+    } else if (item.type === 'organization') {
+      navigate(`/owner-portal/customer-management?org=${item.id}`);
     } else if (item.type === 'bottle') {
-      navigate(`/bottle/${item.id}`);
+      // Legacy support for old bottle references
+      navigate(`/asset/${item.id}`);
     }
   };
 
@@ -281,7 +324,11 @@ export default function MainLayout() {
           </Box>
           <Box sx={{ flexGrow: 1, maxWidth: 400, ml: 1, position: 'relative' }} ref={searchRef}>
             <TextField
-              placeholder="Search customers, bottles..."
+              placeholder={
+                isOwner && location.pathname.startsWith('/owner-portal') 
+                  ? "Search organizations..." 
+                  : "Search customers, assets..."
+              }
               size="small"
               variant="outlined"
               value={searchTerm}
