@@ -20,7 +20,7 @@ import {
   Report as ReportIcon, Inventory2 as InventoryIcon, Support,
   Security as ShieldIcon, Build as WrenchIcon, Description as FileTextIcon,
   Inventory as PackageIcon, Calculate as CalculatorIcon, Psychology as BrainIcon,
-  ChevronLeft, ChevronRight, Menu as MenuIcon
+  ChevronLeft, ChevronRight, Menu as MenuIcon, QrCode as QrCodeIcon
 } from '@mui/icons-material';
 
 const drawerWidth = 280;
@@ -173,6 +173,24 @@ const Sidebar = ({ open, onClose }) => {
 
   // Organized menu structure
   const menuSections = {
+    admin: {
+      title: 'Administration',
+      icon: <AdminPanelSettings />,
+      items: [
+        { title: 'Import Data', path: '/import', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Import Customers', path: '/import-customer-info', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
+        { title: 'File Format Manager', path: '/file-format-manager', icon: <Settings />, roles: ['admin', 'manager'] },
+        { title: 'Import Asset Balance', path: '/import-asset-balance', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Import Approvals', path: '/import-approvals', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Import History', path: '/import-approvals-history', icon: <History />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Organization Tools', path: '/organization-tools', icon: <BuildIcon />, roles: ['admin', 'manager'] },
+        { title: 'User Management', path: '/user-management', icon: <AdminPanelSettings />, roles: ['admin', 'manager'] },
+        { title: 'Customer Portal', path: '/customer-portal', icon: <PersonIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Billing', path: '/billing', icon: <Payment />, roles: ['admin'] },
+        { title: 'Settings', path: '/settings', icon: <Settings />, roles: ['admin'] },
+        { title: 'Support Center', path: '/support', icon: <Support />, roles: ['admin', 'user', 'manager'] }
+      ]
+    },
     core: {
       title: 'Core',
       icon: <HomeIcon />,
@@ -191,7 +209,9 @@ const Sidebar = ({ open, onClose }) => {
         { title: 'Rentals', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
         { title: 'Scanned Orders', path: '/scanned-orders', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Lease Agreements', path: '/lease-agreements', icon: <WorkIcon />, roles: ['admin', 'manager'] },
-        { title: 'Generate Customer ID', path: '/generateid', icon: <IntegrationIcon />, roles: ['admin', 'user', 'manager'] }
+        { title: 'Generate Customer ID', path: '/generateid', icon: <IntegrationIcon />, roles: ['owner'] },
+        { title: 'Barcode Generator', path: '/barcode-generator', icon: <QrCodeIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Accounting Integration', path: '/owner-portal/integration-settings', icon: <IntegrationIcon />, roles: ['owner', 'admin'] }
       ]
     },
     inventory: {
@@ -214,37 +234,6 @@ const Sidebar = ({ open, onClose }) => {
         { title: 'Custom Reports', path: '/custom-reports', icon: <ReportIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Predictive Analytics', path: '/predictive-analytics', icon: <BrainIcon />, roles: ['admin', 'manager'] },
         { title: 'Audit Management', path: '/audit-management', icon: <Assessment />, roles: ['admin', 'manager'] }
-      ]
-    },
-    advanced: {
-      title: 'Advanced Features',
-      icon: <BuildIcon />,
-      items: [
-        { title: 'Hazmat Compliance', path: '/hazmat-compliance', icon: <ShieldIcon />, roles: ['admin', 'manager'] },
-        { title: 'Maintenance Workflows', path: '/maintenance-workflows', icon: <WrenchIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Truck Reconciliation', path: '/truck-reconciliation', icon: <TruckIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Chain of Custody', path: '/chain-of-custody', icon: <FileTextIcon />, roles: ['admin', 'manager'] },
-        { title: 'Palletization System', path: '/palletization-system', icon: <PackageIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Advanced Rental Calculations', path: '/advanced-rental-calculations', icon: <CalculatorIcon />, roles: ['admin', 'manager'] },
-        { title: 'Web Scanning', path: '/web-scanning', icon: <SearchIcon />, roles: ['admin', 'user', 'manager'] }
-      ]
-    },
-    admin: {
-      title: 'Administration',
-      icon: <AdminPanelSettings />,
-      items: [
-        { title: 'Import Data', path: '/import', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Import Customers', path: '/import-customer-info', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
-        { title: 'File Format Manager', path: '/file-format-manager', icon: <Settings />, roles: ['admin', 'manager'] },
-        { title: 'Import Asset Balance', path: '/import-asset-balance', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Import Approvals', path: '/import-approvals', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Import History', path: '/import-approvals-history', icon: <History />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Organization Tools', path: '/organization-tools', icon: <BuildIcon />, roles: ['admin', 'manager'] },
-        { title: 'User Management', path: '/user-management', icon: <AdminPanelSettings />, roles: ['admin', 'manager'] },
-        { title: 'Customer Portal', path: '/customer-portal', icon: <PersonIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Billing', path: '/billing', icon: <Payment />, roles: ['admin'] },
-        { title: 'Settings', path: '/settings', icon: <Settings />, roles: ['admin'] },
-        { title: 'Support Center', path: '/support', icon: <Support />, roles: ['admin', 'user', 'manager'] }
       ]
     }
   };
