@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gas Cylinder App - Backup Manager</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2563eb;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+            transition: background-color 0.3s;
+        }
+        .button:hover {
+            background: #1e40af;
+        }
+        .button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        .button.danger {
+            background: #dc2626;
+        }
+        .button.danger:hover {
+            background: #b91c1c;
+        }
+        .button.success {
+            background: #059669;
+        }
+        .button.success:hover {
+            background: #047857;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #2563eb;
+        }
+        .status.success {
+            background: #d1fae5;
+            border-left-color: #059669;
+        }
+        .status.error {
+            background: #fee2e2;
+            border-left-color: #dc2626;
+        }
+        .status.info {
+            background: #dbeafe;
+            border-left-color: #2563eb;
+        }
+        .log {
+            background: #1f2937;
+            color: #f9fafb;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+        }
+        .stat-card h3 {
+            margin: 0 0 10px 0;
+            color: #374151;
+            font-size: 14px;
+        }
+        .stat-card .value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2563eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Gas Cylinder App - Backup Manager</h1>
+        
+        <div id="status" class="status info">
+            Ready to create backups and clean up old data.
+        </div>
+        
+        <div class="stats" id="stats">
+            <div class="stat-card">
+                <h3>Total Backups</h3>
+                <div class="value" id="totalBackups">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Backups Before July</h3>
+                <div class="value" id="backupsBeforeJuly">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Backups After July</h3>
+                <div class="value" id="backupsAfterJuly">-</div>
+            </div>
+        </div>
+        
+        <div style="text-align: center; margin: 30px 0;">
+            <button class="button success" onclick="createBackupAndCleanup()">
+                📦 Create Backup & Cleanup
+            </button>
+            <button class="button" onclick="createBackupOnly()">
+                📋 Create Backup Only
+            </button>
+            <button class="button danger" onclick="clearOldBackupsOnly()">
+                🗑️ Clear Old Backups Only
+            </button>
+            <button class="button" onclick="refreshStats()">
+                🔄 Refresh Stats
+            </button>
+        </div>
+        
+        <div class="log" id="log">Waiting for action...</div>
+    </div>
+
+    <script type="module">
+        let logElement;
+        
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.innerHTML += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+        
+        function updateStatus(message, type = 'info') {
+            const statusElement = document.getElementById('status');
+            statusElement.className = `status ${type}`;
+            statusElement.textContent = message;
+        }
+        
+        async function refreshStats() {
+            try {
+                log('📊 Refreshing backup statistics...');
+                const { getBackupStats } = await import('./src/utils/backupManager.js');
+                const stats = await getBackupStats();
+                
+                document.getElementById('totalBackups').textContent = stats.totalBackups;
+                document.getElementById('backupsBeforeJuly').textContent = stats.backupsBeforeJuly;
+                document.getElementById('backupsAfterJuly').textContent = stats.backupsAfterJuly;
+                
+                log(`✅ Statistics updated: ${stats.totalBackups} total backups`);
+            } catch (error) {
+                log(`❌ Failed to refresh stats: ${error.message}`);
+                updateStatus('Failed to refresh statistics', 'error');
+            }
+        }
+        
+        window.createBackupAndCleanup = async function() {
+            try {
+                log('🚀 Starting backup and cleanup process...');
+                updateStatus('Creating backup and clearing old backups...', 'info');
+                
+                const { createBackupAndCleanup } = await import('./src/utils/backupManager.js');
+                const result = await createBackupAndCleanup();
+                
+                log(`✅ Backup created: ${result.summary.newBackupId}`);
+                log(`🗑️ Old backups cleared: ${result.summary.oldBackupsCleared}`);
+                
+                updateStatus(`Success! Created backup ${result.summary.newBackupId} and cleared ${result.summary.oldBackupsCleared} old backups.`, 'success');
+                
+                await refreshStats();
+                
+            } catch (error) {
+                log(`❌ Backup and cleanup failed: ${error.message}`);
+                updateStatus('Backup and cleanup failed', 'error');
+            }
+        };
+        
+        window.createBackupOnly = async function() {
+            try {
+                log('📦 Creating new backup...');
+                updateStatus('Creating new backup...', 'info');
+                
+                const { createNewBackup } = await import('./src/utils/backupManager.js');
+                const backup = await createNewBackup();
+                
+                log(`✅ Backup created successfully: ${backup.id}`);
+                updateStatus(`Backup created successfully: ${backup.id}`, 'success');
+                
+                await refreshStats();
+                
+            } catch (error) {
+                log(`❌ Backup creation failed: ${error.message}`);
+                updateStatus('Backup creation failed', 'error');
+            }
+        };
+        
+        window.clearOldBackupsOnly = async function() {
+            if (!confirm('Are you sure you want to clear all backups from before July 2024? This action cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                log('🧹 Clearing old backups...');
+                updateStatus('Clearing old backups...', 'info');
+                
+                const { clearOldBackupsOnly } = await import('./src/utils/backupManager.js');
+                const result = await clearOldBackupsOnly();
+                
+                log(`✅ Cleanup completed: ${result.clearedCount} old backups removed`);
+                updateStatus(`Cleanup completed: ${result.clearedCount} old backups removed`, 'success');
+                
+                await refreshStats();
+                
+            } catch (error) {
+                log(`❌ Cleanup failed: ${error.message}`);
+                updateStatus('Cleanup failed', 'error');
+            }
+        };
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            logElement = document.getElementById('log');
+            log('🚀 Backup Manager initialized');
+            refreshStats();
+        });
+    </script>
+</body>
+</html>

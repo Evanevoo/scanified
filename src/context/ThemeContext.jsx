@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ThemeProvider as MuiThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, GlobalStyles } from '@mui/material';
 import { themes, modernTheme } from '../theme/themes';
+import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../supabase/client';
 
 const ThemeContext = createContext();
 
@@ -143,6 +145,8 @@ const globalStyles = {
 };
 
 export const ThemeProvider = ({ children }) => {
+  const { user, profile, organization } = useAuth();
+  
   const [currentTheme, setCurrentTheme] = useState(() => {
     return localStorage.getItem('theme') || 'modern';
   });
@@ -158,9 +162,80 @@ export const ThemeProvider = ({ children }) => {
     return savedMode || (savedDarkMode ? 'dark' : 'light');
   });
   
-  const [accent, setAccent] = useState(() => {
-    return localStorage.getItem('accentColor') || '#1976d2';
+  const [accent, setAccent] = useState('#1976d2');
+  const [organizationColors, setOrganizationColors] = useState({
+    primary: '#2563eb',
+    secondary: '#1e40af'
   });
+
+  // Load user-specific accent color and organization colors when user changes
+  useEffect(() => {
+    const loadUserAccentColor = async () => {
+      if (user?.id) {
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('theme_accent')
+            .eq('id', user.id)
+            .single();
+
+          if (!error && data?.theme_accent) {
+            // Ensure the accent is a hex color
+            let hexAccent = data.theme_accent;
+            if (!hexAccent.startsWith('#')) {
+              // If it's a color key like 'blue-600', convert it to hex
+              const colorMap = {
+                'blue-600': '#2563eb',
+                'emerald-500': '#10b981',
+                'purple-600': '#7c3aed',
+                'rose-500': '#f43f5e',
+                'amber-500': '#f59e42',
+                'teal-500': '#14b8a6',
+                'cyan-500': '#06b6d4',
+                'green-500': '#22c55e',
+                'orange-500': '#f97316',
+                'red-500': '#ef4444',
+                'pink-500': '#ec4899',
+                'indigo-500': '#6366f1',
+                'lime-500': '#84cc16',
+                'violet-600': '#a21caf',
+                'slate-500': '#64748b',
+                'sky-500': '#0ea5e9',
+              };
+              hexAccent = colorMap[hexAccent] || '#1976d2';
+            }
+            setAccent(hexAccent);
+          } else {
+            // Set default accent if no user-specific color is found
+            setAccent('#1976d2');
+          }
+        } catch (error) {
+          console.error('Error loading user accent color:', error);
+          setAccent('#1976d2');
+        }
+      } else {
+        // Set default accent when no user is logged in
+        setAccent('#1976d2');
+      }
+    };
+
+    loadUserAccentColor();
+  }, [user?.id]);
+
+  // Load organization colors when organization changes
+  useEffect(() => {
+    if (organization) {
+      setOrganizationColors({
+        primary: organization.primary_color || '#2563eb',
+        secondary: organization.secondary_color || '#1e40af'
+      });
+    } else {
+      setOrganizationColors({
+        primary: '#2563eb',
+        secondary: '#1e40af'
+      });
+    }
+  }, [organization]);
 
   useEffect(() => {
     localStorage.setItem('theme', currentTheme);
@@ -178,10 +253,6 @@ export const ThemeProvider = ({ children }) => {
       setIsDarkMode(shouldBeDark);
     }
   }, [mode, isDarkMode]);
-  
-  useEffect(() => {
-    localStorage.setItem('accentColor', accent);
-  }, [accent]);
 
   const changeTheme = (themeName) => {
     setCurrentTheme(themeName);
@@ -192,8 +263,61 @@ export const ThemeProvider = ({ children }) => {
     setIsDarkMode(!isDarkMode);
   };
 
+  // Wrapper function to ensure accent is always stored as hex
+  const setAccentColor = (newAccent) => {
+    let hexAccent = newAccent;
+    if (!hexAccent.startsWith('#')) {
+      // If it's a color key like 'blue-600', convert it to hex
+      const colorMap = {
+        'blue-600': '#2563eb',
+        'emerald-500': '#10b981',
+        'purple-600': '#7c3aed',
+        'rose-500': '#f43f5e',
+        'amber-500': '#f59e42',
+        'teal-500': '#14b8a6',
+        'cyan-500': '#06b6d4',
+        'green-500': '#22c55e',
+        'orange-500': '#f97316',
+        'red-500': '#ef4444',
+        'pink-500': '#ec4899',
+        'indigo-500': '#6366f1',
+        'lime-500': '#84cc16',
+        'violet-600': '#a21caf',
+        'slate-500': '#64748b',
+        'sky-500': '#0ea5e9',
+      };
+      hexAccent = colorMap[hexAccent] || '#1976d2';
+    }
+    setAccent(hexAccent);
+  };
+
   const getTheme = () => {
     const baseTheme = themes[currentTheme] || modernTheme;
+    
+    // Ensure accent is always a hex color
+    let hexAccent = accent;
+    if (!hexAccent.startsWith('#')) {
+      // If it's a color key like 'blue-600', convert it to hex
+      const colorMap = {
+        'blue-600': '#2563eb',
+        'emerald-500': '#10b981',
+        'purple-600': '#7c3aed',
+        'rose-500': '#f43f5e',
+        'amber-500': '#f59e42',
+        'teal-500': '#14b8a6',
+        'cyan-500': '#06b6d4',
+        'green-500': '#22c55e',
+        'orange-500': '#f97316',
+        'red-500': '#ef4444',
+        'pink-500': '#ec4899',
+        'indigo-500': '#6366f1',
+        'lime-500': '#84cc16',
+        'violet-600': '#a21caf',
+        'slate-500': '#64748b',
+        'sky-500': '#0ea5e9',
+      };
+      hexAccent = colorMap[hexAccent] || '#1976d2';
+    }
     
     // Apply dark mode if enabled
     if (isDarkMode) {
@@ -202,6 +326,14 @@ export const ThemeProvider = ({ children }) => {
         palette: {
           ...baseTheme.palette,
           mode: 'dark',
+          primary: {
+            ...baseTheme.palette.primary,
+            main: organizationColors.primary,
+          },
+          secondary: {
+            ...baseTheme.palette.secondary,
+            main: organizationColors.secondary,
+          },
           background: {
             default: '#0a0a0a',
             paper: '#1a1a1a',
@@ -215,7 +347,21 @@ export const ThemeProvider = ({ children }) => {
       });
     }
     
-    return createTheme(baseTheme);
+    // Apply accent color to light theme
+    return createTheme({
+      ...baseTheme,
+      palette: {
+        ...baseTheme.palette,
+        primary: {
+          ...baseTheme.palette.primary,
+          main: organizationColors.primary,
+        },
+        secondary: {
+          ...baseTheme.palette.secondary,
+          main: organizationColors.secondary,
+        },
+      },
+    });
   };
 
   const contextValue = {
@@ -224,7 +370,8 @@ export const ThemeProvider = ({ children }) => {
     mode,
     setMode,
     accent,
-    setAccent,
+    setAccent: setAccentColor,
+    organizationColors,
     changeTheme,
     toggleDarkMode,
     availableThemes: themes,

@@ -1,4 +1,4 @@
-const nodemailer = require('nodemailer');
+const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
   // Only allow POST requests
@@ -13,91 +13,102 @@ exports.handler = async (event, context) => {
     const { to } = JSON.parse(event.body);
 
     // Check environment variables
-    console.log('EMAIL_USER:', process.env.EMAIL_USER ? 'SET' : 'NOT SET');
-    console.log('EMAIL_PASSWORD:', process.env.EMAIL_PASSWORD ? 'SET' : 'NOT SET');
-    console.log('EMAIL_FROM:', process.env.EMAIL_FROM || 'NOT SET');
+    console.log('SUPABASE_URL:', process.env.SUPABASE_URL ? 'SET' : 'NOT SET');
+    console.log('SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'NOT SET');
 
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
       return {
         statusCode: 500,
         body: JSON.stringify({ 
-          error: 'Email service not configured',
+          error: 'Supabase email service not configured',
           details: {
-            EMAIL_USER: process.env.EMAIL_USER ? 'SET' : 'NOT SET',
-            EMAIL_PASSWORD: process.env.EMAIL_PASSWORD ? 'SET' : 'NOT SET',
-            EMAIL_FROM: process.env.EMAIL_FROM || 'NOT SET'
+            SUPABASE_URL: process.env.SUPABASE_URL ? 'SET' : 'NOT SET',
+            SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'NOT SET'
           }
         })
       };
     }
 
-    // Create transporter
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD
+    // Create Supabase client with service role key for admin operations
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
+
+    // Test email using Supabase's built-in email functionality
+    // We'll use signup confirmation which doesn't require the user to exist
+    console.log('Attempting to send test email to:', to);
+    
+    // Try signup confirmation (works even if user doesn't exist)
+    const { error: signupError } = await supabase.auth.admin.generateLink({
+      type: 'signup',
+      email: to,
+      options: {
+        redirectTo: `${process.env.SITE_URL || 'https://scanified1.netlify.app'}/confirm-signup`
       }
     });
 
-    // Test email
-    const mailOptions = {
-      from: process.env.EMAIL_FROM || 'noreply@gascylinderapp.com',
-      to: to || process.env.EMAIL_USER,
-      subject: 'Test Email - Email Service Working!',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2196F3;">Email Service Test</h2>
-          <p>🎉 Congratulations! Your email service is working correctly.</p>
-          <p><strong>Configuration Details:</strong></p>
-          <ul>
-            <li>EMAIL_USER: ${process.env.EMAIL_USER}</li>
-            <li>EMAIL_FROM: ${process.env.EMAIL_FROM || 'noreply@gascylinderapp.com'}</li>
-            <li>Service: Gmail</li>
-          </ul>
-          <p>You can now send invitation emails successfully!</p>
-          <p style="color: #888; font-size: 12px; margin-top: 32px;">Sent by Gas Cylinder Management System</p>
-        </div>
-      `
-    };
+    if (signupError) {
+      console.error('Signup confirmation email failed:', signupError);
+      
+      // Try magic link as fallback
+      const { error: magicError } = await supabase.auth.admin.generateLink({
+        type: 'magiclink',
+        email: to,
+        options: {
+          redirectTo: `${process.env.SITE_URL || 'https://scanified1.netlify.app'}/magic-link`
+        }
+      });
 
-    console.log('Attempting to send test email to:', mailOptions.to);
-    const info = await transporter.sendMail(mailOptions);
-    console.log('Test email sent successfully:', info.messageId);
+      if (magicError) {
+        console.error('Magic link email also failed:', magicError);
+        
+        let errorMessage = 'Failed to send test email via Supabase';
+        if (signupError.message.includes('SMTP') || magicError.message.includes('SMTP')) {
+          errorMessage = 'Supabase SMTP not configured. Please configure SMTP in Supabase Dashboard → Authentication → Settings → Email';
+        } else if (signupError.message.includes('rate limit') || magicError.message.includes('rate limit')) {
+          errorMessage = 'Rate limit exceeded. Please wait a few minutes before trying again.';
+        } else {
+          errorMessage = `Supabase email error: ${signupError.message || magicError.message}`;
+        }
+
+        return {
+          statusCode: 500,
+          body: JSON.stringify({ 
+            error: errorMessage,
+            details: {
+              signupError: signupError.message,
+              magicError: magicError.message,
+              recommendation: 'Configure SMTP in Supabase Dashboard → Authentication → Settings → Email'
+            },
+            code: signupError.status || magicError.status || 'UNKNOWN'
+          })
+        };
+      }
+    }
+
+    console.log('Supabase email test sent successfully');
 
     return {
       statusCode: 200,
       body: JSON.stringify({ 
         success: true,
-        message: 'Test email sent successfully!',
-        messageId: info.messageId,
-        to: mailOptions.to
+        message: 'Test email sent successfully via Supabase!',
+        to: to,
+        service: 'Supabase',
+        note: 'If you don\'t receive the email, check Supabase SMTP configuration in Dashboard → Authentication → Settings → Email'
       })
     };
 
   } catch (error) {
     console.error('Test email error:', error);
     
-    let errorMessage = 'Failed to send test email';
-    if (error.code === 'EAUTH') {
-      errorMessage = 'Email authentication failed. Check your Gmail credentials and app password.';
-    } else if (error.code === 'ENOTFOUND') {
-      errorMessage = 'Email server not found. Check your internet connection.';
-    } else if (error.responseCode === 535) {
-      errorMessage = 'Invalid email username or password. Use Gmail app password if 2FA is enabled.';
-    }
-
     return {
       statusCode: 500,
       body: JSON.stringify({ 
-        error: errorMessage,
+        error: 'Failed to send test email',
         details: error.message,
-        code: error.code,
-        config: {
-          EMAIL_USER: process.env.EMAIL_USER ? 'SET' : 'NOT SET',
-          EMAIL_PASSWORD: process.env.EMAIL_PASSWORD ? 'SET' : 'NOT SET',
-          EMAIL_FROM: process.env.EMAIL_FROM || 'NOT SET'
-        }
+        code: 'UNKNOWN'
       })
     };
   }

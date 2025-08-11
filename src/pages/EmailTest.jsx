@@ -17,6 +17,7 @@ import {
   CheckCircle as CheckIcon,
   Error as ErrorIcon
 } from '@mui/icons-material';
+import { supabase } from '../supabase/client';
 
 export default function EmailTest() {
   const [testEmail, setTestEmail] = useState('');
@@ -24,6 +25,7 @@ export default function EmailTest() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [isLocalhost, setIsLocalhost] = useState(false);
+  const [success, setSuccess] = useState('');
 
   React.useEffect(() => {
     setIsLocalhost(window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -169,6 +171,75 @@ export default function EmailTest() {
     }
   };
 
+  const handleTestSupabaseEmail = async () => {
+    if (!testEmail) {
+      setError('Please enter an email address');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setResult(null);
+
+    try {
+      console.log('Testing Supabase email configuration...');
+      
+      // Test Supabase email via Netlify function (more reliable)
+      const response = await fetch('/.netlify/functions/test-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: testEmail })
+      });
+
+      console.log('Supabase test response status:', response.status);
+
+      if (!response.ok) {
+        // Try to get error text if JSON parsing fails
+        let errorMessage;
+        try {
+          const data = await response.json();
+          errorMessage = data.error || `HTTP ${response.status}: ${response.statusText}`;
+        } catch (jsonError) {
+          const textResponse = await response.text();
+          errorMessage = `HTTP ${response.status}: ${response.statusText}. Response: ${textResponse || 'Empty response'}`;
+        }
+        setError(errorMessage);
+        return;
+      }
+
+      // Try to parse JSON response
+      let data;
+      try {
+        const responseText = await response.text();
+        console.log('Supabase test response text:', responseText);
+        
+        if (!responseText) {
+          throw new Error('Empty response from server');
+        }
+        
+        data = JSON.parse(responseText);
+      } catch (jsonError) {
+        console.error('Supabase test JSON parsing error:', jsonError);
+        setError(`Invalid response from server. Check if Netlify functions are deployed properly.`);
+        return;
+      }
+
+      setResult({
+        success: true,
+        message: 'Supabase email test sent successfully!',
+        type: 'supabase',
+        to: testEmail
+      });
+      
+      setSuccess('Supabase email test sent! Check your email (including spam folder).');
+    } catch (err) {
+      console.error('Supabase email test error:', err);
+      setError(`Supabase email test error: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50', py: 4 }}>
       <Container maxWidth="md">
@@ -180,23 +251,13 @@ export default function EmailTest() {
                 Email Service Test
               </Typography>
               <Typography variant="body1" color="text.secondary">
-                Test your email configuration to make sure invitations are working
+                Test Supabase email configuration to make sure invitations are working
               </Typography>
             </Box>
 
             <Divider />
 
-            {isLocalhost && (
-              <Alert severity="error">
-                <Typography variant="subtitle2" gutterBottom>
-                  🚫 Running on Localhost
-                </Typography>
-                <Typography variant="body2">
-                  Netlify functions only work on deployed sites. You're currently on localhost, so email testing won't work here.
-                  <br/><strong>Solution:</strong> Deploy your site to Netlify first, then test the email functionality there.
-                </Typography>
-              </Alert>
-            )}
+
 
             <TextField
               label="Test Email Address"
@@ -211,22 +272,32 @@ export default function EmailTest() {
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <Button
                 variant="contained"
-                startIcon={loading ? <CircularProgress size={20} /> : <SendIcon />}
-                onClick={handleTestEmail}
+                onClick={handleTestSupabaseEmail}
                 disabled={loading || !testEmail}
-                fullWidth
+                startIcon={loading ? <CircularProgress size={20} /> : <SendIcon />}
+                sx={{ mt: 2 }}
               >
-                {loading ? 'Sending...' : 'Test Email Service'}
+                {loading ? 'Sending...' : 'Test Supabase Email'}
               </Button>
 
               <Button
                 variant="outlined"
-                startIcon={loading ? <CircularProgress size={20} /> : <EmailIcon />}
                 onClick={handleTestInvite}
                 disabled={loading || !testEmail}
-                fullWidth
+                startIcon={loading ? <CircularProgress size={20} /> : <EmailIcon />}
+                sx={{ mt: 2, ml: 2 }}
               >
                 {loading ? 'Sending...' : 'Test Invitation Email'}
+              </Button>
+
+              <Button
+                variant="outlined"
+                onClick={handleTestSupabaseEmail}
+                disabled={loading || !testEmail}
+                startIcon={loading ? <CircularProgress size={20} /> : <EmailIcon />}
+                sx={{ mt: 2, ml: 2 }}
+              >
+                {loading ? 'Sending...' : 'Test Supabase Email'}
               </Button>
             </Stack>
 

@@ -260,40 +260,77 @@ export default function LoginScreen() {
   const handleAppleLogin = async () => {
     setSocialLoading(true);
     try {
+      // Generate nonce for security
+      const nonce = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
+        nonce: nonce,
       });
 
-      if (credential.identityToken) {
-        const { error } = await supabase.auth.signInWithIdToken({
-          provider: 'apple',
-          token: credential.identityToken,
-          nonce: credential.nonce,
-        });
-        
-        if (error) throw error;
-        
-        // If this is the first time signing in, we might want to save additional user info
-        if (credential.fullName) {
+      if (!credential.identityToken) {
+        throw new Error('No identity token received from Apple');
+      }
+
+      console.log('🍎 Authenticating with Supabase...');
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithIdToken({
+        provider: 'apple',
+        token: credential.identityToken,
+        nonce: nonce,
+      });
+
+      if (signInError) {
+        console.error('🚨 Supabase Apple Sign In Error:', signInError);
+        throw signInError;
+      }
+
+      if (!signInData?.user) {
+        throw new Error('No user data received after authentication');
+      }
+
+      console.log('✅ Apple Sign In successful');
+      
+      // If this is the first time signing in, save additional user info
+      if (credential.fullName) {
+        const fullName = `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim();
+        if (fullName) {
           const { error: updateError } = await supabase.auth.updateUser({
             data: {
-              full_name: `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim(),
+              full_name: fullName,
+              apple_user_id: credential.user,
             }
           });
-          if (updateError) console.warn('Could not update user profile:', updateError);
+          if (updateError) {
+            console.warn('⚠️ Could not update user profile:', updateError);
+          } else {
+            console.log('✅ User profile updated with Apple info');
+          }
         }
-      } else {
-        throw new Error('No identity token received');
       }
     } catch (err) {
+      console.error('🚨 Apple Sign In Error:', err);
+      
       if (err.code === 'ERR_REQUEST_CANCELED') {
         // User canceled the sign-in flow
+        console.log('ℹ️ User canceled Apple Sign In');
         return;
       }
-      Alert.alert('Apple Sign In Failed', err.message || 'An error occurred during Apple Sign In');
+      
+      // Provide more specific error messages
+      let errorMessage = 'An error occurred during Apple Sign In. Please try again.';
+      
+      if (err.message?.includes('network')) {
+        errorMessage = 'Network error during Apple Sign In. Please check your connection and try again.';
+      } else if (err.message?.includes('token')) {
+        errorMessage = 'Authentication token error. Please try signing in again.';
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      Alert.alert('Apple Sign In Failed', errorMessage);
     }
     setSocialLoading(false);
   };
@@ -338,7 +375,7 @@ export default function LoginScreen() {
         <View style={styles.loginContainer}>
           {/* App Branding */}
           <View style={styles.brandingSection}>
-            <Text style={styles.appTitle}>AssetFlow Pro</Text>
+            <Text style={styles.appTitle}>Scanified</Text>
             <Text style={styles.appSubtitle}>Asset Management Made Simple</Text>
             <Text style={styles.welcomeMessage}>Welcome back! Sign in to continue</Text>
           </View>
@@ -572,7 +609,10 @@ const styles = StyleSheet.create({
   scrollContainer: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 24,
+    padding: Platform.OS === 'ios' && Platform.isPad ? 48 : 24,
+    maxWidth: Platform.OS === 'ios' && Platform.isPad ? 600 : undefined,
+    alignSelf: 'center',
+    width: '100%',
   },
   loginContainer: {
     backgroundColor: '#fff',

@@ -12,7 +12,16 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "ios": {
+        "buildConfiguration": "Release"
+      }
+    },
+    "ios-only": {
+      "extends": "production",
+      "ios": {
+        "buildConfiguration": "Release"
+      }
     }
   },
   "submit": {

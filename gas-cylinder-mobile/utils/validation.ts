@@ -60,6 +60,88 @@ export class ValidationUtils {
     };
   }
 
+  // New format validation methods
+  static validateBarcodeWithConfig(value: string, formatConfig: any): ValidationResult {
+    if (!formatConfig?.barcode_format?.enabled) {
+      return { isValid: true, errors: [] };
+    }
+
+    if (!value || typeof value !== 'string') {
+      return { isValid: false, errors: ['Barcode cannot be empty'] };
+    }
+
+    const trimmed = value.trim();
+    const pattern = formatConfig.barcode_format.pattern;
+    const description = formatConfig.barcode_format.description;
+
+    try {
+      const regex = new RegExp(pattern);
+      const isValid = regex.test(trimmed);
+      
+      return {
+        isValid,
+        errors: isValid ? [] : [`Invalid barcode format. Expected: ${description}`],
+      };
+    } catch (error) {
+      console.warn('Invalid regex pattern in barcode config:', error);
+      return { isValid: false, errors: ['Invalid barcode format configuration'] };
+    }
+  }
+
+  static validateOrderNumberWithConfig(value: string, formatConfig: any): ValidationResult {
+    if (!formatConfig?.order_number_format?.enabled) {
+      return { isValid: true, errors: [] };
+    }
+
+    if (!value || typeof value !== 'string') {
+      return { isValid: false, errors: ['Order number cannot be empty'] };
+    }
+
+    const trimmed = value.trim();
+    const pattern = formatConfig.order_number_format.pattern;
+    const description = formatConfig.order_number_format.description;
+
+    try {
+      const regex = new RegExp(pattern);
+      const isValid = regex.test(trimmed);
+      
+      return {
+        isValid,
+        errors: isValid ? [] : [`Invalid order number format. Expected: ${description}`],
+      };
+    } catch (error) {
+      console.warn('Invalid regex pattern in order number config:', error);
+      return { isValid: false, errors: ['Invalid order number format configuration'] };
+    }
+  }
+
+  static validateCustomerIdWithConfig(value: string, formatConfig: any): ValidationResult {
+    if (!formatConfig?.customer_id_format?.enabled) {
+      return { isValid: true, errors: [] };
+    }
+
+    if (!value || typeof value !== 'string') {
+      return { isValid: false, errors: ['Customer ID cannot be empty'] };
+    }
+
+    const trimmed = value.trim();
+    const pattern = formatConfig.customer_id_format.pattern;
+    const description = formatConfig.customer_id_format.description;
+
+    try {
+      const regex = new RegExp(pattern);
+      const isValid = regex.test(trimmed);
+      
+      return {
+        isValid,
+        errors: isValid ? [] : [`Invalid customer ID format. Expected: ${description}`],
+      };
+    } catch (error) {
+      console.warn('Invalid regex pattern in customer ID config:', error);
+      return { isValid: false, errors: ['Invalid customer ID format configuration'] };
+    }
+  }
+
   static orderNumber(value: string): ValidationResult {
     // Order number validation - alphanumeric, 1-20 characters
     const orderRegex = /^[A-Za-z0-9]{1,20}$/;

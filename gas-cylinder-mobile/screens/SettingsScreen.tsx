@@ -46,11 +46,16 @@ export default function SettingsScreen() {
   const handleSync = async () => {
     setSyncing(true);
     try {
-      await SyncService.syncOfflineData();
+      const result = await SyncService.syncOfflineData();
       await loadOfflineData();
-      Alert.alert('Success', 'Data synchronized successfully');
+      
+      if (result.success) {
+        Alert.alert('Success', result.message);
+      } else {
+        Alert.alert('Sync Failed', result.message);
+      }
     } catch (error) {
-      Alert.alert('Sync Failed', error.message);
+      Alert.alert('Sync Failed', error.message || 'Unknown error occurred');
     } finally {
       setSyncing(false);
     }
@@ -269,7 +274,7 @@ export default function SettingsScreen() {
             title="Help & Support"
             subtitle="Get help and contact support"
             onPress={() => {
-              Alert.alert('Support', 'Contact support at support@lessannoyingscan.com');
+              Alert.alert('Support', 'Contact support at support@scanified.com');
             }}
             rightComponent={<Text style={styles.chevron}>›</Text>}
           />
@@ -285,6 +290,63 @@ export default function SettingsScreen() {
             title="Version"
             subtitle="1.0.0"
             rightComponent={null}
+            showBorder={false}
+          />
+        </View>
+
+        {/* Account Management */}
+        <SectionHeader title="ACCOUNT MANAGEMENT" />
+        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <SettingItem
+            title="Delete Account"
+            subtitle="Permanently delete your account and all associated data"
+            onPress={() => {
+              Alert.alert(
+                'Delete Account',
+                'This action cannot be undone. All your data will be permanently deleted. Are you sure you want to continue?',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Delete Account',
+                    style: 'destructive',
+                    onPress: async () => {
+                      try {
+                        // Delete user data from profiles table
+                        const { error: profileError } = await supabase
+                          .from('profiles')
+                          .delete()
+                          .eq('id', user?.id);
+
+                        if (profileError) throw profileError;
+
+                        // Delete user authentication
+                        const { error: deleteError } = await supabase.auth.admin.deleteUser(
+                          user?.id
+                        );
+
+                        if (deleteError) throw deleteError;
+
+                        // Clear local storage and sign out
+                        await AsyncStorage.clear();
+                        await supabase.auth.signOut();
+
+                        Alert.alert(
+                          'Account Deleted',
+                          'Your account has been successfully deleted.'
+                        );
+                      } catch (error) {
+                        console.error('Error deleting account:', error);
+                        Alert.alert(
+                          'Error',
+                          'Failed to delete account. Please try again or contact support.'
+                        );
+                      }
+                    },
+                  },
+                ]
+              );
+            }}
+            rightComponent={<Text style={[styles.actionText, { color: '#EF4444' }]}>Delete</Text>}
             showBorder={false}
           />
         </View>

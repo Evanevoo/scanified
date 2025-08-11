@@ -6,88 +6,87 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useTheme } from '../context/ThemeContext';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
-import ScanArea from '../components/ScanArea';
+import ScanOverlay from '../components/ScanOverlay';
+import { FormatValidationService } from '../services/FormatValidationService';
 
 const { width, height } = Dimensions.get('window');
 
 // Barcode validation utility
-const validateBarcode = (barcode: string, config: any): { isValid: boolean; error?: string } => {
+const validateBarcode = async (barcode: string, organizationId: string): Promise<{ isValid: boolean; error?: string }> => {
   if (!barcode || !barcode.trim()) {
     return { isValid: false, error: 'Barcode cannot be empty' };
   }
 
   const trimmedBarcode = barcode.trim();
 
-  // Check if organization has specific barcode format
-  if (config?.barcodeFormat?.pattern) {
-    try {
-      const regex = new RegExp(config.barcodeFormat.pattern);
-      if (!regex.test(trimmedBarcode)) {
-        return { 
-          isValid: false, 
-          error: `Invalid barcode format. Expected: ${config.barcodeFormat.description || 'matches organization pattern'}`
-        };
-      }
-    } catch (error) {
-      console.warn('Invalid regex pattern in barcode config:', error);
-      // Fall back to basic validation if regex is invalid
+  if (!organizationId) {
+    // Fallback to basic validation if no organization
+    const basicPattern = /^[A-Za-z0-9\-_*%]+$/;
+    if (!basicPattern.test(trimmedBarcode)) {
+      return { 
+        isValid: false, 
+        error: 'Barcode contains invalid characters. Only letters, numbers, and basic symbols are allowed.' 
+      };
     }
+    if (trimmedBarcode.length < 3) {
+      return { isValid: false, error: 'Barcode too short (minimum 3 characters)' };
+    }
+    if (trimmedBarcode.length > 50) {
+      return { isValid: false, error: 'Barcode too long (maximum 50 characters)' };
+    }
+    return { isValid: true };
   }
 
-  // Basic validation - no special characters that could cause issues
-  const basicPattern = /^[A-Za-z0-9\-_*%]+$/;
-  if (!basicPattern.test(trimmedBarcode)) {
-    return { 
-      isValid: false, 
-      error: 'Barcode contains invalid characters. Only letters, numbers, and basic symbols are allowed.' 
-    };
+  try {
+    return await FormatValidationService.validateBarcode(trimmedBarcode, organizationId);
+  } catch (error) {
+    console.error('Error validating barcode:', error);
+    // Fallback to basic validation
+    const basicPattern = /^[A-Za-z0-9\-_*%]+$/;
+    if (!basicPattern.test(trimmedBarcode)) {
+      return { 
+        isValid: false, 
+        error: 'Barcode contains invalid characters. Only letters, numbers, and basic symbols are allowed.' 
+      };
+    }
+    return { isValid: true };
   }
-
-  // Length validation
-  if (trimmedBarcode.length < 3) {
-    return { isValid: false, error: 'Barcode too short (minimum 3 characters)' };
-  }
-  
-  if (trimmedBarcode.length > 50) {
-    return { isValid: false, error: 'Barcode too long (maximum 50 characters)' };
-  }
-
-  return { isValid: true };
 };
 
 // Order number validation utility
-const validateOrderNumber = (orderNumber: string, config: any): { isValid: boolean; error?: string } => {
+const validateOrderNumber = async (orderNumber: string, organizationId: string): Promise<{ isValid: boolean; error?: string }> => {
   if (!orderNumber || !orderNumber.trim()) {
     return { isValid: false, error: 'Order number cannot be empty' };
   }
 
   const trimmedOrder = orderNumber.trim();
 
-  // Check if organization has specific order number format
-  if (config?.orderNumberFormat?.pattern) {
-    try {
-      const regex = new RegExp(config.orderNumberFormat.pattern);
-      if (!regex.test(trimmedOrder)) {
-        return { 
-          isValid: false, 
-          error: `Invalid order format. Expected: ${config.orderNumberFormat.description || 'matches organization pattern'}`
-        };
-      }
-    } catch (error) {
-      console.warn('Invalid regex pattern in order number config:', error);
+  if (!organizationId) {
+    // Fallback to basic validation if no organization
+    const basicPattern = /^[A-Za-z0-9\-_]+$/;
+    if (!basicPattern.test(trimmedOrder)) {
+      return { 
+        isValid: false, 
+        error: 'Order number contains invalid characters. Only letters, numbers, hyphens, and underscores are allowed.' 
+      };
     }
+    return { isValid: true };
   }
 
-  // Basic alphanumeric validation
-  const basicPattern = /^[A-Za-z0-9\-_]+$/;
-  if (!basicPattern.test(trimmedOrder)) {
-    return { 
-      isValid: false, 
-      error: 'Order number contains invalid characters. Only letters, numbers, hyphens, and underscores are allowed.' 
-    };
+  try {
+    return await FormatValidationService.validateOrderNumber(trimmedOrder, organizationId);
+  } catch (error) {
+    console.error('Error validating order number:', error);
+    // Fallback to basic validation
+    const basicPattern = /^[A-Za-z0-9\-_]+$/;
+    if (!basicPattern.test(trimmedOrder)) {
+      return { 
+        isValid: false, 
+        error: 'Order number contains invalid characters. Only letters, numbers, hyphens, and underscores are allowed.' 
+      };
+    }
+    return { isValid: true };
   }
-
-  return { isValid: true };
 };
 
 export default function ScanCylindersScreen() {
@@ -102,7 +101,7 @@ export default function ScanCylindersScreen() {
   const navigation = useNavigation();
   const { colors } = useTheme();
   const { config: assetConfig } = useAssetConfig();
-  const { organization } = useAuth();
+  const { profile } = useAuth();
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scannerTarget, setScannerTarget] = useState<'customer' | 'order' | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -114,21 +113,41 @@ export default function ScanCylindersScreen() {
 
   useEffect(() => {
     const fetchCustomers = async () => {
+      if (!profile?.organization_id) {
+        console.log('No organization found, skipping customer fetch');
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       setError(null);
-      const { data, error } = await supabase
-        .from('customers')
-        .select('name, barcode, CustomerListID');
-      if (error) {
-        setError('Failed to load customers');
+      
+      try {
+        // Fetch customers for the current organization
+        const { data, error } = await supabase
+          .from('customers')
+          .select('name, barcode, CustomerListID')
+          .eq('organization_id', profile.organization_id);
+          
+        if (error) {
+          console.error('Error fetching customers:', error);
+          setError('Failed to load customers: ' + error.message);
+          setCustomers([]);
+        } else {
+          setCustomers(data || []);
+          setError(null);
+        }
+      } catch (err) {
+        console.error('Unexpected error fetching customers:', err);
+        setError('Failed to load customers: ' + err.message);
         setCustomers([]);
-      } else {
-        setCustomers(data || []);
       }
+      
       setLoading(false);
     };
+    
     fetchCustomers();
-  }, []);
+  }, [profile]);
 
   useEffect(() => {
     if (scannerVisible) {
@@ -138,23 +157,29 @@ export default function ScanCylindersScreen() {
 
   // Validate order number when it changes
   useEffect(() => {
-    if (orderNumber.trim()) {
-      const validation = validateOrderNumber(orderNumber, assetConfig);
-      setOrderError(validation.isValid ? '' : validation.error || '');
-    } else {
-      setOrderError('');
-    }
-  }, [orderNumber, assetConfig]);
+    const validateOrder = async () => {
+      if (orderNumber.trim()) {
+        const validation = await validateOrderNumber(orderNumber, profile?.organization_id || '');
+        setOrderError(validation.isValid ? '' : validation.error || '');
+      } else {
+        setOrderError('');
+      }
+    };
+    validateOrder();
+  }, [orderNumber, profile?.organization_id]);
 
   // Validate customer barcode when search changes
   useEffect(() => {
-    if (search.trim() && !selectedCustomer) {
-      const validation = validateBarcode(search, assetConfig);
-      setCustomerBarcodeError(validation.isValid ? '' : validation.error || '');
-    } else {
-      setCustomerBarcodeError('');
-    }
-  }, [search, selectedCustomer, assetConfig]);
+    const validateCustomer = async () => {
+      if (search.trim() && !selectedCustomer) {
+        const validation = await validateBarcode(search, profile?.organization_id || '');
+        setCustomerBarcodeError(validation.isValid ? '' : validation.error || '');
+      } else {
+        setCustomerBarcodeError('');
+      }
+    };
+    validateCustomer();
+  }, [search, selectedCustomer, profile?.organization_id]);
 
   const filteredCustomers = (() => {
     if (!search.trim()) return customers;
@@ -198,25 +223,23 @@ export default function ScanCylindersScreen() {
     return uniqueMatches;
   })();
 
-  const handleBarcodeScanned = ({ type, data }: { type: string; data: string }) => {
+  const handleBarcodeScanned = async ({ type, data }: { type: string; data: string }) => {
     if (scanned) return;
     setScanned(true);
     
     // Validate the scanned barcode
-    const validation = validateBarcode(data, assetConfig);
+    const validation = await validateBarcode(data, profile?.organization_id || '');
     
     if (!validation.isValid) {
-      Alert.alert(
-        'Invalid Barcode',
-        validation.error || 'The scanned barcode is not valid for this organization.',
-        [
-          { text: 'Try Again', onPress: () => setScanned(false) },
-          { text: 'Cancel', onPress: () => setScannerVisible(false) }
-        ]
-      );
+      setCustomerBarcodeError(validation.error || 'Invalid barcode format');
+      setTimeout(() => {
+        setScanned(false);
+        setCustomerBarcodeError('');
+      }, 2000);
       return;
     }
 
+    // Apply the scanned data based on target
     if (scannerTarget === 'customer') {
       setSearch(data);
       setShowCustomerScan(false);
@@ -227,27 +250,45 @@ export default function ScanCylindersScreen() {
     
     setScannerVisible(false);
     setScannerTarget(null);
-    
-    // Reset scanned state after delay
-    setTimeout(() => setScanned(false), scanDelay);
+    setTimeout(() => setScanned(false), 1500);
   };
 
   const openScanner = async (target: 'customer' | 'order') => {
-    if (!permission?.granted) {
-      const result = await requestPermission();
-      if (!result.granted) {
-        Alert.alert('Camera Permission', 'Camera permission is required to scan barcodes.');
-        return;
+    try {
+      if (!permission?.granted) {
+        const result = await requestPermission();
+        if (!result.granted) {
+          Alert.alert(
+            'Camera Permission Required', 
+            'Camera permission is required to scan barcodes. Please enable camera access in your device settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Settings', onPress: () => {
+                // This would typically open device settings
+                // For now, just show an alert
+                Alert.alert('Settings', 'Please go to your device settings and enable camera permission for this app.');
+              }}
+            ]
+          );
+          return;
+        }
       }
+      
+      setScannerTarget(target);
+      if (target === 'customer') {
+        setShowCustomerScan(true);
+      } else {
+        setShowOrderScan(true);
+      }
+      setScannerVisible(true);
+    } catch (error) {
+      console.error('Error opening scanner:', error);
+      Alert.alert(
+        'Scanner Error',
+        'Failed to open camera scanner. Please try again.',
+        [{ text: 'OK' }]
+      );
     }
-    
-    setScannerTarget(target);
-    if (target === 'customer') {
-      setShowCustomerScan(true);
-    } else {
-      setShowOrderScan(true);
-    }
-    setScannerVisible(true);
   };
 
   const canProceed = selectedCustomer && orderNumber.trim() && !orderError && !customerBarcodeError;
@@ -286,8 +327,15 @@ export default function ScanCylindersScreen() {
                 autoCapitalize="characters"
               />
               <TouchableOpacity
-                style={[styles.scanButton, { backgroundColor: colors.primary }]}
+                style={[
+                  styles.scanButton, 
+                  { 
+                    backgroundColor: colors.primary,
+                    opacity: permission?.granted ? 1 : 0.6
+                  }
+                ]}
                 onPress={() => openScanner('order')}
+                disabled={!permission?.granted}
               >
                 <Text style={styles.scanButtonText}>📷</Text>
               </TouchableOpacity>
@@ -299,6 +347,11 @@ export default function ScanCylindersScreen() {
                 Examples: {assetConfig.orderNumberFormat.examples.slice(0, 2).join(', ')}
               </Text>
             ) : null}
+            {!permission?.granted && (
+              <Text style={[styles.helperText, { color: colors.warning || '#F59E0B' }]}>
+                Camera permission required for scanning
+              </Text>
+            )}
           </View>
 
           {/* Customer Selection */}
@@ -324,8 +377,15 @@ export default function ScanCylindersScreen() {
                 autoCapitalize="characters"
               />
               <TouchableOpacity
-                style={[styles.scanButton, { backgroundColor: colors.primary }]}
+                style={[
+                  styles.scanButton, 
+                  { 
+                    backgroundColor: colors.primary,
+                    opacity: permission?.granted ? 1 : 0.6
+                  }
+                ]}
                 onPress={() => openScanner('customer')}
+                disabled={!permission?.granted}
               >
                 <Text style={styles.scanButtonText}>📷</Text>
               </TouchableOpacity>
@@ -337,6 +397,11 @@ export default function ScanCylindersScreen() {
                 Barcode examples: {assetConfig.barcodeFormat.examples.slice(0, 2).join(', ')}
               </Text>
             ) : null}
+            {!permission?.granted && (
+              <Text style={[styles.helperText, { color: colors.warning || '#F59E0B' }]}>
+                Camera permission required for scanning
+              </Text>
+            )}
           </View>
 
           {/* Customer List */}
@@ -419,16 +484,17 @@ export default function ScanCylindersScreen() {
               barcodeScannerSettings={{
                 barcodeTypes: ['qr', 'pdf417', 'code128', 'code39', 'code93', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e'],
               }}
-            >
-              <ScanArea 
-                title="Scan Customer Barcode"
-                subtitle="Position the barcode within the frame"
-                onClose={() => {
-                  setShowCustomerScan(false);
-                  setScannerVisible(false);
-                }}
-              />
-            </CameraView>
+            />
+            <ScanOverlay 
+              title="Scan Customer Barcode"
+              subtitle="Position the customer barcode within the frame"
+              isScanning={scanned}
+              onClose={() => {
+                setShowCustomerScan(false);
+                setScannerVisible(false);
+                setScannerTarget(null);
+              }}
+            />
           </View>
         </Modal>
       )}
@@ -443,16 +509,17 @@ export default function ScanCylindersScreen() {
               barcodeScannerSettings={{
                 barcodeTypes: ['qr', 'pdf417', 'code128', 'code39', 'code93', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e'],
               }}
-            >
-              <ScanArea 
-                title="Scan Order Number"
-                subtitle="Position the order barcode within the frame"
-                onClose={() => {
-                  setShowOrderScan(false);
-                  setScannerVisible(false);
-                }}
-              />
-            </CameraView>
+            />
+            <ScanOverlay 
+              title="Scan Order Number"
+              subtitle="Position the order barcode within the frame"
+              isScanning={scanned}
+              onClose={() => {
+                setShowOrderScan(false);
+                setScannerVisible(false);
+                setScannerTarget(null);
+              }}
+            />
           </View>
         </Modal>
       )}

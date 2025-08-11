@@ -36,6 +36,7 @@ export default function UserInvites() {
   const [success, setSuccess] = useState('');
   const [copiedToken, setCopiedToken] = useState('');
   const [roles, setRoles] = useState([]);
+  const [manualInviteLink, setManualInviteLink] = useState('');
 
   useEffect(() => {
     if (profile?.role === 'owner') {
@@ -161,6 +162,7 @@ export default function UserInvites() {
         const inviteLink = `${window.location.origin}/accept-invite?token=${inviteRow.token}`;
         
         try {
+          // Try to send email using Netlify function first
           const emailResponse = await fetch('/.netlify/functions/send-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -179,14 +181,27 @@ export default function UserInvites() {
           if (!emailResponse.ok) {
             const errorData = await emailResponse.json();
             console.error('Email sending failed:', errorData);
-            throw new Error(`Failed to send email: ${errorData.error || 'Unknown error'}`);
+            
+            // If email fails, show the invite link so it can be sent manually
+            setError(`Invite created successfully! However, email sending failed: ${errorData.error || 'Unknown error'}. You can copy the invite link below and send it manually.`);
+            
+            // Show the invite link for manual copying
+            const manualInviteLink = `${window.location.origin}/accept-invite?token=${inviteRow.token}`;
+            console.log('Manual invite link:', manualInviteLink);
+            
+            // You could also store this in state to display to the user
+            setManualInviteLink(manualInviteLink);
+          } else {
+            console.log('Invitation email sent successfully to:', newInvite.email);
           }
-
-          console.log('Invitation email sent successfully to:', newInvite.email);
         } catch (emailError) {
           console.error('Error sending invitation email:', emailError);
           // Don't throw here - the invite was created successfully, just email failed
           setError(`Invite created but email failed to send: ${emailError.message}. You can copy the invite link manually.`);
+          
+          // Show the invite link for manual copying
+          const manualInviteLink = `${window.location.origin}/accept-invite?token=${inviteRow.token}`;
+          setManualInviteLink(manualInviteLink);
         }
       }
 
@@ -276,6 +291,38 @@ export default function UserInvites() {
       {success && (
         <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
           {success}
+        </Alert>
+      )}
+
+      {/* Manual Invite Link Display */}
+      {manualInviteLink && (
+        <Alert severity="warning" sx={{ mt: 2 }}>
+          <Typography variant="subtitle2" gutterBottom>
+            📧 Email sending failed, but invite was created successfully!
+          </Typography>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            You can copy the invite link below and send it manually:
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <TextField
+              fullWidth
+              size="small"
+              value={manualInviteLink}
+              InputProps={{ readOnly: true }}
+              sx={{ '& .MuiInputBase-input': { fontSize: '0.875rem' } }}
+            />
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => {
+                navigator.clipboard.writeText(manualInviteLink);
+                setSuccess('Invite link copied to clipboard!');
+                setTimeout(() => setManualInviteLink(''), 3000);
+              }}
+            >
+              Copy
+            </Button>
+          </Box>
         </Alert>
       )}
 

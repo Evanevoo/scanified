@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView } from 'react-native';
 import { supabase } from '../supabase';
 import { Picker } from '@react-native-picker/picker';
 import { useTheme } from '../context/ThemeContext';
 import ScanArea from '../components/ScanArea';
 import { useAuth } from '../hooks/useAuth';
 import { CylinderLimitService } from '../services/CylinderLimitService';
+import { useAssetConfig } from '../context/AssetContext';
 
 interface GasType {
   id: number;
@@ -32,6 +33,7 @@ interface Location {
 
 export default function AddCylinderScreen() {
   const { colors } = useTheme();
+  const { config: assetConfig } = useAssetConfig();
   const [barcode, setBarcode] = useState('');
   const [serial, setSerial] = useState('');
   const [gasTypes, setGasTypes] = useState<GasType[]>([]);
@@ -48,6 +50,7 @@ export default function AddCylinderScreen() {
   const [selectedOwner, setSelectedOwner] = useState('');
   const [addingOwner, setAddingOwner] = useState(false);
   const [newOwnerName, setNewOwnerName] = useState('');
+  const [scannerVisible, setScannerVisible] = useState(false);
 
   useEffect(() => {
     const fetchGasTypes = async () => {
@@ -158,13 +161,15 @@ export default function AddCylinderScreen() {
     
     // Check for duplicate barcode or serial
     const { data: barcodeDup, error: barcodeError } = await supabase
-              .from('assets')
+      .from('bottles')
       .select('id')
+      .eq('organization_id', profile.organization_id)
       .eq('barcode_number', barcode);
     
     const { data: serialDup, error: serialError } = await supabase
-              .from('assets')
+      .from('bottles')
       .select('id')
+      .eq('organization_id', profile.organization_id)
       .eq('serial_number', serial);
     
     if (barcodeError || serialError) {
@@ -182,7 +187,7 @@ export default function AddCylinderScreen() {
     
     // Insert new bottle with gas type and location information
     const { error: insertError } = await supabase
-              .from('assets')
+      .from('bottles')
       .insert({ 
         barcode_number: barcode, 
         serial_number: serial, 
@@ -192,13 +197,14 @@ export default function AddCylinderScreen() {
         product_code: selectedGasTypeData.product_code,
         description: selectedGasTypeData.description,
         location: selectedLocationData.id,
-        ownership: selectedOwner
+        ownership: selectedOwner,
+        organization_id: profile.organization_id
       });
     setLoading(false);
     if (insertError) {
       setError('Failed to add cylinder.');
     } else {
-      setSuccess('Cylinder added successfully!');
+      setSuccess(`${assetConfig?.assetDisplayName || 'Asset'} added successfully!`);
       setBarcode('');
       setSerial('');
       setSelectedGasType('');
@@ -223,200 +229,345 @@ export default function AddCylinderScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}>
       <Text style={[styles.title, { color: colors.primary }]}>Add New Cylinder</Text>
-      <ScanArea
-        onScanned={setBarcode}
-        label="SCAN HERE"
-        style={{ marginBottom: 0 }}
-      />
-      <TextInput
-        style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-        placeholder="Barcode Number"
-        placeholderTextColor={colors.textSecondary}
-        value={barcode}
-        onChangeText={setBarcode}
-        autoCapitalize="none"
-      />
-      <TextInput
-        style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-        placeholder="Serial Number"
-        placeholderTextColor={colors.textSecondary}
-        value={serial}
-        onChangeText={setSerial}
-        autoCapitalize="none"
-      />
       
-      <Text style={[styles.label, { color: colors.text }]}>Gas Type</Text>
-      {loadingGasTypes ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color={colors.primary} />
-          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading gas types...</Text>
-        </View>
-      ) : gasTypes.length === 0 ? (
-        <Text style={[styles.error, { color: colors.error }]}>No gas types available. Please import gas types in the web app first.</Text>
-      ) : (
-        <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Picker
-            selectedValue={selectedGasType}
-            onValueChange={setSelectedGasType}
-            style={[styles.picker, { color: colors.text }]}
-          >
-            <Picker.Item label="Select Gas Type" value="" color={colors.textSecondary} />
-            {gasTypes.map(type => (
-              <Picker.Item 
-                key={type.id} 
-                label={type.type} 
-                value={type.id.toString()}
-                color={colors.text}
-              />
-            ))}
-          </Picker>
-        </View>
-      )}
-      
-      <Text style={[styles.label, { color: colors.text }]}>Location</Text>
-      {loadingLocations ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color={colors.primary} />
-          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading locations...</Text>
-        </View>
-      ) : locations.length === 0 ? (
-        <Text style={[styles.error, { color: colors.error }]}>No locations available. Please add locations in the web app first.</Text>
-      ) : (
-        <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Picker
-            selectedValue={selectedLocation}
-            onValueChange={setSelectedLocation}
-            style={[styles.picker, { color: colors.text }]}
-          >
-            <Picker.Item label="Select Location" value="" color={colors.textSecondary} />
-            {locations.map(location => {
-              const label = `${location.name}, ${location.province}`;
-              return (
-                <Picker.Item 
-                  key={location.id} 
-                  label={label} 
-                  value={location.id}
-                  color={colors.text}
-                />
-              );
-            })}
-          </Picker>
-        </View>
-      )}
-      
-      <Text style={[styles.label, { color: colors.text }]}>Ownership</Text>
-      <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-        <Picker
-          selectedValue={selectedOwner}
-          onValueChange={value => {
-            if (value === '__add_new__') setAddingOwner(true);
-            else setSelectedOwner(value);
-          }}
-          style={[styles.picker, { color: colors.text }]}
+      {/* Scanner Section */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.primary }]}>Scan Barcode</Text>
+        <TouchableOpacity
+          style={[styles.scanButton, { backgroundColor: colors.primary }]}
+          onPress={() => setScannerVisible(true)}
         >
-          <Picker.Item label="Select Owner" value="" color={colors.textSecondary} />
-          {owners.map(owner => (
-            <Picker.Item key={owner.id} label={owner.name} value={owner.name} color={colors.text} />
-          ))}
-          <Picker.Item label="Add new owner..." value="__add_new__" color={colors.textSecondary} />
-        </Picker>
+          <Text style={[styles.scanButtonText, { color: colors.surface }]}>
+            {barcode ? `✓ Scanned: ${barcode}` : '📷 SCAN BARCODE'}
+          </Text>
+        </TouchableOpacity>
+        {barcode && (
+          <Text style={[styles.scanSuccess, { color: colors.success }]}>
+            ✓ Barcode scanned successfully
+          </Text>
+        )}
       </View>
-      {addingOwner && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+
+      {/* Basic Information Section */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.primary }]}>Basic Information</Text>
+        
+        <View style={styles.inputGroup}>
+          <Text style={[styles.inputLabel, { color: colors.text }]}>Barcode Number</Text>
           <TextInput
-            style={[styles.input, { flex: 1, backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-            placeholder="New owner name"
+            style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+            placeholder="Enter barcode number"
             placeholderTextColor={colors.textSecondary}
-            value={newOwnerName}
-            onChangeText={setNewOwnerName}
-            autoCapitalize="words"
+            value={barcode}
+            onChangeText={setBarcode}
+            autoCapitalize="none"
           />
-          <TouchableOpacity style={[styles.submitBtn, { marginLeft: 8, backgroundColor: colors.primary }]} onPress={handleAddOwner}>
-            <Text style={[styles.submitBtnText, { color: colors.surface }]}>Add</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.submitBtn, { marginLeft: 8, backgroundColor: colors.border }]} onPress={() => setAddingOwner(false)}>
-            <Text style={[styles.submitBtnText, { color: colors.text }]}>Cancel</Text>
-          </TouchableOpacity>
         </View>
-      )}
-      
+
+        <View style={styles.inputGroup}>
+          <Text style={[styles.inputLabel, { color: colors.text }]}>Serial Number</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+            placeholder="Enter serial number"
+            placeholderTextColor={colors.textSecondary}
+            value={serial}
+            onChangeText={setSerial}
+            autoCapitalize="none"
+          />
+        </View>
+      </View>
+
+      {/* Configuration Section */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.primary }]}>Configuration</Text>
+        
+        <View style={styles.inputGroup}>
+          <Text style={[styles.inputLabel, { color: colors.text }]}>Gas Type</Text>
+          {loadingGasTypes ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={[styles.loadingText, { color: colors.text }]}>Loading gas types...</Text>
+            </View>
+          ) : (
+            <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Picker
+                selectedValue={selectedGasType}
+                onValueChange={setSelectedGasType}
+                style={[styles.picker, { color: colors.text }]}
+              >
+                <Picker.Item label="Select Gas Type" value="" color={colors.textSecondary} />
+                {gasTypes.map(gasType => (
+                  <Picker.Item 
+                    key={gasType.id} 
+                    label={`${gasType.category} - ${gasType.type}`} 
+                    value={gasType.id.toString()} 
+                    color={colors.text} 
+                  />
+                ))}
+              </Picker>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={[styles.inputLabel, { color: colors.text }]}>Location</Text>
+          {loadingLocations ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={[styles.loadingText, { color: colors.text }]}>Loading locations...</Text>
+            </View>
+          ) : (
+            <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Picker
+                selectedValue={selectedLocation}
+                onValueChange={setSelectedLocation}
+                style={[styles.picker, { color: colors.text }]}
+              >
+                <Picker.Item label="Select Location" value="" color={colors.textSecondary} />
+                {locations.map(location => (
+                  <Picker.Item 
+                    key={location.id} 
+                    label={location.name} 
+                    value={location.id} 
+                    color={colors.text} 
+                  />
+                ))}
+              </Picker>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={[styles.inputLabel, { color: colors.text }]}>Ownership</Text>
+          <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Picker
+              selectedValue={selectedOwner}
+              onValueChange={value => {
+                if (value === '__add_new__') setAddingOwner(true);
+                else setSelectedOwner(value);
+              }}
+              style={[styles.picker, { color: colors.text }]}
+            >
+              <Picker.Item label="Select Owner" value="" color={colors.textSecondary} />
+              {owners.map(owner => (
+                <Picker.Item key={owner.id} label={owner.name} value={owner.name} color={colors.text} />
+              ))}
+              <Picker.Item label="Add new owner..." value="__add_new__" color={colors.textSecondary} />
+            </Picker>
+          </View>
+        </View>
+
+        {addingOwner && (
+          <View style={styles.addOwnerContainer}>
+            <TextInput
+              style={[styles.input, { flex: 1, backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+              placeholder="New owner name"
+              placeholderTextColor={colors.textSecondary}
+              value={newOwnerName}
+              onChangeText={setNewOwnerName}
+              autoCapitalize="words"
+            />
+            <TouchableOpacity style={[styles.addOwnerBtn, { backgroundColor: colors.primary }]} onPress={handleAddOwner}>
+              <Text style={[styles.addOwnerBtnText, { color: colors.surface }]}>Add</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.cancelOwnerBtn, { backgroundColor: colors.border }]} onPress={() => setAddingOwner(false)}>
+              <Text style={[styles.cancelOwnerBtnText, { color: colors.text }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
+      {/* Error and Success Messages */}
       {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
       {success ? <Text style={[styles.success, { color: colors.success }]}>{success}</Text> : null}
-      <TouchableOpacity 
-        style={[
-          styles.submitBtn, 
-          { backgroundColor: colors.primary },
-          (loading || loadingGasTypes || loadingLocations || gasTypes.length === 0 || locations.length === 0) && { backgroundColor: colors.border }
-        ]} 
-        onPress={handleSubmit} 
-        disabled={loading || loadingGasTypes || loadingLocations || gasTypes.length === 0 || locations.length === 0}
+      
+      {/* Submit Button */}
+      <View style={styles.submitContainer}>
+        <TouchableOpacity 
+          style={[
+            styles.submitBtn, 
+            { backgroundColor: colors.primary },
+            (loading || loadingGasTypes || loadingLocations || gasTypes.length === 0 || locations.length === 0) && { backgroundColor: colors.border }
+          ]} 
+          onPress={handleSubmit} 
+          disabled={loading || loadingGasTypes || loadingLocations || gasTypes.length === 0 || locations.length === 0}
+        >
+          {loading ? <ActivityIndicator color={colors.surface} /> : <Text style={[styles.submitBtnText, { color: colors.surface }]}>Add Cylinder</Text>}
+        </TouchableOpacity>
+      </View>
+
+      {/* Scanner Modal */}
+      <Modal
+        visible={scannerVisible}
+        onRequestClose={() => setScannerVisible(false)}
+        animationType="slide"
+        transparent={false}
       >
-        {loading ? <ActivityIndicator color={colors.surface} /> : <Text style={[styles.submitBtnText, { color: colors.surface }]}>Add Cylinder</Text>}
-      </TouchableOpacity>
-    </View>
+        <View style={styles.modalOverlay}>
+          <ScanArea
+            onScanned={(scannedBarcode) => {
+              setBarcode(scannedBarcode);
+              setScannerVisible(false);
+            }}
+            label="SCAN HERE"
+            onClose={() => setScannerVisible(false)}
+          />
+        </View>
+      </Modal>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    padding: 24,
+    flexGrow: 1,
+    padding: 20,
+    paddingBottom: 40,
   },
   title: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 18,
+    marginBottom: 24,
     textAlign: 'center',
   },
-  input: {
-    borderRadius: 10,
-    padding: 12,
+  section: {
+    marginBottom: 32,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  inputGroup: {
+    marginBottom: 20,
+  },
+  inputLabel: {
     fontSize: 16,
-    marginBottom: 12,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  input: {
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
     borderWidth: 1,
   },
   pickerWrapper: {
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
-    marginBottom: 16,
+    overflow: 'hidden',
   },
   picker: {
-    height: 48,
+    height: 56,
     width: '100%',
-  },
-  submitBtn: {
-    borderRadius: 10,
-    padding: 14,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  submitBtnText: {
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  error: {
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  success: {
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  label: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 8,
   },
   loadingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    padding: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
   },
   loadingText: {
-    fontWeight: 'bold',
+    fontWeight: '600',
     marginLeft: 8,
+  },
+  scanButton: {
+    borderRadius: 12,
+    padding: 18,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  scanButtonText: {
+    fontWeight: 'bold',
+    fontSize: 18,
+  },
+  scanSuccess: {
+    marginTop: 12,
+    textAlign: 'center',
+    fontSize: 14,
+  },
+  addOwnerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    gap: 8,
+  },
+  addOwnerBtn: {
+    borderRadius: 8,
+    padding: 12,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  addOwnerBtnText: {
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  cancelOwnerBtn: {
+    borderRadius: 8,
+    padding: 12,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  cancelOwnerBtnText: {
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  submitContainer: {
+    marginTop: 32,
+    paddingHorizontal: 20,
+  },
+  submitBtn: {
+    borderRadius: 12,
+    padding: 18,
+    alignItems: 'center',
+  },
+  submitBtnText: {
+    fontWeight: 'bold',
+    fontSize: 18,
+  },
+  error: {
+    marginBottom: 16,
+    textAlign: 'center',
+    padding: 12,
+    backgroundColor: '#fef2f2',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  success: {
+    marginBottom: 16,
+    textAlign: 'center',
+    padding: 12,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    width: '80%',
+    alignItems: 'center',
+  },
+  modalCloseBtn: {
+    borderRadius: 12,
+    padding: 16,
+    width: '100%',
+    alignItems: 'center',
+  },
+  modalCloseBtnText: {
+    fontWeight: 'bold',
+    fontSize: 18,
   },
 }); 

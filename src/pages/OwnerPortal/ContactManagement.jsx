@@ -96,7 +96,7 @@ export default function ContactManagement() {
         '500+ employees'
       ],
       currentSolutionOptions: [
-        'TrackAbout',
+        'Legacy Systems',
         'TIMS Software',
         'Excel/Manual',
         'Custom Solution',

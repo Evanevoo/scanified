@@ -12,7 +12,7 @@ import {
   Clear as ClearIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
-import { notificationService } from '../services/notificationService';
+import { NotificationService } from '../services/notificationService';
 import { supabase } from '../supabase/client';
 
 export default function NotificationBell() {
@@ -48,29 +48,26 @@ export default function NotificationBell() {
   }, [profile]);
 
   const fetchNotifications = async () => {
-    if (!profile) return;
+    if (!organization?.id) return;
     
     try {
-      const data = await notificationService.getNotifications(
-        profile.id,
-        organization?.id,
-        10
-      );
-      setNotifications(data);
+      const result = await NotificationService.getNotifications(organization.id, { limit: 10 });
+      if (result.success) {
+        setNotifications(result.notifications || []);
+      }
     } catch (error) {
       console.error('Error fetching notifications:', error);
     }
   };
 
   const fetchUnreadCount = async () => {
-    if (!profile) return;
+    if (!organization?.id) return;
     
     try {
-      const count = await notificationService.getUnreadCount(
-        profile.id,
-        organization?.id
-      );
-      setUnreadCount(count);
+      const result = await NotificationService.getUnreadCount(organization.id);
+      if (result.success) {
+        setUnreadCount(result.count || 0);
+      }
     } catch (error) {
       console.error('Error fetching unread count:', error);
     }
@@ -87,14 +84,16 @@ export default function NotificationBell() {
   const handleNotificationClick = async (notification) => {
     try {
       // Mark as read
-      if (!notification.read) {
-        await notificationService.markAsRead(notification.id);
-        setNotifications(prev => 
-          prev.map(n => 
-            n.id === notification.id ? { ...n, read: true } : n
-          )
-        );
-        setUnreadCount(prev => Math.max(0, prev - 1));
+      if (!notification.is_read) {
+        const result = await NotificationService.markAsRead(notification.id);
+        if (result.success) {
+          setNotifications(prev => 
+            prev.map(n => 
+              n.id === notification.id ? { ...n, is_read: true } : n
+            )
+          );
+          setUnreadCount(prev => Math.max(0, prev - 1));
+        }
       }
 
       // Handle navigation based on notification type
@@ -115,13 +114,15 @@ export default function NotificationBell() {
   };
 
   const handleMarkAllAsRead = async () => {
-    if (!profile) return;
+    if (!organization?.id) return;
     
     setLoading(true);
     try {
-      await notificationService.markAllAsRead(profile.id, organization?.id);
-      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-      setUnreadCount(0);
+      const result = await NotificationService.markAllAsRead(organization.id);
+      if (result.success) {
+        setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+        setUnreadCount(0);
+      }
     } catch (error) {
       console.error('Error marking all as read:', error);
     } finally {
@@ -132,10 +133,12 @@ export default function NotificationBell() {
   const handleDeleteNotification = async (notificationId, event) => {
     event.stopPropagation();
     try {
-      await notificationService.deleteNotification(notificationId);
-      setNotifications(prev => prev.filter(n => n.id !== notificationId));
-      if (unreadCount > 0) {
-        setUnreadCount(prev => Math.max(0, prev - 1));
+      const result = await NotificationService.deleteNotification(notificationId);
+      if (result.success) {
+        setNotifications(prev => prev.filter(n => n.id !== notificationId));
+        if (unreadCount > 0) {
+          setUnreadCount(prev => Math.max(0, prev - 1));
+        }
       }
     } catch (error) {
       console.error('Error deleting notification:', error);

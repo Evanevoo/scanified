@@ -1,17 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, Dimensions, TextInput, Vibration, Alert } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useRoute } from '@react-navigation/native';
+import { useRoute, useNavigation } from '@react-navigation/native';
 import { supabase } from '../supabase';
 import { SyncService } from '../services/SyncService';
 import { useTheme } from '../context/ThemeContext';
+import { useAssetConfig } from '../context/AssetContext';
+import { useAuth } from '../hooks/useAuth';
+import ScanOverlay from '../components/ScanOverlay';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { FormatValidationService } from '../services/FormatValidationService';
 
 const { width } = Dimensions.get('window');
 
 export default function ScanCylindersActionScreen() {
   const route = useRoute();
-  const { customer, orderNumber } = route.params || {};
+  const navigation = useNavigation();
+  const { customer, orderNumber } = route.params as { customer?: any; orderNumber?: string } || {};
   const { colors } = useTheme();
+  const { config: assetConfig } = useAssetConfig();
+  const { profile } = useAuth();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [mode, setMode] = useState('SHIP'); // 'SHIP' or 'RETURN'
@@ -19,8 +27,8 @@ export default function ScanCylindersActionScreen() {
   const [returnCount, setReturnCount] = useState(0);
   const [showManual, setShowManual] = useState(false);
   const [scanError, setScanError] = useState('');
-  const [scannedShip, setScannedShip] = useState([]);
-  const [scannedReturn, setScannedReturn] = useState([]);
+  const [scannedShip, setScannedShip] = useState<string[]>([]);
+  const [scannedReturn, setScannedReturn] = useState<string[]>([]);
   const [manualBarcode, setManualBarcode] = useState('');
   const [manualMode, setManualMode] = useState('SHIP');
   const [manualError, setManualError] = useState('');
@@ -30,19 +38,61 @@ export default function ScanCylindersActionScreen() {
   const [lastScanned, setLastScanned] = useState('');
   const [isConnected, setIsConnected] = useState(true);
   const [offlineCount, setOfflineCount] = useState(0);
+  const [scannerVisible, setScannerVisible] = useState(false);
+  const [hasUserClosedCamera, setHasUserClosedCamera] = useState(false);
+  const [formatConfig, setFormatConfig] = useState<any>(null);
 
-  const isValidBarcode = (barcode) => {
+  const isValidBarcode = (barcode: string) => {
     // Enhanced validation with better error messages
     if (!barcode || typeof barcode !== 'string') return false;
     const trimmed = barcode.trim();
     
-    // Check for 9-digit numeric pattern (existing requirement)
-    if (!/^\d{9}$/.test(trimmed)) return false;
+    // Use organization format configuration if available
+    if (formatConfig?.barcode_format?.enabled) {
+      try {
+        const regex = new RegExp(formatConfig.barcode_format.pattern);
+        if (!regex.test(trimmed)) return false;
+      } catch (error) {
+        console.warn('Invalid regex pattern in barcode config:', error);
+        // Fall back to basic validation
+      }
+    } else {
+      // Fall back to default validation (9-digit numeric pattern)
+      if (!/^\d{9}$/.test(trimmed)) return false;
+    }
     
     // Additional validation - check for common invalid patterns
     if (trimmed === '000000000' || trimmed === '123456789') return false;
     
     return true;
+  };
+
+  // Load format configuration
+  useEffect(() => {
+    loadFormatConfig();
+  }, [profile]);
+
+  const loadFormatConfig = async () => {
+    try {
+      if (!profile?.organization_id) return;
+
+      const { data: orgData, error } = await supabase
+        .from('organizations')
+        .select('format_configuration')
+        .eq('id', profile.organization_id)
+        .single();
+
+      if (error) {
+        console.warn('Error loading format configuration:', error);
+        return;
+      }
+
+      if (orgData?.format_configuration) {
+        setFormatConfig(orgData.format_configuration);
+      }
+    } catch (error) {
+      console.warn('Error loading format configuration:', error);
+    }
   };
 
   // Check connectivity and offline status
@@ -58,6 +108,14 @@ export default function ScanCylindersActionScreen() {
     
     return () => clearInterval(interval);
   }, []);
+
+  // Auto-open camera when screen loads - DISABLED to show full interface
+  // useEffect(() => {
+  //   if (permission?.granted && !scannerVisible && !hasUserClosedCamera) {
+  //     // Open camera immediately when permission is granted
+  //     setScannerVisible(true);
+  //   }
+  // }, [permission?.granted, scannerVisible, hasUserClosedCamera]);
 
   const checkConnectivity = async () => {
     const connected = await SyncService.checkConnectivity();
@@ -84,49 +142,14 @@ export default function ScanCylindersActionScreen() {
     }
   };
 
-  const handleBarcodeScanned = ({ data }) => {
+  const handleBarcodeScanned = ({ data }: { data: string }) => {
     const barcode = data.trim();
     
     if (!isValidBarcode(barcode)) {
-      setScanError('Invalid barcode: must be exactly 9 numbers');
-      setScanned(true);
-      playBeep();
-      setTimeout(() => {
-        setScanned(false);
-        setScanError('');
-      }, 2500); // Slightly longer display time
-      return;
-    }
-
-    // Check for duplicate in opposite list and move if found
-    if (mode === 'SHIP' && scannedReturn.includes(barcode)) {
-      setScannedReturn(list => list.filter(c => c !== barcode));
-      setReturnCount(count => Math.max(0, count - 1));
-      setScannedShip(list => [...list, barcode]);
-      setShipCount(count => count + 1);
-      setScanned(true);
-      setLastScanned(barcode);
-      playBeep();
-      setTimeout(() => setScanned(false), 1000);
-      return;
-    }
-
-    if (mode === 'RETURN' && scannedShip.includes(barcode)) {
-      setScannedShip(list => list.filter(c => c !== barcode));
-      setShipCount(count => Math.max(0, count - 1));
-      setScannedReturn(list => [...list, barcode]);
-      setReturnCount(count => count + 1);
-      setScanned(true);
-      setLastScanned(barcode);
-      playBeep();
-      setTimeout(() => setScanned(false), 1000);
-      return;
-    }
-
-    // Check for duplicate in same list
-    if ((mode === 'SHIP' && scannedShip.includes(barcode)) || 
-        (mode === 'RETURN' && scannedReturn.includes(barcode))) {
-      setScanError('Barcode already scanned in this list');
+      const errorMessage = formatConfig?.barcode_format?.enabled 
+        ? `Invalid barcode: ${formatConfig.barcode_format.description}`
+        : 'Invalid barcode: must be exactly 9 numbers';
+      setScanError(errorMessage);
       setScanned(true);
       playBeep();
       setTimeout(() => {
@@ -136,20 +159,61 @@ export default function ScanCylindersActionScreen() {
       return;
     }
 
-    // Add to appropriate list
-    setScanned(true);
-    setLastScanned(barcode);
-    playBeep();
-    
-    if (mode === 'SHIP') {
-      setShipCount(count => count + 1);
-      setScannedShip(list => [...list, barcode]);
-    } else {
-      setReturnCount(count => count + 1);
-      setScannedReturn(list => [...list, barcode]);
+    // Check if already scanned
+    if (scannedShip.includes(barcode) || scannedReturn.includes(barcode)) {
+      setScanError('Barcode already scanned');
+      setScanned(true);
+      playBeep();
+      setTimeout(() => {
+        setScanned(false);
+        setScanError('');
+      }, 2000);
+      return;
     }
-    
-    setTimeout(() => setScanned(false), 800);
+
+    // Add to appropriate list based on current mode
+    if (mode === 'SHIP') {
+      setScannedShip(list => [...list, barcode]);
+      setShipCount(count => count + 1);
+    } else {
+      setScannedReturn(list => [...list, barcode]);
+      setReturnCount(count => count + 1);
+    }
+
+    setLastScanned(barcode);
+    setScanned(true);
+    playBeep();
+    setTimeout(() => setScanned(false), 1500);
+  };
+
+  const handleManualSubmit = () => {
+    const barcode = manualBarcode.trim();
+    if (!isValidBarcode(barcode)) {
+      const errorMessage = formatConfig?.barcode_format?.enabled 
+        ? `Invalid barcode: ${formatConfig.barcode_format.description}`
+        : 'Invalid barcode: must be exactly 9 numbers';
+      setManualError(errorMessage);
+      return;
+    }
+
+    // Check if already scanned
+    if (scannedShip.includes(barcode) || scannedReturn.includes(barcode)) {
+      setManualError('Barcode already scanned');
+      return;
+    }
+
+    // Add to appropriate list based on manual mode
+    if (manualMode === 'SHIP') {
+      setScannedShip(list => [...list, barcode]);
+      setShipCount(count => count + 1);
+    } else {
+      setScannedReturn(list => [...list, barcode]);
+      setReturnCount(count => count + 1);
+    }
+
+    setManualBarcode('');
+    setManualError('');
+    setShowManual(false);
   };
 
   const handleFinishAndSync = async () => {
@@ -170,7 +234,7 @@ export default function ScanCylindersActionScreen() {
         const allBarcodes = [
           ...scannedShip.map(bc => ({ 
             order_number: orderNumber, 
-            asset_barcode: bc, 
+            bottle_barcode: bc, 
             mode: 'SHIP',
             customer_id: customer?.id,
             location: customer?.location || 'Unknown',
@@ -178,7 +242,7 @@ export default function ScanCylindersActionScreen() {
           })),
           ...scannedReturn.map(bc => ({ 
             order_number: orderNumber, 
-            asset_barcode: bc, 
+            bottle_barcode: bc, 
             mode: 'RETURN',
             customer_id: customer?.id,
             location: customer?.location || 'Unknown',
@@ -188,7 +252,17 @@ export default function ScanCylindersActionScreen() {
 
         // Save each scan offline
         for (const scan of allBarcodes) {
-          await SyncService.saveOfflineScan(scan);
+          try {
+            const existingData = await AsyncStorage.getItem('offline_scans');
+            const scans = existingData ? JSON.parse(existingData) : [];
+            scans.push({
+              ...scan,
+              timestamp: new Date().toISOString(),
+            });
+            await AsyncStorage.setItem('offline_scans', JSON.stringify(scans));
+          } catch (error) {
+            console.error('Error saving offline scan:', error);
+          }
         }
 
         await loadOfflineCount();
@@ -202,21 +276,38 @@ export default function ScanCylindersActionScreen() {
         setLastScanned('');
       } else {
         // Online - sync immediately
+        if (!profile?.organization_id) {
+          setSyncResult('Error: No organization found');
+          setSyncing(false);
+          return;
+        }
+
         const allBarcodes = [
-          ...scannedShip.map(bc => ({ order_number: orderNumber, asset_barcode: bc, mode: 'SHIP' })),
-          ...scannedReturn.map(bc => ({ order_number: orderNumber, asset_barcode: bc, mode: 'RETURN' })),
+          ...scannedShip.map(bc => ({ 
+            order_number: orderNumber, 
+            bottle_barcode: bc, 
+            mode: 'SHIP',
+            organization_id: profile.organization_id
+          })),
+          ...scannedReturn.map(bc => ({ 
+            order_number: orderNumber, 
+            bottle_barcode: bc, 
+            mode: 'RETURN',
+            organization_id: profile.organization_id
+          })),
         ];
 
-        const { error } = await supabase.from('asset_scans').insert(allBarcodes);
+        const { error } = await supabase.from('bottle_scans').insert(allBarcodes);
         
         if (error) {
           setSyncResult('Error: ' + error.message);
         } else {
           // Mark returned bottles as empty
-          if (scannedReturn.length > 0) {
+          if (scannedReturn.length > 0 && profile?.organization_id) {
             const { error: updateError } = await supabase
-              .from('assets')
+              .from('bottles')
               .update({ status: 'empty' })
+              .eq('organization_id', profile.organization_id)
               .in('barcode_number', scannedReturn);
             
             if (updateError) {
@@ -249,33 +340,61 @@ export default function ScanCylindersActionScreen() {
         }
       }
     } catch (e) {
-      setSyncResult('Error: ' + e.message);
+      const errorMessage = e instanceof Error ? e.message : 'Unknown error occurred';
+      setSyncResult('Error: ' + errorMessage);
     }
     setSyncing(false);
   };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header */}
-      <Text style={[styles.header, { color: colors.primary }]}>SCAN HERE</Text>
-      
-      {/* Connection Status */}
-      <View style={[styles.connectionStatus, { backgroundColor: isConnected ? colors.success : colors.warning }]}>
-        <Text style={[styles.connectionText, { color: colors.text }]}>
-          {isConnected ? '🟢 Online' : '🟡 Offline'}
-        </Text>
-        {offlineCount > 0 && (
+      {/* Connection Status - only show offline count if there are pending scans */}
+      {offlineCount > 0 && (
+        <View style={[styles.connectionStatus, { backgroundColor: colors.warning }]}>
           <Text style={[styles.connectionText, { color: colors.text }]}>
             {offlineCount} scan(s) pending sync
           </Text>
-        )}
-      </View>
-      
-      {scannedReturn.length > 0 && (
-        <Text style={[styles.infoNote, { color: colors.textSecondary }]}>
-          💡 Returned bottles will be automatically marked as empty when synced
-        </Text>
+        </View>
       )}
+      
+      {/* Mode Selection */}
+      <View style={styles.toggleRow}>
+        <TouchableOpacity
+          style={[styles.toggleButton, mode === 'SHIP' && styles.toggleButtonActive]}
+          onPress={() => setMode('SHIP')}
+        >
+          <Text style={[styles.toggleText, mode === 'SHIP' && styles.toggleTextActive]}>SHIP</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.toggleButton, mode === 'RETURN' && styles.toggleButtonActive]}
+          onPress={() => setMode('RETURN')}
+        >
+          <Text style={[styles.toggleText, mode === 'RETURN' && styles.toggleTextActive]}>RETURN</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Counters */}
+      <View style={styles.counterRowModern}>
+        <TouchableOpacity
+          style={[styles.counterBoxModern, mode === 'SHIP' && styles.counterBoxActiveModern]}
+          onPress={() => setMode('SHIP')}
+        >
+          <Text style={[styles.counterNumberModern, mode === 'SHIP' && styles.counterNumberActiveModern]}>{shipCount}</Text>
+          <Text style={[styles.counterLabelModern, mode === 'SHIP' && styles.counterLabelActiveModern]}>SHIP</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.counterBoxModern, mode === 'RETURN' && styles.counterBoxActiveModern]}
+          onPress={() => setMode('RETURN')}
+        >
+          <Text style={[styles.counterNumberModern, mode === 'RETURN' && styles.counterNumberActiveModern]}>{returnCount}</Text>
+          <Text style={[styles.counterLabelModern, mode === 'RETURN' && styles.counterLabelActiveModern]}>RETURN</Text>
+        </TouchableOpacity>
+      </View>
+
+      {lastScanned ? (
+        <Text style={styles.lastScanned}>Last scanned: {lastScanned}</Text>
+      ) : null}
+
       {/* Scan Area */}
       <View style={styles.scanAreaWrapper}>
         {scanError ? (
@@ -308,76 +427,23 @@ export default function ScanCylindersActionScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          <View style={styles.cameraContainer}>
-            <CameraView
-              style={styles.camera}
-              facing="back"
-              onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
-              barcodeScannerSettings={{
-                barcodeTypes: [
-                  'qr', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 
-                  'code128', 'pdf417', 'aztec', 'datamatrix', 'itf14', 'interleaved2of5'
-                ],
-                regionOfInterest: {
-                  x: 0.1, // 10% from left
-                  y: 0.35, // 35% from top
-                  width: 0.8, // 80% width
-                  height: 0.3, // 30% height
-                }
-              }}
-            />
-            
-            {/* Enhanced scanning frame */}
-            <View style={styles.scanningFrame} />
-            <View style={styles.cornerTL} />
-            <View style={styles.cornerTR} />
-            <View style={styles.cornerBL} />
-            <View style={styles.cornerBR} />
-            
-            {/* Scanning status indicator */}
-            {lastScanned && !scanError && (
-              <View style={styles.successOverlay}>
-                <Text style={styles.successText}>✓ Scanned: {lastScanned}</Text>
-              </View>
-            )}
-          </View>
+          <TouchableOpacity 
+            style={styles.cameraContainer}
+            onPress={() => {
+              setScannerVisible(true);
+              setHasUserClosedCamera(false);
+            }}
+          >
+            <Text style={styles.cameraPlaceholderText}>📷 Camera Scanner</Text>
+          </TouchableOpacity>
         )}
       </View>
-      {/* Counters below scan area */}
-      <View style={styles.counterRowModern}>
-        <TouchableOpacity
-          style={[styles.counterBoxModern, mode === 'SHIP' && styles.counterBoxActiveModern]}
-          onPress={() => setMode('SHIP')}
-        >
-          <Text style={[styles.counterNumberModern, mode === 'SHIP' && styles.counterNumberActiveModern]}>{shipCount}</Text>
-          <Text style={[styles.counterLabelModern, mode === 'SHIP' && styles.counterLabelActiveModern]}>SHIP</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.counterBoxModern, mode === 'RETURN' && styles.counterBoxActiveModern]}
-          onPress={() => setMode('RETURN')}
-        >
-          <Text style={[styles.counterNumberModern, mode === 'RETURN' && styles.counterNumberActiveModern]}>{returnCount}</Text>
-          <Text style={[styles.counterLabelModern, mode === 'RETURN' && styles.counterLabelActiveModern]}>RETURN</Text>
-        </TouchableOpacity>
-      </View>
-      {lastScanned ? (
-        <Text style={styles.lastScanned}>Last scanned: {lastScanned}</Text>
-      ) : null}
-      {/* Mode Toggle */}
-      <View style={styles.toggleRow}>
-        <TouchableOpacity
-          style={[styles.toggleButton, mode === 'SHIP' && styles.toggleButtonActive]}
-          onPress={() => setMode('SHIP')}
-        >
-          <Text style={[styles.toggleText, mode === 'SHIP' && styles.toggleTextActive]}>SHIP</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.toggleButton, mode === 'RETURN' && styles.toggleButtonActive]}
-          onPress={() => setMode('RETURN')}
-        >
-          <Text style={[styles.toggleText, mode === 'RETURN' && styles.toggleTextActive]}>RETURN</Text>
-        </TouchableOpacity>
-      </View>
+
+      {/* Manual Entry Button */}
+      <TouchableOpacity style={styles.manualButton} onPress={() => setShowManual(true)}>
+        <Text style={styles.manualButtonText}>Enter Barcode Manually</Text>
+      </TouchableOpacity>
+
       {/* Scanned Barcodes List */}
       <View style={{ width: '90%', maxWidth: 400, marginBottom: 12 }}>
         {scannedShip.length > 0 && (
@@ -413,111 +479,90 @@ export default function ScanCylindersActionScreen() {
           </View>
         )}
       </View>
-      {/* Manual Entry Button */}
-      <TouchableOpacity style={styles.manualButton} onPress={() => setShowManual(true)}>
-        <Text style={styles.manualButtonText}>Enter Barcode Manually</Text>
-      </TouchableOpacity>
-      {/* Manual Entry Modal (optional, can be implemented as needed) */}
-      <Modal visible={showManual} transparent animationType="slide" onRequestClose={() => setShowManual(false)}>
-        <View style={styles.manualModalBg}>
-          <View style={styles.manualModalBox}>
-            <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 12 }}>Manual Entry</Text>
-            {/* Mode Toggle */}
-            <View style={{ flexDirection: 'row', marginBottom: 12 }}>
-              <TouchableOpacity
-                style={[styles.toggleButton, manualMode === 'SHIP' && styles.toggleButtonActive]}
-                onPress={() => setManualMode('SHIP')}
-              >
-                <Text style={[styles.toggleText, manualMode === 'SHIP' && styles.toggleTextActive]}>SHIP</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.toggleButton, manualMode === 'RETURN' && styles.toggleButtonActive]}
-                onPress={() => setManualMode('RETURN')}
-              >
-                <Text style={[styles.toggleText, manualMode === 'RETURN' && styles.toggleTextActive]}>RETURN</Text>
-              </TouchableOpacity>
-            </View>
-            <TextInput
-              style={[styles.input, { marginBottom: 8 }]}
-              placeholder="Enter barcode (numbers only)"
-              value={manualBarcode}
-              onChangeText={setManualBarcode}
-              keyboardType="numeric"
-              autoFocus
-            />
-            {manualError ? <Text style={{ color: '#ff5a1f', marginBottom: 8 }}>{manualError}</Text> : null}
-            <TouchableOpacity
-              style={[styles.manualButton, { marginBottom: 8 }]}
-              onPress={() => {
-                const barcode = manualBarcode.trim();
-                if (!isValidBarcode(barcode)) {
-                  setManualError('Invalid barcode: must be exactly 9 numbers');
-                  return;
-                }
-                // If barcode is in the other list, move it
-                if (manualMode === 'SHIP' && scannedReturn.includes(barcode)) {
-                  setScannedReturn(list => list.filter(c => c !== barcode));
-                  setReturnCount(count => Math.max(0, count - 1));
-                  setScannedShip(list => [...list, barcode]);
-                  setShipCount(count => count + 1);
-                  setManualBarcode('');
-                  setManualError('');
-                  setShowManual(false);
-                  return;
-                }
-                if (manualMode === 'RETURN' && scannedShip.includes(barcode)) {
-                  setScannedShip(list => list.filter(c => c !== barcode));
-                  setShipCount(count => Math.max(0, count - 1));
-                  setScannedReturn(list => [...list, barcode]);
-                  setReturnCount(count => count + 1);
-                  setManualBarcode('');
-                  setManualError('');
-                  setShowManual(false);
-                  return;
-                }
-                // Prevent duplicate in the same list
-                if ((manualMode === 'SHIP' && scannedShip.includes(barcode)) || (manualMode === 'RETURN' && scannedReturn.includes(barcode))) {
-                  setManualError('Barcode already scanned');
-                  return;
-                }
-                if (manualMode === 'SHIP') {
-                  setScannedShip(list => [...list, barcode]);
-                  setShipCount(count => count + 1);
-                } else {
-                  setScannedReturn(list => [...list, barcode]);
-                  setReturnCount(count => count + 1);
-                }
-                setManualBarcode('');
-                setManualError('');
-                setShowManual(false);
-              }}
-            >
-              <Text style={{ color: '#2563eb', fontWeight: 'bold', fontSize: 16 }}>Add</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowManual(false)} style={styles.permissionButton}>
-              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Close</Text>
-            </TouchableOpacity>
-          </View>
+
+      {/* Next Button - appears when items are scanned */}
+      {(scannedShip.length > 0 || scannedReturn.length > 0) && (
+        <View style={{ width: '100%', alignItems: 'center', marginTop: 16 }}>
+          <TouchableOpacity
+            style={[styles.manualButton, { backgroundColor: '#2563eb', marginBottom: 8 }]}
+            onPress={() => setShowConfirm(true)}
+          >
+            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 18 }}>Next</Text>
+          </TouchableOpacity>
+          {syncing && <Text style={{ color: '#2563eb', marginTop: 8 }}>Syncing...</Text>}
+          {syncResult ? <Text style={{ color: syncResult.startsWith('Error') ? '#ff5a1f' : '#2563eb', marginTop: 8 }}>{syncResult}</Text> : null}
         </View>
-      </Modal>
-      {/* Finish Button */}
-      <View style={{ width: '100%', alignItems: 'center', marginTop: 16 }}>
-        <TouchableOpacity
-          style={[styles.manualButton, { backgroundColor: '#2563eb', marginBottom: 8 }]}
-          disabled={syncing || (scannedShip.length === 0 && scannedReturn.length === 0)}
-          onPress={() => setShowConfirm(true)}
-        >
-          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 18 }}>Finish & Sync</Text>
-        </TouchableOpacity>
-        {syncing && <Text style={{ color: '#2563eb', marginTop: 8 }}>Syncing...</Text>}
-        {syncResult ? <Text style={{ color: syncResult.startsWith('Error') ? '#ff5a1f' : '#2563eb', marginTop: 8 }}>{syncResult}</Text> : null}
-      </View>
+      )}
+
+      {/* Manual Entry Modal */}
+      {showManual && (
+        <Modal visible={showManual} animationType="slide" transparent>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Manual Entry</Text>
+              
+              {/* Mode Selection */}
+              <View style={styles.modalModeSelection}>
+                <Text style={[styles.modalLabel, { color: colors.text }]}>Select Mode:</Text>
+                <View style={styles.modalToggleRow}>
+                  <TouchableOpacity
+                    style={[styles.modalToggleButton, manualMode === 'SHIP' && { backgroundColor: colors.primary }]}
+                    onPress={() => setManualMode('SHIP')}
+                  >
+                    <Text style={[styles.modalToggleText, manualMode === 'SHIP' && { color: colors.surface }]}>SHIP</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalToggleButton, manualMode === 'RETURN' && { backgroundColor: colors.primary }]}
+                    onPress={() => setManualMode('RETURN')}
+                  >
+                    <Text style={[styles.modalToggleText, manualMode === 'RETURN' && { color: colors.surface }]}>RETURN</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <TextInput
+                style={[styles.modalInput, { borderColor: colors.primary, color: colors.text }]}
+                placeholder="Enter 9-digit barcode"
+                placeholderTextColor={colors.textSecondary}
+                value={manualBarcode}
+                onChangeText={setManualBarcode}
+                keyboardType="numeric"
+                maxLength={9}
+              />
+              
+              {manualError ? (
+                <Text style={[styles.modalError, { color: colors.error }]}>{manualError}</Text>
+              ) : null}
+              
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: colors.error }]}
+                  onPress={() => {
+                    setShowManual(false);
+                    setManualBarcode('');
+                    setManualError('');
+                  }}
+                >
+                  <Text style={[styles.modalButtonText, { color: colors.surface }]}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: colors.primary }]}
+                  onPress={handleManualSubmit}
+                >
+                  <Text style={[styles.modalButtonText, { color: colors.surface }]}>Submit</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
       {/* Confirmation Modal */}
       <Modal visible={showConfirm} transparent animationType="slide" onRequestClose={() => setShowConfirm(false)}>
         <View style={styles.manualModalBg}>
           <View style={[styles.manualModalBox, { maxHeight: '80%' }]}> 
-            <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 12 }}>Confirm Sync</Text>
-            <Text style={{ marginBottom: 8 }}>Please review all scanned/entered barcodes before syncing:</Text>
+            <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 12 }}>Review Scanned Items</Text>
+            <Text style={{ marginBottom: 8 }}>Please review all scanned/entered barcodes:</Text>
             {scannedShip.length > 0 && (
               <View style={{ marginBottom: 8 }}>
                 <Text style={{ fontWeight: 'bold', color: '#2563eb', marginBottom: 2 }}>SHIP:</Text>
@@ -544,18 +589,47 @@ export default function ScanCylindersActionScreen() {
                 style={[styles.manualButton, { backgroundColor: '#e0e7ff', flex: 1, marginRight: 8 }]}
                 onPress={() => setShowConfirm(false)}
               >
-                <Text style={{ color: '#2563eb', fontWeight: 'bold', fontSize: 16 }}>Cancel</Text>
+                <Text style={{ color: '#2563eb', fontWeight: 'bold', fontSize: 16 }}>Back</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.manualButton, { backgroundColor: '#2563eb', flex: 1, marginLeft: 8 }]}
-                onPress={handleFinishAndSync}
+                onPress={() => {
+                  setShowConfirm(false);
+                  handleFinishAndSync();
+                }}
               >
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Confirm & Sync</Text>
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Finish & Sync</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
+
+      {/* Camera Scanner Modal */}
+      {scannerVisible && (
+        <Modal visible={scannerVisible} animationType="slide">
+          <View style={styles.scannerContainer}>
+            <CameraView
+              style={styles.camera}
+              facing="back"
+              onBarcodeScanned={handleBarcodeScanned}
+              barcodeScannerSettings={{
+                barcodeTypes: ['qr', 'pdf417', 'code128', 'code39', 'code93', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e'],
+              }}
+            />
+            <ScanOverlay 
+              title="Scan Cylinder Barcode"
+              subtitle="Position the barcode within the frame"
+              isScanning={scanned}
+              onClose={() => {
+                setScannerVisible(false);
+                setHasUserClosedCamera(true);
+                navigation.goBack();
+              }}
+            />
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -583,15 +657,31 @@ const styles = StyleSheet.create({
   },
   cameraContainer: {
     width: '100%',
-    height: '100%',
+    height: 300,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#e2e8f0',
+    borderStyle: 'dashed',
+  },
+  cameraPlaceholder: {
+    width: '80%',
+    height: '60%',
+    borderWidth: 2,
+    borderColor: '#2563eb',
+    borderRadius: 10,
+    backgroundColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  camera: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 0,
-    overflow: 'hidden',
+  cameraPlaceholderText: {
+    color: '#2563eb',
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    padding: 20,
   },
   scanningFrame: {
     position: 'absolute',
@@ -782,6 +872,81 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   connectionText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '80%',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 16,
+    width: '100%',
+    marginBottom: 12,
+  },
+  modalError: {
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+  },
+  modalButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+  },
+  modalButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  scannerContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  camera: {
+    flex: 1,
+  },
+  modalModeSelection: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  modalLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  modalToggleRow: {
+    flexDirection: 'row',
+    backgroundColor: '#e0e7ff',
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  modalToggleButton: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  modalToggleText: {
     fontSize: 16,
     fontWeight: 'bold',
   },

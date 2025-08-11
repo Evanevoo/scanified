@@ -40,7 +40,7 @@ import { useNavigate } from 'react-router-dom';
 
 const competitorData = [
   {
-    name: 'TrackAbout',
+    name: 'Legacy Systems',
     description: 'Specialized in returnable container tracking',
     pricing: '$$$',
     strengths: [
@@ -185,7 +185,7 @@ export default function CompetitorAnalysis() {
     },
     {
       title: 'No Hardware Required',
-      description: 'Use any smartphone - no expensive scanners like TrackAbout requires',
+      description: 'Use any smartphone - no expensive scanners like legacy systems require',
       icon: <SecurityIcon />
     },
     {
@@ -390,7 +390,7 @@ export default function CompetitorAnalysis() {
             Switching from a Competitor?
           </Typography>
           <Typography sx={{ mb: 2 }}>
-            We make it easy to migrate from TrackAbout, Asset Panda, or any other system. 
+            We make it easy to migrate from legacy systems, Asset Panda, or any other platform. 
             Our team will handle the data migration and provide free onboarding to get you up and running quickly.
           </Typography>
           <Button variant="contained" onClick={() => navigate('/contact')}>

@@ -1,5 +1,5 @@
 import { supabase } from '../supabase/client';
-import { notificationService } from './notificationService';
+import { NotificationService } from './notificationService';
 
 export const usageService = {
   // Get current usage for an organization
@@ -111,33 +111,25 @@ export const usageService = {
 
       const message = `Your ${resourceNames[resource]} usage is at ${usage.percentage}% (${usage.current}/${usage.max}). Consider upgrading your plan to avoid service interruption.`;
 
-      // Send email alert
-      if (organization.admin_email) {
-        await notificationService.sendEmail(
-          organization.admin_email,
-          `Usage Alert: ${resourceNames[resource].charAt(0).toUpperCase() + resourceNames[resource].slice(1)} at ${threshold}%`,
-          'usage-alert',
-          {
-            organizationName: organization.name,
-            resource: resourceNames[resource],
-            currentUsage: usage.current,
-            maxUsage: usage.max,
-            percentage: usage.percentage,
-            threshold
-          }
-        );
-      }
-
-      // Create in-app notification
-      if (organization.admin_id) {
-        await notificationService.createInAppNotification(
-          organization.admin_id,
-          `Usage Alert: ${resourceNames[resource].charAt(0).toUpperCase() + resourceNames[resource].slice(1)} at ${usage.percentage}%`,
-          message,
-          threshold >= 95 ? 'error' : 'warning',
-          { resource, usage, threshold }
-        );
-      }
+      // Create in-app notification for usage alert
+      await NotificationService.createNotification({
+        organizationId: organizationId,
+        type: 'usage_alert',
+        title: `Usage Alert: ${resourceNames[resource].charAt(0).toUpperCase() + resourceNames[resource].slice(1)} at ${usage.percentage}%`,
+        message: message,
+        data: {
+          organizationName: organization.name,
+          resource: resourceNames[resource],
+          currentUsage: usage.current,
+          maxUsage: usage.max,
+          percentage: usage.percentage,
+          threshold,
+          resourceType: resource
+        },
+        priority: threshold >= 95 ? 'urgent' : 'high',
+        actionUrl: `/billing?tab=usage`,
+        actionText: 'View Usage Details'
+      });
     } catch (error) {
       console.error('Error sending usage alert:', error);
     }

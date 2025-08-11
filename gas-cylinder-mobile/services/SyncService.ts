@@ -480,6 +480,134 @@ export class SyncService {
     }
   }
 
+  // Static method for syncing offline data (used by SettingsScreen)
+  static async syncOfflineData(): Promise<SyncResult> {
+    if (this.syncInProgress) {
+      return {
+        success: false,
+        message: 'Sync already in progress',
+        errors: ['Sync already in progress'],
+      };
+    }
+
+    this.syncInProgress = true;
+    
+    try {
+      // Check connectivity first
+      const isConnected = await this.checkConnectivity();
+      if (!isConnected) {
+        return {
+          success: false,
+          message: 'No internet connection',
+          errors: ['No internet connection'],
+        };
+      }
+
+      // Get offline scans
+      const offlineScans = await this.getOfflineScans();
+      if (offlineScans.length === 0) {
+        return {
+          success: true,
+          message: 'No offline data to sync',
+          syncedItems: 0,
+        };
+      }
+
+      // Get current user's organization
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        return {
+          success: false,
+          message: 'No user found',
+          errors: ['No user found'],
+        };
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile?.organization_id) {
+        return {
+          success: false,
+          message: 'No organization found',
+          errors: ['No organization found'],
+        };
+      }
+
+      let syncedCount = 0;
+      const errors: string[] = [];
+
+      // Sync each offline scan
+      for (const scan of offlineScans) {
+        try {
+          const scanData = {
+            order_number: scan.order_number,
+            bottle_barcode: scan.bottle_barcode || scan.barcode,
+            mode: scan.mode || scan.scan_type,
+            customer_id: scan.customer_id,
+            location: scan.location,
+            timestamp: scan.timestamp,
+            user_id: scan.user_id,
+            organization_id: profile.organization_id,
+          };
+
+          const { error } = await supabase
+            .from('bottle_scans')
+            .insert(scanData);
+
+          if (error) {
+            errors.push(`Failed to sync scan ${scan.bottle_barcode || scan.barcode}: ${error.message}`);
+          } else {
+            syncedCount++;
+            
+            // If this is a return scan, mark the bottle as empty
+            if (scanData.mode === 'RETURN') {
+              const { error: updateError } = await supabase
+                .from('bottles')
+                .update({ status: 'empty' })
+                .eq('barcode_number', scanData.bottle_barcode)
+                .eq('organization_id', profile.organization_id);
+              
+              if (updateError) {
+                console.warn(`Could not update bottle status for ${scanData.bottle_barcode}:`, updateError);
+              }
+            }
+          }
+        } catch (error) {
+          errors.push(`Error syncing scan ${scan.bottle_barcode || scan.barcode}: ${error}`);
+        }
+      }
+
+      // Clear synced data if successful
+      if (syncedCount > 0) {
+        await AsyncStorage.removeItem('offline_scans');
+        await this.updateLastSyncTime();
+      }
+
+      return {
+        success: errors.length === 0,
+        message: errors.length === 0 
+          ? `Successfully synced ${syncedCount} items` 
+          : `Synced ${syncedCount} items with ${errors.length} errors`,
+        syncedItems: syncedCount,
+        errors: errors.length > 0 ? errors : undefined,
+      };
+
+    } catch (error) {
+      console.error('Error in static syncOfflineData:', error);
+      return {
+        success: false,
+        message: `Sync failed: ${error}`,
+        errors: [error.toString()],
+      };
+    } finally {
+      this.syncInProgress = false;
+    }
+  }
+
   // Get sync status
   static async getSyncStatus(): Promise<{
     isConnected: boolean;

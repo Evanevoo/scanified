@@ -35,10 +35,11 @@ import { supabase } from './supabase';
 const Stack = createNativeStackNavigator();
 
 function AppContent() {
-  const { user, organization, loading } = useAuth();
+  const { user, organization, loading, profile } = useAuth();
   const { config: assetConfig, loading: assetLoading } = useAssetConfig();
   const [isInitializing, setIsInitializing] = useState(true);
   const [checkingOrg, setCheckingOrg] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const { theme } = useTheme();
 
   // Provide default theme if undefined
@@ -49,20 +50,34 @@ function AppContent() {
   };
 
   useEffect(() => {
-    // Simulate app initialization
+    // Simulate app initialization with timeout protection
     const timer = setTimeout(() => {
       setIsInitializing(false);
-    }, 2000);
+    }, 3000); // Increased timeout for better reliability
+    
     return () => clearTimeout(timer);
   }, []);
+
+  // Handle authentication errors gracefully
+  useEffect(() => {
+    if (loading) return;
+    
+    // If we're not loading and there's no user, but we've been trying to load for too long
+    if (!user && !isInitializing && !loading) {
+      // This is normal - user needs to log in
+      setAuthError(null);
+    }
+  }, [user, loading, isInitializing]);
 
   // Enforce subscription/trial expiry
   useEffect(() => {
     if (!user || !organization) return;
     if (checkingOrg) return;
+    
     setCheckingOrg(true);
     const now = new Date();
     let expired = false;
+    
     if (organization.subscription_status === 'expired' || organization.subscription_status === 'cancelled') {
       expired = true;
     }
@@ -72,6 +87,7 @@ function AppContent() {
     if (!organization.is_active) {
       expired = true;
     }
+    
     if (expired) {
       Alert.alert(
         'Subscription Expired',
@@ -80,8 +96,13 @@ function AppContent() {
           {
             text: 'OK',
             onPress: async () => {
-              await supabase.auth.signOut();
-              setCheckingOrg(false);
+              try {
+                await supabase.auth.signOut();
+              } catch (error) {
+                console.error('Error signing out:', error);
+              } finally {
+                setCheckingOrg(false);
+              }
             },
           },
         ],
@@ -97,9 +118,21 @@ function AppContent() {
     return <LoadingScreen />;
   }
 
+  // Show error screen if there's a critical auth error
+  if (authError) {
+    return (
+      <SafeAreaView style={styles.errorContainer}>
+        <Text style={styles.errorTitle}>Authentication Error</Text>
+        <Text style={styles.errorText}>{authError}</Text>
+        <ActivityIndicator size="large" color="#2563eb" style={styles.errorLoader} />
+        <Text style={styles.errorSubtext}>Please restart the app</Text>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <>
-      <StatusBar style={safeTheme.statusBar as any} />
+      <StatusBar style="dark" translucent backgroundColor="transparent" />
       <NavigationContainer>
         <Stack.Navigator
           initialRouteName={user ? "Home" : "Login"}
@@ -140,7 +173,7 @@ function AppContent() {
               name="Login" 
               component={LoginScreen} 
               options={{ 
-                title: assetConfig.appName,
+                title: assetConfig?.appName || 'Scanified',
                 headerShown: false 
               }}
             />
@@ -163,22 +196,22 @@ function AppContent() {
               <Stack.Screen 
                 name="ScanCylinders" 
                 component={ScanCylindersScreen} 
-                options={{ title: `Scan ${assetConfig.assetDisplayNamePlural}` }}
+                options={{ title: `Scan ${assetConfig?.assetDisplayNamePlural || 'Cylinders'}` }}
               />
               <Stack.Screen 
                 name="ScanCylindersAction" 
                 component={ScanCylindersActionScreen} 
-                options={{ title: `${assetConfig.assetDisplayName} Actions` }}
+                options={{ title: `${assetConfig?.assetDisplayName || 'Cylinder'} Actions` }}
               />
               <Stack.Screen 
                 name="AddCylinder" 
                 component={AddCylinderScreen} 
-                options={{ title: `Add ${assetConfig.assetDisplayName}` }}
+                options={{ title: `Add ${assetConfig?.assetDisplayName || 'Cylinder'}` }}
               />
               <Stack.Screen 
                 name="EditCylinder" 
                 component={EditCylinderScreen} 
-                options={{ title: `Edit ${assetConfig.assetDisplayName}` }}
+                options={{ title: `Edit ${assetConfig?.assetDisplayName || 'Cylinder'}` }}
               />
               <Stack.Screen 
                 name="FillCylinder" 
@@ -188,7 +221,7 @@ function AppContent() {
               <Stack.Screen 
                 name="LocateCylinder" 
                 component={LocateCylinderScreen} 
-                options={{ title: `Locate ${assetConfig.assetDisplayName}` }}
+                options={{ title: `Locate ${assetConfig?.assetDisplayName || 'Cylinder'}` }}
               />
               <Stack.Screen 
                 name="CustomerDetails" 
@@ -223,24 +256,14 @@ function AppContent() {
   );
 }
 
-// AuthGate component to delay children until user is authenticated
-function AuthGate({ children }: { children: React.ReactNode }) {
-  const { loading, user } = useAuth();
-  if (loading) return <LoadingScreen />;
-  if (!user) return <LoginScreen />;
-  return <>{children}</>;
-}
-
 export default function App() {
   return (
     <ThemeProvider>
       <SettingsProvider>
         <ErrorBoundary>
-          <AuthGate>
-            <AssetProvider>
-              <AppContent />
-            </AssetProvider>
-          </AuthGate>
+          <AssetProvider>
+            <AppContent />
+          </AssetProvider>
         </ErrorBoundary>
       </SettingsProvider>
     </ThemeProvider>
@@ -255,9 +278,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffebee',
     padding: 20,
   },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#c62828',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
   errorText: {
     fontSize: 16,
     color: '#c62828',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  errorLoader: {
+    marginVertical: 20,
+  },
+  errorSubtext: {
+    fontSize: 14,
+    color: '#666',
     textAlign: 'center',
   },
 });
