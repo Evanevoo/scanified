@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, FlatList, Modal, TextInput } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput } from 'react-native';
 import { supabase } from '../supabase';
 import { useAssetConfig } from '../context/AssetContext';
+import { useAuth } from '../hooks/useAuth';
 
 function formatDate(dateStr) {
   const d = new Date(dateStr);
@@ -10,6 +11,7 @@ function formatDate(dateStr) {
 
 export default function HistoryScreen() {
   const { config: assetConfig } = useAssetConfig();
+  const { profile } = useAuth();
   const [scans, setScans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -20,46 +22,84 @@ export default function HistoryScreen() {
 
   useEffect(() => {
     const fetchScans = async () => {
+      if (!profile?.organization_id) {
+        setError('Organization not found');
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       setError('');
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const { data, error } = await supabase
-        .from('asset_scans')
-        .select('*')
-        .eq('verified', false)
-        .gte('created_at', since)
-        .order('created_at', { ascending: false });
-      if (error) {
-        setError('Failed to load scans.');
-      } else {
-        setError('');
-        setScans(data || []);
+      
+      try {
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        
+        // Try bottle_scans table first
+        let { data, error } = await supabase
+          .from('bottle_scans')
+          .select('*')
+          .eq('organization_id', profile.organization_id)
+          .gte('created_at', since)
+          .order('created_at', { ascending: false });
+        
+        // If bottle_scans doesn't exist, try cylinder_scans table
+        if (error && error.message?.includes('relation') && error.message?.includes('does not exist')) {
+          console.log('bottle_scans table not found, trying cylinder_scans table...');
+          const fallback = await supabase
+            .from('cylinder_scans')
+            .select('*')
+            .eq('organization_id', profile.organization_id)
+            .gte('created_at', since)
+            .order('created_at', { ascending: false });
+          
+          data = fallback.data;
+          error = fallback.error;
+        }
+        
+        if (error) {
+          console.error('Scan loading error:', error);
+          setError(`Failed to load scans: ${error.message || 'Unknown error'}`);
+        } else {
+          setError('');
+          setScans(data || []);
+          console.log(`Loaded ${data?.length || 0} scans`);
+        }
+      } catch (err) {
+        console.error('Unexpected error loading scans:', err);
+        setError(`Unexpected error: ${err.message}`);
       }
+      
       setLoading(false);
     };
     fetchScans();
-  }, []);
+  }, [profile]);
 
   const openEdit = (scan) => {
     setEditScan(scan);
     setEditCustomer(scan.customer_name || '');
-    setEditAssets(scan.assets || scan.asset_barcode ? [scan.asset_barcode] : []);
+    setEditAssets(scan.assets || scan.bottle_barcode ? [scan.bottle_barcode] : []);
   };
 
   const saveEdit = async () => {
+    if (!profile?.organization_id) {
+      setError('Organization not found');
+      return;
+    }
+
     setSaving(true);
     const { error } = await supabase
-      .from('asset_scans')
-      .update({ customer_name: editCustomer, asset_barcode: editAssets[0] })
-      .eq('id', editScan.id);
+      .from('bottle_scans')
+      .update({ customer_name: editCustomer, bottle_barcode: editAssets[0] })
+      .eq('id', editScan?.id)
+      .eq('organization_id', profile.organization_id);
     setSaving(false);
     setEditScan(null);
     // Refresh list
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { data } = await supabase
-      .from('asset_scans')
+      .from('bottle_scans')
       .select('*')
-      .eq('verified', false)
+      .eq('organization_id', profile.organization_id)
       .gte('created_at', since)
       .order('created_at', { ascending: false });
     setScans(data || []);
@@ -74,7 +114,7 @@ export default function HistoryScreen() {
           keyExtractor={item => item.id}
           renderItem={({ item }) => (
             <TouchableOpacity style={styles.scanItem} onPress={() => openEdit(item)}>
-              <Text style={styles.scanBarcode}>{item.asset_barcode}</Text>
+              <Text style={styles.scanBarcode}>{item.bottle_barcode}</Text>
               <Text style={styles.scanCustomer}>{item.customer_name}</Text>
               <Text style={styles.scanDate}>{formatDate(item.created_at)}</Text>
               <Text style={styles.scanStatus}>Verified: {item.verified ? 'Yes' : 'No'}</Text>
@@ -98,8 +138,8 @@ export default function HistoryScreen() {
             <Text style={styles.label}>{assetConfig?.assetDisplayName || 'Asset'} Barcode</Text>
             <TextInput
               style={styles.input}
-              value={editCylinders[0] || ''}
-              onChangeText={v => setEditCylinders([v])}
+              value={editAssets[0] || ''}
+              onChangeText={v => setEditAssets([v])}
               placeholder={`${assetConfig?.assetDisplayName || 'Asset'} Barcode`}
             />
             <View style={{ flexDirection: 'row', marginTop: 18 }}>

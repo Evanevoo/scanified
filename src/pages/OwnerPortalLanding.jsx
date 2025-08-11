@@ -79,6 +79,14 @@ export default function OwnerPortalLanding() {
       featured: true
     },
     {
+      title: 'Format Configuration',
+      description: 'Configure validation patterns for barcodes, order numbers, and customer IDs',
+      icon: <SettingsIcon sx={{ fontSize: 40 }} />,
+      color: '#ff6b35',
+      path: '/owner-portal/format-configuration',
+      featured: true
+    },
+    {
       title: 'Support Center',
       description: 'Customer support tools and ticket management',
       icon: <SupportIcon sx={{ fontSize: 40 }} />,

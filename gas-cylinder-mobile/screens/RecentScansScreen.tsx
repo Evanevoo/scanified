@@ -1,20 +1,29 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
 import { supabase } from '../supabase';
+import { useAuth } from '../hooks/useAuth';
 
 export default function RecentScansScreen() {
+  const { profile } = useAuth();
   const [scans, setScans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     const fetchScans = async () => {
+      if (!profile?.organization_id) {
+        setError('Organization not found');
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       setError('');
-      // Use the correct table name: bottle_scans
+      // Use the correct table name: bottle_scans and filter by organization
       const { data, error } = await supabase
-        .from('asset_scans')
-        .select('id, asset_barcode, order_number, customer_name, created_at, read')
+        .from('bottle_scans')
+        .select('id, bottle_barcode, order_number, customer_name, created_at, read')
+        .eq('organization_id', profile.organization_id)
         .order('created_at', { ascending: false })
         .limit(20);
       if (error) {
@@ -30,14 +39,15 @@ export default function RecentScansScreen() {
         const unreadIds = data.filter(s => !s.read).map(s => s.id);
         if (unreadIds.length > 0) {
           await supabase
-            .from('asset_scans')
+            .from('bottle_scans')
             .update({ read: true })
+            .eq('organization_id', profile.organization_id)
             .in('id', unreadIds);
         }
       }
     };
     fetchScans();
-  }, []);
+  }, [profile]);
 
   return (
     <View style={styles.container}>
@@ -54,7 +64,7 @@ export default function RecentScansScreen() {
           keyExtractor={item => item.id.toString()}
           renderItem={({ item }) => (
             <View style={styles.scanItem}>
-              <Text style={styles.scanBarcode}>Barcode: {item.asset_barcode}</Text>
+              <Text style={styles.scanBarcode}>Barcode: {item.bottle_barcode}</Text>
               <Text style={styles.scanOrder}>Order: {item.order_number}</Text>
               <Text style={styles.scanCustomer}>Customer: {item.customer_name || '-'}</Text>
               <Text style={styles.scanTime}>{new Date(item.created_at).toLocaleString()}</Text>

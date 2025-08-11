@@ -27,7 +27,7 @@ const defaultConfig: AssetConfig = {
   assetDisplayNamePlural: 'Gas Cylinders',
   primaryColor: '#2563eb',
   secondaryColor: '#1e40af',
-  appName: 'LessAnnoyingScan',
+  appName: 'Scanified',
   customTerminology: {
     scan: 'scan',
     track: 'track',
@@ -55,6 +55,7 @@ export const AssetProvider: React.FC<AssetProviderProps> = ({ children }) => {
   const [config, setConfig] = useState<AssetConfig>(defaultConfig);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastConfigUpdate, setLastConfigUpdate] = useState<Date | null>(null);
 
   const loadAssetConfig = async () => {
     try {
@@ -81,7 +82,7 @@ export const AssetProvider: React.FC<AssetProviderProps> = ({ children }) => {
         throw new Error('Organization not found');
       }
 
-      // Get organization asset configuration
+      // Get organization asset configuration with updated_at timestamp
       const { data: orgData, error: orgError } = await supabase
         .from('organizations')
         .select(`
@@ -93,7 +94,8 @@ export const AssetProvider: React.FC<AssetProviderProps> = ({ children }) => {
           secondary_color,
           app_name,
           custom_terminology,
-          feature_toggles
+          feature_toggles,
+          updated_at
         `)
         .eq('id', profile.organization_id)
         .single();
@@ -102,7 +104,8 @@ export const AssetProvider: React.FC<AssetProviderProps> = ({ children }) => {
         console.warn('Error loading asset config, using defaults:', orgError);
         setConfig(defaultConfig);
       } else {
-        setConfig({
+        // Check if configuration has changed
+        const newConfig = {
           assetType: orgData.asset_type || defaultConfig.assetType,
           assetTypePlural: orgData.asset_type_plural || defaultConfig.assetTypePlural,
           assetDisplayName: orgData.asset_display_name || defaultConfig.assetDisplayName,
@@ -112,7 +115,15 @@ export const AssetProvider: React.FC<AssetProviderProps> = ({ children }) => {
           appName: orgData.app_name || defaultConfig.appName,
           customTerminology: orgData.custom_terminology || defaultConfig.customTerminology,
           featureToggles: orgData.feature_toggles || defaultConfig.featureToggles
-        });
+        };
+
+        // Only update if configuration has actually changed
+        const configChanged = JSON.stringify(newConfig) !== JSON.stringify(config);
+        if (configChanged) {
+          console.log('Asset configuration updated:', newConfig);
+          setConfig(newConfig);
+          setLastConfigUpdate(new Date());
+        }
       }
     } catch (err) {
       console.error('Error loading asset config:', err);
@@ -125,6 +136,60 @@ export const AssetProvider: React.FC<AssetProviderProps> = ({ children }) => {
 
   useEffect(() => {
     loadAssetConfig();
+
+    // Set up real-time subscription for organization changes
+    const setupSubscription = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('organization_id')
+          .eq('id', user.id)
+          .single();
+
+        if (!profile?.organization_id) return;
+
+        const channel = supabase
+          .channel('organization_config_changes')
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'organizations',
+              filter: `id=eq.${profile.organization_id}`
+            },
+            (payload) => {
+              console.log('Organization configuration changed:', payload);
+              // Refresh configuration when organization is updated
+              loadAssetConfig();
+            }
+          )
+          .subscribe();
+
+        // Set up polling as backup (every 30 seconds)
+        const pollInterval = setInterval(() => {
+          loadAssetConfig();
+        }, 30000);
+
+        return () => {
+          // Cleanup subscription and polling
+          supabase.removeChannel(channel);
+          clearInterval(pollInterval);
+        };
+      } catch (error) {
+        console.error('Error setting up subscription:', error);
+      }
+    };
+
+    const cleanup = setupSubscription();
+    return () => {
+      if (cleanup) {
+        cleanup.then(cleanupFn => cleanupFn?.());
+      }
+    };
   }, []);
 
   const refreshConfig = async () => {

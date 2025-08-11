@@ -2,11 +2,11 @@
   "expo": {
     "name": "Scanified",
     "slug": "gas-cylinder-mobile",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/app-icon.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -18,32 +18,19 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.evanevoo.scanifiedmobile",
-      "buildNumber": "4",
+      "buildNumber": "6",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Allow Scanified to access your camera to scan asset barcodes and manage your organization's inventory with enterprise-grade precision.",
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "apple-signin",
+            "CFBundleURLSchemes": ["scanified-auth"]
+          }
+        ]
       },
-      "usesAppleSignIn": true
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#000000"
-      },
-      "edgeToEdgeEnabled": true,
-      "package": "com.evanevoo.scanifiedmobile",
-      "versionCode": 4,
-      "permissions": [
-        "CAMERA",
-        "INTERNET",
-        "ACCESS_NETWORK_STATE",
-        "WRITE_EXTERNAL_STORAGE",
-        "READ_EXTERNAL_STORAGE",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
-      ]
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
+      "usesAppleSignIn": true,
+      "associatedDomains": ["applinks:jtfucttzaswmqqhmmhfb.supabase.co", "webcredentials:jtfucttzaswmqqhmmhfb.supabase.co"]
     },
     "plugins": [
       [

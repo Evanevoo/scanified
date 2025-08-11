@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { SyncService } from '../services/SyncService';
 import { useTheme } from '../context/ThemeContext';
 
@@ -85,7 +85,8 @@ export default function StatusBar({ onSyncPress }: StatusBarProps) {
 
 const styles = StyleSheet.create({
   container: {
-    paddingVertical: 8,
+    paddingTop: Platform.OS === 'ios' ? 44 : 8, // Account for iOS status bar height
+    paddingBottom: 8,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',

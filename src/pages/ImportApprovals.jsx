@@ -39,7 +39,7 @@ import {
   SkipNext as SkipNextIcon,
   Approval as ApprovalIcon,
   RuleFolder as RuleFolderIcon,
-  Assessment as AssessmentIcon,
+
   BugReport as BugReportIcon,
   Security as SecurityIcon,
   Inventory as InventoryIcon,
@@ -51,11 +51,14 @@ import {
   Unarchive as UnarchiveIcon,
   Link as LinkIcon,
   CallSplit as SplitIcon,
-  Archive as ArchiveIcon
+  Archive as ArchiveIcon,
+  Assessment as AssessmentIcon,
+  QrCodeScanner as QrCodeScannerIcon
 } from '@mui/icons-material';
 import ImportApprovalDetail from './ImportApprovalDetail';
+import QuantityDiscrepancyDetector from '../components/QuantityDiscrepancyDetector';
 
-// Enhanced status definitions matching TrackAbout's verification states
+// Enhanced status definitions for verification states
 const VERIFICATION_STATES = {
   PENDING: { 
     label: 'Pending Verification', 
@@ -87,6 +90,12 @@ const VERIFICATION_STATES = {
     icon: <BugReportIcon />,
     description: 'Marked for detailed investigation'
   },
+  SCANNED_ONLY: { 
+    label: 'Scanned Only', 
+    color: 'info', 
+    icon: <QrCodeScannerIcon />,
+    description: 'Order has been scanned but not invoiced yet'
+  },
   REJECTED: { 
     label: 'Rejected', 
     color: 'error', 
@@ -95,7 +104,7 @@ const VERIFICATION_STATES = {
   }
 };
 
-// Enhanced verification actions matching TrackAbout's workflow
+// Enhanced verification actions for approval workflow
 const VERIFICATION_ACTIONS = {
   RECORD_ACTIONS: [
     { id: 'verify', label: 'Verify This Record', icon: <CheckCircleIcon />, color: 'success' },
@@ -152,6 +161,12 @@ const VERIFICATION_STEPS = [
     icon: <ApprovalIcon />
   },
   {
+    id: 'quantity_analysis',
+    label: 'Quantity Analysis',
+    description: 'Analyze shipped vs returned quantity discrepancies',
+    icon: <AssessmentIcon />
+  },
+  {
     id: 'processing',
     label: 'Final Processing',
     description: 'Apply approved changes to system',
@@ -195,8 +210,13 @@ function parseDataField(data) {
   return data;
 }
 
-// Enhanced status determination with TrackAbout-style logic
+// Enhanced status determination with professional workflow logic
 function determineVerificationStatus(record) {
+  // Handle scanned-only records (orders that have been scanned but not invoiced yet)
+  if (record.is_scanned_only) {
+    return 'SCANNED_ONLY';
+  }
+  
   const data = parseDataField(record.data);
   
   // Check for critical errors
@@ -248,8 +268,7 @@ export default function ImportApprovals() {
   const [auditDialog, setAuditDialog] = useState({ open: false, logs: [], title: '' });
   const navigate = useNavigate();
   
-  // Enhanced state management
-  const [activeTab, setActiveTab] = useState(0);
+  // Enhanced state management  
   const [selectedRecords, setSelectedRecords] = useState([]);
   const [viewMode, setViewMode] = useState('list'); // 'list', 'grid', 'timeline'
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -259,6 +278,12 @@ export default function ImportApprovals() {
   const [filterDialog, setFilterDialog] = useState({ open: false });
   const [settingsDialog, setSettingsDialog] = useState({ open: false });
   const [workflowDialog, setWorkflowDialog] = useState({ open: false, record: null });
+  const [quantityAnalysisDialog, setQuantityAnalysisDialog] = useState({ 
+    open: false, 
+    orderNumber: null, 
+    customerId: null, 
+    organizationId: null 
+  });
   
   // Existing state
   const [customerNameToId, setCustomerNameToId] = useState({});
@@ -272,7 +297,6 @@ export default function ImportApprovals() {
   const [invoiceSort, setInvoiceSort] = useState({ field: 'order', dir: 'asc' });
   const [receiptSort, setReceiptSort] = useState({ field: 'order', dir: 'asc' });
   const [selectedRows, setSelectedRows] = useState([]);
-  const [detailDialog, setDetailDialog] = useState({ open: false, row: null });
   const [customerOptions, setCustomerOptions] = useState([]);
   const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
   const [dateDialog, setDateDialog] = useState(false);
@@ -344,6 +368,9 @@ export default function ImportApprovals() {
         fetchPendingReceipts(),
         fetchVerificationStats()
       ]);
+      
+      // Fetch scanned-only orders after the main data is loaded
+      await fetchScannedOnlyOrders();
     } catch (error) {
       setError('Failed to fetch data: ' + error.message);
     } finally {
@@ -378,6 +405,7 @@ export default function ImportApprovals() {
         if (statusFilter === 'verified' && recordStatus !== 'VERIFIED') return false;
         if (statusFilter === 'exception' && recordStatus !== 'EXCEPTION') return false;
         if (statusFilter === 'investigation' && recordStatus !== 'INVESTIGATION') return false;
+        if (statusFilter === 'scanned_only' && recordStatus !== 'SCANNED_ONLY') return false;
       }
       
       // Location filter
@@ -415,7 +443,7 @@ export default function ImportApprovals() {
       
       if (error) throw error;
       
-      // Split grouped imports into individual records (TrackAbout style)
+      // Split grouped imports into individual records (professional workflow)
       const individualRecords = [];
       (data || []).forEach(importRecord => {
         const splitRecords = splitImportIntoIndividualRecords(importRecord);
@@ -439,7 +467,7 @@ export default function ImportApprovals() {
       
       if (error) throw error;
       
-      // Split grouped imports into individual records (TrackAbout style)
+      // Split grouped imports into individual records (professional workflow)
       const individualRecords = [];
       (data || []).forEach(importRecord => {
         const splitRecords = splitImportIntoIndividualRecords(importRecord);
@@ -472,7 +500,71 @@ export default function ImportApprovals() {
         individualReceipts.push(...splitRecords);
       });
       
-      const allRecords = [...individualInvoices, ...individualReceipts];
+      // Get scanned-only records
+      const { data: scannedRows } = await supabase
+        .from('bottle_scans')
+        .select('*')
+        .not('order_number', 'is', null);
+      
+      const { data: importedInvoices } = await supabase
+        .from('imported_invoices')
+        .select('data');
+      
+      // Extract order numbers from imported invoices
+      const importedOrderNumbers = new Set();
+      importedInvoices.forEach(invoice => {
+        const data = parseDataField(invoice.data);
+        const rows = data.rows || data.line_items || [];
+        rows.forEach(row => {
+          if (row.order_number || row.invoice_number || row.reference_number) {
+            importedOrderNumbers.add((row.order_number || row.invoice_number || row.reference_number).toString().trim());
+          }
+        });
+      });
+
+      // Group scanned rows by order number
+      const orderGroups = {};
+      scannedRows.forEach(scan => {
+        const orderNum = scan.order_number?.toString().trim();
+        if (orderNum && !importedOrderNumbers.has(orderNum)) {
+          if (!orderGroups[orderNum]) {
+            orderGroups[orderNum] = [];
+          }
+          orderGroups[orderNum].push(scan);
+        }
+      });
+
+      // Convert to the same format as imported invoices for consistency
+      const scannedOnlyRecords = Object.entries(orderGroups).map(([orderNumber, scans]) => {
+        const firstScan = scans[0];
+        const customerName = firstScan.customer_name || firstScan.customer || 'Unknown Customer';
+        
+        return {
+          id: `scanned_${orderNumber}`,
+          data: {
+            rows: scans.map(scan => ({
+              order_number: orderNumber,
+              customer_name: customerName,
+              product_code: scan.product_code || scan.bottle_barcode || 'Unknown',
+              qty_out: scan.scan_type === 'delivery' || scan.mode === 'delivery' ? 1 : 0,
+              qty_in: scan.scan_type === 'pickup' || scan.mode === 'pickup' ? 1 : 0,
+              date: scan.scan_date || scan.created_at || new Date().toISOString().split('T')[0],
+              location: scan.location || 'Unknown'
+            })),
+            summary: {
+              total_rows: scans.length,
+              uploaded_by: firstScan.user_id || 'scanner',
+              uploaded_at: firstScan.created_at || new Date().toISOString()
+            }
+          },
+          uploaded_by: firstScan.user_id || 'scanner',
+          status: 'scanned_only',
+          created_at: firstScan.created_at || new Date().toISOString(),
+          is_scanned_only: true
+        };
+      });
+      
+      const allRecords = [...individualInvoices, ...individualReceipts, ...scannedOnlyRecords];
       
       const stats = {
         total: allRecords.length,
@@ -480,7 +572,9 @@ export default function ImportApprovals() {
         verified: 0,
         exceptions: 0,
         investigating: 0,
-        processing: 0
+        processing: 0,
+        scanned_only: 0,
+        quantityDiscrepancies: 0
       };
       
       allRecords.forEach(record => {
@@ -491,6 +585,20 @@ export default function ImportApprovals() {
           case 'EXCEPTION': stats.exceptions++; break;
           case 'INVESTIGATION': stats.investigating++; break;
           case 'IN_PROGRESS': stats.processing++; break;
+          case 'SCANNED_ONLY': stats.scanned_only++; break;
+        }
+        
+        // Check for quantity discrepancies
+        const data = parseDataField(record.data);
+        const lineItems = data.rows || data.line_items || data.LineItems || [];
+        const hasQuantityDiscrepancy = lineItems.some(item => {
+          const shippedQty = item.shipped || item.Shipped || 0;
+          const returnedQty = item.returned || item.Returned || 0;
+          return shippedQty > 0 && shippedQty === returnedQty;
+        });
+        
+        if (hasQuantityDiscrepancy) {
+          stats.quantityDiscrepancies++;
         }
       });
       
@@ -563,6 +671,91 @@ export default function ImportApprovals() {
       setScannedOrders(orders || []);
     } catch (error) {
       console.error('Error fetching scanned orders:', error);
+    }
+  }
+
+  // Fetch scanned orders that don't have corresponding invoices yet
+  async function fetchScannedOnlyOrders() {
+    try {
+      // Get all scanned orders from bottle_scans table
+      const { data: scannedRows, error: scanError } = await supabase
+        .from('bottle_scans')
+        .select('*')
+        .not('order_number', 'is', null);
+      
+      if (scanError) throw scanError;
+
+      // Get all order numbers that have been imported
+      const { data: importedInvoices, error: invError } = await supabase
+        .from('imported_invoices')
+        .select('data');
+      
+      if (invError) throw invError;
+
+      // Extract order numbers from imported invoices
+      const importedOrderNumbers = new Set();
+      importedInvoices.forEach(invoice => {
+        const data = parseDataField(invoice.data);
+        const rows = data.rows || data.line_items || [];
+        rows.forEach(row => {
+          if (row.order_number || row.invoice_number || row.reference_number) {
+            importedOrderNumbers.add((row.order_number || row.invoice_number || row.reference_number).toString().trim());
+          }
+        });
+      });
+
+      // Group scanned rows by order number
+      const orderGroups = {};
+      scannedRows.forEach(scan => {
+        const orderNum = scan.order_number?.toString().trim();
+        if (orderNum && !importedOrderNumbers.has(orderNum)) {
+          if (!orderGroups[orderNum]) {
+            orderGroups[orderNum] = [];
+          }
+          orderGroups[orderNum].push(scan);
+        }
+      });
+
+      // Convert to the same format as imported invoices for consistency
+      const scannedOnlyRecords = Object.entries(orderGroups).map(([orderNumber, scans]) => {
+        // Get customer info from the first scan
+        const firstScan = scans[0];
+        const customerName = firstScan.customer_name || firstScan.customer || 'Unknown Customer';
+        
+        // Create a mock data structure that matches imported invoices format
+        return {
+          id: `scanned_${orderNumber}`,
+          data: {
+            rows: scans.map(scan => ({
+              order_number: orderNumber,
+              customer_name: customerName,
+              product_code: scan.product_code || scan.bottle_barcode || 'Unknown',
+              qty_out: scan.scan_type === 'delivery' || scan.mode === 'delivery' ? 1 : 0,
+              qty_in: scan.scan_type === 'pickup' || scan.mode === 'pickup' ? 1 : 0,
+              date: scan.scan_date || scan.created_at || new Date().toISOString().split('T')[0],
+              location: scan.location || 'Unknown'
+            })),
+            summary: {
+              total_rows: scans.length,
+              uploaded_by: firstScan.user_id || 'scanner',
+              uploaded_at: firstScan.created_at || new Date().toISOString()
+            }
+          },
+          uploaded_by: firstScan.user_id || 'scanner',
+          status: 'scanned_only',
+          created_at: firstScan.created_at || new Date().toISOString(),
+          is_scanned_only: true // Flag to identify these records
+        };
+      });
+
+      // Add these to the pending invoices state
+      setPendingInvoices(prev => {
+        const existing = prev.filter(item => !item.is_scanned_only);
+        return [...existing, ...scannedOnlyRecords];
+      });
+
+    } catch (error) {
+      console.error('Error fetching scanned-only orders:', error);
     }
   }
 
@@ -1138,7 +1331,7 @@ export default function ImportApprovals() {
     }
   }
 
-  // Enhanced utility functions for TrackAbout-style display
+  // Enhanced utility functions for professional display
   function getProductInfo(lineItem) {
     if (!lineItem) return {};
     
@@ -1236,6 +1429,33 @@ export default function ImportApprovals() {
     }
     
     return 'Unknown';
+  }
+
+  function getCustomerId(data) {
+    if (!data) return null;
+    
+    // Try direct properties first
+    if (data.customer_id || data.CustomerID || data.CustomerId) {
+      return data.customer_id || data.CustomerID || data.CustomerId;
+    }
+    
+    // Try to get from rows array
+    if (data.rows && data.rows.length > 0) {
+      const firstRow = data.rows[0];
+      if (firstRow.customer_id || firstRow.CustomerID || firstRow.CustomerId) {
+        return firstRow.customer_id || firstRow.CustomerID || firstRow.CustomerId;
+      }
+    }
+    
+    // Try to get from line_items array
+    if (data.line_items && data.line_items.length > 0) {
+      const firstItem = data.line_items[0];
+      if (firstItem.customer_id || firstItem.CustomerID || firstItem.CustomerId) {
+        return firstItem.customer_id || firstItem.CustomerID || firstItem.CustomerId;
+      }
+    }
+    
+    return null;
   }
 
   function getLineItems(data) {
@@ -1435,6 +1655,22 @@ export default function ImportApprovals() {
             </ButtonGroup>
           </Box>
         );
+      case 'quantity_analysis':
+        return (
+          <Box>
+            <Typography variant="body2" gutterBottom>
+              Analyzing quantity discrepancies between shipped and returned items
+            </Typography>
+            <QuantityDiscrepancyDetector 
+              orderNumber={getOrderNumber(parseDataField(record.data))}
+              customerId={getCustomerInfo(parseDataField(record.data))?.id}
+              organizationId={record.organization_id}
+            />
+            <Button onClick={() => onComplete(index, { analyzed: true })}>
+              Analysis Complete
+            </Button>
+          </Box>
+        );
       case 'processing':
         return (
           <Box>
@@ -1487,7 +1723,7 @@ export default function ImportApprovals() {
             Import Verification Center
           </Typography>
           <Typography variant="subtitle1" color="textSecondary">
-            TrackAbout-style verification workflow for import approvals
+            Professional verification workflow for import approvals
           </Typography>
         </Box>
         <Box display="flex" gap={2}>
@@ -1572,6 +1808,24 @@ export default function ImportApprovals() {
             percentage={verificationStats.total ? Math.round((verificationStats.processing / verificationStats.total) * 100) : 0}
           />
         </Grid>
+        <Grid item xs={12} sm={6} md={2}>
+          <StatisticsCard
+            title="Scanned Only"
+            value={verificationStats.scanned_only || 0}
+            color="info.main"
+            icon={<QrCodeScannerIcon fontSize="large" />}
+            percentage={verificationStats.total ? Math.round(((verificationStats.scanned_only || 0) / verificationStats.total) * 100) : 0}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={2}>
+          <StatisticsCard
+            title="Qty Discrepancies"
+            value={verificationStats.quantityDiscrepancies || 0}
+            color="warning.main"
+            icon={<AssessmentIcon fontSize="large" />}
+            percentage={verificationStats.total ? Math.round(((verificationStats.quantityDiscrepancies || 0) / verificationStats.total) * 100) : 0}
+          />
+        </Grid>
       </Grid>
 
       {/* Enhanced Filters and Controls */}
@@ -1600,6 +1854,7 @@ export default function ImportApprovals() {
               <MenuItem value="exception">Exceptions</MenuItem>
               <MenuItem value="investigation">Investigating</MenuItem>
               <MenuItem value="in_progress">Processing</MenuItem>
+              <MenuItem value="scanned_only">Scanned Only</MenuItem>
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 120 }}>
@@ -1643,26 +1898,23 @@ export default function ImportApprovals() {
         </Box>
       </Paper>
 
-      {/* Enhanced Tabs */}
-      <Paper sx={{ mb: 3 }}>
-        <Tabs value={activeTab} onChange={(e, newValue) => setActiveTab(newValue)}>
-          <Tab 
-            label={
-              <Badge badgeContent={pendingInvoices.length} color="primary">
-                Invoices
-              </Badge>
-            } 
-          />
-          <Tab 
-            label={
-              <Badge badgeContent={pendingReceipts.length} color="primary">
-                Receipts
-              </Badge>
-            } 
-          />
-          <Tab label="Audit Trail" />
-          <Tab label="Analytics" />
-        </Tabs>
+      {/* Import Records Header */}
+      <Paper sx={{ mb: 3, p: 2 }}>
+        <Box display="flex" alignItems="center" justifyContent="space-between">
+          <Box>
+            <Typography variant="h6" fontWeight={600}>
+              Import Records
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {pendingInvoices.length} pending import{pendingInvoices.length !== 1 ? 's' : ''} requiring review
+            </Typography>
+          </Box>
+          <Badge badgeContent={pendingInvoices.length} color="primary">
+            <Button variant="outlined" disabled>
+              Total Records
+            </Button>
+          </Badge>
+        </Box>
       </Paper>
 
       {/* Bulk Actions Bar */}
@@ -1714,6 +1966,47 @@ export default function ImportApprovals() {
             fetchData();
           }}
         />
+      )}
+
+      {/* Quantity Analysis Dialog */}
+      {quantityAnalysisDialog.open && (
+        <Dialog 
+          open={quantityAnalysisDialog.open} 
+          onClose={() => setQuantityAnalysisDialog({ 
+            open: false, 
+            orderNumber: null, 
+            customerId: null, 
+            organizationId: null 
+          })}
+          maxWidth="lg"
+          fullWidth
+        >
+          <DialogTitle>
+            <Box display="flex" alignItems="center" gap={2}>
+              <AssessmentIcon />
+              <Typography variant="h6">
+                Quantity Analysis - Order {quantityAnalysisDialog.orderNumber}
+              </Typography>
+            </Box>
+          </DialogTitle>
+          <DialogContent>
+            <QuantityDiscrepancyDetector
+              orderNumber={quantityAnalysisDialog.orderNumber}
+              customerId={quantityAnalysisDialog.customerId}
+              organizationId={quantityAnalysisDialog.organizationId}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setQuantityAnalysisDialog({ 
+              open: false, 
+              orderNumber: null, 
+              customerId: null, 
+              organizationId: null 
+            })}>
+              Close
+            </Button>
+          </DialogActions>
+        </Dialog>
       )}
 
       {/* Speed Dial for Quick Actions */}
@@ -1902,22 +2195,10 @@ export default function ImportApprovals() {
   );
 
   function renderMainContent() {
-    switch (activeTab) {
-      case 0:
-        return viewMode === 'grid' ? renderInvoicesGrid() : 
-               viewMode === 'timeline' ? renderInvoicesTimeline() : 
-               renderInvoicesTab();
-      case 1:
-        return viewMode === 'grid' ? renderReceiptsGrid() : 
-               viewMode === 'timeline' ? renderReceiptsTimeline() : 
-               renderReceiptsTab();
-      case 2:
-        return renderAuditTrailTab();
-      case 3:
-        return renderAnalyticsTab();
-      default:
-        return renderInvoicesTab();
-    }
+    return viewMode === 'grid' ? renderInvoicesGrid() : 
+           viewMode === 'timeline' ? renderInvoicesTimeline() : 
+           viewMode === 'list' ? renderInvoicesTab() :
+           renderInvoicesTab(); // fallback
   }
 
   function renderInvoicesTab() {
@@ -1934,19 +2215,37 @@ export default function ImportApprovals() {
                     onChange={handleSelectAll}
                   />
                 </TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Order #</TableCell>
-                <TableCell>Customer</TableCell>
-                <TableCell>Date</TableCell>
-                <TableCell>Category</TableCell>
-                <TableCell>Group</TableCell>
-                <TableCell>Type</TableCell>
-                <TableCell>Product Code</TableCell>
-                <TableCell>Billing Code</TableCell>
-                <TableCell align="center">SHP</TableCell>
-                <TableCell align="center">RTN</TableCell>
-                <TableCell>Highlight</TableCell>
-                <TableCell>Actions</TableCell>
+                <TableCell>
+                  <Typography variant="body2" fontWeight={600}>Status</Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="body2" fontWeight={600}>Order & Customer</Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="body2" fontWeight={600}>Item Details</Typography>
+                </TableCell>
+                <TableCell align="center">
+                  <Typography variant="body2" fontWeight={600}>Category</Typography>
+                </TableCell>
+                <TableCell align="center">
+                  <Typography variant="body2" fontWeight={600}>Group</Typography>
+                </TableCell>
+                <TableCell align="center">
+                  <Typography variant="body2" fontWeight={600}>Type</Typography>
+                </TableCell>
+                <TableCell align="center">
+                  <Typography variant="body2" fontWeight={600}>Product Code</Typography>
+                </TableCell>
+                <TableCell align="center">
+                  <Typography variant="body2" fontWeight={600}>SHP</Typography>
+                </TableCell>
+                <TableCell align="center">
+                  <Typography variant="body2" fontWeight={600}>RTN</Typography>
+                </TableCell>
+
+                <TableCell align="center" sx={{ minWidth: '200px' }}>
+                  <Typography variant="body2" fontWeight={600}>Actions</Typography>
+                </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1964,7 +2263,7 @@ export default function ImportApprovals() {
                   const returnedMismatch = returned !== scannedIn;
                   
                   return (
-                    <TableRow key={`${invoice.id}_${itemIndex}`} hover>
+                    <TableRow key={`${invoice.displayId || invoice.id}_${itemIndex}`} hover>
                       <TableCell padding="checkbox">
                         {itemIndex === 0 && (
                           <Checkbox
@@ -1983,80 +2282,144 @@ export default function ImportApprovals() {
                           />
                         )}
                       </TableCell>
-                      <TableCell>{itemIndex === 0 && orderNum}</TableCell>
-                      <TableCell>{itemIndex === 0 && getCustomerInfo(data)}</TableCell>
-                      <TableCell>{itemIndex === 0 && getRecordDate(data)}</TableCell>
                       <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {item.productInfo.category}
-                        </Typography>
+                        {itemIndex === 0 && (
+                          <Box>
+                            <Typography variant="body2" fontWeight={600} color="primary">
+                              {orderNum}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {getCustomerInfo(data)}
+                            </Typography>
+                            <br/>
+                            <Typography variant="caption" color="text.secondary">
+                              {getRecordDate(data)}
+                            </Typography>
+                          </Box>
+                        )}
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {item.productInfo.group}
+                        <Box>
+                          <Typography variant="body2" fontWeight={600}>
+                            {item.productInfo.productCode}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {item.productInfo.category} • {item.productInfo.type}
+                          </Typography>
+                          <br/>
+                          <Typography variant="caption" color="text.secondary">
+                            {item.productInfo.group}
+                          </Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography variant="caption" textAlign="center">
+                          {item.productInfo.category || 'INDUSTRIAL CYLINDERS'}
                         </Typography>
                       </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {item.productInfo.type}
+                      <TableCell align="center">
+                        <Typography variant="caption" textAlign="center">
+                          {item.productInfo.group || 'MIXGAS'}
                         </Typography>
                       </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ color: 'primary.main', fontWeight: 'bold' }}>
+                      <TableCell align="center">
+                        <Typography variant="caption" textAlign="center">
+                          {item.productInfo.type || item.productInfo.productCode}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography variant="caption" textAlign="center" fontWeight="bold">
                           {item.productInfo.productCode}
                         </Typography>
                       </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">
-                          {item.productInfo.billingCode}
-                        </Typography>
-                      </TableCell>
                       <TableCell align="center">
-                        <Box>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            Ord: <b style={{ color: shippedMismatch ? 'red' : 'inherit' }}>{shipped}</b>
-                          </Typography>
-                          <br/>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            Trk: <b style={{ color: shippedMismatch ? 'red' : 'green' }}>{scannedOut}</b>
-                          </Typography>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              Trk:
+                            </Typography>
+                            <Typography variant="caption" color="text.primary" fontWeight="bold">
+                              {scannedOut}
+                            </Typography>
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              Inv:
+                            </Typography>
+                            <Typography variant="caption" color={shippedMismatch ? 'warning.main' : 'success.main'} fontWeight="bold">
+                              {item.shipped}
+                            </Typography>
+                          </Box>
                         </Box>
                       </TableCell>
                       <TableCell align="center">
-                        <Box>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            Ord: <b style={{ color: returnedMismatch ? 'red' : 'inherit' }}>{returned}</b>
-                          </Typography>
-                          <br/>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            Trk: <b style={{ color: returnedMismatch ? 'red' : 'green' }}>{scannedIn}</b>
-                          </Typography>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              Trk:
+                            </Typography>
+                            <Typography variant="caption" color="text.primary" fontWeight="bold">
+                              {scannedIn}
+                            </Typography>
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              Inv:
+                            </Typography>
+                            <Typography variant="caption" color={returnedMismatch ? 'warning.main' : 'success.main'} fontWeight="bold">
+                              {item.returned}
+                            </Typography>
+                          </Box>
                         </Box>
                       </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={item.highlight.text}
-                          color={item.highlight.color}
-                          size="small"
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell>
+
+                      <TableCell align="center">
                         {itemIndex === 0 && (
-                          <ButtonGroup size="small">
-                            <Button
-                              startIcon={<ViewIcon />}
-                              onClick={() => setDetailDialog({ open: true, row: invoice })}
-                            >
-                              View
-                            </Button>
-                            <Button
-                              startIcon={<ApprovalIcon />}
-                              onClick={() => setVerificationDialog({ open: true, record: invoice })}
-                            >
-                              Verify
-                            </Button>
-                          </ButtonGroup>
+                          <Box display="flex" gap={1} justifyContent="center" flexWrap="wrap">
+                            {invoice.is_scanned_only ? (
+                              // Special actions for scanned-only records
+                              <>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  startIcon={<ViewIcon />}
+                                  onClick={() => navigate(`/import-approval/${invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
+                                >
+                                  View Scans
+                                </Button>
+                                <Button
+                                  size="small"
+                                  variant="contained"
+                                  color="primary"
+                                  startIcon={<UnarchiveIcon />}
+                                  onClick={() => navigate('/import')}
+                                >
+                                  Upload Invoice
+                                </Button>
+                              </>
+                            ) : (
+                              // Regular actions for imported records
+                              <>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  startIcon={<ViewIcon />}
+                                  onClick={() => navigate(`/import-approval/${invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
+                                >
+                                  Details
+                                </Button>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  color="success"
+                                  startIcon={<ApprovalIcon />}
+                                  onClick={() => setVerificationDialog({ open: true, record: invoice })}
+                                >
+                                  Verify
+                                </Button>
+                              </>
+                            )}
+                          </Box>
                         )}
                       </TableCell>
                     </TableRow>
@@ -2070,170 +2433,14 @@ export default function ImportApprovals() {
     );
   }
 
-  function renderReceiptsTab() {
-    return (
-      <Paper>
-        <Typography variant="h6" sx={{ p: 2 }}>
-          Sales Receipts Verification
-        </Typography>
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell padding="checkbox">
-                  <Checkbox />
-                </TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Receipt #</TableCell>
-                <TableCell>Customer</TableCell>
-                <TableCell>Date</TableCell>
-                <TableCell>Category</TableCell>
-                <TableCell>Group</TableCell>
-                <TableCell>Type</TableCell>
-                <TableCell>Product Code</TableCell>
-                <TableCell>Billing Code</TableCell>
-                <TableCell align="center">SHP</TableCell>
-                <TableCell align="center">RTN</TableCell>
-                <TableCell>Highlight</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredReceipts.map((receipt) => {
-                const data = parseDataField(receipt.data);
-                const detailedItems = getDetailedLineItems(data);
-                const orderNum = getOrderNumber(data);
-                
-                return detailedItems.map((item, itemIndex) => {
-                  const scannedOut = getScannedQty(orderNum, item.productInfo.productCode, 'out');
-                  const scannedIn = getScannedQty(orderNum, item.productInfo.productCode, 'in');
-                  const shipped = item.shipped;
-                  const returned = item.returned;
-                  const shippedMismatch = shipped !== scannedOut;
-                  const returnedMismatch = returned !== scannedIn;
-                  
-                  return (
-                    <TableRow key={`${receipt.id}_${itemIndex}`} hover>
-                      <TableCell padding="checkbox">
-                        {itemIndex === 0 && <Checkbox />}
-                      </TableCell>
-                      <TableCell>
-                        {itemIndex === 0 && (
-                          <Chip
-                            label={VERIFICATION_STATES[determineVerificationStatus(receipt)].label}
-                            color={VERIFICATION_STATES[determineVerificationStatus(receipt)].color}
-                            size="small"
-                            icon={VERIFICATION_STATES[determineVerificationStatus(receipt)].icon}
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell>{itemIndex === 0 && orderNum}</TableCell>
-                      <TableCell>{itemIndex === 0 && getCustomerInfo(data)}</TableCell>
-                      <TableCell>{itemIndex === 0 && getRecordDate(data)}</TableCell>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {item.productInfo.category}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {item.productInfo.group}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {item.productInfo.type}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ color: 'primary.main', fontWeight: 'bold' }}>
-                          {item.productInfo.productCode}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">
-                          {item.productInfo.billingCode}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Box>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            Ord: <b style={{ color: shippedMismatch ? 'red' : 'inherit' }}>{shipped}</b>
-                          </Typography>
-                          <br/>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            Trk: <b style={{ color: shippedMismatch ? 'red' : 'green' }}>{scannedOut}</b>
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Box>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            Ord: <b style={{ color: returnedMismatch ? 'red' : 'inherit' }}>{returned}</b>
-                          </Typography>
-                          <br/>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            Trk: <b style={{ color: returnedMismatch ? 'red' : 'green' }}>{scannedIn}</b>
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={item.highlight.text}
-                          color={item.highlight.color}
-                          size="small"
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {itemIndex === 0 && (
-                          <ButtonGroup size="small">
-                            <Button startIcon={<ViewIcon />}>View</Button>
-                            <Button startIcon={<ApprovalIcon />}>Verify</Button>
-                          </ButtonGroup>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                });
-              })}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
-    );
-  }
 
-  function renderAuditTrailTab() {
-    return (
-      <Paper sx={{ p: 2 }}>
-        <Typography variant="h6" gutterBottom>
-          Verification Audit Trail
-        </Typography>
-        <Typography variant="body2" color="textSecondary">
-          Complete audit trail of all verification activities
-        </Typography>
-        {/* Audit trail implementation */}
-      </Paper>
-    );
-  }
 
-  function renderAnalyticsTab() {
-    return (
-      <Paper sx={{ p: 2 }}>
-        <Typography variant="h6" gutterBottom>
-          Verification Analytics
-        </Typography>
-        <Typography variant="body2" color="textSecondary">
-          Analytics and insights on verification performance
-        </Typography>
-        {/* Analytics implementation */}
-      </Paper>
-    );
-  }
+
 
   // Grid and Timeline view functions
   function renderInvoicesGrid() {
+    console.log('renderInvoicesGrid called with filteredInvoices:', filteredInvoices);
+    
     return (
       <Grid container spacing={2}>
         {filteredInvoices.map((invoice) => {
@@ -2241,8 +2448,18 @@ export default function ImportApprovals() {
           const detailedItems = getDetailedLineItems(data);
           const orderNum = getOrderNumber(data);
           const customerInfo = getCustomerInfo(data);
+          const customerId = getCustomerId(data);
           const recordDate = getRecordDate(data);
           const status = determineVerificationStatus(invoice);
+          
+          console.log('Processing invoice:', { 
+            id: invoice.id, 
+            orderNum, 
+            customerInfo, 
+            customerId, 
+            organizationId: invoice.organization_id,
+            detailedItemsLength: detailedItems.length 
+          });
           
           return (
             <Grid item xs={12} sm={6} md={4} key={invoice.id}>
@@ -2254,7 +2471,7 @@ export default function ImportApprovals() {
                   cursor: 'pointer',
                   '&:hover': { elevation: 4 }
                 }}
-                onClick={() => navigate(`/import-approval-detail/${invoice.id}`)}
+                onClick={() => navigate(`/import-approval/${invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
               >
                 <CardHeader
                   title={
@@ -2305,6 +2522,77 @@ export default function ImportApprovals() {
                       </Typography>
                     )}
                   </Box>
+                  
+                  {/* Quantity Display */}
+                  <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid #e0e0e0' }}>
+                    <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+                      Debug: About to render QuantityDiscrepancyDetector
+                    </Typography>
+                    <QuantityDiscrepancyDetector 
+                      orderNumber={orderNum}
+                      customerId={customerId}
+                      organizationId={invoice.organization_id}
+                    />
+                  </Box>
+                  
+                  {/* Action Buttons */}
+                  <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid #e0e0e0' }}>
+                    {invoice.is_scanned_only ? (
+                      // Special actions for scanned-only records
+                      <Box display="flex" gap={1} justifyContent="center" flexWrap="wrap">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<ViewIcon />}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/import-approval/${invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`);
+                          }}
+                        >
+                          View Scans
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="primary"
+                          startIcon={<UnarchiveIcon />}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate('/import');
+                          }}
+                        >
+                          Upload Invoice
+                        </Button>
+                      </Box>
+                    ) : (
+                      // Regular actions for imported records
+                      <Box display="flex" gap={1} justifyContent="center" flexWrap="wrap">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<ViewIcon />}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/import-approval/${invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`);
+                          }}
+                        >
+                          Details
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="success"
+                          startIcon={<ApprovalIcon />}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setVerificationDialog({ open: true, record: invoice });
+                          }}
+                        >
+                          Verify
+                        </Button>
+                      </Box>
+                    )}
+                  </Box>
                 </CardContent>
               </Card>
             </Grid>
@@ -2329,7 +2617,7 @@ export default function ImportApprovals() {
           const status = determineVerificationStatus(invoice);
           
           return (
-            <Box key={invoice.id} sx={{ display: 'flex', mb: 3 }}>
+            <Box key={invoice.displayId || invoice.id} sx={{ display: 'flex', mb: 3 }}>
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mr: 2 }}>
                 <Box
                   sx={{
@@ -2372,13 +2660,57 @@ export default function ImportApprovals() {
                 <Typography variant="body2" color="text.secondary">
                   Date: {recordDate}
                 </Typography>
+                
+                {/* Add QuantityDiscrepancyDetector to timeline view */}
+                <Box sx={{ mt: 2, pt: 1, borderTop: '1px solid #e0e0e0' }}>
+                  <QuantityDiscrepancyDetector 
+                    orderNumber={orderNum}
+                    customerId={getCustomerId(data)}
+                    organizationId={invoice.organization_id}
+                  />
+                </Box>
+                
                 <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
-                  <Button
-                    size="small"
-                    onClick={() => navigate(`/import-approval-detail/${invoice.id}`)}
-                  >
-                    View Details
-                  </Button>
+                  {invoice.is_scanned_only ? (
+                    // Special actions for scanned-only records
+                    <>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => navigate(`/import-approval/${invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
+                      >
+                        View Scans
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="primary"
+                        startIcon={<UnarchiveIcon />}
+                        onClick={() => navigate('/import')}
+                      >
+                        Upload Invoice
+                      </Button>
+                    </>
+                  ) : (
+                    // Regular actions for imported records
+                    <>
+                      <Button
+                        size="small"
+                        onClick={() => navigate(`/import-approval/${invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
+                      >
+                        View Details
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="success"
+                        startIcon={<ApprovalIcon />}
+                        onClick={() => setVerificationDialog({ open: true, record: invoice })}
+                      >
+                        Verify
+                      </Button>
+                    </>
+                  )}
                   <Checkbox
                     size="small"
                     checked={selectedRecords.includes(invoice.id)}
@@ -2405,7 +2737,7 @@ export default function ImportApprovals() {
           const status = determineVerificationStatus(receipt);
           
           return (
-            <Grid item xs={12} sm={6} md={4} key={receipt.id}>
+            <Grid item xs={12} sm={6} md={4} key={receipt.displayId || receipt.id}>
               <Card 
                 sx={{ 
                   height: '100%', 
@@ -2414,7 +2746,7 @@ export default function ImportApprovals() {
                   cursor: 'pointer',
                   '&:hover': { elevation: 4 }
                 }}
-                onClick={() => navigate(`/import-approval-detail/${receipt.id}`)}
+                onClick={() => navigate(`/import-approval/${receipt.id}/detail?customer=${encodeURIComponent(receipt.data.customer_name || '')}&order=${encodeURIComponent(receipt.data.order_number || receipt.data.reference_number || '')}`)}
               >
                 <CardHeader
                   title={
@@ -2489,7 +2821,7 @@ export default function ImportApprovals() {
           const status = determineVerificationStatus(receipt);
           
           return (
-            <Box key={receipt.id} sx={{ display: 'flex', mb: 3 }}>
+            <Box key={receipt.displayId || receipt.id} sx={{ display: 'flex', mb: 3 }}>
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mr: 2 }}>
                 <Box
                   sx={{
@@ -2535,7 +2867,7 @@ export default function ImportApprovals() {
                 <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
                   <Button
                     size="small"
-                    onClick={() => navigate(`/import-approval-detail/${receipt.id}`)}
+                    onClick={() => navigate(`/import-approval/${receipt.id}/detail?customer=${encodeURIComponent(receipt.data.customer_name || '')}&order=${encodeURIComponent(receipt.data.order_number || receipt.data.reference_number || '')}`)}
                   >
                     View Details
                   </Button>
@@ -2741,7 +3073,7 @@ export default function ImportApprovals() {
     return '';
   }
 
-  // Function to split grouped import data into individual records (TrackAbout style)
+  // Function to split grouped import data into individual records (professional workflow)
   function splitImportIntoIndividualRecords(importRecord) {
     const data = parseDataField(importRecord.data);
     const rows = data.rows || [];
@@ -2766,7 +3098,11 @@ export default function ImportApprovals() {
       
       individualRecords.push({
         ...importRecord,
-        id: `${importRecord.id}_${index}`, // Create unique ID for each split record
+        // Keep original ID for database operations, use displayId for React keys
+        originalId: importRecord.id, // Original database ID
+        id: importRecord.id, // Keep original ID for database operations
+        displayId: `${importRecord.id}_${index}`, // Use for React keys only
+        splitIndex: index, // Track which split this is
         data: {
           ...data,
           rows: orderRows, // Only the rows for this specific order
@@ -2782,7 +3118,7 @@ export default function ImportApprovals() {
     return individualRecords;
   }
 
-  // Helper to get scanned (TrackAbout) SHP/RTN for a given order and product code
+  // Helper to get scanned SHP/RTN for a given order and product code
   function getScannedQty(orderNum, productCode, type) {
     // type: 'out' (delivered/shipped) or 'in' (returned)
     if (!orderNum || !productCode) return 0;

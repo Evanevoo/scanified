@@ -38,7 +38,8 @@ import {
   Preview as PreviewIcon,
   Refresh as RefreshIcon,
   ColorLens as ColorIcon,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Code as CodeIcon
 } from '@mui/icons-material';
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
@@ -66,11 +67,6 @@ const ASSET_TEMPLATES = {
       pressure_tracking: true,
       gas_type_tracking: true,
       delivery_tracking: true
-    },
-    barcodeFormat: {
-      pattern: '^[A-Z0-9]{6,12}$',
-      description: '6-12 alphanumeric characters',
-      examples: ['CYL123456', 'GAS789012']
     }
   },
   pallet: {
@@ -95,11 +91,6 @@ const ASSET_TEMPLATES = {
       delivery_tracking: true,
       weight_tracking: true,
       stacking_limits: true
-    },
-    barcodeFormat: {
-      pattern: '^PAL[0-9]{8}$',
-      description: 'PAL followed by 8 digits',
-      examples: ['PAL12345678', 'PAL87654321']
     }
   },
   equipment: {
@@ -124,11 +115,6 @@ const ASSET_TEMPLATES = {
       delivery_tracking: true,
       condition_tracking: true,
       calibration_tracking: true
-    },
-    barcodeFormat: {
-      pattern: '^EQ[A-Z]{2}[0-9]{6}$',
-      description: 'EQ followed by 2 letters and 6 digits',
-      examples: ['EQAB123456', 'EQXY789012']
     }
   },
   medical: {
@@ -154,11 +140,6 @@ const ASSET_TEMPLATES = {
       sterilization_tracking: true,
       expiry_tracking: true,
       compliance_tracking: true
-    },
-    barcodeFormat: {
-      pattern: '^MED[0-9]{7}$',
-      description: 'MED followed by 7 digits',
-      examples: ['MED1234567', 'MED9876543']
     }
   },
   tool: {
@@ -183,11 +164,6 @@ const ASSET_TEMPLATES = {
       delivery_tracking: true,
       checkout_tracking: true,
       condition_tracking: true
-    },
-    barcodeFormat: {
-      pattern: '^T[0-9]{8}$',
-      description: 'T followed by 8 digits',
-      examples: ['T12345678', 'T87654321']
     }
   }
 };
@@ -206,23 +182,7 @@ export default function AssetConfigurationManager() {
     secondaryColor: '#1e40af',
     appName: '',
     customTerminology: {},
-    featureToggles: {},
-    barcodeFormat: {
-      pattern: '',
-      description: '',
-      examples: []
-    },
-    orderNumberFormat: {
-      pattern: '',
-      description: '',
-      examples: [],
-      prefix: ''
-    },
-    serialNumberFormat: {
-      pattern: '',
-      description: '',
-      examples: []
-    }
+    featureToggles: {}
   });
 
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
@@ -250,10 +210,7 @@ export default function AssetConfigurationManager() {
           secondary_color,
           app_name,
           custom_terminology,
-          feature_toggles,
-          barcode_format,
-          order_number_format,
-          serial_number_format
+          feature_toggles
         `)
         .eq('id', organization.id)
         .single();
@@ -269,10 +226,7 @@ export default function AssetConfigurationManager() {
         secondaryColor: data.secondary_color || '#1e40af',
         appName: data.app_name || 'Scanified',
         customTerminology: data.custom_terminology || {},
-        featureToggles: data.feature_toggles || {},
-        barcodeFormat: data.barcode_format || { pattern: '', description: '', examples: [] },
-        orderNumberFormat: data.order_number_format || { pattern: '', description: '', examples: [], prefix: '' },
-        serialNumberFormat: data.serial_number_format || { pattern: '', description: '', examples: [] }
+        featureToggles: data.feature_toggles || {}
       });
     } catch (error) {
       console.error('Error loading configuration:', error);
@@ -285,6 +239,7 @@ export default function AssetConfigurationManager() {
   const saveConfiguration = async () => {
     try {
       setSaving(true);
+      
       const { error } = await supabase
         .from('organizations')
         .update({
@@ -295,13 +250,8 @@ export default function AssetConfigurationManager() {
           primary_color: config.primaryColor,
           secondary_color: config.secondaryColor,
           app_name: config.appName,
-          app_icon: config.appIcon,
-          show_app_icon: config.showAppIcon,
           custom_terminology: config.customTerminology,
-          feature_toggles: config.featureToggles,
-          barcode_format: config.barcodeFormat,
-          order_number_format: config.orderNumberFormat,
-          serial_number_format: config.serialNumberFormat
+          feature_toggles: config.featureToggles
         })
         .eq('id', organization.id);
 
@@ -325,19 +275,15 @@ export default function AssetConfigurationManager() {
     const template = ASSET_TEMPLATES[templateKey];
     setConfig({
       ...config,
-      ...template,
-      barcodeFormat: template.barcodeFormat,
-      orderNumberFormat: {
-        pattern: template.barcodeFormat.pattern,
-        description: template.barcodeFormat.description,
-        examples: template.barcodeFormat.examples,
-        prefix: 'ORD'
-      },
-      serialNumberFormat: {
-        pattern: template.barcodeFormat.pattern,
-        description: template.barcodeFormat.description,
-        examples: template.barcodeFormat.examples
-      }
+      assetType: template.assetType,
+      assetTypePlural: template.assetTypePlural,
+      assetDisplayName: template.assetDisplayName,
+      assetDisplayNamePlural: template.assetDisplayNamePlural,
+      primaryColor: template.primaryColor,
+      secondaryColor: template.secondaryColor,
+      appName: template.appName,
+      customTerminology: template.customTerminology,
+      featureToggles: template.featureToggles
     });
     setTemplateDialogOpen(false);
     toast.success(`Applied ${template.assetDisplayName} template`);
@@ -446,7 +392,7 @@ export default function AssetConfigurationManager() {
             <Tab label="Basic Configuration" />
             <Tab label="Custom Terminology" />
             <Tab label="Feature Toggles" />
-            <Tab label="Barcode Formats" />
+            <Tab label="Barcode & Number Formats" />
             <Tab label="Branding & Colors" />
           </Tabs>
         </Box>
@@ -626,94 +572,47 @@ export default function AssetConfigurationManager() {
             </Box>
           )}
 
-          {/* Tab 3: Barcode Formats */}
+          {/* Tab 3: Barcode & Number Formats */}
           {activeTab === 3 && (
             <Grid container spacing={3}>
               <Grid item xs={12}>
                 <Typography variant="h6" gutterBottom>Barcode & Number Formats</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                  Configure the expected formats for barcodes, order numbers, and serial numbers.
+                  Barcode and number format configuration has been moved to dedicated pages for better organization.
                 </Typography>
               </Grid>
 
-              {/* Barcode Format */}
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={6}>
                 <Paper sx={{ p: 3 }}>
-                  <Typography variant="subtitle1" gutterBottom>Barcode Format</Typography>
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} sm={6}>
-                      <TextField
-                        fullWidth
-                        label="Regex Pattern"
-                        value={config.barcodeFormat.pattern}
-                        onChange={(e) => setConfig({
-                          ...config,
-                          barcodeFormat: { ...config.barcodeFormat, pattern: e.target.value }
-                        })}
-                        placeholder="^[A-Z0-9]{6,12}$"
-                      />
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <TextField
-                        fullWidth
-                        label="Description"
-                        value={config.barcodeFormat.description}
-                        onChange={(e) => setConfig({
-                          ...config,
-                          barcodeFormat: { ...config.barcodeFormat, description: e.target.value }
-                        })}
-                        placeholder="6-12 alphanumeric characters"
-                      />
-                    </Grid>
-                    <Grid item xs={12}>
-                      <TextField
-                        fullWidth
-                        label="Examples (comma-separated)"
-                        value={config.barcodeFormat.examples?.join(', ') || ''}
-                        onChange={(e) => setConfig({
-                          ...config,
-                          barcodeFormat: { 
-                            ...config.barcodeFormat, 
-                            examples: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
-                          }
-                        })}
-                        placeholder="ABC123, XYZ789012"
-                      />
-                    </Grid>
-                  </Grid>
+                  <Typography variant="subtitle1" gutterBottom>Barcode Formats</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Configure barcode patterns, validation rules, and examples.
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    startIcon={<SettingsIcon />}
+                    onClick={() => window.location.href = '/settings?tab=barcodes'}
+                    fullWidth
+                  >
+                    Go to Barcode Settings
+                  </Button>
                 </Paper>
               </Grid>
 
-              {/* Order Number Format */}
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={6}>
                 <Paper sx={{ p: 3 }}>
-                  <Typography variant="subtitle1" gutterBottom>Order Number Format</Typography>
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} sm={4}>
-                      <TextField
-                        fullWidth
-                        label="Prefix"
-                        value={config.orderNumberFormat.prefix}
-                        onChange={(e) => setConfig({
-                          ...config,
-                          orderNumberFormat: { ...config.orderNumberFormat, prefix: e.target.value }
-                        })}
-                        placeholder="ORD"
-                      />
-                    </Grid>
-                    <Grid item xs={12} sm={8}>
-                      <TextField
-                        fullWidth
-                        label="Regex Pattern"
-                        value={config.orderNumberFormat.pattern}
-                        onChange={(e) => setConfig({
-                          ...config,
-                          orderNumberFormat: { ...config.orderNumberFormat, pattern: e.target.value }
-                        })}
-                        placeholder="^ORD[0-9]{6}$"
-                      />
-                    </Grid>
-                  </Grid>
+                  <Typography variant="subtitle1" gutterBottom>Advanced Format Configuration</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Advanced format templates and validation rules for power users.
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    startIcon={<CodeIcon />}
+                    onClick={() => window.location.href = '/format-configuration'}
+                    fullWidth
+                  >
+                    Go to Format Configuration Manager
+                  </Button>
                 </Paper>
               </Grid>
             </Grid>

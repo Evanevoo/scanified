@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination, Chip
 } from '@mui/material';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useAuth } from '../hooks/useAuth';
@@ -88,7 +88,7 @@ function Customers({ profile }) {
   console.log('Customers component rendering, profile:', profile);
   
   const [customers, setCustomers] = useState([]);
-  const [form, setForm] = useState({ CustomerListID: '', name: '', contact_details: '', phone: '' });
+  const [form, setForm] = useState({ CustomerListID: '', name: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -214,7 +214,7 @@ function Customers({ profile }) {
       const { error } = await supabase.from('customers').insert([{ ...form, organization_id: organization.id }]);
       if (error) throw error;
       
-      setForm({ CustomerListID: '', name: '', contact_details: '', phone: '' });
+      setForm({ CustomerListID: '', name: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
       setSuccessMsg('Customer added successfully!');
       
       // Refresh the current page
@@ -251,7 +251,7 @@ function Customers({ profile }) {
       if (error) throw error;
       
       setEditingId(null);
-      setForm({ CustomerListID: '', name: '', contact_details: '', phone: '' });
+      setForm({ CustomerListID: '', name: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
       setSuccessMsg('Customer updated successfully!');
       
       // Refresh current page
@@ -481,6 +481,7 @@ function Customers({ profile }) {
                   />
                 </TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Name</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Customer #</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Contact</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Phone</TableCell>
@@ -499,6 +500,14 @@ function Customers({ profile }) {
                   </TableCell>
                   <TableCell sx={{ fontWeight: 700, color: '#1976d2', cursor: 'pointer' }} onClick={() => navigate(`/customer/${c.CustomerListID}`)}>
                     {c.name}
+                  </TableCell>
+                  <TableCell>
+                    <Chip 
+                      label={c.customer_type || 'CUSTOMER'} 
+                      size="small"
+                      color={c.customer_type === 'VENDOR' ? 'secondary' : 'primary'}
+                      variant="outlined"
+                    />
                   </TableCell>
                   <TableCell>{c.CustomerListID}</TableCell>
                   <TableCell>{c.contact_details}</TableCell>

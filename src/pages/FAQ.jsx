@@ -51,7 +51,7 @@ export default function FAQ() {
     {
       category: 'getting-started',
       question: 'Can I migrate data from my current system?',
-      answer: 'Yes, we provide data migration tools and support to help you transfer your existing cylinder data, customer information, and historical records. Our team can assist with migration from TrackAbout, TIMS, Excel spreadsheets, or any other system.'
+      answer: 'Yes, we provide data migration tools and support to help you transfer your existing cylinder data, customer information, and historical records. Our team can assist with migration from legacy systems, TIMS, Excel spreadsheets, or any other platform.'
     },
     {
       category: 'getting-started',

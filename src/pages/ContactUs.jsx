@@ -96,7 +96,7 @@ const defaultConfig = {
       '500+ employees'
     ],
     currentSolutionOptions: [
-      'TrackAbout',
+      'Legacy Systems',
       'TIMS Software',
       'Excel/Manual',
       'Custom Solution',

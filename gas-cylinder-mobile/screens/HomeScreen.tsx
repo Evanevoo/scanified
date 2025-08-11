@@ -1,64 +1,62 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, TextInput, ScrollView, FlatList } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useTheme } from '../context/ThemeContext';
-import { useAssetConfig } from '../context/AssetContext';
-import { useAuth } from '../hooks/useAuth';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, TextInput, ActivityIndicator } from 'react-native';
 import { supabase } from '../supabase';
+import { useTheme } from '../context/ThemeContext';
+import { useAuth } from '../hooks/useAuth';
+import { useAssetConfig } from '../context/AssetContext';
+import { useNavigation } from '@react-navigation/native';
+
+// Quick Actions Configuration
+const QUICK_ACTIONS = [
+  {
+    title: 'Scan Cylinders',
+    subtitle: 'Scan for shipping or returns',
+    icon: '📷',
+    action: 'ScanCylinders',
+    color: '#2563eb'
+  },
+  {
+    title: 'Add Cylinder',
+    subtitle: 'Add new cylinder to inventory',
+    icon: '➕',
+    action: 'AddCylinder',
+    color: '#10B981'
+  },
+  {
+    title: 'Edit Cylinder',
+    subtitle: 'Modify cylinder details',
+    icon: '✏️',
+    action: 'EditCylinder',
+    color: '#F59E0B'
+  },
+  {
+    title: 'Locate Cylinder',
+    subtitle: 'Find cylinder location',
+    icon: '🔍',
+    action: 'LocateCylinder',
+    color: '#8B5CF6'
+  },
+  {
+    title: 'Fill Cylinder',
+    subtitle: 'Mark cylinder as filled',
+    icon: '⛽',
+    action: 'FillCylinder',
+    color: '#EF4444'
+  },
+  {
+    title: 'History',
+    subtitle: 'View scan history',
+    icon: '📊',
+    action: 'History',
+    color: '#6B7280'
+  }
+];
 
 export default function HomeScreen() {
   const navigation = useNavigation();
   const { colors } = useTheme();
+  const { user, profile, organization } = useAuth();
   const { config: assetConfig } = useAssetConfig();
-  const { user, organization } = useAuth();
-  
-  // Create dynamic quick actions based on asset configuration
-  const QUICK_ACTIONS = [
-    {
-      title: `Scan ${assetConfig.assetDisplayNamePlural}`,
-      subtitle: 'Scan barcodes',
-      icon: '📷',
-      action: 'ScanCylinders',
-      color: assetConfig.primaryColor,
-    },
-    {
-      title: `Add ${assetConfig.assetDisplayName}`,
-      subtitle: 'Register new',
-      icon: '➕',
-      action: 'AddCylinder',
-      color: '#10B981',
-    },
-    {
-      title: 'Edit Details',
-      subtitle: 'Update info',
-      icon: '✏️',
-      action: 'EditCylinder',
-      color: '#F59E0B',
-    },
-    {
-      title: 'Locate Item',
-      subtitle: 'Find location',
-      icon: '📍',
-      action: 'LocateCylinder',
-      color: '#EF4444',
-    },
-    {
-      title: 'View History',
-      subtitle: 'Past scans',
-      icon: '📋',
-      action: 'History',
-      color: '#8B5CF6',
-    },
-    {
-      title: 'Fill Status',
-      subtitle: 'Update fill',
-      icon: '🔧',
-      action: 'FillCylinder',
-      color: '#06B6D4',
-    },
-  ];
-
-  const [unreadCount, setUnreadCount] = useState(0);
   const [search, setSearch] = useState('');
   const [customerResults, setCustomerResults] = useState([]);
   const [bottleResults, setBottleResults] = useState([]);
@@ -67,67 +65,32 @@ export default function HomeScreen() {
   const [stats, setStats] = useState({
     totalScans: 0,
     todayScans: 0,
-    pendingActions: 0, // TODO: Implement real pending actions count
+    unreadScans: 0
   });
 
   useEffect(() => {
-    fetchDashboardStats();
-    fetchUnreadCount();
-  }, []);
-
-  const fetchDashboardStats = async () => {
-    try {
-      // Get total scans
-      const { count: totalScans } = await supabase
-        .from('asset_scans')
-        .select('*', { count: 'exact', head: true });
-
-      // Get today's scans
-      const today = new Date().toISOString().split('T')[0];
-      const { count: todayScans } = await supabase
-        .from('asset_scans')
-        .select('*', { count: 'exact', head: true })
-        .gte('created_at', today);
-
-      setStats({
-        totalScans: totalScans || 0,
-        todayScans: todayScans || 0,
-        pendingActions: 0, // TODO: Implement real pending actions count
-      });
-    } catch (error) {
-      console.error('Error fetching stats:', error);
-    }
-  };
-
-  const fetchUnreadCount = async () => {
-    try {
-      const { count, error } = await supabase
-        .from('asset_scans')
-        .select('*', { count: 'exact', head: true })
-        .is('read', false);
-      if (!error) setUnreadCount(count || 0);
-    } catch (error) {
-      console.error('Error fetching unread count:', error);
-    }
-  };
-
-  useEffect(() => {
-    if (search.trim().length === 0) {
+    if (search.length > 0) {
+      searchCustomers();
+      searchBottles();
+    } else {
       setCustomerResults([]);
       setBottleResults([]);
-      return;
     }
-    
-    searchCustomers();
-    searchBottles();
-  }, [search]);
+  }, [search, profile]);
 
   const searchCustomers = async () => {
+    if (!profile?.organization_id) {
+      console.log('No organization found, skipping customer search');
+      return;
+    }
+
     setLoadingCustomers(true);
     try {
       let query = supabase
         .from('customers')
-        .select('CustomerListID, name, barcode, contact_details');
+        .select('CustomerListID, name, barcode, contact_details')
+        .eq('organization_id', profile.organization_id)
+        .eq('deleted', false);
       
       if (search.trim().length === 1) {
         query = query.ilike('name', `${search.trim()}%`);
@@ -143,9 +106,10 @@ export default function HomeScreen() {
         );
         
         const results = await Promise.all(uniqueCustomers.map(async (customer) => {
-              const { data: assets } = await supabase
-      .from('assets')
+          const { data: assets } = await supabase
+            .from('bottles')
             .select('group_name')
+            .eq('organization_id', profile.organization_id)
             .eq('assigned_customer', customer.CustomerListID);
           return {
             ...customer,
@@ -162,11 +126,17 @@ export default function HomeScreen() {
   };
 
   const searchBottles = async () => {
+    if (!profile?.organization_id) {
+      console.log('No organization found, skipping bottle search');
+      return;
+    }
+
     setLoadingBottles(true);
     try {
-          const { data: assets, error } = await supabase
-      .from('assets')
+      const { data: assets, error } = await supabase
+        .from('bottles')
         .select('barcode_number, serial_number, assigned_customer, customer_name, product_code, description')
+        .eq('organization_id', profile.organization_id)
         .ilike('barcode_number', `%${search.trim()}%`)
         .limit(5);
       
@@ -177,6 +147,64 @@ export default function HomeScreen() {
       console.error('Error searching bottles:', error);
     } finally {
       setLoadingBottles(false);
+    }
+  };
+
+  useEffect(() => {
+    if (profile?.organization_id) {
+      fetchDashboardStats();
+      fetchUnreadCount();
+    }
+  }, [profile]);
+
+  const fetchDashboardStats = async () => {
+    if (!profile?.organization_id) {
+      console.log('No organization found, skipping stats fetch');
+      return;
+    }
+
+    try {
+      // Get total scans for this organization
+      const { count: totalScans } = await supabase
+        .from('bottle_scans')
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', profile.organization_id);
+
+      // Get today's scans for this organization
+      const today = new Date().toISOString().split('T')[0];
+      const { count: todayScans } = await supabase
+        .from('bottle_scans')
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', profile.organization_id)
+        .gte('created_at', today);
+
+      setStats({
+        totalScans: totalScans || 0,
+        todayScans: todayScans || 0,
+        unreadScans: 0
+      });
+    } catch (error) {
+      console.error('Error fetching stats:', error);
+    }
+  };
+
+  const fetchUnreadCount = async () => {
+    if (!profile?.organization_id) {
+      console.log('No organization found, skipping unread count fetch');
+      return;
+    }
+
+    try {
+      const { count, error } = await supabase
+        .from('bottle_scans')
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', profile.organization_id)
+        .is('read', false);
+      if (!error) {
+        setStats(prev => ({ ...prev, unreadScans: count || 0 }));
+      }
+    } catch (error) {
+      console.error('Error fetching unread count:', error);
     }
   };
 
@@ -225,9 +253,9 @@ export default function HomeScreen() {
               onPress={() => navigation.navigate('RecentScans')}
             >
               <Text style={styles.headerButtonIcon}>🔔</Text>
-              {unreadCount > 0 && (
+              {stats.unreadScans > 0 && (
                 <View style={[styles.badge, { backgroundColor: colors.error }]}>
-                  <Text style={[styles.badgeText, { color: colors.surface }]}>{unreadCount}</Text>
+                  <Text style={[styles.badgeText, { color: colors.surface }]}>{stats.unreadScans}</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -251,8 +279,8 @@ export default function HomeScreen() {
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Today</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.statNumber, { color: '#F59E0B' }]}>{stats.pendingActions}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Pending</Text>
+            <Text style={[styles.statNumber, { color: '#F59E0B' }]}>{stats.unreadScans}</Text>
+            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Unread</Text>
           </View>
         </View>
 
@@ -399,9 +427,12 @@ const styles = StyleSheet.create({
   },
   statsContainer: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
+    paddingHorizontal: Platform.OS === 'ios' && Platform.isPad ? 40 : 20,
     marginBottom: 24,
-    gap: 12,
+    gap: Platform.OS === 'ios' && Platform.isPad ? 20 : 12,
+    maxWidth: Platform.OS === 'ios' && Platform.isPad ? 800 : undefined,
+    alignSelf: 'center',
+    width: '100%',
   },
   statCard: {
     flex: 1,
@@ -487,10 +518,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
+    maxWidth: Platform.OS === 'ios' && Platform.isPad ? 800 : undefined,
+    alignSelf: 'center',
+    width: '100%',
   },
   actionCard: {
-    width: '48%',
-    padding: 16,
+    width: Platform.OS === 'ios' && Platform.isPad ? '31%' : '48%',
+    padding: Platform.OS === 'ios' && Platform.isPad ? 24 : 16,
     borderRadius: 16,
     borderWidth: 1,
     alignItems: 'center',

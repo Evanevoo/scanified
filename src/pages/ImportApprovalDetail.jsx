@@ -1,8 +1,69 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/client';
-import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Button, Grid, List, ListItem, ListItemText, Divider, Alert, Chip, IconButton, Tooltip } from '@mui/material';
+import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Button, Grid, List, ListItem, ListItemText, Divider, Alert, Chip, IconButton, Tooltip, Card, CardContent, CardHeader, Accordion, AccordionSummary, AccordionDetails, Badge } from '@mui/material';
+import { ExpandMore as ExpandMoreIcon, Person as PersonIcon, Receipt as ReceiptIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon } from '@mui/icons-material';
 import { CardSkeleton } from '../components/SmoothLoading';
+
+// Enhanced data parsing with better error handling
+function parseDataField(data) {
+  if (!data) return {};
+  if (typeof data === 'string') {
+    try {
+      const parsed = JSON.parse(data);
+      return parsed;
+    } catch {
+      console.log('JSON parse error for data:', data);
+      return { _raw: data, _error: 'Malformed JSON' };
+    }
+  }
+  return data;
+}
+
+// Function to split grouped import data into individual records (professional workflow)
+function splitImportIntoIndividualRecords(importRecord) {
+  const data = parseDataField(importRecord.data);
+  const rows = data.rows || [];
+  
+  if (!rows || rows.length === 0) return [importRecord];
+  
+  // Group rows by order/receipt number
+  const groupedByOrder = {};
+  rows.forEach(row => {
+    const orderNumber = row.reference_number || row.order_number || row.invoice_number || row.sales_receipt_number || 'UNKNOWN';
+    if (!groupedByOrder[orderNumber]) {
+      groupedByOrder[orderNumber] = [];
+    }
+    groupedByOrder[orderNumber].push(row);
+  });
+  
+  // Create individual records for each order/receipt
+  const individualRecords = [];
+  Object.keys(groupedByOrder).forEach((orderNumber, index) => {
+    const orderRows = groupedByOrder[orderNumber];
+    const firstRow = orderRows[0];
+    
+    individualRecords.push({
+      ...importRecord,
+      // Keep original ID for database operations, use displayId for React keys
+      originalId: importRecord.id, // Original database ID
+      id: importRecord.id, // Keep original ID for database operations
+      displayId: `${importRecord.id}_${index}`, // Use for React keys only
+      splitIndex: index, // Track which split this is
+      data: {
+        ...data,
+        rows: orderRows, // Only the rows for this specific order
+        order_number: orderNumber,
+        customer_name: firstRow.customer_name,
+        customer_id: firstRow.customer_id,
+        date: firstRow.date,
+        reference_number: orderNumber
+      }
+    });
+  });
+  
+  return individualRecords;
+}
 
 export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber }) {
   const params = useParams();
@@ -10,6 +71,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const invoiceNumber = propInvoiceNumber || params.invoiceNumber;
   const navigate = useNavigate();
   const [importRecord, setImportRecord] = useState(null);
+  const [individualRecords, setIndividualRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [actionMessage, setActionMessage] = useState('');
@@ -33,24 +95,38 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const filterCustomerName = searchParams.get('customerName');
   const filterCustomerId = searchParams.get('customerId');
 
+  // Helper function to extract original database ID from composite ID
+  const getOriginalId = (id) => {
+    if (!id) return id;
+    // If it's a composite ID like "638_1", extract the original ID "638"
+    if (typeof id === 'string' && id.includes('_')) {
+      return id.split('_')[0];
+    }
+    return id;
+  };
+
   useEffect(() => {
     async function fetchImport() {
       setLoading(true);
       setError(null);
+      
+      // Extract the original database ID
+      const originalId = getOriginalId(invoiceNumber);
+      
       let data = null;
       let err = null;
       // Try imported_invoices first
       let res = await supabase
         .from('imported_invoices')
         .select('*')
-        .eq('id', invoiceNumber)
+        .eq('id', originalId)
         .single();
       if (res.error || !res.data) {
         // Try imported_sales_receipts as fallback
         let res2 = await supabase
           .from('imported_sales_receipts')
           .select('*')
-          .eq('id', invoiceNumber)
+          .eq('id', originalId)
           .single();
         data = res2.data;
         err = res2.error;
@@ -60,6 +136,14 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       }
       if (err && !data) setError(err.message);
       setImportRecord(data);
+      
+      // Split the import record into individual customer/invoice records
+      if (data) {
+        const splitRecords = splitImportIntoIndividualRecords(data);
+        setIndividualRecords(splitRecords);
+        console.log(`Split import ${data.id} into ${splitRecords.length} individual records:`, splitRecords);
+      }
+      
       setLoading(false);
     }
     fetchImport();

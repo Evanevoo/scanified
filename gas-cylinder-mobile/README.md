@@ -1,6 +1,6 @@
-# Gas Cylinder Mobile App
+# Scanified - iOS Mobile App
 
-A React Native mobile application for gas cylinder management, built with Expo and Supabase.
+A professional iOS mobile application for gas cylinder management, built with Expo and Supabase.
 
 ## 🚀 Features
 
@@ -27,7 +27,7 @@ A React Native mobile application for gas cylinder management, built with Expo a
 
 ## 🛠️ Tech Stack
 
-- **React Native**: Cross-platform mobile development
+- **React Native**: iOS mobile development
 - **Expo**: Development platform and build tools
 - **TypeScript**: Type-safe JavaScript
 - **Supabase**: Backend as a Service (BaaS)
@@ -41,7 +41,7 @@ A React Native mobile application for gas cylinder management, built with Expo a
 - npm or yarn
 - Expo CLI
 - iOS Simulator (for iOS development)
-- Android Studio (for Android development)
+- Xcode (for iOS builds)
 
 ## 🚀 Getting Started
 
@@ -70,7 +70,6 @@ npm start
 ### 4. Run on Device/Simulator
 
 - **iOS**: Press `i` in the terminal or scan QR code with Expo Go app
-- **Android**: Press `a` in the terminal or scan QR code with Expo Go app
 
 ## 🏗️ Project Structure
 
@@ -93,9 +92,7 @@ gas-cylinder-mobile/
 ### Available Scripts
 
 - `npm start` - Start Expo development server
-- `npm run android` - Run on Android device/emulator
 - `npm run ios` - Run on iOS simulator
-- `npm run web` - Run in web browser
 - `npm test` - Run tests
 - `npm run lint` - Run ESLint
 - `npm run type-check` - Check TypeScript types
@@ -178,20 +175,17 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 
 ```bash
 # Build for iOS
-expo build:ios
+npm run build:ios
 
-# Build for Android
-expo build:android
-
-# Build for both platforms
-expo build
+# Build for iOS only (optimized)
+npm run build:ios-only
 ```
 
 ### App Store Deployment
 
 1. Configure app.json with your app details
-2. Build the app using Expo build
-3. Submit to App Store Connect (iOS) or Google Play Console (Android)
+2. Build the app using EAS Build
+3. Submit to App Store Connect (iOS)
 
 ## 🔒 Security
 

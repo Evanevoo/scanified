@@ -10,9 +10,10 @@ import {
 import {
   Dashboard, People, Inventory, LocalShipping, Schedule, Receipt, 
   AdminPanelSettings, Analytics, Payment, Settings, Assessment,
-  TrendingUp, Build as BuildIcon, Business as BusinessIcon,
+  TrendingUp,   Build as BuildIcon, Business as BusinessIcon,
   LocalGasStation as TruckIcon, AutoFixHigh as AutomationIcon,
-  Navigation as RouteOptimizationIcon, People as CustomerServiceIcon, 
+  Navigation as RouteOptimizationIcon, People as CustomerServiceIcon,
+  SwapHoriz as SwapIcon, 
   ExpandLess, ExpandMore, Work as WorkIcon, Person as PersonIcon,
   Palette as PaletteIcon, Store as StoreIcon, Upload, History, CheckCircle,
   Home as HomeIcon, LocationOn as LocationIcon, Search as SearchIcon,
@@ -26,14 +27,13 @@ import {
 const drawerWidth = 280;
 const collapsedWidth = 64;
 
-const Sidebar = ({ open, onClose }) => {
+const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   const { profile, organization } = useAuth();
   const { can, isOrgAdmin } = usePermissions();
   
   if (!profile) return null;
   
   const [searchTerm, setSearchTerm] = useState('');
-  const [isCollapsed, setIsCollapsed] = useState(false);
   const [sections, setSections] = useState({
     core: true,
     operations: true,
@@ -191,8 +191,9 @@ const Sidebar = ({ open, onClose }) => {
       icon: <HomeIcon />,
       items: [
 
-        { title: 'TrackAbout Dashboard', path: '/trackabout-dashboard', icon: <Analytics />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Industry Analytics', path: '/industry-analytics', icon: <Analytics />, roles: ['admin', 'user', 'manager'] },
         { title: 'Customers', path: '/customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Temp Customer Management', path: '/temp-customer-management', icon: <SwapIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Locations', path: '/locations', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] }
       ]
     },
@@ -288,7 +289,7 @@ const Sidebar = ({ open, onClose }) => {
         }}>
           <Tooltip title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
             <IconButton 
-              onClick={() => setIsCollapsed(!isCollapsed)}
+              onClick={onToggleCollapse}
               size="small"
             >
               {isCollapsed ? <ChevronRight /> : <ChevronLeft />}

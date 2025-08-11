@@ -1,887 +1,991 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Collapse, IconButton, TextField, CircularProgress, FormControl, InputLabel, Select, MenuItem, Alert, Chip
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, 
+  Card, CardContent, Grid, Chip, IconButton, TextField, FormControl, InputLabel, Select, MenuItem,
+  Alert, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions, Tabs, Tab,
+  Tooltip, Badge
 } from '@mui/material';
-import DownloadIcon from '@mui/icons-material/Download';
-import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
-import ArrowDropUpIcon from '@mui/icons-material/ArrowDropUp';
-import useMediaQuery from '@mui/material/useMediaQuery';
-import { useTheme } from '@mui/material/styles';
+import {
+  Business as BusinessIcon,
+  Person as PersonIcon,
+  Home as HomeIcon,
+  Edit as EditIcon,
+  Download as DownloadIcon,
+  Visibility as ViewIcon,
+  MonetizationOn as MoneyIcon,
+  Assignment as AssignmentIcon,
+  Notifications as NotificationsIcon,
+  Invoice as InvoiceIcon
+} from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
+import { NotificationService } from '../services/notificationService';
 
-function exportToCSV(customers) {
-  const rows = [];
-  customers.forEach(({ customer, rentals }) => {
-    rentals.forEach(rental => {
-      rows.push({
-        Customer: customer.name,
-        CustomerID: customer.CustomerListID,
-        TotalBottles: rentals.length,
-        RentalType: rental.rental_type,
-        RentalRate: rental.rental_amount,
-        TaxCode: rental.tax_code,
-        Location: rental.location,
-        StartDate: rental.rental_start_date,
-        EndDate: rental.rental_end_date,
-      });
-    });
-  });
-  if (rows.length === 0) return;
-  const header = Object.keys(rows[0]).join(',');
-  const csv = [header, ...rows.map(r => Object.values(r).join(','))].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `rentals_export_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+// Business logic functions to determine asset status
+const getAssetStatus = (assignedCustomer, customerType) => {
+  if (!assignedCustomer) return 'IN-HOUSE';
+  if (customerType === 'VENDOR') return 'IN-HOUSE';     // Vendors are considered in-house
+  if (customerType === 'CUSTOMER') return 'RENTED';     // Customers are rented out
+  if (customerType === 'TEMPORARY') return 'RENTED';    // Temporary customers also rent items
+  // If customer_type doesn't exist yet (migration not run), default to RENTED for assigned items
+  if (assignedCustomer && !customerType) return 'RENTED';
+  return 'IN-HOUSE'; // Default fallback
+};
 
-const defaultEdit = (rentals) => ({
-  bottles: rentals.length,
-  rentalRate: rentals[0]?.rental_amount || '',
-  rentalType: rentals[0]?.rental_type || 'Monthly',
-  taxCode: rentals[0]?.tax_code || 'GST',
-  location: rentals[0]?.location || 'SASKATOON'
-});
+const getStatusDescription = (assignedCustomer, customerType) => {
+  if (!assignedCustomer) return 'Available for assignment';
+  if (customerType === 'VENDOR') return 'In-house with vendor - no rental charge';
+  if (customerType === 'CUSTOMER') return 'Rented to customer';
+  if (customerType === 'TEMPORARY') return 'Rented to temporary customer (needs account setup)';
+  // If customer_type doesn't exist yet, assume it's a customer
+  if (assignedCustomer && !customerType) return 'Rented to customer';
+  return 'Available for assignment';
+};
 
-function getNextInvoiceNumber() {
-  const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
-  const now = new Date();
-  const currentMonth = now.getFullYear() + '-' + (now.getMonth() + 1).toString().padStart(2, '0');
-  let lastNumber = 10000;
-  let lastMonth = currentMonth;
-  if (state.lastMonth === currentMonth && state.lastNumber) {
-    lastNumber = 10000; // Always start from 10000 for the current month
-  } else if (state.lastMonth !== currentMonth && state.lastNumber) {
-    lastNumber = state.lastNumber + 1;
-    lastMonth = currentMonth;
+// Enhanced status mapping with colors and descriptions
+const ASSET_STATUS = {
+  'IN-HOUSE': { 
+    color: 'default', 
+    icon: <HomeIcon />, 
+    description: 'Available in warehouse or with vendors (no charge)',
+    billable: false 
+  },
+  'RENTED': { 
+    color: 'primary', 
+    icon: <PersonIcon />, 
+    description: 'Rented to customer',
+    billable: true 
   }
-  return { next: lastNumber, currentMonth, lastMonth };
-}
+};
 
-function setInvoiceState(number, month) {
-  // Only update if month has changed
-  const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
-  if (state.lastMonth !== month) {
-    localStorage.setItem('invoice_state', JSON.stringify({ lastNumber: number, lastMonth: month }));
-  }
-}
-
-function getInvoiceDates() {
-  const now = new Date();
-  // Invoice date is 1st of next month
-  const invoiceDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  // Due date is 1 month after invoice date
-  const dueDate = new Date(invoiceDate.getFullYear(), invoiceDate.getMonth() + 1, 1);
-  const fmt = d => d.toISOString().slice(0, 10);
-  return { invoiceDate: fmt(invoiceDate), dueDate: fmt(dueDate) };
-}
-
-function exportInvoices(customers) {
-  if (!customers.length) return;
-  const { next, currentMonth } = getNextInvoiceNumber();
-  let invoiceNumber = next;
-  const { invoiceDate, dueDate } = getInvoiceDates();
-  const rate = 10;
-  const taxRate = 0.11;
-  const rows = customers.map(({ customer, rentals }, idx) => {
-    const numBottles = rentals.length;
-    const base = numBottles * rate;
-    const tax = +(base * taxRate).toFixed(1);
-    const total = +(base + tax).toFixed(2);
-    return {
-      'Invoice#': `W${(invoiceNumber + idx).toString().padStart(5, '0')}`,
-      'Customer Number': customer.CustomerListID,
-      'Total': total,
-      'Date': invoiceDate,
-      'TX': tax,
-      'TX code': 'G',
-      'Due date': dueDate,
-      'Rate': rate,
-      'Name': customer.name,
-      '# of Bottles': numBottles
-    };
-  });
-  // Update invoice state
-  setInvoiceState(invoiceNumber + rows.length - 1, currentMonth);
-  // CSV export
-  const header = Object.keys(rows[0]).join(',');
-  const csv = [header, ...rows.map(r => Object.values(r).join(','))].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `quickbooks_invoices_${invoiceDate}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function Rentals() {
-  const { profile: userProfile } = useAuth();
-  const [rentals, setRentals] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [expandedCustomer, setExpandedCustomer] = useState(null);
-  const [editMap, setEditMap] = useState({});
-  const [savingMap, setSavingMap] = useState({});
+function RentalsImproved() {
+  const { profile, organization } = useAuth();
   const navigate = useNavigate();
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const [page, setPage] = useState(0);
-  const rowsPerPage = 20;
-  const [sortField, setSortField] = useState('customer');
-  const [sortDirection, setSortDirection] = useState('asc');
 
-  // Check if user is admin
-  const isAdmin = userProfile?.role === 'admin' || userProfile?.is_admin === true;
+  // State management
+  const [loading, setLoading] = useState(true);
+  const [assets, setAssets] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [activeTab, setActiveTab] = useState(0);
+  const [editDialog, setEditDialog] = useState({ open: false, customer: null, rentals: [] });
+  const [error, setError] = useState(null);
+  const [filters, setFilters] = useState({
+    status: 'all',
+    customer_type: 'all',
+    search: ''
+  });
+
+  // Statistics
+  const [stats, setStats] = useState({
+    inHouse: 0,
+    withVendors: 0,
+    rented: 0,
+    totalRevenue: 0
+  });
+
+  useEffect(() => {
+    if (organization?.id) {
+      fetchRentals();
+      fetchCustomers();
+    }
+  }, [organization]);
 
   const fetchRentals = async () => {
     setLoading(true);
     setError(null);
     try {
-      if (!userProfile?.organization_id) {
+      if (!organization?.id) {
         setError('No organization assigned to user');
         setLoading(false);
         return;
       }
 
-      // Fetch all explicit rental records for this organization
+      console.log('Fetching rentals for organization:', organization.id);
+
+      // Simplified approach - get all data separately to debug
+      // 1. Get all active rentals (from rentals table)
       const { data: rentalsData, error: rentalsError } = await supabase
         .from('rentals')
-        .select('*, bottles(*)')
-        .eq('organization_id', userProfile.organization_id)
-        .not('bottle_id', 'is', null)
-        .order('rental_start_date', { ascending: false });
-      if (rentalsError) throw rentalsError;
-      
-      // Fetch bottles assigned to customers (but not customer-owned) for this organization
+        .select('*')
+        .is('rental_end_date', null);
+
+      if (rentalsError) {
+        console.error('Rentals query error:', rentalsError);
+        throw rentalsError;
+      }
+
+      console.log('All active rentals:', rentalsData?.length || 0);
+
+      // 2. Get all assigned bottles for this organization
       const { data: assignedBottles, error: bottlesError } = await supabase
         .from('bottles')
         .select('*')
-        .eq('organization_id', userProfile.organization_id)
-        .not('assigned_customer', 'is', null)
-        .neq('owner_type', 'customer') // Exclude customer-owned bottles
-        .order('created_at', { ascending: false });
-      if (bottlesError) throw bottlesError;
-      
-      console.log('Rentals: Sample rental data:', rentalsData?.slice(0, 3));
-      console.log('Rentals: Total rentals fetched:', rentalsData?.length || 0);
-      console.log('Rentals: Assigned bottles fetched:', assignedBottles?.length || 0);
-      
-      // Combine explicit rentals with assigned bottles
+        .eq('organization_id', organization.id)
+        .not('assigned_customer', 'is', null);
+
+      if (bottlesError) {
+        console.error('Bottles query error:', bottlesError);
+        throw bottlesError;
+      }
+
+      console.log('Assigned bottles for org:', assignedBottles?.length || 0);
+
+      // 3. Get all bottles for this organization (to join with rentals)
+      const { data: allBottles, error: allBottlesError } = await supabase
+        .from('bottles')
+        .select('*')
+        .eq('organization_id', organization.id);
+
+      if (allBottlesError) {
+        console.error('All bottles query error:', allBottlesError);
+        throw allBottlesError;
+      }
+
+      // Create a map of bottles for quick lookup
+      const bottlesMap = (allBottles || []).reduce((map, bottle) => {
+        map[bottle.barcode_number || bottle.barcode] = bottle;
+        return map;
+      }, {});
+
+      console.log('Total bottles for org:', allBottles?.length || 0);
+
+      // 4. Combine rentals with bottles from this organization
       const allRentalData = [];
       
-      // Add explicit rentals
-      (rentalsData || []).forEach(rental => {
-        allRentalData.push({
-          ...rental,
-          source: 'rental_record',
-          customer_id: rental.customer_id,
-          bottle_id: rental.bottle_id,
-          rental_start_date: rental.rental_start_date,
-          rental_end_date: rental.rental_end_date,
-          rental_amount: rental.rental_amount,
-          rental_type: rental.rental_type,
-          tax_code: rental.tax_code,
-          location: rental.location
-        });
-      });
-      
-      // Add assigned bottles as implicit rentals (if not already in explicit rentals)
-      const existingBottleIds = new Set((rentalsData || []).map(r => r.bottle_id).filter(Boolean));
-      
-      (assignedBottles || []).forEach(bottle => {
-        if (!existingBottleIds.has(bottle.id)) {
+      // Add rentals that have matching bottles in this organization
+      for (const rental of rentalsData || []) {
+        const bottle = bottlesMap[rental.bottle_barcode];
+        if (bottle) {
           allRentalData.push({
-            id: `bottle_${bottle.id}`, // Unique ID for bottle-based rentals
+            ...rental,
+            source: 'rental',
+            bottles: bottle
+          });
+        }
+      }
+
+      // Add bottles that are assigned but don't have rental records
+      const existingBottleBarcodes = new Set(allRentalData.map(r => r.bottle_barcode));
+      
+      for (const bottle of assignedBottles || []) {
+        const barcode = bottle.barcode_number || bottle.barcode;
+        if (!existingBottleBarcodes.has(barcode)) {
+          allRentalData.push({
+            id: `bottle_${bottle.id}`,
             source: 'bottle_assignment',
             customer_id: bottle.assigned_customer,
+            bottle_barcode: barcode,
             bottle_id: bottle.id,
-            bottles: bottle, // Include bottle data
+            bottles: bottle,
             rental_start_date: bottle.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
             rental_end_date: null,
-            rental_amount: 10, // Default rental amount
+            rental_amount: 10,
             rental_type: 'monthly',
-            tax_code: 'pst+gst',
+            tax_code: 'GST+PST',
             tax_rate: 0.11,
             location: bottle.location || 'SASKATOON'
           });
         }
-      });
-      
-      // Get unique customer_ids
+      }
+
+      console.log('Combined rental data:', allRentalData.length);
+
+      // 5. Get customers with their types (with fallback)
       const customerIds = Array.from(new Set(allRentalData.map(r => r.customer_id).filter(Boolean)));
       let customersMap = {};
-      
+
       if (customerIds.length > 0) {
-        // Fetch all customers in one query for this organization
-        const { data: customersData, error: customersError } = await supabase
-          .from('customers')
-          .select('*')
-          .eq('organization_id', userProfile.organization_id)
-          .in('CustomerListID', customerIds);
-        if (!customersError && customersData) {
-          customersMap = customersData.reduce((map, c) => {
-            map[c.CustomerListID] = c;
-            return map;
-          }, {});
+        try {
+          const { data: customersData, error: customersError } = await supabase
+            .from('customers')
+            .select('*')
+            .eq('organization_id', organization.id)
+            .in('CustomerListID', customerIds);
+          
+          if (!customersError && customersData) {
+            customersMap = customersData.reduce((map, c) => {
+              map[c.CustomerListID] = c;
+              return map;
+            }, {});
+          }
+        } catch (error) {
+          console.log('Customer_type column not found, using fallback');
+          const { data: customersData } = await supabase
+            .from('customers')
+            .select('CustomerListID, name, contact_details, phone')
+            .eq('organization_id', organization.id)
+            .in('CustomerListID', customerIds);
+
+          if (customersData) {
+            customersMap = customersData.reduce((map, c) => {
+              map[c.CustomerListID] = { ...c, customer_type: 'CUSTOMER' };
+              return map;
+            }, {});
+          }
         }
       }
-      
-      // Attach customer info to each rental
+
+      console.log('Customers found:', Object.keys(customersMap).length);
+
+      // 6. Attach customer info to each rental
       const rentalsWithCustomer = allRentalData.map(r => ({
         ...r,
         customer: customersMap[r.customer_id] || null
       }));
-      
-      const filteredRentals = rentalsWithCustomer.filter(r => r.customer_id && r.customer_id !== 'Not Set' && r.customer);
-      setRentals(filteredRentals);
-      
-      console.log('Rentals: Total combined rentals:', filteredRentals.length);
-      console.log('Rentals: Sample combined data:', filteredRentals.slice(0, 3));
-      
+
+      const filteredRentals = rentalsWithCustomer.filter(r => r.customer_id && r.customer);
+      setAssets(filteredRentals);
+
+      // 7. Calculate statistics (proper separation of IN-HOUSE vs RENTED)
+      const unassignedBottles = allBottles?.filter(b => !b.assigned_customer).length || 0;
+      const bottlesWithVendors = filteredRentals?.filter(r => r.customer?.customer_type === 'VENDOR').length || 0;
+      const inHouseTotal = unassignedBottles + bottlesWithVendors; // Unassigned + vendors = in-house
+      const rentedToCustomers = filteredRentals?.filter(r => 
+        r.customer?.customer_type === 'CUSTOMER' || r.customer?.customer_type === 'TEMPORARY'
+      ).length || 0;
+      const totalRevenue = filteredRentals?.reduce((sum, rental) => {
+        if (rental.customer?.customer_type === 'CUSTOMER' || rental.customer?.customer_type === 'TEMPORARY') {
+          return sum + (rental.rental_amount || 0);
+        }
+        return sum;
+      }, 0) || 0;
+
+      setStats({ 
+        inHouse: inHouseTotal,  // Unassigned + vendors
+        withVendors: bottlesWithVendors,  // Show vendor bottles for info
+        rented: rentedToCustomers,  // Only customer bottles are "rented"
+        totalRevenue 
+      });
+
+      console.log('Final results:', {
+        unassignedBottles: unassignedBottles,
+        bottlesWithVendors: bottlesWithVendors,
+        inHouseTotal: inHouseTotal,
+        rentedToCustomers: rentedToCustomers,
+        revenue: totalRevenue
+      });
+
+
+
     } catch (err) {
+      console.error('Error in fetchRentals:', err);
       setError(err.message);
     }
     setLoading(false);
   };
 
-  useEffect(() => {
-    fetchRentals();
-  }, []);
+  const fetchCustomers = async () => {
+    try {
+      // Try to get all customer data including customer_type if it exists
+      let customersData = [];
+      try {
+        const { data, error } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('organization_id', organization.id)
+          .order('name');
 
-  // Group rentals by customer, skip if missing customer
-  const customers = [];
+        if (error) throw error;
+        customersData = data || [];
+      } catch (error) {
+        // If there's an error (possibly due to missing customer_type), try basic query
+        console.log('Falling back to basic customer query');
+        const { data, error: fallbackError } = await supabase
+          .from('customers')
+          .select('CustomerListID, name, contact_details, phone')
+          .eq('organization_id', organization.id)
+          .order('name');
+        
+        if (fallbackError) throw fallbackError;
+        customersData = (data || []).map(c => ({ ...c, customer_type: 'CUSTOMER' })); // Default to CUSTOMER
+      }
+      
+      setCustomers(customersData);
+    } catch (error) {
+      console.error('Error fetching customers:', error);
+    }
+  };
+
+  // Group rentals by customer (like original rentals page)
+  const customersWithRentals = [];
   const customerMap = {};
-  
-  for (const rental of rentals) {
-    if (!rental.customer) continue; // Skip rentals with no customer
+
+  for (const rental of assets) {
+    if (!rental.customer) continue;
     const custId = rental.customer.CustomerListID;
     if (!customerMap[custId]) {
       customerMap[custId] = {
         customer: rental.customer,
         rentals: [],
       };
-      customers.push(customerMap[custId]);
+      customersWithRentals.push(customerMap[custId]);
     }
     customerMap[custId].rentals.push(rental);
   }
 
-  // Sort customers based on selected field
-  const sortCustomers = (customers, field, direction) => {
-    return customers.sort((a, b) => {
-      let aValue, bValue;
-      
-      switch (field) {
-        case 'customer':
-          aValue = a.customer.name || '';
-          bValue = b.customer.name || '';
-          break;
-        case 'location':
-          aValue = a.rentals[0]?.location || '';
-          bValue = b.rentals[0]?.location || '';
-          break;
-        case 'rental_type':
-          aValue = a.rentals[0]?.rental_type || '';
-          bValue = b.rentals[0]?.rental_type || '';
-          break;
-        case 'total_bottles':
-          aValue = a.rentals.length;
-          bValue = b.rentals.length;
-          break;
-        case 'rental_amount':
-          aValue = a.rentals[0]?.rental_amount || 0;
-          bValue = b.rentals[0]?.rental_amount || 0;
-          break;
-        case 'start_date':
-          aValue = a.rentals[0]?.rental_start_date || '';
-          bValue = b.rentals[0]?.rental_start_date || '';
-          break;
-        default:
-          aValue = a.customer.name || '';
-          bValue = b.customer.name || '';
-      }
-      
-      if (direction === 'asc') {
-        return aValue > bValue ? 1 : -1;
-      } else {
-        return aValue < bValue ? 1 : -1;
-      }
-    });
-  };
-
-  const sortedCustomers = sortCustomers(customers, sortField, sortDirection);
-  const paginatedCustomers = sortedCustomers.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
-
-  const handleEditChange = (custId, field, value) => {
-    setEditMap(prev => ({
-      ...prev,
-      [custId]: {
-        ...prev[custId],
-        [field]: value
-      }
-    }));
-  };
-
-  const handleSave = async (custId, rentals) => {
-    setSavingMap(prev => ({ ...prev, [custId]: true }));
-    const edit = editMap[custId] || defaultEdit(rentals);
-    try {
-      // Get tax rate for the location
-      let taxRate = 0;
-      let taxCode = edit.taxCode;
-      
-      if (edit.location && edit.location !== 'None') {
-        try {
-          const { data: locationData } = await supabase
-            .from('locations')
-            .select('total_tax_rate')
-            .eq('id', edit.location.toLowerCase())
-            .single();
-          
-          if (locationData) {
-            taxRate = locationData.total_tax_rate;
-            taxCode = 'GST+PST'; // Use combined tax code for location-based rates
-          }
-        } catch (e) {
-          console.warn('Could not fetch tax rate for location:', edit.location);
-        }
-      }
-
-      await Promise.all(rentals.map(rental =>
-        supabase.from('rentals').update({
-          rental_amount: edit.rentalRate,
-          rental_type: edit.rentalType,
-          tax_code: taxCode,
-          tax_rate: taxRate,
-          location: edit.location
-        }).eq('id', rental.id)
-      ));
-      // Refresh data properly
-      await fetchRentals();
-    } catch (error) {
-      // Error handling for rental updates
+  // Filter customers based on search
+  const filteredCustomers = customersWithRentals.filter(({ customer, rentals }) => {
+    const searchText = filters.search.toLowerCase();
+    if (filters.search) {
+      return customer.name?.toLowerCase().includes(searchText) ||
+             customer.CustomerListID?.toLowerCase().includes(searchText) ||
+             rentals.some(r => r.bottles?.barcode_number?.toLowerCase().includes(searchText) ||
+                              r.bottles?.barcode?.toLowerCase().includes(searchText));
     }
-    setSavingMap(prev => ({ ...prev, [custId]: false }));
+    return true;
+  });
+
+  const tabs = [
+    { label: 'All Customers', value: 'all', count: filteredCustomers.length },
+    { label: 'Monthly Rentals', value: 'monthly', count: filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'monthly')).length },
+    { label: 'Yearly Rentals', value: 'yearly', count: filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly')).length },
+  ];
+
+  const handleTabChange = (event, newValue) => {
+    setActiveTab(newValue);
   };
 
-  // Function to create rental records for existing bottle assignments
-  const createRentalsForExistingBottles = async () => {
-    setLoading(true);
+  const handleEditAsset = (asset) => {
+    setEditDialog({ open: true, asset });
+  };
+
+  const handleUpdateAsset = async (assetId, updates) => {
     try {
-      // Get all bottles that are assigned to customers but don't have rental records
-      const { data: assignedBottles, error: bottlesError } = await supabase
+      const { error } = await supabase
         .from('bottles')
-        .select('*')
-        .not('assigned_customer', 'is', null);
-      
-      if (bottlesError) throw bottlesError;
-      
-      // Get existing rental records to avoid duplicates
-      const { data: existingRentals, error: rentalsError } = await supabase
-        .from('rentals')
-        .select('bottle_id');
-      
-      if (rentalsError) throw rentalsError;
-      
-      const existingBottleIds = new Set(existingRentals.map(r => r.bottle_id));
-      
-      // Create rental records for bottles that don't have them
-      const bottlesToCreateRentalsFor = assignedBottles.filter(bottle => !existingBottleIds.has(bottle.id));
-      
-      if (bottlesToCreateRentalsFor.length === 0) {
-        alert('All assigned bottles already have rental records!');
+        .update(updates)
+        .eq('id', assetId);
+
+      if (error) throw error;
+
+      // Refresh data
+      await fetchAssets();
+      setEditDialog({ open: false, asset: null });
+    } catch (error) {
+      console.error('Error updating asset:', error);
+    }
+  };
+
+  // Original export format from old rentals page
+  const exportToCSV = (customers) => {
+    const rows = [];
+    customers.forEach(({ customer, rentals }) => {
+      rentals.forEach(rental => {
+        rows.push({
+          Customer: customer.name,
+          CustomerID: customer.CustomerListID,
+          TotalBottles: rentals.length,
+          RentalType: rental.rental_type,
+          RentalRate: rental.rental_amount,
+          TaxCode: rental.tax_code,
+          Location: rental.location,
+          StartDate: rental.rental_start_date,
+          EndDate: rental.rental_end_date,
+        });
+      });
+    });
+    if (rows.length === 0) return;
+    const header = Object.keys(rows[0]).join(',');
+    const csv = [header, ...rows.map(r => Object.values(r).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `rentals_export_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // QuickBooks invoice export from old rentals page
+  const exportInvoices = (customers) => {
+    if (!customers.length) return;
+    const getNextInvoiceNumber = () => {
+      const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
+      const now = new Date();
+      const currentMonth = now.getFullYear() + '-' + (now.getMonth() + 1).toString().padStart(2, '0');
+      let lastNumber = 10000;
+      let lastMonth = currentMonth;
+      if (state.lastMonth === currentMonth && state.lastNumber) {
+        lastNumber = 10000;
+      } else if (state.lastMonth !== currentMonth && state.lastNumber) {
+        lastNumber = state.lastNumber + 1;
+        lastMonth = currentMonth;
+      }
+      return { next: lastNumber, currentMonth, lastMonth };
+    };
+    
+    const setInvoiceState = (number, month) => {
+      const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
+      if (state.lastMonth !== month) {
+        localStorage.setItem('invoice_state', JSON.stringify({ lastNumber: number, lastMonth: month }));
+      }
+    };
+
+    const getInvoiceDates = () => {
+      const now = new Date();
+      const invoiceDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const dueDate = new Date(invoiceDate.getFullYear(), invoiceDate.getMonth() + 1, 1);
+      const fmt = d => d.toISOString().slice(0, 10);
+      return { invoiceDate: fmt(invoiceDate), dueDate: fmt(dueDate) };
+    };
+
+    const { next, currentMonth } = getNextInvoiceNumber();
+    let invoiceNumber = next;
+    const { invoiceDate, dueDate } = getInvoiceDates();
+    const rate = 10;
+    const taxRate = 0.11;
+    const rows = customers.map(({ customer, rentals }, idx) => {
+      const numBottles = rentals.length;
+      const base = numBottles * rate;
+      const tax = +(base * taxRate).toFixed(1);
+      const total = +(base + tax).toFixed(2);
+      return {
+        'Invoice#': `W${(invoiceNumber + idx).toString().padStart(5, '0')}`,
+        'Customer Number': customer.CustomerListID,
+        'Total': total,
+        'Date': invoiceDate,
+        'TX': tax,
+        'TX code': 'G',
+        'Due date': dueDate,
+        'Rate': rate,
+        'Name': customer.name,
+        '# of Bottles': numBottles
+      };
+    });
+    
+    setInvoiceState(invoiceNumber + rows.length - 1, currentMonth);
+    const header = Object.keys(rows[0]).join(',');
+    const csv = [header, ...rows.map(r => Object.values(r).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `quickbooks_invoices_${invoiceDate}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Generate yearly invoice notifications for January billing
+  const generateYearlyInvoiceNotifications = async () => {
+    try {
+      if (!organization?.id) {
+        alert('Organization ID not found');
         return;
       }
-      
-      // For each bottle, fetch location tax info and set tax_code and tax_rate
-      const rentalRecords = [];
-      for (const bottle of bottlesToCreateRentalsFor) {
-        let taxCode = 'pst+gst';
-        let taxRate = 0;
-        let rentalLocation = bottle.location || 'SASKATOON';
-        try {
-          const { data: locationData } = await supabase
-            .from('locations')
-            .select('id, total_tax_rate')
-            .eq('id', rentalLocation.toLowerCase())
-            .single();
-          if (locationData) {
-            taxRate = locationData.total_tax_rate;
-          }
-        } catch (e) {
-          // Could not fetch location tax info, using defaults
-        }
-        rentalRecords.push({
-          customer_id: bottle.assigned_customer,
-          bottle_id: bottle.id,
-          rental_start_date: bottle.rental_start_date || new Date().toISOString().split('T')[0],
-          rental_type: 'monthly',
-          rental_amount: 10,
-          location: rentalLocation,
-          tax_code: taxCode,
-          tax_rate: taxRate
-        });
+
+      // Get yearly rental customers
+      const yearlyCustomers = filteredCustomers.filter(c => 
+        c.rentals.some(r => r.rental_type === 'yearly')
+      );
+
+      if (yearlyCustomers.length === 0) {
+        alert('No yearly rental customers found');
+        return;
       }
-      
-      const { data: createdRentals, error: createError } = await supabase
-        .from('rentals')
-        .insert(rentalRecords)
-        .select();
-      
-      if (createError) throw createError;
-      
-      alert(`Successfully created ${createdRentals.length} rental records!`);
-      
-      // Refresh the rentals data
-      const { data } = await supabase
-        .from('rentals')
-        .select('*')
-        .order('rental_start_date', { ascending: false });
-      setRentals(data);
-      
+
+      const currentYear = new Date().getFullYear();
+      let notificationsCreated = 0;
+
+      // Create notification for each yearly customer
+      for (const { customer, rentals } of yearlyCustomers) {
+        const yearlyRentals = rentals.filter(r => r.rental_type === 'yearly');
+        const totalAmount = yearlyRentals.reduce((sum, r) => sum + (r.rental_amount || 0), 0);
+        
+        const result = await NotificationService.createYearlyRentalNotification(
+          organization.id,
+          {
+            customer_id: customer.CustomerListID,
+            name: customer.name,
+            bottleCount: yearlyRentals.length,
+            totalAmount: totalAmount,
+            rental_type: 'yearly'
+          }
+        );
+
+        if (result.success) {
+          notificationsCreated++;
+        }
+      }
+
+      // Also create a general summary notification
+      const totalRevenue = yearlyCustomers.reduce((sum, { rentals }) => {
+        return sum + rentals
+          .filter(r => r.rental_type === 'yearly')
+          .reduce((rSum, r) => rSum + (r.rental_amount || 0), 0);
+      }, 0);
+
+      await NotificationService.createNotification({
+        organizationId: organization.id,
+        type: 'yearly_invoice',
+        title: `Yearly Rental Invoices Ready - ${currentYear}`,
+        message: `${yearlyCustomers.length} yearly customers need invoicing. Total revenue: $${totalRevenue}`,
+        data: {
+          year: currentYear,
+          customer_count: yearlyCustomers.length,
+          total_amount: totalRevenue,
+          due_date: `${currentYear}-01-31`
+        },
+        priority: 'high',
+        actionUrl: '/rentals?tab=yearly&action=generate_invoices',
+        actionText: 'View Yearly Rentals'
+      });
+
+      alert(`Successfully created ${notificationsCreated + 1} notifications for yearly rental invoices!`);
+
     } catch (error) {
-      console.error('Error creating rental records:', error);
-      alert('Error creating rental records: ' + error.message);
+      console.error('Error generating yearly invoice notifications:', error);
+      alert('Error generating notifications: ' + error.message);
     }
-    setLoading(false);
   };
 
-  // Admin access check
-  if (!isAdmin) {
+  const currentCustomers = activeTab === 0 ? filteredCustomers : 
+    activeTab === 1 ? filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'monthly')) :
+    filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly'));
+
+  if (loading) {
     return (
-      <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
-        <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
-          <Alert severity="error" sx={{ mb: 3 }}>
-            Access Denied: This page is only available to administrators.
-          </Alert>
-          <Typography variant="h4" component="h1" gutterBottom>
-            Rentals Management
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            You do not have permission to access the rentals management page. Please contact your administrator if you believe this is an error.
-          </Typography>
-          <Button 
-            variant="contained" 
-            onClick={() => navigate('/')}
-            sx={{ mt: 2 }}
-          >
-            Return to Dashboard
-          </Button>
-        </Paper>
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+        <CircularProgress />
       </Box>
     );
   }
 
-  if (loading) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
-  if (error) return <Box p={4} color="error.main">Error: {error}</Box>;
-
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
-        <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Rentals</Typography>
-        
-        {/* Sort Controls */}
-        <Box display="flex" gap={2} alignItems="center" mb={3} sx={{ flexWrap: 'wrap' }}>
-          <Typography variant="body2" color="text.secondary">
-            Sort by:
-          </Typography>
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <Select
-              value={sortField}
-              onChange={(e) => setSortField(e.target.value)}
-              size="small"
-            >
-              <MenuItem value="customer">Customer Name</MenuItem>
-              <MenuItem value="location">Location</MenuItem>
-              <MenuItem value="rental_type">Rental Type</MenuItem>
-              <MenuItem value="total_bottles">Total Bottles</MenuItem>
-              <MenuItem value="rental_amount">Rental Amount</MenuItem>
-              <MenuItem value="start_date">Start Date</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 100 }}>
-            <Select
-              value={sortDirection}
-              onChange={(e) => setSortDirection(e.target.value)}
-              size="small"
-            >
-              <MenuItem value="asc">Ascending</MenuItem>
-              <MenuItem value="desc">Descending</MenuItem>
-            </Select>
-          </FormControl>
-          <Typography variant="body2" color="text.secondary">
-            ({customers.length} customers)
-          </Typography>
-        </Box>
-        
-        <Box display="flex" alignItems="center" justifyContent="space-between" mb={4}>
+    <Box sx={{ p: 3 }}>
+      {/* Header */}
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Typography variant="h4" fontWeight="bold">
+          Asset Management & Rentals
+        </Typography>
+        <Box display="flex" gap={2}>
           <Button
             variant="contained"
-            onClick={() => exportInvoices(customers)}
-            sx={{
-              borderRadius: 999,
-              bgcolor: '#111',
-              color: '#fff',
-              fontWeight: 700,
-              px: 4,
-              py: 1.5,
-              fontSize: 16,
-              boxShadow: 'none',
-              ':hover': { bgcolor: '#222' }
-            }}
             startIcon={<DownloadIcon />}
+            onClick={() => exportToCSV(filteredCustomers)}
+            disabled={filteredCustomers.length === 0}
           >
-            Export CSV
+            Export Rentals CSV
           </Button>
-          
           <Button
             variant="outlined"
-            onClick={createRentalsForExistingBottles}
-            disabled={loading}
-            sx={{
-              borderRadius: 999,
-              fontWeight: 700,
-              px: 4,
-              py: 1.5,
-              fontSize: 16,
-              borderColor: '#1976d2',
-              color: '#1976d2',
-              ':hover': { borderColor: '#1565c0', color: '#1565c0' }
-            }}
+            startIcon={<MoneyIcon />}
+            onClick={() => exportInvoices(filteredCustomers)}
+            disabled={filteredCustomers.length === 0}
           >
-            {loading ? <CircularProgress size={20} /> : 'Create Missing Rentals'}
+            Export QuickBooks Invoices
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<NotificationsIcon />}
+            onClick={generateYearlyInvoiceNotifications}
+            color="secondary"
+          >
+            Generate Yearly Invoice Notifications
           </Button>
         </Box>
+      </Box>
 
-        {/* Show message if no rentals */}
-        {customers.length === 0 && (
-          <Box p={4} textAlign="center">
-            No rentals found. Check your data or Supabase query.
-          </Box>
-        )}
-
-        {/* Customer Rentals Section */}
-        {customers.length > 0 && (
-          <Box>
-            <Typography variant="h5" fontWeight={700} color="primary" mb={2}>
-              👥 Customer Rentals ({customers.length} customers)
-            </Typography>
-            <Typography variant="body2" color="text.secondary" mb={3}>
-              These bottles are currently rented to customers.
-            </Typography>
-            <Paper
-              elevation={3}
-              sx={{
-                borderRadius: 4,
-                p: 0,
-                width: '100%',
-                maxWidth: '100%',
-                overflow: 'hidden',
-              }}
-            >
-              <Box sx={{ width: '100%', overflowX: 'auto', mt: 3 }}>
-                <TableContainer
-                  sx={{
-                    borderRadius: 2,
-                    width: '100%',
-                    minWidth: isMobile ? 700 : '100%',
-                    maxWidth: '100%',
-                    boxShadow: 'none',
-                  }}
-                >
-                  <Table sx={{ width: '100%', minWidth: 700 }}>
-                    <TableHead>
-                      <TableRow sx={{ background: '#fafbfc' }}>
-                        <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>Customer</TableCell>
-                        <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>Total Bottles</TableCell>
-                        <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>Rental Rate</TableCell>
-                        <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>Rental Type</TableCell>
-                        <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>Tax Code</TableCell>
-                        <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>Location</TableCell>
-                        <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>Actions</TableCell>
-                        <TableCell />
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {paginatedCustomers.map(({ customer, rentals }) => {
-                        const expanded = expandedCustomer === customer.CustomerListID;
-                        const edit = editMap[customer.CustomerListID] || defaultEdit(rentals);
-                        const saving = savingMap[customer.CustomerListID] || false;
-                        return (
-                          <React.Fragment key={customer.CustomerListID}>
-                            <TableRow>
-                              <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>
-                                {customer.name}
-                                <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-                                  ({customer.CustomerListID})
-                                </Typography>
-                                {/* Show source indicator */}
-                                {rentals.some(r => r.source === 'bottle_assignment') && (
-                                  <Chip
-                                    label="From Import"
-                                    size="small"
-                                    color="info"
-                                    sx={{ ml: 1, fontSize: 10, height: 20 }}
-                                  />
-                                )}
-                                <Button
-                                  variant="outlined"
-                                  sx={{
-                                    borderRadius: 999,
-                                    ml: 2,
-                                    fontWeight: 700,
-                                    color: '#1976d2',
-                                    borderColor: '#1976d2',
-                                    textTransform: 'none',
-                                    px: 2,
-                                    py: 0.5,
-                                    fontSize: 15
-                                  }}
-                                  onClick={() => navigate(`/customer/${customer.CustomerListID}`)}
-                                >
-                                  View Details
-                                </Button>
-                              </TableCell>
-                              <TableCell>
-                                <Typography variant="h6" fontWeight={700} color="primary">
-                                  {rentals.length}
-                                </Typography>
-                              </TableCell>
-                              <TableCell>
-                                <TextField
-                                  value={edit.rentalRate}
-                                  onChange={e => handleEditChange(customer.CustomerListID, 'rentalRate', e.target.value)}
-                                  size="small"
-                                  sx={{ width: 80, bgcolor: '#fff' }}
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <FormControl size="small" sx={{ minWidth: 110, bgcolor: '#fff' }}>
-                                  <Select
-                                    value={edit.rentalType}
-                                    onChange={e => handleEditChange(customer.CustomerListID, 'rentalType', e.target.value)}
-                                    size="small"
-                                  >
-                                    <MenuItem value="Monthly">Monthly</MenuItem>
-                                    <MenuItem value="Yearly">Yearly</MenuItem>
-                                  </Select>
-                                </FormControl>
-                              </TableCell>
-                              <TableCell>
-                                <FormControl size="small" sx={{ minWidth: 90, bgcolor: '#fff' }}>
-                                  <Select
-                                    value={edit.taxCode}
-                                    onChange={e => handleEditChange(customer.CustomerListID, 'taxCode', e.target.value)}
-                                    size="small"
-                                  >
-                                    <MenuItem value="GST">GST</MenuItem>
-                                    <MenuItem value="PST">PST</MenuItem>
-                                    <MenuItem value="None">None</MenuItem>
-                                  </Select>
-                                </FormControl>
-                              </TableCell>
-                              <TableCell>
-                                <FormControl size="small" sx={{ minWidth: 120, bgcolor: '#fff' }}>
-                                  <Select
-                                    value={edit.location}
-                                    onChange={e => handleEditChange(customer.CustomerListID, 'location', e.target.value)}
-                                    size="small"
-                                  >
-                                    <MenuItem value="SASKATOON">SASKATOON</MenuItem>
-                                    <MenuItem value="REGINA">REGINA</MenuItem>
-                                    <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
-                                    <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
-                                    <MenuItem value="None">None</MenuItem>
-                                  </Select>
-                                </FormControl>
-                              </TableCell>
-                              <TableCell>
-                                <Button
-                                  variant="contained"
-                                  size="small"
-                                  onClick={() => handleSave(customer.CustomerListID, rentals)}
-                                  disabled={saving}
-                                  sx={{
-                                    bgcolor: '#4caf50',
-                                    color: '#fff',
-                                    fontWeight: 700,
-                                    textTransform: 'none',
-                                    ':hover': { bgcolor: '#45a049' }
-                                  }}
-                                >
-                                  {saving ? <CircularProgress size={20} /> : 'Save'}
-                                </Button>
-                              </TableCell>
-                              <TableCell>
-                                <IconButton
-                                  onClick={() => setExpandedCustomer(expanded ? null : customer.CustomerListID)}
-                                  size="small"
-                                >
-                                  {expanded ? <ArrowDropUpIcon /> : <ArrowDropDownIcon />}
-                                </IconButton>
-                              </TableCell>
-                            </TableRow>
-                            <TableRow>
-                              <TableCell colSpan={8} sx={{ p: 0, border: 0, bgcolor: '#fcfcfc' }}>
-                                <Collapse in={expanded} timeout="auto" unmountOnExit>
-                                  <Box sx={{ p: 2, pl: 4 }}>
-                                    <Typography fontWeight={700} sx={{ mb: 1 }}>
-                                      Rentals for {customer.name}
-                                    </Typography>
-                                    <Table size="small" sx={{ width: '100%' }}>
-                                      <TableHead>
-                                        <TableRow>
-                                          <TableCell sx={{ fontWeight: 700 }}>Bottle Type</TableCell>
-                                          <TableCell sx={{ fontWeight: 700 }}>Barcode</TableCell>
-                                          <TableCell sx={{ fontWeight: 700 }}>Rental Type</TableCell>
-                                          <TableCell sx={{ fontWeight: 700 }}>Rental Rate</TableCell>
-                                          <TableCell sx={{ fontWeight: 700 }}>Start Date</TableCell>
-                                          <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
-                                          <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
-                                        </TableRow>
-                                      </TableHead>
-                                      <TableBody>
-                                        {rentals.map(rental => (
-                                          <TableRow key={rental.id}>
-                                            <TableCell>
-                                              {rental.bottles
-                                                ? rental.bottles.gas_type || rental.bottles.description || '—'
-                                                : '—'}
-                                            </TableCell>
-                                            <TableCell>
-                                              {rental.bottles?.barcode_number || '—'}
-                                            </TableCell>
-                                            <TableCell>
-                                              <FormControl size="small" sx={{ minWidth: 110, bgcolor: '#fff' }}>
-                                                <Select
-                                                  value={rental.rental_type || 'Monthly'}
-                                                  size="small"
-                                                  onChange={async e => {
-                                                    await supabase.from('rentals').update({ rental_type: e.target.value }).eq('id', rental.id);
-                                                  }}
-                                                >
-                                                  <MenuItem value="Monthly">Monthly</MenuItem>
-                                                  <MenuItem value="Yearly">Yearly</MenuItem>
-                                                </Select>
-                                              </FormControl>
-                                            </TableCell>
-                                            <TableCell>
-                                              <TextField
-                                                value={rental.rental_amount || ''}
-                                                size="small"
-                                                sx={{ width: 80, bgcolor: '#fff' }}
-                                                onChange={async e => {
-                                                  await supabase.from('rentals').update({ rental_amount: e.target.value }).eq('id', rental.id);
-                                                }}
-                                              />
-                                            </TableCell>
-                                            <TableCell>{rental.rental_start_date}</TableCell>
-                                            <TableCell>
-                                              <FormControl size="small" sx={{ minWidth: 120, bgcolor: '#fff' }}>
-                                                <Select
-                                                  value={rental.location || 'None'}
-                                                  size="small"
-                                                  onChange={async e => {
-                                                    const newLocation = e.target.value;
-                                                    let taxRate = 0;
-                                                    let taxCode = rental.tax_code;
-                                                    
-                                                    if (newLocation && newLocation !== 'None') {
-                                                      try {
-                                                        const { data: locationData } = await supabase
-                                                          .from('locations')
-                                                          .select('total_tax_rate')
-                                                          .eq('id', newLocation.toLowerCase())
-                                                          .single();
-                                                        
-                                                        if (locationData) {
-                                                          taxRate = locationData.total_tax_rate;
-                                                          taxCode = 'GST+PST';
-                                                        }
-                                                      } catch (e) {
-                                                        console.warn('Could not fetch tax rate for location:', newLocation);
-                                                      }
-                                                    }
-                                                    
-                                                    await supabase.from('rentals').update({ 
-                                                      location: newLocation,
-                                                      tax_rate: taxRate,
-                                                      tax_code: taxCode
-                                                    }).eq('id', rental.id);
-                                                    
-                                                    // Refresh the data after update
-                                                    await fetchRentals();
-                                                  }}
-                                                >
-                                                  <MenuItem value="SASKATOON">SASKATOON</MenuItem>
-                                                  <MenuItem value="REGINA">REGINA</MenuItem>
-                                                  <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
-                                                  <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
-                                                  <MenuItem value="None">None</MenuItem>
-                                                </Select>
-                                              </FormControl>
-                                            </TableCell>
-                                            <TableCell>
-                                              <Button
-                                                variant="outlined"
-                                                sx={{
-                                                  borderRadius: 999,
-                                                  fontWeight: 700,
-                                                  color: '#1976d2',
-                                                  borderColor: '#1976d2',
-                                                  textTransform: 'none',
-                                                  px: 2,
-                                                  py: 0.5,
-                                                  fontSize: 15
-                                                }}
-                                                onClick={() => navigate(`/customer/${customer.CustomerListID}`)}
-                                              >
-                                                View Details
-                                              </Button>
-                                            </TableCell>
-                                          </TableRow>
-                                        ))}
-                                      </TableBody>
-                                    </Table>
-                                  </Box>
-                                </Collapse>
-                              </TableCell>
-                            </TableRow>
-                          </React.Fragment>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-                <Box display="flex" justifyContent="center" alignItems="center" my={2}>
-                  <Button
-                    onClick={() => setPage(p => Math.max(0, p - 1))}
-                    disabled={page === 0}
-                  >
-                    Previous
-                  </Button>
-                  <Typography mx={2}>
-                    Page {page + 1} of {Math.ceil(customers.length / rowsPerPage)}
+      {/* Statistics Cards */}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" justifyContent="between">
+                <Box>
+                  <Typography variant="h4" fontWeight="bold" color="primary">
+                    {stats.inHouse}
                   </Typography>
-                  <Button
-                    onClick={() => setPage(p => Math.min(Math.ceil(customers.length / rowsPerPage) - 1, p + 1))}
-                    disabled={page >= Math.ceil(customers.length / rowsPerPage) - 1}
-                  >
-                    Next
-                  </Button>
+                  <Typography variant="body2" color="text.secondary">
+                    In-House Assets
+                  </Typography>
                 </Box>
+                <HomeIcon sx={{ fontSize: 40, color: '#9e9e9e' }} />
               </Box>
-            </Paper>
-          </Box>
-        )}
-      </Paper>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" justifyContent="between">
+                <Box>
+                  <Typography variant="h4" fontWeight="bold" color="secondary">
+                    {stats.withVendors}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    With Vendors
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    (No Charge)
+                  </Typography>
+                </Box>
+                <BusinessIcon sx={{ fontSize: 40, color: '#9c27b0' }} />
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" justifyContent="between">
+                <Box>
+                  <Typography variant="h4" fontWeight="bold" color="success.main">
+                    {stats.rented}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Rented Assets
+                  </Typography>
+                  <Typography variant="caption" color="success.main">
+                    (Billable)
+                  </Typography>
+                </Box>
+                <PersonIcon sx={{ fontSize: 40, color: '#4caf50' }} />
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" justifyContent="between">
+                <Box>
+                  <Typography variant="h4" fontWeight="bold" color="success.main">
+                    ${stats.totalRevenue.toFixed(2)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Monthly Revenue
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    From Rentals
+                  </Typography>
+                </Box>
+                <MoneyIcon sx={{ fontSize: 40, color: '#4caf50' }} />
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Filters */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>Filters</Typography>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} sm={4}>
+              <TextField
+                fullWidth
+                label="Search by barcode or customer"
+                value={filters.search}
+                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                size="small"
+              />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Asset Status</InputLabel>
+                <Select
+                  value={filters.status}
+                  onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                  label="Asset Status"
+                >
+                  <MenuItem value="all">All Statuses</MenuItem>
+                  <MenuItem value="IN-HOUSE">In-House</MenuItem>
+                  <MenuItem value="RENTED">Rented</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Account Type</InputLabel>
+                <Select
+                  value={filters.customer_type}
+                  onChange={(e) => setFilters({ ...filters, customer_type: e.target.value })}
+                  label="Account Type"
+                >
+                  <MenuItem value="all">All Types</MenuItem>
+                  <MenuItem value="CUSTOMER">Customers Only</MenuItem>
+                  <MenuItem value="VENDOR">Vendors Only</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+
+      {/* Tabs */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+        <Tabs value={activeTab} onChange={handleTabChange}>
+          {tabs.map((tab, index) => (
+            <Tab
+              key={index}
+              label={
+                <Badge badgeContent={tab.count} color="primary">
+                  {tab.label}
+                </Badge>
+              }
+            />
+          ))}
+        </Tabs>
+      </Box>
+
+      {/* Customer Rentals Table */}
+      <TableContainer component={Paper}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell><strong>Customer</strong></TableCell>
+              <TableCell><strong>Account Type</strong></TableCell>
+              <TableCell><strong>Total Assets</strong></TableCell>
+              <TableCell><strong>Rental Type</strong></TableCell>
+              <TableCell><strong>Rental Rate</strong></TableCell>
+              <TableCell><strong>Tax Code</strong></TableCell>
+              <TableCell><strong>Location</strong></TableCell>
+              <TableCell><strong>Actions</strong></TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {currentCustomers.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={8} align="center">
+                  <Typography variant="body1" color="text.secondary" py={4}>
+                    No customers found matching your filters
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            ) : (
+              currentCustomers.map(({ customer, rentals }) => (
+                <React.Fragment key={customer.CustomerListID}>
+                  <TableRow hover>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight="bold">
+                        {customer.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        ({customer.CustomerListID})
+                      </Typography>
+                      {/* Show vendor/customer indicator */}
+                      {customer.customer_type === 'VENDOR' && (
+                        <Chip
+                          label="NO CHARGE"
+                          size="small"
+                          color="secondary"
+                          sx={{ ml: 1, fontSize: 10, height: 20 }}
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={customer.customer_type || 'CUSTOMER'}
+                        color={customer.customer_type === 'VENDOR' ? 'secondary' : 'primary'}
+                        size="small"
+                        variant="outlined"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="h6" fontWeight="bold" color="primary">
+                        {rentals.length}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {rentals[0]?.rental_type || 'monthly'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight="bold">
+                        ${rentals[0]?.rental_amount || '10.00'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {rentals[0]?.tax_code || 'GST+PST'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {rentals[0]?.location || 'SASKATOON'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={() => navigate(`/customer/${customer.CustomerListID}`)}
+                        sx={{ mr: 1 }}
+                      >
+                        View Details
+                      </Button>
+                      <Tooltip title="Edit Rentals">
+                        <IconButton
+                          size="small"
+                          onClick={() => setEditDialog({ 
+                            open: true, 
+                            customer,
+                            rentals 
+                          })}
+                        >
+                          <EditIcon />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                  {/* Expandable section for individual rentals */}
+                  <TableRow>
+                    <TableCell colSpan={8} sx={{ p: 1, bgcolor: '#f9f9f9' }}>
+                      <Typography variant="caption" color="text.secondary">
+                        Individual Assets ({rentals.length}):
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                        {rentals.slice(0, 10).map((rental, idx) => (
+                          <Chip
+                            key={idx}
+                            label={rental.bottles?.barcode_number || rental.bottles?.barcode || `Asset ${idx + 1}`}
+                            size="small"
+                            variant="outlined"
+                            sx={{ fontSize: 11 }}
+                          />
+                        ))}
+                        {rentals.length > 10 && (
+                          <Chip
+                            label={`+${rentals.length - 10} more`}
+                            size="small"
+                            variant="filled"
+                            color="default"
+                            sx={{ fontSize: 11 }}
+                          />
+                        )}
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                </React.Fragment>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      {/* Edit Customer Rentals Dialog */}
+      <Dialog
+        open={editDialog.open}
+        onClose={() => setEditDialog({ open: false, customer: null, rentals: [] })}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Edit Rental Settings</DialogTitle>
+        <DialogContent>
+          {editDialog.customer && (
+            <Box sx={{ pt: 2 }}>
+              <Typography variant="h6" gutterBottom>
+                {editDialog.customer.name} ({editDialog.customer.CustomerListID})
+              </Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                {editDialog.rentals?.length || 0} assets currently assigned
+              </Typography>
+
+              <Grid container spacing={3} sx={{ mt: 1 }}>
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth>
+                    <InputLabel>Rental Type</InputLabel>
+                    <Select
+                      value={editDialog.rental_type || 'monthly'}
+                      onChange={(e) => setEditDialog(prev => ({
+                        ...prev,
+                        rental_type: e.target.value
+                      }))}
+                      label="Rental Type"
+                    >
+                      <MenuItem value="monthly">Monthly</MenuItem>
+                      <MenuItem value="yearly">Yearly</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="Rental Rate ($)"
+                    type="number"
+                    value={editDialog.rental_amount || 10}
+                    onChange={(e) => setEditDialog(prev => ({
+                      ...prev,
+                      rental_amount: e.target.value
+                    }))}
+                  />
+                </Grid>
+
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth>
+                    <InputLabel>Tax Code</InputLabel>
+                    <Select
+                      value={editDialog.tax_code || 'GST+PST'}
+                      onChange={(e) => setEditDialog(prev => ({
+                        ...prev,
+                        tax_code: e.target.value
+                      }))}
+                      label="Tax Code"
+                    >
+                      <MenuItem value="GST">GST Only</MenuItem>
+                      <MenuItem value="PST">PST Only</MenuItem>
+                      <MenuItem value="GST+PST">GST+PST</MenuItem>
+                      <MenuItem value="None">No Tax</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth>
+                    <InputLabel>Location</InputLabel>
+                    <Select
+                      value={editDialog.location || 'SASKATOON'}
+                      onChange={(e) => setEditDialog(prev => ({
+                        ...prev,
+                        location: e.target.value
+                      }))}
+                      label="Location"
+                    >
+                      <MenuItem value="SASKATOON">SASKATOON</MenuItem>
+                      <MenuItem value="REGINA">REGINA</MenuItem>
+                      <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
+                      <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+              </Grid>
+
+              {editDialog.customer.customer_type === 'VENDOR' && (
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  <Typography variant="body2">
+                    <strong>Note:</strong> This is a VENDOR account. No rental charges will be applied regardless of rate settings.
+                  </Typography>
+                </Alert>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDialog({ open: false, customer: null, rentals: [] })}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              // Here you would update all rentals for this customer
+              console.log('Update rentals for customer:', editDialog.customer?.CustomerListID);
+              setEditDialog({ open: false, customer: null, rentals: [] });
+              // Refresh data
+              fetchRentals();
+            }}
+          >
+            Update All Rentals
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
 
-export default Rentals; 
+export default RentalsImproved;

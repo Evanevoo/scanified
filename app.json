@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "AssetFlow Pro",
-    "slug": "assetflow-pro-mobile",
+    "name": "Scanified",
+    "slug": "scanified-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -17,7 +17,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.evanevoo.assetflowpro"
+      "bundleIdentifier": "com.evanevoo.scanifiedmobile"
     },
     "android": {
       "adaptiveIcon": {
@@ -25,7 +25,7 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.evanevoo.assetflowpro",
+      "package": "com.evanevoo.scanifiedmobile",
       "versionCode": 1,
       "permissions": [
         "CAMERA",
@@ -42,7 +42,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow AssetFlow Pro to access your camera to scan asset barcodes and track inventory across multiple locations."
+          "cameraPermission": "Allow Scanified to access your camera to scan asset barcodes and manage your organization's inventory with enterprise-grade precision."
         }
       ]
     ]

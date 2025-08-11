@@ -4,6 +4,7 @@ import { supabase } from '../supabase';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useTheme } from '../context/ThemeContext';
 import { useAssetConfig } from '../context/AssetContext';
+import { useAuth } from '../hooks/useAuth';
 
 interface ScannedAsset {
   id: string;
@@ -20,6 +21,7 @@ interface ScannedAsset {
 export default function FillCylinderScreen() {
   const { colors } = useTheme();
   const { config: assetConfig } = useAssetConfig();
+  const { profile } = useAuth();
   const [barcode, setBarcode] = useState('');
   const [serial, setSerial] = useState('');
   const [asset, setAsset] = useState<any>(null);
@@ -60,6 +62,11 @@ export default function FillCylinderScreen() {
   };
 
   const fetchAsset = async (value: string, type: 'barcode' | 'serial') => {
+    if (!profile?.organization_id) {
+      setError('Organization not found');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setAsset(null);
@@ -68,13 +75,15 @@ export default function FillCylinderScreen() {
     let query;
     if (type === 'barcode') {
       query = supabase
-        .from('assets')
+        .from('bottles')
         .select('*')
+        .eq('organization_id', profile.organization_id)
         .eq('barcode_number', value);
     } else {
       query = supabase
-        .from('assets')
+        .from('bottles')
         .select('*')
+        .eq('organization_id', profile.organization_id)
         .eq('serial_number', value);
     }
     
@@ -82,7 +91,7 @@ export default function FillCylinderScreen() {
     
     setLoading(false);
     if (error || !data) {
-              setError(`${assetConfig.assetDisplayName} not found with ${type === 'barcode' ? 'barcode' : 'serial'}: ${value}`);
+      setError(`${assetConfig.assetDisplayName} not found with ${type === 'barcode' ? 'barcode' : 'serial'}: ${value}`);
       return;
     }
     setAsset(data);
@@ -138,7 +147,7 @@ export default function FillCylinderScreen() {
         try {
                 // Update asset status to filled
       const { error: updateError } = await supabase
-        .from('assets')
+        .from('bottles')
         .update({ 
           status: 'filled',
           last_filled_date: new Date().toISOString(),
@@ -154,23 +163,23 @@ export default function FillCylinderScreen() {
           
           // Create a fill record
           const { error: fillError } = await supabase
-            .from('asset_fills')
+            .from('cylinder_fills')
             .insert({
-              cylinder_id: cylinder.id,
-              barcode_number: cylinder.barcode_number,
+              cylinder_id: asset.id,
+              barcode_number: asset.barcode_number,
               fill_date: new Date().toISOString(),
               filled_by: 'mobile_app',
               notes: 'Bulk refill operation'
             });
           
           if (fillError) {
-            console.warn(`Could not create fill record for ${cylinder.barcode_number}:`, fillError);
+            console.warn(`Could not create fill record for ${asset.barcode_number}:`, fillError);
             // Don't fail the operation if fill record creation fails
           }
           
           successCount++;
         } catch (err) {
-          console.error(`Error processing cylinder ${cylinder.barcode_number}:`, err);
+          console.error(`Error processing asset ${asset.barcode_number}:`, err);
           errorCount++;
         }
       }
@@ -206,7 +215,7 @@ export default function FillCylinderScreen() {
     try {
       // Update cylinder status to filled
       const { error: updateError } = await supabase
-        .from('assets')
+        .from('bottles')
         .update({ 
           status: 'filled',
           last_filled_date: new Date().toISOString(),
@@ -221,9 +230,9 @@ export default function FillCylinderScreen() {
       
       // Create a fill record
       const { error: fillError } = await supabase
-        .from('asset_fills')
+        .from('cylinder_fills')
         .insert({
-          asset_id: asset.id,
+          cylinder_id: asset.id,
           barcode_number: asset.barcode_number,
           fill_date: new Date().toISOString(),
           filled_by: 'mobile_app',
@@ -255,7 +264,7 @@ export default function FillCylinderScreen() {
   };
 
   const handleMarkEmpty = async () => {
-    if (!cylinder) return;
+    if (!asset) return;
     
     setLoading(true);
     setError('');
@@ -264,11 +273,11 @@ export default function FillCylinderScreen() {
     try {
       // Update cylinder status to empty
       const { error: updateError } = await supabase
-        .from('assets')
+        .from('bottles')
         .update({ 
           status: 'empty'
         })
-        .eq('id', cylinder.id);
+        .eq('id', asset.id);
       
       if (updateError) {
         setError('Failed to update cylinder status.');
@@ -277,9 +286,9 @@ export default function FillCylinderScreen() {
       
       // Create a fill record for tracking
       const { error: fillError } = await supabase
-        .from('asset_fills')
+        .from('cylinder_fills')
         .insert({
-          asset_id: asset.id,
+          cylinder_id: asset.id,
           barcode_number: asset.barcode_number,
           fill_date: new Date().toISOString(),
           filled_by: 'mobile_app',
@@ -317,21 +326,21 @@ export default function FillCylinderScreen() {
     }
     
     if (barcode.trim()) {
-      fetchCylinder(barcode.trim(), 'barcode');
+      fetchAsset(barcode.trim(), 'barcode');
     } else if (serial.trim()) {
-      fetchCylinder(serial.trim(), 'serial');
+      fetchAsset(serial.trim(), 'serial');
     }
   };
 
   const resetForm = () => {
     setBarcode('');
     setSerial('');
-    setCylinder(null);
+    setAsset(null); // Changed from setCylinder to setAsset
     setError('');
     setSuccess('');
   };
 
-  const renderBulkItem = ({ item }: { item: ScannedCylinder }) => (
+  const renderBulkItem = ({ item }: { item: ScannedAsset }) => ( // Changed from ScannedCylinder to ScannedAsset
     <View style={styles.bulkItem}>
       <View style={styles.bulkItemInfo}>
         <Text style={styles.bulkItemBarcode}>{item.barcode_number}</Text>
@@ -420,45 +429,45 @@ export default function FillCylinderScreen() {
       {success ? <Text style={styles.success}>{success}</Text> : null}
       
       {/* Cylinder Details */}
-      {cylinder && (
+      {asset && ( // Changed from cylinder to asset
         <View style={styles.cylinderDetails}>
           <Text style={styles.detailsTitle}>Cylinder Details</Text>
-          <Text style={styles.detailRow}>Barcode: <Text style={styles.detailValue}>{cylinder.barcode_number}</Text></Text>
-          <Text style={styles.detailRow}>Serial: <Text style={styles.detailValue}>{cylinder.serial_number}</Text></Text>
-          <Text style={styles.detailRow}>Gas Type: <Text style={styles.detailValue}>{cylinder.gas_type || cylinder.group_name}</Text></Text>
-          <Text style={styles.detailRow}>Current Status: <Text style={[styles.detailValue, styles.statusText]}>{cylinder.status || 'Unknown'}</Text></Text>
-          <Text style={styles.detailRow}>Previous Fill Count: <Text style={styles.detailValue}>{cylinder.fill_count || 0}</Text></Text>
-          {cylinder.last_filled_date && (
+          <Text style={styles.detailRow}>Barcode: <Text style={styles.detailValue}>{asset.barcode_number}</Text></Text>
+          <Text style={styles.detailRow}>Serial: <Text style={styles.detailValue}>{asset.serial_number}</Text></Text>
+          <Text style={styles.detailRow}>Gas Type: <Text style={styles.detailValue}>{asset.gas_type || asset.group_name}</Text></Text>
+          <Text style={styles.detailRow}>Current Status: <Text style={[styles.detailValue, styles.statusText]}>{asset.status || 'Unknown'}</Text></Text>
+          <Text style={styles.detailRow}>Previous Fill Count: <Text style={styles.detailValue}>{asset.fill_count || 0}</Text></Text>
+          {asset.last_filled_date && (
             <Text style={styles.detailRow}>Last Filled: <Text style={styles.detailValue}>
-              {new Date(cylinder.last_filled_date).toLocaleDateString()}
+              {new Date(asset.last_filled_date).toLocaleDateString()}
             </Text></Text>
           )}
           
           <View style={styles.buttonRow}>
             <TouchableOpacity 
-              style={[styles.fillButton, cylinder.status === 'filled' && styles.fillButtonDisabled]} 
+              style={[styles.fillButton, asset.status === 'filled' && styles.fillButtonDisabled]} 
               onPress={handleFillCylinder} 
-              disabled={loading || cylinder.status === 'filled'}
+              disabled={loading || asset.status === 'filled'}
             >
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
                 <Text style={styles.fillButtonText}>
-                  {cylinder.status === 'filled' ? 'Already Full' : 'Mark as Full'}
+                  {asset.status === 'filled' ? 'Already Full' : 'Mark as Full'}
                 </Text>
               )}
             </TouchableOpacity>
             
             <TouchableOpacity 
-              style={[styles.emptyButton, cylinder.status === 'empty' && styles.emptyButtonDisabled]} 
+              style={[styles.emptyButton, asset.status === 'empty' && styles.emptyButtonDisabled]} 
               onPress={handleMarkEmpty} 
-              disabled={loading || cylinder.status === 'empty'}
+              disabled={loading || asset.status === 'empty'}
             >
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
                 <Text style={styles.emptyButtonText}>
-                  {cylinder.status === 'empty' ? 'Already Empty' : 'Mark as Empty'}
+                  {asset.status === 'empty' ? 'Already Empty' : 'Mark as Empty'}
                 </Text>
               )}
             </TouchableOpacity>
@@ -467,10 +476,10 @@ export default function FillCylinderScreen() {
           <TouchableOpacity 
             style={styles.addToBulkButton} 
             onPress={addToBulkList}
-            disabled={scannedAssets.find(c => c.id === cylinder.id)}
+            disabled={scannedAssets.find(c => c.id === asset.id)}
           >
             <Text style={styles.addToBulkButtonText}>
-              {scannedAssets.find(c => c.id === cylinder.id) ? 'Already in List' : 'Add to Bulk List'}
+              {scannedAssets.find(c => c.id === asset.id) ? 'Already in List' : 'Add to Bulk List'}
             </Text>
           </TouchableOpacity>
           

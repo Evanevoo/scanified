@@ -125,7 +125,7 @@ export default React.memo(function LandingPageEditor() {
         position: 'Business Owner',
         company: 'Southwest Cylinder Co.',
         rating: 5,
-        text: 'Switched from TrackAbout and never looked back. This is what modern software should be - simple, powerful, and actually affordable.',
+        text: 'Switched from legacy systems and never looked back. This is what modern software should be - simple, powerful, and actually affordable.',
         avatar: 'JM',
         verified: true
       }

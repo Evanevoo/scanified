@@ -3,9 +3,11 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator,
 import { supabase } from '../supabase';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useAssetConfig } from '../context/AssetContext';
+import { useAuth } from '../hooks/useAuth';
 
 export default function LocateCylinderScreen() {
   const { config: assetConfig } = useAssetConfig();
+  const { profile } = useAuth();
   const [barcode, setBarcode] = useState('');
   const [serial, setSerial] = useState('');
   const [asset, setAsset] = useState<any>(null);
@@ -39,10 +41,15 @@ export default function LocateCylinderScreen() {
   };
 
   const fetchAsset = async (value: string, mode: 'barcode' | 'serial') => {
+    if (!profile?.organization_id) {
+      setError('Organization not found');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setAsset(null);
-    let query = supabase.from('assets').select('*');
+    let query = supabase.from('bottles').select('*').eq('organization_id', profile.organization_id);
     if (mode === 'barcode') query = query.eq('barcode_number', value);
     else query = query.eq('serial_number', value);
     const { data, error } = await query.single();

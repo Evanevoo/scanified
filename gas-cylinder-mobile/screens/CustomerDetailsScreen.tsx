@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
 import { supabase } from '../supabase';
 import { useRoute } from '@react-navigation/native';
+import { useAuth } from '../hooks/useAuth';
 
 export default function CustomerDetailsScreen() {
   const route = useRoute();
   const { customerId } = route.params as { customerId: string };
+  const { profile } = useAuth();
   const [customer, setCustomer] = useState<any>(null);
   const [cylinders, setCylinders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -13,13 +15,21 @@ export default function CustomerDetailsScreen() {
 
   useEffect(() => {
     const fetchDetails = async () => {
+      if (!profile?.organization_id) {
+        setError('Organization not found');
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       setError('');
-      // Fetch customer info
+      // Fetch customer info for the current organization
       const { data: cust, error: custErr } = await supabase
         .from('customers')
         .select('*')
         .eq('CustomerListID', customerId)
+        .eq('organization_id', profile.organization_id)
+        .eq('deleted', false)
         .single();
       if (custErr || !cust) {
         setError('Customer not found.');
@@ -27,10 +37,11 @@ export default function CustomerDetailsScreen() {
         return;
       }
       setCustomer(cust);
-      // Fetch cylinders rented by this customer
+      // Fetch cylinders rented by this customer for the current organization
       const { data, error } = await supabase
-        .from('assets')
+        .from('bottles')
         .select('*')
+        .eq('organization_id', profile.organization_id)
         .eq('assigned_customer', customerId);
       if (error) {
         setError('Error fetching cylinders.');
@@ -41,7 +52,7 @@ export default function CustomerDetailsScreen() {
       setLoading(false);
     };
     fetchDetails();
-  }, [customerId]);
+  }, [customerId, profile]);
 
   if (loading) {
     return <View style={styles.center}><ActivityIndicator size="large" color="#2563eb" /></View>;

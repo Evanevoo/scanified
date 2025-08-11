@@ -44,6 +44,8 @@ export default function BottleDetail() {
   const [owners, setOwners] = useState([]);
   const [ownersLoading, setOwnersLoading] = useState(false);
   const [ownersError, setOwnersError] = useState('');
+  const [addOwnerDialogOpen, setAddOwnerDialogOpen] = useState(false);
+  const [newOwnerNameInput, setNewOwnerNameInput] = useState('');
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [ownerToDelete, setOwnerToDelete] = useState(null);
   const [selectedOwner, setSelectedOwner] = useState('');
@@ -294,6 +296,43 @@ export default function BottleDetail() {
     }
   };
 
+  // Add new owner to database
+  const handleAddNewOwner = async () => {
+    if (!newOwnerNameInput.trim()) return;
+    
+    try {
+      const orgId = bottle?.organization_id || userProfile?.organization_id;
+      const { data, error } = await supabase
+        .from('owners')
+        .insert([{
+          name: newOwnerNameInput.trim(),
+          organization_id: orgId
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Add to owners list
+      setOwners(prev => [...prev, data]);
+      
+      // Select the new owner
+      setEditBottle(prev => ({
+        ...prev,
+        owner_id: data.id,
+        owner_name: data.name
+      }));
+
+      // Close dialog and reset input
+      setAddOwnerDialogOpen(false);
+      setNewOwnerNameInput('');
+      
+      setSnackbar({ open: true, message: 'New owner added successfully!', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to add owner: ' + err.message, severity: 'error' });
+    }
+  };
+
   // Delete owner handler
   const handleDeleteOwner = async (ownerId) => {
     setDeletingOwnerId(ownerId);
@@ -425,6 +464,12 @@ export default function BottleDetail() {
                     value={editBottle?.owner_id || ''}
                     onChange={e => {
                       const selectedId = e.target.value;
+                      
+                      if (selectedId === 'ADD_NEW') {
+                        setAddOwnerDialogOpen(true);
+                        return;
+                      }
+                      
                       const selectedOwner = owners.find(o => o.id === selectedId);
                       setEditBottle(prev => ({
                         ...prev,
@@ -443,17 +488,12 @@ export default function BottleDetail() {
                     {owners.map(o => (
                       <MenuItem key={o.id} value={o.id}>{o.name}</MenuItem>
                     ))}
+                    <MenuItem value="ADD_NEW" sx={{ color: 'primary.main', fontStyle: 'italic' }}>
+                      + Add New Owner...
+                    </MenuItem>
                   </Select>
                 </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Ownership</Typography>
-                  <TextField
-                    value={editBottle?.owner_name || ''}
-                    onChange={e => setEditBottle(prev => ({ ...prev, owner_name: e.target.value }))}
-                    fullWidth
-                    size="small"
-                  />
-                </Grid>
+
                 <Grid item xs={12}>
                   <Grid container spacing={2} alignItems="flex-end">
                     <Grid item xs={6}>
@@ -716,6 +756,42 @@ export default function BottleDetail() {
           {/* --- Entire Owner Information section removed --- */}
         </Grid>
       </Box>
+      
+      {/* Add New Owner Dialog */}
+      <Dialog open={addOwnerDialogOpen} onClose={() => setAddOwnerDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add New Owner</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Owner Name"
+            fullWidth
+            variant="outlined"
+            value={newOwnerNameInput}
+            onChange={(e) => setNewOwnerNameInput(e.target.value)}
+            placeholder="e.g., Your Company, Partner Company, etc."
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAddNewOwner();
+              }
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddOwnerDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleAddNewOwner}
+            variant="contained"
+            disabled={!newOwnerNameInput.trim()}
+          >
+            Add Owner
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Snackbar
         open={snackbar.open}
         autoHideDuration={4000}

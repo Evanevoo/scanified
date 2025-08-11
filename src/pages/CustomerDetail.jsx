@@ -21,9 +21,11 @@ import {
   Select,
   MenuItem,
   Card,
-  CardContent
+  CardContent,
+  InputLabel
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import HomeIcon from '@mui/icons-material/Home';
 import { TableSkeleton, CardSkeleton } from '../components/SmoothLoading';
 
 // Helper to check if a string looks like an address
@@ -109,7 +111,8 @@ export default function CustomerDetail() {
       address4: editForm.address4,
       address5: editForm.address5,
       city: editForm.city,
-      postal_code: editForm.postal_code
+      postal_code: editForm.postal_code,
+      customer_type: editForm.customer_type || 'CUSTOMER'
     };
     const { error } = await supabase
       .from('customers')
@@ -165,15 +168,25 @@ export default function CustomerDetail() {
       {/* Customer Information */}
       <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4, border: '1.5px solid #e0e0e0', boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)' }}>
         <Box display="flex" alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between" flexDirection={{ xs: 'column', md: 'row' }} mb={2}>
-          <Typography variant="h5" fontWeight={700} color="primary">
-            {editing ? (
-              <TextField name="name" value={editForm.name || ''} onChange={handleEditChange} size="small" label="Name" sx={{ minWidth: 200 }} />
-            ) : (
-              customer.name
+          <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+            <Typography variant="h5" fontWeight={700} color="primary">
+              {editing ? (
+                <TextField name="name" value={editForm.name || ''} onChange={handleEditChange} size="small" label="Name" sx={{ minWidth: 200 }} />
+              ) : (
+                customer.name
+              )}
+            </Typography>
+            {!editing && (
+              <Chip 
+                label={customer.customer_type || 'CUSTOMER'} 
+                color={customer.customer_type === 'VENDOR' ? 'secondary' : 'primary'} 
+                size="medium"
+                sx={{ fontWeight: 'bold' }}
+              />
             )}
-          </Typography>
+          </Box>
           {!editing && (
-            <Button variant="outlined" onClick={() => setEditing(true)} sx={{ borderRadius: 999, fontWeight: 700, ml: { md: 2 } }}>Edit</Button>
+            <Button variant="outlined" onClick={() => setEditing(true)} sx={{ borderRadius: 999, fontWeight: 700, ml: { md: 2 } }}>Edit Customer</Button>
           )}
         </Box>
         <Divider sx={{ mb: 2 }} />
@@ -187,6 +200,36 @@ export default function CustomerDetail() {
             ) : (
               <Typography variant="body1" sx={{ mb: 2 }}>{customer.phone || 'Not provided'}</Typography>
             )}
+            
+            <Typography variant="body2" color="text.secondary">Customer Type</Typography>
+            {editing ? (
+              <FormControl size="small" sx={{ mb: 2, minWidth: 180 }}>
+                <InputLabel>Customer Type</InputLabel>
+                <Select
+                  name="customer_type"
+                  value={editForm.customer_type || 'CUSTOMER'}
+                  onChange={handleEditChange}
+                  label="Customer Type"
+                >
+                  <MenuItem value="CUSTOMER">Customer</MenuItem>
+                  <MenuItem value="VENDOR">Vendor</MenuItem>
+                  <MenuItem value="TEMPORARY">Temporary (Walk-in)</MenuItem>
+                </Select>
+              </FormControl>
+            ) : (
+              <Typography variant="body1" sx={{ mb: 2 }}>
+                <Chip 
+                  label={customer.customer_type || 'CUSTOMER'} 
+                  color={
+                    customer.customer_type === 'VENDOR' ? 'secondary' : 
+                    customer.customer_type === 'TEMPORARY' ? 'warning' : 'primary'
+                  } 
+                  size="small"
+                  variant="outlined"
+                />
+              </Typography>
+            )}
+            
             <Typography variant="body2" color="text.secondary">Location</Typography>
             {editing ? (
               <FormControl size="small" sx={{ mb: 2, minWidth: 180 }}>
@@ -271,23 +314,68 @@ export default function CustomerDetail() {
           </Box>
         </Box>
         {editing && (
-          <Box display="flex" gap={2} mt={3}>
-            <Button variant="contained" color="primary" onClick={handleSave} disabled={saving}>{saving ? <CircularProgress size={20} /> : 'Save'}</Button>
-            <Button variant="outlined" color="secondary" onClick={() => { setEditing(false); setEditForm(customer); }} disabled={saving}>Cancel</Button>
-            {saveError && <Alert severity="error" sx={{ ml: 2 }}>{saveError}</Alert>}
-            {saveSuccess && <Alert severity="success" sx={{ ml: 2 }}>Saved!</Alert>}
+          <Box>
+            {/* Customer Type Info */}
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Typography variant="body2">
+                <strong>Customer Type:</strong><br/>
+                • <strong>CUSTOMER</strong> - Gets charged rental fees for assigned bottles<br/>
+                • <strong>VENDOR</strong> - Does NOT get charged rental fees (business partner)
+              </Typography>
+            </Alert>
+            
+            <Box display="flex" gap={2} mt={3}>
+              <Button variant="contained" color="primary" onClick={handleSave} disabled={saving}>
+                {saving ? <CircularProgress size={20} /> : 'Save Changes'}
+              </Button>
+              <Button variant="outlined" color="secondary" onClick={() => { setEditing(false); setEditForm(customer); }} disabled={saving}>
+                Cancel
+              </Button>
+            </Box>
+            
+            {saveError && <Alert severity="error" sx={{ mt: 2 }}>{saveError}</Alert>}
+            {saveSuccess && <Alert severity="success" sx={{ mt: 2 }}>Customer information updated successfully!</Alert>}
           </Box>
         )}
       </Paper>
 
       {/* Bottle Rental Summary */}
       <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4, border: '1.5px solid #e0e0e0', boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)' }}>
-        <Typography variant="h5" fontWeight={700} color="primary" mb={3}>
-          📊 Bottle Rental Summary
-        </Typography>
+        <Box display="flex" alignItems="center" justifyContent="space-between" mb={3}>
+          <Typography variant="h5" fontWeight={700} color="primary">
+            📊 Bottle Rental Summary
+          </Typography>
+          {customer.customer_type === 'VENDOR' && (
+            <Chip 
+              label="NO RENTAL FEES" 
+              color="secondary" 
+              size="small"
+              sx={{ fontWeight: 'bold' }}
+            />
+          )}
+        </Box>
         
         {Object.keys(bottleSummary).length === 0 ? (
-          <Typography color="text.secondary">No bottles currently rented to this customer.</Typography>
+          <Box>
+            <Typography color="text.secondary" mb={2}>No bottles currently assigned to this customer.</Typography>
+            
+            {/* Billing Information - show even when no bottles */}
+            <Box mt={2}>
+              {customer.customer_type === 'VENDOR' ? (
+                <Alert severity="info">
+                  <Typography variant="body2">
+                    <strong>Billing Status:</strong> This vendor account is NOT charged rental fees for assigned bottles.
+                  </Typography>
+                </Alert>
+              ) : (
+                <Alert severity="success">
+                  <Typography variant="body2">
+                    <strong>Billing Status:</strong> This customer account IS charged rental fees for assigned bottles.
+                  </Typography>
+                </Alert>
+              )}
+            </Box>
+          </Box>
         ) : (
           <Box>
             <Typography variant="body2" color="text.secondary" mb={2}>
@@ -313,18 +401,35 @@ export default function CustomerDetail() {
             <Typography variant="body2" color="text.secondary" mt={2}>
               Total bottles: {customerAssets.length}
             </Typography>
+            
+            {/* Billing Information */}
+            <Box mt={2}>
+              {customer.customer_type === 'VENDOR' ? (
+                <Alert severity="info">
+                  <Typography variant="body2">
+                    <strong>Billing Status:</strong> This vendor account is NOT charged rental fees for assigned bottles.
+                  </Typography>
+                </Alert>
+              ) : (
+                <Alert severity="success">
+                  <Typography variant="body2">
+                    <strong>Billing Status:</strong> This customer account IS charged rental fees for assigned bottles.
+                  </Typography>
+                </Alert>
+              )}
+            </Box>
           </Box>
         )}
       </Paper>
 
-      {/* Currently Rented Bottles */}
+      {/* Currently Assigned Bottles */}
       <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4 }}>
         <Typography variant="h5" fontWeight={700} color="primary" mb={3}>
-          🏠 Currently Rented Bottles ({customerAssets.length})
+          🏠 Currently Assigned Bottles ({customerAssets.length})
         </Typography>
         
         {customerAssets.length === 0 ? (
-          <Typography color="text.secondary">No bottles currently rented to this customer.</Typography>
+          <Typography color="text.secondary">No bottles currently assigned to this customer.</Typography>
         ) : (
           <TableContainer>
             <Table>
@@ -362,9 +467,19 @@ export default function CustomerDetail() {
                     </TableCell>
                     <TableCell>
                       <Chip 
-                        label="Rented" 
-                        color="success" 
+                        label={
+                          customer?.customer_type === 'VENDOR' 
+                            ? "In-house (no charge)" 
+                            : customer?.customer_type === 'TEMPORARY'
+                            ? "Rented (temp - needs setup)"
+                            : "Rented"
+                        }
+                        color={
+                          customer?.customer_type === 'VENDOR' ? 'default' : 
+                          customer?.customer_type === 'TEMPORARY' ? 'warning' : 'success'
+                        }
                         size="small"
+                        icon={customer?.customer_type === 'VENDOR' ? <HomeIcon /> : null}
                       />
                     </TableCell>
                   </TableRow>

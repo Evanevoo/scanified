@@ -41,7 +41,11 @@ function OrganizationRegistration() {
     name: '',
     slug: '',
     domain: '',
-    subscription_plan: 'basic'
+    subscription_plan: 'basic',
+    asset_type: 'cylinder',
+    asset_display_name: 'Gas Cylinder',
+    asset_display_name_plural: 'Gas Cylinders',
+    app_name: 'Scanified'
   });
 
   // User account details
@@ -76,6 +80,59 @@ function OrganizationRegistration() {
     setOrgData(prev => ({ ...prev, subscription_plan: value }));
   }, []);
 
+  const handleAssetTypeChange = useCallback((value) => {
+    // Set default values based on asset type
+    const assetDefaults = {
+      cylinder: {
+        asset_display_name: 'Gas Cylinder',
+        asset_display_name_plural: 'Gas Cylinders',
+        app_name: 'CylinderTrack Pro'
+      },
+      pallet: {
+        asset_display_name: 'Pallet',
+        asset_display_name_plural: 'Pallets',
+        app_name: 'PalletTracker'
+      },
+      equipment: {
+        asset_display_name: 'Equipment',
+        asset_display_name_plural: 'Equipment',
+        app_name: 'EquipManager'
+      },
+      medical: {
+        asset_display_name: 'Medical Device',
+        asset_display_name_plural: 'Medical Devices',
+        app_name: 'MedTrack'
+      },
+      tool: {
+        asset_display_name: 'Tool',
+        asset_display_name_plural: 'Tools',
+        app_name: 'ToolManager'
+      }
+    };
+
+    const defaults = assetDefaults[value] || assetDefaults.cylinder;
+    
+    setOrgData(prev => ({ 
+      ...prev, 
+      asset_type: value,
+      asset_display_name: defaults.asset_display_name,
+      asset_display_name_plural: defaults.asset_display_name_plural,
+      app_name: defaults.app_name
+    }));
+  }, []);
+
+  const handleAssetDisplayNameChange = useCallback((value) => {
+    setOrgData(prev => ({ ...prev, asset_display_name: value }));
+  }, []);
+
+  const handleAssetDisplayNamePluralChange = useCallback((value) => {
+    setOrgData(prev => ({ ...prev, asset_display_name_plural: value }));
+  }, []);
+
+  const handleAppNameChange = useCallback((value) => {
+    setOrgData(prev => ({ ...prev, app_name: value }));
+  }, []);
+
   const handleUserNameChange = useCallback((value) => {
     setUserData(prev => ({ ...prev, full_name: value }));
   }, []);
@@ -107,7 +164,7 @@ function OrganizationRegistration() {
   const validateStep = (step) => {
     switch (step) {
       case 0:
-        return orgData.name && orgData.slug;
+        return orgData.name && orgData.slug && orgData.asset_type && orgData.asset_display_name && orgData.asset_display_name_plural && orgData.app_name;
       case 1:
         return userData.email && userData.password && userData.full_name;
       case 2:
@@ -228,7 +285,14 @@ function OrganizationRegistration() {
           payment_required: trialData.payment_required,
           max_users: 10,
           max_customers: 100,
-          max_bottles: 1000
+          max_bottles: 1000,
+          asset_type: orgData.asset_type,
+          asset_type_plural: orgData.asset_display_name_plural.toLowerCase(),
+          asset_display_name: orgData.asset_display_name,
+          asset_display_name_plural: orgData.asset_display_name_plural,
+          app_name: orgData.app_name,
+          primary_color: '#2563eb',
+          secondary_color: '#1e40af'
         })
         .select()
         .single();
@@ -320,6 +384,84 @@ function OrganizationRegistration() {
                   value={orgData.domain}
                   onChange={(e) => handleOrgDomainChange(e.target.value)}
                   helperText="Your company's website domain"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <InputLabel>Asset Type</InputLabel>
+                  <Select
+                    value={orgData.asset_type}
+                    onChange={(e) => handleAssetTypeChange(e.target.value)}
+                    label="Asset Type"
+                  >
+                    <MenuItem value="cylinder">
+                      <Box>
+                        <Typography variant="body1">Gas Cylinders</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Track gas cylinders, tanks, and containers
+                        </Typography>
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="pallet">
+                      <Box>
+                        <Typography variant="body1">Pallets</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Manage warehouse pallets and shipments
+                        </Typography>
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="equipment">
+                      <Box>
+                        <Typography variant="body1">Equipment</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Track tools, machinery, and equipment
+                        </Typography>
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="medical">
+                      <Box>
+                        <Typography variant="body1">Medical Devices</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Manage medical equipment and devices
+                        </Typography>
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="tool">
+                      <Box>
+                        <Typography variant="body1">Tools</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Track tools and equipment checkout
+                        </Typography>
+                      </Box>
+                    </MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Asset Display Name (Singular)"
+                  value={orgData.asset_display_name}
+                  onChange={(e) => handleAssetDisplayNameChange(e.target.value)}
+                  helperText="e.g., Gas Cylinder, Pallet, Equipment"
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Asset Display Name (Plural)"
+                  value={orgData.asset_display_name_plural}
+                  onChange={(e) => handleAssetDisplayNamePluralChange(e.target.value)}
+                  helperText="e.g., Gas Cylinders, Pallets, Equipment"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="App Name"
+                  value={orgData.app_name}
+                  onChange={(e) => handleAppNameChange(e.target.value)}
+                  helperText="The name that will appear in your mobile app"
                 />
               </Grid>
               <Grid item xs={12}>

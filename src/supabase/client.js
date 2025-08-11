@@ -13,8 +13,12 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     // Detect session in URL
     detectSessionInUrl: true,
-    // Flow type
-    flowType: 'pkce'
+    // Disable security features that might trigger captcha
+    flowType: 'implicit', // Use implicit flow instead of PKCE
+    // Disable additional security checks
+    debug: false,
+    // Ensure no verification challenges
+    verify: false
   },
   // Global headers
   global: {

@@ -84,7 +84,7 @@ const ReviewSystem = ({ isAdminView = false }) => {
       email: 'david@swcylinder.com',
       rating: 4,
       title: 'Great alternative to legacy systems',
-      review: 'Switched from TrackAbout and never looked back. This is what modern software should be - simple, powerful, and actually affordable. Setup was quick and support was helpful.',
+      review: 'Switched from legacy systems and never looked back. This is what modern software should be - simple, powerful, and actually affordable. Setup was quick and support was helpful.',
       date: '2024-01-15',
       verified: false,
       approved: false,

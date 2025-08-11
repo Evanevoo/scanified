@@ -39,6 +39,7 @@ import Sidebar from './Sidebar';
 
 
 const drawerWidth = 280;
+const collapsedWidth = 72;
 
 export default function MainLayout() {
   const { profile, organization } = useAuth();
@@ -47,6 +48,7 @@ export default function MainLayout() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const searchRef = useRef();
   const navigate = useNavigate();
   const location = useLocation();
@@ -226,21 +228,26 @@ export default function MainLayout() {
       <Drawer
         variant="permanent"
         sx={{
-          width: drawerWidth,
+          width: sidebarCollapsed ? collapsedWidth : drawerWidth,
           flexShrink: 0,
           height: '100vh',
           overflow: 'hidden',
+          transition: 'width 0.3s ease',
           '& .MuiDrawer-paper': {
-            width: drawerWidth,
+            width: sidebarCollapsed ? collapsedWidth : drawerWidth,
             boxSizing: 'border-box',
             top: 0,
             height: '100vh',
             overflow: 'hidden',
+            transition: 'width 0.3s ease',
             zIndex: (theme) => theme.zIndex.drawer
           },
         }}
       >
-        <Sidebar />
+        <Sidebar 
+          isCollapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        />
       </Drawer>
       <AppBar
         position="fixed"
@@ -255,6 +262,15 @@ export default function MainLayout() {
         }}
       >
         <Toolbar sx={{ minHeight: 64, px: 3 }}>
+          <IconButton
+            edge="start"
+            color="inherit"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            sx={{ mr: 2, color: '#666' }}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <MenuIcon />
+          </IconButton>
           <Box sx={{ display: 'flex', alignItems: 'center', mr: 3 }}>
             {organization?.logo_url && (
               <img 
@@ -429,7 +445,7 @@ export default function MainLayout() {
         sx={{
           flexGrow: 1,
           p: 3,
-          width: `calc(100vw - ${drawerWidth}px)`,
+          width: `calc(100vw - ${sidebarCollapsed ? collapsedWidth : drawerWidth}px)`,
           bgcolor: 'transparent',
           height: '100vh',
           position: 'relative',
@@ -438,6 +454,7 @@ export default function MainLayout() {
           flexDirection: 'column',
           alignItems: 'stretch',
           overflow: 'hidden',
+          transition: 'width 0.3s ease',
         }}
       >
         <Toolbar sx={{ minHeight: 64 }} />

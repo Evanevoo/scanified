@@ -600,6 +600,166 @@ class DisasterRecoveryManager {
     }
   }
 
+  async clearOldBackups(cutoffDate = new Date('2024-07-01')) {
+    console.log(`🧹 Clearing backups from before ${cutoffDate.toISOString()}...`);
+    
+    const clearedBackups = [];
+    const errors = [];
+    
+    try {
+      // Clear from localStorage
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('backup_') || key.startsWith('backup_metadata_'))) {
+          try {
+            const data = JSON.parse(localStorage.getItem(key));
+            if (data && data.timestamp) {
+              const backupDate = new Date(data.timestamp);
+              if (backupDate < cutoffDate) {
+                keysToRemove.push(key);
+                clearedBackups.push({
+                  key,
+                  timestamp: data.timestamp,
+                  type: 'localStorage'
+                });
+              }
+            }
+          } catch (parseError) {
+            // If we can't parse the data, check if it's an old backup by key pattern
+            if (key.includes('emergency_') || key.includes('backup_')) {
+              // Try to extract timestamp from key
+              const timestampMatch = key.match(/(\d{10,13})/);
+              if (timestampMatch) {
+                const timestamp = parseInt(timestampMatch[1]);
+                if (timestamp < cutoffDate.getTime()) {
+                  keysToRemove.push(key);
+                  clearedBackups.push({
+                    key,
+                    timestamp: new Date(timestamp).toISOString(),
+                    type: 'localStorage'
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // Remove old backups from localStorage
+      keysToRemove.forEach(key => {
+        try {
+          localStorage.removeItem(key);
+          console.log(`🗑️ Removed old backup: ${key}`);
+        } catch (error) {
+          errors.push(`Failed to remove ${key}: ${error.message}`);
+        }
+      });
+      
+      // Clear from IndexedDB
+      try {
+        await this.clearOldBackupsFromIndexedDB(cutoffDate);
+      } catch (indexedDBError) {
+        errors.push(`IndexedDB cleanup failed: ${indexedDBError.message}`);
+      }
+      
+      console.log(`✅ Cleanup complete: ${clearedBackups.length} old backups cleared`);
+      
+      return {
+        success: true,
+        clearedCount: clearedBackups.length,
+        clearedBackups,
+        errors: errors.length > 0 ? errors : null
+      };
+      
+    } catch (error) {
+      console.error('❌ Failed to clear old backups:', error);
+      return {
+        success: false,
+        clearedCount: clearedBackups.length,
+        clearedBackups,
+        errors: [error.message, ...errors]
+      };
+    }
+  }
+
+  async clearOldBackupsFromIndexedDB(cutoffDate) {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('DisasterRecoveryDB', 1);
+      
+      request.onerror = () => reject(request.error);
+      
+      request.onsuccess = () => {
+        const db = request.result;
+        const transaction = db.transaction(['backups'], 'readwrite');
+        const store = transaction.objectStore('backups');
+        const index = store.index('timestamp');
+        
+        const range = IDBKeyRange.upperBound(cutoffDate.toISOString());
+        const clearRequest = index.openCursor(range);
+        
+        let clearedCount = 0;
+        
+        clearRequest.onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            store.delete(cursor.primaryKey);
+            clearedCount++;
+            cursor.continue();
+          } else {
+            console.log(`🗑️ Removed ${clearedCount} old backups from IndexedDB`);
+            resolve(clearedCount);
+          }
+        };
+        
+        clearRequest.onerror = () => reject(clearRequest.error);
+      };
+      
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('backups')) {
+          const store = db.createObjectStore('backups', { keyPath: 'id' });
+          store.createIndex('backupId', 'backupId', { unique: false });
+          store.createIndex('table', 'table', { unique: false });
+          store.createIndex('timestamp', 'timestamp', { unique: false });
+        }
+      };
+    });
+  }
+
+  async createBackupWithCleanup() {
+    console.log('🔄 Creating backup and clearing old backups...');
+    
+    try {
+      // First, create a new backup
+      const backup = await this.createEmergencyBackup();
+      console.log(`✅ New backup created: ${backup.id}`);
+      
+      // Then, clear old backups from before July 2024
+      const cleanupResult = await this.clearOldBackups(new Date('2024-07-01'));
+      
+      if (cleanupResult.success) {
+        console.log(`✅ Cleanup completed: ${cleanupResult.clearedCount} old backups removed`);
+      } else {
+        console.warn(`⚠️ Cleanup had issues: ${cleanupResult.errors?.join(', ')}`);
+      }
+      
+      return {
+        backup,
+        cleanup: cleanupResult,
+        summary: {
+          newBackupId: backup.id,
+          oldBackupsCleared: cleanupResult.clearedCount,
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+    } catch (error) {
+      console.error('❌ Backup and cleanup failed:', error);
+      throw error;
+    }
+  }
+
   // Public API methods
   async getRecoveryStatus() {
     return {
@@ -645,4 +805,12 @@ export const getRecoveryStatus = async () => {
 // Restore from backup with confirmation
 export const restoreFromBackup = async (backupId, options = {}) => {
   return await disasterRecovery.restore(backupId, options);
+};
+
+export const clearOldBackups = async (cutoffDate = new Date('2024-07-01')) => {
+  return await disasterRecovery.clearOldBackups(cutoffDate);
+};
+
+export const createBackupWithCleanup = async () => {
+  return await disasterRecovery.createBackupWithCleanup();
 }; 

@@ -204,6 +204,7 @@ export default function AssetDetail() {
               {asset.location || '-'}
             </Typography>
           </Grid>
+
           <Grid item xs={12}>
             <Typography variant="body2" color="textSecondary">
               Description
@@ -287,6 +288,7 @@ export default function AssetDetail() {
                 onChange={(e) => setEditData({ ...editData, location: e.target.value })}
               />
             </Grid>
+
             <Grid item xs={12}>
               <TextField
                 fullWidth

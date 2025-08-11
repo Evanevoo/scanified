@@ -339,14 +339,14 @@ export default function Settings() {
 
   // Barcode Format Configuration
   const [barcodeConfig, setBarcodeConfig] = useState({
-    barcodeType: 'custom', // New field for predefined types
+    barcodeType: 'custom',
     barcodePattern: '^[A-Z0-9]{6,12}$',
     barcodeDescription: '6-12 alphanumeric characters',
-    orderNumberType: 'custom', // New field for order number types
+    orderNumberType: 'custom',
     orderNumberPattern: '^ORD[0-9]{6}$',
     orderNumberDescription: 'ORD followed by 6 digits',
     orderNumberPrefix: 'ORD',
-    serialNumberType: 'custom', // New field for serial number types
+    serialNumberType: 'custom',
     serialNumberPattern: '^[A-Z]{2}[0-9]{8}$',
     serialNumberDescription: '2 letters followed by 8 digits',
   });
@@ -410,7 +410,29 @@ export default function Settings() {
         showAppIcon: organization.show_app_icon !== undefined ? organization.show_app_icon : true,
       });
       
-      // Load barcode config from organization
+      // Load barcode config from organization's format_configuration
+      const formatConfig = organization.format_configuration || {};
+      const barcodeFormat = formatConfig.barcode_format || {
+        pattern: '^[A-Z0-9]{6,12}$',
+        description: '6-12 alphanumeric characters',
+        examples: ['123456789', '987654321'],
+        validation_enabled: true
+      };
+      const orderNumberFormat = formatConfig.order_number_format || {
+        pattern: '^ORD[0-9]{6}$',
+        description: 'ORD followed by 6 digits',
+        examples: ['ORD123456', 'SO789012'],
+        prefix: 'ORD',
+        validation_enabled: true
+      };
+      const customerIdFormat = formatConfig.customer_id_format || {
+        pattern: '^[A-Z0-9]{4,10}$',
+        description: '4-10 alphanumeric characters',
+        examples: ['CUST123', 'CLIENT456'],
+        prefix: '',
+        validation_enabled: true
+      };
+
       const detectBarcodeType = (pattern) => {
         for (const [key, type] of Object.entries(barcodeTypes)) {
           if (type.pattern === pattern) return key;
@@ -433,21 +455,21 @@ export default function Settings() {
       };
 
       setBarcodeConfig({
-        barcodeType: organization.barcode_type || detectBarcodeType(organization.barcode_pattern || '^[A-Z0-9]{6,12}$'),
-        barcodePattern: organization.barcode_pattern || '^[A-Z0-9]{6,12}$',
-        barcodeDescription: organization.barcode_description || '6-12 alphanumeric characters',
-        orderNumberType: organization.order_number_type || detectOrderNumberType(organization.order_number_pattern || '^ORD[0-9]{6}$'),
-        orderNumberPattern: organization.order_number_pattern || '^ORD[0-9]{6}$',
-        orderNumberDescription: organization.order_number_description || 'ORD followed by 6 digits',
-        orderNumberPrefix: organization.order_number_prefix || 'ORD',
-        serialNumberType: organization.serial_number_type || detectSerialNumberType(organization.serial_number_pattern || '^[A-Z]{2}[0-9]{8}$'),
-        serialNumberPattern: organization.serial_number_pattern || '^[A-Z]{2}[0-9]{8}$',
-        serialNumberDescription: organization.serial_number_description || '2 letters followed by 8 digits',
+        barcodeType: detectBarcodeType(barcodeFormat.pattern),
+        barcodePattern: barcodeFormat.pattern,
+        barcodeDescription: barcodeFormat.description,
+        orderNumberType: detectOrderNumberType(orderNumberFormat.pattern),
+        orderNumberPattern: orderNumberFormat.pattern,
+        orderNumberDescription: orderNumberFormat.description,
+        orderNumberPrefix: orderNumberFormat.prefix || '',
+        serialNumberType: detectSerialNumberType(customerIdFormat.pattern),
+        serialNumberPattern: customerIdFormat.pattern,
+        serialNumberDescription: customerIdFormat.description,
       });
       
       setLogoUrl(organization.logo_url || '');
     }
-  }, [profile, user, organization]);
+  }, [profile, organization]);
 
   useEffect(() => {
     if (profile?.role === 'owner' || profile?.role === 'admin') {
@@ -475,13 +497,13 @@ export default function Settings() {
 
   useEffect(() => {
     setBarcodeConfigChanged(
-      barcodeConfig.barcodePattern !== (organization?.barcode_pattern || '^[A-Z0-9]{6,12}$') ||
-      barcodeConfig.barcodeDescription !== (organization?.barcode_description || '6-12 alphanumeric characters') ||
-      barcodeConfig.orderNumberPattern !== (organization?.order_number_pattern || '^ORD[0-9]{6}$') ||
-      barcodeConfig.orderNumberDescription !== (organization?.order_number_description || 'ORD followed by 6 digits') ||
-      barcodeConfig.orderNumberPrefix !== (organization?.order_number_prefix || 'ORD') ||
-      barcodeConfig.serialNumberPattern !== (organization?.serial_number_pattern || '^[A-Z]{2}[0-9]{8}$') ||
-      barcodeConfig.serialNumberDescription !== (organization?.serial_number_description || '2 letters followed by 8 digits')
+      barcodeConfig.barcodePattern !== (organization?.format_configuration?.barcode_format?.pattern || '^[A-Z0-9]{6,12}$') ||
+      barcodeConfig.barcodeDescription !== (organization?.format_configuration?.barcode_format?.description || '6-12 alphanumeric characters') ||
+      barcodeConfig.orderNumberPattern !== (organization?.format_configuration?.order_number_format?.pattern || '^ORD[0-9]{6}$') ||
+      barcodeConfig.orderNumberDescription !== (organization?.format_configuration?.order_number_format?.description || 'ORD followed by 6 digits') ||
+      barcodeConfig.orderNumberPrefix !== (organization?.format_configuration?.order_number_format?.prefix || 'ORD') ||
+      barcodeConfig.serialNumberPattern !== (organization?.format_configuration?.customer_id_format?.pattern || '^[A-Z0-9]{4,10}$') ||
+      barcodeConfig.serialNumberDescription !== (organization?.format_configuration?.customer_id_format?.description || '4-10 alphanumeric characters')
     );
   }, [barcodeConfig, organization]);
 
@@ -569,14 +591,16 @@ export default function Settings() {
   };
 
   const handleColorChange = async (newColor) => {
-    setAccent(newColor);
-    localStorage.setItem('themeAccent', newColor);
+    // Convert color key to hex color if needed
+    const hexColor = colorMap[newColor] || newColor;
+    
+    setAccent(hexColor);
     
     // Save to database
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({ theme_accent: newColor })
+        .update({ theme_accent: hexColor })
         .eq('id', user.id);
       
       if (!error) {
@@ -717,19 +741,41 @@ export default function Settings() {
     setBarcodeConfigLoading(true);
 
     try {
+      // Get current format_configuration to preserve other settings
+      const { data: currentData } = await supabase
+        .from('organizations')
+        .select('format_configuration')
+        .eq('id', profile.organization_id)
+        .single();
+
+      const currentFormatConfig = currentData?.format_configuration || {};
+
       const { error } = await supabase
         .from('organizations')
         .update({
-          barcode_type: barcodeConfig.barcodeType,
-          barcode_pattern: barcodeConfig.barcodePattern,
-          barcode_description: barcodeConfig.barcodeDescription,
-          order_number_type: barcodeConfig.orderNumberType,
-          order_number_pattern: barcodeConfig.orderNumberPattern,
-          order_number_description: barcodeConfig.orderNumberDescription,
-          order_number_prefix: barcodeConfig.orderNumberPrefix,
-          serial_number_type: barcodeConfig.serialNumberType,
-          serial_number_pattern: barcodeConfig.serialNumberPattern,
-          serial_number_description: barcodeConfig.serialNumberDescription,
+          format_configuration: {
+            ...currentFormatConfig,
+            barcode_format: {
+              pattern: barcodeConfig.barcodePattern,
+              description: barcodeConfig.barcodeDescription,
+              examples: ['123456789', '987654321'],
+              validation_enabled: true
+            },
+            order_number_format: {
+              pattern: barcodeConfig.orderNumberPattern,
+              description: barcodeConfig.orderNumberDescription,
+              examples: ['ORD123456', 'SO789012'],
+              prefix: barcodeConfig.orderNumberPrefix,
+              validation_enabled: true
+            },
+            customer_id_format: {
+              pattern: barcodeConfig.serialNumberPattern,
+              description: barcodeConfig.serialNumberDescription,
+              examples: ['CUST123', 'CLIENT456'],
+              prefix: '',
+              validation_enabled: true
+            }
+          }
         })
         .eq('id', profile.organization_id);
 
@@ -1091,12 +1137,12 @@ export default function Settings() {
                         width: 40,
                         height: 40,
                         borderRadius: '50%',
-                        border: accent === tc.value ? `3px solid #fff` : '2px solid #ccc',
+                        border: accent === colorMap[tc.value] ? `3px solid #fff` : '2px solid #ccc',
                         background: colorMap[tc.value],
-                        boxShadow: accent === tc.value ? '0 0 0 4px rgba(0,0,0,0.1)' : 'none',
+                        boxShadow: accent === colorMap[tc.value] ? '0 0 0 4px rgba(0,0,0,0.1)' : 'none',
                       }}
                     >
-                      {accent === tc.value && (
+                      {accent === colorMap[tc.value] && (
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M5 13l4 4L19 7" />
                         </svg>
@@ -1791,6 +1837,8 @@ export default function Settings() {
                       </Alert>
                     )}
                   </Grid>
+
+                  {/* Format Configuration is now handled in the Barcodes tab - removed duplicate section */}
                 </Grid>
               </Box>
             </TabPanel>

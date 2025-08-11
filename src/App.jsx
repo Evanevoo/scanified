@@ -32,7 +32,7 @@ import PricingPage from './pages/PricingPage';
 import Documentation from './pages/Documentation';
 import CustomPageViewer from './pages/CustomPageViewer';
 import ImportApprovals from './pages/ImportApprovals';
-import ImportApprovalDetail from './pages/ImportApprovalDetail';
+import ImportApprovalDetail from './pages/ImportApprovalDetailEnhanced';
 import ImportApprovalsHistory from './pages/ImportApprovalsHistory';
 import Home from './pages/Home';
 import DataUtilities from './pages/OwnerPortal/DataUtilities';
@@ -50,6 +50,7 @@ import PlanManagement from './pages/OwnerPortal/PlanManagement';
 import AssetTypeDemo from './components/AssetTypeDemo';
 import AssetConfigurationManager from './pages/OwnerPortal/AssetConfigurationManager';
 import FileFormatManager from './pages/OwnerPortal/FileFormatManager';
+import FormatConfigurationManager from './pages/OwnerPortal/FormatConfigurationManager';
 import RoleManagement from './pages/OwnerPortal/RoleManagement';
 import PageBuilder from './pages/OwnerPortal/PageBuilder';
 import ContactManagement from './pages/OwnerPortal/ContactManagement';
@@ -93,13 +94,15 @@ import CompetitorAnalysis from './pages/CompetitorAnalysis';
 import Blog from './pages/Blog';
 import Security from './pages/Security';
 import EmailTest from './pages/EmailTest';
+import DirectEmailTest from './pages/DirectEmailTest';
+import SMTP2GOTest from './pages/SMTP2GOTest';
 
 // Lazy load all page components
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const Customers = lazy(() => import('./pages/Customers'));
 const Rentals = lazy(() => import('./pages/Rentals'));
 const LeaseAgreements = lazy(() => import('./pages/LeaseAgreements'));
-const TrackAboutDashboard = lazy(() => import('./pages/TrackAboutDashboard'));
+const IndustryAnalyticsDashboard = lazy(() => import('./pages/IndustryAnalyticsDashboard'));
 const WebScanning = lazy(() => import('./pages/WebScanning'));
 const DeliveryTracking = lazy(() => import('./pages/DeliveryTracking'));
 const AuditManagement = lazy(() => import('./pages/AuditManagement'));
@@ -145,6 +148,7 @@ const SupportCenter = lazy(() => import('./pages/SupportCenter'));
 const OrganizationAnalytics = lazy(() => import('./pages/OrganizationAnalytics'));
 const OrganizationTools = lazy(() => import('./pages/OrganizationTools'));
 const Locations = lazy(() => import('./pages/Locations'));
+const TempCustomerManagement = lazy(() => import('./pages/TempCustomerManagement'));
 
 // Analytics tracking component
 function AnalyticsTracker() {
@@ -225,6 +229,8 @@ function AppContent() {
                                   <Route path="/blog" element={<Blog />} />
                 <Route path="/security" element={<Security />} />
                 <Route path="/email-test" element={<EmailTest />} />
+                <Route path="/direct-email-test" element={<DirectEmailTest />} />
+                <Route path="/smtp2go-test" element={<SMTP2GOTest />} />
                   <Route path="/integrations" element={
                     <Suspense fallback={<LoadingSpinner />}>
                       <IntegrationsPage />
@@ -235,6 +241,7 @@ function AppContent() {
                   <Route element={<ProtectedRoute />}>
                     <Route path="/home" element={<Home />} />
                     <Route path="/customers" element={<Customers />} />
+                  <Route path="/temp-customer-management" element={<TempCustomerManagement />} />
                     <Route path="/locations" element={<Locations />} />
                     <Route path="/assets" element={<Assets />} />
                     <Route path="/inventory" element={<Assets />} />
@@ -243,7 +250,7 @@ function AppContent() {
                     <Route path="/delivery-tracking" element={<DeliveryTracking />} />
                     <Route path="/rentals" element={<Rentals />} />
                     <Route path="/lease-agreements" element={<LeaseAgreements />} />
-                    <Route path="/trackabout-dashboard" element={<TrackAboutDashboard />} />
+                    <Route path="/industry-analytics" element={<IndustryAnalyticsDashboard />} />
                     <Route path="/web-scanning" element={<WebScanning />} />
                     <Route path="/audit-management" element={<AuditManagement />} />
                     <Route path="/favorites" element={<Favorites />} />
@@ -287,7 +294,7 @@ function AppContent() {
                     <Route path="/user-management" element={<UserManagement />} />
                     <Route path="/import-asset-balance" element={<ImportAssetBalance />} />
                     <Route path="/import-approvals" element={<ImportApprovals />} />
-                    <Route path="/import-approval/:invoiceNumber/detail" element={<ImportApprovalDetail />} />
+                              <Route path="/import-approval/:invoiceNumber/detail" element={<ImportApprovalDetail />} />
                     <Route path="/import-approvals-history" element={<ImportApprovalsHistory />} />
                     <Route path="/import-approvals/history" element={<ImportApprovalsHistory />} />
                     <Route path="/import-history" element={<ImportApprovalsHistory />} />
@@ -326,7 +333,8 @@ function AppContent() {
                   <Route path="/owner-portal/asset-configuration" element={<AssetConfigurationManager />} />
                   <Route path="/file-format-manager" element={<FileFormatManager />} />
                   <Route path="/owner-portal/file-format-manager" element={<FileFormatManager />} />
-                    <Route path="/owner-portal/roles" element={<RoleManagement />} />
+                  <Route path="/owner-portal/format-configuration" element={<FormatConfigurationManager />} />
+                  <Route path="/owner-portal/roles" element={<RoleManagement />} />
                     <Route path="/owner-portal/page-builder" element={<PageBuilder />} />
                     <Route path="/owner-portal/contact-management" element={<ContactManagement />} />
                     <Route path="/owner-portal/landing-editor" element={<LandingPageEditor />} />

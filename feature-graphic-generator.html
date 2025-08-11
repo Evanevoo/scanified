@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scanified Feature Graphic Generator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-size: 2.5em;
+            font-weight: 700;
+        }
+        .subtitle {
+            text-align: center;
+            color: #6c757d;
+            font-size: 1.1em;
+            margin-bottom: 40px;
+            line-height: 1.5;
+        }
+        .feature-graphic-container {
+            text-align: center;
+            background: rgba(248, 249, 250, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 15px;
+            border: 2px solid rgba(233, 236, 239, 0.5);
+            margin-bottom: 30px;
+        }
+        .feature-graphic-container h3 {
+            margin-bottom: 20px;
+            color: #495057;
+            font-size: 1.2em;
+            font-weight: 600;
+        }
+        canvas {
+            border: 1px solid rgba(222, 226, 230, 0.5);
+            border-radius: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            transition: transform 0.2s ease;
+            max-width: 100%;
+            height: auto;
+        }
+        canvas:hover {
+            transform: scale(1.02);
+        }
+        .download-btn {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            margin: 5px;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+        }
+        .download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.4);
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+        }
+        .instructions {
+            background: rgba(232, 244, 253, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(179, 217, 255, 0.5);
+            border-radius: 15px;
+            padding: 30px;
+            margin-top: 30px;
+        }
+        .instructions h3 {
+            color: #1e40af;
+            margin-top: 0;
+            font-weight: 600;
+        }
+        .instructions ol {
+            color: #374151;
+            line-height: 1.8;
+        }
+        .instructions code {
+            background: rgba(59, 130, 246, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 0.9em;
+        }
+        .brand-highlight {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 700;
+        }
+        .size-info {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 <span class="brand-highlight">Scanified</span> Feature Graphic Generator</h1>
+        <p class="subtitle">
+            Professional feature graphic for Google Play Store<br>
+            Showcases your enterprise asset management platform
+        </p>
+        
+        <div class="feature-graphic-container">
+            <h3>Feature Graphic (1024×500)</h3>
+            <div class="size-info">Required for Google Play Store - Promotional banner</div>
+            <canvas id="featureGraphic" width="1024" height="500"></canvas>
+            <br>
+            <button class="download-btn" onclick="downloadFeatureGraphic()">Download Feature Graphic</button>
+        </div>
+        
+        <div class="instructions">
+            <h3>📋 Installation Instructions</h3>
+            <ol>
+                <li>Download the feature graphic using the button above</li>
+                <li>Upload to Google Play Console:
+                    <ul style="margin-top: 10px;">
+                        <li>Go to <code>Google Play Console</code> → <code>Store Listing</code></li>
+                        <li>Scroll to <code>Graphics</code> section</li>
+                        <li>Upload the feature graphic (1024×500 PNG)</li>
+                        <li>Save your changes</li>
+                    </ul>
+                </li>
+                <li>The feature graphic will appear at the top of your app's store listing</li>
+                <li>This graphic showcases your app's key features and professional branding</li>
+            </ol>
+            <p style="margin-top: 20px; padding: 15px; background: rgba(59, 130, 246, 0.1); border-radius: 8px; border-left: 4px solid #3b82f6;">
+                <strong>💡 Pro Tip:</strong> This feature graphic uses your brand colors and showcases the key value propositions of Scanified - professional asset management, barcode scanning, and enterprise-grade features.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        function drawFeatureGraphic() {
+            const canvas = document.getElementById('featureGraphic');
+            const ctx = canvas.getContext('2d');
+            
+            // Set canvas size for high-resolution export
+            canvas.width = 1024;
+            canvas.height = 500;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, 1024, 500);
+            
+            // Create gradient background
+            const gradient = ctx.createLinearGradient(0, 0, 1024, 500);
+            gradient.addColorStop(0, '#1e40af');    // Deep blue
+            gradient.addColorStop(0.3, '#3b82f6');  // Blue
+            gradient.addColorStop(0.7, '#8b5cf6');  // Purple
+            gradient.addColorStop(1, '#06b6d4');    // Cyan
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 1024, 500);
+            
+            // Add subtle pattern overlay
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.lineWidth = 1;
+            
+            // Draw grid pattern
+            for (let i = 0; i < 1024; i += 40) {
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, 500);
+                ctx.stroke();
+            }
+            for (let i = 0; i < 500; i += 40) {
+                ctx.beginPath();
+                ctx.moveTo(0, i);
+                ctx.lineTo(1024, i);
+                ctx.stroke();
+            }
+            
+            // Add decorative elements
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.beginPath();
+            ctx.arc(900, 100, 80, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.arc(950, 400, 60, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // Draw main content area
+            const contentX = 50;
+            const contentY = 100;
+            const contentWidth = 600;
+            const contentHeight = 300;
+            
+            // Semi-transparent content background
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.beginPath();
+            ctx.roundRect(contentX, contentY, contentWidth, contentHeight, 20);
+            ctx.fill();
+            
+            // App icon placeholder (left side)
+            const iconSize = 120;
+            const iconX = contentX + 50;
+            const iconY = contentY + 50;
+            
+            // Draw app icon background
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.roundRect(iconX, iconY, iconSize, iconSize, 20);
+            ctx.fill();
+            
+            // Draw simplified app icon content
+            ctx.fillStyle = '#3b82f6';
+            ctx.beginPath();
+            ctx.roundRect(iconX + 20, iconY + 20, iconSize - 40, iconSize - 40, 10);
+            ctx.fill();
+            
+            // Draw circuit pattern on icon
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < 3; i++) {
+                const y = iconY + 40 + i * 20;
+                ctx.beginPath();
+                ctx.moveTo(iconX + 30, y);
+                ctx.lineTo(iconX + iconSize - 30, y);
+                ctx.stroke();
+            }
+            for (let i = 0; i < 3; i++) {
+                const x = iconX + 40 + i * 20;
+                ctx.beginPath();
+                ctx.moveTo(x, iconY + 30);
+                ctx.lineTo(x, iconY + iconSize - 30);
+                ctx.stroke();
+            }
+            
+            // Main text content
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 48px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            ctx.fillText('Scanified', contentX + 200, contentY + 80);
+            
+            ctx.font = '24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            ctx.fillText('Professional Asset Management', contentX + 200, contentY + 120);
+            
+            // Feature highlights
+            const features = [
+                '🔍 Barcode Scanning',
+                '📱 Mobile-First Design',
+                '☁️ Real-Time Sync',
+                '🔒 Enterprise Security'
+            ];
+            
+            ctx.font = '18px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            features.forEach((feature, index) => {
+                ctx.fillText(feature, contentX + 200, contentY + 180 + (index * 30));
+            });
+            
+            // Add tagline
+            ctx.font = '16px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.fillText('Transform your asset management with enterprise-grade precision', contentX + 200, contentY + 280);
+            
+            // Add decorative barcode scanner icon
+            const scannerX = 800;
+            const scannerY = 200;
+            
+            // Scanner body
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(scannerX, scannerY, 80, 60);
+            
+            // Scanner window
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(scannerX + 10, scannerY + 10, 60, 40);
+            
+            // Scanning lines
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < 3; i++) {
+                const y = scannerY + 15 + i * 10;
+                ctx.beginPath();
+                ctx.moveTo(scannerX + 15, y);
+                ctx.lineTo(scannerX + 65, y);
+                ctx.stroke();
+            }
+        }
+        
+        function downloadFeatureGraphic() {
+            const canvas = document.getElementById('featureGraphic');
+            const link = document.createElement('a');
+            link.download = 'scanified-feature-graphic.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+        
+        // Generate feature graphic when page loads
+        window.onload = function() {
+            drawFeatureGraphic();
+        };
+    </script>
+</body>
+</html>

@@ -3,8 +3,12 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator,
 import { supabase } from '../supabase';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Picker } from '@react-native-picker/picker';
+import { useAssetConfig } from '../context/AssetContext';
+import { useAuth } from '../hooks/useAuth';
 
 export default function EditCylinderScreen() {
+  const { config: assetConfig } = useAssetConfig();
+  const { profile } = useAuth();
   const [step, setStep] = useState(1);
   const [barcode, setBarcode] = useState('');
   const [serial, setSerial] = useState('');
@@ -23,11 +27,13 @@ export default function EditCylinderScreen() {
 
   // Fetch customers when cylinder is loaded (step 2)
   React.useEffect(() => {
-    if (step === 2) {
+    if (step === 2 && profile?.organization_id) {
       setCustomersLoading(true);
       supabase
         .from('customers')
         .select('CustomerListID, name')
+        .eq('organization_id', profile.organization_id)
+        .eq('deleted', false)
         .order('name')
         .then(({ data, error }) => {
           if (error) setCustomersError('Failed to load customers');
@@ -35,14 +41,14 @@ export default function EditCylinderScreen() {
           setCustomersLoading(false);
         });
     }
-  }, [step]);
+  }, [step, profile]);
 
   // Set initial owner fields when cylinder is loaded
   React.useEffect(() => {
     if (cylinder) {
-      setOwnerType(cylinder.owner_type || 'organization');
-      setOwnerCustomerId(cylinder.owner_id || '');
-      setOwnerName(cylinder.owner_name || '');
+      setOwnerType(cylinder?.owner_type || 'organization');
+      setOwnerCustomerId(cylinder?.owner_id || '');
+      setOwnerName(cylinder?.owner_name || '');
     }
   }, [cylinder]);
 
@@ -80,13 +86,13 @@ export default function EditCylinderScreen() {
     setError('');
     setCylinder(null);
     const { data, error } = await supabase
-      .from('assets')
+      .from('bottles')
       .select('*')
       .eq('barcode_number', barcodeValue)
       .single();
     setLoading(false);
     if (error || !data) {
-      setError('Cylinder not found.');
+      setError(`${assetConfig?.assetDisplayName || 'Asset'} not found.`);
       return;
     }
     setCylinder(data);
@@ -99,10 +105,10 @@ export default function EditCylinderScreen() {
     setError('');
     // Check for duplicate barcode or serial (excluding this cylinder)
     const { data: dupBarcode } = await supabase
-      .from('assets')
+      .from('bottles')
       .select('id')
       .eq('barcode_number', barcode)
-      .neq('id', cylinder.id)
+      .neq('id', cylinder?.id)
       .maybeSingle();
     if (dupBarcode) {
       setLoading(false);
@@ -110,10 +116,10 @@ export default function EditCylinderScreen() {
       return;
     }
     const { data: dupSerial } = await supabase
-      .from('assets')
+      .from('bottles')
       .select('id')
       .eq('serial_number', serial)
-      .neq('id', cylinder.id)
+      .neq('id', cylinder?.id)
       .maybeSingle();
     if (dupSerial) {
       setLoading(false);
@@ -140,14 +146,14 @@ export default function EditCylinderScreen() {
       updateFields.assigned_customer = null;
     }
     const { error: updateError } = await supabase
-      .from('assets')
+      .from('bottles')
       .update(updateFields)
-      .eq('id', cylinder.id);
+      .eq('id', cylinder?.id);
     setLoading(false);
     if (updateError) {
-      setError('Failed to update cylinder.');
+      setError(`Failed to update ${assetConfig?.assetDisplayName?.toLowerCase() || 'asset'}.`);
     } else {
-      Alert.alert('Success', 'Cylinder updated successfully!');
+      Alert.alert('Success', `${assetConfig?.assetDisplayName || 'Asset'} updated successfully!`);
       setStep(1);
       setBarcode('');
       setSerial('');
@@ -246,9 +252,9 @@ export default function EditCylinderScreen() {
           {/* Show current ownership info */}
           <Text style={styles.label}>Current Ownership</Text>
           <Text style={{ marginBottom: 8 }}>
-            {cylinder.owner_type === 'organization' && 'Organization'}
-            {cylinder.owner_type === 'customer' && `Customer: ${cylinder.owner_name || cylinder.assigned_customer}`}
-            {cylinder.owner_type === 'external' && `External: ${cylinder.owner_name}`}
+            {cylinder?.owner_type === 'organization' && 'Organization'}
+            {cylinder?.owner_type === 'customer' && `Customer: ${cylinder?.owner_name || cylinder?.assigned_customer}`}
+            {cylinder?.owner_type === 'external' && `External: ${cylinder?.owner_name}`}
           </Text>
           <TouchableOpacity
             style={styles.nextButton}
