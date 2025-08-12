@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "Scanified",
+    "slug": "scanified-android",
+    "version": "1.0.4",
+    "orientation": "portrait",
+    "icon": "./assets/app-icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "platforms": ["android"],
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.evanevoo.scanifiedmobile",
+      "versionCode": 6,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/app-icon.png",
+        "backgroundColor": "#000000"
+      },
+      "permissions": [
+        "CAMERA",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Scanified to access your camera to scan asset barcodes and manage your organization's inventory with enterprise-grade precision."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d71ec042-1fec-4186-ac3b-0ae85a6af345"
+      }
+    },
+    "owner": "evanevoo"
+  }
+}
