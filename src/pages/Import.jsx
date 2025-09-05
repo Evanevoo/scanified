@@ -8,7 +8,8 @@ import throttle from 'lodash.throttle';
 import debounce from 'lodash.debounce';
 import { toast } from 'react-hot-toast';
 import { getImportWorker, addImportWorkerListener, removeImportWorkerListener } from '../utils/ImportWorkerManager';
-import { Box, Paper, Typography } from '@mui/material';
+import { Box, Paper, Typography, Button, IconButton, Alert, LinearProgress, Card, CardContent, Stack, Chip, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
+import { ArrowBack as ArrowBackIcon, Upload as UploadIcon, Search as SearchIcon, CheckCircle as CheckCircleIcon } from '@mui/icons-material';
 import { findCustomer, normalizeCustomerName } from '../utils/customerMatching';
 
 // Import type definitions
@@ -1391,165 +1392,252 @@ export default function Import() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
-        <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Import Data</Typography>
-        <div className="flex justify-between items-center mb-8">
-          <button
-            onClick={() => navigate(-1)}
-            className="bg-gradient-to-r from-gray-400 to-gray-300 text-white px-6 py-2 rounded-lg shadow-md hover:from-gray-500 hover:to-gray-400 font-semibold transition"
-          >
-            Back
-          </button>
-        </div>
+    <Box sx={{ p: 3 }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <IconButton onClick={() => navigate(-1)}>
+            <ArrowBackIcon />
+          </IconButton>
+          <Typography variant="h4" fontWeight={800} color="primary">
+            Import Data
+          </Typography>
+        </Box>
+      </Box>
 
-        {/* Format Guide */}
-        <div className="mb-6 bg-blue-50 rounded-lg p-4 border border-blue-200">
-          <div className="font-semibold mb-2 text-blue-900">Expected File Format:</div>
-          <div className="text-sm text-blue-800 mb-3">
+      {/* Format Guide Card */}
+      <Card variant="outlined" sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" fontWeight={600} color="primary" gutterBottom>
+            Expected File Format
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Your file should be tab-separated (.txt) or comma-separated (.csv) with the following columns:
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-            <div><strong>Customer ID:</strong> Unique customer identifier</div>
-            <div><strong>Customer Name:</strong> Company or customer name</div>
-            <div><strong>Date:</strong> Invoice/Receipt date (MM/DD/YYYY or YYYY-MM-DD)</div>
-            <div><strong>Product Code:</strong> Asset type or product code (e.g., BCS68-300)</div>
-            <div><strong>Reference Number:</strong> Invoice or sales receipt number</div>
-            <div><strong>Quantity Shipped:</strong> Number of items shipped/out</div>
-            <div><strong>Quantity Returned:</strong> Number of items returned/in</div>
-          </div>
-          <div className="mt-3 p-2 bg-white rounded border text-xs font-mono">
-            <div className="text-blue-600 font-semibold mb-1">Example row:</div>
-            <div>80000C33-1745333424A	Rockford Engineering Works Ltd.	06/06/2025	BCS68-300	64034	2	0</div>
-          </div>
-          <div className="mt-3 text-sm text-blue-700">
+          </Typography>
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid item xs={12} md={6}>
+              <Typography variant="body2"><strong>Customer ID:</strong> Unique customer identifier</Typography>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Typography variant="body2"><strong>Customer Name:</strong> Company or customer name</Typography>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Typography variant="body2"><strong>Date:</strong> Invoice/Receipt date (MM/DD/YYYY or YYYY-MM-DD)</Typography>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Typography variant="body2"><strong>Product Code:</strong> Asset type or product code (e.g., BCS68-300)</Typography>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Typography variant="body2"><strong>Reference Number:</strong> Invoice or sales receipt number</Typography>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Typography variant="body2"><strong>Quantity Shipped:</strong> Number of items shipped/out</Typography>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Typography variant="body2"><strong>Quantity Returned:</strong> Number of items returned/in</Typography>
+            </Grid>
+          </Grid>
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
+            <Typography variant="caption" color="primary" fontWeight={600} display="block" gutterBottom>
+              Example row:
+            </Typography>
+            <Typography variant="caption" fontFamily="monospace">
+              80000C33-1745333424A	Rockford Engineering Works Ltd.	06/06/2025	BCS68-300	64034	2	0
+            </Typography>
+          </Paper>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
             <strong>Note:</strong> The system will automatically detect whether to process as invoices or sales receipts based on your data.
-          </div>
-        </div>
+          </Typography>
+        </CardContent>
+      </Card>
 
-        <form onSubmit={handleImport} className="mb-6 flex gap-2 items-end">
-          <input 
-            type="file" 
-            accept=".txt,.csv,.xlsx,.xls" 
-            onChange={handleFileChange} 
-            className="border p-2 rounded w-full" 
-          />
-          <button 
-            type="button"
-            onClick={checkPreviewStatuses}
-            disabled={!file || !preview.length || loading}
-            className="bg-green-600 text-white px-6 py-2 rounded-lg shadow-md hover:bg-green-700 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Analyzing...' : 'Preview'}
-          </button>
-          <button 
-            type="submit" 
-            className="bg-blue-600 text-white px-6 py-2 rounded-lg shadow-md hover:bg-blue-700 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={!file || !preview.length || loading || !previewChecked || validationErrors.length > 0 || importing || (previewSummary && previewSummary.customersCreated > 0)}
-          >
-            {loading ? 'Importing...' : 'Import'}
-          </button>
-        </form>
+      {/* File Upload Card */}
+      <Card variant="outlined" sx={{ mb: 3 }}>
+        <CardContent>
+          <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Button
+              variant="outlined"
+              component="label"
+              startIcon={<UploadIcon />}
+              disabled={loading}
+            >
+              Choose File
+              <input 
+                type="file" 
+                accept=".txt,.csv,.xlsx,.xls" 
+                onChange={handleFileChange} 
+                style={{ display: 'none' }}
+              />
+            </Button>
+            
+            {file && (
+              <Chip 
+                label={file.name} 
+                color="primary" 
+                variant="outlined" 
+                onDelete={() => {
+                  setFile(null);
+                  setRawRows([]);
+                  setColumns([]);
+                  setMapping({});
+                  setPreview([]);
+                  setResult(null);
+                  setError(null);
+                }}
+              />
+            )}
+            
+            <Button
+              variant="outlined"
+              color="success"
+              onClick={checkPreviewStatuses}
+              disabled={!file || !preview.length || loading}
+              startIcon={<SearchIcon />}
+            >
+              {loading ? 'Analyzing...' : 'Preview'}
+            </Button>
+            
+            <Button
+              variant="contained"
+              onClick={handleImport}
+              disabled={!file || !preview.length || loading || !previewChecked || validationErrors.length > 0 || importing || (previewSummary && previewSummary.customersCreated > 0)}
+              startIcon={loading ? <LinearProgress size={16} /> : <CheckCircleIcon />}
+            >
+              {loading ? 'Importing...' : 'Import'}
+            </Button>
+          </Stack>
+        </CardContent>
+      </Card>
         
-        {/* Help message when import is disabled due to missing customers */}
-        {previewSummary && previewSummary.customersCreated > 0 && (
-          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-300 rounded text-yellow-800">
-            <div className="font-semibold mb-1">⚠️ Import Blocked</div>
-            <div className="text-sm">
-              You need to create {previewSummary.customersCreated} missing customers before you can import the data. 
-              Click the "Create Missing Customers" button in the summary above to proceed.
-            </div>
-          </div>
-        )}
+      {/* Help message when import is disabled due to missing customers */}
+      {previewSummary && previewSummary.customersCreated > 0 && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          <Typography variant="body2">
+            You need to create {previewSummary.customersCreated} missing customers before you can import the data. 
+            Click the "Create Missing Customers" button in the summary above to proceed.
+          </Typography>
+        </Alert>
+      )}
 
-        {/* Field Mapping UI */}
-        {columns.length > 0 && (
-          <div className="mb-6 bg-white/80 rounded-lg p-4 border border-blue-200">
-            <div className="font-semibold mb-2 flex items-center gap-4">
-              Field Mapping:
-              <button
-                type="button"
-                className="bg-gray-200 text-gray-800 px-3 py-1 rounded shadow hover:bg-gray-300 text-xs font-semibold"
+      {/* Field Mapping UI */}
+      {columns.length > 0 && (
+        <Card variant="outlined" sx={{ mb: 3 }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+              <Typography variant="h6" fontWeight={600}>
+                Field Mapping
+              </Typography>
+              <Button
+                variant="outlined"
+                size="small"
                 onClick={handleResetMapping}
               >
                 Reset Mapping
-              </button>
-            </div>
+              </Button>
+            </Box>
             
             {/* Detected Columns Info */}
-            <div className="mb-4 p-2 bg-gray-50 rounded text-sm">
-              <div className="font-medium text-gray-700 mb-1">Detected Columns ({columns.length}):</div>
-              <div className="text-gray-600 font-mono">
+            <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: 'grey.50' }}>
+              <Typography variant="body2" fontWeight={600} color="text.secondary" gutterBottom>
+                Detected Columns ({columns.length}):
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                 {columns.map((col, idx) => (
-                  <span key={idx} className="inline-block bg-white px-2 py-1 rounded border mr-2 mb-1">
-                    {col || `Column ${idx + 1}`}
-                  </span>
+                  <Chip
+                    key={idx}
+                    label={col || `Column ${idx + 1}`}
+                    size="small"
+                    variant="outlined"
+                  />
                 ))}
-              </div>
-            </div>
+              </Box>
+            </Paper>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Grid container spacing={2}>
               {ALL_FIELDS.map(field => (
-                <div key={field.key} className="flex items-center gap-2">
-                  <label className="w-40 font-medium text-blue-900">
-                    {field.label}
-                    {REQUIRED_FIELDS.find(f => f.key === field.key) ? '' : ' (optional)'}
-                  </label>
-                  <select
-                    className="border p-2 rounded w-full"
-                    value={mapping[field.key] || ''}
-                    onChange={e => handleMappingChange(field.key, e.target.value)}
-                  >
-                    <option value="">-- Not Mapped --</option>
-                    {columns.map(col => (
-                      <option key={col} value={col}>{col || `Column ${columns.indexOf(col) + 1}`}</option>
-                    ))}
-                  </select>
-                </div>
+                <Grid item xs={12} md={6} key={field.key}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Typography variant="body2" sx={{ minWidth: 160, fontWeight: 600, color: 'primary.main' }}>
+                      {field.label}
+                      {REQUIRED_FIELDS.find(f => f.key === field.key) ? '' : ' (optional)'}
+                    </Typography>
+                    <select
+                      style={{ 
+                        border: '1px solid #ccc', 
+                        padding: '8px', 
+                        borderRadius: '4px', 
+                        width: '100%',
+                        fontSize: '14px'
+                      }}
+                      value={mapping[field.key] || ''}
+                      onChange={e => handleMappingChange(field.key, e.target.value)}
+                    >
+                      <option value="">-- Not Mapped --</option>
+                      {columns.map(col => (
+                        <option key={col} value={col}>{col || `Column ${columns.indexOf(col) + 1}`}</option>
+                      ))}
+                    </select>
+                  </Box>
+                </Grid>
               ))}
-            </div>
-          </div>
-        )}
+            </Grid>
+          </CardContent>
+        </Card>
+      )}
 
-        {/* Preview Table */}
-        {preview.length > 0 && (
-          <div className="mb-6">
-            <div className="font-semibold mb-2">Preview ({preview.length} rows):</div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full bg-white border">
-                <thead>
-                  <tr>
-                    <th className="border px-2 py-1 text-xs uppercase">Customer ID</th>
-                    <th className="border px-2 py-1 text-xs uppercase">Customer Name</th>
-                    <th className="border px-2 py-1 text-xs uppercase">Date</th>
-                    <th className="border px-2 py-1 text-xs uppercase">Product Code</th>
-                    <th className="border px-2 py-1 text-xs uppercase">Reference Number</th>
-                    <th className="border px-2 py-1 text-xs uppercase">Qty Out</th>
-                    <th className="border px-2 py-1 text-xs uppercase">Qty In</th>
-                  </tr>
-                </thead>
-                <tbody>
+      {/* Preview Table */}
+      {preview.length > 0 && (
+        <Card variant="outlined" sx={{ mb: 3 }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+              <Typography variant="h6" fontWeight={600}>
+                Preview
+              </Typography>
+              <Chip 
+                label={`${preview.length} rows`} 
+                color="primary" 
+                variant="outlined" 
+                size="small"
+              />
+            </Box>
+            
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 600 }}>Customer ID</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>Customer Name</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>Product Code</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>Reference Number</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>Qty Out</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>Qty In</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
                   {preview.slice(0, 10).map((row, idx) => (
-                    <tr key={idx} className={idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
-                      <td className="border px-2 py-1 text-xs">{row.customer_id || '-'}</td>
-                      <td className="border px-2 py-1 text-xs">{row.customer_name || '-'}</td>
-                      <td className="border px-2 py-1 text-xs">{row.date || '-'}</td>
-                      <td className="border px-2 py-1 text-xs">{row.product_code || '-'}</td>
-                      <td className="border px-2 py-1 text-xs">{row.reference_number || '-'}</td>
-                      <td className="border px-2 py-1 text-xs">{row.qty_out || '0'}</td>
-                      <td className="border px-2 py-1 text-xs">{row.qty_in || '0'}</td>
-                    </tr>
+                    <TableRow key={idx} hover>
+                      <TableCell>{row.customer_id || '-'}</TableCell>
+                      <TableCell>{row.customer_name || '-'}</TableCell>
+                      <TableCell>{row.date || '-'}</TableCell>
+                      <TableCell>{row.product_code || '-'}</TableCell>
+                      <TableCell>{row.reference_number || '-'}</TableCell>
+                      <TableCell>{row.qty_out || '0'}</TableCell>
+                      <TableCell>{row.qty_in || '0'}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
-              {preview.length > 10 && (
-                <div className="text-sm text-gray-600 mt-2">
-                  Showing first 10 rows of {preview.length} total rows
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            
+            {preview.length > 10 && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                Showing first 10 rows of {preview.length} total rows
+              </Typography>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
         {/* Preview Summary */}
         {previewSummary && (
@@ -1816,7 +1904,6 @@ export default function Import() {
             </div>
           </div>
         )}
-      </Paper>
-    </Box>
-  );
+      </Box>
+    );
 } 

@@ -838,7 +838,13 @@ export default function Settings() {
         p_expires_in_days: 7
       });
 
-      if (error) throw error;
+      if (error) {
+        // Check if it's a constraint violation and provide user-friendly message
+        if (error.message.includes('organization_invites_organization_id_email_key')) {
+          throw new Error('An invite has already been sent to this email from your organization. Please check the existing invites or wait for the user to respond.');
+        }
+        throw error;
+      }
 
       setInviteSuccess(`Invite sent to ${newInvite.email}`);
       setNewInvite({ email: '', role: 'user' });

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Supabase Connection</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .test-result { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin: 5px; }
+        button:hover { background: #0056b3; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 5px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>🔌 Supabase Connection Test</h1>
+    <p>This tool tests your Supabase connection and environment variables.</p>
+
+    <div id="results"></div>
+
+    <button onclick="testConnection()">Test Connection</button>
+    <button onclick="testEnvironment()">Test Environment Variables</button>
+    <button onclick="testAuth()">Test Authentication</button>
+
+    <script type="module">
+        // Import Supabase
+        import { createClient } from 'https://cdn.skypack.dev/@supabase/supabase-js@2';
+
+        let supabase;
+        
+        function log(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `test-result ${type}`;
+            div.innerHTML = message;
+            results.appendChild(div);
+            console.log(message);
+        }
+
+        window.testEnvironment = function() {
+            log('🧪 Testing Environment Variables...', 'info');
+            
+            // Check if we're in a Vite environment
+            if (typeof import.meta !== 'undefined' && import.meta.env) {
+                const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+                const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+                
+                if (supabaseUrl) {
+                    log(`✅ VITE_SUPABASE_URL: ${supabaseUrl}`, 'success');
+                } else {
+                    log('❌ VITE_SUPABASE_URL is not set', 'error');
+                }
+                
+                if (supabaseKey) {
+                    log(`✅ VITE_SUPABASE_ANON_KEY: ${supabaseKey.substring(0, 20)}...`, 'success');
+                } else {
+                    log('❌ VITE_SUPABASE_ANON_KEY is not set', 'error');
+                }
+            } else {
+                log('⚠️ Not in Vite environment, testing with hardcoded values', 'info');
+                testWithHardcodedValues();
+            }
+        };
+
+        function testWithHardcodedValues() {
+            const supabaseUrl = 'https://jtfucttzaswmqqhmmhfb.supabase.co';
+            const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5NDQ4NzMsImV4cCI6MjA2MTUyMDg3M30.6-CAPYefAektlh3dLRVFZbPKYSnhIAzp3knohc3NDEg';
+            
+            log(`✅ Using hardcoded SUPABASE_URL: ${supabaseUrl}`, 'success');
+            log(`✅ Using hardcoded SUPABASE_KEY: ${supabaseKey.substring(0, 20)}...`, 'success');
+            
+            // Initialize Supabase with hardcoded values
+            try {
+                supabase = createClient(supabaseUrl, supabaseKey);
+                log('✅ Supabase client created successfully', 'success');
+                return true;
+            } catch (error) {
+                log(`❌ Failed to create Supabase client: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        window.testConnection = async function() {
+            log('🔌 Testing Supabase Connection...', 'info');
+            
+            if (!supabase) {
+                if (!testWithHardcodedValues()) {
+                    return;
+                }
+            }
+            
+            try {
+                // Test basic connection
+                const { data, error } = await supabase
+                    .from('organizations')
+                    .select('id, name')
+                    .limit(1);
+                
+                if (error) {
+                    log(`❌ Connection test failed: ${error.message}`, 'error');
+                    log(`Error details: ${JSON.stringify(error, null, 2)}`, 'error');
+                } else {
+                    log('✅ Database connection successful!', 'success');
+                    log(`Found ${data?.length || 0} organizations`, 'info');
+                    if (data && data.length > 0) {
+                        log(`<pre>${JSON.stringify(data[0], null, 2)}</pre>`, 'info');
+                    }
+                }
+            } catch (error) {
+                log(`❌ Connection test error: ${error.message}`, 'error');
+                console.error('Full error:', error);
+            }
+        };
+
+        window.testAuth = async function() {
+            log('🔐 Testing Authentication...', 'info');
+            
+            if (!supabase) {
+                if (!testWithHardcodedValues()) {
+                    return;
+                }
+            }
+            
+            try {
+                const { data: { session }, error } = await supabase.auth.getSession();
+                
+                if (error) {
+                    log(`❌ Auth test failed: ${error.message}`, 'error');
+                } else if (session) {
+                    log('✅ User is authenticated', 'success');
+                    log(`User: ${session.user.email}`, 'info');
+                } else {
+                    log('ℹ️ No active session (user not logged in)', 'info');
+                }
+            } catch (error) {
+                log(`❌ Auth test error: ${error.message}`, 'error');
+                console.error('Full error:', error);
+            }
+        };
+
+        // Auto-run environment test on load
+        window.addEventListener('load', () => {
+            testEnvironment();
+        });
+    </script>
+</body>
+</html>

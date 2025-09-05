@@ -37,7 +37,7 @@ import {
   Notifications as NotificationIcon,
   Build as MaintenanceIcon,
   Route as RouteIcon,
-  AutoMode as AutomationIcon,
+  Memory as AutomationIcon,
   Analytics as AnalyticsIcon,
   Payment as BillingIcon,
   Support as SupportIcon,

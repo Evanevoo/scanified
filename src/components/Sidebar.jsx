@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
@@ -21,7 +21,7 @@ import {
   Report as ReportIcon, Inventory2 as InventoryIcon, Support,
   Security as ShieldIcon, Build as WrenchIcon, Description as FileTextIcon,
   Inventory as PackageIcon, Calculate as CalculatorIcon, Psychology as BrainIcon,
-  ChevronLeft, ChevronRight, Menu as MenuIcon, QrCode as QrCodeIcon
+  ChevronLeft, ChevronRight, Menu as MenuIcon, QrCode as QrCodeIcon, Notifications as NotificationsIcon
 } from '@mui/icons-material';
 
 const drawerWidth = 280;
@@ -29,9 +29,15 @@ const collapsedWidth = 64;
 
 const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   const { profile, organization } = useAuth();
+  
+  // CRITICAL: Check profile BEFORE calling any other hooks to avoid hook inconsistency
+  if (!profile) return null;
+  
   const { can, isOrgAdmin } = usePermissions();
   
-  if (!profile) return null;
+  const [actualRole, setActualRole] = useState(null);
+  const [roleLoading, setRoleLoading] = useState(true);
+  const lastFetchedRole = useRef('');
   
   const [searchTerm, setSearchTerm] = useState('');
   const [sections, setSections] = useState({
@@ -45,6 +51,58 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Fetch actual role name if profile.role is a UUID
+  useEffect(() => {
+    const fetchRoleName = async () => {
+      if (!profile?.role) {
+        setRoleLoading(false);
+        return;
+      }
+      
+      // Don't refetch if we already resolved this exact role
+      if (lastFetchedRole.current === profile.role) {
+        setRoleLoading(false);
+        return;
+      }
+      
+      setRoleLoading(true);
+      
+      // Check if role is a UUID (contains hyphens)
+      if (profile.role.includes('-')) {
+        try {
+          const { data: roleData, error } = await supabase
+            .from('roles')
+            .select('name')
+            .eq('id', profile.role)
+            .single();
+          
+          if (error) {
+            console.error('Error fetching role name:', error);
+            // Fallback to treating it as a role name
+            setActualRole(profile.role);
+            lastFetchedRole.current = profile.role;
+          } else {
+            setActualRole(roleData.name);
+            lastFetchedRole.current = profile.role;
+            console.log('Resolved role UUID to name:', profile.role, '->', roleData.name);
+          }
+        } catch (err) {
+          console.error('Error in role lookup:', err);
+          setActualRole(profile.role);
+          lastFetchedRole.current = profile.role;
+        }
+      } else {
+        // Role is already a name, use it directly
+        setActualRole(profile.role);
+        lastFetchedRole.current = profile.role;
+      }
+      
+      setRoleLoading(false);
+    };
+
+    fetchRoleName();
+  }, [profile?.role]); // Only depend on the role field, not the entire profile object
+
   const toggleSection = (section) => {
     setSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
@@ -56,10 +114,45 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
 
   const isActive = (path) => location.pathname === path;
 
-  // Owner gets special navigation ONLY if they don't have an organization
-  if (profile?.role === 'owner' && !organization) {
-    const ownerMenuItems = [
+  // Helper function to normalize role for case-insensitive comparison
+  const normalizeRole = (role) => {
+    if (!role) return '';
+    return role.toLowerCase();
+  };
 
+  // Helper function to check if user has role (case-insensitive)
+  const hasRole = (allowedRoles) => {
+    const userRole = normalizeRole(actualRole);
+    return allowedRoles.some(role => normalizeRole(role) === userRole);
+  };
+
+  // Show loading while fetching role
+  if (roleLoading) {
+    return (
+      <Drawer
+        variant="permanent"
+        sx={{
+          width: drawerWidth,
+          flexShrink: 0,
+          '& .MuiDrawer-paper': {
+            width: drawerWidth,
+            boxSizing: 'border-box',
+            top: 0,
+            height: '100%',
+            zIndex: (theme) => theme.zIndex.drawer
+          },
+        }}
+      >
+        <Box sx={{ overflow: 'auto', mt: 8, display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
+          <Typography variant="body2" color="text.secondary">Loading menu...</Typography>
+        </Box>
+      </Drawer>
+    );
+  }
+
+  // Owner gets special navigation ONLY if they don't have an organization
+  if (normalizeRole(actualRole) === 'owner' && !organization) {
+    const ownerMenuItems = [
       {
         title: 'Owner Portal',
         path: '/owner-portal',
@@ -179,7 +272,9 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         { title: 'Import Approvals', path: '/import-approvals', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
         { title: 'Import History', path: '/import-approvals-history', icon: <History />, roles: ['admin', 'user', 'manager'] },
         { title: 'Organization Tools', path: '/organization-tools', icon: <BuildIcon />, roles: ['admin', 'manager'] },
-        { title: 'User Management', path: '/user-management', icon: <AdminPanelSettings />, roles: ['admin', 'manager'] },
+              { title: 'User Management', path: '/user-management', icon: <AdminPanelSettings />, roles: ['admin', 'manager'] },
+      { title: 'Join Codes', path: '/organization-join-codes', icon: <QrCodeIcon />, roles: ['admin', 'manager'] },
+      { title: 'Role & Permission Management', path: '/role-management', icon: <ShieldIcon />, roles: ['admin'] },
         { title: 'Customer Portal', path: '/customer-portal', icon: <PersonIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Billing', path: '/billing', icon: <Payment />, roles: ['admin'] },
         { title: 'Settings', path: '/settings', icon: <Settings />, roles: ['admin'] },
@@ -190,7 +285,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       title: 'Core',
       icon: <HomeIcon />,
       items: [
-
+        { title: 'Dashboard', path: '/dashboard', icon: <Dashboard />, roles: ['admin', 'user', 'manager'] },
         { title: 'Industry Analytics', path: '/industry-analytics', icon: <Analytics />, roles: ['admin', 'user', 'manager'] },
         { title: 'Customers', path: '/customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
         { title: 'Temp Customer Management', path: '/temp-customer-management', icon: <SwapIcon />, roles: ['admin', 'user', 'manager'] },
@@ -203,6 +298,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       items: [
         { title: 'Deliveries', path: '/deliveries', icon: <LocalShipping />, roles: ['admin', 'user', 'manager'] },
         { title: 'Rentals', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Rental Pricing', path: '/rental-pricing-manager', icon: <CalculatorIcon />, roles: ['admin', 'manager'] },
+        { title: 'Truck Reconciliation', path: '/truck-reconciliation-dashboard', icon: <TruckIcon />, roles: ['admin', 'manager'] },
         { title: 'Scanned Orders', path: '/scanned-orders', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Lease Agreements', path: '/lease-agreements', icon: <WorkIcon />, roles: ['admin', 'manager'] },
         { title: 'Generate Customer ID', path: '/generateid', icon: <IntegrationIcon />, roles: ['owner'] },
@@ -228,16 +325,15 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         { title: 'Analytics', path: '/analytics', icon: <Analytics />, roles: ['admin', 'manager'] },
         { title: 'Organization Analytics', path: '/organization-analytics', icon: <Analytics />, roles: ['admin', 'user', 'manager'] },
         { title: 'Custom Reports', path: '/custom-reports', icon: <ReportIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Predictive Analytics', path: '/predictive-analytics', icon: <BrainIcon />, roles: ['admin', 'manager'] },
         { title: 'Audit Management', path: '/audit-management', icon: <Assessment />, roles: ['admin', 'manager'] }
       ]
     }
   };
 
-  // Filter items based on user role and search
+  // Filter items based on user role and search (case-insensitive)
   const filteredSections = Object.entries(menuSections).reduce((acc, [key, section]) => {
     const filteredItems = section.items.filter(item => {
-      const hasRole = item.roles.includes(profile?.role);
+      const hasRole = item.roles.some(role => normalizeRole(role) === normalizeRole(actualRole));
       const matchesSearch = !searchTerm || 
         item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.path.toLowerCase().includes(searchTerm.toLowerCase());
@@ -252,10 +348,12 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
 
   // Get user's role display name
   const getRoleDisplayName = (role) => {
-    switch(role) {
+    const normalizedRole = normalizeRole(role);
+    switch(normalizedRole) {
       case 'admin': return 'Administrator';
       case 'manager': return 'Manager';
       case 'user': return 'User';
+      case 'owner': return 'Owner';
       default: return role;
     }
   };
@@ -334,7 +432,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                 {organization.name}
               </Typography>
               <Typography variant="caption" color="text.secondary" noWrap>
-                {getRoleDisplayName(profile?.role)} • {profile?.full_name}
+                {getRoleDisplayName(actualRole)} • {profile?.full_name}
               </Typography>
             </Box>
           </Box>
@@ -444,4 +542,4 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   );
 };
 
-export default Sidebar; 
+export default Sidebar;

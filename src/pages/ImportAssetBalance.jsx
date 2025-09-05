@@ -1,5 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  Box, Typography, Paper, Button, IconButton, Alert, LinearProgress,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Card, CardContent, Stack, Chip
+} from '@mui/material';
+import {
+  ArrowBack as ArrowBackIcon,
+  Upload as UploadIcon,
+  CheckCircle as CheckCircleIcon,
+  Error as ErrorIcon
+} from '@mui/icons-material';
 import * as XLSX from 'xlsx';
 import { supabase } from '../supabase/client';
 
@@ -114,41 +125,132 @@ export default function ImportAssetBalance() {
   };
 
   return (
-    <div className="p-8">
-      <button onClick={() => navigate(-1)} className="mb-4 bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded">Back</button>
-      <h2 className="text-2xl font-bold mb-4">Import Asset Balance</h2>
-      <form onSubmit={handleImport} className="mb-6 flex gap-2 items-end">
-        <input type="file" accept=".pdf,.csv,.xlsx,.xls,.txt" onChange={handleFileChange} className="border p-2 rounded" />
-        <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded" disabled={!file || !preview.length || loading}>{loading ? 'Importing...' : 'Import'}</button>
-      </form>
-      {error && <div className="bg-red-100 text-red-800 p-4 rounded mb-4">Error: {error}</div>}
-      {preview.length > 0 && (
-        <div className="mb-6">
-          <div className="font-semibold mb-2">Preview ({preview.length} rows):</div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full bg-white border">
-              <thead>
-                <tr>
-                  {Object.keys(preview[0]).map(key => <th key={key} className="border px-2 py-1 text-xs">{key}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {preview.slice(0, MAX_PREVIEW_ROWS).map((row, i) => (
-                  <tr key={i}>
-                    {Object.values(row).map((val, j) => <td key={j} className="border px-2 py-1 text-xs">{val}</td>)}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {preview.length > MAX_PREVIEW_ROWS && <div className="text-xs text-gray-500 mt-1">Showing first {MAX_PREVIEW_ROWS} rows only.</div>}
-          </div>
-        </div>
+    <Box sx={{ p: 3 }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
+        <IconButton onClick={() => navigate(-1)}>
+          <ArrowBackIcon />
+        </IconButton>
+        <Typography variant="h4" fontWeight={800} color="primary">
+          Import Asset Balance
+        </Typography>
+      </Box>
+
+      {loading && <LinearProgress sx={{ mb: 3 }} />}
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
       )}
+
       {result && (
-        <div className="bg-green-100 text-green-800 p-4 rounded">
+        <Alert severity="success" sx={{ mb: 3 }}>
           Import finished! Imported: {result.imported}, Errors: {result.errors}
-        </div>
+        </Alert>
       )}
-    </div>
+
+      {/* File Upload Card */}
+      <Card variant="outlined" sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" fontWeight={600} gutterBottom>
+            Upload Asset Balance File
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Upload an Excel file (.xlsx, .xls) or CSV file containing asset balance data
+          </Typography>
+          
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Button
+              variant="outlined"
+              component="label"
+              startIcon={<UploadIcon />}
+              disabled={loading}
+            >
+              Choose File
+              <input
+                type="file"
+                accept=".pdf,.csv,.xlsx,.xls,.txt"
+                onChange={handleFileChange}
+                style={{ display: 'none' }}
+              />
+            </Button>
+            
+            {file && (
+              <Chip 
+                label={file.name} 
+                color="primary" 
+                variant="outlined" 
+                onDelete={() => {
+                  setFile(null);
+                  setPreview([]);
+                  setResult(null);
+                  setError(null);
+                }}
+              />
+            )}
+            
+            <Button
+              variant="contained"
+              onClick={handleImport}
+              disabled={!file || !preview.length || loading}
+              startIcon={loading ? <LinearProgress size={16} /> : <CheckCircleIcon />}
+            >
+              {loading ? 'Importing...' : 'Import'}
+            </Button>
+          </Stack>
+        </CardContent>
+      </Card>
+
+      {/* Preview Card */}
+      {preview.length > 0 && (
+        <Card variant="outlined">
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+              <Typography variant="h6" fontWeight={600}>
+                Preview
+              </Typography>
+              <Chip 
+                label={`${preview.length} rows`} 
+                color="primary" 
+                variant="outlined" 
+                size="small"
+              />
+            </Box>
+            
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    {Object.keys(preview[0]).map(key => (
+                      <TableCell key={key} sx={{ fontWeight: 600 }}>
+                        {key}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {preview.slice(0, MAX_PREVIEW_ROWS).map((row, i) => (
+                    <TableRow key={i} hover>
+                      {Object.values(row).map((val, j) => (
+                        <TableCell key={j}>
+                          {val || '-'}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            
+            {preview.length > MAX_PREVIEW_ROWS && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                Showing first {MAX_PREVIEW_ROWS} rows only.
+              </Typography>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </Box>
   );
 }

@@ -1,5 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  TextField, Button, IconButton, Chip, LinearProgress, Alert, Dialog, DialogTitle, DialogContent,
+  DialogActions, FormControlLabel, Checkbox, Stack, Grid, Card, CardContent
+} from '@mui/material';
+import {
+  ArrowBack as ArrowBackIcon,
+  Search as SearchIcon,
+  Download as DownloadIcon,
+  Delete as DeleteIcon,
+  Settings as SettingsIcon,
+  Refresh as RefreshIcon
+} from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 
 export default function AllAssetMovements() {
@@ -30,6 +43,7 @@ export default function AllAssetMovements() {
     if (saved) return JSON.parse(saved);
     return allColumns.map(c => c.key);
   });
+
   function handleColumnChange(key) {
     let updated = visibleColumns.includes(key)
       ? visibleColumns.filter(k => k !== key)
@@ -123,106 +137,197 @@ export default function AllAssetMovements() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto mt-10 bg-gradient-to-br from-white via-blue-50 to-blue-100 shadow-2xl rounded-2xl p-8 border border-blue-100 w-full">
-      <button onClick={() => navigate(-1)} className="mb-4 bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded">Back</button>
-      <h2 className="text-2xl font-bold mb-4 text-blue-900">All Asset Movements</h2>
-      <div className="mb-4 flex flex-wrap gap-2 items-end">
-        <input
-          className="border p-2 rounded w-64"
-          placeholder="Search by asset, type, user, location, notes..."
-          value={filter}
-          onChange={e => setFilter(e.target.value)}
-        />
-        <div className="flex flex-col">
-          <label className="text-xs text-gray-600">From</label>
-          <input type="date" className="border p-2 rounded" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-        </div>
-        <div className="flex flex-col">
-          <label className="text-xs text-gray-600">To</label>
-          <input type="date" className="border p-2 rounded" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-        </div>
-        <button
-          className="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 font-semibold transition"
-          onClick={downloadCSV}
-          disabled={!filtered.length}
-        >
-          Export CSV
-        </button>
-        <button
-          className="bg-green-600 text-white px-4 py-2 rounded shadow hover:bg-green-700 font-semibold transition"
-          onClick={downloadSelectedCSV}
-          disabled={!selected.length}
-        >
-          Export Selected
-        </button>
-        <button
-          className="bg-red-600 text-white px-4 py-2 rounded shadow hover:bg-red-700 font-semibold transition"
-          onClick={deleteSelected}
-          disabled={!selected.length}
-        >
-          Delete Selected
-        </button>
-        <button
-          className="bg-gray-500 text-white px-4 py-2 rounded shadow hover:bg-gray-600 font-semibold transition"
-          onClick={() => setShowColumnModal(true)}
-        >
-          Columns
-        </button>
-      </div>
-      {showColumnModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 shadow-xl w-80">
-            <div className="font-bold mb-2">Show/Hide Columns</div>
+    <Box sx={{ p: 3 }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <IconButton onClick={() => navigate(-1)}>
+            <ArrowBackIcon />
+          </IconButton>
+          <Typography variant="h4" fontWeight={800} color="primary">
+            All Asset Movements
+          </Typography>
+        </Box>
+        <IconButton onClick={() => window.location.reload()} disabled={loading}>
+          <RefreshIcon />
+        </IconButton>
+      </Box>
+
+      {loading && <LinearProgress sx={{ mb: 3 }} />}
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Filters and Actions */}
+      <Card variant="outlined" sx={{ mb: 3 }}>
+        <CardContent>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} md={4}>
+              <TextField
+                fullWidth
+                placeholder="Search by asset, type, user, location, notes..."
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                InputProps={{
+                  startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} md={2}>
+              <TextField
+                fullWidth
+                type="date"
+                label="From Date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12} md={2}>
+              <TextField
+                fullWidth
+                type="date"
+                label="To Date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Button
+                  variant="outlined"
+                  startIcon={<DownloadIcon />}
+                  onClick={downloadCSV}
+                  disabled={!filtered.length}
+                >
+                  Export CSV
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="success"
+                  startIcon={<DownloadIcon />}
+                  onClick={downloadSelectedCSV}
+                  disabled={!selected.length}
+                >
+                  Export Selected
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={<DeleteIcon />}
+                  onClick={deleteSelected}
+                  disabled={!selected.length}
+                >
+                  Delete Selected
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<SettingsIcon />}
+                  onClick={() => setShowColumnModal(true)}
+                >
+                  Columns
+                </Button>
+              </Stack>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+
+      {/* Column Selection Modal */}
+      <Dialog open={showColumnModal} onClose={() => setShowColumnModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Show/Hide Columns</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={1}>
             {allColumns.map(col => (
-              <div key={col.key} className="flex items-center mb-1">
-                <input
-                  type="checkbox"
-                  checked={visibleColumns.includes(col.key)}
-                  onChange={() => handleColumnChange(col.key)}
-                  id={`col-${col.key}`}
+              <Grid item xs={12} sm={6} key={col.key}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={visibleColumns.includes(col.key)}
+                      onChange={() => handleColumnChange(col.key)}
+                    />
+                  }
+                  label={col.label}
                 />
-                <label htmlFor={`col-${col.key}`} className="ml-2">{col.label}</label>
-              </div>
+              </Grid>
             ))}
-            <button className="mt-4 bg-blue-600 text-white px-4 py-2 rounded" onClick={() => setShowColumnModal(false)}>Close</button>
-          </div>
-        </div>
-      )}
-      {loading ? (
-        <div>Loading...</div>
-      ) : error ? (
-        <div className="text-red-700">Error: {error}</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full bg-white border text-xs">
-            <thead>
-              <tr>
-                <th className="border px-2 py-1">
-                  <input type="checkbox" checked={selected.length === filtered.length && filtered.length > 0} onChange={toggleSelectAll} />
-                </th>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowColumnModal(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Results Summary */}
+      <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+        <Chip 
+          label={`${filtered.length} records`} 
+          color="primary" 
+          variant="outlined" 
+        />
+        {selected.length > 0 && (
+          <Chip 
+            label={`${selected.length} selected`} 
+            color="secondary" 
+            variant="outlined" 
+          />
+        )}
+      </Box>
+
+      {/* Data Table */}
+      <Paper variant="outlined">
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell padding="checkbox">
+                  <Checkbox
+                    checked={selected.length === filtered.length && filtered.length > 0}
+                    indeterminate={selected.length > 0 && selected.length < filtered.length}
+                    onChange={toggleSelectAll}
+                  />
+                </TableCell>
                 {allColumns.filter(col => visibleColumns.includes(col.key)).map(col => (
-                  <th key={col.key} className="border px-2 py-1">{col.label}</th>
+                  <TableCell key={col.key} sx={{ fontWeight: 600 }}>
+                    {col.label}
+                  </TableCell>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
+              </TableRow>
+            </TableHead>
+            <TableBody>
               {filtered.map(r => (
-                <tr key={r.id}>
-                  <td className="border px-2 py-1">
-                    <input type="checkbox" checked={selected.includes(r.id)} onChange={() => toggleSelectRow(r.id)} />
-                  </td>
+                <TableRow key={r.id} hover>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      checked={selected.includes(r.id)}
+                      onChange={() => toggleSelectRow(r.id)}
+                    />
+                  </TableCell>
                   {allColumns.filter(col => visibleColumns.includes(col.key)).map(col => (
-                    <td key={col.key} className="border px-2 py-1">{
-                      col.key === 'created_at' && r[col.key] ? new Date(r[col.key]).toLocaleString() : r[col.key]
-                    }</td>
+                    <TableCell key={col.key}>
+                      {col.key === 'created_at' && r[col.key] 
+                        ? new Date(r[col.key]).toLocaleString() 
+                        : r[col.key] || '-'
+                      }
+                    </TableCell>
                   ))}
-                </tr>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-          {filtered.length === 0 && <div className="text-gray-500 mt-2">No movement records found.</div>}
-        </div>
-      )}
-    </div>
+            </TableBody>
+          </Table>
+        </TableContainer>
+        {filtered.length === 0 && (
+          <Box sx={{ p: 3, textAlign: 'center' }}>
+            <Typography color="text.secondary">
+              No movement records found.
+            </Typography>
+          </Box>
+        )}
+      </Paper>
+    </Box>
   );
 } 

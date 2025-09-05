@@ -14,22 +14,26 @@ const ProtectedRoute = ({ children }) => {
   const navigate = useNavigate();
 
   // Log the state for debugging purposes.
-  console.log('ProtectedRoute:', { 
+  console.log('🛡️ ProtectedRoute DEBUG:', { 
     loading, 
     user: !!user, 
     profile: !!profile, 
     organization: !!organization,
     profileRole: profile?.role,
-    organizationId: profile?.organization_id
+    organizationId: profile?.organization_id,
+    trialExpired,
+    currentPath: location.pathname
   });
 
   if (loading) {
     // Show a full-page loading spinner while auth state is being determined.
+    console.log('🛡️ ProtectedRoute: LOADING - showing spinner');
     return <LoadingSpinner />;
   }
 
   if (!user) {
     // If the user is not authenticated, redirect them to the login page.
+    console.log('🛡️ ProtectedRoute: NO USER - redirecting to login');
     return <Navigate to="/login" replace />;
   }
 
@@ -160,13 +164,14 @@ const ProtectedRoute = ({ children }) => {
   if (user && !profile) {
     // This can happen for a brief moment while the profile is loading.
     // Or if profile creation failed. Show loading spinner.
-    console.log("ProtectedRoute: User exists but profile is not yet available. Waiting...");
+    console.log("🛡️ ProtectedRoute: USER BUT NO PROFILE - showing spinner");
     return <LoadingSpinner />;
   }
 
   if (user && profile && !organization) {
     // Platform owners don't need an organization
     if (profile.role === 'owner') {
+      console.log('🛡️ ProtectedRoute: OWNER WITHOUT ORG - allowing access');
       return (
         <MainLayout profile={profile}>
           {children || <Outlet />}
@@ -179,15 +184,20 @@ const ProtectedRoute = ({ children }) => {
     const publicRoutes = ['/', '/landing', '/login', '/register', '/setup', '/contact', '/pricing', '/faq', '/reviews', '/privacy-policy', '/terms-of-service', '/documentation'];
     const isPublicRoute = publicRoutes.includes(location.pathname);
     
+    console.log('🛡️ ProtectedRoute: USER WITHOUT ORG - checking if public route:', { isPublicRoute, path: location.pathname });
+    
     if (!isPublicRoute && location.pathname !== '/register' && location.pathname !== '/setup') {
+      console.log('🛡️ ProtectedRoute: REDIRECTING TO REGISTER - user needs organization');
       return <Navigate to="/register" replace />;
     }
+    console.log('🛡️ ProtectedRoute: PUBLIC ROUTE - allowing access without org');
     return children || <Outlet />;
   }
 
   if (user && profile && organization) {
     // If the user is fully authenticated and has an organization,
     // render the requested page within the main layout, passing the profile.
+    console.log('🛡️ ProtectedRoute: SUCCESS - rendering with MainLayout');
     return (
       <MainLayout profile={profile}>
         {children || <Outlet />}
@@ -196,7 +206,7 @@ const ProtectedRoute = ({ children }) => {
   }
 
   // As a fallback, if the state is somehow inconsistent, redirect to login.
-  console.warn("ProtectedRoute: Fallback triggered. Auth state is inconsistent. Redirecting to login.");
+  console.warn("🛡️ ProtectedRoute: FALLBACK - inconsistent auth state, redirecting to login");
   return <Navigate to="/login" replace />;
 };
 

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Routing Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .test { padding: 15px; margin: 10px 0; border-radius: 5px; border: 2px solid; }
+        .success { background-color: #d4edda; color: #155724; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; }
+        .info { background-color: #d1ecf1; color: #0c5460; border-color: #bee5eb; }
+        .warning { background-color: #fff3cd; color: #856404; border-color: #ffeaa7; }
+        button { background: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 5px; cursor: pointer; margin: 5px; font-size: 14px; }
+        button:hover { background: #0056b3; }
+        a { color: #007bff; text-decoration: none; font-weight: bold; }
+        a:hover { text-decoration: underline; }
+        .step { margin: 15px 0; padding: 10px; background: #f8f9fa; border-left: 4px solid #007bff; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Routing Debug Test</h1>
+    <p>This tool helps identify exactly where the white screen issue occurs.</p>
+
+    <div class="test info">
+        <h3>📋 Step-by-Step Debugging</h3>
+        <p>Follow these steps in order to isolate the issue:</p>
+    </div>
+
+    <div class="step">
+        <h4>Step 1: Test Basic App Loading</h4>
+        <p>First, let's make sure the main app loads:</p>
+        <a href="http://localhost:5175/home" target="_blank">→ Test Home Page</a>
+        <p><strong>Expected:</strong> Should show the dashboard or redirect to login</p>
+        <p><strong>If fails:</strong> Authentication/app issue</p>
+    </div>
+
+    <div class="step">
+        <h4>Step 2: Test Other Protected Routes</h4>
+        <p>Test if other protected routes work:</p>
+        <a href="http://localhost:5175/customers" target="_blank">→ Test Customers Page</a><br>
+        <a href="http://localhost:5175/assets" target="_blank">→ Test Assets Page</a><br>
+        <a href="http://localhost:5175/rentals" target="_blank">→ Test Rentals Page</a>
+        <p><strong>Expected:</strong> Should show content or proper error messages</p>
+        <p><strong>If fails:</strong> ProtectedRoute issue</p>
+    </div>
+
+    <div class="step">
+        <h4>Step 3: Test AutomatedBilling Route</h4>
+        <p>Now test the specific problematic route:</p>
+        <a href="http://localhost:5175/automated-billing" target="_blank">→ Test AutomatedBilling Page</a>
+        <p><strong>Expected with debug mode:</strong> Should show blue header "AutomatedBillingDashboard - FORCE DEBUG MODE"</p>
+        <p><strong>If still white screen:</strong> Component-specific issue or routing problem</p>
+    </div>
+
+    <div class="step">
+        <h4>Step 4: Check Browser Console</h4>
+        <p>Open browser console (F12) and look for:</p>
+        <ul>
+            <li>✅ <code>🧾 AutomatedBillingDashboard: Component rendering...</code></li>
+            <li>✅ <code>🧾 AutomatedBillingDashboard: Organization: [object Object]</code></li>
+            <li>✅ <code>ProtectedRoute: {loading: false, user: true, profile: true, organization: true}</code></li>
+            <li>❌ Any red error messages</li>
+            <li>❌ Failed network requests</li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <h4>Step 5: Test Other Advanced Routes</h4>
+        <p>Test if the issue is specific to AutomatedBilling or affects other advanced features:</p>
+        <a href="http://localhost:5175/notifications" target="_blank">→ Test Notifications</a><br>
+        <a href="http://localhost:5175/truck-reconciliation-dashboard" target="_blank">→ Test Truck Reconciliation</a><br>
+        <a href="http://localhost:5175/rental-pricing-manager" target="_blank">→ Test Rental Pricing</a>
+        <p><strong>If all show white screens:</strong> Issue with advanced feature routing</p>
+        <p><strong>If only AutomatedBilling fails:</strong> Component-specific issue</p>
+    </div>
+
+    <div class="test warning">
+        <h3>🚨 Common Issues & Solutions</h3>
+        <p><strong>If Step 1 fails:</strong> Authentication or main app issue</p>
+        <p><strong>If Step 2 fails:</strong> ProtectedRoute or layout issue</p>
+        <p><strong>If Step 3 shows debug screen:</strong> Original component has data loading issues</p>
+        <p><strong>If Step 3 still white:</strong> Component import/export or routing issue</p>
+        <p><strong>If Step 5 all fail:</strong> Issue with lazy loading or advanced route configuration</p>
+    </div>
+
+    <button onclick="runAutoTest()">Run Automatic Test</button>
+    <button onclick="clearResults()">Clear Results</button>
+
+    <div id="results"></div>
+
+    <script>
+        function log(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `test ${type}`;
+            div.innerHTML = message;
+            results.appendChild(div);
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        async function runAutoTest() {
+            clearResults();
+            log('🚀 Starting automatic routing test...', 'info');
+            
+            const testUrls = [
+                { url: 'http://localhost:5175/home', name: 'Home Page' },
+                { url: 'http://localhost:5175/customers', name: 'Customers Page' },
+                { url: 'http://localhost:5175/automated-billing', name: 'AutomatedBilling Page' },
+                { url: 'http://localhost:5175/notifications', name: 'Notifications Page' }
+            ];
+
+            for (const test of testUrls) {
+                try {
+                    log(`Testing ${test.name}...`, 'info');
+                    const response = await fetch(test.url);
+                    if (response.ok) {
+                        log(`✅ ${test.name}: Server responds (${response.status})`, 'success');
+                    } else {
+                        log(`❌ ${test.name}: Server error (${response.status})`, 'error');
+                    }
+                } catch (error) {
+                    log(`❌ ${test.name}: Network error - ${error.message}`, 'error');
+                }
+            }
+            
+            log('🎯 Manual testing required: Click the links above to see actual page content', 'warning');
+        }
+    </script>
+</body>
+</html>

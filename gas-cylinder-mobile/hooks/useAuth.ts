@@ -54,9 +54,16 @@ export function useAuth() {
         .then(({ data: profileData, error: profileError }) => {
           if (profileError) {
             console.error('Error fetching profile:', profileError);
+            console.log('User ID:', user.id);
             setProfile(null);
             setOrganization(null);
           } else if (profileData) {
+            console.log('Profile loaded successfully:', {
+              id: profileData.id,
+              email: profileData.email,
+              organization_id: profileData.organization_id,
+              role: profileData.role
+            });
             setProfile(profileData);
             
             // If profile has organization_id, fetch organization separately
@@ -69,12 +76,20 @@ export function useAuth() {
                 .then(({ data: orgData, error: orgError }) => {
                   if (orgError) {
                     console.error('Error fetching organization:', orgError);
+                    console.log('Organization ID:', profileData.organization_id);
                     setOrganization(null);
                   } else {
+                    console.log('Organization loaded successfully:', {
+                      id: orgData?.id,
+                      name: orgData?.name,
+                      slug: orgData?.slug,
+                      subscription_status: orgData?.subscription_status
+                    });
                     setOrganization(orgData);
                   }
                 });
             } else {
+              console.log('Profile has no organization_id');
               setOrganization(null);
             }
           }

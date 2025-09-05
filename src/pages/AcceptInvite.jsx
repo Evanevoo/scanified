@@ -114,7 +114,7 @@ export default function AcceptInvite() {
           .single();
 
         if (profile) {
-          if (profile.email !== inviteData.email) {
+          if (profile.email.toLowerCase() !== inviteData.email.toLowerCase()) {
             throw new Error(`This invite was sent to ${inviteData.email}, but you are logged in as ${profile.email}. Please log out and sign in with the correct email.`);
           }
 
@@ -179,27 +179,62 @@ export default function AcceptInvite() {
               full_name: formData.full_name,
               role: invite.role,
               organization_id: invite.organization_id
-            }
+            },
+            emailRedirectTo: `${window.location.origin}/login`,
+            emailConfirm: false // Disable email confirmation for invite signups
           }
         });
 
-        if (authError) throw authError;
+        if (authError) {
+          // Handle specific email confirmation errors
+          if (authError.message.includes('email confirmation')) {
+            throw new Error('Email confirmation failed. Please try again or contact support.');
+          }
+          throw authError;
+        }
 
-        // Create profile
-        const { error: profileError } = await supabase
+        // Check if we need to wait for email confirmation
+        if (!authData.session) {
+          // User needs to confirm email, but we'll proceed anyway for invite signups
+          console.log('User needs email confirmation, but proceeding with invite acceptance');
+        }
+
+        // Check if profile already exists for this user
+        const { data: existingProfile } = await supabase
           .from('profiles')
-          .insert({
-            id: authData.user.id,
-            email: invite.email,
-            full_name: formData.full_name,
-            role_id: invite.role, // Store the role ID
-            organization_id: invite.organization_id
-          });
+          .select('id')
+          .eq('id', authData.user.id)
+          .single();
 
-        if (profileError) throw profileError;
+        if (existingProfile) {
+          // Update existing profile
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .update({
+              full_name: formData.full_name,
+              role: invite.role, // Store the role name
+              organization_id: invite.organization_id
+            })
+            .eq('id', authData.user.id);
+
+          if (profileError) throw profileError;
+        } else {
+          // Create new profile
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .insert({
+              id: authData.user.id,
+              email: invite.email,
+              full_name: formData.full_name,
+              role: invite.role, // Store the role name
+              organization_id: invite.organization_id
+            });
+
+          if (profileError) throw profileError;
+        }
       } else {
         // Only allow if the logged-in user's email matches the invite email
-        if (user.email !== invite.email) {
+        if (user.email.toLowerCase() !== invite.email.toLowerCase()) {
           throw new Error(
             `This invite was sent to ${invite.email}, but you are logged in as ${user.email}. Please log out and sign in with the correct email.`
           );
@@ -209,7 +244,7 @@ export default function AcceptInvite() {
           .from('profiles')
           .update({
             full_name: formData.full_name,
-            role_id: invite.role,
+            role: invite.role,
             organization_id: invite.organization_id
           })
           .eq('id', user.id);

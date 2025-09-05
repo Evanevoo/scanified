@@ -21,10 +21,13 @@ import {
   Refresh as RefreshIcon,
   Warning as WarningIcon,
   CheckCircle as CheckCircleIcon,
-  Payment as PaymentIcon
+  Payment as PaymentIcon,
+  Download as DownloadIcon,
+  FileDownload as FileDownloadIcon
 } from '@mui/icons-material';
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
+import * as XLSX from 'xlsx';
 
 export default function OwnerCustomers() {
   const { profile } = useAuth();
@@ -182,6 +185,438 @@ export default function OwnerCustomers() {
       case 'expired': return <WarningIcon />;
       case 'suspended': return <WarningIcon />;
       default: return <WarningIcon />;
+    }
+  };
+
+  // Export functionality for organizations
+  const exportOrganizationToCSV = (org) => {
+    if (!org) return;
+    
+    const headers = [
+      'Organization ID',
+      'Name',
+      'Email',
+      'Phone',
+      'Address',
+      'Status',
+      'Contact Email',
+      'User Count',
+      'Customer Count',
+      'Bottle Count',
+      'Subscription Plan',
+      'Subscription Status',
+      'Trial Ends At',
+      'Subscription End Date',
+      'Created At',
+      'Updated At'
+    ];
+    
+    const row = [
+      org.id,
+      org.name || '',
+      org.email || '',
+      org.phone || '',
+      org.address || '',
+      org.status || '',
+      org.contactEmail || '',
+      org.userCount || 0,
+      org.customerCount || 0,
+      org.bottleCount || 0,
+      org.subscription_plan_id || '',
+      org.subscription_status || '',
+      org.trial_ends_at || '',
+      org.subscription_end_date || '',
+      new Date(org.created_at).toLocaleDateString(),
+      org.updated_at ? new Date(org.updated_at).toLocaleDateString() : ''
+    ];
+    
+    const csvContent = [headers.join(','), row.map(x => `"${(x ?? '').toString().replace(/"/g, '""')}"`).join(',')].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `organization_${org.name?.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAllOrganizationsToCSV = () => {
+    if (!organizations.length) {
+      alert('No organizations found to export.');
+      return;
+    }
+    
+    const headers = [
+      'Organization ID',
+      'Name',
+      'Email',
+      'Phone',
+      'Address',
+      'Status',
+      'Contact Email',
+      'User Count',
+      'Customer Count',
+      'Bottle Count',
+      'Subscription Plan',
+      'Subscription Status',
+      'Trial Ends At',
+      'Subscription End Date',
+      'Created At',
+      'Updated At'
+    ];
+    
+    const rows = organizations.map(org => [
+      org.id,
+      org.name || '',
+      org.email || '',
+      org.phone || '',
+      org.address || '',
+      org.status || '',
+      org.contactEmail || '',
+      org.userCount || 0,
+      org.customerCount || 0,
+      org.bottleCount || 0,
+      org.subscription_plan_id || '',
+      org.subscription_status || '',
+      org.trial_ends_at || '',
+      org.subscription_end_date || '',
+      new Date(org.created_at).toLocaleDateString(),
+      org.updated_at ? new Date(org.updated_at).toLocaleDateString() : ''
+    ]);
+    
+    const csvContent = [headers.join(','), ...rows.map(r => r.map(x => `"${(x ?? '').toString().replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `all_organizations_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Export organization data as Excel
+  const exportOrganizationToExcel = async (org) => {
+    if (!org) return;
+    
+    try {
+      // Fetch data using separate queries instead of complex joins
+      const orgId = org.id;
+      
+      // Get users
+      const { data: users, error: usersError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('organization_id', orgId);
+
+      if (usersError) {
+        console.error('Error fetching users:', usersError);
+      }
+
+      // Get customers
+      const { data: customers, error: customersError } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('organization_id', orgId);
+
+      if (customersError) {
+        console.error('Error fetching customers:', customersError);
+      }
+
+      // Get assets/bottles
+      const { data: assets, error: assetsError } = await supabase
+        .from('bottles')
+        .select('*')
+        .eq('organization_id', orgId);
+
+      if (assetsError) {
+        console.error('Error fetching assets:', assetsError);
+      }
+
+      // Get rentals
+      const { data: rentals, error: rentalsError } = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('organization_id', orgId);
+
+      if (rentalsError) {
+        console.error('Error fetching rentals:', rentalsError);
+      }
+
+      // Create workbook with multiple sheets
+      const wb = XLSX.utils.book_new();
+      
+      // Organization Summary Sheet
+      const summaryData = [
+        ['Organization Summary'],
+        [''],
+        ['Organization ID', org.id],
+        ['Name', org.name || ''],
+        ['Email', org.email || ''],
+        ['Phone', org.phone || ''],
+        ['Address', org.address || ''],
+        ['Status', org.status || ''],
+        ['Contact Email', org.contactEmail || ''],
+        ['Subscription Plan', org.subscription_plan_id || ''],
+        ['Subscription Status', org.subscription_status || ''],
+        ['Trial Ends At', org.trial_ends_at ? new Date(org.trial_ends_at).toLocaleDateString() : ''],
+        ['Subscription End Date', org.subscription_end_date ? new Date(org.subscription_end_date).toLocaleDateString() : ''],
+        ['Created At', new Date(org.created_at).toLocaleDateString()],
+        ['Updated At', org.updated_at ? new Date(org.updated_at).toLocaleDateString() : ''],
+        [''],
+        ['Statistics'],
+        ['User Count', users?.length || 0],
+        ['Customer Count', customers?.length || 0],
+        ['Asset Count', assets?.length || 0],
+        ['Rental Count', rentals?.length || 0]
+      ];
+      
+      const summaryWS = XLSX.utils.aoa_to_sheet(summaryData);
+      XLSX.utils.book_append_sheet(wb, summaryWS, 'Organization Summary');
+
+      // Users Sheet
+      if (users && users.length > 0) {
+        const usersData = [
+          ['Users'],
+          ['ID', 'Email', 'Full Name', 'Role', 'Phone', 'Created At', 'Last Sign In']
+        ];
+        
+        users.forEach(user => {
+          usersData.push([
+            user.id,
+            user.email || '',
+            user.full_name || '',
+            user.role || '',
+            user.phone || '',
+            new Date(user.created_at).toLocaleDateString(),
+            user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleDateString() : ''
+          ]);
+        });
+        
+        const usersWS = XLSX.utils.aoa_to_sheet(usersData);
+        XLSX.utils.book_append_sheet(wb, usersWS, 'Users');
+      }
+
+      // Customers Sheet
+      if (customers && customers.length > 0) {
+        const customersData = [
+          ['Customers'],
+          ['ID', 'Name', 'Email', 'Phone', 'Address', 'Status', 'Created At']
+        ];
+        
+        customers.forEach(customer => {
+          customersData.push([
+            customer.id,
+            customer.name || '',
+            customer.email || '',
+            customer.phone || '',
+            customer.address || '',
+            customer.status || '',
+            new Date(customer.created_at).toLocaleDateString()
+          ]);
+        });
+        
+        const customersWS = XLSX.utils.aoa_to_sheet(customersData);
+        XLSX.utils.book_append_sheet(wb, customersWS, 'Customers');
+      }
+
+      // Assets Sheet
+      if (assets && assets.length > 0) {
+        const assetsData = [
+          ['Assets'],
+          ['ID', 'Serial Number', 'Product Code', 'Description', 'Status', 'Location', 'Assigned Customer', 'Created At']
+        ];
+        
+        assets.forEach(asset => {
+          assetsData.push([
+            asset.id,
+            asset.serial_number || '',
+            asset.product_code || '',
+            asset.description || '',
+            asset.status || '',
+            asset.location || '',
+            asset.assigned_customer || '',
+            new Date(asset.created_at).toLocaleDateString()
+          ]);
+        });
+        
+        const assetsWS = XLSX.utils.aoa_to_sheet(assetsData);
+        XLSX.utils.book_append_sheet(wb, assetsWS, 'Assets');
+      }
+
+      // Rentals Sheet
+      if (rentals && rentals.length > 0) {
+        const rentalsData = [
+          ['Rentals'],
+          ['ID', 'Customer', 'Asset', 'Start Date', 'End Date', 'Status', 'Amount', 'Created At']
+        ];
+        
+        rentals.forEach(rental => {
+          rentalsData.push([
+            rental.id,
+            rental.customer_name || '',
+            rental.asset_serial || '',
+            rental.start_date ? new Date(rental.start_date).toLocaleDateString() : '',
+            rental.end_date ? new Date(rental.end_date).toLocaleDateString() : '',
+            rental.status || '',
+            rental.amount || '',
+            new Date(rental.created_at).toLocaleDateString()
+          ]);
+        });
+        
+        const rentalsWS = XLSX.utils.aoa_to_sheet(rentalsData);
+        XLSX.utils.book_append_sheet(wb, rentalsWS, 'Rentals');
+      }
+
+      // Save the Excel file
+      XLSX.writeFile(wb, `organization-${org.name?.replace(/[^a-zA-Z0-9]/g, '_')}-complete-data-${new Date().toISOString().slice(0,10)}.xlsx`);
+      
+    } catch (error) {
+      console.error('Error exporting organization to Excel:', error);
+      alert('Error exporting organization data. Please try again.');
+    }
+  };
+
+  // Export all organizations to Excel
+  const exportAllOrganizationsToExcel = async () => {
+    if (!organizations.length) {
+      alert('No organizations found to export.');
+      return;
+    }
+    
+    try {
+      // Create workbook
+      const wb = XLSX.utils.book_new();
+      
+      // Organizations Summary Sheet
+      const summaryData = [
+        ['All Organizations Summary'],
+        [''],
+        ['Organization ID', 'Name', 'Email', 'Phone', 'Address', 'Status', 'Contact Email', 'User Count', 'Customer Count', 'Asset Count', 'Subscription Plan', 'Subscription Status', 'Trial Ends At', 'Subscription End Date', 'Created At', 'Updated At']
+      ];
+      
+      organizations.forEach(org => {
+        summaryData.push([
+          org.id,
+          org.name || '',
+          org.email || '',
+          org.phone || '',
+          org.address || '',
+          org.status || '',
+          org.contactEmail || '',
+          org.userCount || 0,
+          org.customerCount || 0,
+          org.bottleCount || 0,
+          org.subscription_plan_id || '',
+          org.subscription_status || '',
+          org.trial_ends_at || '',
+          org.subscription_end_date || '',
+          new Date(org.created_at).toLocaleDateString(),
+          org.updated_at ? new Date(org.updated_at).toLocaleDateString() : ''
+        ]);
+      });
+      
+      const summaryWS = XLSX.utils.aoa_to_sheet(summaryData);
+      XLSX.utils.book_append_sheet(wb, summaryWS, 'All Organizations');
+
+      // Statistics Sheet
+      const statsData = [
+        ['Organizations Statistics'],
+        [''],
+        ['Total Organizations', stats.total],
+        ['Active Subscriptions', stats.active],
+        ['Trial Accounts', stats.trial],
+        ['Expired Accounts', stats.expired],
+        [''],
+        ['Export Date', new Date().toLocaleDateString()],
+        ['Export Time', new Date().toLocaleTimeString()]
+      ];
+      
+      const statsWS = XLSX.utils.aoa_to_sheet(statsData);
+      XLSX.utils.book_append_sheet(wb, statsWS, 'Statistics');
+
+      // Save the Excel file
+      XLSX.writeFile(wb, `all-organizations-summary-${new Date().toISOString().slice(0,10)}.xlsx`);
+      
+    } catch (error) {
+      console.error('Error exporting all organizations to Excel:', error);
+      alert('Error exporting organizations data. Please try again.');
+    }
+  };
+
+  const exportOrganizationData = async (org) => {
+    if (!org) return;
+    
+    try {
+      // Fetch all related data for the organization
+      const orgId = org.id;
+      
+      // Get all users
+      const { data: users } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('organization_id', orgId);
+      
+      // Get all customers
+      const { data: customers } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('organization_id', orgId);
+      
+      // Get all bottles
+      const { data: bottles } = await supabase
+        .from('bottles')
+        .select('*')
+        .eq('organization_id', orgId);
+      
+      // Get all rentals
+      const { data: rentals } = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('organization_id', orgId);
+      
+      // Create comprehensive export data
+      const exportData = {
+        export_date: new Date().toISOString(),
+        organization: {
+          id: org.id,
+          name: org.name,
+          email: org.email,
+          phone: org.phone,
+          address: org.address,
+          status: org.status,
+          subscription_plan_id: org.subscription_plan_id,
+          subscription_status: org.subscription_status,
+          trial_ends_at: org.trial_ends_at,
+          subscription_end_date: org.subscription_end_date,
+          created_at: org.created_at,
+          updated_at: org.updated_at
+        },
+        users: users || [],
+        customers: customers || [],
+        bottles: bottles || [],
+        rentals: rentals || []
+      };
+      
+      // Create JSON file
+      const jsonContent = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([jsonContent], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `organization_complete_data_${org.name?.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      alert(`Complete data export for "${org.name}" has been downloaded.`);
+    } catch (error) {
+      console.error('Error exporting organization data:', error);
+      alert('Error exporting organization data: ' + error.message);
     }
   };
 
@@ -414,9 +849,28 @@ export default function OwnerCustomers() {
         <Typography variant="h4" fontWeight={800} color="primary">
           Customer Organizations
         </Typography>
-        <IconButton onClick={fetchOrganizations} disabled={loading}>
-          <RefreshIcon />
-        </IconButton>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            onClick={exportAllOrganizationsToCSV}
+            disabled={loading || organizations.length === 0}
+          >
+            Export All CSV
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<FileDownloadIcon />}
+            onClick={exportAllOrganizationsToExcel}
+            disabled={loading || organizations.length === 0}
+            sx={{ color: 'warning.main', borderColor: 'warning.main' }}
+          >
+            Export All Excel
+          </Button>
+          <IconButton onClick={fetchOrganizations} disabled={loading}>
+            <RefreshIcon />
+          </IconButton>
+        </Box>
       </Box>
 
       {/* Stats Cards */}
@@ -590,6 +1044,33 @@ export default function OwnerCustomers() {
                           onClick={() => handleManageSubscription(org)}
                         >
                           <PaymentIcon />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Export Organization Data">
+                        <IconButton 
+                          size="small"
+                          onClick={() => exportOrganizationData(org)}
+                          sx={{ color: 'info.main' }}
+                        >
+                          <DownloadIcon />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Export Organization CSV">
+                        <IconButton 
+                          size="small"
+                          onClick={() => exportOrganizationToCSV(org)}
+                          sx={{ color: 'success.main' }}
+                        >
+                          <FileDownloadIcon />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Export Organization Excel">
+                        <IconButton 
+                          size="small"
+                          onClick={() => exportOrganizationToExcel(org)}
+                          sx={{ color: 'warning.main' }}
+                        >
+                          <DownloadIcon />
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="Delete Organization">

@@ -30,9 +30,12 @@ const requiredEnvVars = [
 const optionalEnvVars = [
   'VITE_STRIPE_PUBLISHABLE_KEY',
   'STRIPE_SECRET_KEY',
-  'SMTP_HOST',
-  'SMTP_USER',
-  'SMTP_PASS'
+  'SMTP2GO_USER',
+  'SMTP2GO_PASSWORD',
+  'SMTP2GO_FROM',
+  'EMAIL_USER',
+  'EMAIL_PASSWORD',
+  'EMAIL_FROM'
 ];
 
 // Check required variables

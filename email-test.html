@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Test - Gas Cylinder App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2196F3;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        button {
+            background-color: #2196F3;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+        button:hover {
+            background-color: #1976D2;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            display: none;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .loading {
+            text-align: center;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📧 Email Test</h1>
+        <p style="text-align: center; color: #666; margin-bottom: 30px;">
+            Test the email functionality of your Gas Cylinder App
+        </p>
+        
+        <form id="emailForm">
+            <div class="form-group">
+                <label for="to">To Email:</label>
+                <input type="email" id="to" value="scanified@gmail.com" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="subject">Subject:</label>
+                <input type="text" id="subject" value="Test Email from Gas Cylinder App" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="template">Template:</label>
+                <select id="template">
+                    <option value="invite">Invitation</option>
+                    <option value="order-confirmation">Order Confirmation</option>
+                    <option value="default">Default</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="message">Message (for default template):</label>
+                <textarea id="message" rows="4" placeholder="Enter your message here...">This is a test email from the Gas Cylinder Management System.</textarea>
+            </div>
+            
+            <button type="submit" id="sendBtn">Send Test Email</button>
+        </form>
+        
+        <div id="result" class="result"></div>
+    </div>
+
+    <script>
+        document.getElementById('emailForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const sendBtn = document.getElementById('sendBtn');
+            const resultDiv = document.getElementById('result');
+            
+            // Disable button and show loading
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Sending...';
+            resultDiv.style.display = 'none';
+            
+            const to = document.getElementById('to').value;
+            const subject = document.getElementById('subject').value;
+            const template = document.getElementById('template').value;
+            const message = document.getElementById('message').value;
+            
+            // Prepare data based on template
+            let data = {};
+            if (template === 'invite') {
+                data = {
+                    organizationName: 'Test Organization',
+                    inviter: 'Test User',
+                    inviteLink: 'https://example.com/invite/test123'
+                };
+            } else if (template === 'order-confirmation') {
+                data = {
+                    customerName: 'Test Customer',
+                    orderId: 'TEST-123',
+                    deliveryDate: new Date().toLocaleDateString(),
+                    items: [
+                        { name: 'Gas Cylinder', quantity: '2' },
+                        { name: 'Regulator', quantity: '1' }
+                    ]
+                };
+            } else {
+                data = { message: message };
+            }
+            
+            try {
+                const response = await fetch('/.netlify/functions/send-email', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        to: to,
+                        subject: subject,
+                        template: template,
+                        data: data
+                    })
+                });
+                
+                const result = await response.json();
+                
+                resultDiv.style.display = 'block';
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <h3>✅ Email Sent Successfully!</h3>
+                        <p><strong>Service:</strong> ${result.service}</p>
+                        <p><strong>Message ID:</strong> ${result.messageId}</p>
+                        <p><strong>To:</strong> ${to}</p>
+                        <p><strong>Subject:</strong> ${subject}</p>
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `
+                        <h3>❌ Email Sending Failed</h3>
+                        <p><strong>Error:</strong> ${result.error}</p>
+                        <p><strong>Details:</strong> ${result.details}</p>
+                    `;
+                }
+                
+            } catch (error) {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `
+                    <h3>❌ Network Error</h3>
+                    <p>${error.message}</p>
+                    <p>Make sure Netlify Dev is running and the email function is accessible.</p>
+                `;
+            } finally {
+                // Re-enable button
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Send Test Email';
+            }
+        });
+    </script>
+</body>
+</html>

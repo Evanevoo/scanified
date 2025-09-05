@@ -141,68 +141,73 @@ export default function WebsiteManagement() {
         }
       ]
     },
-    pricing: {
-      title: 'Simple, Transparent Pricing',
-      subtitle: 'Choose the plan that fits your business needs',
-      plans: [
-        {
-          id: 'basic',
-          name: 'Basic',
-          price: 29,
-          period: 'month',
-          description: 'Perfect for small businesses',
-          features: [
-            'Up to 1,000 cylinders',
-            'Basic inventory tracking',
-            'Customer management',
-            'Email support',
-            'Mobile app access'
-          ],
-          highlighted: false,
-          visible: true,
-          ctaText: 'Start Free Trial',
-          ctaLink: '/register?plan=basic'
+            pricing: {
+          title: 'Simple, Transparent Pricing',
+          subtitle: 'Choose the plan that fits your business needs',
+          plans: [
+            {
+              id: 'basic',
+              name: 'Basic',
+              price: 29,
+              period: 'month',
+              description: 'Perfect for small businesses',
+              features: [
+                'Up to 5 users',
+                'Up to 100 customers',
+                'Up to 1,000 cylinders',
+                'Basic inventory tracking',
+                'Email support',
+                'Mobile app access'
+              ],
+              highlighted: false,
+              visible: true,
+              ctaText: 'Start Free Trial',
+              ctaLink: '/register?plan=basic'
+            },
+            {
+              id: 'pro',
+              name: 'Professional',
+              price: 99,
+              period: 'month',
+              description: 'For growing businesses',
+              features: [
+                'Up to 15 users',
+                'Up to 500 customers',
+                'Up to 5,000 cylinders',
+                'Advanced analytics',
+                'Route optimization',
+                'Priority support',
+                'API access',
+                'Custom reports'
+              ],
+              highlighted: true,
+              visible: true,
+              ctaText: 'Start Free Trial',
+              ctaLink: '/register?plan=pro'
+            },
+            {
+              id: 'enterprise',
+              name: 'Enterprise',
+              price: 299,
+              period: 'month',
+              description: 'For large operations',
+              features: [
+                'Unlimited users',
+                'Unlimited customers',
+                'Unlimited cylinders',
+                'Custom integrations',
+                'Dedicated support',
+                'Advanced security',
+                'Multi-location support',
+                'Custom features'
+              ],
+              highlighted: false,
+              visible: true,
+              ctaText: 'Contact Sales',
+              ctaLink: '/contact'
+            }
+          ]
         },
-        {
-          id: 'pro',
-          name: 'Professional',
-          price: 99,
-          period: 'month',
-          description: 'For growing businesses',
-          features: [
-            'Up to 5,000 cylinders',
-            'Advanced analytics',
-            'Route optimization',
-            'Priority support',
-            'API access',
-            'Custom reports'
-          ],
-          highlighted: true,
-          visible: true,
-          ctaText: 'Start Free Trial',
-          ctaLink: '/register?plan=pro'
-        },
-        {
-          id: 'enterprise',
-          name: 'Enterprise',
-          price: 299,
-          period: 'month',
-          description: 'For large operations',
-          features: [
-            'Unlimited cylinders',
-            'Custom integrations',
-            'Dedicated support',
-            'Advanced security',
-            'Multi-location support',
-            'Custom features'
-          ],
-          highlighted: false,
-          visible: true,
-          ctaText: 'Contact Sales',
-          ctaLink: '/contact'
-        }
-      ]
-    },
     liveChat: {
       enabled: true,
       welcomeMessage: 'Hi there! 👋 Welcome to Scanified. How can I help you today?',
@@ -212,8 +217,8 @@ export default function WebsiteManagement() {
         'What mobile features do you have?',
         'Schedule a demo'
       ],
-      responses: {
-        pricing: 'Our pricing starts at $49/month for the Starter plan (up to 100 assets, 3 users), Professional at $149/month (up to 1,000 assets, 10 users), and Enterprise with custom pricing (unlimited assets and users). All plans include a free trial and mobile app access!',
+              responses: {
+          pricing: 'Our pricing starts at $29/month for the Basic plan (up to 5 users, 100 customers, 1,000 cylinders), Professional at $99/month (up to 15 users, 500 customers, 5,000 cylinders), and Enterprise at $299/month (unlimited users, customers, and cylinders). All plans include a free trial and mobile app access!',
         scanning: 'Scanning is super easy! Just open the app on any smartphone, point the camera at a barcode or QR code, and it automatically captures the data. No special hardware needed!',
         support: 'I\'d be happy to help with technical support. Could you describe the issue you\'re experiencing?',
         demo: 'I can schedule a personalized demo for you! Please share your email and preferred time, and our team will reach out within 24 hours.',

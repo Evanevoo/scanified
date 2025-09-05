@@ -113,14 +113,46 @@ export default function OwnerCommandCenter() {
         .from('profiles')
         .select('*', { count: 'exact', head: true });
 
-      // Mock revenue data (in real app, this would come from billing system)
+      // Calculate real revenue data based on subscription plans
+      const { data: organizations } = await supabase
+        .from('organizations')
+        .select('subscription_plan, subscription_status, created_at');
+
+      let totalRevenue = 0;
+      let activeSubscriptions = 0;
+      
+      if (organizations) {
+        const planPrices = { basic: 29, pro: 99, enterprise: 299 };
+        
+        organizations.forEach(org => {
+          if (org.subscription_status === 'active') {
+            const planPrice = planPrices[org.subscription_plan] || 0;
+            totalRevenue += planPrice;
+            activeSubscriptions++;
+          }
+        });
+      }
+
+      // Calculate monthly growth (simplified)
+      const lastMonth = new Date();
+      lastMonth.setMonth(lastMonth.getMonth() - 1);
+      const newThisMonth = organizations?.filter(org => 
+        new Date(org.created_at) >= new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+      ).length || 0;
+      const newLastMonth = organizations?.filter(org => 
+        new Date(org.created_at) >= lastMonth && 
+        new Date(org.created_at) < new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+      ).length || 0;
+      
+      const monthlyGrowth = newLastMonth > 0 ? ((newThisMonth - newLastMonth) / newLastMonth) * 100 : 0;
+
       setBusinessMetrics({
-        totalRevenue: 127500,
-        monthlyGrowth: 18.5,
+        totalRevenue,
+        monthlyGrowth: Math.round(monthlyGrowth * 10) / 10,
         customerCount: orgCount || 0,
-        churnRate: 2.1,
-        avgRevenuePerUser: 89,
-        customerLifetimeValue: 2840
+        churnRate: 0, // TODO: Calculate real churn rate
+        avgRevenuePerUser: userCount > 0 ? totalRevenue / userCount : 0,
+        customerLifetimeValue: 0 // TODO: Calculate real CLV
       });
       
     } catch (error) {

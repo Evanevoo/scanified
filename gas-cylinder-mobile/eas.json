@@ -6,25 +6,31 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "ios": {
+        "buildConfiguration": "Debug"
+      }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "ios": {
+        "buildConfiguration": "Release"
+      }
     },
     "production": {
       "autoIncrement": true,
       "ios": {
         "buildConfiguration": "Release"
       }
-    },
-    "ios-only": {
-      "extends": "production",
-      "ios": {
-        "buildConfiguration": "Release"
-      }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "appleId": "evankorial77@gmail.com",
+        "ascAppId": "6749334978",
+        "appleTeamId": "FA8UQ322NZ"
+      }
+    }
   }
 }

@@ -9,60 +9,93 @@ export function PermissionsProvider({ children }) {
   const [permissions, setPermissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isOrgAdmin, setIsOrgAdmin] = useState(false);
+  const [actualRole, setActualRole] = useState(null);
+
+  // Helper function to normalize role for case-insensitive comparison
+  const normalizeRole = (role) => {
+    if (!role) return '';
+    return role.toLowerCase();
+  };
 
   useEffect(() => {
     if (!profile) {
       setPermissions([]);
       setIsOrgAdmin(false);
+      setActualRole(null);
       setLoading(false);
       return;
     }
 
-    // Handle legacy role system (profile.role)
-    if (profile.role === 'owner') {
-      setPermissions(['*']);
-      setIsOrgAdmin(true);
-      setLoading(false);
-      return;
-    }
-
-    // Handle legacy admin role
-    if (profile.role === 'admin') {
-      setPermissions(['*']);
-      setIsOrgAdmin(true);
-      setLoading(false);
-      return;
-    }
-
-    // Handle new RBAC system (profile.role_id)
-    if (profile.role_id) {
+    const resolveRoleAndPermissions = async () => {
       setLoading(true);
-      supabase
-        .from('roles')
-        .select('name, permissions')
-        .eq('id', profile.role_id)
-        .single()
-        .then(({ data, error }) => {
+      let roleName = profile.role;
+
+      // If role is a UUID (contains hyphens), fetch the role name
+      if (profile.role && profile.role.includes('-')) {
+        try {
+          const { data: roleData, error } = await supabase
+            .from('roles')
+            .select('name, permissions')
+            .eq('id', profile.role)
+            .single();
+          
           if (error) {
-            console.error('Error fetching role permissions:', error);
-            setPermissions([]);
-            setIsOrgAdmin(false);
+            console.error('Error fetching role from UUID:', error);
+            // Fallback to default admin permissions if we can't resolve the role
+            setActualRole('admin');
+            setPermissions(['*']);
+            setIsOrgAdmin(true);
+            setLoading(false);
+            return;
           } else {
-            setPermissions(data.permissions || []);
-            if (data.name && data.name.toLowerCase() === 'admin') {
-              setIsOrgAdmin(true);
-            } else {
-              setIsOrgAdmin(false);
+            roleName = roleData.name;
+            setActualRole(roleName);
+            
+            // If role has specific permissions, use them
+            if (roleData.permissions && roleData.permissions.length > 0) {
+              setPermissions(roleData.permissions);
+              setIsOrgAdmin(normalizeRole(roleName) === 'admin');
+              setLoading(false);
+              return;
             }
           }
+        } catch (err) {
+          console.error('Error in role resolution:', err);
+          // Fallback to admin
+          setActualRole('admin');
+          setPermissions(['*']);
+          setIsOrgAdmin(true);
           setLoading(false);
-        });
-    } else {
-      // No role_id, check if there's a legacy role
-      if (profile.role === 'manager') {
+          return;
+        }
+      } else {
+        // Role is already a name
+        setActualRole(roleName);
+      }
+
+      const userRole = normalizeRole(roleName);
+
+      // Handle legacy role system (profile.role) - case insensitive
+      if (userRole === 'owner') {
+        setPermissions(['*']);
+        setIsOrgAdmin(true);
+        setLoading(false);
+        return;
+      }
+
+      // Handle legacy admin role - case insensitive
+      if (userRole === 'admin') {
+        setPermissions(['*']);
+        setIsOrgAdmin(true);
+        setLoading(false);
+        return;
+      }
+
+      // No role_id, check if there's a legacy role - case insensitive
+      if (userRole === 'manager') {
         setPermissions(['read:customers', 'write:customers', 'read:cylinders', 'write:cylinders', 'read:invoices', 'write:invoices']);
         setIsOrgAdmin(false);
-      } else if (profile.role === 'user') {
+      } else if (userRole === 'user') {
         setPermissions(['read:customers', 'read:cylinders', 'read:invoices']);
         setIsOrgAdmin(false);
       } else {
@@ -70,7 +103,9 @@ export function PermissionsProvider({ children }) {
         setIsOrgAdmin(false);
       }
       setLoading(false);
-    }
+    };
+
+    resolveRoleAndPermissions();
   }, [profile]);
 
   const can = (permission) => {
@@ -81,24 +116,27 @@ export function PermissionsProvider({ children }) {
     return permissions.includes(permission);
   };
 
-  // Helper functions for role checking
+  // Helper functions for role checking - case insensitive
   const isAdmin = () => {
-    return profile?.role === 'admin' || profile?.role === 'owner';
+    const userRole = normalizeRole(actualRole);
+    return userRole === 'admin' || userRole === 'owner';
   };
 
   const isManager = () => {
-    return profile?.role === 'manager' || profile?.role === 'admin' || profile?.role === 'owner';
+    const userRole = normalizeRole(actualRole);
+    return userRole === 'manager' || userRole === 'admin' || userRole === 'owner';
   };
 
   const isUser = () => {
-    return profile?.role === 'user';
+    const userRole = normalizeRole(actualRole);
+    return userRole === 'user';
   };
 
   const hasRole = (role) => {
-    return profile?.role === role;
+    return normalizeRole(actualRole) === normalizeRole(role);
   };
 
-  const value = { permissions, can, loading, isOrgAdmin, isAdmin, isManager, isUser, hasRole };
+  const value = { permissions, can, loading, isOrgAdmin, isAdmin, isManager, isUser, hasRole, actualRole };
 
   return (
     <PermissionsContext.Provider value={value}>
@@ -109,4 +147,4 @@ export function PermissionsProvider({ children }) {
 
 export const usePermissions = () => {
   return useContext(PermissionsContext);
-}; 
+};

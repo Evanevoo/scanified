@@ -5,6 +5,14 @@
 [build.environment]
   NODE_VERSION = "18"
 
+[dev]
+  targetPort = 5175
+
+[dev.environment]
+  EMAIL_USER = "scanified@gmail.com"
+  EMAIL_PASSWORD = "fhul uznc onpq foha"
+  EMAIL_FROM = "scanified@gmail.com"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

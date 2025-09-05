@@ -690,9 +690,11 @@ export default function AssetConfigurationManager() {
                 <Card 
                   sx={{ 
                     cursor: 'pointer', 
-                    '&:hover': { boxShadow: 6 },
                     border: '2px solid transparent',
-                    '&:hover': { borderColor: template.primaryColor }
+                    '&:hover': { 
+                      boxShadow: 6,
+                      borderColor: template.primaryColor 
+                    }
                   }}
                   onClick={() => applyTemplate(key)}
                 >

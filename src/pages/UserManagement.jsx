@@ -8,7 +8,43 @@ import {
 import { Delete as DeleteIcon, Edit as EditIcon, Add as AddIcon, ContentCopy as CopyIcon } from '@mui/icons-material';
 import { usePermissions } from '../context/PermissionsContext';
 
-// Roles are now fetched from the database
+// Helper function to get role display name
+const getRoleDisplayName = (user) => {
+  // Try role from JOIN first (roles.name)
+  if (user.roles?.name) return user.roles.name;
+  
+  // Fallback to direct role field
+  if (user.role) return user.role;
+  
+  // Handle common role IDs/names
+  if (user.role_id) {
+    // If role_id looks like a UUID but we don't have the joined name, show a fallback
+    if (user.role_id.includes('-')) {
+      return 'Loading...';
+    }
+    return user.role_id;
+  }
+  
+  return 'N/A';
+};
+
+// Helper function to get role color
+const getRoleColor = (roleName) => {
+  const role = roleName?.toLowerCase();
+  switch (role) {
+    case 'admin':
+    case 'administrator':
+      return 'primary';
+    case 'manager':
+      return 'secondary';
+    case 'owner':
+      return 'error';
+    case 'user':
+      return 'default';
+    default:
+      return 'default';
+  }
+};
 
 export default function UserManagement() {
   const { profile, organization } = useAuth();
@@ -73,12 +109,29 @@ export default function UserManagement() {
     setLoading(true);
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, email, role_id, full_name, created_at')
+      .select(`
+        id, 
+        email, 
+        role, 
+        role_id, 
+        full_name, 
+        created_at,
+        roles:role_id (
+          id,
+          name
+        )
+      `)
       .eq('organization_id', organization.id)
       .order('created_at', { ascending: false });
     
-    if (error) setError(error.message);
-    else setUsers(data);
+    console.log('Fetched users with roles:', data);
+    
+    if (error) {
+      console.error('Error fetching users:', error);
+      setError(error.message);
+    } else {
+      setUsers(data);
+    }
     setLoading(false);
   }
 
@@ -159,7 +212,13 @@ export default function UserManagement() {
         p_expires_in_days: 7
       });
 
-      if (error) throw error;
+      if (error) {
+        // Check if it's a constraint violation and provide user-friendly message
+        if (error.message.includes('organization_invites_organization_id_email_key')) {
+          throw new Error('An invite has already been sent to this email from your organization. Please check the existing invites or wait for the user to respond.');
+        }
+        throw error;
+      }
 
       // Fetch the invite row to get the token
       const { data: inviteRow } = await supabase
@@ -432,8 +491,8 @@ export default function UserManagement() {
                 <TableCell>{user.email}</TableCell>
                 <TableCell>
                   <Chip 
-                    label={users.find(u => u.id === user.id)?.roles?.name || 'N/A'}
-                    color={users.find(u => u.id === user.id)?.roles?.name === 'admin' ? 'primary' : 'default'}
+                    label={getRoleDisplayName(user)}
+                    color={getRoleColor(getRoleDisplayName(user))}
                     size="small"
                   />
                 </TableCell>

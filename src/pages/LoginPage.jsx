@@ -235,17 +235,28 @@ function LoginPage() {
           <Divider sx={{ my: 3 }}>OR</Divider>
 
           <Box sx={{ textAlign: 'center' }}>
-            <Typography variant="body2" color="text.secondary">
-              Don't have an account?{' '}
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Don't have an account?
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Link
+                component="button"
+                variant="body2"
+                onClick={() => navigate('/signup')}
+                sx={{ textDecoration: 'none', fontWeight: 600 }}
+              >
+                Join Organization
+              </Link>
+              <Typography variant="body2" color="text.secondary">•</Typography>
               <Link
                 component="button"
                 variant="body2"
                 onClick={() => navigate('/register')}
                 sx={{ textDecoration: 'none', fontWeight: 600 }}
               >
-                Sign up
+                Start Trial
               </Link>
-            </Typography>
+            </Box>
           </Box>
 
           <Box sx={{ mt: 3, textAlign: 'center' }}>

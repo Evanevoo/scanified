@@ -1,11 +1,13 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated } from 'react-native';
+import { Platform } from '../utils/platform';
 
 interface ScanOverlayProps {
   title?: string;
   subtitle?: string;
   onClose?: () => void;
   isScanning?: boolean;
+  hideScanningLine?: boolean; // New prop to hide scanning line
 }
 
 const { width, height } = Dimensions.get('window');
@@ -14,12 +16,14 @@ const ScanOverlay: React.FC<ScanOverlayProps> = ({
   title = "Scan Barcode",
   subtitle = "Position the barcode within the frame",
   onClose,
-  isScanning = false
+  isScanning = false,
+  hideScanningLine = false // Default to false to maintain existing behavior
 }) => {
   const scanLineAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (isScanning) {
+    // Only animate if scanning line is not hidden and scanning is active
+    if (isScanning && !hideScanningLine) {
       const animation = Animated.loop(
         Animated.sequence([
           Animated.timing(scanLineAnim, {
@@ -39,7 +43,7 @@ const ScanOverlay: React.FC<ScanOverlayProps> = ({
     } else {
       scanLineAnim.setValue(0);
     }
-  }, [isScanning]);
+  }, [isScanning, hideScanningLine]);
 
   return (
     <View style={styles.container}>
@@ -67,8 +71,8 @@ const ScanOverlay: React.FC<ScanOverlayProps> = ({
           <View style={[styles.corner, styles.bottomLeft, isScanning && styles.scanningCorner]} />
           <View style={[styles.corner, styles.bottomRight, isScanning && styles.scanningCorner]} />
           
-          {/* Scanning line animation */}
-          {isScanning && (
+          {/* Scanning line animation - only show if not hidden */}
+          {isScanning && !hideScanningLine && (
             <Animated.View 
               style={[
                 styles.scanningLine,

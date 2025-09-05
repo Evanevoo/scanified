@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apply Invoices Table Fix</title>
+    <style>
+        body { font-family: monospace; margin: 20px; background: #1a1a1a; color: #00ff00; }
+        .error { color: #ff4444; }
+        .success { color: #44ff44; }
+        .warning { color: #ffaa44; }
+        .info { color: #4488ff; }
+        pre { background: #111; padding: 10px; border-radius: 4px; overflow-x: auto; }
+        button { 
+            background: #333; color: #fff; border: 1px solid #555; 
+            padding: 8px 16px; margin: 5px; cursor: pointer; border-radius: 4px;
+        }
+        button:hover { background: #444; }
+        .sql-script { background: #222; border: 1px solid #555; padding: 15px; margin: 10px 0; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Fix Invoices Table Columns</h1>
+    
+    <div>
+        <button onclick="checkCurrentColumns()">Check Current Columns</button>
+        <button onclick="showSQLScript()">Show SQL Script</button>
+    </div>
+    
+    <div id="results"></div>
+
+    <div class="sql-script" id="sql-script" style="display: none;">
+        <h3>SQL Script to Apply:</h3>
+        <p>Copy and paste this into your Supabase SQL editor:</p>
+        <pre id="sql-content">Loading SQL script...</pre>
+        <p><strong>Instructions:</strong></p>
+        <ol>
+            <li>Go to your Supabase dashboard</li>
+            <li>Navigate to SQL Editor</li>
+            <li>Paste the SQL above and run it</li>
+            <li>Check the results for any errors</li>
+        </ol>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        const supabaseUrl = 'https://jtfucttzaswmqqhmmhfb.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI4NTUxMjEsImV4cCI6MjA2ODQzMTEyMX0.9lJqoqnTa3X5cKLNDTf7Vx7cQGz8bGZkTfkLQb0GEgY';
+        const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+
+        let resultsDiv = document.getElementById('results');
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.className = type;
+            div.innerHTML = `[${timestamp}] ${message}`;
+            resultsDiv.appendChild(div);
+        }
+
+        // Load and display the SQL script
+        async function loadSqlScript() {
+            try {
+                const response = await fetch('fix-invoices-table-columns.sql');
+                const sql = await response.text();
+                document.getElementById('sql-content').textContent = sql;
+            } catch (err) {
+                document.getElementById('sql-content').textContent = 'Error loading SQL script: ' + err.message;
+            }
+        }
+
+        window.checkCurrentColumns = async function() {
+            log('🔍 Checking current invoices table columns...', 'info');
+            
+            const requiredColumns = [
+                'due_date', 'issue_date', 'total_amount', 'invoice_number', 
+                'billing_period_start', 'billing_period_end', 'subtotal', 
+                'tax_amount', 'payment_status'
+            ];
+
+            let missingColumns = [];
+            let existingColumns = [];
+
+            for (const col of requiredColumns) {
+                try {
+                    const { error: colError } = await supabase
+                        .from('invoices')
+                        .select(col)
+                        .limit(0);
+                    
+                    if (colError) {
+                        missingColumns.push(col);
+                        log(`❌ Missing: ${col}`, 'error');
+                    } else {
+                        existingColumns.push(col);
+                        log(`✅ Exists: ${col}`, 'success');
+                    }
+                } catch (err) {
+                    missingColumns.push(col);
+                    log(`❌ Missing: ${col}`, 'error');
+                }
+            }
+
+            log('', 'info');
+            log(`📊 Summary: ${existingColumns.length} existing, ${missingColumns.length} missing`, 'info');
+            
+            if (missingColumns.length > 0) {
+                log('🔧 Missing columns need to be added:', 'warning');
+                log(`Missing: ${missingColumns.join(', ')}`, 'warning');
+                log('💡 Click "Show SQL Script" to get the fix', 'info');
+            } else {
+                log('🎉 All required columns exist!', 'success');
+            }
+        };
+
+        window.showSQLScript = function() {
+            document.getElementById('sql-script').style.display = 'block';
+            loadSqlScript();
+        };
+
+        // Auto-check on load
+        setTimeout(checkCurrentColumns, 1000);
+    </script>
+</body>
+</html>
