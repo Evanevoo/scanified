@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Check Join Code Migration</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .btn {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        .btn:hover { background: #1d4ed8; }
+        .btn:disabled { background: #9ca3af; cursor: not-allowed; }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+        .error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .info { background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
+        .warning { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+        pre {
+            background: #f3f4f6;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Check Join Code Migration Status</h1>
+    
+    <div class="card">
+        <h2>📋 Quick Migration Check</h2>
+        <p>This will tell you if the join code system is properly set up in your database.</p>
+        
+        <div style="margin: 10px 0;">
+            <label>Supabase URL:</label>
+            <input type="text" id="supabaseUrl" placeholder="https://your-project.supabase.co">
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <label>Anon Key:</label>
+            <input type="text" id="anonKey" placeholder="eyJ...">
+        </div>
+        
+        <button class="btn" onclick="checkMigration()">Check Migration Status</button>
+        
+        <div id="results">
+            <div class="status info">Enter your Supabase credentials and click "Check Migration Status"</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🔧 If Migration Failed</h2>
+        <p>If the check shows the migration wasn't applied, follow these steps:</p>
+        <ol>
+            <li>Go to your <strong>Supabase Dashboard</strong></li>
+            <li>Navigate to <strong>SQL Editor</strong></li>
+            <li>Click <strong>"New Query"</strong></li>
+            <li>Copy and paste the entire contents of <code>complete-migration.sql</code></li>
+            <li>Click <strong>"Run"</strong> (or press Ctrl+Enter)</li>
+            <li>Wait for it to complete</li>
+            <li>Come back and test again</li>
+        </ol>
+    </div>
+
+    <script>
+        async function checkMigration() {
+            const url = document.getElementById('supabaseUrl').value;
+            const key = document.getElementById('anonKey').value;
+            
+            if (!url || !key) {
+                updateResults('Please enter both Supabase URL and Anon Key', 'error');
+                return;
+            }
+
+            const supabase = window.supabase.createClient(url, key);
+            
+            try {
+                updateResults('🔍 Checking migration status...', 'info');
+
+                // Step 1: Check if table exists
+                const { data: tableData, error: tableError } = await supabase
+                    .from('organization_join_codes')
+                    .select('id')
+                    .limit(1);
+                
+                if (tableError) {
+                    if (tableError.message.includes('relation "organization_join_codes" does not exist')) {
+                        updateResults(`❌ MIGRATION NOT APPLIED
+                        
+The organization_join_codes table does not exist.
+
+🔧 SOLUTION:
+1. Go to Supabase Dashboard → SQL Editor
+2. Copy complete-migration.sql contents
+3. Paste and run the query
+4. Come back and test again`, 'error');
+                        return;
+                    } else {
+                        throw tableError;
+                    }
+                }
+
+                // Step 2: Check if functions exist
+                const { data: funcData, error: funcError } = await supabase
+                    .rpc('generate_numeric_join_code');
+                
+                if (funcError) {
+                    updateResults(`❌ FUNCTIONS MISSING
+                    
+The table exists but the PostgreSQL functions are missing.
+
+Error: ${funcError.message}
+
+🔧 SOLUTION:
+The migration was only partially applied. Run the complete-migration.sql again.`, 'error');
+                    return;
+                }
+
+                // Step 3: Check existing codes
+                const { data: codes, error: codesError } = await supabase
+                    .from('organization_join_codes')
+                    .select('*')
+                    .limit(5);
+                
+                if (codesError) {
+                    updateResults(`❌ TABLE ACCESS ERROR: ${codesError.message}`, 'error');
+                    return;
+                }
+
+                // Success!
+                updateResults(`✅ MIGRATION SUCCESSFUL!
+
+🎉 Join code system is properly set up:
+• Table exists: organization_join_codes
+• Functions exist: generate_numeric_join_code, create_organization_join_code, use_organization_join_code
+• Found ${codes.length} existing join codes
+• Test function generated: ${funcData}
+
+The system should work! If you're still getting "Invalid join code" errors:
+
+1. Make sure you're using a fresh, unexpired code
+2. Check the browser console for detailed error messages
+3. Verify the code is exactly 6 digits
+4. Try generating a new code
+
+Current codes in database:
+${codes.map(c => `• ${c.code} (${c.is_active ? 'active' : 'inactive'}, expires: ${new Date(c.expires_at).toLocaleString()})`).join('\n')}`, 'success');
+
+            } catch (error) {
+                updateResults(`❌ CHECK FAILED: ${error.message}`, 'error');
+            }
+        }
+
+        function updateResults(message, type) {
+            document.getElementById('results').innerHTML = `
+                <div class="status ${type}">
+                    <pre>${message}</pre>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>

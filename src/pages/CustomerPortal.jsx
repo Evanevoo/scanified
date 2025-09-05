@@ -284,7 +284,12 @@ export default function CustomerPortal() {
                     </TableCell>
                     <TableCell>
                       <Tooltip title="View Details">
-                        <IconButton size="small">
+                        <IconButton 
+                          size="small"
+                          onClick={() => {
+                            alert(`Order Details:\n\nOrder ID: #${order.id}\nGas Type: ${order.gas_type}\nSize: ${order.size}\nQuantity: ${order.quantity}\nDelivery Date: ${order.delivery_date ? new Date(order.delivery_date).toLocaleDateString() : 'Not specified'}\nStatus: ${order.status}\nSpecial Instructions: ${order.special_instructions || 'None'}`);
+                          }}
+                        >
                           <ViewIcon />
                         </IconButton>
                       </Tooltip>
@@ -330,7 +335,12 @@ export default function CustomerPortal() {
                     </TableCell>
                     <TableCell>
                       <Tooltip title="View Details">
-                        <IconButton size="small">
+                        <IconButton 
+                          size="small"
+                          onClick={() => {
+                            alert(`Bottle Details:\n\nBottle ID: ${bottle.bottle_id}\nGas Type: ${bottle.gas_type}\nSize: ${bottle.size}\nStatus: ${bottle.status}\nLast Updated: ${new Date(bottle.updated_at).toLocaleDateString()}\nOrganization: ${bottle.organization_id}`);
+                          }}
+                        >
                           <ViewIcon />
                         </IconButton>
                       </Tooltip>

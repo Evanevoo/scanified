@@ -1,10 +1,27 @@
 const nodemailer = require('nodemailer');
 
 exports.handler = async (event, context) => {
+  // Handle CORS preflight requests
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+      },
+      body: ''
+    };
+  }
+
   // Only allow POST requests
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({ error: 'Method not allowed' })
     };
   }
@@ -16,6 +33,10 @@ exports.handler = async (event, context) => {
     if (!to || !subject || !template) {
       return {
         statusCode: 400,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({ error: 'Missing required fields: to, subject, and template are required' })
       };
     }
@@ -27,9 +48,9 @@ exports.handler = async (event, context) => {
     // Try SMTP2GO first (your primary service)
     if (process.env.SMTP2GO_USER && process.env.SMTP2GO_PASSWORD && process.env.SMTP2GO_FROM) {
       console.log('Using SMTP2GO email service');
-      transporter = nodemailer.createTransporter({
+      transporter = nodemailer.createTransport({
         host: 'mail.smtp2go.com',
-        port: 587,
+        port: 2525, // SMTP2GO primary port
         secure: false,
         auth: {
           user: process.env.SMTP2GO_USER,
@@ -41,16 +62,33 @@ exports.handler = async (event, context) => {
       });
       emailService = 'SMTP2GO';
     }
-    // Fallback to Outlook if SMTP2GO not configured
+    // Try Gmail if SMTP2GO not configured
     else if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD && process.env.EMAIL_FROM) {
-      console.log('Using Outlook email service');
-      transporter = nodemailer.createTransporter({
-        host: 'smtp-mail.outlook.com',
+      console.log('Using Gmail email service');
+      transporter = nodemailer.createTransport({
+        host: 'smtp.gmail.com',
         port: 587,
         secure: false,
         auth: {
           user: process.env.EMAIL_USER,
           pass: process.env.EMAIL_PASSWORD
+        },
+        tls: {
+          rejectUnauthorized: false
+        }
+      });
+      emailService = 'Gmail';
+    }
+    // Fallback to Outlook if neither SMTP2GO nor Gmail configured
+    else if (process.env.OUTLOOK_USER && process.env.OUTLOOK_PASSWORD && process.env.OUTLOOK_FROM) {
+      console.log('Using Outlook email service');
+      transporter = nodemailer.createTransport({
+        host: 'smtp-mail.outlook.com',
+        port: 587,
+        secure: false,
+        auth: {
+          user: process.env.OUTLOOK_USER,
+          pass: process.env.OUTLOOK_PASSWORD
         },
         tls: {
           ciphers: 'SSLv3',
@@ -64,9 +102,13 @@ exports.handler = async (event, context) => {
       console.error('No email service configured');
       return {
         statusCode: 500,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({ 
           error: 'Email service not configured',
-          details: 'Please configure SMTP2GO or Outlook email credentials in Netlify environment variables'
+          details: 'Please configure SMTP2GO, Gmail, or Outlook email credentials in Netlify environment variables'
         })
       };
     }
@@ -79,6 +121,10 @@ exports.handler = async (event, context) => {
       console.error(`${emailService} connection verification failed:`, verifyError);
       return {
         statusCode: 500,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({ 
           error: `${emailService} connection failed`,
           details: verifyError.message
@@ -93,7 +139,7 @@ exports.handler = async (event, context) => {
     console.log(`Sending email via ${emailService} to:`, to, 'with subject:', subject);
     
     const mailOptions = {
-      from: process.env.SMTP2GO_FROM || process.env.EMAIL_FROM,
+      from: process.env.SMTP2GO_FROM || process.env.EMAIL_FROM || process.env.OUTLOOK_FROM,
       to: to,
       subject: subject,
       html: emailContent
@@ -105,6 +151,10 @@ exports.handler = async (event, context) => {
 
     return {
       statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({ 
         success: true, 
         message: `Email sent successfully via ${emailService}`,
@@ -117,6 +167,10 @@ exports.handler = async (event, context) => {
     console.error('Error sending email:', error);
     return {
       statusCode: 500,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({ 
         error: 'Failed to send email',
         details: error.message 

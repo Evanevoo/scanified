@@ -7,12 +7,27 @@ The contact form now sends real emails when organizations submit inquiries. This
 
 Add these environment variables to your Netlify dashboard:
 
-### SMTP Configuration
+### SMTP Configuration (Multiple Options)
+
+#### Option 1: SMTP2GO (Recommended)
 ```
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-app-password
+SMTP2GO_USER=your-smtp2go-username
+SMTP2GO_PASSWORD=your-smtp2go-password
+SMTP2GO_FROM=noreply@yourdomain.com
+```
+
+#### Option 2: Gmail
+```
+EMAIL_USER=your-email@gmail.com
+EMAIL_PASSWORD=your-gmail-app-password
+EMAIL_FROM=noreply@yourdomain.com
+```
+
+#### Option 3: Outlook
+```
+EMAIL_USER=your-email@outlook.com
+EMAIL_PASSWORD=your-app-password
+EMAIL_FROM=noreply@yourdomain.com
 ```
 
 ### Contact Information
@@ -29,9 +44,9 @@ CONTACT_PHONE=+1 (555) 123-4567
    - Go to Google Account settings
    - Security → 2-Step Verification → App passwords
    - Generate a password for "Mail"
-   - Use this password as `SMTP_PASS`
+   - Use this password as `EMAIL_PASSWORD`
 
-3. **Use your Gmail address** as `SMTP_USER`
+3. **Use your Gmail address** as `EMAIL_USER`
 
 ## Alternative Email Providers
 
@@ -67,7 +82,7 @@ SMTP_PORT=587
 ### Common Issues
 
 1. **"Authentication failed"**
-   - Check your SMTP credentials
+   - Check your email credentials (SMTP2GO_USER/SMTP2GO_PASSWORD or EMAIL_USER/EMAIL_PASSWORD)
    - Ensure 2FA is enabled for Gmail
    - Use app password, not regular password
 

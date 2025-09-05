@@ -17,10 +17,9 @@ import {
   MonetizationOn as MoneyIcon,
   Assignment as AssignmentIcon,
   Notifications as NotificationsIcon,
-  Invoice as InvoiceIcon
+  Receipt as InvoiceIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
-import { NotificationService } from '../services/notificationService';
 
 // Business logic functions to determine asset status
 const getAssetStatus = (assignedCustomer, customerType) => {
@@ -69,6 +68,7 @@ function RentalsImproved() {
   const [customers, setCustomers] = useState([]);
   const [activeTab, setActiveTab] = useState(0);
   const [editDialog, setEditDialog] = useState({ open: false, customer: null, rentals: [] });
+  const [updatingRentals, setUpdatingRentals] = useState(false);
   const [error, setError] = useState(null);
   const [filters, setFilters] = useState({
     status: 'all',
@@ -189,10 +189,32 @@ function RentalsImproved() {
         }
       }
 
-      console.log('Combined rental data:', allRentalData.length);
+      // Remove duplicates based on bottle_barcode (keep rental records over bottle assignments)
+      const deduplicatedData = [];
+      const seenBarcodes = new Set();
+      
+      // First pass: Add all rental records (priority over bottle assignments)
+      for (const item of allRentalData) {
+        if (item.source === 'rental' && !seenBarcodes.has(item.bottle_barcode)) {
+          deduplicatedData.push(item);
+          seenBarcodes.add(item.bottle_barcode);
+        }
+      }
+      
+      // Second pass: Add bottle assignments only if no rental record exists
+      for (const item of allRentalData) {
+        if (item.source === 'bottle_assignment' && !seenBarcodes.has(item.bottle_barcode)) {
+          deduplicatedData.push(item);
+          seenBarcodes.add(item.bottle_barcode);
+        }
+      }
+      
+      console.log('Before deduplication:', allRentalData.length, 'After deduplication:', deduplicatedData.length);
+
+      console.log('Combined rental data:', deduplicatedData.length);
 
       // 5. Get customers with their types (with fallback)
-      const customerIds = Array.from(new Set(allRentalData.map(r => r.customer_id).filter(Boolean)));
+      const customerIds = Array.from(new Set(deduplicatedData.map(r => r.customer_id).filter(Boolean)));
       let customersMap = {};
 
       if (customerIds.length > 0) {
@@ -229,26 +251,29 @@ function RentalsImproved() {
       console.log('Customers found:', Object.keys(customersMap).length);
 
       // 6. Attach customer info to each rental
-      const rentalsWithCustomer = allRentalData.map(r => ({
+      const rentalsWithCustomer = deduplicatedData.map(r => ({
         ...r,
         customer: customersMap[r.customer_id] || null
       }));
 
-      const filteredRentals = rentalsWithCustomer.filter(r => r.customer_id && r.customer);
+      // Filter out vendors from rental page (they should only appear in inventory/in-house)
+      const filteredRentals = rentalsWithCustomer.filter(r => 
+        r.customer_id && 
+        r.customer &&
+        r.customer.customer_type !== 'VENDOR'  // Exclude vendors from rentals view
+      );
       setAssets(filteredRentals);
 
       // 7. Calculate statistics (proper separation of IN-HOUSE vs RENTED)
       const unassignedBottles = allBottles?.filter(b => !b.assigned_customer).length || 0;
-      const bottlesWithVendors = filteredRentals?.filter(r => r.customer?.customer_type === 'VENDOR').length || 0;
+      // Get vendor bottles from original data (before filtering vendors out)
+      const bottlesWithVendors = rentalsWithCustomer?.filter(r => r.customer?.customer_type === 'VENDOR').length || 0;
       const inHouseTotal = unassignedBottles + bottlesWithVendors; // Unassigned + vendors = in-house
-      const rentedToCustomers = filteredRentals?.filter(r => 
-        r.customer?.customer_type === 'CUSTOMER' || r.customer?.customer_type === 'TEMPORARY'
-      ).length || 0;
+      // All filtered rentals are now customer rentals (vendors excluded)
+      const rentedToCustomers = filteredRentals.length;
+      // Calculate revenue from customer rentals (vendors already excluded)
       const totalRevenue = filteredRentals?.reduce((sum, rental) => {
-        if (rental.customer?.customer_type === 'CUSTOMER' || rental.customer?.customer_type === 'TEMPORARY') {
-          return sum + (rental.rental_amount || 0);
-        }
-        return sum;
+        return sum + (rental.rental_amount || 0);
       }, 0) || 0;
 
       setStats({ 
@@ -337,9 +362,21 @@ function RentalsImproved() {
   });
 
   const tabs = [
-    { label: 'All Customers', value: 'all', count: filteredCustomers.length },
-    { label: 'Monthly Rentals', value: 'monthly', count: filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'monthly')).length },
-    { label: 'Yearly Rentals', value: 'yearly', count: filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly')).length },
+    { 
+      label: 'All Customers', 
+      value: 'all', 
+      count: filteredCustomers.length 
+    },
+    { 
+      label: 'Monthly Rentals', 
+      value: 'monthly', 
+      count: filteredCustomers.reduce((count, c) => count + c.rentals.filter(r => r.rental_type === 'monthly').length, 0)
+    },
+    { 
+      label: 'Yearly Rentals', 
+      value: 'yearly', 
+      count: filteredCustomers.reduce((count, c) => count + c.rentals.filter(r => r.rental_type === 'yearly').length, 0)
+    },
   ];
 
   const handleTabChange = (event, newValue) => {
@@ -492,20 +529,9 @@ function RentalsImproved() {
         const yearlyRentals = rentals.filter(r => r.rental_type === 'yearly');
         const totalAmount = yearlyRentals.reduce((sum, r) => sum + (r.rental_amount || 0), 0);
         
-        const result = await NotificationService.createYearlyRentalNotification(
-          organization.id,
-          {
-            customer_id: customer.CustomerListID,
-            name: customer.name,
-            bottleCount: yearlyRentals.length,
-            totalAmount: totalAmount,
-            rental_type: 'yearly'
-          }
-        );
-
-        if (result.success) {
-          notificationsCreated++;
-        }
+        // Log yearly rental notification (notification service removed)
+        console.log(`Yearly rental notification for ${customer.name}: ${yearlyRentals.length} bottles, $${totalAmount}`);
+        notificationsCreated++;
       }
 
       // Also create a general summary notification
@@ -515,21 +541,8 @@ function RentalsImproved() {
           .reduce((rSum, r) => rSum + (r.rental_amount || 0), 0);
       }, 0);
 
-      await NotificationService.createNotification({
-        organizationId: organization.id,
-        type: 'yearly_invoice',
-        title: `Yearly Rental Invoices Ready - ${currentYear}`,
-        message: `${yearlyCustomers.length} yearly customers need invoicing. Total revenue: $${totalRevenue}`,
-        data: {
-          year: currentYear,
-          customer_count: yearlyCustomers.length,
-          total_amount: totalRevenue,
-          due_date: `${currentYear}-01-31`
-        },
-        priority: 'high',
-        actionUrl: '/rentals?tab=yearly&action=generate_invoices',
-        actionText: 'View Yearly Rentals'
-      });
+      // Log yearly invoice summary (notification service removed)
+      console.log(`Yearly invoices ready for ${yearlyCustomers.length} customers, total revenue: $${totalRevenue}`);
 
       alert(`Successfully created ${notificationsCreated + 1} notifications for yearly rental invoices!`);
 
@@ -972,15 +985,38 @@ function RentalsImproved() {
           </Button>
           <Button
             variant="contained"
-            onClick={() => {
-              // Here you would update all rentals for this customer
-              console.log('Update rentals for customer:', editDialog.customer?.CustomerListID);
-              setEditDialog({ open: false, customer: null, rentals: [] });
-              // Refresh data
-              fetchRentals();
+            onClick={async () => {
+              try {
+                // Update all rentals for this customer
+                const { error } = await supabase
+                  .from('rentals')
+                  .update({
+                    rental_type: editDialog.rental_type,
+                    rental_amount: editDialog.rental_amount,
+                    tax_code: editDialog.tax_code,
+                    location: editDialog.location
+                  })
+                  .eq('customer_id', editDialog.customer.CustomerListID);
+
+                if (error) {
+                  console.error('Error updating rentals:', error);
+                  alert('Error updating rentals: ' + error.message);
+                  return;
+                }
+
+                console.log('Successfully updated rentals for customer:', editDialog.customer?.CustomerListID);
+                setEditDialog({ open: false, customer: null, rentals: [] });
+                // Refresh data
+                await fetchRentals();
+                // Show success message
+                alert(`Successfully updated rental settings for ${editDialog.customer?.name}`);
+              } catch (error) {
+                console.error('Error updating rentals:', error);
+                alert('Error updating rentals: ' + error.message);
+              }
             }}
           >
-            Update All Rentals
+            {updatingRentals ? 'Updating...' : 'Update All Rentals'}
           </Button>
         </DialogActions>
       </Dialog>

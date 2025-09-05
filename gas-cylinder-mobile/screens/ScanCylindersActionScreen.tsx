@@ -10,6 +10,7 @@ import { useAuth } from '../hooks/useAuth';
 import ScanOverlay from '../components/ScanOverlay';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FormatValidationService } from '../services/FormatValidationService';
+import { Platform } from '../utils/platform';
 
 const { width } = Dimensions.get('window');
 
@@ -621,6 +622,7 @@ export default function ScanCylindersActionScreen() {
               title="Scan Cylinder Barcode"
               subtitle="Position the barcode within the frame"
               isScanning={scanned}
+              hideScanningLine={Platform.OS === 'ios'}
               onClose={() => {
                 setScannerVisible(false);
                 setHasUserClosedCamera(true);

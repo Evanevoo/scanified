@@ -1,5 +1,4 @@
 import { supabase } from '../supabase/client';
-import { NotificationService } from './notificationService';
 
 export const usageService = {
   // Get current usage for an organization
@@ -111,25 +110,8 @@ export const usageService = {
 
       const message = `Your ${resourceNames[resource]} usage is at ${usage.percentage}% (${usage.current}/${usage.max}). Consider upgrading your plan to avoid service interruption.`;
 
-      // Create in-app notification for usage alert
-      await NotificationService.createNotification({
-        organizationId: organizationId,
-        type: 'usage_alert',
-        title: `Usage Alert: ${resourceNames[resource].charAt(0).toUpperCase() + resourceNames[resource].slice(1)} at ${usage.percentage}%`,
-        message: message,
-        data: {
-          organizationName: organization.name,
-          resource: resourceNames[resource],
-          currentUsage: usage.current,
-          maxUsage: usage.max,
-          percentage: usage.percentage,
-          threshold,
-          resourceType: resource
-        },
-        priority: threshold >= 95 ? 'urgent' : 'high',
-        actionUrl: `/billing?tab=usage`,
-        actionText: 'View Usage Details'
-      });
+      // Log usage alert (notification service removed)
+      console.log(`Usage Alert: ${resourceNames[resource]} at ${usage.percentage}% for organization ${organization.name}`);
     } catch (error) {
       console.error('Error sending usage alert:', error);
     }

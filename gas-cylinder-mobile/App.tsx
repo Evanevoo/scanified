@@ -2,10 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import { View, Text, StyleSheet, SafeAreaView, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, ActivityIndicator, Alert, TouchableOpacity } from 'react-native';
 
 // Import screens
 import LoginScreen from './LoginScreen';
+import OrganizationJoinScreen from './screens/OrganizationJoinScreen';
 import HomeScreen from './screens/HomeScreen';
 import ScanCylindersScreen from './screens/ScanCylindersScreen';
 import ScanCylindersActionScreen from './screens/ScanCylindersActionScreen';
@@ -34,12 +35,16 @@ import { supabase } from './supabase';
 
 const Stack = createNativeStackNavigator();
 
+// Maximum loading time before showing error (30 seconds)
+const MAX_LOADING_TIME = 30000;
+
 function AppContent() {
   const { user, organization, loading, profile } = useAuth();
   const { config: assetConfig, loading: assetLoading } = useAssetConfig();
   const [isInitializing, setIsInitializing] = useState(true);
   const [checkingOrg, setCheckingOrg] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [loadingTimeout, setLoadingTimeout] = useState(false);
   const { theme } = useTheme();
 
   // Provide default theme if undefined
@@ -68,6 +73,29 @@ function AppContent() {
       setAuthError(null);
     }
   }, [user, loading, isInitializing]);
+
+  // Check if user is authenticated but has no organization
+  const hasNoOrganization = user && profile && !profile.organization_id && !loading && !isInitializing;
+
+  const handleJoinSuccess = () => {
+    // Force a refresh of auth data after successful organization join
+    window.location.reload?.() || setIsInitializing(true);
+  };
+
+  const handleCreateOrganization = () => {
+    // Navigate to web app for organization creation
+    Alert.alert(
+      'Create Organization',
+      'To create a new organization, please visit our web app at scanified.com',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open Website', onPress: () => {
+          // In a real app, you'd use Linking.openURL
+          console.log('Opening website for organization creation');
+        }}
+      ]
+    );
+  };
 
   // Enforce subscription/trial expiry
   useEffect(() => {
@@ -113,9 +141,48 @@ function AppContent() {
     }
   }, [user, organization]);
 
+  // Show timeout error screen
+  if (loadingTimeout) {
+    return (
+      <SafeAreaView style={styles.errorContainer}>
+        <Text style={styles.errorTitle}>Loading Timeout</Text>
+        <Text style={styles.errorText}>
+          The app is taking too long to load. This might be due to:
+        </Text>
+        <Text style={styles.errorSubtext}>
+          • Slow network connection{'\n'}
+          • Server connectivity issues{'\n'}
+          • Device compatibility problems
+        </Text>
+        <TouchableOpacity 
+          style={styles.errorButton}
+          onPress={() => {
+            setLoadingTimeout(false);
+            setIsInitializing(true);
+            // Reset all loading states
+            setTimeout(() => setIsInitializing(false), 2000);
+          }}
+        >
+          <Text style={styles.errorButtonText}>Try Again</Text>
+        </TouchableOpacity>
+        <Text style={styles.errorSubtext}>
+          If the problem persists, please restart the app or contact support.
+        </Text>
+      </SafeAreaView>
+    );
+  }
+
   // Show loading screen while initializing or checking auth
   if (isInitializing || loading || checkingOrg || assetLoading) {
-    return <LoadingScreen />;
+    return (
+      <LoadingScreen 
+        timeout={15000} 
+        onTimeout={() => {
+          console.warn('LoadingScreen timeout triggered - preventing blank screen');
+          setLoadingTimeout(true);
+        }}
+      />
+    );
   }
 
   // Show error screen if there's a critical auth error
@@ -126,6 +193,38 @@ function AppContent() {
         <Text style={styles.errorText}>{authError}</Text>
         <ActivityIndicator size="large" color="#2563eb" style={styles.errorLoader} />
         <Text style={styles.errorSubtext}>Please restart the app</Text>
+      </SafeAreaView>
+    );
+  }
+
+  // Show organization error screen if user is authenticated but has no organization
+  if (hasNoOrganization) {
+    return (
+      <SafeAreaView style={styles.errorContainer}>
+        <Text style={styles.errorTitle}>No Organization Found</Text>
+        <Text style={styles.errorText}>
+          Your account is not associated with any organization. This can happen if:
+        </Text>
+        <Text style={styles.errorSubtext}>
+          • Your account was recently created but not properly linked{'\n'}
+          • Your organization was deleted or deactivated{'\n'}
+          • There was an error during account setup
+        </Text>
+        <TouchableOpacity 
+          style={styles.errorButton}
+          onPress={async () => {
+            try {
+              await supabase.auth.signOut();
+            } catch (error) {
+              console.error('Error signing out:', error);
+            }
+          }}
+        >
+          <Text style={styles.errorButtonText}>Sign Out</Text>
+        </TouchableOpacity>
+        <Text style={styles.errorSubtext}>
+          Please contact your administrator or support team for assistance.
+        </Text>
       </SafeAreaView>
     );
   }
@@ -177,6 +276,23 @@ function AppContent() {
                 headerShown: false 
               }}
             />
+          ) : hasNoOrganization ? (
+            // Organization join screen
+            <Stack.Screen 
+              name="OrganizationJoin" 
+              options={{ 
+                title: 'Connect to Organization',
+                headerShown: false 
+              }}
+            >
+              {() => (
+                <OrganizationJoinScreen
+                  user={user}
+                  onJoinSuccess={handleJoinSuccess}
+                  onCreateOrganization={handleCreateOrganization}
+                />
+              )}
+            </Stack.Screen>
           ) : (
             // App screens (only shown when authenticated)
             <>
@@ -298,5 +414,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
+  },
+  errorButton: {
+    backgroundColor: '#2563eb',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  errorButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

@@ -43,10 +43,12 @@ export const useAssetConfig = () => {
         return;
       }
 
-      // Get organization asset configuration
+      // Get organization asset configuration (only select columns that definitely exist)
       const { data: orgData, error: orgError } = await supabase
         .from('organizations')
         .select(`
+          id,
+          name,
           asset_type,
           asset_type_plural,
           asset_display_name,
@@ -54,8 +56,6 @@ export const useAssetConfig = () => {
           primary_color,
           secondary_color,
           app_name,
-          app_icon,
-          show_app_icon,
           custom_terminology,
           feature_toggles
         `)
@@ -74,8 +74,8 @@ export const useAssetConfig = () => {
           primaryColor: orgData.primary_color || defaultConfig.primaryColor,
           secondaryColor: orgData.secondary_color || defaultConfig.secondaryColor,
           appName: orgData.app_name || defaultConfig.appName,
-          appIcon: orgData.app_icon || defaultConfig.appIcon,
-          showAppIcon: orgData.show_app_icon !== undefined ? orgData.show_app_icon : defaultConfig.showAppIcon,
+          appIcon: defaultConfig.appIcon, // Use default since column doesn't exist
+          showAppIcon: defaultConfig.showAppIcon, // Use default since column doesn't exist
           customTerminology: orgData.custom_terminology || defaultConfig.customTerminology,
           featureToggles: orgData.feature_toggles || defaultConfig.featureToggles
         });

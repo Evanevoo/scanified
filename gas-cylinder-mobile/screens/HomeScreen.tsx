@@ -5,6 +5,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../context/AssetContext';
 import { useNavigation } from '@react-navigation/native';
+import { Platform } from '../utils/platform';
 
 // Quick Actions Configuration
 const QUICK_ACTIONS = [
@@ -81,6 +82,8 @@ export default function HomeScreen() {
   const searchCustomers = async () => {
     if (!profile?.organization_id) {
       console.log('No organization found, skipping customer search');
+      console.log('Profile data:', profile);
+      console.log('User authenticated:', !!profile);
       return;
     }
 
@@ -128,6 +131,8 @@ export default function HomeScreen() {
   const searchBottles = async () => {
     if (!profile?.organization_id) {
       console.log('No organization found, skipping bottle search');
+      console.log('Profile data:', profile);
+      console.log('User authenticated:', !!profile);
       return;
     }
 
@@ -191,18 +196,19 @@ export default function HomeScreen() {
   const fetchUnreadCount = async () => {
     if (!profile?.organization_id) {
       console.log('No organization found, skipping unread count fetch');
+      console.log('Profile data:', profile);
+      console.log('User authenticated:', !!profile);
       return;
     }
 
     try {
-      const { count, error } = await supabase
+      const { count } = await supabase
         .from('bottle_scans')
         .select('*', { count: 'exact', head: true })
         .eq('organization_id', profile.organization_id)
-        .is('read', false);
-      if (!error) {
-        setStats(prev => ({ ...prev, unreadScans: count || 0 }));
-      }
+        .eq('read', false);
+      
+      setStats(prev => ({ ...prev, unreadScans: count || 0 }));
     } catch (error) {
       console.error('Error fetching unread count:', error);
     }
@@ -243,7 +249,7 @@ export default function HomeScreen() {
         <View style={styles.header}>
           <View style={styles.headerContent}>
             <Text style={[styles.welcomeText, { color: colors.text }]}>
-              Welcome back{user?.full_name ? `, ${user.full_name}` : ''}!
+              Welcome back{profile?.full_name ? `, ${profile.full_name}` : ''}!
             </Text>
             <Text style={[styles.appName, { color: colors.primary }]}>{assetConfig.appName}</Text>
           </View>

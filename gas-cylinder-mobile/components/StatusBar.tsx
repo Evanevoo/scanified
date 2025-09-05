@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Platform } from '../utils/platform';
 import { SyncService } from '../services/SyncService';
 import { useTheme } from '../context/ThemeContext';
 

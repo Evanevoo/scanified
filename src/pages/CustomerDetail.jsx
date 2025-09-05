@@ -55,12 +55,28 @@ export default function CustomerDetail() {
       setLoading(true);
       setError(null);
       try {
-        const { data: customerData, error: customerError } = await supabase
+        // First, check if there are multiple customers with this ID
+        const { data: allCustomers, error: checkError } = await supabase
           .from('customers')
           .select('*')
-          .eq('CustomerListID', id)
-          .single();
-        if (customerError) throw customerError;
+          .eq('CustomerListID', id);
+        
+        if (checkError) throw checkError;
+        
+        if (!allCustomers || allCustomers.length === 0) {
+          setError(`Customer with ID "${id}" not found.`);
+          setLoading(false);
+          return;
+        }
+        
+        if (allCustomers.length > 1) {
+          setError(`Multiple customers found with ID "${id}". This indicates a data integrity issue. Please contact support.`);
+          setLoading(false);
+          return;
+        }
+        
+        // We have exactly one customer
+        const customerData = allCustomers[0];
         setCustomer(customerData);
         setEditForm(customerData);
         

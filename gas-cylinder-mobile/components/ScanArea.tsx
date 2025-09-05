@@ -11,6 +11,7 @@ interface ScanAreaProps {
   enableRegionOfInterest?: boolean;
   scanDelay?: number;
   onClose?: () => void;
+  hideScanningLine?: boolean; // New prop to hide scanning line
 }
 
 const { width, height } = Dimensions.get('window');
@@ -24,6 +25,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   enableRegionOfInterest = true,
   scanDelay = 500,
   onClose,
+  hideScanningLine = false, // Default to false to maintain existing behavior
 }) => {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
@@ -204,7 +206,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                   <View style={[styles.corner, styles.bottomRight]} />
                   
                   {/* Scanning animation */}
-                  {isProcessing && (
+                  {isProcessing && !hideScanningLine && (
                     <View style={styles.scanningLine} />
                   )}
                 </>

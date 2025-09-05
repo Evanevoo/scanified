@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apply Role Permissions Table</title>
+    <style>
+        body { font-family: monospace; margin: 20px; background: #1a1a1a; color: #00ff00; }
+        .error { color: #ff4444; }
+        .success { color: #44ff44; }
+        .warning { color: #ffaa44; }
+        .info { color: #4488ff; }
+        pre { background: #111; padding: 10px; border-radius: 4px; overflow-x: auto; }
+        button { 
+            background: #333; color: #fff; border: 1px solid #555; 
+            padding: 8px 16px; margin: 5px; cursor: pointer; border-radius: 4px;
+        }
+        button:hover { background: #444; }
+        .sql-script { background: #222; border: 1px solid #555; padding: 15px; margin: 10px 0; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>🗄️ Apply Role Permissions Table</h1>
+    
+    <div>
+        <button onclick="checkTableExists()">Check Table Status</button>
+        <button onclick="applyScript()">Apply SQL Script</button>
+        <button onclick="createDefaultData()">Create Default Data</button>
+    </div>
+    
+    <div id="results"></div>
+
+    <div class="sql-script">
+        <h3>SQL Script to Apply:</h3>
+        <pre id="sql-content">Loading SQL script...</pre>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        const supabaseUrl = 'https://jtfucttzaswmqqhmmhfb.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI4NTUxMjEsImV4cCI6MjA2ODQzMTEyMX0.9lJqoqnTa3X5cKLNDTf7Vx7cQGz8bGZkTfkLQb0GEgY';
+        const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+
+        let resultsDiv = document.getElementById('results');
+        let currentUser = null;
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.className = type;
+            div.innerHTML = `[${timestamp}] ${message}`;
+            resultsDiv.appendChild(div);
+        }
+
+        // Load and display the SQL script
+        async function loadSqlScript() {
+            try {
+                const response = await fetch('create-role-permissions-table.sql');
+                const sql = await response.text();
+                document.getElementById('sql-content').textContent = sql;
+            } catch (err) {
+                document.getElementById('sql-content').textContent = 'Error loading SQL script: ' + err.message;
+            }
+        }
+
+        window.checkTableExists = async function() {
+            log('🔍 Checking if role_permissions table exists...', 'info');
+            
+            try {
+                const { data, error, count } = await supabase
+                    .from('role_permissions')
+                    .select('*', { count: 'exact' })
+                    .limit(1);
+
+                if (error) {
+                    if (error.code === '42P01') {
+                        log('❌ role_permissions table does NOT exist', 'error');
+                        log('💡 Click "Apply SQL Script" to create it', 'warning');
+                    } else {
+                        log(`❌ Error checking table: ${error.message}`, 'error');
+                    }
+                } else {
+                    log(`✅ role_permissions table EXISTS with ${count} records`, 'success');
+                }
+            } catch (err) {
+                log(`❌ Unexpected error: ${err.message}`, 'error');
+            }
+        };
+
+        window.applyScript = async function() {
+            log('🚀 Applying role_permissions table creation script...', 'info');
+            
+            // Note: This is a simplified version since we can't execute raw SQL from the browser
+            // In a real application, this would be done via a database migration or admin endpoint
+            
+            log('⚠️ Cannot execute raw SQL from browser for security reasons', 'warning');
+            log('📋 Please run this SQL script in your Supabase dashboard:', 'info');
+            log('1. Go to https://supabase.com/dashboard/project/jtfucttzaswmqqhmmhfb/sql', 'info');
+            log('2. Copy the SQL script shown above', 'info');
+            log('3. Paste and execute it', 'info');
+            log('4. Come back and click "Check Table Status" to verify', 'info');
+        };
+
+        window.createDefaultData = async function() {
+            log('🏗️ Creating default role permission records...', 'info');
+            
+            try {
+                // Check if we can access the table first
+                const { data: testData, error: testError } = await supabase
+                    .from('role_permissions')
+                    .select('*')
+                    .limit(1);
+
+                if (testError) {
+                    if (testError.code === '42P01') {
+                        log('❌ Table does not exist. Apply the SQL script first.', 'error');
+                        return;
+                    } else {
+                        throw testError;
+                    }
+                }
+
+                const { data: { user }, error: userError } = await supabase.auth.getUser();
+                if (userError) throw userError;
+                
+                if (!user) {
+                    log('❌ Must be authenticated to create default data', 'error');
+                    return;
+                }
+
+                // Get user's organization
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('organization_id')
+                    .eq('id', user.id)
+                    .single();
+
+                const orgId = profile?.organization_id || 'global';
+                log(`🏢 Creating records for organization: ${orgId}`, 'info');
+
+                const defaultRoles = [
+                    {
+                        role_name: 'admin',
+                        display_name: 'Administrator',
+                        description: 'Full system access',
+                        permissions: ['user-management', 'role-management', 'billing', 'settings', 'analytics'],
+                        organization_id: orgId
+                    },
+                    {
+                        role_name: 'manager',
+                        display_name: 'Manager',
+                        description: 'Management access',
+                        permissions: ['user-management', 'customer-management', 'inventory-management', 'analytics'],
+                        organization_id: orgId
+                    },
+                    {
+                        role_name: 'user',
+                        display_name: 'User',
+                        description: 'Basic user access',
+                        permissions: ['customer-management', 'inventory-management'],
+                        organization_id: orgId
+                    },
+                    {
+                        role_name: 'owner',
+                        display_name: 'Owner',
+                        description: 'Platform owner with full access',
+                        permissions: ['*'],
+                        organization_id: 'global'
+                    }
+                ];
+
+                for (const role of defaultRoles) {
+                    try {
+                        // Check if already exists
+                        const { data: existing } = await supabase
+                            .from('role_permissions')
+                            .select('id')
+                            .eq('role_name', role.role_name)
+                            .eq('organization_id', role.organization_id)
+                            .single();
+
+                        if (existing) {
+                            log(`ℹ️ ${role.role_name} already exists`, 'info');
+                            continue;
+                        }
+
+                        // Create new record
+                        const { data: newRecord, error: insertError } = await supabase
+                            .from('role_permissions')
+                            .insert([role])
+                            .select()
+                            .single();
+
+                        if (insertError) {
+                            log(`❌ Failed to create ${role.role_name}: ${insertError.message}`, 'error');
+                        } else {
+                            log(`✅ Created ${role.role_name} permissions`, 'success');
+                        }
+
+                    } catch (err) {
+                        log(`❌ Error with ${role.role_name}: ${err.message}`, 'error');
+                    }
+                }
+
+                log('🎉 Default data creation completed!', 'success');
+
+            } catch (err) {
+                log(`❌ Failed to create default data: ${err.message}`, 'error');
+            }
+        };
+
+        // Initialize
+        window.onload = function() {
+            loadSqlScript();
+            
+            // Auto-check table status
+            setTimeout(checkTableExists, 1000);
+        };
+    </script>
+</body>
+</html>

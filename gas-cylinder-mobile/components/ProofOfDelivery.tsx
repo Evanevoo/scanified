@@ -9,9 +9,9 @@ import {
   Alert,
   ScrollView,
   Image,
-  Dimensions,
-  Platform
+  Dimensions
 } from 'react-native';
+import { Platform } from '../utils/platform';
 import { Camera, CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { Canvas, Path, Skia } from '@shopify/react-native-skia';

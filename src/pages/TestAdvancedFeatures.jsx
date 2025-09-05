@@ -29,7 +29,6 @@ const TestAdvancedFeatures = () => {
           <li><a href="http://localhost:5174/chain-of-custody" style={{ color: '#007bff' }}>Chain of Custody</a></li>
           <li><a href="http://localhost:5174/palletization-system" style={{ color: '#007bff' }}>Palletization System</a></li>
           <li><a href="http://localhost:5174/advanced-rental-calculations" style={{ color: '#007bff' }}>Advanced Rental Calculations</a></li>
-          <li><a href="http://localhost:5174/predictive-analytics" style={{ color: '#007bff' }}>Predictive Analytics</a></li>
         </ul>
       </div>
     </div>

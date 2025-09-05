@@ -23,7 +23,7 @@ import {
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
-import { NotificationService } from '../../services/notificationService';
+// import { NotificationService } from '../../services/notificationService'; // Removed
 
 export default function SupportTickets() {
   const { profile } = useAuth();
@@ -163,21 +163,8 @@ export default function SupportTickets() {
       
       // Notify the ticket creator of the reply
       try {
-        // Create notification for ticket reply
-        await NotificationService.createNotification({
-          organizationId: selectedTicket.organization_id,
-          type: 'support_ticket',
-          title: `Support Ticket Reply: ${selectedTicket.title}`,
-          message: `Your support ticket has received a reply from our team.`,
-          data: {
-            ticket_id: selectedTicket.id,
-            reply_message: replyMessage,
-            action: 'ticket_reply'
-          },
-          priority: 'normal',
-          actionUrl: `/support?ticket=${selectedTicket.id}`,
-          actionText: 'View Reply'
-        });
+        // Create notification for ticket reply (notification service removed)
+        console.log(`Support ticket reply sent for: ${selectedTicket.title}`);
       } catch (error) {
         console.error('Error notifying user of reply:', error);
       }

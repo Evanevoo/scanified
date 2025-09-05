@@ -30,7 +30,6 @@ import {
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
-import { NotificationService } from '../services/notificationService';
 
 export default function SupportCenter() {
   const { profile, organization } = useAuth();
@@ -114,7 +113,9 @@ export default function SupportCenter() {
       
       // Notify owners of new ticket
       try {
-        // Create notification for new support ticket
+        // Log support ticket creation (notification service removed)
+        console.log('Support ticket created:', data.title);
+        /*
         await NotificationService.createNotification({
           organizationId: organization.id,
           type: 'support_ticket',
@@ -130,6 +131,7 @@ export default function SupportCenter() {
           actionUrl: `/owner-portal/support?ticket=${data.id}`,
           actionText: 'View Ticket'
         });
+        */
       } catch (error) {
         console.error('Error notifying owners:', error);
       }

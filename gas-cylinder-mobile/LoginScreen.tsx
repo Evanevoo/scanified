@@ -8,11 +8,11 @@ import {
   StyleSheet, 
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
   Linking,
   Modal
 } from 'react-native';
+import { Platform } from './utils/platform';
 import { supabase } from './supabase';
 import { ValidationSchemas } from './utils/validation';
 import { useErrorHandler } from './hooks/useErrorHandler';
@@ -260,9 +260,14 @@ export default function LoginScreen() {
   const handleAppleLogin = async () => {
     setSocialLoading(true);
     try {
-      // Generate nonce for security
-      const nonce = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      console.log('🍎 Starting Apple Sign In...');
       
+      // Generate cryptographically secure nonce for security
+      const nonce = Math.random().toString(36).substring(2, 15) + 
+                    Math.random().toString(36).substring(2, 15) + 
+                    Date.now().toString(36);
+      
+      console.log('🍎 Requesting Apple credentials...');
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
@@ -271,32 +276,54 @@ export default function LoginScreen() {
         nonce: nonce,
       });
 
+      console.log('🍎 Apple credential received:', {
+        user: credential.user,
+        email: credential.email,
+        hasIdentityToken: !!credential.identityToken,
+        hasNonce: !!credential.nonce,
+        fullName: credential.fullName ? 'present' : 'null'
+      });
+
       if (!credential.identityToken) {
-        throw new Error('No identity token received from Apple');
+        throw new Error('No identity token received from Apple. Please try again.');
       }
 
-      console.log('🍎 Authenticating with Supabase...');
+      // Use Apple's nonce if available, otherwise fallback to our generated nonce
+      const finalNonce = credential.nonce || nonce;
+      
+      console.log('🍎 Authenticating with Supabase using nonce...');
       const { data: signInData, error: signInError } = await supabase.auth.signInWithIdToken({
         provider: 'apple',
         token: credential.identityToken,
-        nonce: nonce,
+        nonce: finalNonce,
       });
 
       if (signInError) {
         console.error('🚨 Supabase Apple Sign In Error:', signInError);
+        
+        // Handle specific Supabase errors
+        if (signInError.message?.includes('Invalid login credentials')) {
+          throw new Error('Apple authentication failed. Please try again or contact support.');
+        } else if (signInError.message?.includes('network')) {
+          throw new Error('Network connection error. Please check your internet connection and try again.');
+        } else if (signInError.message?.includes('nonce')) {
+          throw new Error('Authentication security error. Please try signing in again.');
+        }
+        
         throw signInError;
       }
 
       if (!signInData?.user) {
-        throw new Error('No user data received after authentication');
+        throw new Error('Authentication completed but no user data received. Please try again.');
       }
 
-      console.log('✅ Apple Sign In successful');
+      console.log('✅ Apple Sign In successful for user:', signInData.user.id);
       
-      // If this is the first time signing in, save additional user info
-      if (credential.fullName) {
+      // Save additional user info if available (first-time sign-in)
+      if (credential.fullName?.givenName || credential.fullName?.familyName) {
         const fullName = `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim();
         if (fullName) {
+          console.log('🍎 Updating user profile with Apple info...');
           const { error: updateError } = await supabase.auth.updateUser({
             data: {
               full_name: fullName,
@@ -304,35 +331,55 @@ export default function LoginScreen() {
             }
           });
           if (updateError) {
-            console.warn('⚠️ Could not update user profile:', updateError);
+            console.warn('⚠️ Could not update user profile:', updateError.message);
+            // Don't fail the login for profile update errors
           } else {
             console.log('✅ User profile updated with Apple info');
           }
         }
       }
+
+      // Wait a moment to ensure auth state is properly set
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
     } catch (err) {
       console.error('🚨 Apple Sign In Error:', err);
       
-      if (err.code === 'ERR_REQUEST_CANCELED') {
-        // User canceled the sign-in flow
+      // Handle user cancellation gracefully
+      if (err.code === 'ERR_REQUEST_CANCELED' || err.code === 'ERR_CANCELED') {
         console.log('ℹ️ User canceled Apple Sign In');
         return;
       }
       
-      // Provide more specific error messages
-      let errorMessage = 'An error occurred during Apple Sign In. Please try again.';
+      // Handle Apple Authentication specific errors
+      if (err.code === 'ERR_INVALID_RESPONSE') {
+        Alert.alert('Apple Sign In Failed', 'Invalid response from Apple. Please try again.');
+        return;
+      }
       
-      if (err.message?.includes('network')) {
-        errorMessage = 'Network error during Apple Sign In. Please check your connection and try again.';
-      } else if (err.message?.includes('token')) {
-        errorMessage = 'Authentication token error. Please try signing in again.';
-      } else if (err.message) {
+      if (err.code === 'ERR_REQUEST_FAILED') {
+        Alert.alert('Apple Sign In Failed', 'Request failed. Please check your internet connection and try again.');
+        return;
+      }
+      
+      // Provide user-friendly error messages
+      let errorMessage = 'An unexpected error occurred during Apple Sign In. Please try again.';
+      
+      if (err.message?.toLowerCase().includes('network')) {
+        errorMessage = 'Network connection error. Please check your internet connection and try again.';
+      } else if (err.message?.toLowerCase().includes('token') || err.message?.toLowerCase().includes('nonce')) {
+        errorMessage = 'Authentication security error. Please try signing in again.';
+      } else if (err.message?.toLowerCase().includes('invalid login credentials')) {
+        errorMessage = 'Apple authentication failed. Please try again or contact support if the issue persists.';
+      } else if (err.message && err.message.length < 200) {
+        // Show the actual error message if it's reasonable length and user-friendly
         errorMessage = err.message;
       }
       
       Alert.alert('Apple Sign In Failed', errorMessage);
+    } finally {
+      setSocialLoading(false);
     }
-    setSocialLoading(false);
   };
 
   const handleRegister = async () => {

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Check Invoices Table Structure</title>
+    <style>
+        body { font-family: monospace; margin: 20px; background: #1a1a1a; color: #00ff00; }
+        .error { color: #ff4444; }
+        .success { color: #44ff44; }
+        .warning { color: #ffaa44; }
+        .info { color: #4488ff; }
+        pre { background: #111; padding: 10px; border-radius: 4px; overflow-x: auto; }
+        button { 
+            background: #333; color: #fff; border: 1px solid #555; 
+            padding: 8px 16px; margin: 5px; cursor: pointer; border-radius: 4px;
+        }
+        button:hover { background: #444; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #555; padding: 8px; text-align: left; }
+        th { background: #333; }
+    </style>
+</head>
+<body>
+    <h1>🗄️ Check Invoices Table Structure</h1>
+    
+    <div>
+        <button onclick="checkTableStructure()">Check Table Structure</button>
+        <button onclick="checkSampleData()">Check Sample Data</button>
+        <button onclick="applyMissingColumns()">Apply Missing Columns</button>
+    </div>
+    
+    <div id="results"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        const supabaseUrl = 'https://jtfucttzaswmqqhmmhfb.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI4NTUxMjEsImV4cCI6MjA2ODQzMTEyMX0.9lJqoqnTa3X5cKLNDTf7Vx7cQGz8bGZkTfkLQb0GEgY';
+        const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+
+        let resultsDiv = document.getElementById('results');
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.className = type;
+            div.innerHTML = `[${timestamp}] ${message}`;
+            resultsDiv.appendChild(div);
+        }
+
+        window.checkTableStructure = async function() {
+            log('🔍 Checking invoices table structure...', 'info');
+            
+            try {
+                // Get table structure using information_schema
+                const { data: columns, error } = await supabase
+                    .rpc('get_table_columns', { table_name: 'invoices' })
+                    .catch(async () => {
+                        // Fallback: try to get a sample record to see what columns exist
+                        const { data: sample, error: sampleError } = await supabase
+                            .from('invoices')
+                            .select('*')
+                            .limit(1);
+                        
+                        if (sampleError && sampleError.code !== 'PGRST116') {
+                            throw sampleError;
+                        }
+                        
+                        return { data: sample };
+                    });
+
+                if (columns) {
+                    log('✅ Table structure retrieved', 'success');
+                    
+                    // Display columns in a table
+                    let tableHTML = '<table><tr><th>Column Name</th><th>Data Type</th><th>Nullable</th><th>Default</th></tr>';
+                    columns.forEach(col => {
+                        tableHTML += `<tr><td>${col.column_name}</td><td>${col.data_type}</td><td>${col.is_nullable}</td><td>${col.column_default || ''}</td></tr>`;
+                    });
+                    tableHTML += '</table>';
+                    
+                    resultsDiv.innerHTML += tableHTML;
+                } else {
+                    // Show what we can from sample data
+                    const { data: sample } = await supabase
+                        .from('invoices')
+                        .select('*')
+                        .limit(1);
+
+                    if (sample && sample.length > 0) {
+                        log('📋 Available columns from sample data:', 'info');
+                        const columns = Object.keys(sample[0]);
+                        log(`Columns: ${columns.join(', ')}`, 'info');
+                    } else {
+                        log('📋 Table exists but no sample data available', 'warning');
+                    }
+                }
+
+                // Check for specific columns we need
+                const requiredColumns = [
+                    'due_date', 'issue_date', 'total_amount', 'invoice_number', 
+                    'billing_period_start', 'billing_period_end', 'line_items',
+                    'subtotal', 'tax_amount', 'payment_status', 'paid_date',
+                    'payment_method', 'payment_reference', 'generated_automatically',
+                    'generation_date', 'email_sent', 'email_sent_date', 'rental_id', 'rental_type'
+                ];
+
+                log('🔍 Checking required columns...', 'info');
+                
+                for (const col of requiredColumns) {
+                    try {
+                        const { error: colError } = await supabase
+                            .from('invoices')
+                            .select(col)
+                            .limit(0);
+                        
+                        if (colError) {
+                            log(`❌ Missing column: ${col}`, 'error');
+                        } else {
+                            log(`✅ Column exists: ${col}`, 'success');
+                        }
+                    } catch (err) {
+                        log(`❌ Missing column: ${col}`, 'error');
+                    }
+                }
+
+            } catch (error) {
+                log(`❌ Error checking table structure: ${error.message}`, 'error');
+                console.error(error);
+            }
+        };
+
+        window.checkSampleData = async function() {
+            log('🔍 Checking sample invoice data...', 'info');
+            
+            try {
+                const { data: invoices, error } = await supabase
+                    .from('invoices')
+                    .select('*')
+                    .limit(3);
+
+                if (error) {
+                    log(`❌ Error fetching invoices: ${error.message}`, 'error');
+                    return;
+                }
+
+                log(`📊 Found ${invoices?.length || 0} sample invoices`, 'info');
+                
+                if (invoices && invoices.length > 0) {
+                    log('📋 Sample invoice structure:', 'info');
+                    log(`<pre>${JSON.stringify(invoices[0], null, 2)}</pre>`, 'info');
+                }
+
+            } catch (error) {
+                log(`❌ Error checking sample data: ${error.message}`, 'error');
+            }
+        };
+
+        window.applyMissingColumns = async function() {
+            log('🔧 This would apply the missing columns...', 'info');
+            log('⚠️ Please run the create-automated-billing-tables.sql script in your Supabase dashboard', 'warning');
+            log('📋 Script location: create-automated-billing-tables.sql', 'info');
+        };
+
+        // Auto-run on load
+        setTimeout(checkTableStructure, 1000);
+    </script>
+</body>
+</html>

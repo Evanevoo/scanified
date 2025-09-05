@@ -1,5 +1,9 @@
 # 🚨 URGENT: Email Invitation Setup Guide
 
+## ⚠️ CRITICAL UPDATE: Gmail No Longer Supported
+
+**Google has disabled external email services from sending emails from Gmail addresses.** Gmail authentication will fail with the error: "Authentication unsuccessful".
+
 ## Problem
 Users are not receiving email invitations because the email service is not properly configured.
 
@@ -9,22 +13,42 @@ Users are not receiving email invitations because the email service is not prope
 
 Go to your **Netlify Dashboard** → **Site Settings** → **Environment Variables** and add these variables:
 
-#### Option A: Gmail (Easiest for Development)
+#### ✅ Option 1: SMTP2GO (HIGHLY RECOMMENDED)
 ```env
+SMTP2GO_USER=your_smtp2go_username
+SMTP2GO_PASSWORD=your_smtp2go_password
+SMTP2GO_FROM=noreply@yourdomain.com
+```
+
+#### ❌ Option 2: Gmail (DEPRECATED - No Longer Works)
+```env
+# Gmail no longer works due to Google's policy changes
 EMAIL_USER=your-gmail@gmail.com
 EMAIL_PASSWORD=your-gmail-app-password
 EMAIL_FROM=noreply@yourdomain.com
 ```
 
-#### Option B: SendGrid (Recommended for Production)
+#### ✅ Option 3: SendGrid (Alternative)
 ```env
 EMAIL_USER=apikey
 EMAIL_PASSWORD=your-sendgrid-api-key
 EMAIL_FROM=noreply@yourdomain.com
 ```
 
-### Step 2: Get Gmail App Password (If Using Gmail)
+### Step 2: Get SMTP2GO Credentials (Skip if using Gmail)
 
+1. **Sign up at [SMTP2GO](https://www.smtp2go.com/)**
+2. **Create SMTP User**:
+   - Go to Settings → API Keys & SMTP
+   - Click "Add SMTP User"
+   - Create username and password
+   - Use these as `SMTP2GO_USER` and `SMTP2GO_PASSWORD`
+
+### ⚠️ Gmail Setup (DEPRECATED - Will Not Work)
+
+**Gmail no longer works due to Google's policy changes.** Please use SMTP2GO instead.
+
+If you must try Gmail (it will fail):
 1. **Enable 2-Factor Authentication** on your Gmail account
 2. **Generate App Password**:
    - Go to [Google Account Settings](https://myaccount.google.com/)
@@ -67,8 +91,11 @@ transporter = nodemailer.createTransporter({
 ### Common Error Messages and Solutions
 
 #### "Email service not configured"
-- **Cause**: `EMAIL_USER` or `EMAIL_PASSWORD` environment variables not set
-- **Solution**: Add the environment variables in Netlify Dashboard
+- **Cause**: Email service environment variables not set
+- **Solution**: Add one of the following sets of variables in Netlify Dashboard:
+  - SMTP2GO: `SMTP2GO_USER`, `SMTP2GO_PASSWORD`, `SMTP2GO_FROM`
+  - Gmail: `EMAIL_USER`, `EMAIL_PASSWORD`, `EMAIL_FROM`
+  - SendGrid: `EMAIL_USER` (as "apikey"), `EMAIL_PASSWORD` (API key), `EMAIL_FROM`
 
 #### "Email authentication failed (EAUTH)"
 - **Cause**: Wrong email credentials
@@ -100,6 +127,41 @@ curl -X POST https://your-site.netlify.app/.netlify/functions/send-email \
     }
   }'
 ```
+
+### Quick Email Configuration Test
+
+Create a test file to verify your email configuration:
+
+```javascript
+// test-email-config.js
+import nodemailer from 'nodemailer';
+
+async function testEmailConfig() {
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP2GO_USER ? 'mail.smtp2go.com' : 'smtp-mail.outlook.com',
+    port: 587,
+    secure: false,
+    auth: {
+      user: process.env.SMTP2GO_USER || process.env.EMAIL_USER,
+      pass: process.env.SMTP2GO_PASSWORD || process.env.EMAIL_PASSWORD
+    },
+    tls: {
+      rejectUnauthorized: false
+    }
+  });
+
+  try {
+    await transporter.verify();
+    console.log('✅ Email configuration is working!');
+  } catch (error) {
+    console.error('❌ Email configuration error:', error.message);
+  }
+}
+
+testEmailConfig();
+```
+
+Run it with: `node test-email-config.js`
 
 ## 📧 Alternative Email Services
 
@@ -136,12 +198,22 @@ curl -X POST https://your-site.netlify.app/.netlify/functions/send-email \
 3. **Enhanced Netlify function** - More detailed logging and error reporting
 4. **Environment variable validation** - Function checks if email credentials are configured
 5. **Graceful error handling** - Invites are still created even if email fails
+6. **Fixed environment variable names** - Updated template to match function expectations
+7. **Added configuration test script** - Quick verification of email setup
 
 ## 🎯 Next Steps
 
-1. **Configure email service** using one of the options above
-2. **Deploy the site** with the new environment variables
-3. **Test invitation sending** 
-4. **Monitor function logs** for any issues
+1. **Sign up for SMTP2GO** at https://www.smtp2go.com/ (free plan available)
+2. **Get your SMTP credentials** from their dashboard
+3. **Run the test script**: `node smtp2go-test.js` to verify configuration
+4. **Configure Netlify environment variables** with your SMTP2GO credentials
+5. **Deploy the site** and test invitation sending
+6. **Monitor function logs** for any issues in Netlify Dashboard
+
+### 📚 Additional Resources
+
+- **Complete SMTP2GO Setup Guide**: See `SMTP2GO_SETUP_GUIDE.md`
+- **Alternative Email Services**: SendGrid, Resend, Mailgun
+- **SMTP2GO Documentation**: https://www.smtp2go.com/docs/
 
 The invitation system will now work properly once the email service is configured!

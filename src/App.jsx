@@ -12,6 +12,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import { initAllTracking, trackPageView } from './utils/analytics';
 import { initializeDisasterRecovery } from './utils/disasterRecovery';
 import OrganizationRegistration from './pages/OrganizationRegistration';
+import UserRegistration from './pages/UserRegistration';
 import Billing from './pages/Billing';
 import OwnerDashboard from './pages/OwnerDashboard';
 import CustomerPortal from './pages/CustomerPortal';
@@ -22,6 +23,7 @@ import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import LandingPage from './pages/LandingPage';
 import DebugAuth from './pages/DebugAuth';
 import FixOrganizationLink from './pages/FixOrganizationLink';
+import OAuthOrganizationLink from './pages/OAuthOrganizationLink';
 
 import CustomerBillingPortal from './pages/CustomerBillingPortal';
 import ResetPassword from './pages/ResetPassword';
@@ -52,6 +54,8 @@ import AssetConfigurationManager from './pages/OwnerPortal/AssetConfigurationMan
 import FileFormatManager from './pages/OwnerPortal/FileFormatManager';
 import FormatConfigurationManager from './pages/OwnerPortal/FormatConfigurationManager';
 import RoleManagement from './pages/OwnerPortal/RoleManagement';
+import ComprehensiveRoleManager from './pages/ComprehensiveRoleManager';
+import OrganizationJoinCodes from './pages/OrganizationJoinCodes';
 import PageBuilder from './pages/OwnerPortal/PageBuilder';
 import ContactManagement from './pages/OwnerPortal/ContactManagement';
 import OwnerCommandCenter from './pages/OwnerPortal/OwnerCommandCenter';
@@ -69,7 +73,10 @@ import TruckReconciliation from './pages/TruckReconciliation';
 import ChainOfCustody from './pages/ChainOfCustody';
 import PalletizationSystem from './pages/PalletizationSystem';
 import AdvancedRentalCalculations from './pages/AdvancedRentalCalculations';
-import PredictiveAnalytics from './pages/PredictiveAnalytics';
+import RentalPricingManager from './pages/RentalPricingManager';
+import TestSimpleComponent from './pages/TestSimpleComponent';
+import MainLayout from './components/MainLayout';
+import TruckReconciliationDashboard from './pages/TruckReconciliationDashboard';
 import TestAdvancedFeatures from './pages/TestAdvancedFeatures';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
@@ -142,7 +149,7 @@ const IntegrationsPage = lazy(() => import('./pages/Integrations'));
 const BottleDetail = lazy(() => import('./pages/BottleDetail'));
 const AssetDetail = lazy(() => import('./pages/AssetDetail'));
 const Assets = lazy(() => import('./pages/Assets'));
-const InventoryManagement = lazy(() => import('./pages/InventoryManagement'));
+const InventoryManagement = lazy(() => import('./pages/InventoryManagementFixed'));
 const SmartInventory = lazy(() => import('./pages/SmartInventory'));
 const SupportCenter = lazy(() => import('./pages/SupportCenter'));
 const OrganizationAnalytics = lazy(() => import('./pages/OrganizationAnalytics'));
@@ -193,15 +200,18 @@ function AppContent() {
                   <Route path="/" element={
                     profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
                     profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
+                    profile && !organization ? <Navigate to="/connect-organization" replace /> :
                     <LandingPage />
                   } />
                   <Route path="/landing" element={<LandingPage />} />
                   <Route path="/login" element={
                     profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
                     profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
+                    profile && !organization ? <Navigate to="/connect-organization" replace /> :
                     <LoginPage />
                   } />
                   <Route path="/register" element={<OrganizationRegistration />} />
+                  <Route path="/signup" element={<UserRegistration />} />
                   <Route path="/setup" element={<OrganizationRegistration />} />
                   <Route path="/contact" element={<ContactUs />} />
                   <Route path="/faq" element={<FAQ />} />
@@ -216,6 +226,7 @@ function AppContent() {
                   <Route path="/portal" element={<CustomerPortal />} />
                   <Route path="/accept-invite" element={<AcceptInvite />} />
                   <Route path="/fix-organization-link" element={<FixOrganizationLink />} />
+                  <Route path="/connect-organization" element={<OAuthOrganizationLink />} />
 
                   {/* --- Debug Routes --- */}
                   <Route path="/debug" element={<DebugAuth />} />
@@ -292,6 +303,12 @@ function AppContent() {
                     <Route path="/import-customer-info" element={<ImportCustomerInfo />} />
                     <Route path="/scanned-orders" element={<ScannedOrders />} />
                     <Route path="/user-management" element={<UserManagement />} />
+                    <Route path="/role-management" element={<ComprehensiveRoleManager />} />
+                    <Route path="/organization-join-codes" element={<OrganizationJoinCodes />} />
+                    
+                    {/* Legacy routes - redirect to new comprehensive manager */}
+                    <Route path="/role-permission-manager" element={<Navigate to="/role-management" replace />} />
+                    <Route path="/unified-role-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/import-asset-balance" element={<ImportAssetBalance />} />
                     <Route path="/import-approvals" element={<ImportApprovals />} />
                               <Route path="/import-approval/:invoiceNumber/detail" element={<ImportApprovalDetail />} />
@@ -376,9 +393,15 @@ function AppContent() {
                       <AdvancedRentalCalculations />
                     </ProtectedRoute>
                   } />
-                  <Route path="/predictive-analytics" element={
+                  <Route path="/rental-pricing-manager" element={
                     <ProtectedRoute>
-                      <PredictiveAnalytics />
+                      <RentalPricingManager />
+                    </ProtectedRoute>
+                  } />
+                        <Route path="/test-emergency" element={<TestSimpleComponent />} />
+                  <Route path="/truck-reconciliation-dashboard" element={
+                    <ProtectedRoute>
+                      <TruckReconciliationDashboard />
                     </ProtectedRoute>
                   } />
                   <Route path="/test-advanced-features" element={
@@ -388,7 +411,11 @@ function AppContent() {
                   } />
 
                   {/* Catch-all for any other unmatched routes */}
-                  <Route path="*" element={profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : <Navigate to="/" replace />} />
+                  <Route path="*" element={
+                    profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
+                    profile && !organization ? <Navigate to="/connect-organization" replace /> :
+                    <Navigate to="/" replace />
+                  } />
                 </Routes>
               </div>
               <Toaster 
@@ -447,4 +474,4 @@ function App() {
   );
 }
 
-export default App; 
+export default App;

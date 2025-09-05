@@ -134,6 +134,7 @@ function CustomerDashboard({ customer, stats }) {
               variant="outlined"
               startIcon={<ScheduleIcon />}
               sx={{ py: 2 }}
+              onClick={() => setActiveTab(2)}
             >
               Schedule Delivery
             </Button>
@@ -144,6 +145,7 @@ function CustomerDashboard({ customer, stats }) {
               variant="outlined"
               startIcon={<ServiceIcon />}
               sx={{ py: 2 }}
+              onClick={() => setActiveTab(3)}
             >
               Request Service
             </Button>
@@ -154,6 +156,7 @@ function CustomerDashboard({ customer, stats }) {
               variant="outlined"
               startIcon={<TrackIcon />}
               sx={{ py: 2 }}
+              onClick={() => setActiveTab(1)}
             >
               Track Cylinders
             </Button>
@@ -164,6 +167,7 @@ function CustomerDashboard({ customer, stats }) {
               variant="outlined"
               startIcon={<SupportIcon />}
               sx={{ py: 2 }}
+              onClick={() => window.open('/support', '_blank')}
             >
               Contact Support
             </Button>
@@ -317,8 +321,8 @@ function CylinderTracking({ customerId }) {
                       size="small"
                       startIcon={<TrackIcon />}
                       onClick={() => {
-                        // Open detailed tracking view
-                        console.log('Track cylinder:', cylinder.barcode_number);
+                        // Show detailed tracking info in an alert (temporary solution)
+                        alert(`Cylinder Details:\n\nBarcode: ${cylinder.barcode_number}\nProduct: ${cylinder.product_type}\nStatus: ${cylinder.status}\nLocation: ${cylinder.location || 'Unknown'}\nDays at Location: ${cylinder.days_at_location || 0}\nLast Updated: ${new Date(cylinder.updated_at).toLocaleString()}`);
                       }}
                     >
                       View Details

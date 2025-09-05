@@ -20,7 +20,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
-import { NotificationService } from '../services/notificationService';
+// import { NotificationService } from '../services/notificationService'; // Removed
 
 const WORKFLOW_TYPES = {
   MAINTENANCE: 'maintenance',

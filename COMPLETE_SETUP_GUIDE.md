@@ -78,8 +78,9 @@ STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
 # Optional but recommended
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-app-password
+SMTP2GO_USER=your-smtp2go-username
+SMTP2GO_PASSWORD=your-smtp2go-password
+SMTP2GO_FROM=noreply@yourdomain.com
 ```
 
 ### Validate Configuration

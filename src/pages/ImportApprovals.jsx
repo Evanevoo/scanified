@@ -39,7 +39,6 @@ import {
   SkipNext as SkipNextIcon,
   Approval as ApprovalIcon,
   RuleFolder as RuleFolderIcon,
-
   BugReport as BugReportIcon,
   Security as SecurityIcon,
   Inventory as InventoryIcon,
@@ -53,10 +52,13 @@ import {
   CallSplit as SplitIcon,
   Archive as ArchiveIcon,
   Assessment as AssessmentIcon,
-  QrCodeScanner as QrCodeScannerIcon
+  QrCodeScanner as QrCodeScannerIcon,
+  PlayArrow as PlayIcon,
+  Speed as SpeedIcon
 } from '@mui/icons-material';
 import ImportApprovalDetail from './ImportApprovalDetail';
 import QuantityDiscrepancyDetector from '../components/QuantityDiscrepancyDetector';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 // Enhanced status definitions for verification states
 const VERIFICATION_STATES = {
@@ -320,6 +322,21 @@ export default function ImportApprovals() {
     processing: 0
   });
 
+  // Automatic scanning state
+  const [autoScanning, setAutoScanning] = useState(false);
+  const [scannerActive, setScannerActive] = useState(false);
+  const [scanSpeed, setScanSpeed] = useState(1000); // milliseconds between scans
+  const [scannedItems, setScannedItems] = useState([]);
+  const [scanStats, setScanStats] = useState({
+    totalScans: 0,
+    successfulScans: 0,
+    errorScans: 0,
+    avgScanTime: 0
+  });
+  const [scanDialog, setScanDialog] = useState(false);
+  const scannerRef = useRef(null);
+  const scanTimeRef = useRef(null);
+
   // Define handleSelectAll early to avoid initialization errors
   const handleSelectAll = () => {
     setSelectedRecords(
@@ -357,6 +374,16 @@ export default function ImportApprovals() {
     fetchScannedOrders();
     fetchGasTypes();
     fetchBottles();
+  }, []);
+
+  // Scanner cleanup effect
+  useEffect(() => {
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.clear();
+        scannerRef.current = null;
+      }
+    };
   }, []);
 
   // Enhanced data fetching with statistics
@@ -820,6 +847,195 @@ export default function ImportApprovals() {
       o => (o.order_number || '').toString().trim() === (orderNum || '').toString().trim()
     );
   }
+
+  // Automatic scanning functions
+  const initializeScanner = () => {
+    try {
+      if (scannerRef.current) {
+        scannerRef.current.clear();
+      }
+
+      const scanner = new Html5QrcodeScanner(
+        'qr-reader',
+        {
+          fps: 30, // High FPS for fast scanning
+          qrbox: { width: 400, height: 200 },
+          aspectRatio: 1.777778,
+          supportedScanTypes: [
+            Html5QrcodeScanType.SCAN_TYPE_CAMERA
+          ],
+          rememberLastUsedCamera: true,
+          showTorchButtonIfSupported: true
+        },
+        false
+      );
+
+      scanner.render(
+        (decodedText) => handleScanSuccess(decodedText),
+        (error) => console.debug('Scan error:', error)
+      );
+
+      scannerRef.current = scanner;
+      setScannerActive(true);
+    } catch (error) {
+      console.error('Failed to initialize scanner:', error);
+      setError('Failed to initialize scanner: ' + error.message);
+    }
+  };
+
+  const handleScanSuccess = async (scannedText) => {
+    const startTime = Date.now();
+    scanTimeRef.current = startTime;
+
+    try {
+      // Validate barcode format (9 digits for gas cylinders)
+      if (!/^\d{9}$/.test(scannedText)) {
+        addScanResult({
+          barcode: scannedText,
+          status: 'error',
+          error: 'Invalid barcode format - must be exactly 9 digits',
+          timestamp: new Date(),
+          scanTime: 0
+        });
+        return;
+      }
+
+      // Check if already scanned
+      if (scannedItems.some(item => item.barcode === scannedText)) {
+        addScanResult({
+          barcode: scannedText,
+          status: 'error',
+          error: 'Barcode already scanned',
+          timestamp: new Date(),
+          scanTime: 0
+        });
+        return;
+      }
+
+      // Process the scan
+      const scanResult = await processScannedBarcode(scannedText);
+      const scanTime = Date.now() - startTime;
+
+      addScanResult({
+        ...scanResult,
+        scanTime,
+        timestamp: new Date()
+      });
+
+      // Update stats
+      setScanStats(prev => ({
+        totalScans: prev.totalScans + 1,
+        successfulScans: scanResult.status === 'success' ? prev.successfulScans + 1 : prev.successfulScans,
+        errorScans: scanResult.status === 'error' ? prev.errorScans + 1 : prev.errorScans,
+        avgScanTime: ((prev.avgScanTime * prev.totalScans) + scanTime) / (prev.totalScans + 1)
+      }));
+
+      // Auto-refresh data after successful scan
+      if (scanResult.status === 'success') {
+        setTimeout(() => fetchData(), 500);
+      }
+
+    } catch (error) {
+      const scanTime = Date.now() - startTime;
+      addScanResult({
+        barcode: scannedText,
+        status: 'error',
+        error: error.message,
+        timestamp: new Date(),
+        scanTime
+      });
+    }
+  };
+
+  const processScannedBarcode = async (barcode) => {
+    try {
+      // Look up bottle information
+      const { data: bottles, error } = await supabase
+        .from('bottles')
+        .select('*')
+        .eq('bottle_barcode', barcode);
+
+      if (error) throw error;
+
+      if (!bottles || bottles.length === 0) {
+        return {
+          status: 'error',
+          error: 'Bottle not found in database',
+          barcode
+        };
+      }
+
+      const bottle = bottles[0];
+
+      // Create scan record
+      const { error: scanError } = await supabase
+        .from('bottle_scans')
+        .insert({
+          bottle_barcode: barcode,
+          product_code: bottle.product_code,
+          scan_type: 'delivery',
+          scan_date: new Date().toISOString(),
+          location: bottle.location || 'Unknown',
+          user_id: (await supabase.auth.getUser()).data.user?.id,
+          created_at: new Date().toISOString()
+        });
+
+      if (scanError) throw scanError;
+
+      return {
+        status: 'success',
+        barcode,
+        product_code: bottle.product_code,
+        description: bottle.description,
+        location: bottle.location
+      };
+
+    } catch (error) {
+      console.error('Error processing scanned barcode:', error);
+      return {
+        status: 'error',
+        error: error.message,
+        barcode
+      };
+    }
+  };
+
+  const addScanResult = (result) => {
+    setScannedItems(prev => [result, ...prev.slice(0, 49)]); // Keep last 50 scans
+  };
+
+  const startAutoScanning = () => {
+    setAutoScanning(true);
+    setScanDialog(true);
+    initializeScanner();
+  };
+
+  const stopAutoScanning = () => {
+    setAutoScanning(false);
+    setScannerActive(false);
+    if (scannerRef.current) {
+      scannerRef.current.clear();
+      scannerRef.current = null;
+    }
+    setScanDialog(false);
+  };
+
+  const toggleScanning = () => {
+    if (autoScanning) {
+      stopAutoScanning();
+    } else {
+      startAutoScanning();
+    }
+  };
+
+  const adjustScanSpeed = (speed) => {
+    setScanSpeed(speed);
+    if (scannerRef.current) {
+      // Reinitialize scanner with new speed
+      stopAutoScanning();
+      setTimeout(() => startAutoScanning(), 100);
+    }
+  };
 
   // Real approval logic for invoices
   async function processInvoice(invoiceData) {

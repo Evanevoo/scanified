@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Role Deletion Fix</title>
+    <style>
+        body { font-family: monospace; margin: 20px; background: #1a1a1a; color: #00ff00; }
+        .error { color: #ff4444; }
+        .success { color: #44ff44; }
+        .warning { color: #ffaa44; }
+        .info { color: #4488ff; }
+        pre { background: #111; padding: 10px; border-radius: 4px; overflow-x: auto; }
+        button { 
+            background: #333; color: #fff; border: 1px solid #555; 
+            padding: 8px 16px; margin: 5px; cursor: pointer; border-radius: 4px;
+        }
+        button:hover { background: #444; }
+    </style>
+</head>
+<body>
+    <h1>🗑️ Role Deletion Fix Test</h1>
+    
+    <div>
+        <button onclick="checkRLS()">Check RLS Policies</button>
+        <button onclick="testRoleDeletion()">Test Role Deletion</button>
+        <button onclick="createTestRole()">Create Test Role</button>
+        <button onclick="fixRLS()">Apply RLS Fix</button>
+    </div>
+    
+    <div id="results"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        const supabaseUrl = 'https://jtfucttzaswmqqhmmhfb.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI4NTUxMjEsImV4cCI6MjA2ODQzMTEyMX0.9lJqoqnTa3X5cKLNDTf7Vx7cQGz8bGZkTfkLQb0GEgY';
+        const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+
+        let resultsDiv = document.getElementById('results');
+        let currentUser = null;
+        let testRoleId = null;
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.className = type;
+            div.innerHTML = `[${timestamp}] ${message}`;
+            resultsDiv.appendChild(div);
+        }
+
+        async function init() {
+            try {
+                const { data: { user }, error } = await supabase.auth.getUser();
+                if (error) throw error;
+                
+                currentUser = user;
+                if (user) {
+                    const { data: profile } = await supabase
+                        .from('profiles')
+                        .select('role, organization_id')
+                        .eq('id', user.id)
+                        .single();
+                    
+                    log(`✅ Authenticated as ${user.email}`, 'success');
+                    log(`👤 Role: ${profile?.role || 'Unknown'}`, 'info');
+                    log(`🏢 Org ID: ${profile?.organization_id || 'None'}`, 'info');
+                } else {
+                    log('❌ Not authenticated', 'error');
+                }
+            } catch (err) {
+                log(`❌ Auth error: ${err.message}`, 'error');
+            }
+        }
+
+        window.checkRLS = async function() {
+            if (!currentUser) {
+                log('❌ Must be authenticated', 'error');
+                return;
+            }
+
+            log('🛡️ Checking RLS policies on roles table...', 'info');
+            
+            try {
+                // Test read access
+                const { data: readTest, error: readError } = await supabase
+                    .from('roles')
+                    .select('*')
+                    .limit(5);
+
+                if (readError) {
+                    log(`❌ Cannot read roles table: ${readError.message}`, 'error');
+                } else {
+                    log(`✅ Can read roles table (${readTest.length} roles found)`, 'success');
+                }
+
+                // Test if we can create a role (insert permission)
+                const testRoleName = `test-role-${Date.now()}`;
+                const { data: insertTest, error: insertError } = await supabase
+                    .from('roles')
+                    .insert([{
+                        name: testRoleName,
+                        display_name: 'Test Role'
+                    }])
+                    .select()
+                    .single();
+
+                if (insertError) {
+                    log(`❌ Cannot insert roles: ${insertError.message}`, 'error');
+                } else {
+                    log(`✅ Can insert roles`, 'success');
+                    testRoleId = insertTest.id;
+                    log(`📝 Created test role: ${testRoleId}`, 'info');
+                }
+
+            } catch (err) {
+                log(`❌ RLS check failed: ${err.message}`, 'error');
+            }
+        };
+
+        window.testRoleDeletion = async function() {
+            if (!testRoleId) {
+                log('❌ No test role available. Create one first.', 'error');
+                return;
+            }
+
+            log(`🗑️ Testing deletion of role: ${testRoleId}`, 'info');
+            
+            try {
+                // First verify the role exists
+                const { data: existsCheck, error: existsError } = await supabase
+                    .from('roles')
+                    .select('*')
+                    .eq('id', testRoleId)
+                    .single();
+
+                if (existsError) {
+                    log(`❌ Role doesn't exist or can't be read: ${existsError.message}`, 'error');
+                    return;
+                }
+
+                log(`✅ Role exists: ${existsCheck.name}`, 'success');
+
+                // Now try to delete it
+                const { data: deleteResult, error: deleteError } = await supabase
+                    .from('roles')
+                    .delete()
+                    .eq('id', testRoleId)
+                    .select();
+
+                log(`🗑️ Delete attempt result:`, 'info');
+                log(`  - Error: ${deleteError ? deleteError.message : 'None'}`, deleteError ? 'error' : 'success');
+                log(`  - Deleted rows: ${deleteResult ? deleteResult.length : 0}`, deleteResult && deleteResult.length > 0 ? 'success' : 'warning');
+
+                if (deleteError) {
+                    log(`❌ Delete failed: ${deleteError.message}`, 'error');
+                } else if (!deleteResult || deleteResult.length === 0) {
+                    log(`⚠️ Delete command succeeded but no rows were deleted`, 'warning');
+                    log(`🔍 This indicates RLS is blocking the deletion`, 'warning');
+                } else {
+                    log(`✅ Role deleted successfully!`, 'success');
+                    testRoleId = null;
+                }
+
+            } catch (err) {
+                log(`❌ Deletion test failed: ${err.message}`, 'error');
+            }
+        };
+
+        window.createTestRole = async function() {
+            if (!currentUser) {
+                log('❌ Must be authenticated', 'error');
+                return;
+            }
+
+            log('🏗️ Creating test role for deletion...', 'info');
+            
+            const testRoleName = `test-role-${Date.now()}`;
+            
+            try {
+                const { data: newRole, error } = await supabase
+                    .from('roles')
+                    .insert([{
+                        name: testRoleName,
+                        display_name: 'Test Role for Deletion',
+                        description: 'Temporary role for testing deletion functionality'
+                    }])
+                    .select()
+                    .single();
+
+                if (error) {
+                    log(`❌ Failed to create test role: ${error.message}`, 'error');
+                } else {
+                    log(`✅ Created test role: ${newRole.name}`, 'success');
+                    log(`🆔 Role ID: ${newRole.id}`, 'info');
+                    testRoleId = newRole.id;
+                }
+
+            } catch (err) {
+                log(`❌ Error creating test role: ${err.message}`, 'error');
+            }
+        };
+
+        window.fixRLS = async function() {
+            log('🔧 RLS Fix Instructions', 'info');
+            log('⚠️ Cannot execute SQL from browser for security reasons', 'warning');
+            log('📋 Please run the following in your Supabase SQL editor:', 'info');
+            log('', 'info');
+            log('1. Go to: https://supabase.com/dashboard/project/jtfucttzaswmqqhmmhfb/sql', 'info');
+            log('2. Run the SQL from fix-roles-table-rls.sql file', 'info');
+            log('3. Come back and test role deletion again', 'info');
+            log('', 'info');
+            log('The key policy needed is:', 'info');
+            log('CREATE POLICY "Admins can delete roles" ON public.roles FOR DELETE TO authenticated USING (...admin check...);', 'info');
+        };
+
+        // Auto-initialize
+        init();
+    </script>
+</body>
+</html>

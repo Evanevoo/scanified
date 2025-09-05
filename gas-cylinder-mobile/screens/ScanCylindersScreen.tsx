@@ -8,6 +8,7 @@ import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
 import ScanOverlay from '../components/ScanOverlay';
 import { FormatValidationService } from '../services/FormatValidationService';
+import { Platform } from '../utils/platform';
 
 const { width, height } = Dimensions.get('window');
 
@@ -115,7 +116,11 @@ export default function ScanCylindersScreen() {
     const fetchCustomers = async () => {
       if (!profile?.organization_id) {
         console.log('No organization found, skipping customer fetch');
+        console.log('Profile data:', profile);
+        console.log('User authenticated:', !!profile);
         setLoading(false);
+        setError('No organization associated with your account. Please contact your administrator.');
+        setCustomers([]);
         return;
       }
 
@@ -489,6 +494,7 @@ export default function ScanCylindersScreen() {
               title="Scan Customer Barcode"
               subtitle="Position the customer barcode within the frame"
               isScanning={scanned}
+              hideScanningLine={Platform.OS === 'ios'}
               onClose={() => {
                 setShowCustomerScan(false);
                 setScannerVisible(false);
@@ -514,6 +520,7 @@ export default function ScanCylindersScreen() {
               title="Scan Order Number"
               subtitle="Position the order barcode within the frame"
               isScanning={scanned}
+              hideScanningLine={Platform.OS === 'ios'}
               onClose={() => {
                 setShowOrderScan(false);
                 setScannerVisible(false);

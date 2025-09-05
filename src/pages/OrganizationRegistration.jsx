@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Box, Card, CardContent, Typography, TextField, Button, 
   Alert, CircularProgress, Stepper, Step, StepLabel,
@@ -22,6 +22,170 @@ function OrganizationRegistration() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [subscriptionPlans, setSubscriptionPlans] = useState([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [emailValidation, setEmailValidation] = useState({ checking: false, available: true, message: '' });
+  const [orgNameValidation, setOrgNameValidation] = useState({ checking: false, available: true, message: '' });
+
+  // Debounce function for validation
+  const debounce = (func, wait) => {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  };
+
+  // Check if email is available
+  const checkEmailAvailability = async (email) => {
+    if (!email || email.length < 3) {
+      setEmailValidation({ checking: false, available: true, message: '' });
+      return;
+    }
+
+    setEmailValidation({ checking: true, available: true, message: '' });
+
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', email.toLowerCase().trim())
+        .single();
+
+      if (data) {
+        setEmailValidation({ 
+          checking: false, 
+          available: false, 
+          message: 'This email is already registered. Please use a different email.' 
+        });
+      } else {
+        setEmailValidation({ 
+          checking: false, 
+          available: true, 
+          message: 'Email is available' 
+        });
+      }
+    } catch (error) {
+      if (error.code === 'PGRST116') {
+        // No user found with this email
+        setEmailValidation({ 
+          checking: false, 
+          available: true, 
+          message: 'Email is available' 
+        });
+      } else {
+        setEmailValidation({ 
+          checking: false, 
+          available: false, 
+          message: 'Error checking email availability' 
+        });
+      }
+    }
+  };
+
+  // Check if organization name is available
+  const checkOrgNameAvailability = async (name) => {
+    if (!name || name.length < 2) {
+      setOrgNameValidation({ checking: false, available: true, message: '' });
+      return;
+    }
+
+    setOrgNameValidation({ checking: true, available: true, message: '' });
+
+    try {
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('id, name')
+        .eq('name', name)
+        .single();
+
+      if (data) {
+        setOrgNameValidation({ 
+          checking: false, 
+          available: false, 
+          message: 'This organization name is already taken. Please choose a different name.' 
+        });
+      } else {
+        setOrgNameValidation({ 
+          checking: false, 
+          available: true, 
+          message: 'Organization name is available' 
+        });
+      }
+    } catch (error) {
+      if (error.code === 'PGRST116') {
+        // No organization found with this name
+        setOrgNameValidation({ 
+          checking: false, 
+          available: true, 
+          message: 'Organization name is available' 
+        });
+      } else {
+        setOrgNameValidation({ 
+          checking: false, 
+          available: false, 
+          message: 'Error checking organization name availability' 
+        });
+      }
+    }
+  };
+
+  // Debounced validation functions
+  const debouncedEmailCheck = useCallback(debounce(checkEmailAvailability, 500), []);
+  const debouncedOrgNameCheck = useCallback(debounce(checkOrgNameAvailability, 500), []);
+
+  // Fetch subscription plans from database
+  useEffect(() => {
+    const fetchPlans = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('subscription_plans')
+          .select('*')
+          .eq('is_active', true)
+          .order('price', { ascending: true });
+
+        if (error) throw error;
+        setSubscriptionPlans(data || []);
+      } catch (error) {
+        console.error('Error fetching subscription plans:', error);
+        // Fallback to default plans if database fetch fails
+        setSubscriptionPlans([
+          {
+            id: 'basic',
+            name: 'Basic',
+            price: 29,
+            max_users: 5,
+            max_customers: 100,
+            max_cylinders: 1000
+          },
+          {
+            id: 'professional',
+            name: 'Professional',
+            price: 99,
+            max_users: 15,
+            max_customers: 500,
+            max_cylinders: 5000
+          },
+          {
+            id: 'enterprise',
+            name: 'Enterprise',
+            price: 299,
+            max_users: 999999,
+            max_customers: 999999,
+            max_cylinders: 999999
+          }
+        ]);
+      } finally {
+        setPlansLoading(false);
+      }
+    };
+
+    fetchPlans();
+  }, []);
 
   // Conditional steps based on user login status
   const getSteps = () => {
@@ -65,7 +229,8 @@ function OrganizationRegistration() {
   // Optimized input handlers using useCallback
   const handleOrgNameChange = useCallback((value) => {
     setOrgData(prev => ({ ...prev, name: value }));
-  }, []);
+    debouncedOrgNameCheck(value);
+  }, [debouncedOrgNameCheck]);
 
   const handleOrgSlugChange = useCallback((value) => {
     const cleanSlug = value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
@@ -139,7 +304,8 @@ function OrganizationRegistration() {
 
   const handleUserEmailChange = useCallback((value) => {
     setUserData(prev => ({ ...prev, email: value }));
-  }, []);
+    debouncedEmailCheck(value);
+  }, [debouncedEmailCheck]);
 
   const handleUserRoleChange = useCallback((value) => {
     setUserData(prev => ({ ...prev, role: value }));
@@ -164,9 +330,9 @@ function OrganizationRegistration() {
   const validateStep = (step) => {
     switch (step) {
       case 0:
-        return orgData.name && orgData.slug && orgData.asset_type && orgData.asset_display_name && orgData.asset_display_name_plural && orgData.app_name;
+        return orgData.name && orgData.slug && orgData.asset_type && orgData.asset_display_name && orgData.asset_display_name_plural && orgData.app_name && orgNameValidation.available;
       case 1:
-        return userData.email && userData.password && userData.full_name;
+        return userData.email && userData.password && userData.full_name && emailValidation.available;
       case 2:
         return true;
       default:
@@ -220,20 +386,44 @@ function OrganizationRegistration() {
     console.log('NODE_ENV:', import.meta.env.MODE, 'VITE_NODE_ENV:', import.meta.env.VITE_NODE_ENV);
 
     try {
-      // 0. Check if email already exists
-      const { data: existingUser, error: emailCheckError } = await supabase
+      // 0. Validate input data
+      if (!userData.email || !userData.password || !userData.full_name) {
+        throw new Error('Please fill in all required fields.');
+      }
+
+      if (!orgData.name || !orgData.slug) {
+        throw new Error('Please provide organization name and slug.');
+      }
+
+      // 1. Check if email already exists in profiles table
+      const { data: existingProfile, error: profileCheckError } = await supabase
         .from('profiles')
-        .select('id')
-        .eq('email', userData.email)
+        .select('id, email')
+        .eq('email', userData.email.toLowerCase().trim())
         .single();
 
-      if (existingUser) {
+      if (existingProfile) {
         throw new Error('This email address is already registered. Please use a different email or try logging in.');
       }
 
-      // 1. Create user account (sign up)
+      // 2. Check if organization name/slug already exists
+      const { data: existingOrg, error: orgCheckError } = await supabase
+        .from('organizations')
+        .select('id, name, slug')
+        .or(`name.eq.${orgData.name},slug.eq.${orgData.slug}`)
+        .single();
+
+      if (existingOrg) {
+        if (existingOrg.name === orgData.name) {
+          throw new Error('This organization name is already taken. Please choose a different name.');
+        } else {
+          throw new Error('This organization slug is already taken. Please choose a different name.');
+        }
+      }
+
+      // 3. Create user account (sign up)
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: userData.email,
+        email: userData.email.toLowerCase().trim(),
         password: userData.password,
         options: {
           data: {
@@ -245,21 +435,22 @@ function OrganizationRegistration() {
           emailConfirm: isEmailConfirmationRequired()
         }
       });
+      
       if (authError) {
-        if (authError.message.includes('already registered')) {
+        if (authError.message.includes('already registered') || authError.message.includes('already exists')) {
           throw new Error('This email address is already registered. Please use a different email or try logging in.');
         }
         throw authError;
       }
 
-      // 2. If no session, show confirmation message and stop
+      // 4. If no session, show confirmation message and stop
       if (!authData.session) {
         setSuccess('Registration successful! Please check your email to confirm your account before logging in.');
         setLoading(false);
         return;
       }
 
-      // 3. Wait for session to be established
+      // 5. Wait for session to be established
       let session = authData.session;
       for (let i = 0; i < 10 && !session; i++) {
         const { data: sessionData } = await supabase.auth.getSession();
@@ -269,10 +460,16 @@ function OrganizationRegistration() {
       }
       if (!session) throw new Error('Failed to establish session after sign up. Please try logging in.');
 
-      // 4. Ensure slug is unique (double-check)
+      // 6. Final check: Ensure slug is unique (triple-check)
       const finalSlug = await generateUniqueSlug(orgData.slug);
 
-      // 5. Create organization (now as authenticated user)
+      // 7. Create organization (now as authenticated user)
+      // Get limits from selected plan
+      const selectedPlan = subscriptionPlans.find(p => p.id === orgData.subscription_plan);
+      if (!selectedPlan) {
+        throw new Error('Selected subscription plan not found. Please try again.');
+      }
+
       const { data: org, error: orgError } = await supabase
         .from('organizations')
         .insert({
@@ -283,9 +480,9 @@ function OrganizationRegistration() {
           subscription_status: 'trial',
           trial_end_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
           payment_required: trialData.payment_required,
-          max_users: 10,
-          max_customers: 100,
-          max_bottles: 1000,
+          max_users: selectedPlan.max_users,
+          max_customers: selectedPlan.max_customers,
+          max_cylinders: selectedPlan.max_cylinders,
           asset_type: orgData.asset_type,
           asset_type_plural: orgData.asset_display_name_plural.toLowerCase(),
           asset_display_name: orgData.asset_display_name,
@@ -298,22 +495,29 @@ function OrganizationRegistration() {
         .single();
 
       if (orgError) {
-        if (orgError.code === '23505' && orgError.message.includes('organizations_slug_key')) {
-          throw new Error('This organization name is already taken. Please choose a different name.');
+        if (orgError.code === '23505') {
+          if (orgError.message.includes('organizations_slug_key')) {
+            throw new Error('This organization slug is already taken. Please choose a different name.');
+          } else if (orgError.message.includes('organizations_name_key')) {
+            throw new Error('This organization name is already taken. Please choose a different name.');
+          } else {
+            throw new Error('This organization name or slug is already taken. Please choose a different name.');
+          }
         }
         throw orgError;
       }
 
-      // 6. Create profile, link to org
+      // 8. Create profile, link to org
       const { error: profileError } = await supabase
         .from('profiles')
         .insert({
           id: authData.user.id,
-          email: userData.email,
+          email: userData.email.toLowerCase().trim(),
           full_name: userData.full_name,
           role: userData.role,
           organization_id: org.id
         });
+        
       if (profileError) {
         if (profileError.code === '23505' && profileError.message.includes('profiles_email_key')) {
           throw new Error('This email address is already registered. Please use a different email or try logging in.');
@@ -321,11 +525,11 @@ function OrganizationRegistration() {
         throw profileError;
       }
 
-      // 7. Set up payment if required
+      // 9. Set up payment if required
       if (trialData.payment_required) {
         try {
           await subscriptionService.createCustomer({
-            email: userData.email,
+            email: userData.email.toLowerCase().trim(),
             name: userData.full_name,
             organization_id: org.id
           });
@@ -364,7 +568,21 @@ function OrganizationRegistration() {
                   onChange={(e) => handleOrgNameChange(e.target.value)}
                   onBlur={handleOrgNameBlur}
                   required
-                  helperText="The name of your company or organization"
+                  helperText={
+                    orgNameValidation.checking 
+                      ? "Checking availability..." 
+                      : orgNameValidation.message || "The name of your company or organization"
+                  }
+                  error={!orgNameValidation.available && orgNameValidation.message}
+                  InputProps={{
+                    endAdornment: orgNameValidation.checking ? (
+                      <CircularProgress size={20} />
+                    ) : orgNameValidation.available && orgNameValidation.message ? (
+                      <Chip label="✓" size="small" color="success" />
+                    ) : !orgNameValidation.available ? (
+                      <Chip label="✗" size="small" color="error" />
+                    ) : null
+                  }}
                 />
               </Grid>
               <Grid item xs={12}>
@@ -471,32 +689,27 @@ function OrganizationRegistration() {
                     value={orgData.subscription_plan}
                     onChange={(e) => handleOrgPlanChange(e.target.value)}
                     label="Subscription Plan"
+                    disabled={plansLoading}
                   >
-                    <MenuItem value="basic">
-                      <Box>
-                        <Typography variant="body1">Basic</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          $29/month - 10 users, 100 customers, 1,000 bottles
-                        </Typography>
-                      </Box>
-                    </MenuItem>
-                    <MenuItem value="professional">
-                      <Box>
-                        <Typography variant="body1">Professional</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          $99/month - 50 users, 500 customers, 5,000 bottles
-                        </Typography>
-                      </Box>
-                    </MenuItem>
-                    <MenuItem value="enterprise">
-                      <Box>
-                        <Typography variant="body1">Enterprise</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          $299/month - Unlimited users, customers, and bottles
-                        </Typography>
-                      </Box>
-                    </MenuItem>
+                    {subscriptionPlans.map((plan) => (
+                      <MenuItem key={plan.id} value={plan.id}>
+                        <Box>
+                          <Typography variant="body1">{plan.name}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            ${plan.price}/month - {plan.max_users === 999999 ? 'Unlimited' : plan.max_users} users, {plan.max_customers === 999999 ? 'Unlimited' : plan.max_customers} customers, {plan.max_cylinders === 999999 ? 'Unlimited' : plan.max_cylinders.toLocaleString()} cylinders
+                          </Typography>
+                        </Box>
+                      </MenuItem>
+                    ))}
                   </Select>
+                  {plansLoading && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
+                      <CircularProgress size={16} sx={{ mr: 1 }} />
+                      <Typography variant="caption" color="text.secondary">
+                        Loading plans...
+                      </Typography>
+                    </Box>
+                  )}
                 </FormControl>
               </Grid>
             </Grid>
@@ -527,7 +740,21 @@ function OrganizationRegistration() {
                   value={userData.email}
                   onChange={(e) => handleUserEmailChange(e.target.value)}
                   required
-                  helperText="This will be your login email"
+                  helperText={
+                    emailValidation.checking 
+                      ? "Checking availability..." 
+                      : emailValidation.message || "This will be your login email"
+                  }
+                  error={!emailValidation.available && emailValidation.message}
+                  InputProps={{
+                    endAdornment: emailValidation.checking ? (
+                      <CircularProgress size={20} />
+                    ) : emailValidation.available && emailValidation.message ? (
+                      <Chip label="✓" size="small" color="success" />
+                    ) : !emailValidation.available ? (
+                      <Chip label="✗" size="small" color="error" />
+                    ) : null
+                  }}
                 />
               </Grid>
               <Grid item xs={12}>
@@ -581,11 +808,18 @@ function OrganizationRegistration() {
                     <Typography component="li" variant="body2">
                       Full access to all features
                     </Typography>
-                    <Typography component="li" variant="body2">
-                      {orgData.subscription_plan === 'basic' ? '10 users, 100 customers, 1,000 bottles' : 
-                       orgData.subscription_plan === 'professional' ? '50 users, 500 customers, 5,000 bottles' : 
-                       'Unlimited users, customers, and bottles'}
-                    </Typography>
+                                         <Typography component="li" variant="body2">
+                       {(() => {
+                         const selectedPlan = subscriptionPlans.find(p => p.id === orgData.subscription_plan);
+                         if (!selectedPlan) return 'Loading plan details...';
+                         
+                         const users = selectedPlan.max_users === 999999 ? 'Unlimited' : selectedPlan.max_users;
+                         const customers = selectedPlan.max_customers === 999999 ? 'Unlimited' : selectedPlan.max_customers;
+                         const cylinders = selectedPlan.max_cylinders === 999999 ? 'Unlimited' : selectedPlan.max_cylinders.toLocaleString();
+                         
+                         return `${users} users, ${customers} customers, ${cylinders} cylinders`;
+                       })()}
+                     </Typography>
                     <Typography component="li" variant="body2">
                       Mobile app access
                     </Typography>

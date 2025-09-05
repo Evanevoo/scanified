@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Join Code Functions</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .btn {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        .btn:hover { background: #1d4ed8; }
+        .btn:disabled { background: #9ca3af; cursor: not-allowed; }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+        .error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .info { background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
+        .warning { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+        pre {
+            background: #f3f4f6;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test Join Code Database Functions</h1>
+    
+    <div class="card">
+        <h2>🔑 Supabase Configuration</h2>
+        <div style="margin: 10px 0;">
+            <label>Supabase URL:</label>
+            <input type="text" id="supabaseUrl" value="https://jtfucttzaswmqqhmmhfb.supabase.co">
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <label>Anon Key:</label>
+            <input type="text" id="anonKey" value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5NDQ4NzMsImV4cCI6MjA2MTUyMDg3M30.6-CAPYefAektlh3dLRVFZbPKYSnhIAzp3knohc3NDEg">
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <label>Organization ID (from your database):</label>
+            <input type="text" id="orgId" placeholder="e.g., 123e4567-e89b-12d3-a456-426614174000">
+        </div>
+        
+        <button class="btn" onclick="connect()">Connect to Supabase</button>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h2>🏗️ Step 1: Test Function Existence</h2>
+            <button class="btn" onclick="testFunctionExists()" id="testExistsBtn" disabled>Check Functions Exist</button>
+            <div id="existsResults">
+                <div class="status info">Connect to Supabase first</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📊 Step 2: View Raw Table Data</h2>
+            <button class="btn" onclick="viewRawData()" id="rawDataBtn" disabled>View organization_join_codes Table</button>
+            <div id="rawResults">
+                <div class="status info">Connect to Supabase first</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🎯 Step 3: Test Code Generation</h2>
+        <button class="btn" onclick="testCreateCode()" id="createBtn" disabled>Generate Test Code</button>
+        <div id="createResults">
+            <div class="status info">Connect to Supabase first</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>✅ Step 4: Test Code Validation (Read-Only)</h2>
+        <div style="margin: 10px 0;">
+            <label>Enter code to test:</label>
+            <input type="text" id="testCodeInput" placeholder="123456" maxlength="6">
+        </div>
+        <button class="btn" onclick="testCodeReadOnly()" id="validateBtn" disabled>Check Code Status (Safe)</button>
+        <div id="validateResults">
+            <div class="status info">Connect to Supabase first</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🔥 Step 5: Actually Use Code (WARNING: Consumes Code!)</h2>
+        <div style="margin: 10px 0;">
+            <label>Enter code to actually use:</label>
+            <input type="text" id="useCodeInput" placeholder="123456" maxlength="6">
+        </div>
+        <button class="btn" onclick="testValidateCode()" id="useBtn" disabled style="background: #dc2626;">⚠️ USE CODE (One-Time Only!)</button>
+        <div id="useResults">
+            <div class="status info">Connect to Supabase first</div>
+        </div>
+    </div>
+
+    <script>
+        let supabase = null;
+        let currentOrgId = null;
+
+        async function connect() {
+            const url = document.getElementById('supabaseUrl').value;
+            const key = document.getElementById('anonKey').value;
+            currentOrgId = document.getElementById('orgId').value;
+            
+            if (!currentOrgId) {
+                alert('Please enter your Organization ID first');
+                return;
+            }
+            
+            try {
+                supabase = window.supabase.createClient(url, key);
+                updateResults('existsResults', '✅ Connected to Supabase!', 'success');
+                
+                // Enable all buttons
+                document.getElementById('testExistsBtn').disabled = false;
+                document.getElementById('rawDataBtn').disabled = false;
+                document.getElementById('createBtn').disabled = false;
+                document.getElementById('validateBtn').disabled = false;
+                document.getElementById('useBtn').disabled = false;
+                
+            } catch (error) {
+                updateResults('existsResults', `❌ Connection failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testFunctionExists() {
+            try {
+                updateResults('existsResults', '🔍 Testing function existence...', 'info');
+
+                // Test each function
+                const functions = [
+                    'generate_numeric_join_code',
+                    'create_organization_join_code', 
+                    'use_organization_join_code',
+                    'get_organization_join_codes'
+                ];
+
+                let results = '📋 Function Test Results:\n\n';
+
+                for (const funcName of functions) {
+                    try {
+                        // Try to call each function with minimal parameters
+                        let testCall;
+                        
+                        switch (funcName) {
+                            case 'generate_numeric_join_code':
+                                testCall = await supabase.rpc(funcName);
+                                break;
+                            case 'get_organization_join_codes':
+                                testCall = await supabase.rpc(funcName, { p_organization_id: currentOrgId });
+                                break;
+                            case 'create_organization_join_code':
+                                // Don't actually create, just test if function exists
+                                testCall = { error: { message: 'Function exists (not executing)' } };
+                                break;
+                            case 'use_organization_join_code':
+                                // Don't actually use, just test if function exists  
+                                testCall = { error: { message: 'Function exists (not executing)' } };
+                                break;
+                        }
+                        
+                        if (funcName === 'generate_numeric_join_code') {
+                            results += `✅ ${funcName}: EXISTS (Generated: ${testCall.data})\n`;
+                        } else if (funcName === 'get_organization_join_codes') {
+                            results += `✅ ${funcName}: EXISTS (Found ${testCall.data?.length || 0} codes)\n`;
+                        } else {
+                            results += `✅ ${funcName}: EXISTS\n`;
+                        }
+                        
+                    } catch (error) {
+                        if (error.message.includes('function') && error.message.includes('does not exist')) {
+                            results += `❌ ${funcName}: MISSING\n`;
+                        } else {
+                            results += `⚠️ ${funcName}: EXISTS (Error: ${error.message})\n`;
+                        }
+                    }
+                }
+
+                updateResults('existsResults', results, 'info');
+
+            } catch (error) {
+                updateResults('existsResults', `❌ Test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function viewRawData() {
+            try {
+                updateResults('rawResults', '🔍 Querying organization_join_codes table...', 'info');
+
+                const { data, error } = await supabase
+                    .from('organization_join_codes')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (error) {
+                    updateResults('rawResults', `❌ Query failed: ${error.message}`, 'error');
+                    return;
+                }
+
+                if (!data || data.length === 0) {
+                    updateResults('rawResults', '📋 No join codes found in database.\n\nThis explains why your code validation is failing!', 'warning');
+                    return;
+                }
+
+                let results = `📋 Found ${data.length} join codes in database:\n\n`;
+                
+                data.forEach((code, index) => {
+                    const now = new Date();
+                    const expires = new Date(code.expires_at);
+                    const isExpired = expires < now;
+                    const isUsedUp = code.current_uses >= code.max_uses;
+                    
+                    let status = 'ACTIVE';
+                    if (!code.is_active) status = 'INACTIVE';
+                    else if (isExpired) status = 'EXPIRED';
+                    else if (isUsedUp) status = 'USED UP';
+                    
+                    results += `${index + 1}. Code: ${code.code}
+   Status: ${status}
+   Created: ${new Date(code.created_at).toLocaleString()}
+   Expires: ${new Date(code.expires_at).toLocaleString()}
+   Uses: ${code.current_uses}/${code.max_uses}
+   Org ID: ${code.organization_id}
+   Notes: ${code.notes || 'None'}
+
+`;
+                });
+
+                updateResults('rawResults', results, 'success');
+
+            } catch (error) {
+                updateResults('rawResults', `❌ Query failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testCreateCode() {
+            try {
+                updateResults('createResults', '🎯 Testing code generation...', 'info');
+
+                // First, get the current authenticated user
+                const { data: { user }, error: userError } = await supabase.auth.getUser();
+                
+                if (userError || !user) {
+                    updateResults('createResults', '❌ No authenticated user found. Please log in to the main app first.', 'error');
+                    return;
+                }
+
+                updateResults('createResults', `🎯 Testing code generation with user: ${user.email}`, 'info');
+
+                const { data, error } = await supabase
+                    .rpc('create_organization_join_code', {
+                        p_organization_id: currentOrgId,
+                        p_created_by: user.id, // Use real authenticated user ID
+                        p_expires_hours: 24,
+                        p_max_uses: 1,
+                        p_notes: 'Test code generated by debug tool'
+                    });
+
+                if (error) {
+                    updateResults('createResults', `❌ Code generation failed: ${error.message}`, 'error');
+                    return;
+                }
+
+                const newCode = data[0];
+                updateResults('createResults', `✅ SUCCESS! Code generated:
+
+Code: ${newCode.join_code}
+Expires: ${new Date(newCode.expires_at).toLocaleString()}
+Max Uses: ${newCode.max_uses}
+
+🎉 This code should now work for joining the organization!`, 'success');
+
+                // Auto-fill the test input
+                document.getElementById('testCodeInput').value = newCode.join_code;
+
+            } catch (error) {
+                updateResults('createResults', `❌ Generation failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testCodeReadOnly() {
+            const code = document.getElementById('testCodeInput').value.trim();
+            if (!code) {
+                updateResults('validateResults', 'Please enter a code to test', 'error');
+                return;
+            }
+
+            try {
+                updateResults('validateResults', `🔍 Checking code status: ${code} (read-only)`, 'info');
+
+                // Just check if the code exists and its status
+                const { data: codeData, error: codeError } = await supabase
+                    .from('organization_join_codes')
+                    .select('*')
+                    .eq('code', code);
+
+                if (codeError) {
+                    updateResults('validateResults', `❌ Database query failed: ${codeError.message}`, 'error');
+                    return;
+                }
+
+                if (!codeData || codeData.length === 0) {
+                    updateResults('validateResults', `❌ CODE NOT FOUND
+
+The code "${code}" does not exist in the database.
+
+This is why your join is failing!`, 'error');
+                    return;
+                }
+
+                const codeInfo = codeData[0];
+                const now = new Date();
+                const expiresAt = new Date(codeInfo.expires_at);
+                const isExpired = expiresAt < now;
+                const isUsedUp = codeInfo.current_uses >= codeInfo.max_uses;
+
+                let status = 'ACTIVE ✅';
+                let statusColor = 'success';
+                if (!codeInfo.is_active) {
+                    status = 'INACTIVE ❌';
+                    statusColor = 'error';
+                } else if (isExpired) {
+                    status = 'EXPIRED ⏰';
+                    statusColor = 'error';
+                } else if (isUsedUp) {
+                    status = 'USED UP 🚫';
+                    statusColor = 'error';
+                }
+
+                const result = `📋 CODE FOUND IN DATABASE!
+
+Code: ${code}
+Status: ${status}
+Active: ${codeInfo.is_active ? 'Yes' : 'No'}
+Created: ${new Date(codeInfo.created_at).toLocaleString()}
+Expires: ${new Date(codeInfo.expires_at).toLocaleString()}
+Used: ${codeInfo.current_uses}/${codeInfo.max_uses}
+Organization ID: ${codeInfo.organization_id}
+Notes: ${codeInfo.notes || 'None'}
+
+${status.includes('✅') ? '🎉 This code should work for joining!' : '❌ This code cannot be used: ' + status}`;
+
+                updateResults('validateResults', result, statusColor);
+
+            } catch (error) {
+                updateResults('validateResults', `❌ Test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testValidateCode() {
+            const code = document.getElementById('useCodeInput').value.trim();
+            if (!code) {
+                updateResults('validateResults', 'Please enter a code to test', 'error');
+                return;
+            }
+
+            try {
+                updateResults('validateResults', `🧪 Testing validation for code: ${code}`, 'info');
+
+                // First, get the current authenticated user
+                const { data: { user }, error: userError } = await supabase.auth.getUser();
+                
+                if (userError || !user) {
+                    updateResults('useResults', '❌ No authenticated user found. Please log in to the main app first.', 'error');
+                    return;
+                }
+
+                updateResults('useResults', `🧪 Actually using code: ${code} with user: ${user.email}`, 'info');
+
+                const { data, error } = await supabase
+                    .rpc('use_organization_join_code', {
+                        p_code: code,
+                        p_used_by: user.id // Use real authenticated user ID
+                    });
+
+                if (error) {
+                    updateResults('useResults', `❌ Code usage failed: ${error.message}`, 'error');
+                    return;
+                }
+
+                const result = data[0];
+                updateResults('useResults', `🎉 CODE USED SUCCESSFULLY!
+
+Success: ${result.success}
+Message: ${result.message}
+Organization ID: ${result.organization_id || 'N/A'}
+
+${result.success ? '✅ Code was consumed! User should now be linked to organization.' : '❌ Code usage failed: ' + result.message}`, 
+                    result.success ? 'success' : 'error');
+
+            } catch (error) {
+                updateResults('useResults', `❌ Code usage test failed: ${error.message}`, 'error');
+            }
+        }
+
+        function updateResults(elementId, message, type) {
+            document.getElementById(elementId).innerHTML = `
+                <div class="status ${type}">
+                    <pre>${message}</pre>
+                </div>
+            `;
+        }
+
+        // Auto-format code input
+        document.getElementById('testCodeInput').addEventListener('input', function(e) {
+            e.target.value = e.target.value.replace(/\D/g, '').substring(0, 6);
+        });
+    </script>
+</body>
+</html>

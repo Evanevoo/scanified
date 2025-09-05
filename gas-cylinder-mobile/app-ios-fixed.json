@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Scanified",
+    "slug": "scanified-ios",
+    "version": "1.0.4",
+    "orientation": "portrait",
+    "icon": "./assets/app-icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": false,
+    "platforms": ["ios"],
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.evanevoo.scanifiedmobile",
+      "buildNumber": "7",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Allow Scanified to access your camera to scan asset barcodes and manage your organization's inventory with enterprise-grade precision.",
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "apple-signin",
+            "CFBundleURLSchemes": ["scanified-auth"]
+          }
+        ]
+      },
+      "usesAppleSignIn": true,
+      "associatedDomains": ["applinks:jtfucttzaswmqqhmmhfb.supabase.co", "webcredentials:jtfucttzaswmqqhfb.supabase.co"]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Scanified to access your camera to scan asset barcodes and manage your organization's inventory with enterprise-grade precision."
+        }
+      ],
+      "expo-apple-authentication"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d71ec042-1fec-4186-ac3b-0ae85a6af345"
+      }
+    },
+    "owner": "evanevoo"
+  }
+}

@@ -7,6 +7,7 @@ import ScanArea from '../components/ScanArea';
 import { useAuth } from '../hooks/useAuth';
 import { CylinderLimitService } from '../services/CylinderLimitService';
 import { useAssetConfig } from '../context/AssetContext';
+import { Platform } from '../utils/platform';
 
 interface GasType {
   id: number;
@@ -412,6 +413,7 @@ export default function AddCylinderScreen() {
               setScannerVisible(false);
             }}
             label="SCAN HERE"
+            hideScanningLine={Platform.OS === 'ios'}
             onClose={() => setScannerVisible(false)}
           />
         </View>

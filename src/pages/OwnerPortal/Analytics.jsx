@@ -22,46 +22,29 @@ export default function Analytics() {
   const [timeRange, setTimeRange] = useState('30d');
   const [analytics, setAnalytics] = useState({
     overview: {
-      totalOrganizations: 47,
-      totalUsers: 234,
-      monthlyRevenue: 12450,
-      activeSubscriptions: 42,
-      trialAccounts: 8,
-      churnRate: 2.3,
-      avgRevenuePerUser: 53.2,
-      customerLifetimeValue: 1247
+      totalOrganizations: 0,
+      totalUsers: 0,
+      monthlyRevenue: 0,
+      activeSubscriptions: 0,
+      trialAccounts: 0,
+      churnRate: 0,
+      avgRevenuePerUser: 0,
+      customerLifetimeValue: 0
     },
     growth: {
-      organizationsGrowth: 12.5,
-      usersGrowth: 8.7,
-      revenueGrowth: 15.2,
-      subscriptionsGrowth: 9.1
+      organizationsGrowth: 0,
+      usersGrowth: 0,
+      revenueGrowth: 0,
+      subscriptionsGrowth: 0
     },
-    planDistribution: [
-      { plan: 'Starter', count: 18, revenue: 1620, percentage: 38.3 },
-      { plan: 'Professional', count: 15, revenue: 4725, percentage: 31.9 },
-      { plan: 'Enterprise', count: 9, revenue: 5400, percentage: 19.1 },
-      { plan: 'Custom', count: 5, revenue: 2975, percentage: 10.6 }
-    ],
-    recentActivity: [
-      { organization: 'ABC Gas Solutions', action: 'Upgraded to Professional', time: '2 hours ago', type: 'upgrade' },
-      { organization: 'Metro Cylinders', action: 'New user added', time: '4 hours ago', type: 'user' },
-      { organization: 'Industrial Gas Co', action: 'Payment processed', time: '6 hours ago', type: 'payment' },
-      { organization: 'Quick Gas Express', action: 'Trial started', time: '1 day ago', type: 'trial' },
-      { organization: 'Coastal Gas Services', action: 'Support ticket created', time: '1 day ago', type: 'support' }
-    ],
-    topPerformers: [
-      { organization: 'Industrial Gas Co', users: 25, revenue: 1495, cylinders: 2500, growth: 23.5 },
-      { organization: 'Metro Cylinders', users: 18, revenue: 1134, cylinders: 1800, growth: 18.2 },
-      { organization: 'ABC Gas Solutions', users: 15, revenue: 945, cylinders: 1200, growth: 15.7 },
-      { organization: 'Coastal Gas Services', users: 12, revenue: 756, cylinders: 950, growth: 12.1 },
-      { organization: 'Quick Gas Express', users: 8, revenue: 504, cylinders: 600, growth: 8.9 }
-    ],
+    planDistribution: [],
+    recentActivity: [],
+    topPerformers: [],
     systemHealth: {
-      uptime: 99.7,
-      responseTime: 145,
-      errorRate: 0.02,
-      activeConnections: 1247
+      uptime: 0,
+      responseTime: 0,
+      errorRate: 0,
+      activeConnections: 0
     }
   });
 
