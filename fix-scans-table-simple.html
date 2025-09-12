@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fix Scans Table - Simple</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .instructions {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .instructions h3 {
+            margin-top: 0;
+            color: #856404;
+        }
+        .instructions ol {
+            margin-bottom: 0;
+        }
+        textarea {
+            width: 100%;
+            font-family: monospace;
+            font-size: 12px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box;
+            height: 400px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Fix Scans Table - Simple Version</h1>
+        
+        <div class="instructions">
+            <h3>📋 Simple fix for the scans table:</h3>
+            <ol>
+                <li>Go to your <strong>Supabase Dashboard</strong></li>
+                <li>Navigate to <strong>SQL Editor</strong></li>
+                <li>Copy and paste the fix script below</li>
+                <li>Click <strong>"Run"</strong> to execute</li>
+            </ol>
+        </div>
+
+        <div class="form-group">
+            <label for="sqlScript">Simple Fix Script:</label>
+            <textarea id="sqlScript">-- Simple fix for scans table UUID generation
+-- This script fixes the existing table without complex syntax
+
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Fix the id column to auto-generate UUIDs
+ALTER TABLE scans ALTER COLUMN id SET DEFAULT uuid_generate_v4();
+
+-- Fix timestamps to auto-generate
+ALTER TABLE scans ALTER COLUMN created_at SET DEFAULT NOW();
+ALTER TABLE scans ALTER COLUMN updated_at SET DEFAULT NOW();
+
+-- Create indexes if they don't exist
+CREATE INDEX IF NOT EXISTS idx_scans_organization_id ON scans(organization_id);
+CREATE INDEX IF NOT EXISTS idx_scans_barcode_number ON scans(barcode_number);
+CREATE INDEX IF NOT EXISTS idx_scans_action ON scans(action);
+CREATE INDEX IF NOT EXISTS idx_scans_created_at ON scans(created_at);
+CREATE INDEX IF NOT EXISTS idx_scans_scanned_by ON scans(scanned_by);
+
+-- Enable Row Level Security
+ALTER TABLE scans ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies and create simple one
+DROP POLICY IF EXISTS "Allow all operations for authenticated users" ON scans;
+DROP POLICY IF EXISTS "Users can view scans from their organization" ON scans;
+DROP POLICY IF EXISTS "Users can insert scans for their organization" ON scans;
+DROP POLICY IF EXISTS "Users can update scans from their organization" ON scans;
+DROP POLICY IF EXISTS "Users can delete scans from their organization" ON scans;
+
+-- Create simple RLS policy
+CREATE POLICY "Allow all operations for authenticated users" ON scans
+    FOR ALL USING (auth.role() = 'authenticated');
+
+-- Test the fix with a simple insert
+INSERT INTO scans (organization_id, barcode_number, action, location, notes, scanned_by)
+VALUES (
+    '00000000-0000-0000-0000-000000000000'::uuid,
+    'TEST_BARCODE_123',
+    'in',
+    'Test Location',
+    'Test scan to verify table works',
+    '00000000-0000-0000-0000-000000000000'::uuid
+);
+
+-- Delete the test record
+DELETE FROM scans WHERE barcode_number = 'TEST_BARCODE_123';
+
+-- Show success message
+SELECT 'Scans table fixed successfully! UUID generation is now working.' as result;</textarea>
+        </div>
+
+        <button onclick="copyToClipboard()">📋 Copy Fix Script</button>
+
+        <div class="status" id="status"></div>
+    </div>
+
+    <script>
+        function copyToClipboard() {
+            const sqlScript = document.getElementById('sqlScript');
+            sqlScript.select();
+            sqlScript.setSelectionRange(0, 99999); // For mobile devices
+            
+            try {
+                document.execCommand('copy');
+                showStatus('✅ Fix script copied to clipboard! Now paste it in your Supabase SQL Editor.', 'success');
+            } catch (err) {
+                showStatus('❌ Failed to copy. Please manually select and copy the fix script.', 'error');
+            }
+        }
+
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
+
+        // Show initial instructions
+        showStatus('📋 Please run the simple fix script above to fix the scans table.', 'info');
+    </script>
+</body>
+</html>

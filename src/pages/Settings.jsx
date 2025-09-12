@@ -38,27 +38,16 @@ import {
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SecurityIcon from '@mui/icons-material/Security';
-import NotificationsIcon from '@mui/icons-material/Notifications';
 import BusinessIcon from '@mui/icons-material/Business';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import DataUsageIcon from '@mui/icons-material/DataUsage';
-import ThemeSelector from '../components/ThemeSelector';
 import SaveIcon from '@mui/icons-material/Save';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import PaymentIcon from '@mui/icons-material/Payment';
 import PeopleIcon from '@mui/icons-material/People';
-import EmailIcon from '@mui/icons-material/Email';
-import AddIcon from '@mui/icons-material/Add';
-import DeleteIcon from '@mui/icons-material/Delete';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import WarningIcon from '@mui/icons-material/Warning';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import ScheduleIcon from '@mui/icons-material/Schedule';
 import EditIcon from '@mui/icons-material/Edit';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import SettingsIcon from '@mui/icons-material/Settings';
 import QrCodeIcon from '@mui/icons-material/QrCode';
-import { useTheme } from '../context/ThemeContext';
 import UserManagement from './UserManagement';
 import { usePermissions } from '../context/PermissionsContext';
 
@@ -200,12 +189,19 @@ const orderNumberTypes = {
     prefix: '',
     example: 'ORDER12345'
   },
+  'flexible_5_digit': {
+    name: 'Flexible 5-Digit',
+    pattern: '^[A-Z]?[0-9]{5}[A-Z]?$',
+    description: '5 digits, or letter+5 digits, or 5 digits+letter',
+    prefix: '',
+    example: '12345, A12345, 12345A'
+  },
   'custom': {
     name: 'Custom Pattern',
-    pattern: '^ORD[0-9]{6}$',
-    description: 'Define your own pattern',
-    prefix: 'ORD',
-    example: 'ORD123456'
+    pattern: '^[A-Z]?[0-9]{5}[A-Z]?$',
+    description: '5 digits, or letter+5 digits, or 5 digits+letter',
+    prefix: '',
+    example: '12345, A12345, 12345A'
   }
 };
 
@@ -266,7 +262,6 @@ export default function Settings() {
   const { user, profile, organization, reloadOrganization } = useAuth();
   const { isOrgAdmin } = usePermissions();
   const navigate = useNavigate();
-  const { mode, setMode, accent, setAccent } = useTheme();
   const [activeTab, setActiveTab] = useState(0);
 
   // Loading states
@@ -286,7 +281,6 @@ export default function Settings() {
   // Snackbars
   const [profileSnackbar, setProfileSnackbar] = useState(false);
   const [passwordSnackbar, setPasswordSnackbar] = useState(false);
-  const [notifSnackbar, setNotifSnackbar] = useState(false);
 
   // Profile Data
   const [profileData, setProfileData] = useState({
@@ -299,19 +293,6 @@ export default function Settings() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // Notifications
-  const [notifications, setNotifications] = useState(
-    JSON.parse(localStorage.getItem('notifications')) || {
-      email: true,
-      inApp: true,
-      browser: false,
-      sms: false,
-      dailySummary: true,
-      alerts: true,
-      reports: false,
-    }
-  );
-  const [notificationsChanged, setNotificationsChanged] = useState(false);
 
   // Security Settings
   const [securitySettings, setSecuritySettings] = useState(
@@ -352,14 +333,6 @@ export default function Settings() {
   });
   const [barcodeConfigChanged, setBarcodeConfigChanged] = useState(false);
 
-  // User Invites
-  const [invites, setInvites] = useState([]);
-  const [inviteDialog, setInviteDialog] = useState(false);
-  const [newInvite, setNewInvite] = useState({ email: '', role: 'user' });
-  const [inviteLoading, setInviteLoading] = useState(false);
-  const [inviteError, setInviteError] = useState('');
-  const [inviteSuccess, setInviteSuccess] = useState('');
-  const [copiedToken, setCopiedToken] = useState('');
 
   // Logo
   const [logoUrl, setLogoUrl] = useState(organization?.logo_url || '');
@@ -370,7 +343,6 @@ export default function Settings() {
       { label: 'Profile', icon: <AccountCircleIcon />, id: 'profile' },
       { label: 'Security', icon: <SecurityIcon />, id: 'security' },
       { label: 'Appearance', icon: <BusinessIcon />, id: 'appearance' },
-      { label: 'Notifications', icon: <NotificationsIcon />, id: 'notifications' },
       { label: 'Billing', icon: <PaymentIcon />, id: 'billing' },
     ];
 
@@ -378,7 +350,6 @@ export default function Settings() {
     if (profile?.role === 'admin' || profile?.role === 'owner') {
       adminTabs.push(
         { label: 'Team', icon: <PeopleIcon />, id: 'team' },
-        { label: 'Invites', icon: <EmailIcon />, id: 'invites' },
         { label: 'Assets', icon: <DataUsageIcon />, id: 'assets' },
         { label: 'Barcodes', icon: <QrCodeIcon />, id: 'barcodes' }
       );
@@ -471,11 +442,6 @@ export default function Settings() {
     }
   }, [profile, organization]);
 
-  useEffect(() => {
-    if (profile?.role === 'owner' || profile?.role === 'admin') {
-      fetchInvites();
-    }
-  }, [profile]);
 
   // Track changes
   useEffect(() => {
@@ -569,75 +535,7 @@ export default function Settings() {
     }
   };
 
-  // Theme and color updates - save to database
-  const handleThemeChange = async (newMode) => {
-    setMode(newMode);
-    localStorage.setItem('themeMode', newMode);
-    
-    // Save to database
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ theme_mode: newMode })
-        .eq('id', user.id);
-      
-      if (!error) {
-        setNotifMsg('Theme updated successfully!');
-        setNotifSnackbar(true);
-      }
-    } catch (error) {
-      console.error('Error saving theme:', error);
-    }
-  };
 
-  const handleColorChange = async (newColor) => {
-    // Convert color key to hex color if needed
-    const hexColor = colorMap[newColor] || newColor;
-    
-    setAccent(hexColor);
-    
-    // Save to database
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ theme_accent: hexColor })
-        .eq('id', user.id);
-      
-      if (!error) {
-        setNotifMsg('Accent color updated successfully!');
-        setNotifSnackbar(true);
-      }
-    } catch (error) {
-      console.error('Error saving accent color:', error);
-    }
-  };
-
-  // Notifications update
-  const handleNotifChange = (type) => {
-    const updated = { ...notifications, [type]: !notifications[type] };
-    setNotifications(updated);
-    setNotificationsChanged(true);
-  };
-
-  const handleNotificationsSave = async () => {
-    localStorage.setItem('notifications', JSON.stringify(notifications));
-    
-    // Save to database
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ notification_preferences: notifications })
-        .eq('id', user.id);
-      
-      if (!error) {
-        setNotificationsChanged(false);
-        setNotifMsg('Notification preferences saved!');
-        setNotifSnackbar(true);
-      }
-    } catch (error) {
-      console.error('Error saving notifications:', error);
-    }
-  };
 
   // Security settings update
   const handleSecurityChange = (key, value) => {
@@ -800,107 +698,6 @@ export default function Settings() {
     setActiveTab(newValue);
   };
 
-  // User Invite Functions
-  const fetchInvites = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('organization_invites')
-        .select(`
-          *,
-          invited_by:profiles!organization_invites_invited_by_fkey(full_name, email)
-        `)
-        .eq('organization_id', profile.organization_id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setInvites(data || []);
-    } catch (error) {
-      console.error('Error fetching invites:', error);
-      setInviteError('Failed to load invites: ' + error.message);
-    }
-  };
-
-  const handleCreateInvite = async () => {
-    if (!newInvite.email || !newInvite.role) {
-      setInviteError('Please fill in all fields');
-      return;
-    }
-
-    setInviteLoading(true);
-    setInviteError('');
-
-    try {
-      // Create the invite using the database function
-      const { data, error } = await supabase.rpc('create_organization_invite', {
-        p_organization_id: profile.organization_id,
-        p_email: newInvite.email,
-        p_role: newInvite.role,
-        p_expires_in_days: 7
-      });
-
-      if (error) {
-        // Check if it's a constraint violation and provide user-friendly message
-        if (error.message.includes('organization_invites_organization_id_email_key')) {
-          throw new Error('An invite has already been sent to this email from your organization. Please check the existing invites or wait for the user to respond.');
-        }
-        throw error;
-      }
-
-      setInviteSuccess(`Invite sent to ${newInvite.email}`);
-      setNewInvite({ email: '', role: 'user' });
-      setInviteDialog(false);
-      fetchInvites();
-    } catch (error) {
-      console.error('Error creating invite:', error);
-      setInviteError(error.message);
-    } finally {
-      setInviteLoading(false);
-    }
-  };
-
-  const handleDeleteInvite = async (inviteId) => {
-    try {
-      const { error } = await supabase
-        .from('organization_invites')
-        .delete()
-        .eq('id', inviteId);
-
-      if (error) throw error;
-
-      setInviteSuccess('Invite deleted successfully');
-      fetchInvites();
-    } catch (error) {
-      console.error('Error deleting invite:', error);
-      setInviteError('Failed to delete invite: ' + error.message);
-    }
-  };
-
-  const copyInviteLink = (token) => {
-    const inviteLink = `${window.location.origin}/accept-invite?token=${token}`;
-    navigator.clipboard.writeText(inviteLink);
-    setCopiedToken(token);
-    setInviteSuccess('Invite link copied to clipboard!');
-    setTimeout(() => setCopiedToken(''), 2000);
-  };
-
-  const getInviteStatus = (invite) => {
-    if (invite.accepted_at) {
-      return { status: 'accepted', color: 'success', icon: <CheckCircleIcon />, label: 'Accepted' };
-    } else if (new Date(invite.expires_at) < new Date()) {
-      return { status: 'expired', color: 'error', icon: <WarningIcon />, label: 'Expired' };
-    } else {
-      return { status: 'pending', color: 'warning', icon: <ScheduleIcon />, label: 'Pending' };
-    }
-  };
-
-  const getRoleColor = (role) => {
-    switch (role) {
-      case 'owner': return 'error';
-      case 'admin': return 'warning';
-      case 'manager': return 'info';
-      default: return 'default';
-    }
-  };
 
   const handleLogoUpload = async (e) => {
     const file = e.target.files[0];
@@ -991,7 +788,6 @@ export default function Settings() {
               Profile Settings
             </Typography>
             
-            <ThemeSelector />
             
             <Paper sx={{ p: 3, mb: 3 }}>
               <Typography variant="h5" fontWeight={600} sx={{ mb: 3 }}>
@@ -1117,49 +913,9 @@ export default function Settings() {
           {/* Appearance Tab */}
           <TabPanel value={activeTab} index={2}>
             <Stack spacing={3}>
-              <Typography variant="h5" gutterBottom>Appearance Settings</Typography>
+              <Typography variant="h5" gutterBottom>Organization Settings</Typography>
               
-              <FormControl fullWidth>
-                <InputLabel>Theme</InputLabel>
-                <Select
-                  value={mode}
-                  label="Theme"
-                  onChange={(e) => handleThemeChange(e.target.value)}
-                >
-                  <MenuItem value="light">Light</MenuItem>
-                  <MenuItem value="dark">Dark</MenuItem>
-                  <MenuItem value="system">System</MenuItem>
-                </Select>
-              </FormControl>
               
-              <Box>
-                <Typography variant="h6" mb={2}>Accent Color</Typography>
-                <Stack direction="row" spacing={2} flexWrap="wrap">
-                  {themeColors.map(tc => (
-                    <IconButton
-                      key={tc.value}
-                      onClick={() => handleColorChange(tc.value)}
-                      sx={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: '50%',
-                        border: accent === colorMap[tc.value] ? `3px solid #fff` : '2px solid #ccc',
-                        background: colorMap[tc.value],
-                        boxShadow: accent === colorMap[tc.value] ? '0 0 0 4px rgba(0,0,0,0.1)' : 'none',
-                      }}
-                    >
-                      {accent === colorMap[tc.value] && (
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                    </IconButton>
-                  ))}
-                </Stack>
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                  Your accent color is used for highlights, buttons, and tabs.
-                </Typography>
-              </Box>
 
               {isOrgAdmin && (
                 <Box>
@@ -1200,86 +956,9 @@ export default function Settings() {
             </Stack>
           </TabPanel>
 
-          {/* Notifications Tab */}
-          <TabPanel value={activeTab} index={3}>
-            <Stack spacing={3}>
-              <Typography variant="h5" gutterBottom>Notification Preferences</Typography>
-              
-              <FormControlLabel
-                control={
-                  <Switch 
-                    checked={notifications.email} 
-                    onChange={() => handleNotifChange('email')} 
-                    color="primary" 
-                  />
-                }
-                label="Email Notifications"
-              />
-              <FormControlLabel
-                control={
-                  <Switch 
-                    checked={notifications.inApp} 
-                    onChange={() => handleNotifChange('inApp')} 
-                    color="primary" 
-                  />
-                }
-                label="In-App Notifications"
-              />
-              <FormControlLabel
-                control={
-                  <Switch 
-                    checked={notifications.sms} 
-                    onChange={() => handleNotifChange('sms')} 
-                    color="primary" 
-                  />
-                }
-                label="SMS Notifications"
-              />
-              <FormControlLabel
-                control={
-                  <Switch 
-                    checked={notifications.dailySummary} 
-                    onChange={() => handleNotifChange('dailySummary')} 
-                    color="primary" 
-                  />
-                }
-                label="Daily Summary"
-              />
-              <FormControlLabel
-                control={
-                  <Switch 
-                    checked={notifications.alerts} 
-                    onChange={() => handleNotifChange('alerts')} 
-                    color="primary" 
-                  />
-                }
-                label="System Alerts"
-              />
-              <FormControlLabel
-                control={
-                  <Switch 
-                    checked={notifications.reports} 
-                    onChange={() => handleNotifChange('reports')} 
-                    color="primary" 
-                  />
-                }
-                label="Report Notifications"
-              />
-              
-              {notificationsChanged && (
-                <Button 
-                  variant="contained" 
-                  onClick={handleNotificationsSave}
-                  startIcon={<SaveIcon />}
-                >
-                  Save Notification Settings
-                </Button>
-              )}
-            </Stack>
-          </TabPanel>
 
           {/* Billing Tab */}
-          <TabPanel value={activeTab} index={4}>
+            <TabPanel value={activeTab} index={3}>
             <Typography variant="h4" gutterBottom>
               Billing Settings
             </Typography>
@@ -1302,128 +981,15 @@ export default function Settings() {
 
           {/* Team Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
-            <TabPanel value={activeTab} index={5}>
+            <TabPanel value={activeTab} index={4}>
               <UserManagement />
             </TabPanel>
           )}
 
-          {/* Invites Tab (Admin/Owner only) */}
-          {(profile?.role === 'admin' || profile?.role === 'owner') && (
-            <TabPanel value={activeTab} index={6}>
-              <Stack spacing={3}>
-                <Typography variant="h4" gutterBottom>
-                  User Invites
-                </Typography>
-                
-                {inviteError && (
-                  <Alert severity="error" onClose={() => setInviteError('')}>
-                    {inviteError}
-                  </Alert>
-                )}
-
-                {inviteSuccess && (
-                  <Alert severity="success" onClose={() => setInviteSuccess('')}>
-                    {inviteSuccess}
-                  </Alert>
-                )}
-
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="h6">
-                    Pending Invites ({invites.filter(i => !i.accepted_at && new Date(i.expires_at) > new Date()).length})
-                  </Typography>
-                  <Box>
-                    <Button
-                      variant="outlined"
-                      startIcon={<RefreshIcon />}
-                      onClick={fetchInvites}
-                      sx={{ mr: 2 }}
-                    >
-                      Refresh
-                    </Button>
-                    <Button
-                      variant="contained"
-                      startIcon={<AddIcon />}
-                      onClick={() => setInviteDialog(true)}
-                    >
-                      Invite User
-                    </Button>
-                  </Box>
-                </Box>
-
-                {invites.length === 0 ? (
-                  <Box sx={{ textAlign: 'center', py: 4 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      No invites found. Create your first invite to get started.
-                    </Typography>
-                  </Box>
-                ) : (
-                  <Box>
-                    {invites.map((invite) => {
-                      const status = getInviteStatus(invite);
-                      return (
-                        <Paper key={invite.id} sx={{ p: 2, mb: 2 }}>
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Box>
-                              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                                <EmailIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                                <Typography variant="subtitle1">
-                                  {invite.email}
-                                </Typography>
-                              </Box>
-                              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                                <Chip
-                                  label={invite.role}
-                                  color={getRoleColor(invite.role)}
-                                  size="small"
-                                />
-                                <Chip
-                                  icon={status.icon}
-                                  label={status.label}
-                                  color={status.color}
-                                  size="small"
-                                />
-                                <Typography variant="caption" color="text.secondary">
-                                  Expires: {new Date(invite.expires_at).toLocaleDateString()}
-                                </Typography>
-                              </Box>
-                            </Box>
-                            <Box sx={{ display: 'flex', gap: 1 }}>
-                              {status.status === 'pending' && (
-                                <>
-                                  <Tooltip title="Copy Invite Link">
-                                    <IconButton
-                                      size="small"
-                                      onClick={() => copyInviteLink(invite.token)}
-                                      color={copiedToken === invite.token ? 'success' : 'primary'}
-                                    >
-                                      <ContentCopyIcon />
-                                    </IconButton>
-                                  </Tooltip>
-                                  <Tooltip title="Delete Invite">
-                                    <IconButton
-                                      size="small"
-                                      onClick={() => handleDeleteInvite(invite.id)}
-                                      sx={{ color: 'error.main' }}
-                                    >
-                                      <DeleteIcon />
-                                    </IconButton>
-                                  </Tooltip>
-                                </>
-                              )}
-                            </Box>
-                          </Box>
-                        </Paper>
-                      );
-                    })}
-                  </Box>
-                )}
-              </Stack>
-            </TabPanel>
-          )}
 
           {/* Assets Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
-            <TabPanel value={activeTab} index={7}>
+            <TabPanel value={activeTab} index={5}>
               <Box sx={{ maxWidth: 800 }}>
                 <Typography variant="h4" gutterBottom>
                   Asset Configuration
@@ -1595,7 +1161,7 @@ export default function Settings() {
 
           {/* Barcodes Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
-            <TabPanel value={activeTab} index={8}>
+            <TabPanel value={activeTab} index={6}>
               <Box sx={{ maxWidth: 800 }}>
                 <Typography variant="h4" gutterBottom>
                   Barcode Configuration
@@ -1850,61 +1416,6 @@ export default function Settings() {
             </TabPanel>
           )}
 
-          {/* Create Invite Dialog */}
-          <Dialog
-            open={inviteDialog}
-            onClose={() => setInviteDialog(false)}
-            maxWidth="sm"
-            fullWidth
-          >
-            <DialogTitle>
-              <Typography variant="h6">
-                Invite New User
-              </Typography>
-            </DialogTitle>
-            <DialogContent>
-              <Grid container spacing={2} sx={{ mt: 1 }}>
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="Email Address"
-                    type="email"
-                    value={newInvite.email}
-                    onChange={(e) => setNewInvite({ ...newInvite, email: e.target.value })}
-                    required
-                    helperText="The user will receive an invite link at this email address"
-                  />
-                </Grid>
-                <Grid item xs={12}>
-                  <FormControl fullWidth>
-                    <InputLabel>Role</InputLabel>
-                    <Select
-                      value={newInvite.role}
-                      onChange={(e) => setNewInvite({ ...newInvite, role: e.target.value })}
-                      label="Role"
-                    >
-                      <MenuItem value="user">User</MenuItem>
-                      <MenuItem value="manager">Manager</MenuItem>
-                      <MenuItem value="admin">Admin</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Grid>
-              </Grid>
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={() => setInviteDialog(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="contained"
-                onClick={handleCreateInvite}
-                disabled={inviteLoading || !newInvite.email || !newInvite.role}
-                startIcon={inviteLoading ? <CircularProgress size={20} /> : <AddIcon />}
-              >
-                Send Invite
-              </Button>
-            </DialogActions>
-          </Dialog>
 
           {/* Snackbars */}
           <Snackbar open={profileSnackbar} autoHideDuration={3000} onClose={() => setProfileSnackbar(false)}>
@@ -1919,11 +1430,6 @@ export default function Settings() {
             </Alert>
           </Snackbar>
           
-          <Snackbar open={notifSnackbar} autoHideDuration={3000} onClose={() => setNotifSnackbar(false)}>
-            <Alert onClose={() => setNotifSnackbar(false)} severity="success" sx={{ width: '100%' }}>
-              {notifMsg}
-            </Alert>
-          </Snackbar>
         </Card>
       </Box>
     </Box>

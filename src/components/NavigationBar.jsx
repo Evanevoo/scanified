@@ -22,6 +22,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useAssetConfig } from '../hooks/useAssetConfig';
 
 const navigationItems = [
   {
@@ -74,6 +75,7 @@ export default function NavigationBar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile } = useAuth();
+  const { config } = useAssetConfig();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
   const [resourcesAnchor, setResourcesAnchor] = useState(null);
@@ -139,7 +141,7 @@ export default function NavigationBar() {
                 }}
                 onClick={() => navigate('/')}
               >
-                Scanified
+                {config.appName || 'Scanified'}
               </Typography>
 
               {/* Desktop Navigation */}

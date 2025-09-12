@@ -42,12 +42,7 @@ export default function OwnerCustomers() {
   const [selectedOrgForSubscription, setSelectedOrgForSubscription] = useState(null);
   const [availablePlans, setAvailablePlans] = useState([]);
   const [editForm, setEditForm] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    address: '',
-    status: 'active',
-    contactEmail: ''
+    name: ''
   });
   const [subscriptionForm, setSubscriptionForm] = useState({
     plan_id: '',
@@ -104,10 +99,17 @@ export default function OwnerCustomers() {
       const orgsWithCounts = await Promise.all(
         (orgs || []).map(async (org) => {
           // Get user count and primary contact email
-          const { data: profiles, count: userCount } = await supabase
+          const { data: profiles, count: userCount, error: profilesError } = await supabase
             .from('profiles')
             .select('email, role')
             .eq('organization_id', org.id);
+          
+          console.log(`Organization ${org.name} (${org.id}):`, {
+            profiles: profiles?.length || 0,
+            userCount: userCount,
+            profilesError: profilesError,
+            profilesData: profiles
+          });
 
           // Get customer count
           const { count: customerCount } = await supabase
@@ -127,7 +129,7 @@ export default function OwnerCustomers() {
 
           return {
             ...org,
-            userCount: userCount || 0,
+            userCount: userCount || profiles?.length || 0,
             customerCount: customerCount || 0,
             bottleCount: bottleCount || 0,
             contactEmail: contactEmail
@@ -628,12 +630,7 @@ export default function OwnerCustomers() {
   const handleEditOrganization = (org) => {
     setEditingOrg(org);
     setEditForm({
-      name: org.name || '',
-      email: org.email || '',
-      phone: org.phone || '',
-      address: org.address || '',
-      status: org.status || 'active',
-      contactEmail: org.contactEmail || ''
+      name: org.name || ''
     });
     setEditDialog(true);
   };
@@ -646,10 +643,6 @@ export default function OwnerCustomers() {
         .from('organizations')
         .update({
           name: editForm.name,
-          email: editForm.email,
-          phone: editForm.phone,
-          address: editForm.address,
-          status: editForm.status,
           updated_at: new Date().toISOString()
         })
         .eq('id', editingOrg.id);
@@ -665,7 +658,7 @@ export default function OwnerCustomers() {
 
       setEditDialog(false);
       setEditingOrg(null);
-      setEditForm({ name: '', email: '', phone: '', address: '', status: 'active', contactEmail: '' });
+      setEditForm({ name: '' });
       
       // Refresh the data
       fetchOrganizations();
@@ -1236,49 +1229,6 @@ export default function OwnerCustomers() {
                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
                  required
                />
-             </Grid>
-             <Grid item xs={12}>
-               <TextField
-                 fullWidth
-                 label="Email"
-                 type="email"
-                 value={editForm.email}
-                 onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                 required
-               />
-             </Grid>
-             <Grid item xs={12}>
-               <TextField
-                 fullWidth
-                 label="Phone"
-                 value={editForm.phone}
-                 onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-               />
-             </Grid>
-             <Grid item xs={12}>
-               <TextField
-                 fullWidth
-                 label="Address"
-                 multiline
-                 rows={2}
-                 value={editForm.address}
-                 onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
-               />
-             </Grid>
-             <Grid item xs={12}>
-               <FormControl fullWidth>
-                 <InputLabel>Status</InputLabel>
-                 <Select
-                   value={editForm.status}
-                   onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                   label="Status"
-                 >
-                   <MenuItem value="active">Active</MenuItem>
-                   <MenuItem value="trial">Trial</MenuItem>
-                   <MenuItem value="expired">Expired</MenuItem>
-                   <MenuItem value="suspended">Suspended</MenuItem>
-                 </Select>
-               </FormControl>
              </Grid>
            </Grid>
          </DialogContent>

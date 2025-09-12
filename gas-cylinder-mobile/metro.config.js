@@ -16,4 +16,8 @@ config.resolver.extraNodeModules = {
   url: require.resolve('./emptyShim.js'),
 };
 
+// Add resolver for invariant package - supports both iOS and Android
+config.resolver.resolverMainFields = ['react-native', 'browser', 'main'];
+config.resolver.platforms = ['ios', 'android', 'native', 'web'];
+
 module.exports = config; 

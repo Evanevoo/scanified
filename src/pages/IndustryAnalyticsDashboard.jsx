@@ -383,7 +383,7 @@ export default function IndustryAnalyticsDashboard() {
             <SmoothButton
               variant="contained"
               startIcon={<AddIcon />}
-              onClick={() => navigate('/bottles/add')}
+              onClick={() => navigate('/bottle-management')}
             >
               Add Asset
             </SmoothButton>
@@ -399,7 +399,7 @@ export default function IndustryAnalyticsDashboard() {
             value={quickStats.totalAssets}
             icon={<InventoryIcon />}
             color="primary"
-            onClick={() => navigate('/bottles')}
+            onClick={() => navigate('/bottle-management')}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
@@ -408,7 +408,7 @@ export default function IndustryAnalyticsDashboard() {
             value={quickStats.assetsInField}
             icon={<LocationIcon />}
             color="success"
-            onClick={() => navigate('/bottles?filter=in-field')}
+            onClick={() => navigate('/bottle-management')}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
@@ -417,7 +417,7 @@ export default function IndustryAnalyticsDashboard() {
             value={quickStats.assetsInHouse}
             icon={<DashboardIcon />}
             color="info"
-            onClick={() => navigate('/bottles?filter=in-house')}
+            onClick={() => navigate('/bottle-management')}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
@@ -444,7 +444,7 @@ export default function IndustryAnalyticsDashboard() {
             value={quickStats.overdueReturns}
             icon={<WarningIcon />}
             color="error"
-            onClick={() => navigate('/bottles?filter=overdue')}
+            onClick={() => navigate('/bottle-management')}
           />
         </Grid>
       </Grid>

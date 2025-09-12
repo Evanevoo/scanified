@@ -583,7 +583,7 @@ export default function ProofOfDelivery({
                 onPress={requestCameraPermission}
               >
                 <Text style={styles.permissionButtonText}>
-                  Grant Permission
+                  Continue
                 </Text>
               </TouchableOpacity>
             </View>

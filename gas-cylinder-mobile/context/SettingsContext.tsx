@@ -10,6 +10,8 @@ interface Settings {
   offlineMode: boolean;
   lastSync: string;
   autoSync: boolean;
+  notifications: boolean;
+  hapticFeedback: boolean;
 }
 
 interface SettingsContextType {
@@ -29,6 +31,8 @@ const defaultSettings: Settings = {
   offlineMode: false,
   lastSync: 'Never',
   autoSync: true,
+  notifications: true,
+  hapticFeedback: true,
 };
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
@@ -50,16 +54,40 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     loadSettings();
   }, []);
 
+  const migrateSettings = (storedSettings: any): Settings => {
+    // Ensure all required properties exist with defaults
+    return {
+      theme: storedSettings.theme || defaultSettings.theme,
+      soundEnabled: storedSettings.soundEnabled !== undefined ? storedSettings.soundEnabled : defaultSettings.soundEnabled,
+      vibrationEnabled: storedSettings.vibrationEnabled !== undefined ? storedSettings.vibrationEnabled : defaultSettings.vibrationEnabled,
+      defaultScanMode: storedSettings.defaultScanMode || defaultSettings.defaultScanMode,
+      offlineMode: storedSettings.offlineMode !== undefined ? storedSettings.offlineMode : defaultSettings.offlineMode,
+      lastSync: storedSettings.lastSync || defaultSettings.lastSync,
+      autoSync: storedSettings.autoSync !== undefined ? storedSettings.autoSync : defaultSettings.autoSync,
+      notifications: storedSettings.notifications !== undefined ? storedSettings.notifications : defaultSettings.notifications,
+      hapticFeedback: storedSettings.hapticFeedback !== undefined ? storedSettings.hapticFeedback : defaultSettings.hapticFeedback,
+    };
+  };
+
   const loadSettings = async () => {
     try {
       const storedSettings = await AsyncStorage.getItem('app_settings');
       if (storedSettings) {
         const parsedSettings = JSON.parse(storedSettings);
-        setSettings({ ...defaultSettings, ...parsedSettings });
+        // Migrate settings to ensure all properties exist
+        const migratedSettings = migrateSettings(parsedSettings);
+        console.log('🔧 Loading settings:', { stored: parsedSettings, migrated: migratedSettings });
+        setSettings(migratedSettings);
+        // Save migrated settings back to storage
+        await saveSettings(migratedSettings);
+      } else {
+        console.log('🔧 No stored settings found, using defaults');
+        setSettings(defaultSettings);
       }
     } catch (error) {
       console.error('Error loading settings:', error);
       // Keep default settings if loading fails
+      setSettings(defaultSettings);
     } finally {
       setIsLoaded(true);
     }
@@ -74,9 +102,18 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
-    const newSettings = { ...settings, [key]: value };
-    setSettings(newSettings);
-    saveSettings(newSettings);
+    console.log('🔧 Updating setting:', { key, value, currentSettings: settings });
+    
+    // Use functional update to ensure we get the latest state
+    setSettings(prevSettings => {
+      const newSettings = { ...prevSettings, [key]: value };
+      console.log('🔧 New settings:', newSettings);
+      
+      // Save to storage asynchronously
+      saveSettings(newSettings);
+      
+      return newSettings;
+    });
   };
 
   const clearAllData = async () => {

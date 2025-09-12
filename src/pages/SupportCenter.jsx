@@ -28,8 +28,7 @@ import {
   Delete as DeleteIcon,
   Restore as RestoreIcon
 } from '@mui/icons-material';
-import { supabase } from '../supabase/client';
-import { useAuth } from '../hooks/useAuth';
+import { sendSupportTicketNotification, sendSupportTicketReplyNotification } from '../services/notificationService';
 
 export default function SupportCenter() {
   const { profile, organization } = useAuth();
@@ -113,27 +112,12 @@ export default function SupportCenter() {
       
       // Notify owners of new ticket
       try {
-        // Log support ticket creation (notification service removed)
-        console.log('Support ticket created:', data.title);
-        /*
-        await NotificationService.createNotification({
-          organizationId: organization.id,
-          type: 'support_ticket',
-          title: `New Support Ticket: ${data.title}`,
-          message: `A new support ticket has been created by ${profile.email}. Priority: ${data.priority}`,
-          data: {
-            ticket_id: data.id,
-            customer_email: profile.email,
-            priority: data.priority,
-            action: 'new_ticket'
-          },
-          priority: data.priority === 'urgent' ? 'urgent' : 'high',
-          actionUrl: `/owner-portal/support?ticket=${data.id}`,
-          actionText: 'View Ticket'
-        });
-        */
+        console.log('Sending support ticket notification email...');
+        await sendSupportTicketNotification(data, profile, organization);
+        console.log('Support ticket notification sent successfully');
       } catch (error) {
-        console.error('Error notifying owners:', error);
+        console.error('Error sending support ticket notification:', error);
+        // Don't fail the ticket creation if email fails
       }
     } catch (error) {
       console.error('Error submitting ticket:', error);
@@ -171,6 +155,20 @@ export default function SupportCenter() {
         await fetchTicketMessages(selectedTicket.id);
       }
       fetchTickets();
+      
+      // Notify owners of ticket reply
+      try {
+        console.log('Sending support ticket reply notification email...');
+        const replyData = {
+          message: replyMessage,
+          created_at: new Date().toISOString()
+        };
+        await sendSupportTicketReplyNotification(selectedTicket, replyData, profile);
+        console.log('Support ticket reply notification sent successfully');
+      } catch (error) {
+        console.error('Error sending support ticket reply notification:', error);
+        // Don't fail the reply if email fails
+      }
     } catch (error) {
       console.error('Error sending reply:', error);
       setSnackbar({ open: true, message: 'Error sending reply', severity: 'error' });

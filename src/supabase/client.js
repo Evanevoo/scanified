@@ -23,7 +23,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   // Global headers
   global: {
     headers: {
-      'X-Client-Info': 'gas-cylinder-app'
+      'X-Client-Info': 'scanified-app'
     }
   }
 }); 

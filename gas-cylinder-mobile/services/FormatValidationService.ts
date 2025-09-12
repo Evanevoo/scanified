@@ -29,6 +29,7 @@ export class FormatValidationService {
     }
 
     try {
+      console.log('🔍 Fetching organization formats for ID:', organizationId);
       const { data, error } = await supabase
         .from('organizations')
         .select('format_configuration')
@@ -39,13 +40,14 @@ export class FormatValidationService {
 
       // Parse the format_configuration JSONB column
       const formatConfig = data?.format_configuration || {};
+      console.log('🔍 Raw format_configuration from database:', formatConfig);
       
       // Set default formats if not configured
       const formats: OrganizationFormats = {
         barcode_format: formatConfig.barcode_format || {
-          pattern: '^[0-9]{9}$',
-          description: '9-digit numeric barcode',
-          examples: ['123456789', '987654321'],
+          pattern: '^%[0-9]{8}-[0-9]{10}[A-Za-z]?$',
+          description: '% + 8 digits + hyphen + 10 digits + optional letter',
+          examples: ['%800005D2-1580333825A', '%80000635-1596735793A'],
           validation_enabled: true
         },
         order_number_format: formatConfig.order_number_format || {
@@ -68,6 +70,10 @@ export class FormatValidationService {
       this.cachedFormats = formats;
       this.lastFetch = now;
 
+      console.log('🔍 Final barcode format being used:', formats.barcode_format);
+      console.log('🔍 Pattern:', formats.barcode_format.pattern);
+      console.log('🔍 Description:', formats.barcode_format.description);
+
       return formats;
     } catch (error) {
       console.error('Error fetching organization formats:', error);
@@ -75,9 +81,9 @@ export class FormatValidationService {
       // Return default formats on error
       return {
         barcode_format: {
-          pattern: '^[0-9]{9}$',
-          description: '9-digit numeric barcode',
-          examples: ['123456789', '987654321'],
+          pattern: '^%[0-9]{8}-[0-9]{10}[A-Za-z]?$',
+          description: '% + 8 digits + hyphen + 10 digits + optional letter',
+          examples: ['%800005D2-1580333825A', '%80000635-1596735793A'],
           validation_enabled: true
         },
         order_number_format: {
@@ -115,12 +121,18 @@ export class FormatValidationService {
 
     try {
       const regex = new RegExp(formatConfig.pattern);
+      console.log('🔍 Testing regex pattern:', formatConfig.pattern);
+      console.log('🔍 Testing against value:', trimmed);
+      console.log('🔍 Regex test result:', regex.test(trimmed));
+      
       if (!regex.test(trimmed)) {
+        console.log('❌ Regex test failed for:', trimmed);
         return { 
           isValid: false, 
           error: `Invalid format. Expected: ${formatConfig.description}` 
         };
       }
+      console.log('✅ Regex test passed for:', trimmed);
     } catch (error) {
       console.warn('Invalid regex pattern in format config:', error);
       return { isValid: false, error: 'Invalid format configuration' };

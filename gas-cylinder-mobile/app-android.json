@@ -19,21 +19,28 @@
     "android": {
       "package": "com.evanevoo.scanifiedmobile",
       "versionCode": 6,
+      "permissions": [
+        "CAMERA",
+        "VIBRATE",
+        "RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/app-icon.png",
         "backgroundColor": "#000000"
-      },
-      "permissions": [
-        "CAMERA",
-        "INTERNET",
-        "ACCESS_NETWORK_STATE"
-      ]
+      }
     },
     "plugins": [
       [
         "expo-camera",
         {
           "cameraPermission": "Allow Scanified to access your camera to scan asset barcodes and manage your organization's inventory with enterprise-grade precision."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#ffffff"
         }
       ]
     ],

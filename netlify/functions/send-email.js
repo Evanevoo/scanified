@@ -197,6 +197,142 @@ function generateEmailContent(template, data) {
         </div>
       `;
     
+    case 'support_ticket':
+      return `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+            <h2 style="color: #dc3545; margin: 0 0 10px 0;">🔔 New Support Ticket</h2>
+            <p style="margin: 0; color: #6c757d;">A customer has submitted a new support ticket</p>
+          </div>
+          
+          <div style="background-color: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="color: #495057; margin-top: 0;">Ticket Details</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; font-weight: bold; color: #495057;">Subject:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; color: #495057;">${data.subject}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; font-weight: bold; color: #495057;">Priority:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6;">
+                  <span style="background-color: ${data.priority === 'high' ? '#dc3545' : data.priority === 'medium' ? '#ffc107' : '#28a745'}; color: ${data.priority === 'high' ? 'white' : 'black'}; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold;">
+                    ${data.priority.toUpperCase()}
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; font-weight: bold; color: #495057;">Category:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; color: #495057;">${data.category}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; font-weight: bold; color: #495057;">Status:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6;">
+                  <span style="background-color: #dc3545; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold;">
+                    ${data.status.toUpperCase()}
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; font-weight: bold; color: #495057;">Created:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; color: #495057;">${new Date(data.createdAt).toLocaleString()}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="background-color: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="color: #495057; margin-top: 0;">Customer Information</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; font-weight: bold; color: #495057;">Name:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; color: #495057;">${data.userName}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; font-weight: bold; color: #495057;">Email:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; color: #495057;">${data.userEmail}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Organization:</td>
+                <td style="padding: 8px 0; color: #495057;">${data.organizationName}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="background-color: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="color: #495057; margin-top: 0;">Description</h3>
+            <div style="background-color: #f8f9fa; padding: 15px; border-radius: 4px; border-left: 4px solid #007bff;">
+              <p style="margin: 0; color: #495057; white-space: pre-wrap;">${data.description}</p>
+            </div>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${data.ticketUrl}" style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+              View & Respond to Ticket
+            </a>
+          </div>
+          
+          <div style="text-align: center; margin-top: 30px;">
+            <a href="${data.supportUrl}" style="color: #6c757d; text-decoration: none; font-size: 14px;">
+              Go to Support Dashboard
+            </a>
+          </div>
+          
+          <p style="color: #6c757d; font-size: 12px; margin-top: 32px; text-align: center;">
+            This is an automated notification from Scanified Gas Cylinder Management System
+          </p>
+        </div>
+      `;
+    
+    case 'support_ticket_reply':
+      return `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+            <h2 style="color: #007bff; margin: 0 0 10px 0;">💬 New Reply to Support Ticket</h2>
+            <p style="margin: 0; color: #6c757d;">A customer has replied to a support ticket</p>
+          </div>
+          
+          <div style="background-color: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="color: #495057; margin-top: 0;">Ticket Information</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; font-weight: bold; color: #495057;">Subject:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; color: #495057;">${data.subject}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; font-weight: bold; color: #495057;">Customer:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #dee2e6; color: #495057;">${data.userName} (${data.userEmail})</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Reply Time:</td>
+                <td style="padding: 8px 0; color: #495057;">${new Date(data.replyCreatedAt).toLocaleString()}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="background-color: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="color: #495057; margin-top: 0;">Customer Reply</h3>
+            <div style="background-color: #f8f9fa; padding: 15px; border-radius: 4px; border-left: 4px solid #28a745;">
+              <p style="margin: 0; color: #495057; white-space: pre-wrap;">${data.replyMessage}</p>
+            </div>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${data.ticketUrl}" style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+              View Full Conversation
+            </a>
+          </div>
+          
+          <div style="text-align: center; margin-top: 30px;">
+            <a href="${data.supportUrl}" style="color: #6c757d; text-decoration: none; font-size: 14px;">
+              Go to Support Dashboard
+            </a>
+          </div>
+          
+          <p style="color: #6c757d; font-size: 12px; margin-top: 32px; text-align: center;">
+            This is an automated notification from Scanified Gas Cylinder Management System
+          </p>
+        </div>
+      `;
+    
     case 'order-confirmation':
       return `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">

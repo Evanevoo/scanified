@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "🚀 Building Scanified iOS App..."
-echo "=================================="
+echo "====================================="
 
 # Check if we're in the right directory
 if [ ! -f "app-ios.json" ]; then
@@ -9,7 +9,13 @@ if [ ! -f "app-ios.json" ]; then
     exit 1
 fi
 
-# Install dependencies if needed
+# Switch to iOS configuration
+echo "📱 Switching to iOS configuration..."
+cp app-ios.json app.json
+cp eas-ios.json eas.json
+cp package-ios.json package.json
+
+# Install dependencies
 echo "📦 Installing dependencies..."
 npm install
 
@@ -18,4 +24,4 @@ echo "🔨 Building iOS app..."
 eas build --platform ios --profile production --config eas-ios.json --clear-cache
 
 echo "✅ iOS build completed!"
-echo "📱 You can now submit to App Store using: npm run submit:ios"
+echo "🍎 You can now submit to App Store using: npm run submit:ios"

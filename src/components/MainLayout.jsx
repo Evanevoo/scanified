@@ -41,7 +41,7 @@ import Sidebar from './Sidebar';
 const drawerWidth = 280;
 const collapsedWidth = 72;
 
-export default function MainLayout() {
+export default function MainLayout({ children }) {
   const { profile, organization } = useAuth();
   const { config: assetConfig } = useAssetConfig();
   const [integrationsOpen, setIntegrationsOpen] = useState(true);
@@ -468,7 +468,7 @@ export default function MainLayout() {
           minHeight: 'calc(100vh - 64px)',
           overflow: 'auto',
         }}>
-          <Outlet />
+          {children || <Outlet />}
         </Box>
         <GlobalImportProgress />
         <ImportNotification />

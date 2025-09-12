@@ -271,14 +271,40 @@ function Customers({ profile }) {
 
   const handleDelete = async (id) => {
     if (!organization?.id) return;
-    if (!window.confirm('Are you sure you want to delete this customer?')) return;
+    if (!window.confirm('Are you sure you want to delete this customer? This will also unassign any bottles from this customer.')) return;
     
     setError(null);
     try {
-      const { error } = await supabase.from('customers').delete().eq('CustomerListID', id).eq('organization_id', organization.id);
+      console.log(`Deleting customer with ID: ${id}`);
+      
+      // First, unassign any bottles from this customer
+      const { error: unassignError } = await supabase
+        .from('bottles')
+        .update({ assigned_customer: null })
+        .eq('assigned_customer', id)
+        .eq('organization_id', organization.id);
+      
+      if (unassignError) {
+        console.warn('Warning: Could not unassign bottles from customer:', unassignError);
+      } else {
+        console.log('Successfully unassigned bottles from customer');
+      }
+      
+      // Delete the customer
+      const { error, count } = await supabase
+        .from('customers')
+        .delete({ count: 'exact' })
+        .eq('CustomerListID', id)
+        .eq('organization_id', organization.id);
+      
       if (error) throw error;
       
-      setSuccessMsg('Customer deleted successfully!');
+      if (count === 0) {
+        throw new Error('Customer not found or already deleted');
+      }
+      
+      console.log(`Customer ${id} deleted successfully from database`);
+      setSuccessMsg('Customer deleted successfully from database!');
       setSelected(prev => prev.filter(sid => sid !== id));
       
       // Refresh current page
@@ -293,7 +319,8 @@ function Customers({ profile }) {
       setCustomers(data || []);
       setTotalCount(prev => prev - 1);
     } catch (err) {
-      setError(err.message);
+      console.error('Error deleting customer:', err);
+      setError(`Failed to delete customer: ${err.message}`);
     }
   };
 
@@ -313,14 +340,40 @@ function Customers({ profile }) {
 
   const handleBulkDelete = async () => {
     if (!organization?.id) return;
-    if (!window.confirm(`Delete ${selected.length} selected customers? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete ${selected.length} selected customers? This will also unassign any bottles from these customers. This cannot be undone.`)) return;
     
     setError(null);
     try {
-      const { error } = await supabase.from('customers').delete().in('CustomerListID', selected).eq('organization_id', organization.id);
+      console.log(`Bulk deleting ${selected.length} customers:`, selected);
+      
+      // First, unassign any bottles from these customers
+      const { error: unassignError } = await supabase
+        .from('bottles')
+        .update({ assigned_customer: null })
+        .in('assigned_customer', selected)
+        .eq('organization_id', organization.id);
+      
+      if (unassignError) {
+        console.warn('Warning: Could not unassign bottles from customers:', unassignError);
+      } else {
+        console.log('Successfully unassigned bottles from customers');
+      }
+      
+      // Delete the customers
+      const { error, count } = await supabase
+        .from('customers')
+        .delete({ count: 'exact' })
+        .in('CustomerListID', selected)
+        .eq('organization_id', organization.id);
+      
       if (error) throw error;
       
-      setSuccessMsg(`${selected.length} customers deleted successfully!`);
+      if (count === 0) {
+        throw new Error('No customers found or already deleted');
+      }
+      
+      console.log(`${count} customers deleted successfully from database`);
+      setSuccessMsg(`${count} customers deleted successfully from database!`);
       setSelected([]);
       
       // Refresh current page
@@ -333,9 +386,10 @@ function Customers({ profile }) {
         .range(from, to)
         .eq('organization_id', organization.id);
       setCustomers(data || []);
-      setTotalCount(prev => prev - selected.length);
+      setTotalCount(prev => prev - count);
     } catch (err) {
-      setError(err.message);
+      console.error('Error bulk deleting customers:', err);
+      setError(`Failed to delete customers: ${err.message}`);
     }
   };
 

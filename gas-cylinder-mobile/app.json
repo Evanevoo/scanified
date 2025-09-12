@@ -1,13 +1,24 @@
 {
   "expo": {
-    "name": "Scanified",
+    "name": "Scanified - Asset Management Platform",
     "slug": "gas-cylinder-mobile",
-    "version": "1.0.5",
+    "version": "1.0.9",
     "orientation": "portrait",
     "icon": "./assets/app-icon.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
-    "platforms": ["ios"],
+    "platforms": [
+      "ios"
+    ],
+    "description": "Professional asset tracking and inventory management solution. Scan barcodes, track assets, manage inventory, and maintain compliance with comprehensive reporting tools.",
+    "keywords": [
+      "asset management",
+      "inventory tracking",
+      "barcode scanner",
+      "enterprise",
+      "compliance",
+      "reporting"
+    ],
+    "privacy": "public",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -18,35 +29,50 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.evanevoo.scanifiedmobile",
-      "buildNumber": "7",
+      "bundleIdentifier": "com.scanified.assettrack",
+      "buildNumber": "20",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "Allow Scanified to access your camera to scan asset barcodes and manage your organization's inventory with enterprise-grade precision.",
+        "NSCameraUsageDescription": "Scanified uses your camera to scan asset barcodes for inventory management and tracking purposes.",
+        "NSPhotoLibraryUsageDescription": "Scanified may access your photo library to save scanned asset images for documentation purposes.",
         "CFBundleURLTypes": [
           {
             "CFBundleURLName": "apple-signin",
-            "CFBundleURLSchemes": ["scanified-auth"]
+            "CFBundleURLSchemes": [
+              "scanified-auth"
+            ]
           }
-        ]
+        ],
+        "LSApplicationCategoryType": "public.app-category.business"
       },
       "usesAppleSignIn": true,
-      "associatedDomains": ["applinks:jtfucttzaswmqqhmmhfb.supabase.co", "webcredentials:jtfucttzaswmqqhfb.supabase.co"]
+      "associatedDomains": [
+        "applinks:jtfucttzaswmqqhmmhfb.supabase.co",
+        "webcredentials:jtfucttzaswmqqhfb.supabase.co"
+      ]
     },
     "plugins": [
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Scanified to access your camera to scan asset barcodes and manage your organization's inventory with enterprise-grade precision."
+          "cameraPermission": "Scanified uses your camera to scan asset barcodes for inventory management and tracking purposes."
         }
       ],
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "expo-notifications"
     ],
     "extra": {
       "eas": {
         "projectId": "d71ec042-1fec-4186-ac3b-0ae85a6af345"
       }
     },
-    "owner": "evanevoo"
+    "owner": "evanevoo",
+    "android": {
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.scanified.assettrack"
+    }
   }
 }

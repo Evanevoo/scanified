@@ -276,6 +276,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       { title: 'Join Codes', path: '/organization-join-codes', icon: <QrCodeIcon />, roles: ['admin', 'manager'] },
       { title: 'Role & Permission Management', path: '/role-management', icon: <ShieldIcon />, roles: ['admin'] },
         { title: 'Customer Portal', path: '/customer-portal', icon: <PersonIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Bulk Rental Pricing', path: '/bulk-rental-pricing', icon: <CalculatorIcon />, roles: ['admin', 'manager'] },
         { title: 'Billing', path: '/billing', icon: <Payment />, roles: ['admin'] },
         { title: 'Settings', path: '/settings', icon: <Settings />, roles: ['admin'] },
         { title: 'Support Center', path: '/support', icon: <Support />, roles: ['admin', 'user', 'manager'] }
@@ -298,8 +299,6 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       items: [
         { title: 'Deliveries', path: '/deliveries', icon: <LocalShipping />, roles: ['admin', 'user', 'manager'] },
         { title: 'Rentals', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Rental Pricing', path: '/rental-pricing-manager', icon: <CalculatorIcon />, roles: ['admin', 'manager'] },
-        { title: 'Truck Reconciliation', path: '/truck-reconciliation-dashboard', icon: <TruckIcon />, roles: ['admin', 'manager'] },
         { title: 'Scanned Orders', path: '/scanned-orders', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Lease Agreements', path: '/lease-agreements', icon: <WorkIcon />, roles: ['admin', 'manager'] },
         { title: 'Generate Customer ID', path: '/generateid', icon: <IntegrationIcon />, roles: ['owner'] },
@@ -311,8 +310,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       title: 'Inventory',
       icon: <Inventory />,
       items: [
+        { title: 'Bottle Management', path: '/bottle-management', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
         { title: 'Assets', path: '/assets', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Asset Management', path: '/inventory-management', icon: <Inventory />, roles: ['admin', 'user', 'manager'], dynamic: true, termKey: 'itemManagement' },
         { title: 'Smart Inventory', path: '/smart-inventory', icon: <InventoryIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Asset History Lookup', path: '/asset-history-lookup', icon: <SearchIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'All Asset Movements', path: '/all-asset-movements', icon: <TrendingUp />, roles: ['admin', 'user', 'manager'] }

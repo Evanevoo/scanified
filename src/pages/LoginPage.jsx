@@ -209,15 +209,19 @@ function LoginPage() {
             />
             
             <Box sx={{ mt: 2, mb: 2, textAlign: 'right' }}>
-              <Link
-                component="button"
-                type="button"
+              <Typography
                 variant="body2"
                 onClick={() => setForgotPasswordOpen(true)}
-                sx={{ textDecoration: 'none' }}
+                sx={{ 
+                  cursor: 'pointer',
+                  color: 'primary.main',
+                  '&:hover': {
+                    textDecoration: 'underline'
+                  }
+                }}
               >
                 Forgot password?
-              </Link>
+              </Typography>
             </Box>
 
             <Button
@@ -239,38 +243,60 @@ function LoginPage() {
               Don't have an account?
             </Typography>
             <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <Link
-                component="button"
+              <Typography
                 variant="body2"
                 onClick={() => navigate('/signup')}
-                sx={{ textDecoration: 'none', fontWeight: 600 }}
+                sx={{ 
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  color: 'primary.main',
+                  '&:hover': {
+                    textDecoration: 'underline'
+                  }
+                }}
               >
                 Join Organization
-              </Link>
+              </Typography>
               <Typography variant="body2" color="text.secondary">•</Typography>
-              <Link
-                component="button"
+              <Typography
                 variant="body2"
                 onClick={() => navigate('/register')}
-                sx={{ textDecoration: 'none', fontWeight: 600 }}
+                sx={{ 
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  color: 'primary.main',
+                  '&:hover': {
+                    textDecoration: 'underline'
+                  }
+                }}
               >
                 Start Trial
-              </Link>
+              </Typography>
             </Box>
           </Box>
 
           <Box sx={{ mt: 3, textAlign: 'center' }}>
-            <Link
-              component="button"
-              variant="body2"
+            <Box
               onClick={() => navigate('/')}
-              sx={{ textDecoration: 'none' }}
+              sx={{ 
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 1,
+                color: 'primary.main',
+                '&:hover': {
+                  textDecoration: 'underline'
+                }
+              }}
             >
-              <IconButton size="small">
+              <IconButton size="small" sx={{ padding: 0 }}>
                 <ArrowBackIcon />
               </IconButton>
-              Back to Home
-            </Link>
+              <Typography variant="body2">
+                Back to Home
+              </Typography>
+            </Box>
           </Box>
         </CardContent>
       </Card>

@@ -1,0 +1,20 @@
+[33mb02d31c[m Update mobile app branding to Scanified
+[33m4ab4d1f[m [Cursor] Checkpoint at 2025-07-24T19:59:42.638Z
+[33mc2d1f1b[m [Cursor] Checkpoint at 2025-07-24T19:59:42.109Z
+[33mbb6e344[m [Cursor] Checkpoint at 2025-07-24T19:59:31.654Z
+[33mdc5debe[m [Cursor] Checkpoint at 2025-07-24T19:59:31.117Z
+[33ma8a757e[m [Cursor] Checkpoint at 2025-07-24T19:59:21.464Z
+[33m85a1b9f[m [Cursor] Checkpoint at 2025-07-24T19:59:20.629Z
+[33m7819246[m [Cursor] Checkpoint at 2025-07-24T19:58:54.462Z
+[33ma031c19[m [Cursor] Checkpoint at 2025-07-24T19:58:53.911Z
+[33mbffe8bd[m [Cursor] Checkpoint at 2025-07-24T19:58:37.258Z
+[33m407e324[m [Cursor] Checkpoint at 2025-07-24T19:58:36.516Z
+[33mb65a78b[m [Cursor] Checkpoint at 2025-07-24T19:58:01.123Z
+[33me41c556[m [Cursor] Checkpoint at 2025-07-24T19:58:00.576Z
+[33mdd66538[m Add backup scripts and latest changes
+[33mbcb818b[m Add TrackAbout integration to eliminate Excel barcode generation step
+[33m39c7ab7[m Fix bottle location filtering: add case-insensitive matching and auto-fix for bottles without location
+[33m51e964f[m Add customer location field and location filtering across all pages - Add location field to customers table - Add location editing in CustomerDetail page - Add location filtering to Rentals, BottleManagement, Customers, and ImportApprovals pages - Update bottle location sync when rental location changes
+[33m8394b6a[m Sync all local changes and deletions for deployment
+[33m39b4665[m Complete mobile app upgrade with working barcode scanning, improved settings, and stable expo-camera implementation
+[33m568da48[m Full project backup before pushing to GitHub

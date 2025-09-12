@@ -4,42 +4,42 @@ import { supabase } from '../supabase';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../context/AssetContext';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Platform } from '../utils/platform';
 
-// Quick Actions Configuration
-const QUICK_ACTIONS = [
+// Quick Actions Configuration - will be updated with dynamic terms
+const getQuickActions = (config) => [
   {
-    title: 'Scan Cylinders',
+    title: `Scan ${config?.assetDisplayNamePlural || 'Cylinders'}`,
     subtitle: 'Scan for shipping or returns',
     icon: '📷',
     action: 'ScanCylinders',
     color: '#2563eb'
   },
   {
-    title: 'Add Cylinder',
-    subtitle: 'Add new cylinder to inventory',
+    title: `Add ${config?.assetDisplayName || 'Cylinder'}`,
+    subtitle: `Add new ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} to inventory`,
     icon: '➕',
     action: 'AddCylinder',
     color: '#10B981'
   },
   {
-    title: 'Edit Cylinder',
-    subtitle: 'Modify cylinder details',
+    title: `Edit ${config?.assetDisplayName || 'Cylinder'}`,
+    subtitle: `Modify ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} details`,
     icon: '✏️',
     action: 'EditCylinder',
     color: '#F59E0B'
   },
   {
-    title: 'Locate Cylinder',
-    subtitle: 'Find cylinder location',
+    title: `Locate ${config?.assetDisplayName || 'Cylinder'}`,
+    subtitle: `Find ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} location`,
     icon: '🔍',
     action: 'LocateCylinder',
     color: '#8B5CF6'
   },
   {
-    title: 'Fill Cylinder',
-    subtitle: 'Mark cylinder as filled',
+    title: `Fill ${config?.assetDisplayName || 'Cylinder'}`,
+    subtitle: `Mark ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} as filled`,
     icon: '⛽',
     action: 'FillCylinder',
     color: '#EF4444'
@@ -79,6 +79,48 @@ export default function HomeScreen() {
     }
   }, [search, profile]);
 
+  // Debug function to test basic data access
+  const testDataAccess = async () => {
+    if (!profile?.organization_id) return;
+    
+    console.log('🧪 Testing basic data access...');
+    
+    // Test customers table
+    const { data: customers, error: customerError } = await supabase
+      .from('customers')
+      .select('CustomerListID, name, barcode')
+      .eq('organization_id', profile.organization_id)
+      .limit(3);
+    
+    console.log('🧪 Customers test:', { data: customers, error: customerError });
+    
+    // Test bottles table
+    const { data: bottles, error: bottleError } = await supabase
+      .from('bottles')
+      .select('barcode_number, customer_name')
+      .eq('organization_id', profile.organization_id)
+      .limit(3);
+    
+    console.log('🧪 Bottles test:', { data: bottles, error: bottleError });
+  };
+
+  useEffect(() => {
+    if (profile?.organization_id) {
+      testDataAccess();
+    }
+  }, [profile]);
+
+  // Refresh stats when screen comes into focus (e.g., after returning from scan)
+  useFocusEffect(
+    React.useCallback(() => {
+      if (profile?.organization_id) {
+        console.log('🔄 Screen focused, refreshing stats...');
+        fetchDashboardStats();
+        fetchUnreadCount();
+      }
+    }, [profile?.organization_id])
+  );
+
   const searchCustomers = async () => {
     if (!profile?.organization_id) {
       console.log('No organization found, skipping customer search');
@@ -87,42 +129,83 @@ export default function HomeScreen() {
       return;
     }
 
+    console.log('🔍 Starting customer search for:', search.trim());
+    console.log('🔍 Organization ID:', profile.organization_id);
+
     setLoadingCustomers(true);
     try {
-      let query = supabase
+      // Search by name only (most reliable)
+      let nameQuery = supabase
         .from('customers')
         .select('CustomerListID, name, barcode, contact_details')
-        .eq('organization_id', profile.organization_id)
-        .eq('deleted', false);
+        .eq('organization_id', profile.organization_id);
       
       if (search.trim().length === 1) {
-        query = query.ilike('name', `${search.trim()}%`);
+        nameQuery = nameQuery.ilike('name', `${search.trim()}%`);
       } else {
-        query = query.ilike('name', `%${search.trim()}%`);
+        nameQuery = nameQuery.ilike('name', `%${search.trim()}%`);
       }
       
-      const { data: customers, error } = await query.limit(5);
-      if (!error && customers) {
-        // Deduplicate customers by CustomerListID
-        const uniqueCustomers = customers.filter((customer, index, self) =>
-          index === self.findIndex((c) => c.CustomerListID === customer.CustomerListID)
-        );
+      console.log('🔍 Executing name query...');
+      const nameResult = await nameQuery.limit(10);
+      console.log('🔍 Name query result:', nameResult);
+      
+      let allCustomers = nameResult.data || [];
+      
+      // Try barcode search if barcode column exists
+      try {
+        let barcodeQuery = supabase
+          .from('customers')
+          .select('CustomerListID, name, barcode, contact_details')
+          .eq('organization_id', profile.organization_id)
+          .ilike('barcode', `%${search.trim()}%`);
         
+        console.log('🔍 Executing barcode query...');
+        const barcodeResult = await barcodeQuery.limit(10);
+        console.log('🔍 Barcode query result:', barcodeResult);
+        
+        if (barcodeResult.data) {
+          allCustomers = [...allCustomers, ...barcodeResult.data];
+        }
+      } catch (barcodeError) {
+        console.log('⚠️ Barcode search failed (column may not exist):', barcodeError);
+      }
+      
+      // Remove duplicates
+      const uniqueCustomers = (allCustomers || []).filter((customer, index, self) =>
+        index === self.findIndex((c) => c.CustomerListID === customer.CustomerListID)
+      );
+      
+      console.log('🔍 Combined customers:', uniqueCustomers.length);
+      
+      if (uniqueCustomers.length > 0) {
         const results = await Promise.all(uniqueCustomers.map(async (customer) => {
-          const { data: assets } = await supabase
-            .from('bottles')
-            .select('group_name')
-            .eq('organization_id', profile.organization_id)
-            .eq('assigned_customer', customer.CustomerListID);
-          return {
-            ...customer,
-            gases: Array.from(new Set((assets || []).map(c => c.group_name))).filter(Boolean),
-          };
+          try {
+            const { data: assets } = await supabase
+              .from('bottles')
+              .select('group_name')
+              .eq('organization_id', profile.organization_id)
+              .eq('assigned_customer', customer.CustomerListID);
+            return {
+              ...customer,
+              gases: Array.from(new Set((assets || []).map(c => c.group_name))).filter(Boolean),
+            };
+          } catch (error) {
+            console.log('⚠️ Error fetching customer assets:', error);
+            return {
+              ...customer,
+              gases: [],
+            };
+          }
         }));
+        console.log('🔍 Final results:', results.length);
         setCustomerResults(results);
+      } else {
+        console.log('🔍 No customers found, setting empty results');
+        setCustomerResults([]);
       }
     } catch (error) {
-      console.error('Error searching customers:', error);
+      console.error('❌ Error searching customers:', error);
     } finally {
       setLoadingCustomers(false);
     }
@@ -136,6 +219,9 @@ export default function HomeScreen() {
       return;
     }
 
+    console.log('🔍 Starting bottle search for:', search.trim());
+    console.log('🔍 Organization ID:', profile.organization_id);
+
     setLoadingBottles(true);
     try {
       const { data: assets, error } = await supabase
@@ -145,11 +231,17 @@ export default function HomeScreen() {
         .ilike('barcode_number', `%${search.trim()}%`)
         .limit(5);
       
+      console.log('🔍 Bottle query result:', { data: assets, error });
+      
       if (!error && assets) {
+        console.log('🔍 Found bottles:', assets.length);
         setBottleResults(assets);
+      } else {
+        console.log('🔍 No bottles found or error:', error);
+        setBottleResults([]);
       }
     } catch (error) {
-      console.error('Error searching bottles:', error);
+      console.error('❌ Error searching bottles:', error);
     } finally {
       setLoadingBottles(false);
     }
@@ -332,7 +424,7 @@ export default function HomeScreen() {
                   <TouchableOpacity
                     key={`${item.barcode_number}_${index}`}
                     style={[styles.resultItem, { borderBottomColor: colors.border }]}
-                    onPress={() => navigation.navigate('EditCylinder', { barcode: item.barcode_number })}
+                    onPress={() => navigation.navigate('CylinderDetails', { barcode: item.barcode_number })}
                   >
                     <Text style={[styles.resultTitle, { color: colors.text }]}>#{item.barcode_number}</Text>
                     <Text style={[styles.resultSubtitle, { color: colors.textSecondary }]}>
@@ -353,7 +445,7 @@ export default function HomeScreen() {
         <View style={styles.quickActionsContainer}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Quick Actions</Text>
           <View style={styles.actionsGrid}>
-            {QUICK_ACTIONS.map((action, index) => (
+            {getQuickActions(assetConfig).map((action, index) => (
               <TouchableOpacity
                 key={index}
                 style={[styles.actionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}

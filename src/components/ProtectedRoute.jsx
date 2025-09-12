@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useAssetConfig } from '../hooks/useAssetConfig';
 import LoadingSpinner from './LoadingSpinner';
 import MainLayout from './MainLayout';
 import { Alert, Box, Button, Card, CardContent, Typography, Grid } from '@mui/material';
@@ -10,6 +11,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, organization, loading, trialExpired, signOut } = useAuth();
+  const { config } = useAssetConfig();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -60,7 +62,7 @@ const ProtectedRoute = ({ children }) => {
             </Typography>
             
             <Typography variant="body1" paragraph align="center" color="text.secondary">
-              To continue using Scanified, please choose one of the options below:
+              To continue using {config?.appName || 'Scanified'}, please choose one of the options below:
             </Typography>
 
             <Grid container spacing={3} sx={{ mt: 2 }}>

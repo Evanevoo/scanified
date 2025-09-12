@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useAssetConfig } from '../hooks/useAssetConfig';
 import {
   Box,
   Paper,
@@ -54,6 +55,7 @@ const defaultConfig = {
 };
 
 export default function LiveChat() {
+  const { config } = useAssetConfig();
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -145,7 +147,7 @@ export default function LiveChat() {
     }
   }, [isOpen, isMinimized]);
 
-  const handleOpen = () => {
+  const handleOpen = useCallback(() => {
     setIsOpen(true);
     setIsMinimized(false);
     setHasNewMessage(false);
@@ -160,17 +162,17 @@ export default function LiveChat() {
         }
       }
     }, 200);
-  };
+  }, []);
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     console.log('Close button clicked');
     setIsOpen(false);
     setIsMinimized(false);
-  };
+  }, []);
 
-  const handleMinimize = () => {
+  const handleMinimize = useCallback(() => {
     setIsMinimized(!isMinimized);
-  };
+  }, [isMinimized]);
 
   const handleSendMessage = () => {
     if (inputValue.trim()) {
@@ -248,7 +250,8 @@ export default function LiveChat() {
               position: 'fixed',
               bottom: 24,
               right: 24,
-              zIndex: 1300
+              zIndex: 1000, // Reduced z-index to avoid conflicts
+              pointerEvents: 'auto' // Ensure it's clickable
             }}
           >
             <Badge
@@ -302,7 +305,7 @@ export default function LiveChat() {
             right: 0,
             bottom: 0,
             bgcolor: 'rgba(0,0,0,0.3)',
-            zIndex: 1299
+            zIndex: 999 // Reduced z-index
           }}
         />
       )}
@@ -324,7 +327,7 @@ export default function LiveChat() {
               flexDirection: 'column',
               borderRadius: 3,
               overflow: 'hidden',
-              zIndex: 1300,
+              zIndex: 1001, // Reduced z-index to avoid conflicts
               transition: 'height 0.3s ease'
             }}
           >
@@ -361,7 +364,7 @@ export default function LiveChat() {
                 </Badge>
                 <Box>
                   <Typography variant="subtitle1" fontWeight={600}>
-                    Scanified Support
+                    {config?.appName || 'Scanified'} Support
                   </Typography>
                   <Typography variant="caption" sx={{ opacity: 0.9 }}>
                     We typically reply instantly
@@ -577,7 +580,7 @@ export default function LiveChat() {
                     color="text.secondary"
                     sx={{ display: 'block', mt: 1, textAlign: 'center' }}
                   >
-                    Powered by Scanified AI Assistant
+                    Powered by {config?.appName || 'Scanified'} AI Assistant
                   </Typography>
                 </Box>
               </>

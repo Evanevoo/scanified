@@ -22,6 +22,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as AuthSession from 'expo-auth-session';
 import * as SecureStore from 'expo-secure-store';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 
 const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com'; // TODO: Replace with your client ID
 
@@ -262,52 +263,82 @@ export default function LoginScreen() {
     try {
       console.log('🍎 Starting Apple Sign In...');
       
-      // Generate cryptographically secure nonce for security
-      const nonce = Math.random().toString(36).substring(2, 15) + 
-                    Math.random().toString(36).substring(2, 15) + 
-                    Date.now().toString(36);
+      // Check if Apple Sign In is available (iPad and iOS 26 compatibility)
+      const isAvailable = await AppleAuthentication.isAvailableAsync();
+      if (!isAvailable) {
+        // Fallback to OAuth flow for devices without native Apple Sign In
+        console.log('🍎 Native Apple Sign In not available, using OAuth flow...');
+        const redirectUri = AuthSession.makeRedirectUri({ useProxy: false });
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: 'apple',
+          options: {
+            redirectTo: redirectUri,
+            skipBrowserRedirect: false,
+          },
+        });
+        if (error) throw error;
+        setSocialLoading(false);
+        return;
+      }
       
-      console.log('🍎 Requesting Apple credentials...');
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-        nonce: nonce,
-      });
+      // Generate a cryptographically secure nonce for iOS 26 compatibility
+      const nonce = Crypto.randomUUID();
+      
+      console.log('🍎 Requesting Apple credentials with iOS 26 compatibility...');
+      let credential;
+      try {
+        credential = await AppleAuthentication.signInAsync({
+          requestedScopes: [
+            AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+            AppleAuthentication.AppleAuthenticationScope.EMAIL,
+          ],
+          nonce: nonce,
+          state: Platform.OS === 'ios' && Platform.isPad ? 'ipad' : 'iphone',
+        });
+      } catch (appleError) {
+        // Handle specific Apple authentication errors
+        if (appleError.code === 'ERR_REQUEST_CANCELED') {
+          console.log('ℹ️ User canceled Apple Sign In');
+          setSocialLoading(false);
+          return;
+        }
+        throw appleError;
+      }
 
       console.log('🍎 Apple credential received:', {
         user: credential.user,
         email: credential.email,
         hasIdentityToken: !!credential.identityToken,
-        hasNonce: !!credential.nonce,
+        authorizationCode: !!credential.authorizationCode,
         fullName: credential.fullName ? 'present' : 'null'
       });
 
       if (!credential.identityToken) {
         throw new Error('No identity token received from Apple. Please try again.');
       }
-
-      // Use Apple's nonce if available, otherwise fallback to our generated nonce
-      const finalNonce = credential.nonce || nonce;
       
-      console.log('🍎 Authenticating with Supabase using nonce...');
+      console.log('🍎 Authenticating with Supabase using identity token...');
       const { data: signInData, error: signInError } = await supabase.auth.signInWithIdToken({
         provider: 'apple',
         token: credential.identityToken,
-        nonce: finalNonce,
+        nonce: nonce,
+        options: {
+          captchaToken: credential.authorizationCode, // Include authorization code for additional verification
+        }
       });
 
       if (signInError) {
         console.error('🚨 Supabase Apple Sign In Error:', signInError);
         
-        // Handle specific Supabase errors
+        // Enhanced error handling for iPad and specific Supabase errors
         if (signInError.message?.includes('Invalid login credentials')) {
           throw new Error('Apple authentication failed. Please try again or contact support.');
         } else if (signInError.message?.includes('network')) {
           throw new Error('Network connection error. Please check your internet connection and try again.');
         } else if (signInError.message?.includes('nonce')) {
           throw new Error('Authentication security error. Please try signing in again.');
+        } else if (signInError.message?.includes('iPad') || signInError.message?.includes('tablet')) {
+          throw new Error('iPad compatibility issue detected. Please try again or use email sign in.');
         }
         
         throw signInError;
@@ -351,7 +382,7 @@ export default function LoginScreen() {
         return;
       }
       
-      // Handle Apple Authentication specific errors
+      // Enhanced error handling for iPad and Apple Authentication specific errors
       if (err.code === 'ERR_INVALID_RESPONSE') {
         Alert.alert('Apple Sign In Failed', 'Invalid response from Apple. Please try again.');
         return;
@@ -362,7 +393,7 @@ export default function LoginScreen() {
         return;
       }
       
-      // Provide user-friendly error messages
+      // Provide user-friendly error messages with iPad-specific handling
       let errorMessage = 'An unexpected error occurred during Apple Sign In. Please try again.';
       
       if (err.message?.toLowerCase().includes('network')) {
@@ -371,6 +402,8 @@ export default function LoginScreen() {
         errorMessage = 'Authentication security error. Please try signing in again.';
       } else if (err.message?.toLowerCase().includes('invalid login credentials')) {
         errorMessage = 'Apple authentication failed. Please try again or contact support if the issue persists.';
+      } else if (err.message?.toLowerCase().includes('ipad') || err.message?.toLowerCase().includes('tablet')) {
+        errorMessage = 'iPad compatibility issue detected. Please try again or use email sign in.';
       } else if (err.message && err.message.length < 200) {
         // Show the actual error message if it's reasonable length and user-friendly
         errorMessage = err.message;
