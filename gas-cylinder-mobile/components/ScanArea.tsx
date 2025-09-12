@@ -160,10 +160,14 @@ const ScanArea: React.FC<ScanAreaProps> = ({
             backgroundColor: 'rgba(0,0,0,0.5)',
             borderRadius: 20,
             padding: 8,
+            width: 40,
+            height: 40,
+            justifyContent: 'center',
+            alignItems: 'center',
           }}
           onPress={onClose}
         >
-          <Text style={{ color: '#fff', fontSize: 24 }}>✕</Text>
+          <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold' }}>←</Text>
         </TouchableOpacity>
       )}
       <Text style={styles.header}>{label}</Text>
@@ -178,7 +182,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
             <View style={styles.centerContent}>
               <Text style={styles.statusText}>Camera permission required</Text>
               <TouchableOpacity onPress={requestPermission} style={styles.permissionButton}>
-                <Text style={styles.buttonText}>Grant Permission</Text>
+                <Text style={styles.buttonText}>Continue</Text>
               </TouchableOpacity>
             </View>
           ) : (

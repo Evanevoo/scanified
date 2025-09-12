@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import { CylinderLimitService } from '../services/CylinderLimitService';
 import { useAssetConfig } from '../context/AssetContext';
 import { Platform } from '../utils/platform';
+import { useNavigation } from '@react-navigation/native';
 
 interface GasType {
   id: number;
@@ -35,6 +36,7 @@ interface Location {
 export default function AddCylinderScreen() {
   const { colors } = useTheme();
   const { config: assetConfig } = useAssetConfig();
+  const navigation = useNavigation();
   const [barcode, setBarcode] = useState('');
   const [serial, setSerial] = useState('');
   const [gasTypes, setGasTypes] = useState<GasType[]>([]);
@@ -231,7 +233,17 @@ export default function AddCylinderScreen() {
 
   return (
     <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}>
-      <Text style={[styles.title, { color: colors.primary }]}>Add New Cylinder</Text>
+      {/* Header with Return Button */}
+      <View style={styles.header}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backIcon}>←</Text>
+        </TouchableOpacity>
+        <Text style={[styles.title, { color: colors.primary }]}>Add New Cylinder</Text>
+        <View style={styles.headerSpacer} />
+      </View>
       
       {/* Scanner Section */}
       <View style={styles.section}>
@@ -428,11 +440,33 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 40,
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#E5E7EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  backIcon: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#374151',
+  },
+  headerSpacer: {
+    width: 40,
+  },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 24,
     textAlign: 'center',
+    flex: 1,
   },
   section: {
     marginBottom: 32,

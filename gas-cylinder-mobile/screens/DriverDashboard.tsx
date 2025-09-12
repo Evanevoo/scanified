@@ -9,7 +9,7 @@ import {
 } from '@expo/vector-icons';
 import { useAuth } from '../hooks/useAuth';
 import { deliveryService } from '../services/deliveryService';
-import { notificationService } from '../services/notificationService';
+import { notificationService } from '../services/NotificationService';
 import { supabase } from '../supabase';
 
 const { width } = Dimensions.get('window');

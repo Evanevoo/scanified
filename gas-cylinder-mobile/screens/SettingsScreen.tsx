@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -16,6 +16,9 @@ import { useSettings } from '../context/SettingsContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabase';
 import { SyncService } from '../services/SyncService';
+import { connectivityService } from '../services/ConnectivityService';
+import { notificationService } from '../services/NotificationService';
+import { offlineModeService } from '../services/OfflineModeService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function SettingsScreen() {
@@ -105,6 +108,56 @@ export default function SettingsScreen() {
     );
   };
 
+  // Individual toggle handlers to prevent interference
+  const handleAutoSyncToggle = useCallback(async (value: boolean) => {
+    console.log('🔄 Auto Sync toggle:', value);
+    updateSetting('autoSync', value);
+    
+    // Send notification about auto-sync change
+    await notificationService.sendSyncNotification(
+      true, 
+      `Auto-sync ${value ? 'enabled' : 'disabled'}. ${value ? 'Data will sync automatically when connected.' : 'Manual sync required.'}`
+    );
+  }, [updateSetting]);
+
+  const handleOfflineModeToggle = useCallback(async (value: boolean) => {
+    console.log('🔄 Offline Mode toggle:', value);
+    updateSetting('offlineMode', value);
+    
+    // Update offline mode service
+    await offlineModeService.setOfflineMode(value);
+    
+    // Send notification about offline mode change
+    await notificationService.sendOfflineModeNotification(value);
+  }, [updateSetting]);
+
+  const handleNotificationsToggle = useCallback(async (value: boolean) => {
+    console.log('🔄 Notifications toggle:', value);
+    updateSetting('notifications', value);
+    
+    // Update notification service settings
+    await notificationService.updateNotificationSettings({ enabled: value });
+    
+    // Send test notification if enabling
+    if (value) {
+      await notificationService.sendLocalNotification({
+        title: 'Notifications Enabled',
+        body: 'You will now receive notifications for scans, syncs, and important updates.',
+        priority: 'default',
+      });
+    }
+  }, [updateSetting]);
+
+  const handleSoundEffectsToggle = useCallback((value: boolean) => {
+    console.log('🔄 Sound Effects toggle:', value);
+    updateSetting('soundEnabled', value);
+  }, [updateSetting]);
+
+  const handleHapticFeedbackToggle = useCallback((value: boolean) => {
+    console.log('🔄 Haptic Feedback toggle:', value);
+    updateSetting('hapticFeedback', value);
+  }, [updateSetting]);
+
   const SettingItem = ({ title, subtitle, onPress, rightComponent, showBorder = true }) => (
     <TouchableOpacity 
       style={[
@@ -183,8 +236,9 @@ export default function SettingsScreen() {
             subtitle="Automatically sync when connected"
             rightComponent={
               <Switch
+                key="autoSync"
                 value={settings.autoSync}
-                onValueChange={(value) => updateSetting('autoSync', value)}
+                onValueChange={handleAutoSyncToggle}
                 trackColor={{ false: colors.border, true: colors.primary + '40' }}
                 thumbColor={settings.autoSync ? colors.primary : colors.textSecondary}
               />
@@ -195,8 +249,9 @@ export default function SettingsScreen() {
             subtitle="Work without internet connection"
             rightComponent={
               <Switch
+                key="offlineMode"
                 value={settings.offlineMode}
-                onValueChange={(value) => updateSetting('offlineMode', value)}
+                onValueChange={handleOfflineModeToggle}
                 trackColor={{ false: colors.border, true: colors.primary + '40' }}
                 thumbColor={settings.offlineMode ? colors.primary : colors.textSecondary}
               />
@@ -213,8 +268,9 @@ export default function SettingsScreen() {
             subtitle="Push notifications and alerts"
             rightComponent={
               <Switch
+                key="notifications"
                 value={settings.notifications}
-                onValueChange={(value) => updateSetting('notifications', value)}
+                onValueChange={handleNotificationsToggle}
                 trackColor={{ false: colors.border, true: colors.primary + '40' }}
                 thumbColor={settings.notifications ? colors.primary : colors.textSecondary}
               />
@@ -225,8 +281,9 @@ export default function SettingsScreen() {
             subtitle="Scan sounds and feedback"
             rightComponent={
               <Switch
+                key="soundEnabled"
                 value={settings.soundEnabled}
-                onValueChange={(value) => updateSetting('soundEnabled', value)}
+                onValueChange={handleSoundEffectsToggle}
                 trackColor={{ false: colors.border, true: colors.primary + '40' }}
                 thumbColor={settings.soundEnabled ? colors.primary : colors.textSecondary}
               />
@@ -237,8 +294,9 @@ export default function SettingsScreen() {
             subtitle="Vibration on interactions"
             rightComponent={
               <Switch
+                key="hapticFeedback"
                 value={settings.hapticFeedback}
-                onValueChange={(value) => updateSetting('hapticFeedback', value)}
+                onValueChange={handleHapticFeedbackToggle}
                 trackColor={{ false: colors.border, true: colors.primary + '40' }}
                 thumbColor={settings.hapticFeedback ? colors.primary : colors.textSecondary}
               />
@@ -254,7 +312,25 @@ export default function SettingsScreen() {
             title="Clear Cache"
             subtitle="Free up storage space"
             onPress={() => {
-              Alert.alert('Success', 'Cache cleared successfully');
+              Alert.alert(
+                'Clear Cache',
+                'This will clear app cache and reset settings to defaults. Continue?',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Clear',
+                    style: 'destructive',
+                    onPress: async () => {
+                      try {
+                        await resetSettings();
+                        Alert.alert('Success', 'Cache and settings cleared successfully');
+                      } catch (error) {
+                        Alert.alert('Error', 'Failed to clear cache');
+                      }
+                    }
+                  }
+                ]
+              );
             }}
             rightComponent={<Text style={[styles.actionText, { color: colors.primary }]}>Clear</Text>}
           />
@@ -274,7 +350,32 @@ export default function SettingsScreen() {
             title="Help & Support"
             subtitle="Get help and contact support"
             onPress={() => {
-              Alert.alert('Support', 'Contact support at support@scanified.com');
+              Alert.alert(
+                'Help & Support',
+                'Choose how you\'d like to contact support:',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Email Support',
+                    onPress: () => {
+                      // In a real app, you'd use Linking.openURL to open email client
+                      Alert.alert('Email Support', 'support@scanified.com\n\nCopy this email address to contact our support team.');
+                    }
+                  },
+                  {
+                    text: 'Phone Support',
+                    onPress: () => {
+                      Alert.alert('Phone Support', 'Call us at: +1 (555) 123-4567\n\nAvailable Monday-Friday, 9 AM - 5 PM EST');
+                    }
+                  },
+                  {
+                    text: 'Live Chat',
+                    onPress: () => {
+                      Alert.alert('Live Chat', 'Live chat is available on our website at scanified.com/support');
+                    }
+                  }
+                ]
+              );
             }}
             rightComponent={<Text style={styles.chevron}>›</Text>}
           />

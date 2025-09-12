@@ -9,7 +9,13 @@ if [ ! -f "app-android.json" ]; then
     exit 1
 fi
 
-# Install dependencies if needed
+# Switch to Android configuration
+echo "📱 Switching to Android configuration..."
+cp app-android.json app.json
+cp eas-android.json eas.json
+cp package-android.json package.json
+
+# Install dependencies
 echo "📦 Installing dependencies..."
 npm install
 

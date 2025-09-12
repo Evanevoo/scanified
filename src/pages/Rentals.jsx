@@ -168,9 +168,35 @@ function RentalsImproved() {
       // Add bottles that are assigned but don't have rental records
       const existingBottleBarcodes = new Set(allRentalData.map(r => r.bottle_barcode));
       
+      // Load customer pricing to apply correct rates
+      const { data: customerPricing } = await supabase
+        .from('customer_pricing')
+        .select('*')
+        .eq('organization_id', organization.id);
+      
+      const pricingMap = (customerPricing || []).reduce((map, pricing) => {
+        map[pricing.customer_id] = pricing;
+        return map;
+      }, {});
+      
       for (const bottle of assignedBottles || []) {
         const barcode = bottle.barcode_number || bottle.barcode;
         if (!existingBottleBarcodes.has(barcode)) {
+          // Get customer-specific pricing or use default
+          const customerPricing = pricingMap[bottle.assigned_customer];
+          let rentalAmount = 15; // Default rate
+          let rentalType = 'monthly';
+          
+          if (customerPricing) {
+            if (customerPricing.fixed_rate_override) {
+              rentalAmount = customerPricing.fixed_rate_override;
+            } else if (customerPricing.discount_percent > 0) {
+              // Apply discount to base rate (assuming base rate is $15)
+              rentalAmount = 15 * (1 - customerPricing.discount_percent / 100);
+            }
+            rentalType = customerPricing.rental_period || 'monthly';
+          }
+          
           allRentalData.push({
             id: `bottle_${bottle.id}`,
             source: 'bottle_assignment',
@@ -180,8 +206,8 @@ function RentalsImproved() {
             bottles: bottle,
             rental_start_date: bottle.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
             rental_end_date: null,
-            rental_amount: 10,
-            rental_type: 'monthly',
+            rental_amount: rentalAmount,
+            rental_type: rentalType,
             tax_code: 'GST+PST',
             tax_rate: 0.11,
             location: bottle.location || 'SASKATOON'
@@ -286,7 +312,7 @@ function RentalsImproved() {
       console.log('Final results:', {
         unassignedBottles: unassignedBottles,
         bottlesWithVendors: bottlesWithVendors,
-        inHouseTotal: inHouseTotal,
+        availableAssets: inHouseTotal, // Renamed from inHouseTotal
         rentedToCustomers: rentedToCustomers,
         revenue: totalRevenue
       });
@@ -609,9 +635,11 @@ function RentalsImproved() {
                   <Typography variant="h4" fontWeight="bold" color="primary">
                     {stats.inHouse}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    In-House Assets
-                  </Typography>
+                  <Tooltip title="Unassigned bottles + bottles with vendor customers">
+                    <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                      Available Assets
+                    </Typography>
+                  </Tooltip>
                 </Box>
                 <HomeIcon sx={{ fontSize: 40, color: '#9e9e9e' }} />
               </Box>

@@ -24,6 +24,20 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
     
+    // Log additional details for debugging
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Component stack:', errorInfo.componentStack);
+    
+    // Check if it's the reduce error we're looking for
+    if (error.message && error.message.includes('reduce')) {
+      console.error('🔍 REDUCE ERROR DETECTED:', {
+        message: error.message,
+        stack: error.stack,
+        componentStack: errorInfo.componentStack
+      });
+    }
+    
     // In a real app, you might want to log this to a service
     // like Sentry, Crashlytics, etc.
   }

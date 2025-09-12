@@ -131,7 +131,7 @@ export const useAppStore = create(
       }))
     }),
     {
-      name: 'gas-cylinder-app-storage',
+      name: 'scanified-app-storage',
       partialize: (state) => ({
         // Only persist these states
         theme: state.theme,

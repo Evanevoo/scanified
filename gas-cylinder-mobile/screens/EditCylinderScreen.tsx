@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Linking } from 'react-native';
 import { supabase } from '../supabase';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Picker } from '@react-native-picker/picker';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
+import { useNavigation } from '@react-navigation/native';
 
 export default function EditCylinderScreen() {
   const { config: assetConfig } = useAssetConfig();
   const { profile } = useAuth();
+  const navigation = useNavigation();
   const [step, setStep] = useState(1);
   const [barcode, setBarcode] = useState('');
   const [serial, setSerial] = useState('');
@@ -29,15 +31,20 @@ export default function EditCylinderScreen() {
   React.useEffect(() => {
     if (step === 2 && profile?.organization_id) {
       setCustomersLoading(true);
+      
       supabase
         .from('customers')
         .select('CustomerListID, name')
         .eq('organization_id', profile.organization_id)
-        .eq('deleted', false)
         .order('name')
         .then(({ data, error }) => {
-          if (error) setCustomersError('Failed to load customers');
-          else setCustomers(data || []);
+          if (error) {
+            console.log('❌ Error loading customers:', error);
+            setCustomersError('Failed to load customers');
+          } else {
+            console.log('✅ Loaded customers:', data?.length || 0);
+            setCustomers(data || []);
+          }
           setCustomersLoading(false);
         });
     }
@@ -163,9 +170,21 @@ export default function EditCylinderScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Header with Return Button */}
+      <View style={styles.header}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backIcon}>←</Text>
+        </TouchableOpacity>
+        <Text style={styles.title}>Edit Cylinder</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+      
       {step === 1 && (
         <>
-          <Text style={styles.title}>Scan or Enter Cylinder Barcode</Text>
+          <Text style={styles.stepTitle}>Scan or Enter Cylinder Barcode</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
             <TextInput
               style={styles.input}
@@ -270,13 +289,33 @@ export default function EditCylinderScreen() {
       {/* Scanner Modal */}
       {scannerVisible && (
         <View style={styles.scannerModal}>
+          {/* Close Button */}
+          <TouchableOpacity 
+            style={styles.scannerCloseButton}
+            onPress={() => setScannerVisible(false)}
+          >
+            <Text style={styles.scannerCloseIcon}>←</Text>
+          </TouchableOpacity>
+          
           {!permission ? (
             <Text style={{ color: '#fff' }}>Requesting camera permission...</Text>
           ) : !permission.granted ? (
             <View style={{ alignItems: 'center' }}>
-              <Text style={{ color: '#fff', marginBottom: 16 }}>We need your permission to show the camera</Text>
-              <TouchableOpacity onPress={requestPermission} style={{ backgroundColor: '#2563eb', padding: 16, borderRadius: 10 }}>
-                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Grant Permission</Text>
+              <Text style={{ color: '#fff', marginBottom: 16 }}>Camera access is required to scan barcodes</Text>
+              <TouchableOpacity onPress={async () => {
+                const result = await requestPermission();
+                if (!result.granted && result.canAskAgain === false) {
+                  Alert.alert(
+                    'Camera Permission',
+                    'Please enable camera access in your device settings to use the scanner.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Open Settings', onPress: () => Linking.openSettings() }
+                    ]
+                  );
+                }
+              }} style={{ backgroundColor: '#2563eb', padding: 16, borderRadius: 10 }}>
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Continue</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -335,11 +374,45 @@ const styles = StyleSheet.create({
     padding: 24,
     justifyContent: 'center',
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+    position: 'absolute',
+    top: 50,
+    left: 24,
+    right: 24,
+    zIndex: 10,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#E5E7EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  backIcon: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#374151',
+  },
+  headerSpacer: {
+    width: 40,
+  },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#2563eb',
-    marginBottom: 18,
+    textAlign: 'center',
+    flex: 1,
+  },
+  stepTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2563eb',
+    marginBottom: 16,
     textAlign: 'center',
   },
   input: {
@@ -388,6 +461,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 100,
+  },
+  scannerCloseButton: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    zIndex: 1000,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scannerCloseIcon: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
   },
   removeButton: {
     backgroundColor: '#ff5a1f',

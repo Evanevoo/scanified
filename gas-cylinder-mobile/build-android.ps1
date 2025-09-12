@@ -8,7 +8,13 @@ if (-not (Test-Path "app-android.json")) {
     exit 1
 }
 
-# Install dependencies if needed
+# Switch to Android configuration
+Write-Host "📱 Switching to Android configuration..." -ForegroundColor Yellow
+Copy-Item "app-android.json" "app.json" -Force
+Copy-Item "eas-android.json" "eas.json" -Force
+Copy-Item "package-android.json" "package.json" -Force
+
+# Install dependencies
 Write-Host "📦 Installing dependencies..." -ForegroundColor Yellow
 npm install
 

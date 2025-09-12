@@ -53,7 +53,7 @@ export default function Home() {
       const [customersRes, cylindersRes, rentalsRes, deliveriesRes] = await Promise.all([
         supabase.from('customers').select('id', { count: 'exact' }).eq('organization_id', organization.id),
         supabase.from('bottles').select('id', { count: 'exact' }).eq('organization_id', organization.id),
-        supabase.from('rentals').select('id', { count: 'exact' }).eq('organization_id', organization.id).eq('status', 'active'),
+        supabase.from('bottles').select('id', { count: 'exact' }).eq('organization_id', organization.id).not('assigned_customer', 'is', null),
         supabase.from('deliveries').select('id', { count: 'exact' }).eq('organization_id', organization.id).eq('status', 'pending')
       ]);
 
@@ -158,16 +158,70 @@ export default function Home() {
 
   const getStatCards = () => {
     const baseCards = [
-      { title: 'Customers', value: stats.customers, icon: <People />, color: currentTheme.primary.main },
-      { title: 'Cylinders', value: stats.cylinders, icon: <Inventory />, color: currentTheme.secondary.main },
-      { title: 'Active Rentals', value: stats.activeRentals, icon: <Schedule />, color: currentTheme.success.main },
-      { title: 'Pending Deliveries', value: stats.pendingDeliveries, icon: <LocalShipping />, color: currentTheme.warning.main }
+      { 
+        title: 'Customers', 
+        value: stats.customers, 
+        icon: <People />, 
+        color: currentTheme.primary.main,
+        onClick: () => {
+          console.log('🔄 Navigating to /customers');
+          navigate('/customers');
+        }
+      },
+      { 
+        title: 'Cylinders', 
+        value: stats.cylinders, 
+        icon: <Inventory />, 
+        color: currentTheme.secondary.main,
+        onClick: () => {
+          console.log('🔄 Navigating to /inventory');
+          navigate('/inventory');
+        }
+      },
+      { 
+        title: 'Active Rentals', 
+        value: stats.activeRentals, 
+        icon: <Schedule />, 
+        color: currentTheme.success.main,
+        onClick: () => {
+          console.log('🔄 Navigating to /rentals');
+          navigate('/rentals');
+        }
+      },
+      { 
+        title: 'Pending Deliveries', 
+        value: stats.pendingDeliveries, 
+        icon: <LocalShipping />, 
+        color: currentTheme.warning.main,
+        onClick: () => {
+          console.log('🔄 Navigating to /deliveries');
+          navigate('/deliveries');
+        }
+      }
     ];
 
     if (isAdmin()) {
       baseCards.push(
-        { title: 'Overdue Invoices', value: stats.overdueInvoices, icon: <Warning />, color: currentTheme.error.main },
-        { title: 'Total Users', value: stats.totalUsers, icon: <AdminPanelSettings />, color: currentTheme.info.main }
+        { 
+          title: 'Overdue Invoices', 
+          value: stats.overdueInvoices, 
+          icon: <Warning />, 
+          color: currentTheme.error.main,
+          onClick: () => {
+            console.log('🔄 Navigating to /billing (invoices not available)');
+            navigate('/billing');
+          }
+        },
+        { 
+          title: 'Total Users', 
+          value: stats.totalUsers, 
+          icon: <AdminPanelSettings />, 
+          color: currentTheme.info.main,
+          onClick: () => {
+            console.log('🔄 Navigating to /user-management');
+            navigate('/user-management');
+          }
+        }
       );
     }
 
@@ -222,13 +276,19 @@ export default function Home() {
       <Grid container spacing={3} sx={{ mb: 3 }}>
         {statCards.map((card, index) => (
           <Grid item xs={12} sm={6} md={4} lg={2} key={index}>
-            <Card sx={{ 
-              height: '100%', 
-              background: `linear-gradient(135deg, ${card.color} 0%, ${card.color}CC 100%)`,
-              color: 'white',
-              transition: 'transform 0.2s',
-              '&:hover': { transform: 'translateY(-4px)' }
-            }}>
+            <Card 
+              onClick={card.onClick}
+              sx={{ 
+                height: '100%', 
+                background: `linear-gradient(135deg, ${card.color} 0%, ${card.color}CC 100%)`,
+                color: 'white',
+                transition: 'transform 0.2s',
+                cursor: 'pointer',
+                '&:hover': { 
+                  transform: 'translateY(-4px)',
+                  boxShadow: '0 8px 25px rgba(0,0,0,0.15)'
+                }
+              }}>
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Box>

@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-netinfo/netinfo';
+import NetInfo from '@react-native-community/netinfo';
 
 /**
  * Offline Storage Service for Mobile App
@@ -196,16 +196,33 @@ export class OfflineStorageService {
    * Sync scan operation
    */
   private static async syncScanOperation(supabase: any, operation: OfflineData): Promise<void> {
+    console.log('🔄 Syncing scan operation:', {
+      organizationId: operation.organizationId,
+      userId: operation.userId,
+      customerId: operation.data.customer_id,
+      orderNumber: operation.data.order_number
+    });
+
     const { data, error } = await supabase
       .from('scans')
       .insert([{
-        ...operation.data,
-        organization_id: operation.organizationId,
-        scanned_by: operation.userId,
-        created_at: new Date(operation.timestamp).toISOString()
+        organization_id: operation.organizationId || null,
+        barcode_number: operation.data.barcode_number,
+        action: operation.data.action,
+        location: operation.data.location || null,
+        notes: operation.data.notes || null,
+        scanned_by: operation.userId || null,
+        order_number: operation.data.order_number || null,
+        customer_name: operation.data.customer_name || null,
+        customer_id: operation.data.customer_id || null
       }]);
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Scan sync error:', error);
+      throw error;
+    }
+    
+    console.log('✅ Scan synced successfully');
   }
 
   /**

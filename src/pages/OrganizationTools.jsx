@@ -34,38 +34,26 @@ export default function OrganizationTools() {
   const [loading, setLoading] = useState(false);
   const [validationResults, setValidationResults] = useState({
     customers: { valid: 0, invalid: 0, issues: [] },
-    cylinders: { valid: 0, invalid: 0, issues: [] },
+    bottles: { valid: 0, invalid: 0, issues: [] },
     deliveries: { valid: 0, invalid: 0, issues: [] },
     locations: { valid: 0, invalid: 0, issues: [] }
   });
-  const [exportDialog, setExportDialog] = useState(false);
-  const [cleanupDialog, setCleanupDialog] = useState(false);
-  const [validationDialog, setValidationDialog] = useState(false);
-  const [duplicateReviewDialog, setDuplicateReviewDialog] = useState(false);
-  const [duplicateResults, setDuplicateResults] = useState({
-    emails: [],
+  const [detailedData, setDetailedData] = useState({
     customers: [],
-    cylinders: []
+    bottles: [],
+    deliveries: [],
+    locations: []
   });
-  const [selectedDuplicates, setSelectedDuplicates] = useState({});
-  const [exportParams, setExportParams] = useState({
-    format: 'csv',
-    dateRange: '30d',
-    includeDetails: true,
-    dataTypes: ['customers', 'cylinders', 'deliveries']
+  const [editingBottle, setEditingBottle] = useState(null);
+  const [editForm, setEditForm] = useState({
+    serial_number: '',
+    barcode_number: '',
+    gas_type: '',
+    status: ''
   });
-  const [cleanupParams, setCleanupParams] = useState({
-    removeDuplicates: true,
-    fixOrphanedRecords: true,
-    archiveOldRecords: false,
-    dryRun: true
-  });
-  const [validationParams, setValidationParams] = useState({
-    checkDataIntegrity: true,
-    validateRelationships: true,
-    checkForOrphans: true,
-    validateBusinessRules: true
-  });
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [bulkCleanupDialog, setBulkCleanupDialog] = useState(false);
+  const [cleanupLoading, setCleanupLoading] = useState(false);
 
   useEffect(() => {
     if (profile && organization) {
@@ -81,24 +69,24 @@ export default function OrganizationTools() {
         return;
       }
 
-      // Fetch real data from Supabase
-      const [customersResult, cylindersResult, deliveriesResult, locationsResult] = await Promise.all([
+      // Fetch real data from Supabase with error handling
+      const [customersResult, bottlesResult, deliveriesResult, locationsResult] = await Promise.allSettled([
         // Customers
         supabase
           .from('customers')
           .select('id, name, email, phone')
           .eq('organization_id', organization.id),
         
-        // Cylinders/Bottles
+        // Bottles
         supabase
           .from('bottles')
-          .select('id, serial_number, cylinder_type, status')
+          .select('id, serial_number, barcode_number, gas_type, status')
           .eq('organization_id', organization.id),
         
-        // Deliveries
+        // Delivery Manifests
         supabase
-          .from('deliveries')
-          .select('id, delivery_date, status, customer_id')
+          .from('delivery_manifests')
+          .select('id, manifest_date, status, driver_id')
           .eq('organization_id', organization.id),
         
         // Locations
@@ -108,8 +96,27 @@ export default function OrganizationTools() {
           .eq('organization_id', organization.id)
       ]);
 
+      // Extract data from Promise.allSettled results
+      const customers = customersResult.status === 'fulfilled' ? (customersResult.value.data || []) : [];
+      const bottles = bottlesResult.status === 'fulfilled' ? (bottlesResult.value.data || []) : [];
+      const deliveries = deliveriesResult.status === 'fulfilled' ? (deliveriesResult.value.data || []) : [];
+      const locations = locationsResult.status === 'fulfilled' ? (locationsResult.value.data || []) : [];
+      
+      console.log('Organization Tools - Data loaded:', {
+        customers: customers.length,
+        bottles: bottles.length,
+        deliveries: deliveries.length,
+        locations: locations.length,
+        organizationId: organization.id
+      });
+      
+      // Log any errors
+      if (customersResult.status === 'rejected') console.error('Customers query failed:', customersResult.reason);
+      if (bottlesResult.status === 'rejected') console.error('Bottles query failed:', bottlesResult.reason);
+      if (deliveriesResult.status === 'rejected') console.error('Deliveries query failed:', deliveriesResult.reason);
+      if (locationsResult.status === 'rejected') console.error('Locations query failed:', locationsResult.reason);
+
       // Process customers
-      const customers = customersResult.data || [];
       const customerIssues = [];
       let validCustomers = 0;
       
@@ -142,76 +149,130 @@ export default function OrganizationTools() {
         });
       }
 
-      // Process cylinders
-      const cylinders = cylindersResult.data || [];
-      const cylinderIssues = [];
-      let validCylinders = 0;
+      // Process bottles with detailed tracking
+      const bottleIssues = [];
+      let validBottles = 0;
+      const bottlesWithIssues = [];
       
-      cylinders.forEach(cylinder => {
-        let hasIssue = false;
-        if (!cylinder.serial_number) {
-          hasIssue = true;
+      bottles.forEach(bottle => {
+        const issues = [];
+        // Only check for REQUIRED fields
+        if (!bottle.serial_number) {
+          issues.push('Missing serial number');
         }
-        if (!cylinder.cylinder_type) {
-          hasIssue = true;
+        if (!bottle.barcode_number) {
+          issues.push('Missing barcode number');
         }
-        if (!hasIssue) validCylinders++;
+        // Optional fields - only flag if completely missing (not just empty string)
+        if (bottle.gas_type === null || bottle.gas_type === undefined) {
+          issues.push('Missing gas type');
+        }
+        if (!bottle.status) {
+          issues.push('Missing status');
+        }
+        
+        if (issues.length === 0) {
+          validBottles++;
+        } else {
+          bottlesWithIssues.push({
+            id: bottle.id,
+            serial_number: bottle.serial_number || 'N/A',
+            barcode_number: bottle.barcode_number || 'N/A',
+            gas_type: bottle.gas_type || 'N/A',
+            status: bottle.status || 'N/A',
+            issues: issues
+          });
+        }
       });
 
-      const missingSerials = cylinders.filter(c => !c.serial_number).length;
-      const missingTypes = cylinders.filter(c => !c.cylinder_type).length;
+      const missingSerials = bottles.filter(b => !b.serial_number).length;
+      const missingBarcodes = bottles.filter(b => !b.barcode_number).length;
+      const missingGasTypes = bottles.filter(b => b.gas_type === null || b.gas_type === undefined).length;
+      const missingStatus = bottles.filter(b => !b.status).length;
       
       if (missingSerials > 0) {
-        cylinderIssues.push({
+        bottleIssues.push({
           type: 'missing_serial',
           count: missingSerials,
-          description: 'Cylinders missing serial numbers'
+          description: 'Bottles missing serial numbers',
+          records: bottles.filter(b => !b.serial_number).map(b => ({
+            id: b.id,
+            serial_number: b.serial_number || 'N/A',
+            barcode_number: b.barcode_number || 'N/A'
+          }))
         });
       }
-      if (missingTypes > 0) {
-        cylinderIssues.push({
-          type: 'missing_type',
-          count: missingTypes,
-          description: 'Cylinders missing type information'
+      if (missingBarcodes > 0) {
+        bottleIssues.push({
+          type: 'missing_barcode',
+          count: missingBarcodes,
+          description: 'Bottles missing barcode numbers',
+          records: bottles.filter(b => !b.barcode_number).map(b => ({
+            id: b.id,
+            serial_number: b.serial_number || 'N/A',
+            barcode_number: b.barcode_number || 'N/A'
+          }))
+        });
+      }
+      if (missingGasTypes > 0) {
+        bottleIssues.push({
+          type: 'missing_gas_type',
+          count: missingGasTypes,
+          description: 'Bottles missing gas type',
+          records: bottles.filter(b => !b.gas_type).map(b => ({
+            id: b.id,
+            serial_number: b.serial_number || 'N/A',
+            gas_type: b.gas_type || 'N/A'
+          }))
+        });
+      }
+      if (missingStatus > 0) {
+        bottleIssues.push({
+          type: 'missing_status',
+          count: missingStatus,
+          description: 'Bottles missing status',
+          records: bottles.filter(b => !b.status).map(b => ({
+            id: b.id,
+            serial_number: b.serial_number || 'N/A',
+            status: b.status || 'N/A'
+          }))
         });
       }
 
-      // Process deliveries
-      const deliveries = deliveriesResult.data || [];
+      // Process delivery manifests
       const deliveryIssues = [];
       let validDeliveries = 0;
       
       deliveries.forEach(delivery => {
         let hasIssue = false;
-        if (!delivery.delivery_date) {
+        if (!delivery.manifest_date) {
           hasIssue = true;
         }
-        if (!delivery.customer_id) {
+        if (!delivery.status) {
           hasIssue = true;
         }
         if (!hasIssue) validDeliveries++;
       });
 
-      const missingDates = deliveries.filter(d => !d.delivery_date).length;
-      const missingCustomers = deliveries.filter(d => !d.customer_id).length;
+      const missingDates = deliveries.filter(d => !d.manifest_date).length;
+      const missingDeliveryStatus = deliveries.filter(d => !d.status).length;
       
       if (missingDates > 0) {
         deliveryIssues.push({
           type: 'missing_date',
           count: missingDates,
-          description: 'Deliveries missing delivery dates'
+          description: 'Delivery manifests missing dates'
         });
       }
-      if (missingCustomers > 0) {
+      if (missingDeliveryStatus > 0) {
         deliveryIssues.push({
-          type: 'missing_customer',
-          count: missingCustomers,
-          description: 'Deliveries missing customer information'
+          type: 'missing_status',
+          count: missingDeliveryStatus,
+          description: 'Delivery manifests missing status'
         });
       }
 
       // Process locations
-      const locations = locationsResult.data || [];
       const locationIssues = [];
       let validLocations = 0;
       
@@ -251,10 +312,10 @@ export default function OrganizationTools() {
           invalid: customers.length - validCustomers, 
           issues: customerIssues
         },
-        cylinders: { 
-          valid: validCylinders, 
-          invalid: cylinders.length - validCylinders, 
-          issues: cylinderIssues
+        bottles: { 
+          valid: validBottles, 
+          invalid: bottles.length - validBottles, 
+          issues: bottleIssues
         },
         deliveries: { 
           valid: validDeliveries, 
@@ -267,97 +328,26 @@ export default function OrganizationTools() {
           issues: locationIssues
         }
       });
+
+      // Store detailed data for display
+      setDetailedData({
+        customers: customers,
+        bottles: bottlesWithIssues,
+        deliveries: deliveries,
+        locations: locations
+      });
     } catch (error) {
       console.error('Error loading validation results:', error);
       // Set empty results on error
       setValidationResults({
         customers: { valid: 0, invalid: 0, issues: [] },
-        cylinders: { valid: 0, invalid: 0, issues: [] },
+        bottles: { valid: 0, invalid: 0, issues: [] },
         deliveries: { valid: 0, invalid: 0, issues: [] },
         locations: { valid: 0, invalid: 0, issues: [] }
       });
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleExport = async () => {
-    setLoading(true);
-    try {
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      setExportDialog(false);
-      // In production, this would trigger a file download
-      console.log('Exporting organization data with params:', exportParams);
-    } catch (error) {
-      console.error('Error exporting data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleValidation = async () => {
-    setLoading(true);
-    try {
-      await new Promise(resolve => setTimeout(resolve, 4000));
-      setValidationDialog(false);
-      await loadValidationResults();
-      // In production, this would run actual validation queries
-      console.log('Running validation with params:', validationParams);
-    } catch (error) {
-      console.error('Error running validation:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCleanup = async () => {
-    setLoading(true);
-    try {
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
-      if (cleanupParams.dryRun) {
-        // In a real implementation, this would fetch actual duplicate data from the database
-        const mockDuplicates = {
-          emails: [],
-          customers: []
-        };
-        
-        setDuplicateResults(mockDuplicates);
-        setCleanupDialog(false);
-        setDuplicateReviewDialog(true);
-      } else {
-        setCleanupDialog(false);
-        // In production, this would run actual cleanup operations
-        console.log('Running cleanup with params:', cleanupParams);
-      }
-    } catch (error) {
-      console.error('Error running cleanup:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDuplicateResolution = async () => {
-    setLoading(true);
-    try {
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      setDuplicateReviewDialog(false);
-      setSelectedDuplicates({});
-      await loadValidationResults();
-      // In production, this would apply the selected resolutions
-      console.log('Applying duplicate resolutions:', selectedDuplicates);
-    } catch (error) {
-      console.error('Error resolving duplicates:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDuplicateSelection = (duplicateType, duplicateId, recordId, action) => {
-    setSelectedDuplicates(prev => ({
-      ...prev,
-      [`${duplicateType}_${duplicateId}_${recordId}`]: action
-    }));
   };
 
   const getValidationColor = (valid, invalid) => {
@@ -370,6 +360,110 @@ export default function OrganizationTools() {
     if (invalid === 0) return <CheckIcon color="success" />;
     if (invalid < valid * 0.1) return <WarningIcon color="warning" />;
     return <ErrorIcon color="error" />;
+  };
+
+  const handleEditBottle = (bottle) => {
+    setEditingBottle(bottle.id);
+    setEditForm({
+      serial_number: bottle.serial_number || '',
+      barcode_number: bottle.barcode_number || '',
+      gas_type: bottle.gas_type || '',
+      status: bottle.status || 'available'
+    });
+  };
+
+  const handleSaveBottle = async () => {
+    if (!editingBottle) return;
+    
+    setSaveLoading(true);
+    try {
+      const { error } = await supabase
+        .from('bottles')
+        .update({
+          serial_number: editForm.serial_number,
+          barcode_number: editForm.barcode_number,
+          gas_type: editForm.gas_type || null,
+          status: editForm.status
+        })
+        .eq('id', editingBottle);
+
+      if (error) throw error;
+
+      // Refresh the data
+      await loadValidationResults();
+      setEditingBottle(null);
+      
+      console.log('Bottle updated successfully');
+    } catch (error) {
+      console.error('Error updating bottle:', error);
+      alert('Failed to update bottle: ' + error.message);
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingBottle(null);
+    setEditForm({
+      serial_number: '',
+      barcode_number: '',
+      gas_type: '',
+      status: ''
+    });
+  };
+
+  const handleBulkCleanup = async () => {
+    setCleanupLoading(true);
+    try {
+      // Find bottles with invalid data (N/A values)
+      const invalidBottles = detailedData.bottles.filter(bottle => 
+        bottle.serial_number === 'N/A' || 
+        bottle.barcode_number === 'N/A' ||
+        bottle.serial_number === '' ||
+        bottle.barcode_number === ''
+      );
+
+      if (invalidBottles.length === 0) {
+        alert('No invalid bottles found to clean up!');
+        return;
+      }
+
+      const confirmMessage = `Found ${invalidBottles.length} bottles with invalid data (N/A or empty serial/barcode numbers).\n\nThese bottles will be DELETED permanently.\n\nAre you sure you want to proceed?`;
+      
+      if (!confirm(confirmMessage)) {
+        return;
+      }
+
+      // Delete invalid bottles
+      const bottleIds = invalidBottles.map(bottle => bottle.id);
+      const { error } = await supabase
+        .from('bottles')
+        .delete()
+        .in('id', bottleIds);
+
+      if (error) throw error;
+
+      // Refresh the data
+      await loadValidationResults();
+      setBulkCleanupDialog(false);
+      
+      alert(`Successfully deleted ${invalidBottles.length} invalid bottles!`);
+      console.log('Bulk cleanup completed successfully');
+    } catch (error) {
+      console.error('Error during bulk cleanup:', error);
+      alert('Failed to clean up bottles: ' + error.message);
+    } finally {
+      setCleanupLoading(false);
+    }
+  };
+
+  const getInvalidBottlesCount = () => {
+    return detailedData.bottles.filter(bottle => 
+      bottle.serial_number === 'N/A' || 
+      bottle.barcode_number === 'N/A' ||
+      bottle.serial_number === '' ||
+      bottle.barcode_number === ''
+    ).length;
   };
 
   if (!profile || !organization) {
@@ -424,14 +518,14 @@ export default function OrganizationTools() {
           <Card>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                {getValidationIcon(validationResults.cylinders.valid, validationResults.cylinders.invalid)}
-                <Typography variant="h6" sx={{ ml: 1 }}>Cylinders</Typography>
+                {getValidationIcon(validationResults.bottles.valid, validationResults.bottles.invalid)}
+                <Typography variant="h6" sx={{ ml: 1 }}>Bottles</Typography>
               </Box>
               <Typography variant="h4" gutterBottom>
-                {validationResults.cylinders.valid + validationResults.cylinders.invalid}
+                {validationResults.bottles.valid + validationResults.bottles.invalid}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                {validationResults.cylinders.valid} valid, {validationResults.cylinders.invalid} issues
+                {validationResults.bottles.valid} valid, {validationResults.bottles.invalid} issues
               </Typography>
             </CardContent>
           </Card>
@@ -485,7 +579,6 @@ export default function OrganizationTools() {
               <Button
                 variant="contained"
                 startIcon={<DownloadIcon />}
-                onClick={() => setExportDialog(true)}
                 fullWidth
               >
                 Export Data
@@ -506,10 +599,11 @@ export default function OrganizationTools() {
               <Button
                 variant="contained"
                 startIcon={<CheckIcon />}
-                onClick={() => setValidationDialog(true)}
+                onClick={loadValidationResults}
+                disabled={loading}
                 fullWidth
               >
-                Run Validation
+                {loading ? 'Validating...' : 'Run Validation'}
               </Button>
             </CardContent>
           </Card>
@@ -527,7 +621,6 @@ export default function OrganizationTools() {
               <Button
                 variant="contained"
                 startIcon={<DeleteIcon />}
-                onClick={() => setCleanupDialog(true)}
                 fullWidth
               >
                 Run Cleanup
@@ -537,18 +630,18 @@ export default function OrganizationTools() {
         </Grid>
       </Grid>
 
-      {/* Data Issues Details */}
+      {/* Detailed Data Issues */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
-            Data Issues Found
+            Detailed Data Analysis
           </Typography>
           {Object.entries(validationResults).map(([key, data]) => (
             <Accordion key={key} sx={{ mb: 1 }}>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                 <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                   <Typography variant="subtitle1" sx={{ textTransform: 'capitalize', flex: 1 }}>
-                    {key}
+                    {key} ({data.valid + data.invalid} total)
                   </Typography>
                   <Chip 
                     label={`${data.invalid} issues`} 
@@ -556,27 +649,221 @@ export default function OrganizationTools() {
                     size="small"
                     sx={{ mr: 2 }}
                   />
+                  <Chip 
+                    label={`${data.valid} valid`} 
+                    color="success"
+                    size="small"
+                    sx={{ mr: 2 }}
+                  />
                 </Box>
               </AccordionSummary>
               <AccordionDetails>
                 {data.issues.length > 0 ? (
-                  <List dense>
-                    {data.issues.map((issue, index) => (
-                      <ListItem key={index}>
-                        <ListItemIcon>
-                          <WarningIcon color="warning" />
-                        </ListItemIcon>
-                        <ListItemText
-                          primary={issue.description}
-                          secondary={`${issue.count} record(s) affected`}
-                        />
-                      </ListItem>
-                    ))}
-                  </List>
+                  <Box>
+                    <Typography variant="subtitle2" gutterBottom color="error">
+                      Issues Found:
+                    </Typography>
+                    <List dense>
+                      {data.issues.map((issue, index) => (
+                        <ListItem key={index}>
+                          <ListItemIcon>
+                            <ErrorIcon color="error" />
+                          </ListItemIcon>
+                          <ListItemText
+                            primary={issue.description}
+                            secondary={`${issue.count} record(s) affected`}
+                          />
+                          <Chip 
+                            label={`${issue.count} records`} 
+                            color="error" 
+                            size="small"
+                          />
+                        </ListItem>
+                      ))}
+                    </List>
+
+                    {/* Show specific bottles with issues */}
+                    {key === 'bottles' && detailedData.bottles.length > 0 && (
+                      <Box sx={{ mt: 3 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                          <Typography variant="subtitle2" gutterBottom color="error">
+                            Specific Bottles with Issues:
+                          </Typography>
+                          {getInvalidBottlesCount() > 0 && (
+                            <Button
+                              variant="contained"
+                              color="error"
+                              size="small"
+                              startIcon={<DeleteIcon />}
+                              onClick={() => setBulkCleanupDialog(true)}
+                            >
+                              Clean Up {getInvalidBottlesCount()} Invalid Bottles
+                            </Button>
+                          )}
+                        </Box>
+                        <TableContainer sx={{ maxHeight: 300 }}>
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow>
+                                <TableCell><strong>Serial Number</strong></TableCell>
+                                <TableCell><strong>Barcode Number</strong></TableCell>
+                                <TableCell><strong>Gas Type</strong></TableCell>
+                                <TableCell><strong>Status</strong></TableCell>
+                                <TableCell><strong>Issues</strong></TableCell>
+                                <TableCell><strong>Actions</strong></TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {detailedData.bottles.map((bottle) => (
+                                <TableRow key={bottle.id}>
+                                  <TableCell>
+                                    {editingBottle === bottle.id ? (
+                                      <TextField
+                                        size="small"
+                                        value={editForm.serial_number}
+                                        onChange={(e) => setEditForm(prev => ({ ...prev, serial_number: e.target.value }))}
+                                        placeholder="Enter serial number"
+                                        error={!editForm.serial_number}
+                                        helperText={!editForm.serial_number ? "Required" : ""}
+                                      />
+                                    ) : (
+                                      <Typography 
+                                        color={bottle.serial_number === 'N/A' ? "error.main" : "text.primary"}
+                                        sx={{ fontWeight: bottle.serial_number === 'N/A' ? 'bold' : 'normal' }}
+                                      >
+                                        {bottle.serial_number}
+                                      </Typography>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {editingBottle === bottle.id ? (
+                                      <TextField
+                                        size="small"
+                                        value={editForm.barcode_number}
+                                        onChange={(e) => setEditForm(prev => ({ ...prev, barcode_number: e.target.value }))}
+                                        placeholder="Enter barcode number"
+                                        error={!editForm.barcode_number}
+                                        helperText={!editForm.barcode_number ? "Required" : ""}
+                                      />
+                                    ) : (
+                                      <Typography 
+                                        color={bottle.barcode_number === 'N/A' ? "error.main" : "text.primary"}
+                                        sx={{ fontWeight: bottle.barcode_number === 'N/A' ? 'bold' : 'normal' }}
+                                      >
+                                        {bottle.barcode_number}
+                                      </Typography>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {editingBottle === bottle.id ? (
+                                      <TextField
+                                        size="small"
+                                        value={editForm.gas_type}
+                                        onChange={(e) => setEditForm(prev => ({ ...prev, gas_type: e.target.value }))}
+                                        placeholder="Enter gas type (optional)"
+                                      />
+                                    ) : (
+                                      <Typography 
+                                        color={bottle.gas_type === 'N/A' ? "error.main" : "text.primary"}
+                                        sx={{ fontWeight: bottle.gas_type === 'N/A' ? 'bold' : 'normal' }}
+                                      >
+                                        {bottle.gas_type}
+                                      </Typography>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {editingBottle === bottle.id ? (
+                                      <FormControl size="small" sx={{ minWidth: 120 }}>
+                                        <Select
+                                          value={editForm.status}
+                                          onChange={(e) => setEditForm(prev => ({ ...prev, status: e.target.value }))}
+                                        >
+                                          <MenuItem value="available">Available</MenuItem>
+                                          <MenuItem value="rented">Rented</MenuItem>
+                                          <MenuItem value="maintenance">Maintenance</MenuItem>
+                                          <MenuItem value="retired">Retired</MenuItem>
+                                        </Select>
+                                      </FormControl>
+                                    ) : (
+                                      <Typography 
+                                        color={bottle.status === 'N/A' ? "error.main" : "text.primary"}
+                                        sx={{ fontWeight: bottle.status === 'N/A' ? 'bold' : 'normal' }}
+                                      >
+                                        {bottle.status}
+                                      </Typography>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                      {bottle.issues.map((issue, idx) => (
+                                        <Chip 
+                                          key={idx}
+                                          label={issue} 
+                                          color="error" 
+                                          size="small"
+                                          variant="outlined"
+                                        />
+                                      ))}
+                                    </Box>
+                                  </TableCell>
+                                  <TableCell>
+                                    {editingBottle === bottle.id ? (
+                                      <Box sx={{ display: 'flex', gap: 1 }}>
+                                        <Button
+                                          size="small"
+                                          variant="contained"
+                                          color="success"
+                                          onClick={handleSaveBottle}
+                                          disabled={saveLoading || !editForm.serial_number || !editForm.barcode_number}
+                                          startIcon={saveLoading ? <CircularProgress size={16} /> : <CheckIcon />}
+                                        >
+                                          {saveLoading ? 'Saving...' : 'Save'}
+                                        </Button>
+                                        <Button
+                                          size="small"
+                                          variant="outlined"
+                                          onClick={handleCancelEdit}
+                                          disabled={saveLoading}
+                                        >
+                                          Cancel
+                                        </Button>
+                                      </Box>
+                                    ) : (
+                                      <Button
+                                        size="small"
+                                        variant="outlined"
+                                        startIcon={<BuildIcon />}
+                                        onClick={() => handleEditBottle(bottle)}
+                                      >
+                                        Fix
+                                      </Button>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
+                      </Box>
+                    )}
+
+                    <Alert severity="warning" sx={{ mt: 2 }}>
+                      <Typography variant="body2">
+                        <strong>Action Required:</strong> These issues should be addressed to ensure data integrity and proper system functionality.
+                      </Typography>
+                    </Alert>
+                  </Box>
                 ) : (
-                  <Typography variant="body2" color="success.main">
-                    No issues found - all data is valid!
-                  </Typography>
+                  <Box>
+                    <Typography variant="body2" color="success.main" sx={{ mb: 2 }}>
+                      ✅ No issues found - all data is valid!
+                    </Typography>
+                    <Alert severity="success">
+                      <Typography variant="body2">
+                        <strong>Great!</strong> All {key} records are properly formatted and contain all required information.
+                      </Typography>
+                    </Alert>
+                  </Box>
                 )}
               </AccordionDetails>
             </Accordion>
@@ -584,441 +871,117 @@ export default function OrganizationTools() {
         </CardContent>
       </Card>
 
-      {/* Export Dialog */}
-      <Dialog open={exportDialog} onClose={() => setExportDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Export Organization Data</DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth sx={{ mb: 2 }}>
-                <InputLabel>Export Format</InputLabel>
-                <Select
-                  value={exportParams.format}
-                  onChange={(e) => setExportParams(prev => ({ ...prev, format: e.target.value }))}
-                  label="Export Format"
-                >
-                  <MenuItem value="csv">CSV</MenuItem>
-                  <MenuItem value="excel">Excel</MenuItem>
-                  <MenuItem value="json">JSON</MenuItem>
-                  <MenuItem value="pdf">PDF Report</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth sx={{ mb: 2 }}>
-                <InputLabel>Date Range</InputLabel>
-                <Select
-                  value={exportParams.dateRange}
-                  onChange={(e) => setExportParams(prev => ({ ...prev, dateRange: e.target.value }))}
-                  label="Date Range"
-                >
-                  <MenuItem value="7d">Last 7 Days</MenuItem>
-                  <MenuItem value="30d">Last 30 Days</MenuItem>
-                  <MenuItem value="90d">Last 90 Days</MenuItem>
-                  <MenuItem value="1y">Last Year</MenuItem>
-                  <MenuItem value="all">All Time</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <Typography variant="subtitle2" gutterBottom>
-                Data Types to Export
-              </Typography>
-              <Grid container spacing={1}>
-                {['customers', 'cylinders', 'deliveries', 'locations', 'analytics'].map((type) => (
-                  <Grid item xs={6} md={4} key={type}>
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={exportParams.dataTypes.includes(type)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setExportParams(prev => ({
-                                ...prev,
-                                dataTypes: [...prev.dataTypes, type]
-                              }));
-                            } else {
-                              setExportParams(prev => ({
-                                ...prev,
-                                dataTypes: prev.dataTypes.filter(t => t !== type)
-                              }));
-                            }
-                          }}
-                        />
-                      }
-                      label={type.charAt(0).toUpperCase() + type.slice(1)}
-                    />
-                  </Grid>
-                ))}
-              </Grid>
-            </Grid>
-            <Grid item xs={12}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={exportParams.includeDetails}
-                    onChange={(e) => setExportParams(prev => ({ ...prev, includeDetails: e.target.checked }))}
-                  />
-                }
-                label="Include detailed breakdowns and raw data"
-              />
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setExportDialog(false)} disabled={loading}>
-            Cancel
-          </Button>
-          <Button 
-            onClick={handleExport} 
-            variant="contained" 
-            disabled={loading || exportParams.dataTypes.length === 0}
-            startIcon={loading ? <CircularProgress size={16} /> : <DownloadIcon />}
-          >
-            {loading ? 'Exporting...' : 'Export Data'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Validation Dialog */}
-      <Dialog open={validationDialog} onClose={() => setValidationDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Data Validation</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Select validation checks to run on your organization's data:
+      {/* Data Summary Table */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            Data Summary
           </Typography>
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={validationParams.checkDataIntegrity}
-                    onChange={(e) => setValidationParams(prev => ({ ...prev, checkDataIntegrity: e.target.checked }))}
-                  />
-                }
-                label="Data Integrity Checks"
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={validationParams.validateRelationships}
-                    onChange={(e) => setValidationParams(prev => ({ ...prev, validateRelationships: e.target.checked }))}
-                  />
-                }
-                label="Relationship Validation"
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={validationParams.checkForOrphans}
-                    onChange={(e) => setValidationParams(prev => ({ ...prev, checkForOrphans: e.target.checked }))}
-                  />
-                }
-                label="Orphaned Record Detection"
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={validationParams.validateBusinessRules}
-                    onChange={(e) => setValidationParams(prev => ({ ...prev, validateBusinessRules: e.target.checked }))}
-                  />
-                }
-                label="Business Rule Validation"
-              />
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setValidationDialog(false)} disabled={loading}>
-            Cancel
-          </Button>
-          <Button 
-            onClick={handleValidation} 
-            variant="contained" 
-            disabled={loading}
-            startIcon={loading ? <CircularProgress size={16} /> : <CheckIcon />}
-          >
-            {loading ? 'Validating...' : 'Run Validation'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell><strong>Data Type</strong></TableCell>
+                  <TableCell align="right"><strong>Total Records</strong></TableCell>
+                  <TableCell align="right"><strong>Valid Records</strong></TableCell>
+                  <TableCell align="right"><strong>Issues</strong></TableCell>
+                  <TableCell align="right"><strong>Health Score</strong></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {Object.entries(validationResults).map(([key, data]) => {
+                  const total = data.valid + data.invalid;
+                  const healthScore = total > 0 ? Math.round((data.valid / total) * 100) : 100;
+                  return (
+                    <TableRow key={key}>
+                      <TableCell sx={{ textTransform: 'capitalize' }}>{key}</TableCell>
+                      <TableCell align="right">{total}</TableCell>
+                      <TableCell align="right">
+                        <Typography color="success.main">{data.valid}</Typography>
+                      </TableCell>
+                      <TableCell align="right">
+                        <Typography color={data.invalid > 0 ? "error.main" : "success.main"}>
+                          {data.invalid}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right">
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                          <Typography 
+                            variant="body2" 
+                            color={healthScore >= 90 ? "success.main" : healthScore >= 70 ? "warning.main" : "error.main"}
+                            sx={{ mr: 1 }}
+                          >
+                            {healthScore}%
+                          </Typography>
+                          <LinearProgress 
+                            variant="determinate" 
+                            value={healthScore} 
+                            sx={{ width: 60, height: 8, borderRadius: 4 }}
+                            color={healthScore >= 90 ? "success" : healthScore >= 70 ? "warning" : "error"}
+                          />
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </CardContent>
+      </Card>
 
-      {/* Cleanup Dialog */}
-      <Dialog open={cleanupDialog} onClose={() => setCleanupDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Data Cleanup</DialogTitle>
+      {/* Bulk Cleanup Dialog */}
+      <Dialog open={bulkCleanupDialog} onClose={() => setBulkCleanupDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>Clean Up Invalid Bottles</DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 2 }}>
-            <strong>Warning:</strong> Data cleanup operations can permanently modify your data. 
-            Always run a dry run first to see what changes would be made.
-          </Alert>
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={cleanupParams.removeDuplicates}
-                    onChange={(e) => setCleanupParams(prev => ({ ...prev, removeDuplicates: e.target.checked }))}
-                  />
-                }
-                label="Remove Duplicate Records"
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={cleanupParams.fixOrphanedRecords}
-                    onChange={(e) => setCleanupParams(prev => ({ ...prev, fixOrphanedRecords: e.target.checked }))}
-                  />
-                }
-                label="Fix Orphaned Records"
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={cleanupParams.archiveOldRecords}
-                    onChange={(e) => setCleanupParams(prev => ({ ...prev, archiveOldRecords: e.target.checked }))}
-                  />
-                }
-                label="Archive Old Records"
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={cleanupParams.dryRun}
-                    onChange={(e) => setCleanupParams(prev => ({ ...prev, dryRun: e.target.checked }))}
-                  />
-                }
-                label="Dry Run (Preview Only)"
-              />
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCleanupDialog(false)} disabled={loading}>
-            Cancel
-          </Button>
-          <Button 
-            onClick={handleCleanup} 
-            variant="contained" 
-            color={cleanupParams.dryRun ? "primary" : "error"}
-            disabled={loading}
-            startIcon={loading ? <CircularProgress size={16} /> : <DeleteIcon />}
-          >
-            {loading ? 'Cleaning...' : cleanupParams.dryRun ? 'Preview Changes' : 'Execute Cleanup'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Duplicate Review Dialog */}
-      <Dialog open={duplicateReviewDialog} onClose={() => setDuplicateReviewDialog(false)} maxWidth="lg" fullWidth>
-        <DialogTitle>Review Duplicate Records</DialogTitle>
-        <DialogContent>
-          <Alert severity="info" sx={{ mb: 2 }}>
-            <strong>Manual Review Required:</strong> The system found duplicate records that need your review. 
-            For each duplicate group, select which record to keep and what to do with the others.
+            <strong>Warning:</strong> This action will permanently delete bottles with invalid data (N/A or empty serial/barcode numbers).
           </Alert>
           
-          {/* Email Duplicates */}
-          {duplicateResults.emails.length > 0 && (
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Duplicate Email Addresses ({duplicateResults.emails.length})
-              </Typography>
-              {duplicateResults.emails.map((emailGroup) => (
-                <Card key={emailGroup.id} sx={{ mb: 2 }}>
-                  <CardContent>
-                    <Typography variant="subtitle1" color="primary" gutterBottom>
-                      Email: {emailGroup.email}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                      Found {emailGroup.duplicates.length} records with this email address
-                    </Typography>
-                    
-                    <TableContainer>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Customer Name</TableCell>
-                            <TableCell>Phone</TableCell>
-                            <TableCell>Created</TableCell>
-                            <TableCell align="center">Action</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {emailGroup.duplicates.map((record) => (
-                            <TableRow key={record.id}>
-                              <TableCell>{record.name}</TableCell>
-                              <TableCell>{record.phone}</TableCell>
-                              <TableCell>{new Date(record.created_at).toLocaleDateString()}</TableCell>
-                              <TableCell align="center">
-                                <FormControl size="small" fullWidth>
-                                  <Select
-                                    value={selectedDuplicates[`email_${emailGroup.id}_${record.id}`] || 'keep'}
-                                    onChange={(e) => handleDuplicateSelection('email', emailGroup.id, record.id, e.target.value)}
-                                  >
-                                    <MenuItem value="keep">Keep This Record</MenuItem>
-                                    <MenuItem value="merge">Merge Into Primary</MenuItem>
-                                    <MenuItem value="delete">Delete This Record</MenuItem>
-                                  </Select>
-                                </FormControl>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </CardContent>
-                </Card>
+          <Typography variant="body1" gutterBottom>
+            The following bottles will be deleted:
+          </Typography>
+          
+          <List dense>
+            {detailedData.bottles
+              .filter(bottle => 
+                bottle.serial_number === 'N/A' || 
+                bottle.barcode_number === 'N/A' ||
+                bottle.serial_number === '' ||
+                bottle.barcode_number === ''
+              )
+              .map((bottle, index) => (
+                <ListItem key={bottle.id}>
+                  <ListItemIcon>
+                    <ErrorIcon color="error" />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={`Bottle ${index + 1}`}
+                    secondary={`Serial: ${bottle.serial_number}, Barcode: ${bottle.barcode_number}, Status: ${bottle.status}`}
+                  />
+                </ListItem>
               ))}
-            </Box>
-          )}
-
-          {/* Customer Name Duplicates */}
-          {duplicateResults.customers.length > 0 && (
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Duplicate Customer Names ({duplicateResults.customers.length})
-              </Typography>
-              {duplicateResults.customers.map((customerGroup) => (
-                <Card key={customerGroup.id} sx={{ mb: 2 }}>
-                  <CardContent>
-                    <Typography variant="subtitle1" color="primary" gutterBottom>
-                      Customer: {customerGroup.name}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                      Found {customerGroup.duplicates.length} records with this name
-                    </Typography>
-                    
-                    <TableContainer>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Address</TableCell>
-                            <TableCell>Phone</TableCell>
-                            <TableCell>Created</TableCell>
-                            <TableCell align="center">Action</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {customerGroup.duplicates.map((record) => (
-                            <TableRow key={record.id}>
-                              <TableCell>{record.address}</TableCell>
-                              <TableCell>{record.phone}</TableCell>
-                              <TableCell>{new Date(record.created_at).toLocaleDateString()}</TableCell>
-                              <TableCell align="center">
-                                <FormControl size="small" fullWidth>
-                                  <Select
-                                    value={selectedDuplicates[`customer_${customerGroup.id}_${record.id}`] || 'keep'}
-                                    onChange={(e) => handleDuplicateSelection('customer', customerGroup.id, record.id, e.target.value)}
-                                  >
-                                    <MenuItem value="keep">Keep This Record</MenuItem>
-                                    <MenuItem value="merge">Merge Into Primary</MenuItem>
-                                    <MenuItem value="delete">Delete This Record</MenuItem>
-                                  </Select>
-                                </FormControl>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </CardContent>
-                </Card>
-              ))}
-            </Box>
-          )}
-
-          {/* Cylinder Duplicates */}
-          {duplicateResults.cylinders.length > 0 && (
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Duplicate Cylinders ({duplicateResults.cylinders.length})
-              </Typography>
-              {duplicateResults.cylinders.map((cylinderGroup) => (
-                <Card key={cylinderGroup.id} sx={{ mb: 2 }}>
-                  <CardContent>
-                    <Typography variant="subtitle1" color="primary" gutterBottom>
-                      Serial Number: {cylinderGroup.serial}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                      Found {cylinderGroup.duplicates.length} records with this serial number
-                    </Typography>
-                    
-                    <TableContainer>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Type</TableCell>
-                            <TableCell>Location</TableCell>
-                            <TableCell>Status</TableCell>
-                            <TableCell align="center">Action</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {cylinderGroup.duplicates.map((record) => (
-                            <TableRow key={record.id}>
-                              <TableCell>{record.type}</TableCell>
-                              <TableCell>{record.location}</TableCell>
-                              <TableCell>{record.status}</TableCell>
-                              <TableCell align="center">
-                                <FormControl size="small" fullWidth>
-                                  <Select
-                                    value={selectedDuplicates[`cylinder_${cylinderGroup.id}_${record.id}`] || 'keep'}
-                                    onChange={(e) => handleDuplicateSelection('cylinder', cylinderGroup.id, record.id, e.target.value)}
-                                  >
-                                    <MenuItem value="keep">Keep This Record</MenuItem>
-                                    <MenuItem value="merge">Merge Into Primary</MenuItem>
-                                    <MenuItem value="delete">Delete This Record</MenuItem>
-                                  </Select>
-                                </FormControl>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </CardContent>
-                </Card>
-              ))}
-            </Box>
-          )}
-
-          {duplicateResults.emails.length === 0 && duplicateResults.customers.length === 0 && duplicateResults.cylinders.length === 0 && (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <Typography variant="h6" color="success.main">
-                No duplicates found that require manual review!
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                All duplicates can be automatically resolved.
-              </Typography>
-            </Box>
-          )}
+          </List>
+          
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            Total bottles to be deleted: <strong>{getInvalidBottlesCount()}</strong>
+          </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDuplicateReviewDialog(false)} disabled={loading}>
+          <Button onClick={() => setBulkCleanupDialog(false)} disabled={cleanupLoading}>
             Cancel
           </Button>
           <Button 
-            onClick={handleDuplicateResolution} 
+            onClick={handleBulkCleanup} 
             variant="contained" 
-            disabled={loading || (duplicateResults.emails.length === 0 && duplicateResults.customers.length === 0 && duplicateResults.cylinders.length === 0)}
-            startIcon={loading ? <CircularProgress size={16} /> : <CheckIcon />}
+            color="error"
+            disabled={cleanupLoading || getInvalidBottlesCount() === 0}
+            startIcon={cleanupLoading ? <CircularProgress size={16} /> : <DeleteIcon />}
           >
-            {loading ? 'Applying Changes...' : 'Apply Selected Actions'}
+            {cleanupLoading ? 'Deleting...' : `Delete ${getInvalidBottlesCount()} Bottles`}
           </Button>
         </DialogActions>
       </Dialog>
     </Box>
   );
-} 
+}

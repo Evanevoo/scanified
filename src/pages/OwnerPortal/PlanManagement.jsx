@@ -82,8 +82,7 @@ const PlanManagement = () => {
     planToSave.price = Number(planToSave.price);
     planToSave.max_users = planToSave.max_users === '' || planToSave.max_users === undefined ? null : Number(planToSave.max_users);
     planToSave.max_cylinders = planToSave.max_cylinders === '' || planToSave.max_cylinders === undefined ? null : Number(planToSave.max_cylinders);
-    // Remove max_customers if present
-    delete planToSave.max_customers;
+    planToSave.max_customers = planToSave.max_customers === '' || planToSave.max_customers === undefined ? null : Number(planToSave.max_customers);
 
     if (isNewPlan) {
       delete planToSave.id;
@@ -124,6 +123,9 @@ const PlanManagement = () => {
               <TableCell>Plan Name</TableCell>
               <TableCell>Description</TableCell>
               <TableCell>Price</TableCell>
+              <TableCell>Max Users</TableCell>
+              <TableCell>Max Customers</TableCell>
+              <TableCell>Max Cylinders</TableCell>
               <TableCell>Features</TableCell>
               {isOwner && <TableCell>Actions</TableCell>}
             </TableRow>
@@ -134,6 +136,9 @@ const PlanManagement = () => {
                 <TableCell>{plan.name}</TableCell>
                 <TableCell>{plan.description}</TableCell>
                 <TableCell>${plan.price} / {plan.price_interval}</TableCell>
+                <TableCell>{plan.max_users === -1 ? 'Unlimited' : plan.max_users || 0}</TableCell>
+                <TableCell>{plan.max_customers === -1 ? 'Unlimited' : plan.max_customers || 0}</TableCell>
+                <TableCell>{plan.max_cylinders === -1 ? 'Unlimited' : plan.max_cylinders || 0}</TableCell>
                 <TableCell>
                   <ul>
                     {Array.isArray(plan.features)
@@ -178,6 +183,9 @@ const PlanManagement = () => {
             </Grid>
             <Grid item xs={6} sm={4}>
               <TextField name="max_cylinders" label="Max Cylinders" type="number" value={selectedPlan?.max_cylinders || 0} onChange={handleModalChange} fullWidth />
+            </Grid>
+            <Grid item xs={6} sm={4}>
+              <TextField name="max_customers" label="Max Customers" type="number" value={selectedPlan?.max_customers || 0} onChange={handleModalChange} fullWidth />
             </Grid>
             <Grid item xs={12}>
                <TextField

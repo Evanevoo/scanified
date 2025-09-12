@@ -1,6 +1,6 @@
 {
   "cli": {
-    "version": ">= 16.6.1",
+    "version": ">= 3.0.0",
     "appVersionSource": "remote"
   },
   "build": {
@@ -8,18 +8,19 @@
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
-        "buildConfiguration": "Debug"
+        "simulator": true
       }
     },
     "preview": {
       "distribution": "internal",
       "ios": {
-        "buildConfiguration": "Release"
+        "simulator": true
       }
     },
     "production": {
       "autoIncrement": true,
       "ios": {
+        "simulator": false,
         "buildConfiguration": "Release"
       }
     }
@@ -27,8 +28,8 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "evankorial77@gmail.com",
-        "ascAppId": "6749334978",
+        "appleId": "evanevoo@icloud.com",
+        "ascAppId": "6752309990",
         "appleTeamId": "FA8UQ322NZ"
       }
     }

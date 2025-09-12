@@ -8,10 +8,12 @@ import {
   Settings, Logout, Dashboard, Business
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
+import { useAssetConfig } from '../hooks/useAssetConfig';
 import NotificationCenter from './NotificationCenter';
 
 export default function Navbar({ onMenuClick }) {
   const { profile, signOut, organization } = useAuth();
+  const { config } = useAssetConfig();
   const [anchorEl, setAnchorEl] = useState(null);
 
   const handleMenu = (event) => {
@@ -45,7 +47,7 @@ export default function Navbar({ onMenuClick }) {
         </IconButton>
 
         <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-          Gas Cylinder Management
+          {config.appName || 'Scanified'}
           {organization && (
             <Typography variant="caption" display="block" sx={{ opacity: 0.8 }}>
               {organization.name}

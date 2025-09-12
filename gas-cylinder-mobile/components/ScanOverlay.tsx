@@ -53,7 +53,7 @@ const ScanOverlay: React.FC<ScanOverlayProps> = ({
           style={styles.closeButton}
           onPress={onClose}
         >
-          <Text style={styles.closeButtonText}>✕</Text>
+          <Text style={styles.closeButtonText}>←</Text>
         </TouchableOpacity>
       )}
       

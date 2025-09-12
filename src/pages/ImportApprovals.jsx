@@ -11,6 +11,7 @@ import {
   ButtonGroup, SpeedDial, SpeedDialAction, SpeedDialIcon
 } from '@mui/material';
 import { useNavigate, Link } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 import {
   History as HistoryIcon,
   Close as CloseIcon,
@@ -259,6 +260,7 @@ function determineVerificationStatus(record) {
 }
 
 export default function ImportApprovals() {
+  const { user } = useAuth();
   const [pendingInvoices, setPendingInvoices] = useState([]);
   const [pendingReceipts, setPendingReceipts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -339,10 +341,14 @@ export default function ImportApprovals() {
 
   // Define handleSelectAll early to avoid initialization errors
   const handleSelectAll = () => {
+    const selectableInvoices = filteredInvoices.filter(invoice => 
+      !(typeof invoice.id === 'string' && invoice.id.startsWith('scanned_'))
+    );
+    
     setSelectedRecords(
-      selectedRecords.length === pendingInvoices.length 
+      selectedRecords.length === selectableInvoices.length 
         ? [] 
-        : pendingInvoices.map(invoice => invoice.id)
+        : selectableInvoices.map(invoice => invoice.id)
     );
   };
 
@@ -448,6 +454,10 @@ export default function ImportApprovals() {
   // Get filtered records
   const filteredInvoices = filterRecords(pendingInvoices);
   const filteredReceipts = filterRecords(pendingReceipts);
+  
+  // Debug: Log the data to see what we're working with
+  console.log('Pending invoices:', pendingInvoices);
+  console.log('Filtered invoices:', filteredInvoices);
 
   // Get unique locations from all records
   const getUniqueLocations = () => {
@@ -478,7 +488,26 @@ export default function ImportApprovals() {
       });
       
       console.log('Split invoices into individual records:', individualRecords.length);
-      setPendingInvoices(individualRecords);
+      
+      // Check for auto-approval opportunities
+      const autoApprovedRecords = [];
+      const remainingRecords = [];
+      
+      for (const record of individualRecords) {
+        const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
+        if (wasAutoApproved) {
+          autoApprovedRecords.push(record);
+        } else {
+          remainingRecords.push(record);
+        }
+      }
+      
+      if (autoApprovedRecords.length > 0) {
+        console.log(`✅ Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
+        setSnackbar(`Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
+      }
+      
+      setPendingInvoices(remainingRecords);
     } catch (error) {
       console.error('Error fetching pending invoices:', error);
       setError('Failed to fetch pending invoices');
@@ -527,11 +556,21 @@ export default function ImportApprovals() {
         individualReceipts.push(...splitRecords);
       });
       
-      // Get scanned-only records
+      // Get scanned-only records from both bottle_scans and scans tables
       const { data: scannedRows } = await supabase
         .from('bottle_scans')
         .select('*')
         .not('order_number', 'is', null);
+      
+      // Also get scans from the mobile app scans table (exclude rejected ones)
+      const { data: mobileScans } = await supabase
+        .from('scans')
+        .select('*')
+        .not('order_number', 'is', null)
+        .or('status.is.null,status.eq.pending,status.eq.approved');
+      
+      // Combine both scan sources
+      const allScannedRows = [...(scannedRows || []), ...(mobileScans || [])];
       
       const { data: importedInvoices } = await supabase
         .from('imported_invoices')
@@ -551,7 +590,7 @@ export default function ImportApprovals() {
 
       // Group scanned rows by order number
       const orderGroups = {};
-      scannedRows.forEach(scan => {
+      allScannedRows.forEach(scan => {
         const orderNum = scan.order_number?.toString().trim();
         if (orderNum && !importedOrderNumbers.has(orderNum)) {
           if (!orderGroups[orderNum]) {
@@ -572,11 +611,15 @@ export default function ImportApprovals() {
             rows: scans.map(scan => ({
               order_number: orderNumber,
               customer_name: customerName,
-              product_code: scan.product_code || scan.bottle_barcode || 'Unknown',
-              qty_out: scan.scan_type === 'delivery' || scan.mode === 'delivery' ? 1 : 0,
-              qty_in: scan.scan_type === 'pickup' || scan.mode === 'pickup' ? 1 : 0,
+              product_code: scan.product_code || scan.bottle_barcode || scan.barcode_number || 'Unknown',
+              qty_out: scan.action === 'out' || scan.scan_type === 'delivery' || scan.mode === 'delivery' ? 1 : 0,
+              qty_in: scan.action === 'in' || scan.scan_type === 'pickup' || scan.mode === 'pickup' ? 1 : 0,
               date: scan.scan_date || scan.created_at || new Date().toISOString().split('T')[0],
-              location: scan.location || 'Unknown'
+              location: scan.location || 'Unknown',
+              // Add mobile-specific fields for better display
+              barcode: scan.barcode_number || scan.bottle_barcode,
+              description: scan.description || 'Unknown',
+              gas_type: scan.gas_type || 'Unknown'
             })),
             summary: {
               total_rows: scans.length,
@@ -710,7 +753,30 @@ export default function ImportApprovals() {
         .select('*')
         .not('order_number', 'is', null);
       
+      console.log('Fetched bottle_scans:', scannedRows);
+      
       if (scanError) throw scanError;
+
+      // Also get scans from the mobile app scans table (exclude rejected ones)
+      const { data: mobileScans, error: mobileError } = await supabase
+        .from('scans')
+        .select('*')
+        .not('order_number', 'is', null)
+        .or('status.is.null,status.eq.pending,status.eq.approved');
+      
+      if (mobileError) throw mobileError;
+      
+      console.log('Fetched mobile scans (excluding rejected):', mobileScans);
+      
+      // Debug: Check if any scans have status 'rejected'
+      const { data: rejectedScans } = await supabase
+        .from('scans')
+        .select('order_number, status, rejected_at')
+        .eq('status', 'rejected');
+      console.log('Rejected scans in database:', rejectedScans);
+
+      // Combine both scan sources
+      const allScannedRows = [...(scannedRows || []), ...(mobileScans || [])];
 
       // Get all order numbers that have been imported
       const { data: importedInvoices, error: invError } = await supabase
@@ -733,7 +799,7 @@ export default function ImportApprovals() {
 
       // Group scanned rows by order number
       const orderGroups = {};
-      scannedRows.forEach(scan => {
+      allScannedRows.forEach(scan => {
         const orderNum = scan.order_number?.toString().trim();
         if (orderNum && !importedOrderNumbers.has(orderNum)) {
           if (!orderGroups[orderNum]) {
@@ -756,11 +822,15 @@ export default function ImportApprovals() {
             rows: scans.map(scan => ({
               order_number: orderNumber,
               customer_name: customerName,
-              product_code: scan.product_code || scan.bottle_barcode || 'Unknown',
-              qty_out: scan.scan_type === 'delivery' || scan.mode === 'delivery' ? 1 : 0,
-              qty_in: scan.scan_type === 'pickup' || scan.mode === 'pickup' ? 1 : 0,
+              product_code: scan.product_code || scan.bottle_barcode || scan.barcode_number || 'Unknown',
+              qty_out: scan.action === 'out' || scan.scan_type === 'delivery' || scan.mode === 'delivery' ? 1 : 0,
+              qty_in: scan.action === 'in' || scan.scan_type === 'pickup' || scan.mode === 'pickup' ? 1 : 0,
               date: scan.scan_date || scan.created_at || new Date().toISOString().split('T')[0],
-              location: scan.location || 'Unknown'
+              location: scan.location || 'Unknown',
+              // Add mobile-specific fields for better display
+              barcode: scan.barcode_number || scan.bottle_barcode,
+              description: scan.description || 'Unknown',
+              gas_type: scan.gas_type || 'Unknown'
             })),
             summary: {
               total_rows: scans.length,
@@ -775,10 +845,28 @@ export default function ImportApprovals() {
         };
       });
 
-      // Add these to the pending invoices state
+      // Check for auto-approval opportunities in scanned-only records
+      const autoApprovedScannedRecords = [];
+      const remainingScannedRecords = [];
+      
+      for (const record of scannedOnlyRecords) {
+        const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
+        if (wasAutoApproved) {
+          autoApprovedScannedRecords.push(record);
+        } else {
+          remainingScannedRecords.push(record);
+        }
+      }
+      
+      if (autoApprovedScannedRecords.length > 0) {
+        console.log(`✅ Auto-approved ${autoApprovedScannedRecords.length} scanned-only records with matching quantities`);
+        setSnackbar(`Auto-approved ${autoApprovedScannedRecords.length} scanned-only records with matching quantities`);
+      }
+
+      // Add remaining scanned-only records to the pending invoices state
       setPendingInvoices(prev => {
         const existing = prev.filter(item => !item.is_scanned_only);
-        return [...existing, ...scannedOnlyRecords];
+        return [...existing, ...remainingScannedRecords];
       });
 
     } catch (error) {
@@ -2339,12 +2427,63 @@ export default function ImportApprovals() {
           <Button 
             variant="contained" 
             color={bulkActionDialog.action?.color || 'primary'}
-            onClick={() => {
-              // Handle bulk action here
-              console.log('Bulk action:', bulkActionDialog.action?.id, 'on records:', selectedRecords);
-              setBulkActionDialog({ open: false, action: null });
-              setSelectedRecords([]);
-              setSnackbar(`${bulkActionDialog.action?.label} applied to ${selectedRecords.length} records`);
+            onClick={async () => {
+              try {
+                setLoading(true);
+                const actionId = bulkActionDialog.action?.id;
+                const recordCount = selectedRecords.length;
+                
+                if (actionId === 'bulk_verify') {
+                  const recordsToVerify = filteredInvoices.filter(invoice => 
+                    selectedRecords.includes(invoice.id) && 
+                    !(typeof invoice.id === 'string' && invoice.id.startsWith('scanned_'))
+                  );
+                  await handleBulkVerify(recordsToVerify);
+                } else if (actionId === 'bulk_reject') {
+                  const recordsToReject = filteredInvoices.filter(invoice => 
+                    selectedRecords.includes(invoice.id)
+                  );
+                  console.log('Selected records:', selectedRecords);
+                  console.log('Filtered invoices:', filteredInvoices);
+                  console.log('Records to reject:', recordsToReject);
+                  await handleBulkReject(recordsToReject);
+                } else if (actionId === 'bulk_investigate') {
+                  const recordsToInvestigate = filteredInvoices.filter(invoice => 
+                    selectedRecords.includes(invoice.id) && 
+                    !(typeof invoice.id === 'string' && invoice.id.startsWith('scanned_'))
+                  );
+                  await handleBulkInvestigate(recordsToInvestigate);
+                } else if (actionId === 'bulk_export') {
+                  const recordsToExport = filteredInvoices.filter(invoice => 
+                    selectedRecords.includes(invoice.id) && 
+                    !(typeof invoice.id === 'string' && invoice.id.startsWith('scanned_'))
+                  );
+                  await handleBulkExport(recordsToExport);
+                } else {
+                  console.log('Unknown bulk action:', actionId);
+                }
+                
+                setBulkActionDialog({ open: false, action: null });
+                setSelectedRecords([]);
+                setSnackbar(`${bulkActionDialog.action?.label} applied to ${recordCount} records`);
+                
+                // Refresh the data
+                await fetchPendingInvoices();
+                
+              } catch (error) {
+                console.error('Bulk action failed:', error);
+                console.error('Error details:', {
+                  message: error.message,
+                  code: error.code,
+                  details: error.details,
+                  hint: error.hint,
+                  action: bulkActionDialog.action?.id,
+                  recordCount: selectedRecords.length
+                });
+                setSnackbar(`Failed to ${bulkActionDialog.action?.label?.toLowerCase()}: ${error.message}`);
+              } finally {
+                setLoading(false);
+              }
             }}
           >
             Confirm
@@ -2406,6 +2545,11 @@ export default function ImportApprovals() {
         autoHideDuration={6000}
         onClose={() => setSnackbar('')}
         message={snackbar}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        sx={{ 
+          zIndex: 9999,
+          marginTop: '80px' // Account for header/sidebar
+        }}
       />
     </Box>
   );
@@ -2560,7 +2704,7 @@ export default function ImportApprovals() {
                           </Box>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                             <Typography variant="caption" color="text.secondary">
-                              Inv:
+                              {typeof invoice.id === 'string' && invoice.id.startsWith('scanned_') ? 'Trk:' : 'Inv:'}
                             </Typography>
                             <Typography variant="caption" color={shippedMismatch ? 'warning.main' : 'success.main'} fontWeight="bold">
                               {item.shipped}
@@ -2580,7 +2724,7 @@ export default function ImportApprovals() {
                           </Box>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                             <Typography variant="caption" color="text.secondary">
-                              Inv:
+                              {typeof invoice.id === 'string' && invoice.id.startsWith('scanned_') ? 'Trk:' : 'Inv:'}
                             </Typography>
                             <Typography variant="caption" color={returnedMismatch ? 'warning.main' : 'success.main'} fontWeight="bold">
                               {item.returned}
@@ -2612,6 +2756,15 @@ export default function ImportApprovals() {
                                 >
                                   Upload Invoice
                                 </Button>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  color="error"
+                                  startIcon={<DeleteOutline />}
+                                  onClick={() => handleIndividualReject(invoice)}
+                                >
+                                  Reject
+                                </Button>
                               </>
                             ) : (
                               // Regular actions for imported records
@@ -2632,6 +2785,15 @@ export default function ImportApprovals() {
                                   onClick={() => setVerificationDialog({ open: true, record: invoice })}
                                 >
                                   Verify
+                                </Button>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  color="error"
+                                  startIcon={<DeleteOutline />}
+                                  onClick={() => handleIndividualReject(invoice)}
+                                >
+                                  Reject
                                 </Button>
                               </>
                             )}
@@ -2711,6 +2873,8 @@ export default function ImportApprovals() {
                         e.stopPropagation();
                         handleSelectRecord(invoice.id);
                       }}
+                      color={typeof invoice.id === 'string' && invoice.id.startsWith('scanned_') ? 'warning' : 'primary'}
+                      title={typeof invoice.id === 'string' && invoice.id.startsWith('scanned_') ? 'Scanned-only record - individual actions only' : ''}
                     />
                   }
                 />
@@ -2931,6 +3095,8 @@ export default function ImportApprovals() {
                     size="small"
                     checked={selectedRecords.includes(invoice.id)}
                     onChange={() => handleSelectRecord(invoice.id)}
+                    disabled={typeof invoice.id === 'string' && invoice.id.startsWith('scanned_')}
+                    title={typeof invoice.id === 'string' && invoice.id.startsWith('scanned_') ? 'Scanned-only records cannot be bulk processed' : ''}
                   />
                 </Box>
               </Paper>
@@ -3116,7 +3282,10 @@ export default function ImportApprovals() {
       
       if (error) throw error;
       
-      setSnackbar('Record approved successfully');
+      // Assign bottles to customers after approval
+      await assignBottlesToCustomer(row);
+      
+      setSnackbar('Record approved successfully and bottles assigned to customers');
       fetchData();
     } catch (error) {
       setError('Failed to approve record: ' + error.message);
@@ -3159,6 +3328,572 @@ export default function ImportApprovals() {
     } catch (error) {
       setError('Failed to delete record: ' + error.message);
     }
+  }
+
+  // Check if scanned quantities match invoice quantities for auto-approval
+  async function checkQuantityMatch(record) {
+    try {
+      const data = parseDataField(record.data);
+      const rows = data.rows || data.line_items || [];
+      const orderNumber = data.order_number || data.reference_number || data.invoice_number;
+      
+      if (!orderNumber) {
+        console.log('No order number found for quantity check');
+        return false;
+      }
+
+      // Get scanned quantities for this order
+      const { data: scannedData, error: scannedError } = await supabase
+        .from('scans')
+        .select('*')
+        .eq('order_number', orderNumber);
+
+      if (scannedError) {
+        console.error('Error fetching scanned data:', scannedError);
+        return false;
+      }
+
+      // Group scanned data by product code
+      const scannedQuantities = {};
+      (scannedData || []).forEach(scan => {
+        const productCode = scan.product_code || scan.barcode_number || scan.bottle_barcode;
+        if (!scannedQuantities[productCode]) {
+          scannedQuantities[productCode] = { shipped: 0, returned: 0 };
+        }
+        
+        if (scan.action === 'out') {
+          scannedQuantities[productCode].shipped++;
+        } else if (scan.action === 'in') {
+          scannedQuantities[productCode].returned++;
+        }
+      });
+
+      // Check if invoice quantities match scanned quantities
+      let allQuantitiesMatch = true;
+      
+      for (const row of rows) {
+        const productCode = row.product_code || row.barcode_number || row.bottle_barcode;
+        const invoiceShipped = parseInt(row.qty_out || row.shipped || row.quantity || 0);
+        const invoiceReturned = parseInt(row.qty_in || row.returned || row.return_qty || 0);
+        
+        const scannedQty = scannedQuantities[productCode] || { shipped: 0, returned: 0 };
+        
+        if (invoiceShipped !== scannedQty.shipped || invoiceReturned !== scannedQty.returned) {
+          console.log(`Quantity mismatch for ${productCode}: Invoice(${invoiceShipped}/${invoiceReturned}) vs Scanned(${scannedQty.shipped}/${scannedQty.returned})`);
+          allQuantitiesMatch = false;
+          break;
+        }
+      }
+
+      return allQuantitiesMatch;
+    } catch (error) {
+      console.error('Error checking quantity match:', error);
+      return false;
+    }
+  }
+
+  // Auto-approve record if quantities match
+  async function autoApproveIfQuantitiesMatch(record) {
+    try {
+      const quantitiesMatch = await checkQuantityMatch(record);
+      
+      if (quantitiesMatch) {
+        console.log(`✅ Auto-approving record ${record.id} - quantities match`);
+        
+        // Update record status to approved
+        const tableName = record.is_scanned_only ? 'imported_invoices' : 'imported_invoices';
+        const { error } = await supabase
+          .from(tableName)
+          .update({ 
+            status: 'approved', 
+            approved_at: new Date().toISOString(),
+            verified: true,
+            auto_approved: true,
+            auto_approval_reason: 'Quantities match between invoice and scanned data'
+          })
+          .eq('id', record.id);
+        
+        if (error) {
+          console.error('Error auto-approving record:', error);
+          return false;
+        }
+        
+        // Assign bottles to customers
+        await assignBottlesToCustomer(record);
+        
+        return true;
+      } else {
+        console.log(`❌ Not auto-approving record ${record.id} - quantities don't match`);
+        return false;
+      }
+    } catch (error) {
+      console.error('Error in auto-approval:', error);
+      return false;
+    }
+  }
+
+  // Assign bottles to customers after approval
+  async function assignBottlesToCustomer(record) {
+    try {
+      const data = parseDataField(record.data);
+      const rows = data.rows || data.line_items || [];
+      
+      for (const row of rows) {
+        if (row.product_code || row.bottle_barcode || row.barcode) {
+          // Find the bottle by barcode or product code
+          const bottleQuery = row.bottle_barcode || row.barcode
+            ? { barcode_number: row.bottle_barcode || row.barcode }
+            : { product_code: row.product_code };
+          
+          const { data: bottles, error: bottleError } = await supabase
+            .from('bottles')
+            .select('*')
+            .match(bottleQuery)
+            .limit(1);
+          
+          if (bottleError) {
+            console.error('Error finding bottle:', bottleError);
+            continue;
+          }
+          
+          if (bottles && bottles.length > 0) {
+            const bottle = bottles[0];
+            const customerName = row.customer_name || data.customer_name;
+            
+            // Update bottle with customer assignment
+            const { error: updateError } = await supabase
+              .from('bottles')
+              .update({
+                assigned_customer: customerName,
+                customer_name: customerName,
+                status: 'RENTED',
+                rental_start_date: new Date().toISOString().split('T')[0], // DATE format
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', bottle.id);
+            
+            if (updateError) {
+              console.error('Error updating bottle:', updateError);
+            } else {
+              console.log(`✅ Assigned bottle ${bottle.barcode_number} to customer ${customerName}`);
+              
+              // Create rental record if it doesn't exist
+              await createRentalRecord(bottle, customerName, row);
+            }
+          } else {
+            console.warn(`⚠️ Bottle not found for barcode: ${row.bottle_barcode || row.barcode || row.product_code}`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error assigning bottles to customer:', error);
+    }
+  }
+
+  // Create rental record for assigned bottle
+  async function createRentalRecord(bottle, customerName, row) {
+    try {
+      // Check if rental record already exists
+      const { data: existingRental } = await supabase
+        .from('rentals')
+        .select('id')
+        .eq('bottle_barcode', bottle.barcode_number)
+        .is('rental_end_date', null)
+        .limit(1);
+
+      if (existingRental && existingRental.length > 0) {
+        console.log(`Rental record already exists for bottle ${bottle.barcode_number}`);
+        return;
+      }
+
+      // Create new rental record
+      const { error: rentalError } = await supabase
+        .from('rentals')
+        .insert({
+          bottle_id: bottle.id,
+          bottle_barcode: bottle.barcode_number,
+          customer_id: customerName,
+          customer_name: customerName,
+          rental_start_date: new Date().toISOString().split('T')[0],
+          rental_end_date: null,
+          rental_amount: 10, // Default rental amount
+          rental_type: 'monthly',
+          tax_code: 'GST+PST',
+          tax_rate: 0.11,
+          location: bottle.location || 'SASKATOON',
+          status: 'active',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+
+      if (rentalError) {
+        console.error('Error creating rental record:', rentalError);
+      } else {
+        console.log(`✅ Created rental record for bottle ${bottle.barcode_number}`);
+      }
+    } catch (error) {
+      console.error('Error creating rental record:', error);
+    }
+  }
+
+  // Bulk verify records
+  async function handleBulkVerify(records) {
+    // Get current user ID
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    if (!currentUser) {
+      throw new Error('User not authenticated');
+    }
+
+    // Update each record individually to avoid upsert issues
+    for (const record of records) {
+      // Check if this is a scanned-only record that shouldn't be processed
+      if (typeof record.id === 'string' && record.id.startsWith('scanned_')) {
+        console.log('Skipping scanned-only record:', record.id);
+        continue;
+      }
+      
+      // Extract numeric part from ID (e.g., "scanned_55555" -> 55555)
+      let recordId;
+      if (typeof record.id === 'string') {
+        const numericPart = record.id.match(/\d+/);
+        recordId = numericPart ? parseInt(numericPart[0], 10) : record.id;
+      } else {
+        recordId = record.id;
+      }
+      
+      if (isNaN(recordId)) {
+        console.error('Cannot convert ID to number:', record.id);
+        throw new Error(`Invalid ID format: ${record.id}`);
+      }
+      
+      const { error } = await supabase
+        .from('imported_invoices')
+        .update({
+          status: 'verified',
+          verified_at: new Date().toISOString(),
+          verified_by: currentUser.id
+        })
+        .eq('id', recordId);
+
+      if (error) throw error;
+    }
+
+    // Assign bottles to customers for each approved record
+    for (const record of records) {
+      await assignBottlesToCustomer(record);
+    }
+  }
+
+  // Bulk reject records
+  async function handleBulkReject(records) {
+    console.log('Starting bulk reject for records:', records);
+    
+    // Get current user ID
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    if (!currentUser) {
+      throw new Error('User not authenticated');
+    }
+    
+    console.log('Current user ID:', currentUser.id);
+
+    // Update each record individually to avoid upsert issues
+    for (const record of records) {
+      console.log('Processing record:', record);
+      console.log('Record ID:', record.id, 'Type:', typeof record.id);
+      
+      // Check if this is a scanned-only record that needs special handling
+      if (typeof record.id === 'string' && record.id.startsWith('scanned_')) {
+        console.log('Processing scanned-only record:', record.id);
+        
+        // Extract order number from scanned_ prefix
+        const orderNumber = record.id.replace('scanned_', '');
+        
+        // Mark all scans for this order as rejected
+        console.log('Attempting to reject scans for order:', orderNumber);
+        const { data: updateData, error: scanError } = await supabase
+          .from('scans')
+          .update({
+            status: 'rejected',
+            rejected_at: new Date().toISOString(),
+            rejected_by: currentUser.id
+          })
+          .eq('order_number', orderNumber)
+          .select();
+        
+        if (scanError) {
+          console.error('Error rejecting scans for order:', orderNumber, scanError);
+          // Continue with other records even if this one fails
+        } else {
+          console.log('Successfully marked scans as rejected for order:', orderNumber, 'Updated records:', updateData);
+        }
+        continue;
+      }
+      
+      // Extract numeric part from ID (e.g., "scanned_55555" -> 55555)
+      let recordId;
+      if (typeof record.id === 'string') {
+        const numericPart = record.id.match(/\d+/);
+        recordId = numericPart ? parseInt(numericPart[0], 10) : record.id;
+      } else {
+        recordId = record.id;
+      }
+      
+      console.log('Converted ID:', recordId, 'Type:', typeof recordId);
+      
+      if (isNaN(recordId)) {
+        console.error('Cannot convert ID to number:', record.id);
+        throw new Error(`Invalid ID format: ${record.id}`);
+      }
+      
+      // Check if record exists in imported_invoices table
+      const { data: existingRecord, error: checkError } = await supabase
+        .from('imported_invoices')
+        .select('id, status')
+        .eq('id', recordId)
+        .single();
+      
+      if (checkError) {
+        console.error('Record not found in imported_invoices:', recordId, checkError);
+        
+        // Check if it's in the scans table instead
+        const { data: scanRecord, error: scanError } = await supabase
+          .from('scans')
+          .select('id, action')
+          .eq('id', recordId)
+          .single();
+        
+        if (scanError) {
+          console.error('Record not found in scans table either:', recordId, scanError);
+          
+          // Check other possible tables
+          console.log('Checking other tables for record:', recordId);
+          
+          // Check bottle_scans table
+          const { data: bottleScanRecord, error: bottleScanError } = await supabase
+            .from('bottle_scans')
+            .select('id, action')
+            .eq('id', recordId)
+            .single();
+          
+          if (!bottleScanError) {
+            console.log('Found record in bottle_scans table:', bottleScanRecord);
+            console.log('Skipping bottle_scan record:', recordId);
+            continue;
+          }
+          
+          // Check sales_orders table
+          const { data: salesOrderRecord, error: salesOrderError } = await supabase
+            .from('sales_orders')
+            .select('id, sales_order_number')
+            .eq('id', recordId)
+            .single();
+          
+          if (!salesOrderError) {
+            console.log('Found record in sales_orders table:', salesOrderRecord);
+            console.log('Skipping sales_order record:', recordId);
+            continue;
+          }
+          
+          // Check imported_sales_receipts table
+          const { data: receiptRecord, error: receiptError } = await supabase
+            .from('imported_sales_receipts')
+            .select('id, status')
+            .eq('id', recordId)
+            .single();
+          
+          if (!receiptError) {
+            console.log('Found record in imported_sales_receipts table:', receiptRecord);
+            console.log('Skipping sales_receipt record:', recordId);
+            continue;
+          }
+          
+          console.error('Record not found in any table:', recordId);
+          
+          // Check if this might be a "scanned only" record that shouldn't be rejected
+          if (record.displayId && record.displayId.startsWith('scanned_')) {
+            console.log('This appears to be a scanned-only record, skipping rejection:', recordId);
+            continue;
+          }
+          
+          throw new Error(`Record with ID ${recordId} not found in any table`);
+        }
+        
+        console.log('Found record in scans table:', scanRecord);
+        // Skip this record as it's not an imported invoice
+        console.log('Skipping scan record:', recordId);
+        continue;
+      }
+      
+      console.log('Found existing record in imported_invoices:', existingRecord);
+      
+      const { error } = await supabase
+        .from('imported_invoices')
+        .update({
+          status: 'rejected',
+          rejected_at: new Date().toISOString(),
+          rejected_by: currentUser.id
+        })
+        .eq('id', recordId);
+
+      if (error) {
+        console.error('Error updating record:', recordId, error);
+        console.error('Record details:', record);
+        throw error;
+      }
+      console.log('Successfully updated record:', recordId);
+    }
+  }
+
+  // Individual reject record
+  async function handleIndividualReject(record) {
+    console.log('Starting individual reject for record:', record);
+    
+    // Get current user ID
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    if (!currentUser) {
+      throw new Error('User not authenticated');
+    }
+    
+    console.log('Current user ID:', currentUser.id);
+
+    // Check if this is a scanned-only record
+    if (typeof record.id === 'string' && record.id.startsWith('scanned_')) {
+      console.log('Cannot reject scanned-only record:', record.id);
+      setSnackbar('Scanned-only records cannot be rejected individually. Use bulk reject instead.');
+      return;
+    }
+    
+    // Extract numeric part from ID (e.g., "scanned_55555" -> 55555)
+    let recordId;
+    if (typeof record.id === 'string') {
+      const numericPart = record.id.match(/\d+/);
+      recordId = numericPart ? parseInt(numericPart[0], 10) : record.id;
+    } else {
+      recordId = record.id;
+    }
+    
+    console.log('Converted ID:', recordId, 'Type:', typeof recordId);
+    
+    if (isNaN(recordId)) {
+      console.error('Cannot convert ID to number:', record.id);
+      throw new Error(`Invalid ID format: ${record.id}`);
+    }
+    
+    try {
+      // Check if record exists in imported_invoices table
+      const { data: existingRecord, error: checkError } = await supabase
+        .from('imported_invoices')
+        .select('id, status')
+        .eq('id', recordId)
+        .single();
+      
+      if (checkError) {
+        console.error('Record not found in imported_invoices:', recordId, checkError);
+        setSnackbar('Record not found in database');
+        return;
+      }
+
+      // Update the record
+      const { error } = await supabase
+        .from('imported_invoices')
+        .update({
+          status: 'rejected',
+          rejected_at: new Date().toISOString(),
+          rejected_by: currentUser.id
+        })
+        .eq('id', recordId);
+
+      if (error) {
+        console.error('Error updating record:', recordId, error);
+        throw error;
+      }
+      
+      console.log('Successfully rejected record:', recordId);
+      setSnackbar('Record rejected successfully');
+      
+      // Refresh the data
+      await fetchData();
+      
+    } catch (error) {
+      console.error('Error rejecting record:', error);
+      setSnackbar('Failed to reject record: ' + error.message);
+    }
+  }
+
+  // Bulk mark for investigation
+  async function handleBulkInvestigate(records) {
+    // Get current user ID
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    if (!currentUser) {
+      throw new Error('User not authenticated');
+    }
+
+    // Update each record individually to avoid upsert issues
+    for (const record of records) {
+      // Check if this is a scanned-only record that shouldn't be processed
+      if (typeof record.id === 'string' && record.id.startsWith('scanned_')) {
+        console.log('Skipping scanned-only record:', record.id);
+        continue;
+      }
+      
+      // Extract numeric part from ID (e.g., "scanned_55555" -> 55555)
+      let recordId;
+      if (typeof record.id === 'string') {
+        const numericPart = record.id.match(/\d+/);
+        recordId = numericPart ? parseInt(numericPart[0], 10) : record.id;
+      } else {
+        recordId = record.id;
+      }
+      
+      if (isNaN(recordId)) {
+        console.error('Cannot convert ID to number:', record.id);
+        throw new Error(`Invalid ID format: ${record.id}`);
+      }
+      
+      const { error } = await supabase
+        .from('imported_invoices')
+        .update({
+          status: 'investigation',
+          investigation_started_at: new Date().toISOString(),
+          investigation_started_by: currentUser.id
+        })
+        .eq('id', recordId);
+
+      if (error) throw error;
+    }
+  }
+
+  // Bulk export records
+  async function handleBulkExport(records) {
+    // Create CSV data
+    const csvData = records.map(record => {
+      const data = parseDataField(record.data);
+      return {
+        'Order Number': data.order_number || '',
+        'Customer': data.customer_name || '',
+        'Date': data.date || '',
+        'Status': record.status || '',
+        'Uploaded By': record.uploaded_by || '',
+        'Created At': record.created_at || ''
+      };
+    });
+
+    // Convert to CSV
+    const csvContent = [
+      Object.keys(csvData[0]).join(','),
+      ...csvData.map(row => Object.values(row).map(val => `"${val}"`).join(','))
+    ].join('\n');
+
+    // Download CSV
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bulk_export_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
   }
 
   async function handleBulkDeleteInvoices() {

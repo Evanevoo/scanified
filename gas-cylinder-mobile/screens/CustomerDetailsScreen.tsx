@@ -21,33 +21,49 @@ export default function CustomerDetailsScreen() {
         return;
       }
 
+      console.log('🔍 Fetching customer details for ID:', customerId);
+      console.log('🔍 Organization ID:', profile.organization_id);
+
       setLoading(true);
       setError('');
+      
       // Fetch customer info for the current organization
       const { data: cust, error: custErr } = await supabase
         .from('customers')
         .select('*')
         .eq('CustomerListID', customerId)
         .eq('organization_id', profile.organization_id)
-        .eq('deleted', false)
         .single();
+      
+      console.log('🔍 Customer query result:', { data: cust, error: custErr });
+      
       if (custErr || !cust) {
+        console.log('❌ Customer not found:', custErr);
         setError('Customer not found.');
         setLoading(false);
         return;
       }
+      
+      console.log('✅ Customer found:', cust.name);
       setCustomer(cust);
+      
       // Fetch cylinders rented by this customer for the current organization
       const { data, error } = await supabase
         .from('bottles')
         .select('*')
         .eq('organization_id', profile.organization_id)
         .eq('assigned_customer', customerId);
+        
+      console.log('🔍 Cylinders query result:', { data, error });
+      
       if (error) {
+        console.log('❌ Error fetching cylinders:', error);
         setError('Error fetching cylinders.');
         setLoading(false);
         return;
       }
+      
+      console.log('✅ Found cylinders:', data?.length || 0);
       setCylinders(data || []);
       setLoading(false);
     };

@@ -11,7 +11,7 @@ export const Platform = {
   select: RNPlatform?.select || ((obj: any) => obj.ios || obj.default || obj),
 };
 
-// Helper functions for common platform checks
+// Helper functions for platform checks
 export const isIOS = () => Platform.OS === 'ios';
 export const isAndroid = () => Platform.OS === 'android';
 export const isTablet = () => Platform.isPad;

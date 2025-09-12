@@ -1,8 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabase/client';
-import { useNavigate } from 'react-router-dom';
 import { 
-  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, Button, TextField, FormControl, InputLabel, Select, MenuItem, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Checkbox
+  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, TextField, FormControl, InputLabel, Select, MenuItem, Alert, Button
 } from '@mui/material';
 import { useAuth } from '../hooks/useAuth';
 
@@ -108,13 +107,13 @@ function exportSummaryByType(bottles) {
     }
     summaryByType[type].total += 1;
     
-    // Count by status
-    if (bottle.status === 'available' || !bottle.assigned_customer) {
-      summaryByType[type].in_house += 1;
-    } else if (bottle.status === 'rented' || bottle.assigned_customer) {
-      summaryByType[type].with_customer += 1;
-    } else if (bottle.status === 'lost') {
+    // Count by status - FIXED: Use mutually exclusive logic
+    if (bottle.status === 'lost') {
       summaryByType[type].lost += 1;
+    } else if (bottle.assigned_customer && bottle.assigned_customer !== '') {
+      summaryByType[type].with_customer += 1;
+    } else {
+      summaryByType[type].in_house += 1;
     }
   });
   
@@ -146,15 +145,8 @@ export default function Assets() {
   const [organizations, setOrganizations] = useState([]);
   const [selectedOrg, setSelectedOrg] = useState('');
   const [search, setSearch] = useState('');
-  const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { profile, organization } = useAuth();
   const [organizationName, setOrganizationName] = useState('');
-  const [editRow, setEditRow] = useState(null);
-  const [editForm, setEditForm] = useState({});
-  const [deleteRow, setDeleteRow] = useState(null);
-  const [deleting, setDeleting] = useState(false);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [selectedRows, setSelectedRows] = useState([]);
 
   useEffect(() => {
     fetchOrganizations();
@@ -178,33 +170,23 @@ export default function Assets() {
     fetchOrgName();
   }, [profile]);
 
-  useEffect(() => {
-    if (editDialogOpen && editForm.id) {
-      // Try to load draft from localStorage
-      const draft = localStorage.getItem(`editAssetDraft_${editForm.id}`);
-      if (draft) {
-        setEditForm(JSON.parse(draft));
-      }
-    }
-    // eslint-disable-next-line
-  }, [editDialogOpen]);
-
-  useEffect(() => {
-    if (editDialogOpen && editForm.id) {
-      localStorage.setItem(`editAssetDraft_${editForm.id}`, JSON.stringify(editForm));
-    }
-    // eslint-disable-next-line
-  }, [editForm, editDialogOpen]);
-
   const fetchOrganizations = async () => {
     try {
-      const { data, error } = await supabase
-        .from('organizations')
-        .select('id, name')
-        .order('name');
-      
-      if (error) throw error;
-      setOrganizations(data || []);
+      // Only fetch organizations for owners, regular users only see their own org
+      if (profile?.role === 'owner') {
+        const { data, error } = await supabase
+          .from('organizations')
+          .select('id, name')
+          .order('name');
+        
+        if (error) throw error;
+        setOrganizations(data || []);
+      } else {
+        // Non-owners only see their own organization
+        if (organization?.id) {
+          setOrganizations([{ id: organization.id, name: organization.name }]);
+        }
+      }
     } catch (err) {
       console.error('Error fetching organizations:', err);
       setError(err.message);
@@ -216,12 +198,21 @@ export default function Assets() {
     setError(null);
     
     try {
+      // ALWAYS filter by current user's organization - no exceptions!
+      if (!organization?.id) {
+        setError('No organization found for current user');
+        setLoading(false);
+        return;
+      }
+
       let query = supabase
         .from('bottles')
         .select('*')
+        .eq('organization_id', organization.id) // CRITICAL: Always filter by current organization
         .order('barcode_number');
       
-      if (selectedOrg) {
+      // Additional organization filter for owners (if they want to see specific org)
+      if (selectedOrg && profile?.role === 'owner') {
         query = query.eq('organization_id', selectedOrg);
       }
       
@@ -229,26 +220,10 @@ export default function Assets() {
       
       if (error) throw error;
       
-      // Fetch organization names separately
-      const organizationIds = [...new Set((data || []).map(bottle => bottle.organization_id).filter(Boolean))];
-      let organizationMap = {};
-      
-      if (organizationIds.length > 0) {
-        const { data: orgData } = await supabase
-          .from('organizations')
-          .select('id, name')
-          .in('id', organizationIds);
-        
-        organizationMap = (orgData || []).reduce((map, org) => {
-          map[org.id] = org.name;
-          return map;
-        }, {});
-      }
-      
-      // Add organization name to each bottle
+      // All bottles should be from the same organization now
       const bottlesWithOrg = (data || []).map(bottle => ({
         ...bottle,
-        organization_name: bottle.organization_id ? (organizationMap[bottle.organization_id] || 'Unknown') : 'Unknown'
+        organization_name: organization.name // Use current organization name
       }));
       
       setBottles(bottlesWithOrg);
@@ -274,123 +249,111 @@ export default function Assets() {
     );
   });
 
-  // Get all unique asset types from the bottles table
+  // Get all unique gas types from the bottles table - these are the gas assets inside the bottles
   const assetTypes = useMemo(() => {
-    const types = new Set();
+    const assetMap = new Map();
+    
     bottles.forEach(bottle => {
-      if (bottle.type) types.add(bottle.type);
+      // Use description as primary categorization (it contains the gas type)
+      // Fallback to product_code, then gas_type, then type
+      let gasType = bottle.description || bottle.product_code || bottle.gas_type || bottle.type;
+      
+      // Clean up the gas type name
+      if (gasType) {
+        // Remove common prefixes/suffixes to get cleaner gas type names
+        gasType = gasType
+          .replace(/^AVIATOR\s+/i, '') // Remove "AVIATOR" prefix
+          .replace(/\s+BOTTLE.*$/i, '') // Remove "BOTTLE" suffix and everything after
+          .replace(/\s+ASSET.*$/i, '') // Remove "ASSET" suffix and everything after
+          .replace(/\s+SIZE\s+\d+.*$/i, '') // Remove "SIZE 250" etc
+          .replace(/\s+-\s+SIZE\s+\d+.*$/i, '') // Remove "- SIZE 250" etc
+          .replace(/\s+ASSETS.*$/i, '') // Remove "ASSETS" suffix
+          .trim();
+        
+        // If it's still too generic, use the original description
+        if (gasType.length < 3) {
+          gasType = bottle.description || bottle.product_code || bottle.gas_type || bottle.type;
+        }
+      }
+      
+      if (gasType && gasType !== 'Unknown' && gasType !== 'N/A') {
+        // Group by gas type and collect all bottles containing this gas type
+        if (!assetMap.has(gasType)) {
+          assetMap.set(gasType, []);
+        }
+        assetMap.get(gasType).push(bottle);
+      } else {
+        // Include bottles with empty/unknown gas type in a special category
+        const fallbackType = gasType || 'Unknown Gas Type';
+        if (!assetMap.has(fallbackType)) {
+          assetMap.set(fallbackType, []);
+        }
+        assetMap.get(fallbackType).push(bottle);
+      }
     });
-    return Array.from(types);
+    
+    return Array.from(assetMap.entries()).map(([gasType, bottlesOfType]) => ({
+      gasType,
+      bottles: bottlesOfType
+    })).sort((a, b) => a.gasType.localeCompare(b.gasType));
   }, [bottles]);
 
-  // For each asset type, count bottles by status
-  const assetRows = assetTypes.map(type => {
-    const bottlesOfType = bottles.filter(b => b.type === type);
-    const inHouse = bottlesOfType.filter(b => b.status === 'available').length;
-    const withCustomer = bottlesOfType.filter(b => b.status === 'rented').length;
+  // For each gas type, show bottle inventory (counting physical bottles)
+  const assetRows = assetTypes.map(({ gasType, bottles: bottlesOfType }) => {
+    // Count bottles by status - these are the physical containers we track
+    // FIXED: Use mutually exclusive logic to prevent double counting
+    const available = bottlesOfType.filter(b => 
+      (b.status === 'available' && !b.assigned_customer) || 
+      (!b.status || b.status === 'available')
+    ).length;
+    const rented = bottlesOfType.filter(b => 
+      b.assigned_customer && b.assigned_customer !== '' && 
+      b.status !== 'maintenance' && b.status !== 'lost' && b.status !== 'retired'
+    ).length;
+    const maintenance = bottlesOfType.filter(b => b.status === 'maintenance').length;
     const lost = bottlesOfType.filter(b => b.status === 'lost').length;
+    const retired = bottlesOfType.filter(b => b.status === 'retired').length;
     const total = bottlesOfType.length;
+    
     const sample = bottlesOfType[0] || {};
+    
+    // Get bottle size information - show the different sizes of bottles for this gas type
+    const sizes = [...new Set(bottlesOfType.map(b => {
+      let desc = b.description || '';
+      // Extract size from description if it contains size info
+      const sizeMatch = desc.match(/(?:SIZE|size)\s+(\d+)/i);
+      if (sizeMatch) {
+        return `${sizeMatch[1]} cu ft`;
+      }
+      // Clean up description to remove asset/bottle references
+      desc = desc
+        .replace(/\s+BOTTLE.*$/i, '')
+        .replace(/\s+ASSET.*$/i, '')
+        .replace(/\s+ASSETS.*$/i, '')
+        .trim();
+      return desc;
+    }).filter(Boolean))];
+    
+    const sizeInfo = sizes.length === 1 ? sizes[0] : sizes.length > 1 ? `${sizes.length} different sizes` : 'Various sizes';
+    
     return {
-      group_name: sample.group_name || '',
-      type,
+      gasType: gasType,
       product_code: sample.product_code || '',
-      description: sample.description || '',
-      in_house_total: inHouse,
-      with_customer_total: withCustomer,
-      lost_total: lost,
-      total,
-      dock_stock: sample.dock_stock || 0,
+      sizeInfo: sizeInfo,
+      available: available,
+      rented: rented,
+      maintenance: maintenance,
+      lost: lost,
+      retired: retired,
+      total: total,
       organization_name: sample.organization_name || '',
-      id: sample.id || ''
+      id: sample.id || '',
+      sizes: sizes,
+      sample_bottle: sample
+      // Removed all_bottles to prevent storage quota issues
     };
   });
 
-  const handleEditClick = (row) => {
-    setEditRow(row);
-    setEditForm({ ...row });
-    setEditDialogOpen(true);
-  };
-
-  const handleEditChange = (e) => {
-    setEditForm({ ...editForm, [e.target.name]: e.target.value });
-  };
-
-  const handleEditSave = async () => {
-    // Save to supabase
-    const { id, ...fields } = editForm;
-    const { error } = await supabase.from('bottles').update(fields).eq('id', id);
-    if (!error) {
-      setEditDialogOpen(false);
-      setEditRow(null);
-      localStorage.removeItem(`editAssetDraft_${id}`);
-      fetchBottles();
-    }
-  };
-
-  const handleEditCancel = () => {
-    if (editForm.id) localStorage.removeItem(`editAssetDraft_${editForm.id}`);
-    setEditDialogOpen(false);
-    setEditRow(null);
-  };
-
-  const handleDeleteClick = (row) => setDeleteRow(row);
-
-  const handleDeleteConfirm = async () => {
-    setDeleting(true);
-    await supabase.from('bottles').delete().eq('id', deleteRow.id);
-    setDeleting(false);
-    setDeleteRow(null);
-    fetchBottles();
-  };
-
-  const handleDeleteCancel = () => setDeleteRow(null);
-
-  const isSelected = (id) => selectedRows.includes(id);
-  const handleSelectRow = (id) => {
-    setSelectedRows(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  };
-  const handleSelectAll = (checked) => {
-    if (checked) {
-      setSelectedRows(assetRows.map(row => row.id).filter(Boolean));
-    } else {
-      setSelectedRows([]);
-    }
-  };
-
-  const handleDeleteSelected = async () => {
-    if (selectedRows.length === 0) return;
-    setDeleting(true);
-    await supabase.from('bottles').delete().in('id', selectedRows);
-    setDeleting(false);
-    setSelectedRows([]);
-    fetchBottles();
-  };
-
-  const handleDeleteAll = async () => {
-    setDeleting(true);
-    // Fetch all bottle IDs
-    const { data: allBottles, error: fetchError } = await supabase.from('bottles').select('id');
-    if (fetchError) {
-      setDeleting(false);
-      alert('Error fetching assets: ' + fetchError.message);
-      return;
-    }
-    const ids = (allBottles || []).map(b => b.id).filter(Boolean);
-    if (ids.length === 0) {
-      setDeleting(false);
-      alert('No assets found to delete.');
-      return;
-    }
-    const { error } = await supabase.from('bottles').delete().in('id', ids);
-    setDeleting(false);
-    if (error) {
-      alert('Error deleting all assets: ' + error.message);
-    } else {
-      fetchBottles();
-      alert('All assets deleted successfully.');
-    }
-  };
 
   if (loading) return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
@@ -406,54 +369,38 @@ export default function Assets() {
     <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
       <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>All Gas Assets</Typography>
-          <Box display="flex" gap={2}>
-            <Button
-              variant="contained"
-              color="secondary"
-              onClick={exportAllBottlesToCSV}
-            >
-              Export All Bottles
-            </Button>
-            <Button
-              variant="contained"
-              color="info"
-              onClick={() => exportSummaryByType(bottles)}
-            >
-              Export Summary by Type
-            </Button>
-            {(profile?.role === 'owner' || profile?.role === 'admin') && (
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={() => navigate('/import-asset-balance')}
-              >
-                Import Assets
-              </Button>
-            )}
+          <Box>
+            <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>Bottle Inventory</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Organization: <strong>{organization?.name}</strong>
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+              View-only inventory overview of physical bottles (containers) that hold gas assets
+            </Typography>
           </Box>
         </Box>
 
         {/* Filters */}
         <Box display="flex" gap={2} mb={3} flexWrap="wrap">
-          {profile?.role === 'owner' && (
-            <FormControl sx={{ minWidth: 220 }} size="small">
-              <InputLabel>Organization</InputLabel>
-              <Select
-                value={selectedOrg}
-                label="Organization"
-                onChange={e => setSelectedOrg(e.target.value)}
-              >
-                <MenuItem value="">All Organizations</MenuItem>
-                {organizations.map(org => (
-                  <MenuItem key={org.id} value={org.id}>{org.name}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          )}
+        {/* Organization Filter - Only for Owners */}
+        {profile?.role === 'owner' && (
+          <FormControl sx={{ minWidth: 220 }} size="small">
+            <InputLabel>Organization</InputLabel>
+            <Select
+              value={selectedOrg}
+              label="Organization"
+              onChange={e => setSelectedOrg(e.target.value)}
+            >
+              <MenuItem value="">All Organizations</MenuItem>
+              {organizations.map(org => (
+                <MenuItem key={org.id} value={org.id}>{org.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
           <TextField
             size="small"
-            label="Search bottles, barcode, type..."
+            label="Search bottles, barcode, gas type..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             sx={{ minWidth: 260 }}
@@ -466,105 +413,93 @@ export default function Assets() {
           </Alert>
         )}
 
-        <Button
-          variant="contained"
-          color="error"
-          sx={{ mb: 2 }}
-          onClick={async () => {
-            if (!window.confirm('Are you sure you want to delete ALL assets? This cannot be undone.')) return;
-            setLoading(true);
-            // Fetch all bottle IDs
-            const { data: allBottles, error: fetchError } = await supabase.from('bottles').select('id');
-            if (fetchError) {
-              setLoading(false);
-              alert('Error fetching assets: ' + fetchError.message);
-              return;
-            }
-            const ids = (allBottles || []).map(b => b.id).filter(Boolean);
-            if (ids.length === 0) {
-              setLoading(false);
-              alert('No assets found to delete.');
-              return;
-            }
-            const { error } = await supabase.from('bottles').delete().in('id', ids);
-            setLoading(false);
-            if (error) {
-              alert('Error deleting all assets: ' + error.message);
-            } else {
-              fetchBottles();
-              alert('All assets deleted successfully.');
-            }
-          }}
-        >
-          Delete All
-        </Button>
 
         <Paper elevation={2} sx={{ borderRadius: 2 }}>
           <TableContainer>
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell padding="checkbox">
-                    <Checkbox
-                      indeterminate={selectedRows.length > 0 && selectedRows.length < assetRows.length}
-                      checked={assetRows.length > 0 && selectedRows.length === assetRows.length}
-                      onChange={e => handleSelectAll(e.target.checked)}
-                    />
-                  </TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Group</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Product Code</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Total</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Organization</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Details</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Gas Type</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Bottle Sizes</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Available Bottles</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Rented Bottles</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Maintenance</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Lost</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Total Bottles</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {assetRows.map(row => (
-                  <TableRow key={row.type} selected={isSelected(row.id)}>
-                    <TableCell padding="checkbox">
-                      <Checkbox
-                        checked={isSelected(row.id)}
-                        onChange={() => handleSelectRow(row.id)}
-                      />
-                    </TableCell>
-                    <TableCell>{row.group_name}</TableCell>
-                    <TableCell>{row.type}</TableCell>
-                    <TableCell>{row.product_code}</TableCell>
-                    <TableCell>{row.description}</TableCell>
-                    <TableCell>{row.total}</TableCell>
-                    <TableCell>{organizationName}</TableCell>
+                  <TableRow key={row.gasType}>
                     <TableCell>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        color="primary"
-                        sx={{ mr: 1 }}
-                        onClick={() => handleEditClick(row)}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        color="error"
-                        sx={{ mr: 1 }}
-                        onClick={() => handleDeleteClick(row)}
-                      >
-                        Delete
-                      </Button>
-                      {row.id ? (
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => navigate(`/bottle/${row.id}`)}
-                        >
-                          View Details
-                        </Button>
-                      ) : (
-                        <span style={{ color: '#aaa' }}>No Details</span>
+                      <Typography variant="body1" sx={{ fontWeight: 600, color: 'primary.main' }}>
+                        {row.gasType}
+                      </Typography>
+                      {row.product_code && (
+                        <Typography variant="caption" color="text.secondary">
+                          Code: {row.product_code}
+                        </Typography>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {row.sizeInfo}
+                      </Typography>
+                      {row.sizes.length > 1 && (
+                        <Typography variant="caption" color="text.secondary">
+                          {row.sizes.slice(0, 3).join(', ')}
+                          {row.sizes.length > 3 && ` +${row.sizes.length - 3} more`}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Typography 
+                        variant="body1" 
+                        sx={{ 
+                          fontWeight: 600, 
+                          color: row.available > 0 ? 'success.main' : 'text.secondary' 
+                        }}
+                      >
+                        {row.available}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography 
+                        variant="body1" 
+                        sx={{ 
+                          fontWeight: 600, 
+                          color: row.rented > 0 ? 'primary.main' : 'text.secondary' 
+                        }}
+                      >
+                        {row.rented}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography 
+                        variant="body1" 
+                        sx={{ 
+                          fontWeight: 600, 
+                          color: row.maintenance > 0 ? 'warning.main' : 'text.secondary' 
+                        }}
+                      >
+                        {row.maintenance}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography 
+                        variant="body1" 
+                        sx={{ 
+                          fontWeight: 600, 
+                          color: row.lost > 0 ? 'error.main' : 'text.secondary' 
+                        }}
+                      >
+                        {row.lost}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body1" sx={{ fontWeight: 700 }}>
+                        {row.total}
+                      </Typography>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -580,32 +515,6 @@ export default function Assets() {
           )}
         </Paper>
       </Paper>
-      <Dialog open={editDialogOpen} onClose={handleEditCancel}>
-        <DialogTitle>Edit Asset</DialogTitle>
-        <DialogContent>
-          <TextField label="Group" name="group_name" value={editForm.group_name || ''} onChange={handleEditChange} fullWidth sx={{ mb: 2 }} />
-          <TextField label="Type" name="type" value={editForm.type || ''} onChange={handleEditChange} fullWidth sx={{ mb: 2 }} />
-          <TextField label="Product Code" name="product_code" value={editForm.product_code || ''} onChange={handleEditChange} fullWidth sx={{ mb: 2 }} />
-          <TextField label="Description" name="description" value={editForm.description || ''} onChange={handleEditChange} fullWidth sx={{ mb: 2 }} />
-          <TextField label="Dock Stock" name="dock_stock" value={editForm.dock_stock || ''} onChange={handleEditChange} fullWidth sx={{ mb: 2 }} />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleEditCancel}>Cancel</Button>
-          <Button onClick={handleEditSave} variant="contained" color="primary">Save</Button>
-        </DialogActions>
-      </Dialog>
-      <Dialog open={!!deleteRow} onClose={handleDeleteCancel}>
-        <DialogTitle>Delete Asset</DialogTitle>
-        <DialogContent>
-          Are you sure you want to delete this asset?
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleDeleteCancel}>Cancel</Button>
-          <Button onClick={handleDeleteConfirm} color="error" variant="contained" disabled={deleting}>
-            {deleting ? 'Deleting...' : 'Delete'}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 } 

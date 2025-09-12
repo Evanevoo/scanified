@@ -73,10 +73,9 @@ import TruckReconciliation from './pages/TruckReconciliation';
 import ChainOfCustody from './pages/ChainOfCustody';
 import PalletizationSystem from './pages/PalletizationSystem';
 import AdvancedRentalCalculations from './pages/AdvancedRentalCalculations';
-import RentalPricingManager from './pages/RentalPricingManager';
-import TestSimpleComponent from './pages/TestSimpleComponent';
+import BulkRentalPricingManager from './pages/BulkRentalPricingManager';
+import MinimalTest from './pages/MinimalTest';
 import MainLayout from './components/MainLayout';
-import TruckReconciliationDashboard from './pages/TruckReconciliationDashboard';
 import TestAdvancedFeatures from './pages/TestAdvancedFeatures';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
@@ -146,10 +145,9 @@ const SupabaseOrders = lazy(() => import('./pages/management-reports/SupabaseOrd
 const UserManagement = lazy(() => import('./pages/UserManagement'));
 const ImportAssetBalance = lazy(() => import('./pages/ImportAssetBalance'));
 const IntegrationsPage = lazy(() => import('./pages/Integrations'));
-const BottleDetail = lazy(() => import('./pages/BottleDetail'));
+const BottleManagement = lazy(() => import('./pages/BottleManagement'));
 const AssetDetail = lazy(() => import('./pages/AssetDetail'));
 const Assets = lazy(() => import('./pages/Assets'));
-const InventoryManagement = lazy(() => import('./pages/InventoryManagementFixed'));
 const SmartInventory = lazy(() => import('./pages/SmartInventory'));
 const SupportCenter = lazy(() => import('./pages/SupportCenter'));
 const OrganizationAnalytics = lazy(() => import('./pages/OrganizationAnalytics'));
@@ -319,13 +317,13 @@ function AppContent() {
                     <Route path="/generateid" element={<CustomerRegistration />} />
                     <Route path="/barcode-generator" element={<BarcodeGenerator />} />
                     <Route path="/owner-portal/integration-settings" element={<IntegrationSettings />} />
-                    <Route path="/bottle/:id" element={<BottleDetail />} />
+                    <Route path="/bottle/:id" element={<AssetDetail />} />
+                    <Route path="/bottle-management" element={<BottleManagement />} />
                     <Route path="/assets/:id" element={<AssetDetail />} />
                     <Route path="/asset/:id" element={<AssetDetail />} />
                     <Route path="/orders" element={<ScannedOrders />} />
                     <Route path="/billing" element={<Billing />} />
                     <Route path="/payments" element={<CustomerPayments />} />
-                    <Route path="/inventory-management" element={<InventoryManagement />} />
                     <Route path="/smart-inventory" element={<SmartInventory />} />
                     <Route path="/customer-portal" element={<CustomerSelfService />} />
                     <Route path="/support" element={<SupportCenter />} />
@@ -393,17 +391,15 @@ function AppContent() {
                       <AdvancedRentalCalculations />
                     </ProtectedRoute>
                   } />
-                  <Route path="/rental-pricing-manager" element={
+                  <Route path="/bulk-rental-pricing" element={
                     <ProtectedRoute>
-                      <RentalPricingManager />
+                      <BulkRentalPricingManager />
                     </ProtectedRoute>
                   } />
-                        <Route path="/test-emergency" element={<TestSimpleComponent />} />
-                  <Route path="/truck-reconciliation-dashboard" element={
-                    <ProtectedRoute>
-                      <TruckReconciliationDashboard />
-                    </ProtectedRoute>
-                  } />
+                        <Route path="/test-emergency" element={<MinimalTest />} />
+                        <Route path="/test-simple" element={<MinimalTest />} />
+                        <Route path="/minimal-test" element={<MinimalTest />} />
+                        <Route path="/test-unprotected" element={<MinimalTest />} />
                   <Route path="/test-advanced-features" element={
                     <ProtectedRoute>
                       <TestAdvancedFeatures />
@@ -442,13 +438,24 @@ function AppContent() {
                   },
                 }}
               />
-              {/* Global Snackbar */}
+              {/* Global Snackbar - MOVED TO TOP RIGHT */}
               <Snackbar
                 open={globalSnackbar.open}
                 autoHideDuration={4000}
                 onClose={() => setGlobalSnackbar({ ...globalSnackbar, open: false })}
-                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                ContentProps={{ sx: { zIndex: 2147483647, position: 'relative' } }}
+                anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+                sx={{ 
+                  zIndex: 9999999,
+                  position: 'fixed',
+                  top: '80px !important',
+                  right: '20px !important',
+                  '& .MuiSnackbar-root': {
+                    zIndex: 9999999,
+                    position: 'fixed',
+                    top: '80px !important',
+                    right: '20px !important'
+                  }
+                }}
               >
                 <Alert onClose={() => setGlobalSnackbar({ ...globalSnackbar, open: false })} severity={globalSnackbar.severity} sx={{ width: '100%' }}>
                   {globalSnackbar.message}

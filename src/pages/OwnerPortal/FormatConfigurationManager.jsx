@@ -89,6 +89,12 @@ const FORMAT_TEMPLATES = {
       pattern: '^[0-9]{4}[A-Z0-9]{4,8}$',
       description: '4-digit year followed by 4-8 alphanumeric',
       examples: ['2024ORD123', '2024SO456']
+    },
+    flexible_5_digit: {
+      name: 'Flexible 5-Digit',
+      pattern: '^[A-Z]?[0-9]{5}[A-Z]?$',
+      description: '5 digits, or letter+5 digits, or 5 digits+letter',
+      examples: ['12345', 'A12345', '12345A']
     }
   },
   customer_id: {
