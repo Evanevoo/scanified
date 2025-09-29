@@ -170,7 +170,7 @@ export default function CTABanner({
                 {...getButtonStyles(true)}
                 size="large"
                 startIcon={<RocketIcon />}
-                onClick={() => navigate('/register')}
+                onClick={() => navigate('/contact')}
                 sx={{ 
                   px: 4,
                   py: 1.5,
@@ -179,7 +179,7 @@ export default function CTABanner({
                   ...getButtonStyles(true).sx
                 }}
               >
-                {primaryAction}
+                Contact Us
               </Button>
               <Button
                 {...getButtonStyles(false)}

@@ -179,7 +179,7 @@ export default function Analytics() {
       if (recentOrgs) {
         recentActivity.push(...recentOrgs.map(org => ({
           organization: org.name,
-          action: `Organization registered`,
+          action: `Organization created`,
           time: formatTimeAgo(org.created_at),
           type: 'organization'
         })));

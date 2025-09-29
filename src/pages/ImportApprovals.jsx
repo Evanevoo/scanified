@@ -3,8 +3,7 @@ import { supabase } from '../supabase/client';
 import { 
   Box, Paper, Typography, Button, Alert, Snackbar, CircularProgress, Divider, 
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton, 
-  MenuItem, Select, FormControl, InputLabel, TableContainer, Table, TableHead, 
-  TableBody, TableRow, TableCell, Chip, Checkbox, Autocomplete, Tooltip, Fab, 
+  MenuItem, Select, FormControl, InputLabel, Chip, Checkbox, Autocomplete, Tooltip, Fab, 
   Zoom, Card, CardContent, CardHeader, Grid, Tabs, Tab, Badge, LinearProgress,
   Stepper, Step, StepLabel, StepContent, Accordion, AccordionSummary, AccordionDetails,
   List, ListItem, ListItemText, ListItemIcon, Switch, FormControlLabel, Stack,
@@ -213,6 +212,52 @@ function parseDataField(data) {
   return data;
 }
 
+// Function to merge scanned records with imported invoices for the same order
+function mergeScannedWithImported(importedInvoices, scannedRecords) {
+  const merged = [];
+  const processedScannedIds = new Set();
+  
+  // Process each imported invoice
+  for (const invoice of importedInvoices) {
+    const invoiceData = parseDataField(invoice.data);
+    const invoiceOrderNum = getOrderNumber(invoiceData);
+    
+    // Find matching scanned records for this order
+    const matchingScanned = scannedRecords.filter(scan => {
+      const scanData = parseDataField(scan.data);
+      const scanOrderNum = getOrderNumber(scanData);
+      return scanOrderNum === invoiceOrderNum;
+    });
+    
+    if (matchingScanned.length > 0) {
+      // Merge the invoice with scanned data
+      const mergedInvoice = {
+        ...invoice,
+        has_scanned_data: true,
+        scanned_records: matchingScanned,
+        is_scanned_only: false
+      };
+      merged.push(mergedInvoice);
+      
+      // Mark these scanned records as processed
+      matchingScanned.forEach(scan => processedScannedIds.add(scan.id));
+      
+      console.log(`🔗 Merged order ${invoiceOrderNum}: invoice + ${matchingScanned.length} scanned records`);
+    } else {
+      // No matching scans, keep as regular import
+      merged.push(invoice);
+    }
+  }
+  
+  // Add remaining scanned records that don't have matching imports
+  const remainingScanned = scannedRecords.filter(scan => !processedScannedIds.has(scan.id));
+  merged.push(...remainingScanned);
+  
+  console.log(`📊 Merge result: ${merged.length} total records (${importedInvoices.length} imports, ${remainingScanned.length} scanned-only)`);
+  
+  return merged;
+}
+
 // Enhanced status determination with professional workflow logic
 function determineVerificationStatus(record) {
   // Handle scanned-only records (orders that have been scanned but not invoiced yet)
@@ -260,7 +305,7 @@ function determineVerificationStatus(record) {
 }
 
 export default function ImportApprovals() {
-  const { user } = useAuth();
+  const { user, organization } = useAuth();
   const [pendingInvoices, setPendingInvoices] = useState([]);
   const [pendingReceipts, setPendingReceipts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -370,16 +415,36 @@ export default function ImportApprovals() {
     }
   }, [autoRefresh, refreshInterval]);
 
-  // Initialize component
+  // Initialize component with optimized loading
   useEffect(() => {
-    fetchData();
-    fetchCylinders();
-    fetchCustomers();
-    fetchScannedCounts();
-    fetchAllScanned();
-    fetchScannedOrders();
-    fetchGasTypes();
-    fetchBottles();
+    const initializeData = async () => {
+      setLoading(true);
+      try {
+        // Load critical data first
+        await Promise.all([
+          fetchData(),
+          fetchCustomers(),
+          fetchScannedCounts()
+        ]);
+        
+        // Load secondary data in background
+        Promise.all([
+          fetchCylinders(),
+          fetchAllScanned(),
+          fetchScannedOrders(),
+          fetchGasTypes(),
+          fetchBottles()
+        ]).catch(console.error);
+        
+      } catch (error) {
+        console.error('Error initializing data:', error);
+        setError('Failed to load data: ' + error.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    initializeData();
   }, []);
 
   // Scanner cleanup effect
@@ -394,20 +459,20 @@ export default function ImportApprovals() {
 
   // Enhanced data fetching with statistics
   const fetchData = async () => {
-    setLoading(true);
     try {
+      // First fetch the main data
       await Promise.all([
         fetchPendingInvoices(),
-        fetchPendingReceipts(),
-        fetchVerificationStats()
+        fetchPendingReceipts()
       ]);
       
-      // Fetch scanned-only orders after the main data is loaded
+      // Then fetch verification stats (which will also set pendingInvoices)
+      await fetchVerificationStats();
+      
+      // Finally fetch scanned-only orders
       await fetchScannedOnlyOrders();
     } catch (error) {
       setError('Failed to fetch data: ' + error.message);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -475,8 +540,7 @@ export default function ImportApprovals() {
     try {
       const { data, error } = await supabase
         .from('imported_invoices')
-        .select('*')
-        .eq('status', 'pending');
+        .select('*');
       
       if (error) throw error;
       
@@ -507,7 +571,8 @@ export default function ImportApprovals() {
         setSnackbar(`Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
       }
       
-      setPendingInvoices(remainingRecords);
+      // Don't set pendingInvoices here - let fetchVerificationStats handle it
+      console.log('📊 fetchPendingInvoices completed, remaining records:', remainingRecords.length);
     } catch (error) {
       console.error('Error fetching pending invoices:', error);
       setError('Failed to fetch pending invoices');
@@ -518,8 +583,7 @@ export default function ImportApprovals() {
     try {
       const { data, error } = await supabase
         .from('imported_sales_receipts')
-        .select('*')
-        .eq('status', 'pending');
+        .select('*');
       
       if (error) throw error;
       
@@ -540,41 +604,133 @@ export default function ImportApprovals() {
 
   async function fetchVerificationStats() {
     try {
-      const { data: invoices } = await supabase.from('imported_invoices').select('*').eq('status', 'pending');
-      const { data: receipts } = await supabase.from('imported_sales_receipts').select('*').eq('status', 'pending');
+      setLoading(true);
+      console.log('🚀 Starting data fetch...');
+      console.log('🔍 Organization:', organization);
+      
+      if (!organization || !organization.id) {
+        console.error('❌ No organization found');
+        setError('No organization found. Please log in again.');
+        setLoading(false);
+        return;
+      }
+      
+      const startTime = Date.now();
+      
+      const { data: invoices, error: invoiceError } = await supabase.from('imported_invoices').select('*').eq('organization_id', organization.id);
+      const { data: receipts, error: receiptError } = await supabase.from('imported_sales_receipts').select('*').eq('organization_id', organization.id);
+      
+      if (invoiceError) {
+        console.error('❌ Invoice query error:', invoiceError);
+        throw invoiceError;
+      }
+      
+      if (receiptError) {
+        console.error('❌ Receipt query error:', receiptError);
+        throw receiptError;
+      }
+      
+      console.log('⏱️ Database queries completed in:', Date.now() - startTime, 'ms');
+      
+      console.log('🔍 Organization filter:', {
+        organizationId: organization.id,
+        invoicesFound: invoices?.length || 0,
+        receiptsFound: receipts?.length || 0
+      });
       
       // Split grouped imports into individual records (same as in fetchPendingInvoices/fetchPendingReceipts)
       const individualInvoices = [];
       (invoices || []).forEach(importRecord => {
+        console.log('🔍 Processing invoice record:', {
+          id: importRecord.id,
+          filename: importRecord.filename,
+          dataKeys: Object.keys(importRecord.data || {})
+        });
+        
         const splitRecords = splitImportIntoIndividualRecords(importRecord);
+        console.log('📊 Split into individual records:', splitRecords.length);
         individualInvoices.push(...splitRecords);
       });
       
       const individualReceipts = [];
       (receipts || []).forEach(importRecord => {
+        console.log('🔍 Processing receipt record:', {
+          id: importRecord.id,
+          filename: importRecord.filename,
+          dataKeys: Object.keys(importRecord.data || {})
+        });
+        
         const splitRecords = splitImportIntoIndividualRecords(importRecord);
+        console.log('📊 Split into individual records:', splitRecords.length);
         individualReceipts.push(...splitRecords);
       });
       
+      console.log('🔍 Individual records:', {
+        invoices: invoices?.length || 0,
+        receipts: receipts?.length || 0,
+        individualInvoices: individualInvoices.length,
+        individualReceipts: individualReceipts.length,
+        invoiceStatuses: invoices?.map(i => i.status) || [],
+        receiptStatuses: receipts?.map(r => r.status) || []
+      });
+      
+      // Debug: Show first few individual records
+      console.log('🔍 First 3 individual invoices:', individualInvoices.slice(0, 3).map(inv => ({
+        id: inv.id,
+        displayId: inv.displayId,
+        customerName: inv.data.customer_name,
+        productCode: inv.data.product_code,
+        orderNumber: inv.data.order_number
+      })));
+      
       // Get scanned-only records from both bottle_scans and scans tables
-      const { data: scannedRows } = await supabase
+      console.log('⏱️ Fetching scanned data...');
+      const scanStartTime = Date.now();
+      
+      const { data: scannedRows, error: scannedError } = await supabase
         .from('bottle_scans')
         .select('*')
-        .not('order_number', 'is', null);
+        .not('order_number', 'is', null)
+        .eq('organization_id', organization.id)
+        .order('created_at', { ascending: false })
+        .limit(1000); // Limit to prevent slow queries
       
       // Also get scans from the mobile app scans table (exclude rejected ones)
-      const { data: mobileScans } = await supabase
+      const { data: mobileScans, error: mobileError } = await supabase
         .from('scans')
         .select('*')
         .not('order_number', 'is', null)
-        .or('status.is.null,status.eq.pending,status.eq.approved');
+        .eq('organization_id', organization.id)
+        .or('status.is.null,status.eq.pending,status.eq.approved')
+        .order('created_at', { ascending: false })
+        .limit(1000); // Limit to prevent slow queries
+      
+      if (scannedError) {
+        console.error('❌ Scanned rows query error:', scannedError);
+        throw scannedError;
+      }
+      
+      if (mobileError) {
+        console.error('❌ Mobile scans query error:', mobileError);
+        throw mobileError;
+      }
+      
+      console.log('⏱️ Scanned data queries completed in:', Date.now() - scanStartTime, 'ms');
       
       // Combine both scan sources
       const allScannedRows = [...(scannedRows || []), ...(mobileScans || [])];
       
+      console.log('🔍 Data fetch results:', {
+        scannedRows: scannedRows?.length || 0,
+        mobileScans: mobileScans?.length || 0,
+        allScannedRows: allScannedRows.length
+      });
+      
       const { data: importedInvoices } = await supabase
         .from('imported_invoices')
         .select('data');
+        
+      console.log('🔍 Imported invoices:', importedInvoices?.length || 0);
       
       // Extract order numbers from imported invoices
       const importedOrderNumbers = new Set();
@@ -588,22 +744,37 @@ export default function ImportApprovals() {
         });
       });
 
-      // Group scanned rows by order number
+      // Group scanned rows by order number - include ALL scanned records
       const orderGroups = {};
       allScannedRows.forEach(scan => {
         const orderNum = scan.order_number?.toString().trim();
-        if (orderNum && !importedOrderNumbers.has(orderNum)) {
+        if (orderNum) {
           if (!orderGroups[orderNum]) {
             orderGroups[orderNum] = [];
           }
           orderGroups[orderNum].push(scan);
         }
       });
+      
+      console.log('🔍 Order groups created:', Object.keys(orderGroups).length);
+      console.log('🔍 Order numbers:', Object.keys(orderGroups));
 
       // Convert to the same format as imported invoices for consistency
+      console.log('⏱️ Processing scanned records...');
+      const processStartTime = Date.now();
+      
       const scannedOnlyRecords = Object.entries(orderGroups).map(([orderNumber, scans]) => {
         const firstScan = scans[0];
         const customerName = firstScan.customer_name || firstScan.customer || 'Unknown Customer';
+        const hasMatchingImport = importedOrderNumbers.has(orderNumber);
+        
+        console.log('🔍 Creating scanned record:', { 
+          orderNumber, 
+          customerName, 
+          hasMatchingImport, 
+          scanCount: scans.length,
+          importedOrderNumbers: Array.from(importedOrderNumbers)
+        });
         
         return {
           id: `scanned_${orderNumber}`,
@@ -612,8 +783,8 @@ export default function ImportApprovals() {
               order_number: orderNumber,
               customer_name: customerName,
               product_code: scan.product_code || scan.bottle_barcode || scan.barcode_number || 'Unknown',
-              qty_out: scan.action === 'out' || scan.scan_type === 'delivery' || scan.mode === 'delivery' ? 1 : 0,
-              qty_in: scan.action === 'in' || scan.scan_type === 'pickup' || scan.mode === 'pickup' ? 1 : 0,
+              qty_out: scan.action === 'out' || scan.scan_type === 'delivery' || scan.mode === 'delivery' || scan.mode === 'SHIP' ? 1 : 0,
+              qty_in: scan.action === 'in' || scan.scan_type === 'pickup' || scan.mode === 'pickup' || scan.mode === 'RETURN' ? 1 : 0,
               date: scan.scan_date || scan.created_at || new Date().toISOString().split('T')[0],
               location: scan.location || 'Unknown',
               // Add mobile-specific fields for better display
@@ -628,15 +799,39 @@ export default function ImportApprovals() {
             }
           },
           uploaded_by: firstScan.user_id || 'scanner',
-          status: 'scanned_only',
+          status: hasMatchingImport ? 'pending' : 'scanned_only',
           created_at: firstScan.created_at || new Date().toISOString(),
-          is_scanned_only: true
+          is_scanned_only: !hasMatchingImport,
+          has_matching_import: hasMatchingImport
         };
       });
       
-      const allRecords = [...individualInvoices, ...individualReceipts, ...scannedOnlyRecords];
+      console.log('⏱️ Scanned records processing completed in:', Date.now() - processStartTime, 'ms');
+      console.log('📊 Final scanned records count:', scannedOnlyRecords.length);
       
-      const stats = {
+      const allRecords = [...individualInvoices, ...individualReceipts, ...scannedOnlyRecords];
+      console.log('📊 All records count:', allRecords.length);
+      
+      console.log('🔍 Final allRecords:', {
+        individualInvoices: individualInvoices.length,
+        individualReceipts: individualReceipts.length,
+        scannedOnlyRecords: scannedOnlyRecords.length,
+        total: allRecords.length
+      });
+      
+      // Debug: Show first few final records
+      console.log('🔍 First 3 final records:', allRecords.slice(0, 3).map(record => ({
+        id: record.id,
+        displayId: record.displayId,
+        customerName: record.data?.customer_name,
+        productCode: record.data?.product_code,
+        orderNumber: record.data?.order_number
+      })));
+      
+      setPendingInvoices(allRecords);
+      
+      // Calculate stats from the actual data being displayed
+      const displayStats = {
         total: allRecords.length,
         pending: 0,
         verified: 0,
@@ -650,12 +845,12 @@ export default function ImportApprovals() {
       allRecords.forEach(record => {
         const status = determineVerificationStatus(record);
         switch (status) {
-          case 'PENDING': stats.pending++; break;
-          case 'VERIFIED': stats.verified++; break;
-          case 'EXCEPTION': stats.exceptions++; break;
-          case 'INVESTIGATION': stats.investigating++; break;
-          case 'IN_PROGRESS': stats.processing++; break;
-          case 'SCANNED_ONLY': stats.scanned_only++; break;
+          case 'PENDING': displayStats.pending++; break;
+          case 'VERIFIED': displayStats.verified++; break;
+          case 'EXCEPTION': displayStats.exceptions++; break;
+          case 'INVESTIGATION': displayStats.investigating++; break;
+          case 'IN_PROGRESS': displayStats.processing++; break;
+          case 'SCANNED_ONLY': displayStats.scanned_only++; break;
         }
         
         // Check for quantity discrepancies
@@ -668,13 +863,50 @@ export default function ImportApprovals() {
         });
         
         if (hasQuantityDiscrepancy) {
-          stats.quantityDiscrepancies++;
+          displayStats.quantityDiscrepancies++;
         }
       });
       
-      setVerificationStats(stats);
+      console.log('⏱️ Total data fetch completed in:', Date.now() - startTime, 'ms');
+      console.log('📊 Final stats calculated:', displayStats);
+      console.log('📊 Setting verification stats...');
+      setVerificationStats(displayStats);
+      console.log('📊 Verification stats set successfully');
+      console.log('📊 Pending invoices set to:', allRecords.length, 'records');
+      setLoading(false);
+      
     } catch (error) {
       console.error('Error fetching verification stats:', error);
+      setError('Failed to fetch data: ' + error.message);
+      
+      // Fallback: try to show basic data even if main function fails
+      try {
+        console.log('🔄 Attempting fallback data fetch...');
+        const { data: fallbackInvoices } = await supabase
+          .from('imported_invoices')
+          .select('*')
+          .eq('organization_id', organization.id)
+          .limit(50);
+        
+        if (fallbackInvoices && fallbackInvoices.length > 0) {
+          console.log('✅ Fallback data found:', fallbackInvoices.length, 'records');
+          setPendingInvoices(fallbackInvoices);
+          setVerificationStats({
+            total: fallbackInvoices.length,
+            pending: fallbackInvoices.length,
+            verified: 0,
+            exceptions: 0,
+            investigating: 0,
+            processing: 0,
+            scanned_only: 0,
+            quantityDiscrepancies: 0
+          });
+        }
+      } catch (fallbackError) {
+        console.error('❌ Fallback also failed:', fallbackError);
+      }
+      
+      setLoading(false);
     }
   }
 
@@ -725,9 +957,23 @@ export default function ImportApprovals() {
   // Batch fetch all relevant bottles for all pending invoices
   async function fetchAllScanned() {
     try {
-      const { data: scannedRows, error } = await supabase.from('bottle_scans').select('*');
-      if (error) throw error;
-      setAllScannedRows(scannedRows || []);
+      // Get from bottle_scans table
+      const { data: scannedRows, error: scanError } = await supabase.from('bottle_scans').select('*');
+      if (scanError) throw scanError;
+      
+      // Also get from scans table (legacy/mobile scans)
+      const { data: mobileScans, error: mobileError } = await supabase
+        .from('scans')
+        .select('*')
+        .or('status.is.null,status.eq.pending,status.eq.approved');
+      
+      if (mobileError) console.error('Error fetching mobile scans:', mobileError);
+      
+      // Combine both sources
+      const allScans = [...(scannedRows || []), ...(mobileScans || [])];
+      console.log('📊 Loaded scans:', { bottleScans: scannedRows?.length || 0, mobileScans: mobileScans?.length || 0, total: allScans.length });
+      
+      setAllScannedRows(allScans);
     } catch (error) {
       console.error('Error fetching all scanned rows:', error);
     }
@@ -753,7 +999,7 @@ export default function ImportApprovals() {
         .select('*')
         .not('order_number', 'is', null);
       
-      console.log('Fetched bottle_scans:', scannedRows);
+      console.log('🔍 Fetched bottle_scans:', scannedRows?.length || 0, 'records');
       
       if (scanError) throw scanError;
 
@@ -766,7 +1012,7 @@ export default function ImportApprovals() {
       
       if (mobileError) throw mobileError;
       
-      console.log('Fetched mobile scans (excluding rejected):', mobileScans);
+      console.log('🔍 Fetched mobile scans:', mobileScans?.length || 0, 'records');
       
       // Debug: Check if any scans have status 'rejected'
       const { data: rejectedScans } = await supabase
@@ -797,11 +1043,13 @@ export default function ImportApprovals() {
         });
       });
 
-      // Group scanned rows by order number
+      console.log('📋 Imported order numbers:', Array.from(importedOrderNumbers));
+
+      // Group ALL scanned rows by order number (don't exclude any)
       const orderGroups = {};
       allScannedRows.forEach(scan => {
         const orderNum = scan.order_number?.toString().trim();
-        if (orderNum && !importedOrderNumbers.has(orderNum)) {
+        if (orderNum) {
           if (!orderGroups[orderNum]) {
             orderGroups[orderNum] = [];
           }
@@ -809,41 +1057,47 @@ export default function ImportApprovals() {
         }
       });
 
+      console.log('📦 All scanned order groups:', Object.keys(orderGroups));
+      console.log('📋 Imported order numbers:', Array.from(importedOrderNumbers));
+
       // Convert to the same format as imported invoices for consistency
-      const scannedOnlyRecords = Object.entries(orderGroups).map(([orderNumber, scans]) => {
-        // Get customer info from the first scan
-        const firstScan = scans[0];
-        const customerName = firstScan.customer_name || firstScan.customer || 'Unknown Customer';
-        
-        // Create a mock data structure that matches imported invoices format
-        return {
-          id: `scanned_${orderNumber}`,
-          data: {
-            rows: scans.map(scan => ({
-              order_number: orderNumber,
-              customer_name: customerName,
-              product_code: scan.product_code || scan.bottle_barcode || scan.barcode_number || 'Unknown',
-              qty_out: scan.action === 'out' || scan.scan_type === 'delivery' || scan.mode === 'delivery' ? 1 : 0,
-              qty_in: scan.action === 'in' || scan.scan_type === 'pickup' || scan.mode === 'pickup' ? 1 : 0,
-              date: scan.scan_date || scan.created_at || new Date().toISOString().split('T')[0],
-              location: scan.location || 'Unknown',
-              // Add mobile-specific fields for better display
-              barcode: scan.barcode_number || scan.bottle_barcode,
-              description: scan.description || 'Unknown',
-              gas_type: scan.gas_type || 'Unknown'
-            })),
-            summary: {
-              total_rows: scans.length,
-              uploaded_by: firstScan.user_id || 'scanner',
-              uploaded_at: firstScan.created_at || new Date().toISOString()
-            }
-          },
-          uploaded_by: firstScan.user_id || 'scanner',
-          status: 'scanned_only',
-          created_at: firstScan.created_at || new Date().toISOString(),
-          is_scanned_only: true // Flag to identify these records
-        };
-      });
+      // Only create scanned-only records for orders that DON'T have matching imports
+      const scannedOnlyRecords = Object.entries(orderGroups)
+        .filter(([orderNumber]) => !importedOrderNumbers.has(orderNumber))
+        .map(([orderNumber, scans]) => {
+          // Get customer info from the first scan
+          const firstScan = scans[0];
+          const customerName = firstScan.customer_name || firstScan.customer || 'Unknown Customer';
+          
+          // Create a mock data structure that matches imported invoices format
+          return {
+            id: `scanned_${orderNumber}`,
+            data: {
+              rows: scans.map(scan => ({
+                order_number: orderNumber,
+                customer_name: customerName,
+                product_code: scan.product_code || scan.bottle_barcode || scan.barcode_number || 'Unknown',
+                qty_out: scan.action === 'out' || scan.scan_type === 'delivery' || scan.mode === 'delivery' || scan.mode === 'SHIP' ? 1 : 0,
+                qty_in: scan.action === 'in' || scan.scan_type === 'pickup' || scan.mode === 'pickup' || scan.mode === 'RETURN' ? 1 : 0,
+                date: scan.scan_date || scan.created_at || new Date().toISOString().split('T')[0],
+                location: scan.location || 'Unknown',
+                // Add mobile-specific fields for better display
+                barcode: scan.barcode_number || scan.bottle_barcode,
+                description: scan.description || 'Unknown',
+                gas_type: scan.gas_type || 'Unknown'
+              })),
+              summary: {
+                total_rows: scans.length,
+                uploaded_by: firstScan.user_id || 'scanner',
+                uploaded_at: firstScan.created_at || new Date().toISOString()
+              }
+            },
+            uploaded_by: firstScan.user_id || 'scanner',
+            status: 'scanned_only',
+            created_at: firstScan.created_at || new Date().toISOString(),
+            is_scanned_only: true
+          };
+        });
 
       // Check for auto-approval opportunities in scanned-only records
       const autoApprovedScannedRecords = [];
@@ -863,11 +1117,8 @@ export default function ImportApprovals() {
         setSnackbar(`Auto-approved ${autoApprovedScannedRecords.length} scanned-only records with matching quantities`);
       }
 
-      // Add remaining scanned-only records to the pending invoices state
-      setPendingInvoices(prev => {
-        const existing = prev.filter(item => !item.is_scanned_only);
-        return [...existing, ...remainingScannedRecords];
-      });
+      // Don't set pendingInvoices here - let fetchVerificationStats handle it
+      console.log('📊 fetchScannedOnlyOrders completed, remaining scanned records:', remainingScannedRecords.length);
 
     } catch (error) {
       console.error('Error fetching scanned-only orders:', error);
@@ -1162,18 +1413,7 @@ export default function ImportApprovals() {
       let customer = null;
       
       // Get current user's organization for proper filtering
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        return { success: false, error: 'User not authenticated' };
-      }
-      
-      const { data: userProfile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single();
-      
-      if (!userProfile?.organization_id) {
+      if (!organization?.id) {
         return { success: false, error: 'User not assigned to an organization' };
       }
       
@@ -1183,7 +1423,7 @@ export default function ImportApprovals() {
           .from('customers')
           .select('CustomerListID, name')
           .eq('CustomerListID', customerId)
-          .eq('organization_id', userProfile.organization_id);
+          .eq('organization_id', organization.id);
         
         if (existing && existing.length > 0) {
           customer = existing[0];
@@ -1196,7 +1436,7 @@ export default function ImportApprovals() {
           .from('customers')
           .select('CustomerListID, name')
           .ilike('name', customerName)
-          .eq('organization_id', userProfile.organization_id);
+          .eq('organization_id', organization.id);
         
         if (existing && existing.length > 0) {
           customer = existing[0];
@@ -1417,18 +1657,7 @@ export default function ImportApprovals() {
       let customer = null;
       
       // Get current user's organization for proper filtering
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        return { success: false, error: 'User not authenticated' };
-      }
-      
-      const { data: userProfile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single();
-      
-      if (!userProfile?.organization_id) {
+      if (!organization?.id) {
         return { success: false, error: 'User not assigned to an organization' };
       }
       
@@ -1438,7 +1667,7 @@ export default function ImportApprovals() {
           .from('customers')
           .select('CustomerListID, name')
           .eq('CustomerListID', customerId)
-          .eq('organization_id', userProfile.organization_id);
+          .eq('organization_id', organization.id);
         
         if (existing && existing.length > 0) {
           customer = existing[0];
@@ -1451,7 +1680,7 @@ export default function ImportApprovals() {
           .from('customers')
           .select('CustomerListID, name')
           .ilike('name', customerName)
-          .eq('organization_id', userProfile.organization_id);
+          .eq('organization_id', organization.id);
         
         if (existing && existing.length > 0) {
           customer = existing[0];
@@ -1900,6 +2129,183 @@ export default function ImportApprovals() {
     );
   };
 
+  // Auto-verification function that assigns assets to customers
+  const handleAutoVerify = async (record, onComplete, stepIndex) => {
+    try {
+      const data = parseDataField(record.data);
+      const orderNumber = getOrderNumber(data);
+      const customerName = getCustomerInfo(data);
+      const customerId = data.customer_id || data.CustomerListID;
+      
+      console.log('🔍 Auto-verifying order:', { orderNumber, customerName, customerId });
+      
+      // Get all scanned data for this order
+      const { data: scannedData, error: scannedError } = await supabase
+        .from('bottle_scans')
+        .select('*')
+        .eq('order_number', orderNumber)
+        .eq('organization_id', organization.id);
+      
+      if (scannedError) {
+        console.error('❌ Error fetching scanned data:', scannedError);
+        return;
+      }
+      
+      console.log('📦 Found scanned data:', scannedData?.length || 0);
+      
+      // Process each scanned item
+      for (const scan of scannedData || []) {
+        const barcode = scan.bottle_barcode || scan.barcode_number;
+        const mode = scan.mode;
+        
+        console.log('🔍 Processing scan:', { barcode, mode, customerName });
+        
+        if (mode === 'SHIP' || mode === 'out') {
+          // SHIP: Assign to customer (rental)
+          await assignAssetToCustomer(barcode, customerName, customerId, orderNumber);
+        } else if (mode === 'RETURN' || mode === 'in') {
+          // RETURN: Move to in-house/available
+          await returnAssetToInventory(barcode, orderNumber);
+        }
+      }
+      
+      // Update the record status to verified
+      await supabase
+        .from('imported_invoices')
+        .update({ status: 'verified' })
+        .eq('id', record.id);
+      
+      console.log('✅ Auto-verification completed');
+      setSnackbar('✅ Order verified and assets assigned successfully!');
+      onComplete(stepIndex, { verified: true, assetsAssigned: true });
+      
+      // Refresh the data to remove verified records from the list
+      await fetchData();
+      
+    } catch (error) {
+      console.error('❌ Auto-verification failed:', error);
+      onComplete(stepIndex, { verified: false, error: error.message });
+    }
+  };
+  
+  // Assign asset to customer (rental)
+  const assignAssetToCustomer = async (barcode, customerName, customerId, orderNumber) => {
+    try {
+      // Find the bottle
+      const { data: bottle, error: bottleError } = await supabase
+        .from('bottles')
+        .select('*')
+        .eq('barcode_number', barcode)
+        .eq('organization_id', organization.id)
+        .single();
+      
+      if (bottleError || !bottle) {
+        console.error('❌ Bottle not found:', barcode);
+        return;
+      }
+      
+      // Update bottle status to RENTED
+      const { error: updateError } = await supabase
+        .from('bottles')
+        .update({
+          status: 'RENTED',
+          assigned_customer: customerName,
+          customer_id: customerId,
+          rental_start_date: new Date().toISOString().split('T')[0],
+          rental_order_number: orderNumber,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', bottle.id);
+      
+      if (updateError) {
+        console.error('❌ Error updating bottle:', updateError);
+        return;
+      }
+      
+      // Create rental record
+      const { error: rentalError } = await supabase
+        .from('rentals')
+        .insert({
+          bottle_id: bottle.id,
+          customer_name: customerName,
+          customer_id: customerId,
+          order_number: orderNumber,
+          rental_start_date: new Date().toISOString().split('T')[0],
+          status: 'ACTIVE',
+          organization_id: organization.id,
+          created_at: new Date().toISOString()
+        });
+      
+      if (rentalError) {
+        console.error('❌ Error creating rental record:', rentalError);
+        return;
+      }
+      
+      console.log('✅ Asset assigned to customer:', { barcode, customerName });
+      
+    } catch (error) {
+      console.error('❌ Error assigning asset:', error);
+    }
+  };
+  
+  // Return asset to inventory (in-house/available)
+  const returnAssetToInventory = async (barcode, orderNumber) => {
+    try {
+      // Find the bottle
+      const { data: bottle, error: bottleError } = await supabase
+        .from('bottles')
+        .select('*')
+        .eq('barcode_number', barcode)
+        .eq('organization_id', organization.id)
+        .single();
+      
+      if (bottleError || !bottle) {
+        console.error('❌ Bottle not found:', barcode);
+        return;
+      }
+      
+      // Update bottle status to AVAILABLE
+      const { error: updateError } = await supabase
+        .from('bottles')
+        .update({
+          status: 'AVAILABLE',
+          assigned_customer: null,
+          customer_id: null,
+          rental_start_date: null,
+          rental_order_number: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', bottle.id);
+      
+      if (updateError) {
+        console.error('❌ Error updating bottle:', updateError);
+        return;
+      }
+      
+      // Update rental record if exists
+      const { error: rentalError } = await supabase
+        .from('rentals')
+        .update({
+          rental_end_date: new Date().toISOString().split('T')[0],
+          status: 'RETURNED',
+          return_order_number: orderNumber,
+          updated_at: new Date().toISOString()
+        })
+        .eq('bottle_id', bottle.id)
+        .is('rental_end_date', null);
+      
+      if (rentalError) {
+        console.error('❌ Error updating rental record:', rentalError);
+        return;
+      }
+      
+      console.log('✅ Asset returned to inventory:', { barcode });
+      
+    } catch (error) {
+      console.error('❌ Error returning asset:', error);
+    }
+  };
+
   const renderStepContent = (step, index, record, onComplete) => {
     switch (step.id) {
       case 'import':
@@ -1941,18 +2347,22 @@ export default function ImportApprovals() {
         return (
           <Box>
             <Typography variant="body2" gutterBottom>
-              Manual verification required
+              Auto-verification will assign assets to customers and update inventory
             </Typography>
             <ButtonGroup>
               <Button 
                 startIcon={<CheckCircleIcon />}
-                onClick={() => onComplete(index, { verified: true })}
+                onClick={() => handleAutoVerify(record, onComplete, index)}
+                variant="contained"
+                color="success"
               >
-                Approve
+                Auto-Verify & Assign Assets
               </Button>
               <Button 
                 startIcon={<ErrorIcon />}
                 onClick={() => onComplete(index, { verified: false })}
+                variant="outlined"
+                color="error"
               >
                 Reject
               </Button>
@@ -2058,7 +2468,7 @@ export default function ImportApprovals() {
 
       {/* Statistics Dashboard */}
       <Grid container spacing={3} mb={3}>
-        <Grid item xs={12} sm={6} md={2}>
+        <Grid item xs={12} sm={6} md={6}>
           <StatisticsCard
             title="Total Records"
             value={verificationStats.total}
@@ -2067,67 +2477,13 @@ export default function ImportApprovals() {
             percentage={100}
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={2}>
+        <Grid item xs={12} sm={6} md={6}>
           <StatisticsCard
             title="Pending"
             value={verificationStats.pending}
             color="warning.main"
             icon={<ScheduleIcon fontSize="large" />}
             percentage={verificationStats.total ? Math.round((verificationStats.pending / verificationStats.total) * 100) : 0}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={2}>
-          <StatisticsCard
-            title="Verified"
-            value={verificationStats.verified}
-            color="success.main"
-            icon={<CheckCircleIcon fontSize="large" />}
-            percentage={verificationStats.total ? Math.round((verificationStats.verified / verificationStats.total) * 100) : 0}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={2}>
-          <StatisticsCard
-            title="Exceptions"
-            value={verificationStats.exceptions}
-            color="error.main"
-            icon={<ErrorIcon fontSize="large" />}
-            percentage={verificationStats.total ? Math.round((verificationStats.exceptions / verificationStats.total) * 100) : 0}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={2}>
-          <StatisticsCard
-            title="Investigating"
-            value={verificationStats.investigating}
-            color="secondary.main"
-            icon={<BugReportIcon fontSize="large" />}
-            percentage={verificationStats.total ? Math.round((verificationStats.investigating / verificationStats.total) * 100) : 0}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={2}>
-          <StatisticsCard
-            title="Processing"
-            value={verificationStats.processing}
-            color="info.main"
-            icon={<PlayArrowIcon fontSize="large" />}
-            percentage={verificationStats.total ? Math.round((verificationStats.processing / verificationStats.total) * 100) : 0}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={2}>
-          <StatisticsCard
-            title="Scanned Only"
-            value={verificationStats.scanned_only || 0}
-            color="info.main"
-            icon={<QrCodeScannerIcon fontSize="large" />}
-            percentage={verificationStats.total ? Math.round(((verificationStats.scanned_only || 0) / verificationStats.total) * 100) : 0}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={2}>
-          <StatisticsCard
-            title="Qty Discrepancies"
-            value={verificationStats.quantityDiscrepancies || 0}
-            color="warning.main"
-            icon={<AssessmentIcon fontSize="large" />}
-            percentage={verificationStats.total ? Math.round(((verificationStats.quantityDiscrepancies || 0) / verificationStats.total) * 100) : 0}
           />
         </Grid>
       </Grid>
@@ -2563,251 +2919,248 @@ export default function ImportApprovals() {
 
   function renderInvoicesTab() {
     return (
-      <Paper>
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell padding="checkbox">
-                  <Checkbox
-                    indeterminate={selectedRecords.length > 0 && selectedRecords.length < filteredInvoices.length}
-                    checked={selectedRecords.length === filteredInvoices.length}
-                    onChange={handleSelectAll}
-                  />
-                </TableCell>
-                <TableCell>
-                  <Typography variant="body2" fontWeight={600}>Status</Typography>
-                </TableCell>
-                <TableCell>
-                  <Typography variant="body2" fontWeight={600}>Order & Customer</Typography>
-                </TableCell>
-                <TableCell>
-                  <Typography variant="body2" fontWeight={600}>Item Details</Typography>
-                </TableCell>
-                <TableCell align="center">
-                  <Typography variant="body2" fontWeight={600}>Category</Typography>
-                </TableCell>
-                <TableCell align="center">
-                  <Typography variant="body2" fontWeight={600}>Group</Typography>
-                </TableCell>
-                <TableCell align="center">
-                  <Typography variant="body2" fontWeight={600}>Type</Typography>
-                </TableCell>
-                <TableCell align="center">
-                  <Typography variant="body2" fontWeight={600}>Product Code</Typography>
-                </TableCell>
-                <TableCell align="center">
-                  <Typography variant="body2" fontWeight={600}>SHP</Typography>
-                </TableCell>
-                <TableCell align="center">
-                  <Typography variant="body2" fontWeight={600}>RTN</Typography>
-                </TableCell>
-
-                <TableCell align="center" sx={{ minWidth: '200px' }}>
-                  <Typography variant="body2" fontWeight={600}>Actions</Typography>
-                </TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredInvoices.map((invoice) => {
-                const data = parseDataField(invoice.data);
-                const detailedItems = getDetailedLineItems(data);
-                const orderNum = getOrderNumber(data);
-                
-                return detailedItems.map((item, itemIndex) => {
-                  const scannedOut = getScannedQty(orderNum, item.productInfo.productCode, 'out');
-                  const scannedIn = getScannedQty(orderNum, item.productInfo.productCode, 'in');
-                  const shipped = item.shipped;
-                  const returned = item.returned;
-                  const shippedMismatch = shipped !== scannedOut;
-                  const returnedMismatch = returned !== scannedIn;
+      <Box sx={{ mt: 2 }}>
+        {filteredInvoices.map(invoice => {
+          const data = parseDataField(invoice.data);
+          const orderNum = getOrderNumber(data);
+          const customerInfo = getCustomerInfo(data);
+          const recordDate = getRecordDate(data);
+          
+          // Get detailed items for this invoice
+          const detailedItems = getDetailedLineItems(data);
+          
+          return (
+            <Card 
+              key={invoice.displayId || invoice.id}
+              sx={{ 
+                mb: 3,
+                border: '1px solid #e0e0e0',
+                borderRadius: 2,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                '&:hover': { 
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+                  borderColor: 'primary.main'
+                }
+              }}
+            >
+              <CardContent sx={{ p: 3 }}>
+                {/* Header */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Checkbox
+                      checked={selectedRecords.includes(invoice.id)}
+                      onChange={() => handleSelectRecord(invoice.id)}
+                    />
+                    <Chip
+                      label={VERIFICATION_STATES[determineVerificationStatus(invoice)].label}
+                      color={VERIFICATION_STATES[determineVerificationStatus(invoice)].color}
+                      size="small"
+                      icon={VERIFICATION_STATES[determineVerificationStatus(invoice)].icon}
+                    />
+                    <Box>
+                      <Typography variant="h6" color="primary" fontWeight={600}>
+                        {orderNum}
+                      </Typography>
+                      <Typography 
+                        variant="body2" 
+                        color="primary"
+                        sx={{ 
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                          '&:hover': { 
+                            color: 'primary.dark',
+                            textDecoration: 'underline'
+                          }
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation(); // Prevent card click
+                          const customerName = getCustomerInfo(data);
+                          const customerId = data.customer_id || data.CustomerListID;
+                          if (customerId) {
+                            navigate(`/customer/${customerId}`);
+                          } else {
+                            // Try to find customer by name first
+                            navigate(`/customers?search=${encodeURIComponent(customerName)}`);
+                          }
+                        }}
+                      >
+                        {customerInfo}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {recordDate}
+                      </Typography>
+                    </Box>
+                  </Box>
                   
-                  return (
-                    <TableRow key={`${invoice.displayId || invoice.id}_${itemIndex}`} hover>
-                      <TableCell padding="checkbox">
-                        {itemIndex === 0 && (
-                          <Checkbox
-                            checked={selectedRecords.includes(invoice.id)}
-                            onChange={() => handleSelectRecord(invoice.id)}
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {itemIndex === 0 && (
-                          <Chip
-                            label={VERIFICATION_STATES[determineVerificationStatus(invoice)].label}
-                            color={VERIFICATION_STATES[determineVerificationStatus(invoice)].color}
-                            size="small"
-                            icon={VERIFICATION_STATES[determineVerificationStatus(invoice)].icon}
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {itemIndex === 0 && (
-                          <Box>
-                            <Typography variant="body2" fontWeight={600} color="primary">
-                              {orderNum}
+                  {/* Actions */}
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<ViewIcon />}
+                      onClick={() => navigate(`/import-approval/${invoice.originalId || invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
+                    >
+                      View Scans
+                    </Button>
+                    {(() => {
+                      const allMatch = detailedItems.every(item => {
+                        const scannedOut = getScannedQty(orderNum, item.productInfo.productCode, 'out');
+                        const scannedIn = getScannedQty(orderNum, item.productInfo.productCode, 'in');
+                        return scannedOut === item.shipped && scannedIn === item.returned;
+                      });
+                      const hasScans = detailedItems.some(item => {
+                        const scannedOut = getScannedQty(orderNum, item.productInfo.productCode, 'out');
+                        const scannedIn = getScannedQty(orderNum, item.productInfo.productCode, 'in');
+                        return scannedOut > 0 || scannedIn > 0;
+                      });
+                      
+                      return allMatch && hasScans ? (
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="success"
+                          startIcon={<ApprovalIcon />}
+                          onClick={() => handleAutoVerify(invoice, () => {
+                            console.log('Auto-verification completed from main table');
+                            setSnackbar('✅ Order verified and assets assigned successfully!');
+                            fetchData();
+                          }, 0)}
+                        >
+                          Auto-Verify
+                        </Button>
+                      ) : (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="success"
+                          startIcon={<ApprovalIcon />}
+                          onClick={() => setVerificationDialog({ open: true, record: invoice })}
+                        >
+                          Verify
+                        </Button>
+                      );
+                    })()}
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="error"
+                      startIcon={<ErrorIcon />}
+                      onClick={() => setVerificationDialog({ open: true, record: invoice })}
+                    >
+                      Reject
+                    </Button>
+                  </Box>
+                </Box>
+                
+                {/* Items */}
+                <Box sx={{ mt: 2 }}>
+                  {detailedItems.map((item, itemIndex) => {
+                    const scannedOut = getScannedQty(orderNum, item.productInfo.productCode, 'out', invoice);
+                    const scannedIn = getScannedQty(orderNum, item.productInfo.productCode, 'in', invoice);
+                    const shipped = item.shipped;
+                    const returned = item.returned;
+                    const shippedMismatch = shipped !== scannedOut;
+                    const returnedMismatch = returned !== scannedIn;
+                    
+                    return (
+                      <Paper 
+                        key={itemIndex}
+                        sx={{ 
+                          p: 2, 
+                          mb: 2, 
+                          border: '1px solid #f0f0f0',
+                          borderRadius: 1,
+                          backgroundColor: '#fafafa',
+                          '&:hover': {
+                            backgroundColor: '#f5f5f5',
+                            borderColor: '#e0e0e0'
+                          }
+                        }}
+                      >
+                        <Grid container spacing={2} alignItems="center">
+                          <Grid item xs={12} sm={3}>
+                            <Typography variant="body1" fontWeight={600} color="primary">
+                              {item.productInfo.productCode}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {item.productInfo.category} • {item.productInfo.type}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                              {getCustomerInfo(data)}
+                              {item.productInfo.group}
                             </Typography>
-                            <br/>
-                            <Typography variant="caption" color="text.secondary">
-                              {getRecordDate(data)}
+                          </Grid>
+                          <Grid item xs={6} sm={2}>
+                            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                              Category
                             </Typography>
-                          </Box>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Box>
-                          <Typography variant="body2" fontWeight={600}>
-                            {item.productInfo.productCode}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {item.productInfo.category} • {item.productInfo.type}
-                          </Typography>
-                          <br/>
-                          <Typography variant="caption" color="text.secondary">
-                            {item.productInfo.group}
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Typography variant="caption" textAlign="center">
-                          {item.productInfo.category || 'INDUSTRIAL CYLINDERS'}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Typography variant="caption" textAlign="center">
-                          {item.productInfo.group || 'MIXGAS'}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Typography variant="caption" textAlign="center">
-                          {item.productInfo.type || item.productInfo.productCode}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Typography variant="caption" textAlign="center" fontWeight="bold">
-                          {item.productInfo.productCode}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <Typography variant="caption" color="text.secondary">
-                              Trk:
+                            <Typography variant="body2">
+                              {item.productInfo.category || 'INDUSTRIAL CYLINDERS'}
                             </Typography>
-                            <Typography variant="caption" color="text.primary" fontWeight="bold">
-                              {scannedOut}
+                          </Grid>
+                          <Grid item xs={6} sm={2}>
+                            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                              Group
                             </Typography>
-                          </Box>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <Typography variant="caption" color="text.secondary">
-                              {typeof invoice.id === 'string' && invoice.id.startsWith('scanned_') ? 'Trk:' : 'Inv:'}
+                            <Typography variant="body2">
+                              {item.productInfo.group || 'MIXGAS'}
                             </Typography>
-                            <Typography variant="caption" color={shippedMismatch ? 'warning.main' : 'success.main'} fontWeight="bold">
-                              {item.shipped}
+                          </Grid>
+                          <Grid item xs={6} sm={2}>
+                            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                              Type
                             </Typography>
-                          </Box>
-                        </Box>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <Typography variant="caption" color="text.secondary">
-                              Trk:
+                            <Typography variant="body2">
+                              {item.productInfo.type || item.productInfo.productCode}
                             </Typography>
-                            <Typography variant="caption" color="text.primary" fontWeight="bold">
-                              {scannedIn}
-                            </Typography>
-                          </Box>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <Typography variant="caption" color="text.secondary">
-                              {typeof invoice.id === 'string' && invoice.id.startsWith('scanned_') ? 'Trk:' : 'Inv:'}
-                            </Typography>
-                            <Typography variant="caption" color={returnedMismatch ? 'warning.main' : 'success.main'} fontWeight="bold">
-                              {item.returned}
-                            </Typography>
-                          </Box>
-                        </Box>
-                      </TableCell>
-
-                      <TableCell align="center">
-                        {itemIndex === 0 && (
-                          <Box display="flex" gap={1} justifyContent="center" flexWrap="wrap">
-                            {invoice.is_scanned_only ? (
-                              // Special actions for scanned-only records
-                              <>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  startIcon={<ViewIcon />}
-                                  onClick={() => navigate(`/import-approval/${invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
-                                >
-                                  View Scans
-                                </Button>
-                                <Button
-                                  size="small"
-                                  variant="contained"
-                                  color="primary"
-                                  startIcon={<UnarchiveIcon />}
-                                  onClick={() => navigate('/import')}
-                                >
-                                  Upload Invoice
-                                </Button>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  color="error"
-                                  startIcon={<DeleteOutline />}
-                                  onClick={() => handleIndividualReject(invoice)}
-                                >
-                                  Reject
-                                </Button>
-                              </>
-                            ) : (
-                              // Regular actions for imported records
-                              <>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  startIcon={<ViewIcon />}
-                                  onClick={() => navigate(`/import-approval/${invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
-                                >
-                                  Details
-                                </Button>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  color="success"
-                                  startIcon={<ApprovalIcon />}
-                                  onClick={() => setVerificationDialog({ open: true, record: invoice })}
-                                >
-                                  Verify
-                                </Button>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  color="error"
-                                  startIcon={<DeleteOutline />}
-                                  onClick={() => handleIndividualReject(invoice)}
-                                >
-                                  Reject
-                                </Button>
-                              </>
-                            )}
-                          </Box>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                });
-              })}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+                          </Grid>
+                          <Grid item xs={12} sm={3}>
+                            <Box sx={{ display: 'flex', gap: 3, justifyContent: 'center' }}>
+                              <Box sx={{ textAlign: 'center', minWidth: '60px' }}>
+                                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                                  SHP
+                                </Typography>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                                  <Typography variant="body2" color="text.primary" fontWeight={600}>
+                                    Trk: {scannedOut}
+                                  </Typography>
+                                  <Typography 
+                                    variant="body2" 
+                                    color={invoice.is_scanned_only ? 'text.secondary' : (shippedMismatch ? 'error.main' : 'text.primary')}
+                                    fontWeight={600}
+                                  >
+                                    Inv: {invoice.is_scanned_only ? '?' : item.shipped}
+                                  </Typography>
+                                </Box>
+                              </Box>
+                              <Box sx={{ textAlign: 'center', minWidth: '60px' }}>
+                                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                                  RTN
+                                </Typography>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                                  <Typography variant="body2" color="text.primary" fontWeight={600}>
+                                    Trk: {scannedIn}
+                                  </Typography>
+                                  <Typography 
+                                    variant="body2" 
+                                    color={invoice.is_scanned_only ? 'text.secondary' : (returnedMismatch ? 'error.main' : 'text.primary')}
+                                    fontWeight={600}
+                                  >
+                                    Inv: {invoice.is_scanned_only ? '?' : item.returned}
+                                  </Typography>
+                                </Box>
+                              </Box>
+                            </Box>
+                          </Grid>
+                        </Grid>
+                      </Paper>
+                    );
+                  })}
+                </Box>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </Box>
     );
   }
 
@@ -2820,7 +3173,7 @@ export default function ImportApprovals() {
     console.log('renderInvoicesGrid called with filteredInvoices:', filteredInvoices);
     
     return (
-      <Grid container spacing={2}>
+      <Grid container spacing={3}>
         {filteredInvoices.map((invoice) => {
           const data = parseDataField(invoice.data);
           const detailedItems = getDetailedLineItems(data);
@@ -2849,7 +3202,7 @@ export default function ImportApprovals() {
                   cursor: 'pointer',
                   '&:hover': { elevation: 4 }
                 }}
-                onClick={() => navigate(`/import-approval/${invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
+                onClick={() => navigate(`/import-approval/${invoice.originalId || invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
               >
                 <CardHeader
                   title={
@@ -3057,7 +3410,7 @@ export default function ImportApprovals() {
                       <Button
                         size="small"
                         variant="outlined"
-                        onClick={() => navigate(`/import-approval/${invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
+                        onClick={() => navigate(`/import-approval/${invoice.originalId || invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
                       >
                         View Scans
                       </Button>
@@ -3076,7 +3429,7 @@ export default function ImportApprovals() {
                     <>
                       <Button
                         size="small"
-                        onClick={() => navigate(`/import-approval/${invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
+                        onClick={() => navigate(`/import-approval/${invoice.originalId || invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`)}
                       >
                         View Details
                       </Button>
@@ -3286,7 +3639,7 @@ export default function ImportApprovals() {
       await assignBottlesToCustomer(row);
       
       setSnackbar('Record approved successfully and bottles assigned to customers');
-      fetchData();
+      await fetchData();
     } catch (error) {
       setError('Failed to approve record: ' + error.message);
     }
@@ -3307,7 +3660,7 @@ export default function ImportApprovals() {
       if (error) throw error;
       
       setSnackbar('Record rejected successfully');
-      fetchData();
+      await fetchData();
     } catch (error) {
       setError('Failed to reject record: ' + error.message);
     }
@@ -3324,7 +3677,7 @@ export default function ImportApprovals() {
       if (error) throw error;
       
       setSnackbar('Record deleted successfully');
-      fetchData();
+      await fetchData();
     } catch (error) {
       setError('Failed to delete record: ' + error.message);
     }
@@ -3582,6 +3935,9 @@ export default function ImportApprovals() {
     for (const record of records) {
       await assignBottlesToCustomer(record);
     }
+    
+    // Refresh the data to remove verified records from the list
+    await fetchData();
   }
 
   // Bulk reject records
@@ -3947,7 +4303,7 @@ export default function ImportApprovals() {
       const { data: customers, error } = await supabase
         .from('customers')
         .select('CustomerListID, name')
-        .eq('organization_id', user.organization_id)
+        .eq('organization_id', organization.id)
         .ilike('name', `%${query}%`)
         .limit(10);
       
@@ -4029,9 +4385,24 @@ export default function ImportApprovals() {
     const data = parseDataField(importRecord.data);
     const rows = data.rows || [];
     
+    console.log('🔍 splitImportIntoIndividualRecords:', {
+      importId: importRecord.id,
+      filename: importRecord.filename,
+      rowsCount: rows.length,
+      dataKeys: Object.keys(data),
+      firstRow: rows[0] ? {
+        order_number: rows[0].order_number,
+        reference_number: rows[0].reference_number,
+        customer_name: rows[0].customer_name,
+        product_code: rows[0].product_code,
+        shipped: rows[0].shipped,
+        returned: rows[0].returned
+      } : null
+    });
+    
     if (!rows || rows.length === 0) return [importRecord];
     
-    // Group rows by order/receipt number
+    // Group rows by order/receipt number to keep separate entries for barcode vs product code
     const groupedByOrder = {};
     rows.forEach(row => {
       const orderNumber = row.reference_number || row.order_number || row.invoice_number || row.sales_receipt_number || 'UNKNOWN';
@@ -4041,11 +4412,23 @@ export default function ImportApprovals() {
       groupedByOrder[orderNumber].push(row);
     });
     
+    console.log('🔍 Grouped by order:', Object.keys(groupedByOrder).map(orderNum => ({
+      orderNumber: orderNum,
+      rowCount: groupedByOrder[orderNum].length
+    })));
+    
     // Create individual records for each order/receipt
     const individualRecords = [];
     Object.keys(groupedByOrder).forEach((orderNumber, index) => {
       const orderRows = groupedByOrder[orderNumber];
       const firstRow = orderRows[0];
+      
+      console.log('🔍 Creating grouped record:', {
+        index,
+        orderNumber,
+        customerName: firstRow.customer_name,
+        rowCount: orderRows.length
+      });
       
       individualRecords.push({
         ...importRecord,
@@ -4056,7 +4439,7 @@ export default function ImportApprovals() {
         splitIndex: index, // Track which split this is
         data: {
           ...data,
-          rows: orderRows, // Only the rows for this specific order
+          rows: orderRows, // All rows for this specific order
           order_number: orderNumber,
           customer_name: firstRow.customer_name,
           customer_id: firstRow.customer_id,
@@ -4066,20 +4449,55 @@ export default function ImportApprovals() {
       });
     });
     
+    console.log('📊 Created consolidated records:', individualRecords.length);
     return individualRecords;
   }
 
   // Helper to get scanned SHP/RTN for a given order and product code
-  function getScannedQty(orderNum, productCode, type) {
+  function getScannedQty(orderNum, productCode, type, invoiceRecord = null) {
     // type: 'out' (delivered/shipped) or 'in' (returned)
     if (!orderNum || !productCode) return 0;
-    // allScannedRows is an array of scan records
-    // Assume scan_type: 'delivery' or 'pickup' or similar
-    return allScannedRows.filter(row =>
-      (row.order_number === orderNum || row.invoice_number === orderNum) &&
-      (row.product_code === productCode || row.bottle_barcode === productCode)
-      && ((type === 'out' && (row.scan_type === 'delivery' || row.mode === 'delivery')) ||
-          (type === 'in' && (row.scan_type === 'pickup' || row.mode === 'pickup')))
-    ).length;
+    
+    console.log('🔍 getScannedQty:', { orderNum, productCode, type, totalScans: allScannedRows.length });
+    
+    const matches = allScannedRows.filter(row => {
+      const orderMatch = row.order_number === orderNum || row.invoice_number === orderNum;
+      
+      // For the same order, match ANY scanned barcode to ANY invoice product code
+      // This handles the case where barcode 677777777 should match product BCS68-300
+      const productMatch = row.product_code === productCode || 
+                          row.bottle_barcode === productCode || 
+                          row.barcode_number === productCode ||
+                          // If we're looking for a product code from invoice, match any barcode from scans for same order
+                          (orderMatch && (row.bottle_barcode || row.barcode_number));
+      
+      // Updated to match the mobile app's mode values
+      const typeMatch = (type === 'out' && (
+        row.scan_type === 'delivery' || 
+        row.mode === 'delivery' || 
+        row.mode === 'SHIP' || 
+        row.action === 'out'
+      )) || (type === 'in' && (
+        row.scan_type === 'pickup' || 
+        row.mode === 'pickup' || 
+        row.mode === 'RETURN' || 
+        row.action === 'in'
+      ));
+      
+      if (orderMatch && productMatch && typeMatch) {
+        console.log('📦 Scan match found:', { 
+          order: row.order_number, 
+          product: row.product_code || row.bottle_barcode || row.barcode_number, 
+          mode: row.mode, 
+          action: row.action,
+          lookingFor: productCode
+        });
+      }
+      
+      return orderMatch && productMatch && typeMatch;
+    });
+    
+    console.log(`📊 Found ${matches.length} scans for ${orderNum}/${productCode}/${type}`);
+    return matches.length;
   }
 } 

@@ -22,11 +22,25 @@ import {
   MenuItem,
   Card,
   CardContent,
-  InputLabel
+  InputLabel,
+  Checkbox,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Autocomplete,
+  Snackbar,
+  ButtonGroup,
+  Tooltip
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import HomeIcon from '@mui/icons-material/Home';
+import TransferWithinAStationIcon from '@mui/icons-material/TransferWithinAStation';
+import SelectAllIcon from '@mui/icons-material/SelectAll';
+import DeselectIcon from '@mui/icons-material/Deselect';
 import { TableSkeleton, CardSkeleton } from '../components/SmoothLoading';
+import { AssetTransferService } from '../services/assetTransferService';
+import { useAuth } from '../hooks/useAuth';
 
 // Helper to check if a string looks like an address
 function looksLikeAddress(str) {
@@ -38,6 +52,7 @@ function looksLikeAddress(str) {
 export default function CustomerDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { organization } = useAuth();
   const [customer, setCustomer] = useState(null);
   const [customerAssets, setCustomerAssets] = useState([]);
   const [locationAssets, setLocationAssets] = useState([]);
@@ -49,6 +64,15 @@ export default function CustomerDetail() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  
+  // Transfer functionality state
+  const [selectedAssets, setSelectedAssets] = useState([]);
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [availableCustomers, setAvailableCustomers] = useState([]);
+  const [targetCustomer, setTargetCustomer] = useState(null);
+  const [transferReason, setTransferReason] = useState('');
+  const [transferLoading, setTransferLoading] = useState(false);
+  const [transferMessage, setTransferMessage] = useState({ open: false, message: '', severity: 'success' });
 
   useEffect(() => {
     const fetchData = async () => {
@@ -109,6 +133,132 @@ export default function CustomerDetail() {
     fetchData();
   }, [id]);
 
+  // Transfer functionality functions
+  const handleSelectAsset = (assetId) => {
+    setSelectedAssets(prev => 
+      prev.includes(assetId) 
+        ? prev.filter(id => id !== assetId)
+        : [...prev, assetId]
+    );
+  };
+
+  const handleSelectAllAssets = () => {
+    if (selectedAssets.length === customerAssets.length) {
+      setSelectedAssets([]);
+    } else {
+      setSelectedAssets(customerAssets.map(asset => asset.id));
+    }
+  };
+
+  const handleOpenTransferDialog = async () => {
+    if (selectedAssets.length === 0) {
+      setTransferMessage({
+        open: true,
+        message: 'Please select at least one asset to transfer',
+        severity: 'warning'
+      });
+      return;
+    }
+
+    setTransferLoading(true);
+    try {
+      const result = await AssetTransferService.getAvailableCustomers(
+        organization?.id || customer?.organization_id, 
+        customer?.CustomerListID
+      );
+      
+      if (result.success) {
+        setAvailableCustomers(result.customers);
+        setTransferDialogOpen(true);
+      } else {
+        setTransferMessage({
+          open: true,
+          message: `Failed to load customers: ${result.error}`,
+          severity: 'error'
+        });
+      }
+    } catch (error) {
+      setTransferMessage({
+        open: true,
+        message: `Error loading customers: ${error.message}`,
+        severity: 'error'
+      });
+    } finally {
+      setTransferLoading(false);
+    }
+  };
+
+  const handleCloseTransferDialog = () => {
+    setTransferDialogOpen(false);
+    setTargetCustomer(null);
+    setTransferReason('');
+  };
+
+  const handleConfirmTransfer = async () => {
+    if (!targetCustomer) {
+      setTransferMessage({
+        open: true,
+        message: 'Please select a target customer',
+        severity: 'warning'
+      });
+      return;
+    }
+
+    setTransferLoading(true);
+    try {
+      const result = await AssetTransferService.transferAssets(
+        selectedAssets,
+        customer?.CustomerListID,
+        targetCustomer.CustomerListID,
+        organization?.id || customer?.organization_id,
+        transferReason
+      );
+
+      if (result.success) {
+        setTransferMessage({
+          open: true,
+          message: result.message,
+          severity: 'success'
+        });
+        
+        // Refresh data and reset state
+        const { data: customerAssetsData, error: customerAssetsError } = await supabase
+          .from('bottles')
+          .select('*')
+          .eq('assigned_customer', id);
+        
+        if (!customerAssetsError) {
+          setCustomerAssets(customerAssetsData || []);
+          
+          // Recalculate bottle summary
+          const summary = {};
+          (customerAssetsData || []).forEach(bottle => {
+            const type = bottle.type || bottle.description || 'Unknown';
+            summary[type] = (summary[type] || 0) + 1;
+          });
+          setBottleSummary(summary);
+        }
+        
+        setSelectedAssets([]);
+        handleCloseTransferDialog();
+      } else {
+        setTransferMessage({
+          open: true,
+          message: result.message,
+          severity: 'error'
+        });
+      }
+    } catch (error) {
+      setTransferMessage({
+        open: true,
+        message: `Transfer failed: ${error.message}`,
+        severity: 'error'
+      });
+    } finally {
+      setTransferLoading(false);
+    }
+  };
+
   const handleEditChange = (e) => {
     setEditForm({ ...editForm, [e.target.name]: e.target.value });
   };
@@ -117,6 +267,10 @@ export default function CustomerDetail() {
     setSaving(true);
     setSaveError(null);
     setSaveSuccess(false);
+    // Normalize barcode: trim whitespace only (organizations control format)
+    const normalizedBarcode = (editForm.barcode || '')
+      .toString()
+      .trim();
     const updateFields = {
       name: editForm.name,
       phone: editForm.phone,
@@ -128,7 +282,9 @@ export default function CustomerDetail() {
       address5: editForm.address5,
       city: editForm.city,
       postal_code: editForm.postal_code,
-      customer_type: editForm.customer_type || 'CUSTOMER'
+      customer_type: editForm.customer_type || 'CUSTOMER',
+      // Include barcode if provided (empty string allowed to clear)
+      barcode: normalizedBarcode || null
     };
     const { error } = await supabase
       .from('customers')
@@ -210,6 +366,23 @@ export default function CustomerDetail() {
           <Box>
             <Typography variant="body2" color="text.secondary">Customer ID</Typography>
             <Typography variant="body1" fontWeight={600} fontFamily="monospace" sx={{ mb: 2 }}>{customer.CustomerListID}</Typography>
+            <Typography variant="body2" color="text.secondary">Customer Barcode</Typography>
+            {editing ? (
+              <TextField 
+                name="barcode" 
+                value={editForm.barcode || ''} 
+                onChange={handleEditChange} 
+                size="small" 
+                label="Barcode (optional)" 
+                placeholder="e.g. 800006B3-1611180703A"
+                sx={{ mb: 2, minWidth: 220 }} 
+                helperText="Scanned code used on mobile; leading % will be stripped automatically"
+              />
+            ) : (
+              <Typography variant="body1" fontFamily="monospace" sx={{ mb: 2 }}>
+                {customer.barcode || <em style={{ color: '#888' }}>No barcode set</em>}
+              </Typography>
+            )}
             <Typography variant="body2" color="text.secondary">Phone</Typography>
             {editing ? (
               <TextField name="phone" value={editForm.phone || ''} onChange={handleEditChange} size="small" label="Phone" sx={{ mb: 2, minWidth: 180 }} />
@@ -440,9 +613,38 @@ export default function CustomerDetail() {
 
       {/* Currently Assigned Bottles */}
       <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4 }}>
-        <Typography variant="h5" fontWeight={700} color="primary" mb={3}>
-          🏠 Currently Assigned Bottles ({customerAssets.length})
-        </Typography>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+          <Typography variant="h5" fontWeight={700} color="primary">
+            🏠 Currently Assigned Bottles ({customerAssets.length})
+          </Typography>
+          
+          {customerAssets.length > 0 && (
+            <Box display="flex" gap={2}>
+              <ButtonGroup variant="outlined" size="small">
+                <Tooltip title="Select/Deselect All">
+                  <Button
+                    onClick={handleSelectAllAssets}
+                    startIcon={selectedAssets.length === customerAssets.length ? <DeselectIcon /> : <SelectAllIcon />}
+                  >
+                    {selectedAssets.length === customerAssets.length ? 'Deselect All' : 'Select All'}
+                  </Button>
+                </Tooltip>
+                <Tooltip title={selectedAssets.length === 0 ? "Select assets to transfer" : `Transfer ${selectedAssets.length} selected asset(s)`}>
+                  <span>
+                    <Button
+                      onClick={handleOpenTransferDialog}
+                      disabled={selectedAssets.length === 0 || transferLoading}
+                      startIcon={transferLoading ? <CircularProgress size={16} /> : <TransferWithinAStationIcon />}
+                      color="primary"
+                    >
+                      Transfer ({selectedAssets.length})
+                    </Button>
+                  </span>
+                </Tooltip>
+              </ButtonGroup>
+            </Box>
+          )}
+        </Box>
         
         {customerAssets.length === 0 ? (
           <Typography color="text.secondary">No bottles currently assigned to this customer.</Typography>
@@ -451,6 +653,14 @@ export default function CustomerDetail() {
             <Table>
               <TableHead>
                 <TableRow sx={{ backgroundColor: '#f5f7fa' }}>
+                  <TableCell padding="checkbox" sx={{ fontWeight: 700 }}>
+                    <Checkbox
+                      indeterminate={selectedAssets.length > 0 && selectedAssets.length < customerAssets.length}
+                      checked={customerAssets.length > 0 && selectedAssets.length === customerAssets.length}
+                      onChange={handleSelectAllAssets}
+                      color="primary"
+                    />
+                  </TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Serial Number</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Barcode</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
@@ -460,7 +670,14 @@ export default function CustomerDetail() {
               </TableHead>
               <TableBody>
                 {customerAssets.map((asset) => (
-                  <TableRow key={asset.id} hover>
+                  <TableRow key={asset.id} hover selected={selectedAssets.includes(asset.id)}>
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        checked={selectedAssets.includes(asset.id)}
+                        onChange={() => handleSelectAsset(asset.id)}
+                        color="primary"
+                      />
+                    </TableCell>
                     <TableCell>{asset.serial_number}</TableCell>
                     <TableCell>
                       {asset.barcode_number ? (
@@ -565,6 +782,111 @@ export default function CustomerDetail() {
           </TableContainer>
         )}
       </Paper>
+
+      {/* Transfer Dialog */}
+      <Dialog 
+        open={transferDialogOpen} 
+        onClose={handleCloseTransferDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <TransferWithinAStationIcon color="primary" />
+            Transfer Assets
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Transfer {selectedAssets.length} selected asset(s) from <strong>{customer?.name}</strong> to another customer:
+            </Typography>
+            
+            <Autocomplete
+              options={availableCustomers}
+              getOptionLabel={(option) => `${option.name} (${option.CustomerListID})`}
+              renderOption={(props, option) => (
+                <Box component="li" {...props}>
+                  <Box>
+                    <Typography variant="body2" fontWeight={500}>
+                      {option.name}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      ID: {option.CustomerListID} | Type: {option.customer_type || 'CUSTOMER'}
+                    </Typography>
+                  </Box>
+                </Box>
+              )}
+              value={targetCustomer}
+              onChange={(event, newValue) => setTargetCustomer(newValue)}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Select Target Customer"
+                  placeholder="Choose customer to transfer assets to..."
+                  fullWidth
+                  margin="normal"
+                  required
+                />
+              )}
+              sx={{ mb: 2 }}
+            />
+
+            <TextField
+              label="Transfer Reason (Optional)"
+              value={transferReason}
+              onChange={(e) => setTransferReason(e.target.value)}
+              fullWidth
+              multiline
+              rows={3}
+              placeholder="Enter reason for transfer (e.g., customer request, equipment reallocation, etc.)"
+              margin="normal"
+            />
+
+            {selectedAssets.length > 0 && (
+              <Alert severity="info" sx={{ mt: 2 }}>
+                <Typography variant="body2">
+                  <strong>Assets to transfer:</strong> {selectedAssets.length} item(s)
+                </Typography>
+                <Typography variant="caption">
+                  Selected assets will be immediately reassigned to the target customer.
+                </Typography>
+              </Alert>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={handleCloseTransferDialog}
+            disabled={transferLoading}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleConfirmTransfer}
+            variant="contained"
+            disabled={!targetCustomer || transferLoading}
+            startIcon={transferLoading ? <CircularProgress size={16} /> : <TransferWithinAStationIcon />}
+          >
+            {transferLoading ? 'Transferring...' : 'Transfer Assets'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Transfer Status Messages */}
+      <Snackbar
+        open={transferMessage.open}
+        autoHideDuration={6000}
+        onClose={() => setTransferMessage({ ...transferMessage, open: false })}
+      >
+        <Alert 
+          onClose={() => setTransferMessage({ ...transferMessage, open: false })}
+          severity={transferMessage.severity}
+          sx={{ width: '100%' }}
+        >
+          {transferMessage.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 } 

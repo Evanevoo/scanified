@@ -1,0 +1,2 @@
+// emptyShim.js
+module.exports = {}; 

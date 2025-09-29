@@ -79,7 +79,7 @@ export const clearPlansCache = () => {
 };
 
 // Helper function to check if a limit is effectively unlimited
-const isUnlimited = (limit) => limit >= 999999;
+const isUnlimited = (limit) => limit === -1 || limit >= 999999;
 
 export const subscriptionService = {
   async createSubscription(organizationId, plan, paymentMethodId) {
@@ -221,16 +221,16 @@ export const subscriptionService = {
       case 'users':
         return {
           current: usage.current_users,
-          max: usage.max_users,
+          max: isUnlimited(usage.max_users) ? 'Unlimited' : usage.max_users,
           percentage: usage.user_usage_percent,
-          canAdd: usage.current_users < usage.max_users
+          canAdd: isUnlimited(usage.max_users) || usage.current_users < usage.max_users
         };
       case 'customers':
         return {
           current: usage.current_customers,
-          max: usage.max_customers,
+          max: isUnlimited(usage.max_customers) ? 'Unlimited' : usage.max_customers,
           percentage: usage.customer_usage_percent,
-          canAdd: usage.current_customers < usage.max_customers
+          canAdd: isUnlimited(usage.max_customers) || usage.current_customers < usage.max_customers
         };
       case 'bottles':
         return {

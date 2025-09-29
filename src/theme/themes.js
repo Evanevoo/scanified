@@ -143,21 +143,21 @@ const baseTheme = {
   },
 };
 
-// 1. Modern Professional Theme (Default)
+// 1. Modern Professional Theme (Default) - Scanified Branding
 export const modernTheme = createTheme({
   ...baseTheme,
   palette: {
     mode: 'light',
     primary: {
-      main: '#2563eb',
-      light: '#3b82f6',
-      dark: '#1d4ed8',
+      main: '#40B5AD',
+      light: '#5FCDC5',
+      dark: '#2D8B85',
       contrastText: '#ffffff',
     },
     secondary: {
-      main: '#10b981',
-      light: '#34d399',
-      dark: '#059669',
+      main: '#48C9B0',
+      light: '#6EDDD3',
+      dark: '#359A8A',
       contrastText: '#ffffff',
     },
     background: {
@@ -169,9 +169,9 @@ export const modernTheme = createTheme({
       secondary: '#64748b',
     },
     success: {
-      main: '#10b981',
-      light: '#34d399',
-      dark: '#059669',
+      main: '#48C9B0',
+      light: '#6EDDD3',
+      dark: '#359A8A',
     },
     warning: {
       main: '#f59e0b',
@@ -184,9 +184,9 @@ export const modernTheme = createTheme({
       dark: '#dc2626',
     },
     info: {
-      main: '#3b82f6',
-      light: '#60a5fa',
-      dark: '#2563eb',
+      main: '#40B5AD',
+      light: '#5FCDC5',
+      dark: '#2D8B85',
     },
     grey: {
       50: '#f8fafc',

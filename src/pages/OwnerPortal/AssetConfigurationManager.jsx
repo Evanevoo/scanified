@@ -222,8 +222,8 @@ export default function AssetConfigurationManager() {
         assetTypePlural: data.asset_type_plural || 'cylinders',
         assetDisplayName: data.asset_display_name || 'Gas Cylinder',
         assetDisplayNamePlural: data.asset_display_name_plural || 'Gas Cylinders',
-        primaryColor: data.primary_color || '#2563eb',
-        secondaryColor: data.secondary_color || '#1e40af',
+        primaryColor: data.primary_color || '#40B5AD',
+        secondaryColor: data.secondary_color || '#48C9B0',
         appName: data.app_name || 'Scanified',
         customTerminology: data.custom_terminology || {},
         featureToggles: data.feature_toggles || {}

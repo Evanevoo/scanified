@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { supabase } from '../supabase';
 import { useNavigation } from '@react-navigation/native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { useAssetConfig } from '../context/AssetContext';
@@ -72,6 +72,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   // State
   const [scannedItems, setScannedItems] = useState<ScanResult[]>([]);
   const [isScanning, setIsScanning] = useState(false);
+  const [scanningReady, setScanningReady] = useState(false);
+  const [scanningCountdown, setScanningCountdown] = useState(0);
+  const [lastScanAttempt, setLastScanAttempt] = useState<string>('');
+  const [scanFeedback, setScanFeedback] = useState<string>('');
   const [manualBarcode, setManualBarcode] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [location, setLocation] = useState('');
@@ -81,6 +85,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   const [isOnline, setIsOnline] = useState(true);
   const [syncStatus, setSyncStatus] = useState({ pending: 0, synced: 0 });
   const [organizationError, setOrganizationError] = useState<string | null>(null);
+  const [isProcessingBarcode, setIsProcessingBarcode] = useState(false);
   
   // Batch scanning features
   const [batchMode, setBatchMode] = useState(false);
@@ -105,6 +110,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   useEffect(() => {
     if (authLoading) {
       console.log('Auth still loading, waiting...');
+      setOrganizationError(null); // Clear any existing error while loading
       return;
     }
     
@@ -288,23 +294,141 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     });
   }, [settings.soundEnabled, settings.vibrationEnabled]);
 
-  // Load offline queue stats and auto-start camera
+  // Load offline queue stats
   useEffect(() => {
     loadSyncStatus();
-    
-    // Auto-open camera scanner when screen loads (only if organization is loaded)
-    if (!authLoading && organization && permission?.granted) {
-      const timer = setTimeout(() => {
-        setIsScanning(true);
-      }, 500); // Small delay to ensure UI is ready
+  }, []);
+
+  // Countdown timer for scanning readiness
+  useEffect(() => {
+    if (isScanning && !scanningReady) {
+      setScanningCountdown(3); // Start with 3 second countdown
       
-      return () => clearTimeout(timer);
+      const countdownInterval = setInterval(() => {
+        setScanningCountdown(prev => {
+          if (prev <= 1) {
+            setScanningReady(true);
+            clearInterval(countdownInterval);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      
+      return () => clearInterval(countdownInterval);
+    } else if (!isScanning) {
+      setScanningReady(false);
+      setScanningCountdown(0);
     }
-  }, [authLoading, organization, permission?.granted]);
+  }, [isScanning, scanningReady]);
 
   const loadSyncStatus = async () => {
     const stats = await OfflineStorageService.getQueueStats();
     setSyncStatus({ pending: stats.pending, synced: stats.synced });
+  };
+
+  // Check if barcode is within scan rectangle bounds
+  const isBarcodeInScanArea = (bounds: any): boolean => {
+    if (!bounds) return false;
+    
+    // Get screen dimensions
+    const screenWidth = Dimensions.get('window').width;
+    const screenHeight = Dimensions.get('window').height;
+    
+    // Define scan rectangle bounds (center area)
+    const scanAreaWidth = screenWidth * 0.7;
+    const scanAreaHeight = screenHeight * 0.3;
+    const scanAreaLeft = (screenWidth - scanAreaWidth) / 2;
+    const scanAreaTop = (screenHeight - scanAreaHeight) / 2;
+    const scanAreaRight = scanAreaLeft + scanAreaWidth;
+    const scanAreaBottom = scanAreaTop + scanAreaHeight;
+    
+    // Check if barcode center is within scan area
+    const barcodeX = bounds.origin?.x + (bounds.size?.width / 2) || 0;
+    const barcodeY = bounds.origin?.y + (bounds.size?.height / 2) || 0;
+    
+    const isInArea = (
+      barcodeX >= scanAreaLeft &&
+      barcodeX <= scanAreaRight &&
+      barcodeY >= scanAreaTop &&
+      barcodeY <= scanAreaBottom
+    );
+    
+    console.log('📍 Enhanced scan barcode position check:', {
+      barcodeX,
+      barcodeY,
+      scanAreaLeft,
+      scanAreaTop,
+      scanAreaRight,
+      scanAreaBottom,
+      isInArea
+    });
+    
+    return isInArea;
+  };
+
+  // Validate cylinder serial number format - ONLY 9 digits
+  const validateCylinderSerial = (barcode: string): { isValid: boolean; error?: string; scannedValue?: string } => {
+    if (!barcode || !barcode.trim()) {
+      return { isValid: false, error: 'Empty barcode' };
+    }
+
+    const trimmed = barcode.trim();
+    
+    // Always return what was scanned for user feedback
+    const result = { scannedValue: trimmed };
+    
+    // Cylinders are ONLY 9 digits - nothing else!
+    const nineDigitPattern = /^[0-9]{9}$/;
+    
+    if (nineDigitPattern.test(trimmed)) {
+      return { ...result, isValid: true };
+    }
+    
+    return { 
+      ...result,
+      isValid: false, 
+      error: `Invalid cylinder serial number. Expected: exactly 9 digits (e.g., 123456789)\nScanned: ${trimmed}` 
+    };
+  };
+
+  // Validate barcode format - More flexible for scanner variations
+  const validateBarcodeFormat = async (barcode: string): Promise<{ isValid: boolean; error?: string }> => {
+    if (!barcode || !barcode.trim()) {
+      return { isValid: false, error: 'Empty barcode' };
+    }
+
+    const trimmed = barcode.trim();
+    
+    // More flexible pattern to handle scanner variations
+    // Accepts: % + 8 alphanumeric (case insensitive) + hyphen + 10 digits + optional letter
+    // Examples: %800006B3-1611180703A, %800005ca-1579809606A
+    const flexiblePattern = /^%[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?$/;
+    
+    if (!flexiblePattern.test(trimmed)) {
+      // Try without the % prefix
+      const withoutPrefix = trimmed.replace(/^%/, '');
+      const patternWithoutPrefix = /^[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?$/;
+      
+      if (patternWithoutPrefix.test(withoutPrefix)) {
+        return { isValid: true };
+      }
+      
+      return { 
+        isValid: false, 
+        error: `Invalid format. Expected: %800006B3-1611180703A or similar\nGot: ${trimmed}` 
+      };
+    }
+
+    return { isValid: true };
+  };
+
+  // Check if barcode is in scan frame region
+  const isBarcodeInScanRegion = (barcode: string): boolean => {
+    // For now, we'll assume all detected barcodes are in region
+    // In a more advanced implementation, you could use the barcode's position
+    // from the camera's detection results
+    return true;
   };
 
   // Look up item details by barcode
@@ -355,18 +479,55 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   // Handle barcode scan
   const handleBarcodeScan = async (data: string) => {
     console.log('📷 EnhancedScanScreen barcode detected:', data);
-    console.log('📷 Barcode type:', typeof data);
-    console.log('📷 Barcode length:', data?.length);
-    console.log('📷 Barcode raw data:', JSON.stringify(data));
-    console.log('📷 Current loading state:', loading);
+    console.log('📷 Scanning ready state:', scanningReady);
+    console.log('📷 Countdown:', scanningCountdown);
     
-    // Show immediate alert for debugging
-    Alert.alert('Barcode Detected!', `Data: ${data}\nLength: ${data?.length}\nType: ${typeof data}\n\nThis means the camera IS working!`);
-    
-    if (!data || loading) {
-      console.log('📷 Skipping scan - no data or loading');
+    // Don't process scans until countdown is finished
+    if (!scanningReady) {
+      console.log('📷 Skipping scan - countdown still active');
       return;
     }
+    
+    if (!data || loading || isProcessingBarcode) {
+      console.log('📷 Skipping scan - no data, loading, or already processing');
+      return;
+    }
+    
+    // Set processing flag to prevent multiple alerts
+    setIsProcessingBarcode(true);
+
+    // Show what was scanned for feedback
+    setLastScanAttempt(data);
+    
+    // Validate cylinder serial number format first
+    const serialValidation = validateCylinderSerial(data);
+    if (!serialValidation.isValid) {
+      console.log('📷 Barcode scanned but invalid format:', serialValidation.scannedValue);
+      console.log('📷 Validation error:', serialValidation.error);
+      setScanFeedback(`❌ ${serialValidation.error}`);
+      
+      // Clear feedback after 3 seconds
+      setTimeout(() => {
+        setScanFeedback('');
+        setLastScanAttempt('');
+      }, 3000);
+      
+      // Provide error feedback
+      await feedbackService.scanError(serialValidation.error || 'Invalid barcode format');
+      return;
+    }
+
+    // Check if barcode is in scan region (future enhancement)
+    if (!isBarcodeInScanRegion(data)) {
+      console.log('📷 Barcode not in scan region');
+      setScanFeedback('📍 Point camera directly at barcode');
+      setTimeout(() => setScanFeedback(''), 2000);
+      return;
+    }
+
+    // Clear any previous feedback
+    setScanFeedback('✅ Valid barcode detected');
+    setTimeout(() => setScanFeedback(''), 1000);
     
     const now = Date.now();
     
@@ -408,9 +569,8 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     }
 
     try {
-      // Clear format validation cache to get latest configuration
-      console.log('🔍 Clearing format cache before processing scan...');
-      FormatValidationService.clearCache();
+      // For cylinders, use the original 9-digit barcode directly
+      console.log('📷 Using cylinder serial number for lookup:', data);
       
       await processScan(data);
       
@@ -426,7 +586,15 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         setIsScanning(true);
       }
     } catch (error) {
-      console.error('Error processing scan:', error);
+      console.error('❌ Error processing scan:', error);
+      console.error('❌ Error details:', {
+        errorType: typeof error,
+        errorMessage: error?.message,
+        errorCode: error?.code,
+        errorDetails: error?.details,
+        errorHint: error?.hint,
+        fullError: error
+      });
       
       // Provide error feedback
       await feedbackService.scanError('Failed to process scan');
@@ -435,24 +603,53 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       await notificationService.sendScanErrorNotification('Failed to process scan');
       
       if (!batchMode) {
-        Alert.alert('Error', 'Failed to process scan. Please try again.');
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        Alert.alert('Error', `Failed to process scan: ${errorMessage}`);
       }
     } finally {
       if (!batchMode) {
         setLoading(false);
       }
+      // Reset processing flag
+      setIsProcessingBarcode(false);
     }
   };
 
   // Process scan (online or offline)
   const processScan = async (barcode: string) => {
+    console.log('🔄 Starting processScan for barcode:', barcode);
+    console.log('🔄 Organization ID:', organization?.id);
+    console.log('🔄 User ID:', user?.id);
+    console.log('🔄 Is Online:', isOnline);
+    
     // Get current location data if available
     const locationData = fieldToolsService.getCurrentLocationData();
+    console.log('🔄 Location data:', locationData);
     
     // Look up item details
+    console.log('🔄 Looking up item details...');
     const itemDetails = await lookupItemDetails(barcode);
+    console.log('🔄 Item details found:', itemDetails);
     setLastScannedItemDetails(itemDetails);
     
+    // Check if barcode exists in the system BEFORE creating scan result
+    if (!itemDetails) {
+      console.log('❌ Barcode not found in system:', barcode);
+      Alert.alert(
+        'Barcode Not Found', 
+        `The barcode "${barcode}" is not in the system. Please check the barcode or contact your administrator.`,
+        [{ 
+          text: 'OK',
+          onPress: () => {
+            setIsProcessingBarcode(false); // Reset processing flag when alert is dismissed
+          }
+        }]
+      );
+      await feedbackService.scanError('Barcode not found in system');
+      return; // Stop processing if barcode not found - DON'T add to scanned items
+    }
+    
+    // Only create scan result if barcode exists in system
     const scanResult: ScanResult = {
       id: `scan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       barcode: barcode.trim(),
@@ -497,14 +694,28 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       timestamp: Date.now(),
     });
 
+    // Check for duplicates before adding
+    const isDuplicate = scannedItems.some(item => item.barcode === scanResult.barcode);
+    if (isDuplicate) {
+      console.log('⚠️ Duplicate barcode detected, not adding to list:', scanResult.barcode);
+      Alert.alert(
+        'Duplicate Barcode',
+        `Barcode "${scanResult.barcode}" has already been scanned.`,
+        [{ text: 'OK' }]
+      );
+      return; // Don't add duplicate
+    }
+
     // Add to local results immediately
     setScannedItems(prev => [scanResult, ...prev]);
     console.log('Added scan result to local items:', scanResult);
     console.log('Current scanned items count:', scannedItems.length + 1);
 
     if (isOnline) {
+      console.log('🌐 Device is online, attempting to sync scan...');
       try {
         // Try to sync immediately if online
+        console.log('🔄 Calling syncScanToServer...');
         await syncScanToServer(scanResult);
         
         // Mark as synced
@@ -512,11 +723,11 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         setScannedItems(prev => 
           prev.map(item => item.id === scanResult.id ? { ...item, synced: true } : item)
         );
-        console.log('Item synced successfully:', scanResult.barcode);
+        console.log('✅ Item synced successfully:', scanResult.barcode);
 
       } catch (error) {
-        console.error('Failed to sync scan:', error);
-        console.error('Sync error details:', {
+        console.error('❌ Failed to sync scan:', error);
+        console.error('❌ Sync error details:', {
           errorType: typeof error,
           errorMessage: error?.message,
           errorCode: error?.code,
@@ -527,7 +738,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         
         // Show user-friendly error message
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.log(`Scan will be saved offline: ${errorMessage}`);
+        console.log(`📱 Scan will be saved offline: ${errorMessage}`);
         
         // Add to offline queue
         await OfflineStorageService.addToOfflineQueue({
@@ -593,6 +804,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   // Sync scan to server
   const syncScanToServer = async (scanResult: ScanResult) => {
     try {
+      console.log('🔄 syncScanToServer called with:', scanResult);
+      console.log('🔄 Organization:', organization);
+      console.log('🔄 User:', user);
+      
       // Debug logging
       console.log('Sync attempt - Organization:', organization?.id, 'User:', user?.id);
       console.log('Scan data:', {
@@ -604,45 +819,58 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       });
       
       if (!organization?.id) {
+        console.error('❌ No organization ID available');
         throw new Error('No organization ID available');
       }
       
       if (!user?.id) {
+        console.error('❌ No user ID available');
         throw new Error('No user ID available');
       }
 
       // Test database connection and table access
-      console.log('Testing database connection...');
-      const { data: testData, error: testError } = await supabase
-        .from('scans')
-        .select('id')
-        .limit(1);
-      
-      if (testError) {
-        console.error('Database test failed:', testError);
-        throw new Error(`Database connection failed: ${testError.message}`);
+      console.log('🔄 Testing database connection...');
+      try {
+        const { data: testData, error: testError } = await supabase
+          .from('bottle_scans')
+          .select('id')
+          .limit(1);
+        
+        if (testError) {
+          console.error('❌ Database test failed:', testError);
+          throw new Error(`Database connection failed: ${testError.message}`);
+        }
+        
+        console.log('✅ Database connection test passed');
+      } catch (dbTestError) {
+        console.error('❌ Database test error:', dbTestError);
+        throw dbTestError;
       }
-      
-      console.log('Database connection test passed');
 
-      // Debug: Log the exact data being inserted
+      // Debug: Log the exact data being inserted  
       const insertData = {
         organization_id: organization.id,
-        barcode_number: scanResult.barcode,
-        action: scanResult.action,
+        bottle_barcode: scanResult.barcode, // Changed from barcode_number to bottle_barcode
+        mode: scanResult.action.toUpperCase(), // Changed from action to mode, uppercase
         location: scanResult.location,
-        notes: scanResult.notes,
-        scanned_by: user.id,
+        // notes: scanResult.notes, // Removed - column doesn't exist in database
+        user_id: user.id, // Changed from scanned_by to user_id
         order_number: orderNumber || null,
         customer_name: routeCustomerName || null,
-        customer_id: customerId || null
+        customer_id: customerId || null,
+        scan_date: new Date().toISOString(), // Add scan_date
+        timestamp: new Date().toISOString(), // Add timestamp
+        created_at: new Date().toISOString() // Add created_at
       };
       
-      console.log('Insert data:', JSON.stringify(insertData, null, 2));
+      console.log('🔄 Insert data for bottle_scans:', JSON.stringify(insertData, null, 2));
 
+      console.log('🔄 Attempting to insert scan data...');
       const { data, error } = await supabase
-        .from('scans')
+        .from('bottle_scans')
         .insert([insertData]);
+      
+      console.log('🔄 Insert result - data:', data, 'error:', error);
 
       if (error) {
         console.error('Supabase error details:', {
@@ -661,17 +889,26 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         throw new Error(`Database error: ${errorMessage}`);
       }
 
-      console.log('Scan synced successfully:', data);
+      console.log('✅ Scan synced successfully:', data);
 
-      // Also update bottle status if needed
-      if (scanResult.action === 'in' || scanResult.action === 'out') {
+      // Also update bottle status and location
+      console.log('🔄 Updating bottle status...');
+      try {
         await updateBottleStatus(scanResult.barcode, scanResult.action);
+        console.log('✅ Bottle status updated successfully');
+      } catch (bottleUpdateError) {
+        console.error('❌ Error updating bottle status:', bottleUpdateError);
+        // Don't throw here - scan was successful, bottle update is secondary
       }
     } catch (error) {
-      console.error('Failed to sync scan to server:', error);
-      console.error('Error type:', typeof error);
-      console.error('Error constructor:', error?.constructor?.name);
-      console.error('Error stack:', error?.stack);
+      console.error('❌ Failed to sync scan to server:', error);
+      console.error('❌ Error type:', typeof error);
+      console.error('❌ Error constructor:', error?.constructor?.name);
+      console.error('❌ Error stack:', error?.stack);
+      console.error('❌ Error message:', error?.message);
+      console.error('❌ Error details:', error?.details);
+      console.error('❌ Error code:', error?.code);
+      console.error('❌ Error hint:', error?.hint);
       
       const errorMessage = error instanceof Error ? error.message : 'Unknown sync error';
       throw new Error(`Sync failed: ${errorMessage}`);
@@ -679,19 +916,48 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   };
 
   // Update bottle status
-  const updateBottleStatus = async (barcode: string, action: 'in' | 'out') => {
-    const status = action === 'in' ? 'available' : 'rented';
+  const updateBottleStatus = async (barcode: string, action: 'in' | 'out' | 'locate' | 'fill') => {
+    let updateData: any = {
+      last_scanned: new Date().toISOString()
+    };
     
+    switch (action) {
+      case 'out':
+        updateData.status = 'delivered';
+        if (location) updateData.location = location;
+        if (customerId) updateData.assigned_customer = customerId;
+        if (routeCustomerName) updateData.customer_name = routeCustomerName;
+        break;
+      case 'in':
+        updateData.status = 'returned';
+        updateData.location = 'Warehouse';
+        updateData.assigned_customer = null;
+        updateData.customer_name = null;
+        break;
+      case 'locate':
+        // Don't change status for locate, just update location and last scanned
+        if (location) updateData.location = location;
+        break;
+      case 'fill':
+        updateData.status = 'filled';
+        break;
+      default:
+        updateData.status = action === 'in' ? 'available' : 'rented';
+        break;
+    }
+
+    console.log('Updating bottle status:', { barcode, updateData });
+
     const { error } = await supabase
       .from('bottles')
-      .update({ status })
+      .update(updateData)
       .eq('barcode_number', barcode)
       .eq('organization_id', organization?.id);
 
     if (error) {
       console.error('Error updating bottle status:', error);
     } else {
-      console.log(`Bottle ${barcode} status updated to ${status}`);
+      console.log(`Bottle ${barcode} status updated:`, updateData);
     }
   };
 
@@ -704,6 +970,20 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     }
 
     try {
+      // First validate that the barcode exists in the system
+      const itemDetails = await lookupItemDetails(manualBarcode.trim());
+      
+      if (!itemDetails) {
+        Alert.alert(
+          'Barcode Not Found', 
+          `The barcode "${manualBarcode.trim()}" is not in the system. Please check the barcode or contact your administrator.`,
+          [{ text: 'OK' }]
+        );
+        await feedbackService.scanError('Barcode not found in system');
+        return;
+      }
+
+      // Barcode exists, proceed with the scan
       await processScan(manualBarcode);
       await feedbackService.scanSuccess(manualBarcode);
       
@@ -1110,6 +1390,13 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 >
                   <Text style={styles.quickActionText}>⚠️ DAMAGE</Text>
                 </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[styles.quickActionButton, styles.removeButton]}
+                  onPress={() => handleSwipeAction(item, 'delete')}
+                >
+                  <Text style={styles.quickActionText}>🗑️ REMOVE</Text>
+                </TouchableOpacity>
               </View>
             </View>
           </View>
@@ -1387,9 +1674,17 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         <View style={styles.cameraModal}>
           <CameraView
             style={styles.camera}
-            onBarcodeScanned={({ data }) => {
+            barcodeScannerEnabled={true}
+            onBarcodeScanned={({ data, bounds }) => {
               console.log('📷 CameraView onBarcodeScanned triggered!');
-              console.log('📷 Raw barcode data:', data);
+              console.log('📷 Raw barcode data:', data, 'bounds:', bounds);
+              
+              // Check if barcode is within scan area (if bounds are available)
+              if (bounds && !isBarcodeInScanArea(bounds)) {
+                console.log('📷 Enhanced scan barcode outside scan area, ignoring');
+                return;
+              }
+              
               handleBarcodeScan(data);
             }}
             onCameraReady={() => {
@@ -1400,27 +1695,29 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
               console.error('❌ Camera mount error:', error);
               Alert.alert('Camera Error', 'Failed to start camera: ' + error.message);
             }}
-            barcodeScannerSettings={{
-              barcodeTypes: [
-                'code128', 'code39', 'code93', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 
-                'itf14', 'qr', 'pdf417', 'aztec', 'datamatrix', 'gs1_databar', 'gs1_databar_expanded', 
-                'gs1_databar_limited', 'interleaved2of5', 'maxicode', 'rss14', 'rss_expanded'
-              ],
-              // Temporarily disable regionOfInterest to test if it's blocking sales receipt barcodes
-              // regionOfInterest: {
-              //   x: 0.1,   // 10% from left
-              //   y: 0.3,   // 30% from top  
-              //   width: 0.8, // 80% width
-              //   height: 0.4, // 40% height
-              // },
-            }}
           />
           
-          <View style={styles.cameraOverlay} pointerEvents="none">
-            <View style={styles.scanFrame} />
-            <Text style={styles.scanInstructions}>
-              Point camera at barcode to scan
-            </Text>
+          <View style={styles.cameraOverlay}>
+            <View style={styles.scanFrame} pointerEvents="none" />
+            {(
+              <>
+                <Text style={styles.scanInstructions} pointerEvents="none">
+                  Point camera at gas cylinder barcode
+                </Text>
+                
+                {/* Scan Feedback */}
+                {scanFeedback && (
+                  <View style={styles.scanFeedbackContainer}>
+                    <Text style={styles.scanFeedbackText}>{scanFeedback}</Text>
+                    {lastScanAttempt && (
+                      <Text style={styles.lastScanText}>
+                        Scanned: {lastScanAttempt}
+                      </Text>
+                    )}
+                  </View>
+                )}
+              </>
+            )}
           </View>
           
           {/* Close Button - Separate from overlay to ensure it works */}
@@ -1599,6 +1896,35 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 </Text>
                 <Text style={[styles.submitOrderSubtext, { color: 'rgba(255,255,255,0.8)' }]}>
                   Finalize order and send to processing
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Clear All Button */}
+            {scannedItems.length > 0 && (
+              <TouchableOpacity 
+                style={[styles.clearAllButton, { backgroundColor: '#EF4444' }]}
+                onPress={() => {
+                  Alert.alert(
+                    'Clear All Items',
+                    `Are you sure you want to remove all ${scannedItems.length} scanned items?`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { 
+                        text: 'Clear All', 
+                        style: 'destructive',
+                        onPress: () => {
+                          setScannedItems([]);
+                          setScanCount(0);
+                          setDuplicates([]);
+                        }
+                      }
+                    ]
+                  );
+                }}
+              >
+                <Text style={[styles.clearAllButtonText, { color: 'white' }]}>
+                  🗑️ Clear All ({scannedItems.length} items)
                 </Text>
               </TouchableOpacity>
             )}
@@ -2178,6 +2504,29 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 4,
   },
+  scanFeedbackContainer: {
+    marginTop: 16,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    maxWidth: '90%',
+  },
+  scanFeedbackText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  lastScanText: {
+    color: '#fff',
+    fontSize: 12,
+    textAlign: 'center',
+    fontFamily: 'monospace',
+    opacity: 0.8,
+  },
   closeCameraButton: {
     position: 'absolute',
     top: 50,
@@ -2526,6 +2875,9 @@ const styles = StyleSheet.create({
   },
   damageButton: {
     backgroundColor: '#F59E0B',
+  },
+  removeButton: {
+    backgroundColor: '#EF4444',
   },
   quickActionText: {
     color: '#fff',
@@ -2900,6 +3252,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   syncButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  clearAllButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  clearAllButtonText: {
     fontSize: 16,
     fontWeight: '600',
   },

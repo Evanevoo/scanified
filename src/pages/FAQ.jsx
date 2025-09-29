@@ -46,7 +46,7 @@ export default function FAQ() {
     {
       category: 'getting-started',
       question: 'Do I need to install any software or hardware?',
-      answer: 'No! Our platform is completely web-based and works on any modern browser. For mobile scanning, simply download our app from the App Store or Google Play. No expensive scanners or hardware required - use any smartphone or tablet.'
+      answer: 'No! Our platform is completely web-based and works on any modern browser. For mobile scanning, simply download our iOS app from the App Store. No expensive scanners or hardware required - use any iPhone or iPad.'
     },
     {
       category: 'getting-started',

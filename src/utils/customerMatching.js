@@ -151,16 +151,120 @@ export async function getCustomerSuggestions(searchTerm, limit = 10) {
 }
 
 /**
+ * Batch find customers efficiently (single query)
+ * @param {Array} customers - Array of customer objects with {name, CustomerListID}
+ * @param {string} organizationId - Organization ID for filtering
+ * @returns {Promise<Object>} Map of customer key to found customer
+ */
+export async function batchFindCustomers(customers, organizationId = null) {
+  if (!customers || customers.length === 0) return {};
+  
+  // Get current user's organization_id if not provided
+  if (!organizationId) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single();
+      organizationId = profile?.organization_id;
+    }
+  }
+  
+  if (!organizationId) return {};
+  
+  // Extract all CustomerListIDs and names for batch lookup
+  const customerIds = customers.map(c => c.CustomerListID).filter(Boolean);
+  const customerNames = customers.map(c => c.name).filter(Boolean);
+  
+  // Single query to get all existing customers
+  let query = supabase
+    .from('customers')
+    .select('CustomerListID, name, contact_details, phone, address2, address3, address4, address5, city, postal_code, barcode')
+    .eq('organization_id', organizationId);
+  
+  // Build OR condition for IDs and names
+  const orConditions = [];
+  if (customerIds.length > 0) {
+    orConditions.push(...customerIds.map(id => `CustomerListID.ilike.${id.trim()}`));
+  }
+  if (customerNames.length > 0) {
+    orConditions.push(...customerNames.map(name => `name.ilike.${name.trim()}`));
+  }
+  
+  if (orConditions.length > 0) {
+    query = query.or(orConditions.join(','));
+  }
+  
+  const { data: existingCustomers, error } = await query;
+  
+  if (error) {
+    console.error('Error in batch customer lookup:', error);
+    return {};
+  }
+  
+  // Create lookup map with enhanced matching
+  const customerMap = {};
+  
+  for (const customer of customers) {
+    const key = `${customer.CustomerListID || ''}_${customer.name || ''}`;
+    
+    // Find matching existing customer with multiple strategies
+    const found = existingCustomers?.find(existing => {
+      // Strategy 1: Exact ID match (case-insensitive)
+      if (customer.CustomerListID && existing.CustomerListID) {
+        if (existing.CustomerListID.toLowerCase() === customer.CustomerListID.toLowerCase()) {
+          return true;
+        }
+        
+        // Strategy 2: Similar ID match (handle cases like 800006B3-1611180703 vs 800006B3-1611180703A)
+        const customerIdBase = customer.CustomerListID.toLowerCase().replace(/[a-z]+$/, '');
+        const existingIdBase = existing.CustomerListID.toLowerCase().replace(/[a-z]+$/, '');
+        if (customerIdBase && existingIdBase && customerIdBase === existingIdBase && customerIdBase.length > 5) {
+          return true;
+        }
+      }
+      
+      // Strategy 3: Exact name match (case-insensitive)
+      if (customer.name && existing.name) {
+        if (existing.name.toLowerCase().trim() === customer.name.toLowerCase().trim()) {
+          return true;
+        }
+      }
+      
+      // Strategy 4: Name similarity (fuzzy match for slight variations)
+      if (customer.name && existing.name) {
+        const customerNameNorm = customer.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const existingNameNorm = existing.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (customerNameNorm && existingNameNorm && customerNameNorm === existingNameNorm && customerNameNorm.length > 5) {
+          return true;
+        }
+      }
+      
+      return false;
+    });
+    
+    customerMap[key] = found || null;
+  }
+  
+  return customerMap;
+}
+
+/**
  * Batch validate multiple customers
  * @param {Array} customers - Array of customer objects with name and id
  * @returns {Promise<Object>} Object with valid and invalid customers
  */
 export async function batchValidateCustomers(customers) {
+  const customerMap = await batchFindCustomers(customers);
   const valid = [];
   const invalid = [];
   
   for (const customer of customers) {
-    const found = await findCustomer(customer.name, customer.id);
+    const key = `${customer.CustomerListID || ''}_${customer.name || ''}`;
+    const found = customerMap[key];
+    
     if (found) {
       valid.push({ ...customer, found });
     } else {

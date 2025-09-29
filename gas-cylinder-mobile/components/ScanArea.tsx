@@ -191,6 +191,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                 style={styles.camera}
                 facing="back"
                 onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+                barcodeScannerEnabled={true}
                 barcodeScannerSettings={{
                   barcodeTypes: [
                     'qr', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 

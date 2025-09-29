@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/client';
+import { useAuth } from '../hooks/useAuth';
 import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Button, Grid, List, ListItem, ListItemText, Divider, Alert, Chip, IconButton, Tooltip, Card, CardContent, CardHeader, Accordion, AccordionSummary, AccordionDetails, Badge } from '@mui/material';
 import { ExpandMore as ExpandMoreIcon, Person as PersonIcon, Receipt as ReceiptIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon } from '@mui/icons-material';
 import { CardSkeleton } from '../components/SmoothLoading';
@@ -68,8 +69,9 @@ function splitImportIntoIndividualRecords(importRecord) {
 export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber }) {
   const params = useParams();
   const [searchParams] = useSearchParams();
-  const invoiceNumber = propInvoiceNumber || params.invoiceNumber;
+  const invoiceNumber = propInvoiceNumber || params.id; // Changed from params.invoiceNumber to params.id
   const navigate = useNavigate();
+  const { organization } = useAuth();
   const [importRecord, setImportRecord] = useState(null);
   const [individualRecords, setIndividualRecords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -91,13 +93,21 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const [newLocation, setNewLocation] = useState('');
 
   // Get filter parameters from URL
-  const filterInvoiceNumber = searchParams.get('invoiceNumber');
-  const filterCustomerName = searchParams.get('customerName');
+  const filterInvoiceNumber = searchParams.get('order') || searchParams.get('invoiceNumber');
+  const filterCustomerName = searchParams.get('customer') || searchParams.get('customerName');
   const filterCustomerId = searchParams.get('customerId');
 
   // Helper function to extract original database ID from composite ID
   const getOriginalId = (id) => {
     if (!id) return id;
+    
+    // Handle scanned-only records (e.g., "scanned_55666")
+    if (typeof id === 'string' && id.startsWith('scanned_')) {
+      // For scanned records, we don't need to query imported_invoices
+      // Return null to indicate this is a scanned-only record
+      return null;
+    }
+    
     // If it's a composite ID like "638_1", extract the original ID "638"
     if (typeof id === 'string' && id.includes('_')) {
       return id.split('_')[0];
@@ -110,8 +120,76 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setLoading(true);
       setError(null);
       
+      console.log('fetchImport: invoiceNumber =', invoiceNumber);
+      console.log('fetchImport: params =', params);
+      
       // Extract the original database ID
       const originalId = getOriginalId(invoiceNumber);
+      console.log('fetchImport: originalId =', originalId);
+      
+      // Handle scanned-only records
+      if (invoiceNumber && invoiceNumber.startsWith('scanned_')) {
+        // For scanned-only records, create a mock record structure
+        const orderNumber = invoiceNumber.replace('scanned_', '');
+        const customerName = filterCustomerName || '';
+        
+        // Fetch scan data from bottle_scans table
+        const { data: scans, error: scansError } = await supabase
+          .from('bottle_scans')
+          .select('*')
+          .eq('order_number', orderNumber)
+          .order('created_at', { ascending: false });
+        
+        if (scansError) {
+          setError(`Error fetching scan data: ${scansError.message}`);
+          setLoading(false);
+          return;
+        }
+        
+        if (!scans || scans.length === 0) {
+          setError('No scan data found for this order');
+          setLoading(false);
+          return;
+        }
+        
+        // Create a mock import record structure for scanned-only data
+        const mockRecord = {
+          id: invoiceNumber,
+          data: {
+            rows: scans.map(scan => ({
+              order_number: scan.order_number,
+              customer_name: scan.customer_name,
+              product_code: scan.bottle_barcode,
+              qty_out: scan.mode === 'SHIP' ? 1 : 0,
+              qty_in: scan.mode === 'RETURN' ? 1 : 0,
+              date: scan.created_at ? new Date(scan.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+              location: scan.location || 'Unknown',
+              barcode: scan.bottle_barcode,
+              description: 'Scanned Bottle',
+              gas_type: 'Unknown'
+            })),
+            summary: {
+              total_rows: scans.length,
+              uploaded_by: scans[0].user_id || 'scanner',
+              uploaded_at: scans[0].created_at || new Date().toISOString()
+            }
+          },
+          uploaded_by: scans[0].user_id || 'scanner',
+          status: 'scanned_only',
+          created_at: scans[0].created_at || new Date().toISOString(),
+          is_scanned_only: true
+        };
+        
+        setImportRecord(mockRecord);
+        setLoading(false);
+        return;
+      }
+      
+      if (!originalId) {
+        setError('No invoice ID provided');
+        setLoading(false);
+        return;
+      }
       
       let data = null;
       let err = null;
@@ -203,7 +281,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   // Fetch asset information from bottles table
   useEffect(() => {
     async function fetchAssetInfo() {
-      if (!importRecord) return;
+      if (!importRecord || !organization?.id) return;
       
       const importData = importRecord.data || {};
       const allDelivered = importData.delivered || importData.rows || importData.line_items || [];
@@ -223,7 +301,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         const { data: bottles, error } = await supabase
           .from('bottles')
           .select('product_code, category, group_name, type, description, gas_type')
-          .in('product_code', Array.from(productCodes));
+          .in('product_code', Array.from(productCodes))
+          .eq('organization_id', organization.id);
         
         if (error) {
           console.error('Error fetching asset info:', error);
@@ -251,15 +330,18 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     }
     
     fetchAssetInfo();
-  }, [importRecord]);
+  }, [importRecord, organization]);
 
   // Fetch customers for the change customer modal
   useEffect(() => {
     async function fetchCustomers() {
+      if (!organization?.id) return;
+      
       try {
         const { data: customersData, error } = await supabase
           .from('customers')
           .select('CustomerListID, name')
+          .eq('organization_id', organization.id)
           .order('name');
         
         if (error) {
@@ -276,14 +358,21 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     if (showCustomerModal) {
       fetchCustomers();
     }
-  }, [showCustomerModal]);
+  }, [showCustomerModal, organization]);
 
   // Handle record actions
   const handleRecordAction = async (action) => {
     setActionMessage(`Processing: ${action}`);
     console.log('handleRecordAction: invoiceNumber =', invoiceNumber);
+    console.log('handleRecordAction: organization =', organization);
+    
     if (!invoiceNumber) {
       setActionMessage('Error: No invoice number found. Aborting action.');
+      return;
+    }
+    
+    if (!organization?.id) {
+      setActionMessage('Error: No organization found. Aborting action.');
       return;
     }
     // Prevent verification unless shp/rtn and trk values match
@@ -312,12 +401,14 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             await supabase
               .from('bottles')
               .update({ assigned_customer: item.customer_id })
-              .eq('barcode_number', item.barcode_number);
+              .eq('barcode_number', item.barcode_number)
+              .eq('organization_id', organization.id);
             // Add to rentals if not already active
             const { data: existingRental } = await supabase
               .from('rentals')
               .select('*')
               .eq('bottle_barcode', item.barcode_number)
+              .eq('organization_id', organization.id)
               .is('rental_end_date', null)
               .single();
             if (!existingRental) {
@@ -326,6 +417,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 .insert({
                   bottle_barcode: item.barcode_number,
                   customer_id: item.customer_id,
+                  organization_id: organization.id,
                   rental_start_date: new Date().toISOString(),
                   rental_end_date: null
                 });
@@ -339,16 +431,20 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             await supabase
               .from('bottles')
               .update({ assigned_customer: null })
-              .eq('barcode_number', item.barcode_number);
+              .eq('barcode_number', item.barcode_number)
+              .eq('organization_id', organization.id);
             // End rental
             await supabase
               .from('rentals')
               .update({ rental_end_date: new Date().toISOString() })
               .eq('bottle_barcode', item.barcode_number)
+              .eq('organization_id', organization.id)
               .is('rental_end_date', null);
           }
 
           setActionMessage('Record verified successfully!');
+          // Navigate back to approvals list after successful verification
+          setTimeout(() => navigate('/import-approvals'), 1500);
           break;
         }
         case 'Delete This Record':
@@ -720,11 +816,17 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
   // Filter line items based on invoice number and customer
   const filterLineItems = (items) => {
+    console.log('filterLineItems: filterInvoiceNumber =', filterInvoiceNumber);
+    console.log('filterLineItems: filterCustomerName =', filterCustomerName);
+    console.log('filterLineItems: filterCustomerId =', filterCustomerId);
+    console.log('filterLineItems: total items before filter =', items.length);
+    
     if (!filterInvoiceNumber && !filterCustomerName && !filterCustomerId) {
+      console.log('filterLineItems: No filters applied, returning all items');
       return items; // No filters, return all
     }
     
-    return items.filter(item => {
+    const filteredItems = items.filter(item => {
       const itemInvoiceNumber = item.invoice_number || item.order_number || item.InvoiceNumber || item.ReferenceNumber || item.reference_number;
       const itemCustomerName = item.customer_name || item.customerName;
       const itemCustomerId = item.customer_id || item.customerId;
@@ -733,8 +835,17 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       const customerNameMatch = !filterCustomerName || itemCustomerName === filterCustomerName;
       const customerIdMatch = !filterCustomerId || itemCustomerId === filterCustomerId;
       
-      return invoiceMatch && (customerNameMatch || customerIdMatch);
+      const matches = invoiceMatch && (customerNameMatch || customerIdMatch);
+      
+      if (matches) {
+        console.log('filterLineItems: MATCH - Invoice:', itemInvoiceNumber, 'Customer:', itemCustomerName, 'Product:', item.product_code);
+      }
+      
+      return matches;
     });
+    
+    console.log('filterLineItems: filtered items count =', filteredItems.length);
+    return filteredItems;
   };
 
   const delivered = filterLineItems(allDelivered);

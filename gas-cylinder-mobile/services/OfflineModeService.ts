@@ -278,12 +278,24 @@ class OfflineModeService {
       // Sync scans
       for (const scan of this.offlineData.scans) {
         try {
+          const scanData = {
+            organization_id: profile.organization_id,
+            bottle_barcode: scan.bottle_barcode || scan.barcode,
+            mode: scan.mode || scan.action,
+            customer_id: scan.customer_id,
+            customer_name: scan.customer_name,
+            location: scan.location,
+            scan_date: scan.scan_date || scan.timestamp || new Date().toISOString(),
+            timestamp: scan.timestamp || new Date().toISOString(),
+            user_id: scan.user_id || user.id,
+            order_number: scan.order_number,
+            notes: scan.notes,
+            created_at: scan.created_at || new Date().toISOString()
+          };
+
           const { error } = await supabase
             .from('bottle_scans')
-            .insert({
-              ...scan,
-              organization_id: profile.organization_id,
-            });
+            .insert(scanData);
 
           if (error) throw error;
           syncedCount++;

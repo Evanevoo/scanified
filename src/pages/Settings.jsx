@@ -375,8 +375,8 @@ export default function Settings() {
         assetDisplayName: organization.asset_display_name || 'Gas Cylinder',
         assetDisplayNamePlural: organization.asset_display_name_plural || 'Gas Cylinders',
         appName: organization.app_name || 'Scanified',
-        primaryColor: organization.primary_color || '#2563eb',
-        secondaryColor: organization.secondary_color || '#1e40af',
+        primaryColor: organization.primary_color || '#40B5AD',
+        secondaryColor: organization.secondary_color || '#48C9B0',
         appIcon: organization.app_icon || '/landing-icon.png',
         showAppIcon: organization.show_app_icon !== undefined ? organization.show_app_icon : true,
       });
@@ -456,8 +456,8 @@ export default function Settings() {
       assetConfig.assetDisplayName !== (organization?.asset_display_name || '') ||
       assetConfig.assetDisplayNamePlural !== (organization?.asset_display_name_plural || '') ||
       assetConfig.appName !== (organization?.app_name || '') ||
-      assetConfig.primaryColor !== (organization?.primary_color || '#2563eb') ||
-      assetConfig.secondaryColor !== (organization?.secondary_color || '#1e40af')
+      assetConfig.primaryColor !== (organization?.primary_color || '#40B5AD') ||
+      assetConfig.secondaryColor !== (organization?.secondary_color || '#48C9B0')
     );
   }, [assetConfig, organization]);
 
@@ -766,7 +766,43 @@ export default function Settings() {
               '& .MuiTab-root': {
                 textTransform: 'none',
                 fontWeight: 600,
-                minHeight: 64
+                minHeight: 64,
+                transition: 'none !important',
+                transform: 'none !important',
+                animation: 'none !important',
+                position: 'relative',
+                left: '0 !important',
+                right: '0 !important',
+                margin: '0 !important',
+                padding: '0 16px !important',
+                '&:hover': {
+                  backgroundColor: 'transparent',
+                  transform: 'none !important',
+                  transition: 'none !important',
+                  animation: 'none !important',
+                  left: '0 !important',
+                  right: '0 !important'
+                },
+                '&:focus': {
+                  transform: 'none !important',
+                  transition: 'none !important',
+                  animation: 'none !important',
+                  left: '0 !important',
+                  right: '0 !important'
+                },
+                '&::before': {
+                  display: 'none !important'
+                },
+                '&::after': {
+                  display: 'none !important'
+                }
+              },
+              '& .MuiTabs-indicator': {
+                transition: 'none !important',
+                animation: 'none !important'
+              },
+              '& .MuiTouchRipple-root': {
+                display: 'none !important'
               }
             }} 
             variant="scrollable" 
@@ -777,7 +813,27 @@ export default function Settings() {
                 key={tab.id} 
                 label={tab.label} 
                 icon={tab.icon} 
-                iconPosition="start" 
+                iconPosition="start"
+                disableRipple={true}
+                disableTouchRipple={true}
+                disableFocusRipple={true}
+                sx={{
+                  transition: 'none !important',
+                  transform: 'none !important',
+                  animation: 'none !important',
+                  '&:hover': {
+                    backgroundColor: 'transparent !important',
+                    transform: 'none !important',
+                    transition: 'none !important',
+                    animation: 'none !important'
+                  },
+                  '&:focus': {
+                    backgroundColor: 'transparent !important',
+                    transform: 'none !important',
+                    transition: 'none !important',
+                    animation: 'none !important'
+                  }
+                }}
               />
             ))}
           </Tabs>

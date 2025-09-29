@@ -3,8 +3,8 @@
 ## App Information
 - **App Name**: AssetTrack Pro - Enterprise Asset Management
 - **Bundle ID**: com.evanevoo.assettrackpro
-- **Version**: 1.0.8
-- **Build Number**: 14
+- **Version**: 1.0.11
+- **Build Number**: 21
 - **Category**: Business
 - **Age Rating**: 4+ (No Objectionable Content)
 
@@ -17,9 +17,9 @@ AssetTrack Pro is a comprehensive enterprise asset management solution designed 
 **Key Features:**
 • **Barcode Scanning**: Quick and accurate asset identification using your device's camera
 • **Inventory Management**: Complete asset lifecycle tracking from acquisition to disposal
-• **Real-time Sync**: Cloud-based synchronization across multiple devices and users
+• **Real-time Sync**: Cloud-based synchronization across iOS devices and users
 • **Compliance Reporting**: Generate detailed reports for audits and compliance requirements
-• **Multi-user Support**: Team collaboration with role-based access controls
+• **Team Collaboration**: iOS-native team collaboration with role-based access controls
 • **Offline Mode**: Continue working even without internet connectivity
 • **Custom Fields**: Tailor asset tracking to your specific business needs
 
@@ -41,12 +41,12 @@ Transform your asset management process with AssetTrack Pro - the professional s
 ## Keywords
 asset management, inventory tracking, barcode scanner, enterprise, compliance, reporting, business, productivity, organization, tracking
 
-## What's New in Version 1.0.8
-- Enhanced barcode scanning accuracy
-- Improved offline synchronization
-- New reporting features
-- Bug fixes and performance improvements
-- Enhanced user interface
+## What's New in Version 1.0.11
+- Enhanced iOS-optimized barcode scanning accuracy
+- Improved offline synchronization for iOS devices
+- New reporting features with iOS-native interface
+- iOS-specific bug fixes and performance improvements
+- Enhanced user interface optimized for iPhone and iPad
 
 ## Support Information
 - **Website**: https://assettrackpro.com

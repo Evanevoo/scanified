@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Scanified Icon Generator</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            text-align: center;
+        }
+        canvas {
+            border: 2px solid #333;
+            margin: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #3B82F6;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        button:hover {
+            background: #1E40AF;
+        }
+        .icon-preview {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Scanified App Icon Generator</h1>
+        
+        <div class="icon-preview">
+            <div>
+                <h3>Main Icon (1024x1024)</h3>
+                <canvas id="mainIcon" width="1024" height="1024"></canvas>
+                <br>
+                <button onclick="downloadIcon('mainIcon', 'icon.png')">Download Main Icon</button>
+            </div>
+            
+            <div>
+                <h3>Adaptive Icon (1024x1024)</h3>
+                <canvas id="adaptiveIcon" width="1024" height="1024"></canvas>
+                <br>
+                <button onclick="downloadIcon('adaptiveIcon', 'adaptive-icon.png')">Download Adaptive Icon</button>
+            </div>
+            
+            <div>
+                <h3>Splash Icon (1024x1024)</h3>
+                <canvas id="splashIcon" width="1024" height="1024"></canvas>
+                <br>
+                <button onclick="downloadIcon('splashIcon', 'splash-icon.png')">Download Splash Icon</button>
+            </div>
+            
+            <div>
+                <h3>Favicon (192x192)</h3>
+                <canvas id="favicon" width="192" height="192"></canvas>
+                <br>
+                <button onclick="downloadIcon('favicon', 'favicon.png')">Download Favicon</button>
+            </div>
+        </div>
+        
+        <p>Download these files and replace the existing icons in <code>gas-cylinder-mobile/assets/</code></p>
+    </div>
+
+    <script>
+        function drawScanifiedIcon(canvasId, size) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, size, size);
+            
+            // Black background
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, size, size);
+            
+            const centerX = size / 2;
+            const centerY = size / 2;
+            const iconSize = size * 0.8;
+            
+            // White rounded square background
+            ctx.fillStyle = '#FFFFFF';
+            ctx.beginPath();
+            ctx.roundRect(centerX - iconSize/2, centerY - iconSize/2, iconSize, iconSize, size * 0.15);
+            ctx.fill();
+            
+            // Circuit board pattern
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = size * 0.008;
+            
+            // Draw circuit-like patterns
+            const patternSize = iconSize * 0.6;
+            const patternCenterX = centerX;
+            const patternCenterY = centerY;
+            
+            // Horizontal lines
+            for (let i = 0; i < 5; i++) {
+                const y = patternCenterY - patternSize/2 + (patternSize/4) * i;
+                ctx.beginPath();
+                ctx.moveTo(patternCenterX - patternSize/2, y);
+                ctx.lineTo(patternCenterX + patternSize/2, y);
+                ctx.stroke();
+            }
+            
+            // Vertical lines
+            for (let i = 0; i < 5; i++) {
+                const x = patternCenterX - patternSize/2 + (patternSize/4) * i;
+                ctx.beginPath();
+                ctx.moveTo(x, patternCenterY - patternSize/2);
+                ctx.lineTo(x, patternCenterY + patternSize/2);
+                ctx.stroke();
+            }
+            
+            // Diagonal lines
+            ctx.beginPath();
+            ctx.moveTo(patternCenterX - patternSize/2, patternCenterY - patternSize/2);
+            ctx.lineTo(patternCenterX + patternSize/2, patternCenterY + patternSize/2);
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.moveTo(patternCenterX + patternSize/2, patternCenterY - patternSize/2);
+            ctx.lineTo(patternCenterX - patternSize/2, patternCenterY + patternSize/2);
+            ctx.stroke();
+            
+            // Small dots at intersections
+            ctx.fillStyle = '#FFFFFF';
+            for (let i = 0; i < 5; i++) {
+                for (let j = 0; j < 5; j++) {
+                    const x = patternCenterX - patternSize/2 + (patternSize/4) * i;
+                    const y = patternCenterY - patternSize/2 + (patternSize/4) * j;
+                    ctx.beginPath();
+                    ctx.arc(x, y, size * 0.006, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+            }
+            
+            // Central "S" letter
+            ctx.fillStyle = '#000000';
+            ctx.font = `bold ${size * 0.25}px Arial, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('S', centerX, centerY);
+            
+            // Add subtle glow effect
+            ctx.shadowColor = '#00BFFF';
+            ctx.shadowBlur = size * 0.02;
+            ctx.strokeStyle = '#00BFFF';
+            ctx.lineWidth = size * 0.002;
+            ctx.beginPath();
+            ctx.roundRect(centerX - iconSize/2, centerY - iconSize/2, iconSize, iconSize, size * 0.15);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+        
+        function downloadIcon(canvasId, filename) {
+            const canvas = document.getElementById(canvasId);
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+        
+        // Draw icons when page loads
+        window.onload = function() {
+            drawScanifiedIcon('mainIcon', 1024);
+            drawScanifiedIcon('adaptiveIcon', 1024);
+            drawScanifiedIcon('splashIcon', 1024);
+            drawScanifiedIcon('favicon', 192);
+        };
+    </script>
+</body>
+</html> 

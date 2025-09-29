@@ -51,8 +51,7 @@ class FeedbackService {
         allowsRecordingIOS: false,
         staysActiveInBackground: false,
         playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
+        // iOS-specific audio configuration
       });
 
       // Preload sound effects

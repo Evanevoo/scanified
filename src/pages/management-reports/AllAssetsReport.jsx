@@ -40,7 +40,7 @@ import { StatsSkeleton, TableSkeleton } from '../../components/SmoothLoading';
 
 export default function AllAssetsReport() {
   const navigate = useNavigate();
-  const { organization } = useAuth();
+  const { organization, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -56,22 +56,34 @@ export default function AllAssetsReport() {
   });
 
   useEffect(() => {
-    if (organization) {
+    console.log('AllAssetsReport useEffect triggered:', {
+      authLoading,
+      organization: organization ? { id: organization.id, name: organization.name } : null,
+      hasOrganizationId: organization?.id ? true : false
+    });
+    
+    if (!authLoading && organization && organization.id) {
       fetchAssetsData();
+    } else if (!authLoading && !organization) {
+      console.warn('No organization found after auth loading completed');
+      setError('No organization found. Please contact your administrator.');
+      setLoading(false);
     }
-  }, [organization]);
+  }, [organization, authLoading]);
 
   const fetchAssetsData = async () => {
     try {
       setLoading(true);
       setError(null);
 
+      console.log('Fetching assets data for organization:', organization);
+
       // Fetch all assets/bottles with customer info
       const { data: assetsData, error: assetsError } = await supabase
         .from('bottles')
         .select(`
           *,
-          customers (
+          customers!assigned_customer (
             name,
             phone,
             CustomerListID
@@ -80,7 +92,12 @@ export default function AllAssetsReport() {
         .eq('organization_id', organization.id)
         .order('created_at', { ascending: false });
 
-      if (assetsError) throw assetsError;
+      if (assetsError) {
+        console.error('Supabase error:', assetsError);
+        throw assetsError;
+      }
+
+      console.log('Assets data fetched successfully:', assetsData?.length || 0, 'assets');
 
       setAssets(assetsData || []);
 
@@ -99,7 +116,7 @@ export default function AllAssetsReport() {
 
     } catch (err) {
       console.error('Error fetching assets data:', err);
-      setError('Failed to load assets data. Please try again.');
+      setError(`Failed to load assets data: ${err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -178,7 +195,7 @@ export default function AllAssetsReport() {
     setExportAnchorEl(null);
   };
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 4 }}>
         <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 4 }, borderRadius: 2, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)' }}>
@@ -204,6 +221,16 @@ export default function AllAssetsReport() {
         <Button onClick={fetchAssetsData} sx={{ mt: 2 }}>
           Retry
         </Button>
+      </Box>
+    );
+  }
+
+  if (!authLoading && !organization) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="warning">
+          No organization found. Please contact your administrator.
+        </Alert>
       </Box>
     );
   }

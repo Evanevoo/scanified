@@ -21,7 +21,8 @@ import {
   Report as ReportIcon, Inventory2 as InventoryIcon, Support,
   Security as ShieldIcon, Build as WrenchIcon, Description as FileTextIcon,
   Inventory as PackageIcon, Calculate as CalculatorIcon, Psychology as BrainIcon,
-  ChevronLeft, ChevronRight, Menu as MenuIcon, QrCode as QrCodeIcon, Notifications as NotificationsIcon
+  ChevronLeft, ChevronRight, Menu as MenuIcon, QrCode as QrCodeIcon, Notifications as NotificationsIcon,
+  Assignment as AssignmentIcon
 } from '@mui/icons-material';
 
 const drawerWidth = 280;

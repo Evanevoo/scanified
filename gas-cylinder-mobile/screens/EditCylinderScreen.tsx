@@ -324,6 +324,7 @@ export default function EditCylinderScreen() {
                 style={{ width: '100%', height: '100%' }}
                 facing="back"
                 onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+                barcodeScannerEnabled={true}
                 barcodeScannerSettings={{
                   barcodeTypes: [
                     'ean13',

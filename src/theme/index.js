@@ -1,24 +1,24 @@
 import { createTheme } from '@mui/material/styles';
 
-// Color palette for the application
+// Color palette for the application - Scanified Branding
 const colors = {
   primary: {
-    blue: '#2563eb',
-    emerald: '#10b981',
-    purple: '#7c3aed',
+    blue: '#40B5AD',
+    emerald: '#48C9B0',
+    purple: '#8B7BA8',
     rose: '#f43f5e',
     amber: '#f59e42',
-    teal: '#14b8a6',
-    cyan: '#06b6d4',
-    green: '#22c55e',
+    teal: '#40B5AD',
+    cyan: '#5FCDC5',
+    green: '#48C9B0',
     orange: '#f97316',
     red: '#ef4444',
     pink: '#ec4899',
     indigo: '#6366f1',
     lime: '#84cc16',
-    violet: '#a21caf',
+    violet: '#8B7BA8',
     slate: '#64748b',
-    sky: '#0ea5e9',
+    sky: '#5FCDC5',
   },
   black: '#111111',
   white: '#ffffff',

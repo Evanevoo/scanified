@@ -3,10 +3,12 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, Activity
 import { supabase } from '../supabase';
 import { useNavigation } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import SimpleCameraTest from '../SimpleCameraTest';
 import { useTheme } from '../context/ThemeContext';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
 import ScanOverlay from '../components/ScanOverlay';
+import { Customer } from '../types';
 import { FormatValidationService } from '../services/FormatValidationService';
 import { Platform } from '../utils/platform';
 
@@ -41,6 +43,88 @@ const levenshteinDistance = (str1: string, str2: string): number => {
   }
   
   return matrix[str2.length][str1.length];
+};
+
+// Normalize for comparison: trim whitespace and ignore leading/trailing '*'
+// (common Code 39 start/stop characters). Stored values are not altered.
+const normalizeBarcode = (value: string): string => {
+  if (!value) return '';
+  return value.trim().replace(/^\*+|\*+$/g, '');
+};
+
+// Check if barcode is within scan rectangle bounds - More lenient
+const isBarcodeInScanArea = (bounds: any): boolean => {
+  if (!bounds) {
+    console.log('📍 No bounds provided, allowing scan');
+    return true; // Allow scan if no bounds available
+  }
+  
+  // Get screen dimensions
+  const screenWidth = Dimensions.get('window').width;
+  const screenHeight = Dimensions.get('window').height;
+  
+  // More lenient scan area (90% of screen)
+  const scanAreaWidth = screenWidth * 0.9;
+  const scanAreaHeight = screenHeight * 0.5;
+  const scanAreaLeft = (screenWidth - scanAreaWidth) / 2;
+  const scanAreaTop = (screenHeight - scanAreaHeight) / 2;
+  const scanAreaRight = scanAreaLeft + scanAreaWidth;
+  const scanAreaBottom = scanAreaTop + scanAreaHeight;
+  
+  // Check if barcode center is within scan area
+  const barcodeX = bounds.origin?.x + (bounds.size?.width / 2) || 0;
+  const barcodeY = bounds.origin?.y + (bounds.size?.height / 2) || 0;
+  
+  const isInArea = (
+    barcodeX >= scanAreaLeft &&
+    barcodeX <= scanAreaRight &&
+    barcodeY >= scanAreaTop &&
+    barcodeY <= scanAreaBottom
+  );
+  
+  console.log('📍 Barcode position check:', {
+    barcodeX,
+    barcodeY,
+    scanAreaLeft,
+    scanAreaTop,
+    scanAreaRight,
+    scanAreaBottom,
+    isInArea
+  });
+  
+  return isInArea;
+};
+
+// Validate barcode format for gas cylinders - More lenient for customer barcodes
+const validateGasCylinderBarcode = (barcode: string): { isValid: boolean; error?: string } => {
+  if (!barcode || !barcode.trim()) {
+    return { isValid: false, error: 'Empty barcode' };
+  }
+
+  const trimmed = barcode.trim();
+  
+  // More lenient validation - accept most common barcode formats
+  // Allow letters, numbers, hyphens, underscores, and basic symbols
+  const basicPattern = /^[A-Za-z0-9\-_*%\.\s]+$/;
+  
+  if (!basicPattern.test(trimmed)) {
+    return { 
+      isValid: false, 
+      error: `Invalid barcode format.\nOnly letters, numbers, and basic symbols are allowed.\nGot: ${trimmed}` 
+    };
+  }
+
+  // Check minimum length
+  if (trimmed.length < 1) {
+    return { isValid: false, error: 'Barcode too short' };
+  }
+
+  // Check maximum length
+  if (trimmed.length > 50) {
+    return { isValid: false, error: 'Barcode too long' };
+  }
+
+  return { isValid: true };
 };
 
 // Barcode validation utility
@@ -147,8 +231,8 @@ const validateOrderNumber = async (orderNumber: string, organizationId: string):
 export default function ScanCylindersScreen() {
   const [search, setSearch] = useState('');
   const [orderNumber, setOrderNumber] = useState('');
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [customers, setCustomers] = useState([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [orderError, setOrderError] = useState('');
@@ -165,6 +249,8 @@ export default function ScanCylindersScreen() {
   const [showCustomerPopup, setShowCustomerPopup] = useState(false);
   const [showCustomerScan, setShowCustomerScan] = useState(false);
   const [showOrderScan, setShowOrderScan] = useState(false);
+  const [showSimpleTest, setShowSimpleTest] = useState(false);
+
 
   useEffect(() => {
     const fetchCustomers = async () => {
@@ -175,9 +261,12 @@ export default function ScanCylindersScreen() {
       }
 
       if (!profile?.organization_id) {
-        console.log('No organization found, skipping customer fetch');
-        console.log('Profile data:', profile);
-        console.log('User authenticated:', !!profile);
+        // Only log if we have a profile but no organization_id (actual error case)
+        if (profile && !profile.organization_id) {
+          console.log('No organization found, skipping customer fetch');
+          console.log('Profile data:', profile);
+          console.log('User authenticated:', !!profile);
+        }
         setLoading(false);
         // Don't set error immediately - let the UI handle the empty state gracefully
         setCustomers([]);
@@ -213,6 +302,7 @@ export default function ScanCylindersScreen() {
     
     fetchCustomers();
   }, [profile, authLoading]);
+
 
   useEffect(() => {
     if (scannerVisible) {
@@ -260,8 +350,8 @@ export default function ScanCylindersScreen() {
     const barcodeMatches = customers.filter(c => {
       if (!c.barcode) return false;
       
-      const customerBarcode = c.barcode.trim();
-      const searchBarcode = search.trim();
+      const customerBarcode = normalizeBarcode(c.barcode);
+      const searchBarcode = normalizeBarcode(search);
       
       // Exact match
       if (customerBarcode === searchBarcode) return true;
@@ -325,11 +415,11 @@ export default function ScanCylindersScreen() {
         console.log('👤 Setting customer search:', data);
         
         // Check if the scanned barcode matches any existing customer
-        const scannedBarcode = data.trim();
+        const scannedBarcode = normalizeBarcode(data);
         const matchingCustomer = customers.find(customer => {
           if (!customer.barcode) return false;
           
-          const customerBarcode = customer.barcode.trim();
+          const customerBarcode = normalizeBarcode(customer.barcode);
           
           // Exact match (case insensitive)
           if (customerBarcode.toLowerCase() === scannedBarcode.toLowerCase()) {
@@ -355,14 +445,14 @@ export default function ScanCylindersScreen() {
           // Find similar barcodes for helpful suggestions
           const similarBarcodes = customers
             .filter(customer => customer.barcode)
-            .map(customer => customer.barcode.trim())
+            .map(customer => normalizeBarcode(customer.barcode))
             .filter(barcode => {
               const similarity = calculateSimilarity(scannedBarcode.toLowerCase(), barcode.toLowerCase());
               return similarity > 0.7; // 70% similarity threshold
             })
             .slice(0, 3); // Show max 3 suggestions
           
-          let message = `The scanned barcode "${data}" does not match any existing customer in your organization.`;
+          let message = `The scanned barcode "${normalizeBarcode(data)}" does not match any existing customer in your organization.`;
           
           if (similarBarcodes.length > 0) {
             message += `\n\nSimilar barcodes found:\n• ${similarBarcodes.join('\n• ')}`;
@@ -376,7 +466,7 @@ export default function ScanCylindersScreen() {
             [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Use Anyway', onPress: () => {
-                setSearch(data);
+                setSearch(scannedBarcode);
                 setShowCustomerScan(false);
                 setScannerVisible(false);
                 setScannerTarget(null);
@@ -389,7 +479,7 @@ export default function ScanCylindersScreen() {
         
         // Customer found, proceed normally
         console.log('✅ Customer found:', matchingCustomer.name);
-        setSearch(data);
+        setSearch(normalizeBarcode(matchingCustomer.barcode || data));
         setSelectedCustomer(matchingCustomer);
         setShowCustomerScan(false);
         setScannerVisible(false);
@@ -434,7 +524,6 @@ export default function ScanCylindersScreen() {
   const openScanner = async (target: 'customer' | 'order') => {
     console.log('📷 Opening scanner for target:', target);
     console.log('📷 Current permission status:', permission?.granted);
-    console.log('📷 Current scanned state:', scanned);
     
     try {
       // Check if permission is still loading
@@ -453,29 +542,13 @@ export default function ScanCylindersScreen() {
         const result = await requestPermission();
         console.log('📷 Permission request result:', result);
         if (!result.granted) {
-          if (result.canAskAgain === false) {
-            // Permission permanently denied, offer to open settings
-            Alert.alert(
-              'Camera Permission Required', 
-              'Please enable camera access in your device settings to scan barcodes.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Open Settings', onPress: () => Linking.openSettings() }
-              ]
-            );
-          }
+          Alert.alert(
+            'Camera Permission Required',
+            'Please allow camera access to scan barcodes.',
+            [{ text: 'OK' }]
+          );
           return;
         }
-      }
-      
-      // Force request permission again to ensure it's properly granted
-      console.log('📷 Double-checking camera permission...');
-      const finalPermission = await requestPermission();
-      console.log('📷 Final permission status:', finalPermission);
-      
-      if (!finalPermission.granted) {
-        Alert.alert('Camera Permission Denied', 'Camera access is required for scanning. Please enable it in settings.');
-        return;
       }
       
       console.log('📷 Setting up scanner for target:', target);
@@ -488,12 +561,13 @@ export default function ScanCylindersScreen() {
       setScanned(false);
       setScannerTarget(target);
       
-      console.log('🎯 Scanner target set to:', target, 'scanned reset to false');
-      console.log('🎯 About to open scanner modal for:', target);
+      console.log('🎯 Scanner target set to:', target);
       
       // Open the appropriate scanner modal
       if (target === 'customer') {
         console.log('📷 Opening customer scanner modal');
+        console.log('📷 Customers loaded:', customers.length);
+        console.log('📷 Customer barcodes:', customers.map(c => c.barcode).filter(Boolean));
         setShowCustomerScan(true);
       } else {
         console.log('📷 Opening order scanner modal');
@@ -502,6 +576,7 @@ export default function ScanCylindersScreen() {
       
       setScannerVisible(true);
       console.log('📷 Scanner setup complete');
+      console.log('📷 showCustomerScan will be:', target === 'customer');
       
     } catch (error) {
       console.error('❌ Error opening scanner:', error);
@@ -656,10 +731,15 @@ export default function ScanCylindersScreen() {
             <View style={styles.errorContainer}>
               <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
             </View>
-          ) : filteredCustomers.length === 0 ? (
+          ) : authLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading...</Text>
+            </View>
+          ) : filteredCustomers.length === 0 && !selectedCustomer ? (
             <View style={styles.emptyStateContainer}>
               <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
-                {!profile?.organization_id 
+                {!profile?.organization_id && !authLoading
                   ? 'No organization associated with your account. Please contact your administrator.'
                   : 'No customers found. Please check your organization settings.'
                 }
@@ -710,7 +790,7 @@ export default function ScanCylindersScreen() {
             ]}
             onPress={() => {
               if (canProceed) {
-                navigation.navigate('ScanCylindersAction', {
+                navigation.navigate('EnhancedScan', {
                   customer: selectedCustomer,
                   customerName: selectedCustomer?.name || selectedCustomer?.customer_name,
                   customerId: selectedCustomer?.id,
@@ -730,83 +810,144 @@ export default function ScanCylindersScreen() {
       {/* Camera Scanner - Customer */}
       {showCustomerScan && (
         <View style={styles.fullscreenWrapper}>
+          {console.log('📷 RENDERING CAMERA VIEW - showCustomerScan is true')}
           <CameraView
             style={styles.fullscreenCamera}
             facing="back"
-            onBarcodeScanned={(event) => {
-              const barcode = event.data.trim();
+            barcodeScannerSettings={{
+              barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "codabar", "itf14"],
+            }}
+            onBarcodeScanned={({ data }) => {
+              console.log('📷 BARCODE DETECTED:', data);
+              console.log('📷 Available customers:', customers.length);
+              console.log('📷 Customer barcodes:', customers.map(c => c.barcode).filter(Boolean));
+              
+              const barcode = data.trim();
               if (barcode) {
-                console.log('📷 Customer barcode detected:', barcode);
+                // Close camera first
+                setShowCustomerScan(false);
                 
-                // Check if the scanned barcode matches any existing customer
-                const matchingCustomer = customers.find(customer => {
-                  if (!customer.barcode) return false;
-                  
-                  const customerBarcode = customer.barcode.trim();
-                  
-                  // Exact match (case insensitive)
-                  if (customerBarcode.toLowerCase() === barcode.toLowerCase()) {
-                    return true;
+                // Try multiple matching strategies
+                const exactMatch = customers.find(customer => 
+                  customer.barcode && customer.barcode.toLowerCase() === barcode.toLowerCase()
+                );
+                
+                const partialMatch = customers.find(customer => 
+                  customer.barcode && (customer.barcode.toLowerCase().includes(barcode.toLowerCase()) || barcode.toLowerCase().includes(customer.barcode.toLowerCase()))
+                );
+                
+                // Try multiple normalization strategies for scanner vs website format differences
+                const normalizeBarcode = (b) => {
+                  if (!b) return '';
+                  return b
+                    .replace(/[^a-zA-Z0-9]/g, '') // Remove all special characters
+                    .toUpperCase() // Convert to uppercase
+                    .trim();
+                };
+                
+                const normalizeForScanner = (b) => {
+                  if (!b) return '';
+                  return b
+                    .replace(/^%/, '') // Remove leading %
+                    .replace(/-/g, '') // Remove dashes
+                    .toUpperCase() // Convert to uppercase
+                    .trim();
+                };
+                
+                // Enhanced normalization for the specific format: *%800006A2-1610382989A*
+                const normalizeStoredBarcode = (b) => {
+                  if (!b) return '';
+                  return b
+                    .replace(/^\*%/, '') // Remove leading *%
+                    .replace(/\*$/, '') // Remove trailing *
+                    .replace(/-/g, '') // Remove dashes
+                    .toUpperCase() // Convert to uppercase
+                    .trim();
+                };
+                
+                const normalizedScanned = normalizeBarcode(barcode);
+                const scannerNormalizedScanned = normalizeForScanner(barcode);
+                
+                const normalizedMatch = customers.find(customer => 
+                  customer.barcode && normalizeBarcode(customer.barcode) === normalizedScanned
+                );
+                
+                const scannerMatch = customers.find(customer => 
+                  customer.barcode && normalizeForScanner(customer.barcode) === scannerNormalizedScanned
+                );
+                
+                // Enhanced matching for the specific stored format
+                const storedFormatMatch = customers.find(customer => 
+                  customer.barcode && normalizeStoredBarcode(customer.barcode) === scannerNormalizedScanned
+                );
+                
+                console.log('📷 Exact match:', exactMatch);
+                console.log('📷 Partial match:', partialMatch);
+                console.log('📷 Normalized match:', normalizedMatch);
+                console.log('📷 Normalized scanned:', normalizedScanned);
+                console.log('📷 Scanner normalized scanned:', scannerNormalizedScanned);
+                console.log('📷 Scanner match:', scannerMatch);
+                console.log('📷 Stored format match:', storedFormatMatch);
+                
+                // Debug: Show what each customer barcode normalizes to
+                customers.forEach(customer => {
+                  if (customer.barcode) {
+                    console.log(`📷 Customer "${customer.name}": "${customer.barcode}" -> normalizeStoredBarcode: "${normalizeStoredBarcode(customer.barcode)}"`);
                   }
-                  
-                  // Handle common barcode variations (A/a endings)
-                  if (barcode.length > 1) {
-                    const baseScanned = barcode.slice(0, -1);
-                    const baseCustomer = customerBarcode.slice(0, -1);
-                    
-                    if (baseScanned.toLowerCase() === baseCustomer.toLowerCase()) {
-                      return true;
-                    }
-                  }
-                  
-                  return false;
                 });
                 
-                if (matchingCustomer) {
-                  console.log('✅ Customer found:', matchingCustomer.name);
-                  setSearch(matchingCustomer.name);
-                  setSelectedCustomer(matchingCustomer);
-                  setShowCustomerScan(false);
-                  
-                  // Show success feedback
-                  Alert.alert(
-                    'Customer Found!',
-                    `Successfully scanned customer: ${matchingCustomer.name}`,
-                    [{ text: 'OK' }]
-                  );
+                if (exactMatch) {
+                  setSearch(exactMatch.barcode);
+                  setSelectedCustomer(exactMatch);
+                  setShowCustomerScan(false); // Close scanner after finding customer
+                  Alert.alert('Customer Found!', `Found: ${exactMatch.name}\nBarcode: ${barcode}`);
+                } else if (storedFormatMatch) {
+                  setSearch(storedFormatMatch.barcode);
+                  setSelectedCustomer(storedFormatMatch);
+                  setShowCustomerScan(false); // Close scanner after finding customer
+                  Alert.alert('Customer Found (Stored Format Match)!', `Found: ${storedFormatMatch.name}\nScanned: ${barcode}\nStored: ${storedFormatMatch.barcode}`);
+                } else if (scannerMatch) {
+                  setSearch(scannerMatch.barcode);
+                  setSelectedCustomer(scannerMatch);
+                  setShowCustomerScan(false); // Close scanner after finding customer
+                  Alert.alert('Customer Found (Scanner Format Match)!', `Found: ${scannerMatch.name}\nScanned: ${barcode}\nStored: ${scannerMatch.barcode}`);
+                } else if (normalizedMatch) {
+                  setSearch(normalizedMatch.barcode);
+                  setSelectedCustomer(normalizedMatch);
+                  setShowCustomerScan(false); // Close scanner after finding customer
+                  Alert.alert('Customer Found (Normalized Match)!', `Found: ${normalizedMatch.name}\nScanned: ${barcode}\nStored: ${normalizedMatch.barcode}`);
+                } else if (partialMatch) {
+                  setSearch(partialMatch.barcode);
+                  setSelectedCustomer(partialMatch);
+                  setShowCustomerScan(false); // Close scanner after finding customer
+                  Alert.alert('Customer Found (Partial Match)!', `Found: ${partialMatch.name}\nScanned: ${barcode}\nStored: ${partialMatch.barcode}`);
                 } else {
-                  console.log('⚠️ Scanned barcode does not match any existing customer');
                   setSearch(barcode);
-                  setShowCustomerScan(false);
-                  
-                  Alert.alert(
-                    'Customer Not Found',
-                    `The scanned barcode "${barcode}" does not match any existing customer. You can still proceed by typing the customer name.`,
-                    [{ text: 'OK' }]
-                  );
+                  Alert.alert('Barcode Scanned', `Scanned: ${barcode}\nNo matching customer found.\n\nAvailable barcodes:\n${customers.map(c => c.barcode).filter(Boolean).slice(0, 5).join('\n')}`);
                 }
               }
             }}
-            barcodeScannerSettings={{
-              barcodeTypes: [
-                'qr', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 'code128', 'pdf417', 'aztec', 'datamatrix', 'itf14',
-              ],
-              regionOfInterest: {
-                x: 0.075, // 7.5% from left
-                y: 0.4,   // 40% from top
-                width: 0.85, // 85% width
-                height: 0.2, // 20% height
-              },
-            }}
           />
-          <View style={styles.scanRectangle} />
-          <View style={styles.scanAreaOverlay} />
-          <TouchableOpacity 
-            style={styles.closeButton} 
-            onPress={() => setShowCustomerScan(false)}
-          >
-            <Text style={styles.closeButtonText}>✕ Close</Text>
-          </TouchableOpacity>
+          
+          {/* Scan area with border */}
+          <View style={styles.scanArea}>
+            <View style={styles.scanFrame}>
+              <View style={[styles.corner, styles.topLeft]} />
+              <View style={[styles.corner, styles.topRight]} />
+              <View style={[styles.corner, styles.bottomLeft]} />
+              <View style={[styles.corner, styles.bottomRight]} />
+            </View>
+          </View>
+          
+          {/* Close button */}
+          <View style={styles.closeButtonContainer}>
+            <TouchableOpacity 
+              style={styles.closeButton} 
+              onPress={() => setShowCustomerScan(false)}
+            >
+              <Text style={styles.closeButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -816,24 +957,24 @@ export default function ScanCylindersScreen() {
           <CameraView
             style={styles.fullscreenCamera}
             facing="back"
-            onBarcodeScanned={(event) => {
-              const barcode = event.data.trim();
+            barcodeScannerSettings={{
+              barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "codabar", "itf14"],
+            }}
+            onBarcodeScanned={({ data, bounds }) => {
+              console.log('📷 Raw order barcode event:', data, 'bounds:', bounds);
+              
+              // Check if barcode is within scan area (if bounds are available)
+              if (bounds && !isBarcodeInScanArea(bounds)) {
+                console.log('📷 Order barcode outside scan area, ignoring');
+                return;
+              }
+              
+              const barcode = data.trim();
               if (barcode) {
                 console.log('📷 Order barcode detected:', barcode);
                 setOrderNumber(barcode);
                 setShowOrderScan(false);
               }
-            }}
-            barcodeScannerSettings={{
-              barcodeTypes: [
-                'qr', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 'code128', 'pdf417', 'aztec', 'datamatrix', 'itf14',
-              ],
-              regionOfInterest: {
-                x: 0.075, // 7.5% from left
-                y: 0.4,   // 40% from top
-                width: 0.85, // 85% width
-                height: 0.2, // 20% height
-              },
             }}
           />
           <View style={styles.scanRectangle} />
@@ -1039,5 +1180,160 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#2563eb',
+  },
+  cooldownOverlay: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -100 }, { translateY: -25 }],
+    backgroundColor: 'rgba(16, 185, 129, 0.9)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  cooldownText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  countdownOverlay: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -75 }, { translateY: -50 }],
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  countdownNumber: {
+    color: '#fff',
+    fontSize: 48,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  simpleScanOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  simpleScanBox: {
+    width: '80%',
+    height: 200,
+    borderWidth: 2,
+    borderColor: '#00ff00',
+    borderRadius: 10,
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  simpleScanText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 5,
+    textAlign: 'center',
+  },
+  simpleScanSubtext: {
+    color: '#fff',
+    fontSize: 14,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 15,
+    paddingVertical: 5,
+    borderRadius: 5,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  debugInfo: {
+    position: 'absolute',
+    top: 100,
+    left: 20,
+    right: 20,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    padding: 10,
+    borderRadius: 8,
+  },
+  debugText: {
+    color: '#fff',
+    fontSize: 12,
+    marginBottom: 5,
+  },
+  simpleOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  simpleText: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: 'bold',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 20,
+  },
+  scanArea: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scanFrame: {
+    width: '80%',
+    height: 200,
+    position: 'relative',
+  },
+  corner: {
+    position: 'absolute',
+    width: 30,
+    height: 30,
+    borderColor: '#00ff00',
+    borderWidth: 3,
+  },
+  topLeft: {
+    top: 0,
+    left: 0,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+  },
+  topRight: {
+    top: 0,
+    right: 0,
+    borderLeftWidth: 0,
+    borderBottomWidth: 0,
+  },
+  bottomLeft: {
+    bottom: 0,
+    left: 0,
+    borderRightWidth: 0,
+    borderTopWidth: 0,
+  },
+  bottomRight: {
+    bottom: 0,
+    right: 0,
+    borderLeftWidth: 0,
+    borderTopWidth: 0,
+  },
+  closeButtonContainer: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
   },
 }); 
