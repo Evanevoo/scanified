@@ -13,6 +13,7 @@ export interface OrganizationFormats {
   barcode_format: FormatConfig;
   order_number_format: FormatConfig;
   customer_id_format: FormatConfig;
+  cylinder_serial_format: FormatConfig;
 }
 
 export class FormatValidationService {
@@ -61,6 +62,13 @@ export class FormatValidationService {
           pattern: '^[A-Z0-9]{4,10}$',
           description: '4-10 alphanumeric characters',
           examples: ['CUST123', 'CLIENT456'],
+          prefix: '',
+          validation_enabled: true
+        },
+        cylinder_serial_format: formatConfig.cylinder_serial_format || {
+          pattern: '^[0-9]{9}$',
+          description: '9-digit serial number',
+          examples: ['123456789', '987654321'],
           prefix: '',
           validation_enabled: true
         }

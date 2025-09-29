@@ -424,12 +424,15 @@ export default function OAuthOrganizationLink() {
 
   const handleSignOut = async () => {
     try {
+      // Set a flag to prevent root redirects during sign-out
+      sessionStorage.setItem('skip_org_redirect_once', '1');
       await supabase.auth.signOut();
-      navigate('/login');
+      // Force full navigation to clear any state
+      window.location.href = '/login';
     } catch (error) {
       console.error('Error signing out:', error);
       // Force navigation anyway
-      navigate('/login');
+      window.location.href = '/login';
     }
   };
 

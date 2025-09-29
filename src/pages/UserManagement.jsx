@@ -435,11 +435,11 @@ export default function UserManagement() {
           <Stack direction="row" spacing={3}>
             <Box>
               <Typography variant="body2" color="text.secondary">
-                Users ({users.length} / {organization?.max_users === 999999 ? 'Unlimited' : organization?.max_users ?? 'N/A'})
+                Users ({users.length} / {organization?.max_users === -1 ? 'Unlimited' : organization?.max_users ?? 'N/A'})
               </Typography>
               <LinearProgress 
                 variant="determinate" 
-                value={organization?.max_users && organization.max_users !== 999999 ? (users.length / organization.max_users) * 100 : 0}
+                value={organization?.max_users && organization.max_users !== -1 ? (users.length / organization.max_users) * 100 : 0}
                 sx={{ mt: 1, width: 200 }}
               />
             </Box>
@@ -461,11 +461,11 @@ export default function UserManagement() {
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => setShowAddDialog(true)}
-          disabled={(organization?.max_users !== 999999 && users.length >= (organization?.max_users || 0)) || !can('manage:users')}
+          disabled={(organization?.max_users !== -1 && users.length >= (organization?.max_users || 0)) || !can('manage:users')}
         >
           Invite User
         </Button>
-        {organization?.max_users !== 999999 && users.length >= (organization?.max_users || 0) && (
+        {organization?.max_users !== -1 && users.length >= (organization?.max_users || 0) && (
           <Typography variant="caption" color="error" sx={{ ml: 2 }}>
             User limit reached. Upgrade your plan to add more users.
           </Typography>

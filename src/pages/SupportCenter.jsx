@@ -28,6 +28,8 @@ import {
   Delete as DeleteIcon,
   Restore as RestoreIcon
 } from '@mui/icons-material';
+import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../supabase/client';
 import { sendSupportTicketNotification, sendSupportTicketReplyNotification } from '../services/notificationService';
 
 export default function SupportCenter() {

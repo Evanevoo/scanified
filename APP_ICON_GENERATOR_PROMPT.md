@@ -10,9 +10,8 @@
 ### Technical Specifications
 - **Format**: PNG with transparency
 - **Sizes Needed**: 
-  - 1024x1024 (App Store/Play Store)
+  - 1024x1024 (App Store)
   - 512x512 (App Store)
-  - 192x192 (Android)
   - 180x180 (iOS)
   - 152x152 (iOS)
   - 120x120 (iOS)
@@ -103,7 +102,7 @@
 ### Brand Consistency
 - Should match the app's professional, industrial theme
 - Consistent with the "Scanified" brand name
-- Suitable for both iOS and Android platforms
+- Suitable for iOS platform
 - Works well in both light and dark modes
 
 ### Accessibility
@@ -138,7 +137,7 @@ Design requirements:
 - Industrial/B2B professional appearance
 - No text or complex details
 - High contrast for visibility
-- Suitable for both iOS and Android app stores
+- Suitable for iOS App Store
 
 Style: Modern, flat design, professional, industrial, trustworthy
 Mood: Efficient, reliable, professional, safety-focused

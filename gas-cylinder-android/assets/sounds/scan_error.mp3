@@ -1,0 +1,3 @@
+# This is a placeholder for scan_error.mp3
+# In a real implementation, you would add actual MP3 sound files here
+# For now, the app will use haptic feedback as fallback

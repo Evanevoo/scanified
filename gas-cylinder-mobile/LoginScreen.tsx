@@ -9,8 +9,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   ScrollView,
-  Linking,
-  Modal
+  Linking
 } from 'react-native';
 import { Platform } from './utils/platform';
 import { supabase } from './supabase';
@@ -19,46 +18,33 @@ import { useErrorHandler } from './hooks/useErrorHandler';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
-import * as AuthSession from 'expo-auth-session';
 import * as SecureStore from 'expo-secure-store';
-import * as AppleAuthentication from 'expo-apple-authentication';
-import * as Crypto from 'expo-crypto';
-
-const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com'; // TODO: Replace with your client ID
 
 const translations = {
   en: {
     signIn: 'Sign In',
-    signUp: 'Sign Up',
     email: 'Email',
     password: 'Password',
     confirmPassword: 'Confirm Password',
     forgotPassword: 'Forgot Password?',
     rememberMe: 'Remember Me',
-    createAccount: 'Create Account',
-    alreadyHaveAccount: 'Already have an account? Sign In',
     terms: 'Terms of Service',
     privacy: 'Privacy Policy',
     enterName: 'Enter your name',
     name: 'Name',
-    registrationSuccess: 'Registration successful! Please check your email to verify your account.',
     selectLanguage: 'Language',
   },
   es: {
     signIn: 'Iniciar sesión',
-    signUp: 'Registrarse',
     email: 'Correo electrónico',
     password: 'Contraseña',
     confirmPassword: 'Confirmar contraseña',
     forgotPassword: '¿Olvidaste tu contraseña?',
     rememberMe: 'Recuérdame',
-    createAccount: 'Crear cuenta',
-    alreadyHaveAccount: '¿Ya tienes una cuenta? Inicia sesión',
     terms: 'Términos de servicio',
     privacy: 'Política de privacidad',
     enterName: 'Ingresa tu nombre',
     name: 'Nombre',
-    registrationSuccess: '¡Registro exitoso! Por favor revisa tu correo para verificar tu cuenta.',
     selectLanguage: 'Idioma',
   },
 };
@@ -69,19 +55,14 @@ export default function LoginScreen() {
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const { handleError, isLoading, withErrorHandling } = useErrorHandler();
-  const [showPassword, setShowPassword] = useState(true); // Start with password visible
+  const [showPassword, setShowPassword] = useState(false); // Start with password hidden
   const [rememberMe, setRememberMe] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [biometricSupported, setBiometricSupported] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
-  const [socialLoading, setSocialLoading] = useState(false);
-  const [appleSignInAvailable, setAppleSignInAvailable] = useState(false);
+  const [biometricType, setBiometricType] = useState<'face' | 'touch' | 'unknown'>('unknown');
   const [language, setLanguage] = useState<'en' | 'es'>('en');
   const t = translations[language];
-  const [registerModal, setRegisterModal] = useState(false);
-  const [registerForm, setRegisterForm] = useState({ name: '', email: '', password: '', confirm: '' });
-  const [registerError, setRegisterError] = useState('');
-  const [registerLoading, setRegisterLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -106,22 +87,28 @@ export default function LoginScreen() {
         const isEnrolled = await LocalAuthentication.isEnrolledAsync();
         setBiometricSupported(hasHardware);
         setBiometricAvailable(isEnrolled);
+        
+        // Check what biometric types are available
+        if (hasHardware && isEnrolled) {
+          const availableTypes = await LocalAuthentication.supportedAuthenticationTypesAsync();
+          const hasFaceID = availableTypes.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
+          const hasTouchID = availableTypes.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
+          
+          if (hasFaceID) {
+            setBiometricType('face');
+          } else if (hasTouchID) {
+            setBiometricType('touch');
+          } else {
+            setBiometricType('unknown');
+          }
+        }
       } catch (error) {
         console.warn('Error checking biometric support:', error);
         setBiometricSupported(false);
         setBiometricAvailable(false);
+        setBiometricType('unknown');
       }
       
-      try {
-        // Check for Apple Sign In availability
-        if (Platform.OS === 'ios') {
-          const isAppleAvailable = await AppleAuthentication.isAvailableAsync();
-          setAppleSignInAvailable(isAppleAvailable);
-        }
-      } catch (error) {
-        console.warn('Error checking Apple Sign In availability:', error);
-        setAppleSignInAvailable(false);
-      }
     })();
   }, []);
 
@@ -203,19 +190,47 @@ export default function LoginScreen() {
   };
 
   const handleBiometricLogin = async () => {
+    console.log('🔐 Biometric login button pressed');
     try {
       const savedEmail = await AsyncStorage.getItem('rememberedEmail');
       const savedPassword = await SecureStore.getItemAsync('rememberedPassword');
       
+      console.log('🔐 Saved email exists:', !!savedEmail);
+      console.log('🔐 Saved password exists:', !!savedPassword);
+      
       if (!savedEmail || !savedPassword) {
+        console.log('🔐 No saved credentials, showing alert');
         Alert.alert('No saved login', 'Please login with email and password first and enable Remember Me.');
         return;
       }
       
+      // Check what biometric types are available
+      const availableTypes = await LocalAuthentication.supportedAuthenticationTypesAsync();
+      const hasFaceID = availableTypes.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
+      const hasTouchID = availableTypes.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
+      
+      console.log('🔐 Available biometric types:', availableTypes);
+      console.log('🔐 Has Face ID:', hasFaceID);
+      console.log('🔐 Has Touch ID:', hasTouchID);
+      
+      let promptMessage = 'Login with Biometric Authentication';
+      if (hasFaceID) {
+        promptMessage = 'Login with Face ID';
+      } else if (hasTouchID) {
+        promptMessage = 'Login with Touch ID';
+      }
+      
+      console.log('🔐 Prompt message:', promptMessage);
+      console.log('🔐 Starting biometric authentication...');
+      
       const biometricResult = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Login with Fingerprint/FaceID',
-        fallbackLabel: 'Enter Password',
+        promptMessage: promptMessage,
+        disableDeviceFallback: true,
+        cancelLabel: 'Cancel',
+        requireConfirmation: false,
       });
+      
+      console.log('🔐 Biometric result:', biometricResult);
       
       if (biometricResult.success) {
         // Set the saved credentials
@@ -235,212 +250,12 @@ export default function LoginScreen() {
         }, 'Biometric Login Failed');
       }
     } catch (err) {
+      console.log('🔐 Biometric login error:', err);
       Alert.alert('Biometric Login Failed', err.message);
     }
   };
 
-  const handleGoogleLogin = async () => {
-    setSocialLoading(true);
-    try {
-      const redirectUri = AuthSession.makeRedirectUri({ useProxy: true });
-      const provider = 'google';
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: {
-          redirectTo: redirectUri,
-        },
-      });
-      if (error) throw error;
-      // The user will be redirected back to the app after login
-    } catch (err) {
-      Alert.alert('Google Login Failed', err.message);
-    }
-    setSocialLoading(false);
-  };
 
-  const handleAppleLogin = async () => {
-    setSocialLoading(true);
-    try {
-      console.log('🍎 Starting Apple Sign In...');
-      
-      // Check if Apple Sign In is available (iPad and iOS 26 compatibility)
-      const isAvailable = await AppleAuthentication.isAvailableAsync();
-      if (!isAvailable) {
-        // Fallback to OAuth flow for devices without native Apple Sign In
-        console.log('🍎 Native Apple Sign In not available, using OAuth flow...');
-        const redirectUri = AuthSession.makeRedirectUri({ useProxy: false });
-        const { data, error } = await supabase.auth.signInWithOAuth({
-          provider: 'apple',
-          options: {
-            redirectTo: redirectUri,
-            skipBrowserRedirect: false,
-          },
-        });
-        if (error) throw error;
-        setSocialLoading(false);
-        return;
-      }
-      
-      // Generate a cryptographically secure nonce for iOS 26 compatibility
-      const nonce = Crypto.randomUUID();
-      
-      console.log('🍎 Requesting Apple credentials with iOS 26 compatibility...');
-      let credential;
-      try {
-        credential = await AppleAuthentication.signInAsync({
-          requestedScopes: [
-            AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-            AppleAuthentication.AppleAuthenticationScope.EMAIL,
-          ],
-          nonce: nonce,
-          state: Platform.OS === 'ios' && Platform.isPad ? 'ipad' : 'iphone',
-        });
-      } catch (appleError) {
-        // Handle specific Apple authentication errors
-        if (appleError.code === 'ERR_REQUEST_CANCELED') {
-          console.log('ℹ️ User canceled Apple Sign In');
-          setSocialLoading(false);
-          return;
-        }
-        throw appleError;
-      }
-
-      console.log('🍎 Apple credential received:', {
-        user: credential.user,
-        email: credential.email,
-        hasIdentityToken: !!credential.identityToken,
-        authorizationCode: !!credential.authorizationCode,
-        fullName: credential.fullName ? 'present' : 'null'
-      });
-
-      if (!credential.identityToken) {
-        throw new Error('No identity token received from Apple. Please try again.');
-      }
-      
-      console.log('🍎 Authenticating with Supabase using identity token...');
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithIdToken({
-        provider: 'apple',
-        token: credential.identityToken,
-        nonce: nonce,
-        options: {
-          captchaToken: credential.authorizationCode, // Include authorization code for additional verification
-        }
-      });
-
-      if (signInError) {
-        console.error('🚨 Supabase Apple Sign In Error:', signInError);
-        
-        // Enhanced error handling for iPad and specific Supabase errors
-        if (signInError.message?.includes('Invalid login credentials')) {
-          throw new Error('Apple authentication failed. Please try again or contact support.');
-        } else if (signInError.message?.includes('network')) {
-          throw new Error('Network connection error. Please check your internet connection and try again.');
-        } else if (signInError.message?.includes('nonce')) {
-          throw new Error('Authentication security error. Please try signing in again.');
-        } else if (signInError.message?.includes('iPad') || signInError.message?.includes('tablet')) {
-          throw new Error('iPad compatibility issue detected. Please try again or use email sign in.');
-        }
-        
-        throw signInError;
-      }
-
-      if (!signInData?.user) {
-        throw new Error('Authentication completed but no user data received. Please try again.');
-      }
-
-      console.log('✅ Apple Sign In successful for user:', signInData.user.id);
-      
-      // Save additional user info if available (first-time sign-in)
-      if (credential.fullName?.givenName || credential.fullName?.familyName) {
-        const fullName = `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim();
-        if (fullName) {
-          console.log('🍎 Updating user profile with Apple info...');
-          const { error: updateError } = await supabase.auth.updateUser({
-            data: {
-              full_name: fullName,
-              apple_user_id: credential.user,
-            }
-          });
-          if (updateError) {
-            console.warn('⚠️ Could not update user profile:', updateError.message);
-            // Don't fail the login for profile update errors
-          } else {
-            console.log('✅ User profile updated with Apple info');
-          }
-        }
-      }
-
-      // Wait a moment to ensure auth state is properly set
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-    } catch (err) {
-      console.error('🚨 Apple Sign In Error:', err);
-      
-      // Handle user cancellation gracefully
-      if (err.code === 'ERR_REQUEST_CANCELED' || err.code === 'ERR_CANCELED') {
-        console.log('ℹ️ User canceled Apple Sign In');
-        return;
-      }
-      
-      // Enhanced error handling for iPad and Apple Authentication specific errors
-      if (err.code === 'ERR_INVALID_RESPONSE') {
-        Alert.alert('Apple Sign In Failed', 'Invalid response from Apple. Please try again.');
-        return;
-      }
-      
-      if (err.code === 'ERR_REQUEST_FAILED') {
-        Alert.alert('Apple Sign In Failed', 'Request failed. Please check your internet connection and try again.');
-        return;
-      }
-      
-      // Provide user-friendly error messages with iPad-specific handling
-      let errorMessage = 'An unexpected error occurred during Apple Sign In. Please try again.';
-      
-      if (err.message?.toLowerCase().includes('network')) {
-        errorMessage = 'Network connection error. Please check your internet connection and try again.';
-      } else if (err.message?.toLowerCase().includes('token') || err.message?.toLowerCase().includes('nonce')) {
-        errorMessage = 'Authentication security error. Please try signing in again.';
-      } else if (err.message?.toLowerCase().includes('invalid login credentials')) {
-        errorMessage = 'Apple authentication failed. Please try again or contact support if the issue persists.';
-      } else if (err.message?.toLowerCase().includes('ipad') || err.message?.toLowerCase().includes('tablet')) {
-        errorMessage = 'iPad compatibility issue detected. Please try again or use email sign in.';
-      } else if (err.message && err.message.length < 200) {
-        // Show the actual error message if it's reasonable length and user-friendly
-        errorMessage = err.message;
-      }
-      
-      Alert.alert('Apple Sign In Failed', errorMessage);
-    } finally {
-      setSocialLoading(false);
-    }
-  };
-
-  const handleRegister = async () => {
-    setRegisterError('');
-    if (!registerForm.name || !registerForm.email || !registerForm.password || !registerForm.confirm) {
-      setRegisterError('All fields are required.');
-      return;
-    }
-    if (registerForm.password !== registerForm.confirm) {
-      setRegisterError('Passwords do not match.');
-      return;
-    }
-    setRegisterLoading(true);
-    try {
-      const { error } = await supabase.auth.signUp({
-        email: registerForm.email.trim(),
-        password: registerForm.password,
-        options: { data: { name: registerForm.name } },
-      });
-      if (error) throw error;
-      Alert.alert(t.registrationSuccess);
-      setRegisterModal(false);
-      setRegisterForm({ name: '', email: '', password: '', confirm: '' });
-    } catch (err) {
-      setRegisterError(err.message);
-    }
-    setRegisterLoading(false);
-  };
 
   return (
     <KeyboardAvoidingView 
@@ -460,32 +275,42 @@ export default function LoginScreen() {
             <Text style={styles.welcomeMessage}>Welcome back! Sign in to continue</Text>
           </View>
 
-          {/* Social Login Options */}
-          <View style={styles.socialSection}>
-            <TouchableOpacity style={styles.googleButton} onPress={handleGoogleLogin} disabled={socialLoading}>
-              <Ionicons name="logo-google" size={20} color="#ea4335" style={{ marginRight: 8 }} />
-              <Text style={styles.googleButtonText}>
-                {socialLoading ? 'Signing in...' : 'Continue with Google'}
-              </Text>
-            </TouchableOpacity>
-
-            {appleSignInAvailable && (
-              <AppleAuthentication.AppleAuthenticationButton
-                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-                cornerRadius={8}
-                style={styles.appleButton}
-                onPress={handleAppleLogin}
-              />
-            )}
-
-            {biometricSupported && biometricAvailable && rememberMe && email && (
-              <TouchableOpacity style={styles.biometricButton} onPress={handleBiometricLogin}>
-                <Ionicons name="finger-print" size={20} color="#3B82F6" style={{ marginRight: 8 }} />
-                <Text style={styles.biometricButtonText}>Use Biometric Login</Text>
+          {/* Biometric Login Option */}
+          {biometricSupported && biometricAvailable && (
+            <View style={styles.biometricSection}>
+              <TouchableOpacity 
+                style={[
+                  styles.biometricButton,
+                  (!rememberMe || !email) && styles.biometricButtonDisabled
+                ]} 
+                onPress={() => {
+                  console.log('🔐 Button pressed - rememberMe:', rememberMe, 'email:', email);
+                  handleBiometricLogin();
+                }}
+                disabled={!rememberMe || !email}
+              >
+                <Ionicons 
+                  name={biometricType === 'face' ? 'eye' : biometricType === 'touch' ? 'finger-print' : 'shield-checkmark'} 
+                  size={20} 
+                  color={(!rememberMe || !email) ? "#9CA3AF" : "#3B82F6"} 
+                  style={{ marginRight: 8 }} 
+                />
+                <Text style={[
+                  styles.biometricButtonText,
+                  (!rememberMe || !email) && styles.biometricButtonTextDisabled
+                ]}>
+                  {biometricType === 'face' ? 'Use Face ID' : 
+                   biometricType === 'touch' ? 'Use Touch ID' : 
+                   'Use Biometric Login'}
+                </Text>
               </TouchableOpacity>
-            )}
-          </View>
+              {(!rememberMe || !email) && (
+                <Text style={styles.biometricHint}>
+                  Login with email/password first and enable "Remember Me" to use biometric login
+                </Text>
+              )}
+            </View>
+          )}
 
           {/* Divider */}
           <View style={styles.dividerContainer}>
@@ -570,12 +395,6 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            {/* Sign Up Link */}
-            <TouchableOpacity style={styles.signUpLink} onPress={() => setRegisterModal(true)}>
-              <Text style={styles.signUpText}>
-                Don't have an account? <Text style={styles.signUpTextBold}>Sign Up</Text>
-              </Text>
-            </TouchableOpacity>
           </View>
           
           {/* Footer */}
@@ -584,12 +403,12 @@ export default function LoginScreen() {
               Use the same credentials as the web app
             </Text>
             <Text style={styles.organizationText}>
-              Need to create an organization? Sign up at{' '}
+              Need to create an organization? Contact us at{' '}
               <Text 
                 style={styles.websiteLink}
-                onPress={() => Linking.openURL('https://yourdomain.com/register')}
+                onPress={() => Linking.openURL('https://scanified.com/contact')}
               >
-                yourdomain.com
+                scanified.com
               </Text>
             </Text>
             <View style={styles.legalLinks}>
@@ -604,78 +423,6 @@ export default function LoginScreen() {
           </View>
         </View>
 
-        {/* Registration Modal */}
-        <Modal visible={registerModal} animationType="slide" transparent>
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Create Account</Text>
-                <TouchableOpacity onPress={() => setRegisterModal(false)}>
-                  <Ionicons name="close" size={24} color="#6B7280" />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.modalForm}>
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Full Name</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={registerForm.name}
-                    onChangeText={v => setRegisterForm(f => ({ ...f, name: v }))}
-                    placeholder="Enter your full name"
-                    autoCapitalize="words"
-                  />
-                </View>
-                
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Email Address</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={registerForm.email}
-                    onChangeText={v => setRegisterForm(f => ({ ...f, email: v }))}
-                    placeholder="Enter your email"
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                  />
-                </View>
-                
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Password</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={registerForm.password}
-                    onChangeText={v => setRegisterForm(f => ({ ...f, password: v }))}
-                    placeholder="Create a password"
-                    secureTextEntry
-                  />
-                </View>
-                
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Confirm Password</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={registerForm.confirm}
-                    onChangeText={v => setRegisterForm(f => ({ ...f, confirm: v }))}
-                    placeholder="Confirm your password"
-                    secureTextEntry
-                  />
-                </View>
-                
-                {registerError ? <Text style={styles.errorText}>{registerError}</Text> : null}
-                
-                <TouchableOpacity 
-                  style={[styles.signInButton, registerLoading && styles.signInButtonDisabled]} 
-                  onPress={handleRegister} 
-                  disabled={registerLoading}
-                >
-                  <Text style={styles.signInButtonText}>
-                    {registerLoading ? 'Creating Account...' : 'Create Account'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -724,29 +471,8 @@ const styles = StyleSheet.create({
     color: '#374151',
     textAlign: 'center',
   },
-  socialSection: {
+  biometricSection: {
     marginBottom: 24,
-  },
-  googleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    backgroundColor: '#fff',
-  },
-  googleButtonText: {
-    color: '#374151',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  appleButton: {
-    width: '100%',
-    height: 50,
-    marginBottom: 12,
   },
   biometricButton: {
     flexDirection: 'row',
@@ -762,6 +488,21 @@ const styles = StyleSheet.create({
     color: '#3B82F6',
     fontWeight: '600',
     fontSize: 16,
+  },
+  biometricButtonDisabled: {
+    opacity: 0.5,
+    borderColor: '#9CA3AF',
+    backgroundColor: '#F3F4F6',
+  },
+  biometricButtonTextDisabled: {
+    color: '#9CA3AF',
+  },
+  biometricHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   dividerContainer: {
     flexDirection: 'row',
@@ -872,17 +613,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  signUpLink: {
-    alignItems: 'center',
-  },
-  signUpText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  signUpTextBold: {
-    color: '#3B82F6',
-    fontWeight: '600',
-  },
   footer: {
     alignItems: 'center',
   },
@@ -915,33 +645,5 @@ const styles = StyleSheet.create({
   websiteLink: {
     color: '#3B82F6',
     fontWeight: '600',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 24,
-    width: '100%',
-    maxWidth: 400,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#374151',
-  },
-  modalForm: {
-    // No additional styles needed
   },
 });

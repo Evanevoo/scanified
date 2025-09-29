@@ -71,8 +71,8 @@ export const useAssetConfig = () => {
           assetTypePlural: orgData.asset_type_plural || defaultConfig.assetTypePlural,
           assetDisplayName: orgData.asset_display_name || defaultConfig.assetDisplayName,
           assetDisplayNamePlural: orgData.asset_display_name_plural || defaultConfig.assetDisplayNamePlural,
-          primaryColor: orgData.primary_color || defaultConfig.primaryColor,
-          secondaryColor: orgData.secondary_color || defaultConfig.secondaryColor,
+          primaryColor: orgData.primary_color || '#40B5AD',
+          secondaryColor: orgData.secondary_color || '#48C9B0',
           appName: orgData.app_name || defaultConfig.appName,
           appIcon: defaultConfig.appIcon, // Use default since column doesn't exist
           showAppIcon: defaultConfig.showAppIcon, // Use default since column doesn't exist

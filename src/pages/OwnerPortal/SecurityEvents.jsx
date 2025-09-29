@@ -106,7 +106,7 @@ export default function SecurityEvents() {
       description: 'User attempted to access admin functions',
       ip: '172.16.0.25',
       location: 'Miami, FL',
-      device: 'Chrome on Android',
+      device: 'Safari on iOS',
       action: 'Access denied, security team notified',
       status: 'investigated'
     },

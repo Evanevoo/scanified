@@ -11,17 +11,13 @@ import LoadingSpinner from './components/LoadingSpinner';
 import ProtectedRoute from './components/ProtectedRoute';
 import { initAllTracking, trackPageView } from './utils/analytics';
 import { initializeDisasterRecovery } from './utils/disasterRecovery';
-import OrganizationRegistration from './pages/OrganizationRegistration';
-import UserRegistration from './pages/UserRegistration';
 import Billing from './pages/Billing';
 import OwnerDashboard from './pages/OwnerDashboard';
 import CustomerPortal from './pages/CustomerPortal';
-import CustomerRegistration from './pages/CustomerRegistration';
 import BarcodeGenerator from './pages/BarcodeGenerator';
 import IntegrationSettings from './pages/OwnerPortal/IntegrationSettings';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import LandingPage from './pages/LandingPage';
-import DebugAuth from './pages/DebugAuth';
 import FixOrganizationLink from './pages/FixOrganizationLink';
 import OAuthOrganizationLink from './pages/OAuthOrganizationLink';
 
@@ -34,7 +30,7 @@ import PricingPage from './pages/PricingPage';
 import Documentation from './pages/Documentation';
 import CustomPageViewer from './pages/CustomPageViewer';
 import ImportApprovals from './pages/ImportApprovals';
-import ImportApprovalDetail from './pages/ImportApprovalDetailEnhanced';
+import ImportApprovalDetail from './pages/ImportApprovalDetail';
 import ImportApprovalsHistory from './pages/ImportApprovalsHistory';
 import Home from './pages/Home';
 import DataUtilities from './pages/OwnerPortal/DataUtilities';
@@ -74,9 +70,7 @@ import ChainOfCustody from './pages/ChainOfCustody';
 import PalletizationSystem from './pages/PalletizationSystem';
 import AdvancedRentalCalculations from './pages/AdvancedRentalCalculations';
 import BulkRentalPricingManager from './pages/BulkRentalPricingManager';
-import MinimalTest from './pages/MinimalTest';
 import MainLayout from './components/MainLayout';
-import TestAdvancedFeatures from './pages/TestAdvancedFeatures';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 import { supabase } from './supabase/client';
@@ -88,7 +82,6 @@ import FAQ from './pages/FAQ';
 import Reviews from './pages/Reviews';
 import CookieNotice from './components/CookieNotice';
 import NavigationBar from './components/NavigationBar';
-import LiveChat from './components/LiveChat';
 import Demo from './pages/Demo';
 import Features from './pages/Features';
 import Pricing from './pages/Pricing';
@@ -99,9 +92,6 @@ import CustomerPayments from './pages/CustomerPayments';
 import CompetitorAnalysis from './pages/CompetitorAnalysis';
 import Blog from './pages/Blog';
 import Security from './pages/Security';
-import EmailTest from './pages/EmailTest';
-import DirectEmailTest from './pages/DirectEmailTest';
-import SMTP2GOTest from './pages/SMTP2GOTest';
 
 // Lazy load all page components
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -167,7 +157,7 @@ function AnalyticsTracker() {
 }
 
 function AppContent() {
-  const { profile, organization } = useAuth();
+  const { profile, organization, loading } = useAuth();
   
   // Initialize analytics and disaster recovery on app start
   useEffect(() => {
@@ -189,28 +179,40 @@ function AppContent() {
         <PermissionsProvider>
           <ThemeProvider>
             <Router>
+              {/* Optional dev skip flag: prevent redirect loops after sign-out */}
+              {(() => {
+                const skip = sessionStorage.getItem('skip_org_redirect_once');
+                if (skip) {
+                  // Clear the flag so it only applies once
+                  sessionStorage.removeItem('skip_org_redirect_once');
+                }
+                return null;
+              })()}
               <AnalyticsTracker />
               <NavigationBar />
-              <LiveChat />
               <div className="App">
                 <Routes>
                   {/* Smart root redirect based on user state */}
                   <Route path="/" element={
-                    profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
-                    profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
-                    profile && !organization ? <Navigate to="/connect-organization" replace /> :
-                    <LandingPage />
+                    loading ? <LandingPage /> :
+                    (sessionStorage.getItem('skip_org_redirect_once') ? <LandingPage /> : (
+                      profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
+                      profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
+                      profile && !organization ? <Navigate to="/connect-organization" replace /> :
+                      <LandingPage />
+                    ))
                   } />
                   <Route path="/landing" element={<LandingPage />} />
                   <Route path="/login" element={
-                    profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
-                    profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
-                    profile && !organization ? <Navigate to="/connect-organization" replace /> :
-                    <LoginPage />
+                    loading ? <LoginPage /> :
+                    (sessionStorage.getItem('skip_org_redirect_once') ? <LoginPage /> : (
+                      profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
+                      profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
+                      profile && !organization ? <Navigate to="/connect-organization" replace /> :
+                      <LoginPage />
+                    ))
                   } />
-                  <Route path="/register" element={<OrganizationRegistration />} />
-                  <Route path="/signup" element={<UserRegistration />} />
-                  <Route path="/setup" element={<OrganizationRegistration />} />
+                  {/* Registration routes removed per App Store guidelines */}
                   <Route path="/contact" element={<ContactUs />} />
                   <Route path="/faq" element={<FAQ />} />
                   <Route path="/reviews" element={<Reviews />} />
@@ -220,14 +222,12 @@ function AppContent() {
                   <Route path="/documentation" element={<Documentation />} />
                   <Route path="/p/:slug" element={<CustomPageViewer />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
-                  <Route path="/customer-register" element={<CustomerRegistration />} />
+                  {/* Customer registration route removed per App Store guidelines */}
                   <Route path="/portal" element={<CustomerPortal />} />
                   <Route path="/accept-invite" element={<AcceptInvite />} />
                   <Route path="/fix-organization-link" element={<FixOrganizationLink />} />
                   <Route path="/connect-organization" element={<OAuthOrganizationLink />} />
 
-                  {/* --- Debug Routes --- */}
-                  <Route path="/debug" element={<DebugAuth />} />
                   <Route path="/test-landing" element={<LandingPage />} />
                   <Route path="/demo" element={<Demo />} />
                   <Route path="/features" element={<Features />} />
@@ -237,9 +237,6 @@ function AppContent() {
                   <Route path="/compare" element={<CompetitorAnalysis />} />
                                   <Route path="/blog" element={<Blog />} />
                 <Route path="/security" element={<Security />} />
-                <Route path="/email-test" element={<EmailTest />} />
-                <Route path="/direct-email-test" element={<DirectEmailTest />} />
-                <Route path="/smtp2go-test" element={<SMTP2GOTest />} />
                   <Route path="/integrations" element={
                     <Suspense fallback={<LoadingSpinner />}>
                       <IntegrationsPage />
@@ -309,12 +306,12 @@ function AppContent() {
                     <Route path="/unified-role-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/import-asset-balance" element={<ImportAssetBalance />} />
                     <Route path="/import-approvals" element={<ImportApprovals />} />
-                              <Route path="/import-approval/:invoiceNumber/detail" element={<ImportApprovalDetail />} />
+                    <Route path="/import-approval/:id/detail" element={<ImportApprovalDetail />} />
                     <Route path="/import-approvals-history" element={<ImportApprovalsHistory />} />
                     <Route path="/import-approvals/history" element={<ImportApprovalsHistory />} />
                     <Route path="/import-history" element={<ImportApprovalsHistory />} />
                     <Route path="/orders-report" element={<ScannedOrders />} />
-                    <Route path="/generateid" element={<CustomerRegistration />} />
+                    {/* Generate ID route removed per App Store guidelines */}
                     <Route path="/barcode-generator" element={<BarcodeGenerator />} />
                     <Route path="/owner-portal/integration-settings" element={<IntegrationSettings />} />
                     <Route path="/bottle/:id" element={<AssetDetail />} />
@@ -396,21 +393,15 @@ function AppContent() {
                       <BulkRentalPricingManager />
                     </ProtectedRoute>
                   } />
-                        <Route path="/test-emergency" element={<MinimalTest />} />
-                        <Route path="/test-simple" element={<MinimalTest />} />
-                        <Route path="/minimal-test" element={<MinimalTest />} />
-                        <Route path="/test-unprotected" element={<MinimalTest />} />
-                  <Route path="/test-advanced-features" element={
-                    <ProtectedRoute>
-                      <TestAdvancedFeatures />
-                    </ProtectedRoute>
-                  } />
 
                   {/* Catch-all for any other unmatched routes */}
                   <Route path="*" element={
-                    profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
-                    profile && !organization ? <Navigate to="/connect-organization" replace /> :
-                    <Navigate to="/" replace />
+                    loading ? <Navigate to="/" replace /> :
+                    (sessionStorage.getItem('skip_org_redirect_once') ? <Navigate to="/" replace /> : (
+                      profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
+                      profile && !organization ? <Navigate to="/connect-organization" replace /> :
+                      <Navigate to="/" replace />
+                    ))
                   } />
                 </Routes>
               </div>

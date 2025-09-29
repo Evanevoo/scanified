@@ -4,8 +4,9 @@ import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import Papa from 'papaparse';
 import { Box, Paper, Typography, Button, TextField, Alert, MenuItem, Snackbar } from '@mui/material';
-import { findCustomer, normalizeCustomerName, extractCustomerId } from '../utils/customerMatching';
+import { findCustomer, normalizeCustomerName, extractCustomerId, batchFindCustomers } from '../utils/customerMatching';
 import { TableSkeleton } from '../components/SmoothLoading';
+import { useAuth } from '../hooks/useAuth';
 
 const colorMap = {
   'blue-600': '#2563eb',
@@ -25,7 +26,14 @@ const FIELD_ALIASES = {
   CustomerListID: ['customerlistid', 'customer id', 'customer_id', 'id', 'accountnumber', 'account number', 'holderstr', 'customerlist'],
   name: ['name', 'customername', 'customer name', 'holdername', 'company', 'company name'],
   contact_details: ['contact_details', 'address', 'contact', 'contact info', 'contact information', 'address1', 'address 1', 'billtofulladdress'],
-  phone: ['phone', 'phone number', 'phonenumber', 'contact phone', 'mobile', 'mobile number']
+  phone: ['phone', 'phone number', 'phonenumber', 'contact phone', 'mobile', 'mobile number'],
+  barcode: ['barcode', 'customer_barcode', 'customer barcode', 'holderbarcode', 'customeridbarcode', 'scan code', 'scan_code'],
+  address2: ['address2', 'address 2', 'billing address 2', 'shipping address line2', 'shipping address 2'],
+  address3: ['address3', 'address 3', 'billing address 3', 'shipping address line3', 'shipping address 3'],
+  address4: ['address4', 'address 4', 'billing address 4', 'shipping address line4', 'shipping address 4'],
+  address5: ['address5', 'address 5', 'billing address 5', 'shipping address line5', 'shipping address 5'],
+  city: ['city', 'billing city', 'shipping city'],
+  postal_code: ['postal_code', 'postal code', 'zip', 'zipcode', 'billing zip', 'shipping zip', 'billing postal', 'shipping postal']
 };
 
 const ALLOWED_FIELDS = [
@@ -39,7 +47,7 @@ const ALLOWED_FIELDS = [
   { key: 'city', label: 'City' },
   { key: 'postal_code', label: 'Postal Code' },
   { key: 'phone', label: 'Phone' },
-  { key: 'customer_barcode', label: 'Customer Barcode' }
+  { key: 'barcode', label: 'Customer Barcode' }
 ];
 
 // Asset import fields for 'Import Assets by Customer'
@@ -96,16 +104,17 @@ function normalizeName(name) {
   return (name || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-// Enhanced customer matching function
-async function findExistingCustomer(customerName, customerId) {
+// Enhanced customer matching function with organization filtering
+async function findExistingCustomer(customerName, customerId, organizationId) {
   if (!customerName && !customerId) return null;
   
-  // Strategy 1: Match by exact CustomerListID (case-insensitive)
-  if (customerId) {
+  // Strategy 1: Match by exact CustomerListID (case-insensitive) within organization
+  if (customerId && organizationId) {
     const { data: customer, error } = await supabase
       .from('customers')
       .select('CustomerListID, name')
       .ilike('CustomerListID', customerId.trim())
+      .eq('organization_id', organizationId)
       .single();
     
     if (customer && !error) {
@@ -113,8 +122,8 @@ async function findExistingCustomer(customerName, customerId) {
     }
   }
   
-  // Strategy 2: Parse customer name with ID in parentheses
-  if (customerName) {
+  // Strategy 2: Parse customer name with ID in parentheses (within organization)
+  if (customerName && organizationId) {
     const idMatch = customerName.match(/\(([^)]+)\)$/);
     if (idMatch) {
       const extractedId = idMatch[1].trim();
@@ -122,6 +131,7 @@ async function findExistingCustomer(customerName, customerId) {
         .from('customers')
         .select('CustomerListID, name')
         .ilike('CustomerListID', extractedId)
+        .eq('organization_id', organizationId)
         .single();
       
       if (customer && !error) {
@@ -130,13 +140,14 @@ async function findExistingCustomer(customerName, customerId) {
     }
   }
   
-  // Strategy 3: Match by normalized name (remove parentheses and IDs)
-  if (customerName) {
+  // Strategy 3: Match by normalized name (remove parentheses and IDs) within organization
+  if (customerName && organizationId) {
     const normalizedName = customerName.replace(/\([^)]*\)/g, '').trim();
     const { data: customer, error } = await supabase
       .from('customers')
       .select('CustomerListID, name')
       .ilike('name', normalizedName)
+      .eq('organization_id', organizationId)
       .single();
     
     if (customer && !error) {
@@ -144,12 +155,13 @@ async function findExistingCustomer(customerName, customerId) {
     }
   }
   
-  // Strategy 4: Fuzzy name matching (case-insensitive)
-  if (customerName) {
+  // Strategy 4: Fuzzy name matching (case-insensitive) within organization
+  if (customerName && organizationId) {
     const { data: customers, error } = await supabase
       .from('customers')
       .select('CustomerListID, name')
-      .ilike('name', `%${customerName.trim()}%`);
+      .ilike('name', `%${customerName.trim()}%`)
+      .eq('organization_id', organizationId);
     
     if (customers && customers.length > 0 && !error) {
       // Return the first match (most exact)
@@ -171,6 +183,7 @@ const ImportCustomerInfo = () => {
   const [columns, setColumns] = useState([]); // detected columns from CSV
   const [mapping, setMapping] = useState({}); // fieldKey -> columnName
   const [showMapping, setShowMapping] = useState(false);
+  const { profile } = useAuth(); // Add useAuth hook to get profile
 
   useEffect(() => {
     const color = localStorage.getItem('themeColor') || 'blue-600';
@@ -244,23 +257,29 @@ const ImportCustomerInfo = () => {
       console.log('First 3 data rows:', dataRows.slice(0,3));
       setColumns(detectedColumns);
       // Enhanced auto-map columns by name or position
+      const normalize = (s) => (s || '').toString().toLowerCase().replace(/[^a-z0-9]/g, '');
       const initialMapping = {};
-      ALLOWED_FIELDS.forEach((f, i) => {
-        // Try to find a column by alias, case-insensitive and ignoring spaces/underscores
+      ALLOWED_FIELDS.forEach((f) => {
         const alias = FIELD_ALIASES[f.key] || [];
-        const found = detectedColumns.find(col => alias.some(a => col.toLowerCase().replace(/[^a-z0-9]/g, '') === a.toLowerCase().replace(/[^a-z0-9]/g, '')));
-        if (found) initialMapping[f.key] = found;
-        else {
-          // Try fuzzy match: contains alias
-          const fuzzy = detectedColumns.find(col => alias.some(a => col.toLowerCase().replace(/[^a-z0-9]/g, '').includes(a.toLowerCase().replace(/[^a-z0-9]/g, ''))));
-          if (fuzzy) initialMapping[f.key] = fuzzy;
-          else if (detectedColumns[i]) initialMapping[f.key] = detectedColumns[i];
+        const targetNames = [f.label, ...alias];
+        const exact = detectedColumns.find(col => targetNames.some(a => normalize(col) === normalize(a)));
+        if (exact) {
+          initialMapping[f.key] = exact;
+          return;
+        }
+        const fuzzy = detectedColumns.find(col => targetNames.some(a => normalize(col).includes(normalize(a))));
+        if (fuzzy) {
+          initialMapping[f.key] = fuzzy;
         }
       });
       // Force mapping for your example columns
       if (detectedColumns.includes('HolderStr')) initialMapping['CustomerListID'] = 'HolderStr';
       if (detectedColumns.includes('HolderName')) initialMapping['name'] = 'HolderName';
       if (detectedColumns.includes('BillToFullAddress')) initialMapping['contact_details'] = 'BillToFullAddress';
+      // Common barcode headers
+      if (detectedColumns.includes('Customer Barcode')) initialMapping['barcode'] = 'Customer Barcode';
+      if (detectedColumns.includes('Barcode')) initialMapping['barcode'] = 'Barcode';
+      if (detectedColumns.includes('HolderBarcode')) initialMapping['barcode'] = 'HolderBarcode';
       setMapping(initialMapping);
       setShowMapping(true);
       // Build preview data in batches
@@ -364,58 +383,205 @@ const ImportCustomerInfo = () => {
     let errorCount = 0;
     
     try {
-      // Enhanced customer validation and deduplication
+      // Check if user has organization
+      if (!profile?.organization_id) {
+        throw new Error('You must be linked to an organization to import customers.');
+      }
+      
+      // Enhanced customer validation and batch deduplication
       const customersToProcess = [];
       const duplicateCustomers = [];
       const invalidCustomers = [];
+      const customersToUpdate = [];
+      
+      // Filter out invalid entries and detect duplicates within import data
+      const seenCustomers = new Set();
+      const validCustomers = [];
       
       for (const customer of preview) {
-        const customerName = customer[mapping.name] || '';
-        const customerId = customer[mapping.CustomerListID] || '';
+        const customerName = customer.name || '';
+        const customerId = customer.CustomerListID || '';
         
-        // Skip if no name or ID
         if (!customerName.trim() && !customerId.trim()) {
           invalidCustomers.push('Empty name and ID');
           continue;
         }
         
-        // Check if customer already exists using enhanced matching
-        const existingCustomer = await findCustomer(customerName, customerId);
+        // Check for duplicates within the import data itself
+        const normalizedName = customerName.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+        const normalizedId = customerId.toLowerCase().trim().replace(/[a-z]+$/, ''); // Remove trailing letters
+        const duplicateKey = `${normalizedName}_${normalizedId}`;
         
-        if (existingCustomer) {
-          duplicateCustomers.push(`${customerName} (${customerId}) - matches existing: ${existingCustomer.name} (${existingCustomer.CustomerListID})`);
+        if (seenCustomers.has(duplicateKey)) {
+          duplicateCustomers.push(`${customerName} (${customerId}) - duplicate within import file`);
           continue;
         }
         
-        // Prepare customer data
+        seenCustomers.add(duplicateKey);
+        validCustomers.push(customer);
+      }
+      
+      // Batch lookup all existing customers (single database query)
+      console.log(`Checking ${validCustomers.length} customers against database...`);
+      const existingCustomerMap = await batchFindCustomers(validCustomers, profile.organization_id);
+      
+      // Process each customer using the batch lookup results
+      for (const customer of validCustomers) {
+        const customerName = customer.name || '';
+        const customerId = customer.CustomerListID || '';
+        const key = `${customerId}_${customerName}`;
+        const existingCustomer = existingCustomerMap[key];
+        
+        if (existingCustomer) {
+          // Update existing customer with missing info instead of skipping
+          const updateData = {};
+          let hasUpdates = false;
+          
+          // Check each field and update if missing in existing customer
+          if (customer.contact_details && !existingCustomer.contact_details) {
+            updateData.contact_details = customer.contact_details;
+            hasUpdates = true;
+          }
+          if (customer.address2 && !existingCustomer.address2) {
+            updateData.address2 = customer.address2;
+            hasUpdates = true;
+          }
+          if (customer.address3 && !existingCustomer.address3) {
+            updateData.address3 = customer.address3;
+            hasUpdates = true;
+          }
+          if (customer.address4 && !existingCustomer.address4) {
+            updateData.address4 = customer.address4;
+            hasUpdates = true;
+          }
+          if (customer.address5 && !existingCustomer.address5) {
+            updateData.address5 = customer.address5;
+            hasUpdates = true;
+          }
+          if (customer.city && !existingCustomer.city) {
+            updateData.city = customer.city;
+            hasUpdates = true;
+          }
+          if (customer.postal_code && !existingCustomer.postal_code) {
+            updateData.postal_code = customer.postal_code;
+            hasUpdates = true;
+          }
+          if (customer.phone && !existingCustomer.phone) {
+            updateData.phone = customer.phone;
+            hasUpdates = true;
+          }
+          if (customer.barcode && customer.barcode !== existingCustomer.barcode) {
+            updateData.barcode = (customer.barcode || '').toString().trim();
+            hasUpdates = true;
+          }
+          
+          if (hasUpdates) {
+            customersToUpdate.push({
+              CustomerListID: existingCustomer.CustomerListID,
+              updateData,
+              displayName: `${customerName} (${customerId})`
+            });
+          } else {
+            duplicateCustomers.push(`${customerName} (${customerId}) - already exists with complete info`);
+          }
+          continue;
+        }
+        
+        // Prepare customer data for new customers
         const customerData = {
           CustomerListID: customerId.trim() || generateCustomerId(),
           name: customerName.trim(),
-          contact_details: customer[mapping.contact_details] || '',
-          address2: customer[mapping.address2] || '',
-          address3: customer[mapping.address3] || '',
-          address4: customer[mapping.address4] || '',
-          address5: customer[mapping.address5] || '',
-          city: customer[mapping.city] || '',
-          postal_code: customer[mapping.postal_code] || '',
-          phone: customer[mapping.phone] || '',
-          customer_barcode: customer[mapping.customer_barcode] || `*%${customerId.trim()}*`,
+          contact_details: customer.contact_details || '',
+          address2: customer.address2 || '',
+          address3: customer.address3 || '',
+          address4: customer.address4 || '',
+          address5: customer.address5 || '',
+          city: customer.city || '',
+          postal_code: customer.postal_code || '',
+          phone: customer.phone || '',
+          barcode: (customer.barcode || '').toString().trim() || null,
+          organization_id: profile.organization_id
         };
         
         customersToProcess.push(customerData);
       }
       
-      // Import new customers
+      // Batch update existing customers
+      if (customersToUpdate.length > 0) {
+        console.log(`Updating ${customersToUpdate.length} existing customers...`);
+        for (const { CustomerListID, updateData, displayName } of customersToUpdate) {
+          const { error: updateError } = await supabase
+            .from('customers')
+            .update(updateData)
+            .eq('CustomerListID', CustomerListID);
+          
+          if (!updateError) {
+            duplicateCustomers.push(`${displayName} - updated existing customer with missing info`);
+          } else {
+            duplicateCustomers.push(`${displayName} - failed to update existing customer`);
+          }
+        }
+      }
+      
+      // Import new customers with conflict handling
       if (customersToProcess.length > 0) {
-        const { error: insertError } = await supabase
+        console.log(`Importing ${customersToProcess.length} new customers...`);
+        
+        // Use upsert to handle duplicate key conflicts gracefully
+        const { data: insertData, error: insertError } = await supabase
           .from('customers')
-          .insert(customersToProcess);
+          .upsert(customersToProcess, {
+            onConflict: 'organization_id,CustomerListID',
+            ignoreDuplicates: false
+          });
         
         if (insertError) {
-          throw new Error(`Import error: ${insertError.message}`);
+          console.error('Insert error:', insertError);
+          
+          // If it's a constraint violation, try individual inserts to identify the problem
+          if (insertError.code === '23505' || insertError.message.includes('duplicate key')) {
+            console.log('Constraint violation detected, trying individual inserts...');
+            
+            let successCount = 0;
+            let conflictCount = 0;
+            const conflictCustomers = [];
+            
+            for (const customer of customersToProcess) {
+              try {
+                const { error: singleInsertError } = await supabase
+                  .from('customers')
+                  .insert([customer]);
+                
+                if (singleInsertError) {
+                  if (singleInsertError.code === '23505' || singleInsertError.message.includes('duplicate key')) {
+                    conflictCount++;
+                    conflictCustomers.push(`${customer.name} (${customer.CustomerListID})`);
+                    console.log(`Conflict: ${customer.name} (${customer.CustomerListID})`);
+                  } else {
+                    throw singleInsertError;
+                  }
+                } else {
+                  successCount++;
+                }
+              } catch (err) {
+                console.error(`Error inserting ${customer.name}:`, err);
+                conflictCount++;
+                conflictCustomers.push(`${customer.name} (${customer.CustomerListID})`);
+              }
+            }
+            
+            importedCount = successCount;
+            duplicateCustomers.push(...conflictCustomers.map(name => `${name} - duplicate CustomerListID`));
+            
+            if (successCount > 0) {
+              console.log(`Successfully imported ${successCount} customers, ${conflictCount} conflicts resolved`);
+            }
+          } else {
+            throw new Error(`Import error: ${insertError.message}`);
+          }
+        } else {
+          importedCount = customersToProcess.length;
         }
-        
-        importedCount = customersToProcess.length;
       }
       
       skippedCount = duplicateCustomers.length + invalidCustomers.length;
@@ -478,7 +644,10 @@ const ImportCustomerInfo = () => {
       const mapped = {};
       Object.entries(mapping).forEach(([fieldKey, columnName]) => {
         if (columnName && row[columnName] !== undefined) {
-          mapped[fieldKey] = row[columnName];
+          let val = row[columnName];
+          if (typeof val === 'string') val = val.trim();
+          if (fieldKey === 'CustomerListID') val = normalizeId(val);
+          mapped[fieldKey] = val;
         }
       });
       return mapped;

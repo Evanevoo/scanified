@@ -230,14 +230,22 @@ export default function QuantityDiscrepancyDetector({ orderNumber, customerId, o
         return;
       }
       
-      // Get scanned quantities
+      // Get scanned quantities from bottle_scans table
       const { data: scannedData, error: scannedError } = await supabase
-        .from('sales_orders')
+        .from('bottle_scans')
         .select('*')
-        .eq('sales_order_number', orderNumber)
+        .eq('order_number', orderNumber)
         .eq('organization_id', organizationId);
       
+      console.log('🔍 QuantityDiscrepancyDetector - Scanned data:', {
+        orderNumber,
+        organizationId,
+        scannedData: scannedData?.length || 0,
+        scannedError: scannedError?.message || 'none'
+      });
+      
       if (scannedError) {
+        console.error('❌ Error fetching scanned data:', scannedError);
         // Continue without scanned data
       }
       
@@ -253,28 +261,30 @@ export default function QuantityDiscrepancyDetector({ orderNumber, customerId, o
         if (shippedQty > 0 || returnedQty > 0) {
           const productCode = lineItem.product_code || lineItem.ProductCode || lineItem.barcode_number || lineItem.barcode || lineItem.sku || lineItem.SKU || 'Unknown';
           
-          // Count scanned quantities
+          // Count scanned quantities from bottle_scans
           let scannedShip = 0;
           let scannedReturn = 0;
           
           if (scannedData && scannedData.length > 0) {
-            for (const order of scannedData) {
-              if (order.assets) {
-                try {
-                  const assets = typeof order.assets === 'string' ? JSON.parse(order.assets) : order.assets;
-                  if (Array.isArray(assets)) {
-                    assets.forEach(asset => {
-                      if (asset.product_code === productCode || asset.barcode === productCode) {
-                        if (asset.mode === 'SHIP') {
-                          scannedShip++;
-                        } else if (asset.mode === 'RETURN') {
-                          scannedReturn++;
-                        }
-                      }
-                    });
-                  }
-                } catch (parseError) {
-                  console.warn('Failed to parse assets for order:', order.id);
+            for (const scan of scannedData) {
+              // Check if this scan matches the product code
+              const scanProductCode = scan.product_code || scan.bottle_barcode || scan.barcode_number;
+              console.log('🔍 Checking scan:', {
+                scanProductCode,
+                productCode,
+                mode: scan.mode,
+                scanType: scan.scan_type,
+                matches: scanProductCode === productCode
+              });
+              
+              if (scanProductCode === productCode) {
+                // Count based on mode
+                if (scan.mode === 'SHIP' || scan.mode === 'out' || scan.scan_type === 'delivery') {
+                  scannedShip++;
+                  console.log('📦 Scanned SHIP count:', scannedShip);
+                } else if (scan.mode === 'RETURN' || scan.mode === 'in' || scan.scan_type === 'pickup') {
+                  scannedReturn++;
+                  console.log('📦 Scanned RETURN count:', scannedReturn);
                 }
               }
             }

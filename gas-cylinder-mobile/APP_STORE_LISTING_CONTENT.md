@@ -8,7 +8,7 @@ Transform your asset management with AssetTrack Pro, the professional solution f
 **Key Features:**
 • Barcode scanning for instant asset identification
 • Real-time inventory tracking and synchronization
-• Multi-user collaboration with role-based access
+• Team collaboration with role-based access controls
 • Comprehensive compliance reporting
 • Offline mode for uninterrupted operations
 • Custom fields for your specific needs
@@ -19,8 +19,8 @@ Manufacturing companies, healthcare facilities, educational institutions, govern
 **Why Choose AssetTrack Pro:**
 Enterprise-grade security, intuitive interface, scalable solution that grows with your business, and comprehensive support.
 
-**New in Version 1.0.7:**
-Enhanced barcode scanning accuracy, improved offline synchronization, new reporting features, bug fixes, and performance improvements.
+**New in Version 1.0.11:**
+Enhanced iOS-optimized barcode scanning accuracy, improved offline synchronization, new reporting features, iPad optimization, and performance improvements specifically for iOS devices.
 
 Transform your asset management process today. Download AssetTrack Pro and experience professional-grade inventory tracking that saves time, reduces errors, and ensures compliance.
 
@@ -56,7 +56,7 @@ In today's fast-paced business environment, accurate asset tracking is crucial f
 • Maintenance scheduling and tracking
 • Asset condition monitoring
 
-**👥 Multi-User Collaboration**
+**👥 Team Collaboration**
 • Organization-based user management
 • Role-based access controls (Admin, Manager, User)
 • Team collaboration features
@@ -64,7 +64,7 @@ In today's fast-paced business environment, accurate asset tracking is crucial f
 • Secure data sharing within your organization
 
 **☁️ Cloud Synchronization**
-• Real-time data synchronization across all devices
+• Real-time data synchronization across iOS devices
 • Automatic backup and data protection
 • Conflict resolution for simultaneous edits
 • Version history and change tracking
@@ -157,15 +157,15 @@ Grows with your business from small teams to large enterprises. Flexible archite
 
 AssetTrack Pro takes your data security seriously. All data is encrypted in transit and at rest. We comply with enterprise security standards and never share your data with third parties. Your information is stored securely in enterprise-grade cloud infrastructure.
 
-**What's New in Version 1.0.7:**
+**What's New in Version 1.0.11:**
 
-• Enhanced barcode scanning accuracy and speed
-• Improved offline synchronization performance
-• New advanced reporting features
-• Enhanced user interface with better navigation
-• Bug fixes and performance improvements
-• Additional customization options
-• Improved data export capabilities
+• Enhanced iOS-optimized barcode scanning accuracy and speed
+• Improved offline synchronization performance for iOS devices
+• New advanced reporting features with iOS-native interface
+• Enhanced user interface optimized for iPhone and iPad
+• iOS-specific bug fixes and performance improvements
+• Additional customization options for iOS users
+• Improved data export capabilities with iOS sharing integration
 
 **System Requirements:**
 

@@ -1,18 +1,18 @@
 import { createTheme } from '@mui/material/styles';
 
-// Custom color palette
+// Custom color palette - Scanified Branding
 const colors = {
   primary: {
-    50: '#eff6ff',
-    100: '#dbeafe',
-    200: '#bfdbfe',
-    300: '#93c5fd',
-    400: '#60a5fa',
-    500: '#3b82f6',
-    600: '#2563eb',
-    700: '#1d4ed8',
-    800: '#1e40af',
-    900: '#1e3a8a',
+    50: '#E8F7F5',
+    100: '#C2EBE7',
+    200: '#9BDED8',
+    300: '#74D1C9',
+    400: '#5FCDC5',
+    500: '#40B5AD',
+    600: '#389F98',
+    700: '#2D8B85',
+    800: '#227770',
+    900: '#186359',
   },
   success: {
     50: '#f0fdf4',

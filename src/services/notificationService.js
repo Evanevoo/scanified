@@ -3,7 +3,7 @@
  * Handles sending email notifications when support tickets are created
  */
 
-const SITE_URL = process.env.NODE_ENV === 'production' 
+const SITE_URL = import.meta.env.MODE === 'production' 
   ? 'https://www.scanified.com' 
   : 'http://localhost:5174';
 
@@ -23,7 +23,7 @@ export const sendSupportTicketNotification = async (ticketData, userData, organi
     });
 
     // Get owner email from environment or use a default
-    const ownerEmail = process.env.REACT_APP_OWNER_EMAIL || 'support@scanified.com';
+    const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'support@scanified.com';
     
     const response = await fetch('/.netlify/functions/send-email', {
       method: 'POST',
@@ -82,7 +82,7 @@ export const sendSupportTicketReplyNotification = async (ticketData, replyData, 
     });
 
     // Get owner email from environment or use a default
-    const ownerEmail = process.env.REACT_APP_OWNER_EMAIL || 'support@scanified.com';
+    const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'support@scanified.com';
     
     const response = await fetch('/.netlify/functions/send-email', {
       method: 'POST',

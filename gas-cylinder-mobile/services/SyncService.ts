@@ -546,12 +546,16 @@ export class SyncService {
           const scanData = {
             order_number: scan.order_number,
             bottle_barcode: scan.bottle_barcode || scan.barcode,
-            mode: scan.mode || scan.scan_type,
+            mode: scan.mode || scan.scan_type || scan.action,
             customer_id: scan.customer_id,
+            customer_name: scan.customer_name,
             location: scan.location,
-            timestamp: scan.timestamp,
+            scan_date: scan.scan_date || scan.timestamp || new Date().toISOString(),
+            timestamp: scan.timestamp || new Date().toISOString(),
             user_id: scan.user_id,
             organization_id: profile.organization_id,
+            created_at: scan.created_at || new Date().toISOString(),
+            notes: scan.notes
           };
 
           const { error } = await supabase

@@ -1,12 +1,12 @@
 {
   "expo": {
     "name": "Scanified",
-    "slug": "scanified-mobile",
+    "slug": "scanified-web",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "platforms": ["ios"],
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -17,23 +17,10 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.evanevoo.scanifiedmobile"
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#000000"
-      },
-      "edgeToEdgeEnabled": true,
-      "package": "com.evanevoo.scanifiedmobile",
-      "versionCode": 1,
-      "permissions": [
-        "CAMERA",
-        "INTERNET",
-        "ACCESS_NETWORK_STATE",
-        "WRITE_EXTERNAL_STORAGE",
-        "READ_EXTERNAL_STORAGE"
-      ]
+      "bundleIdentifier": "com.evanevoo.scanified",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow Scanified to access your camera to scan asset barcodes and manage your organization's inventory with enterprise-grade precision."
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"

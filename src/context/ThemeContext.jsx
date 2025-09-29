@@ -36,6 +36,37 @@ const globalStyles = {
     boxSizing: 'border-box',
     transition: 'background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease',
   },
+  // Fix for Material-UI tab movement/vibration issues
+  '.MuiTab-root': {
+    transition: 'none !important',
+    transform: 'none !important',
+    animation: 'none !important',
+    '&:hover': {
+      backgroundColor: 'transparent !important',
+      transform: 'none !important',
+      transition: 'none !important',
+      animation: 'none !important',
+    },
+    '&:focus': {
+      backgroundColor: 'transparent !important',
+      transform: 'none !important',
+      transition: 'none !important',
+      animation: 'none !important',
+    },
+    '&::before': {
+      display: 'none !important',
+    },
+    '&::after': {
+      display: 'none !important',
+    }
+  },
+  '.MuiTabs-indicator': {
+    transition: 'none !important',
+    animation: 'none !important',
+  },
+  '.MuiTouchRipple-root': {
+    display: 'none !important',
+  },
   html: {
     fontSize: '16px',
     fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
@@ -164,8 +195,8 @@ export const ThemeProvider = ({ children }) => {
   
   const [accent, setAccent] = useState('#1976d2');
   const [organizationColors, setOrganizationColors] = useState({
-    primary: '#2563eb',
-    secondary: '#1e40af'
+    primary: '#40B5AD',
+    secondary: '#48C9B0'
   });
 
   // Load user-specific accent color and organization colors when user changes
@@ -185,24 +216,24 @@ export const ThemeProvider = ({ children }) => {
             if (!hexAccent.startsWith('#')) {
               // If it's a color key like 'blue-600', convert it to hex
               const colorMap = {
-                'blue-600': '#2563eb',
-                'emerald-500': '#10b981',
-                'purple-600': '#7c3aed',
+                'blue-600': '#40B5AD',
+                'emerald-500': '#48C9B0',
+                'purple-600': '#8B7BA8',
                 'rose-500': '#f43f5e',
                 'amber-500': '#f59e42',
-                'teal-500': '#14b8a6',
-                'cyan-500': '#06b6d4',
-                'green-500': '#22c55e',
+                'teal-500': '#40B5AD',
+                'cyan-500': '#5FCDC5',
+                'green-500': '#48C9B0',
                 'orange-500': '#f97316',
                 'red-500': '#ef4444',
                 'pink-500': '#ec4899',
                 'indigo-500': '#6366f1',
                 'lime-500': '#84cc16',
-                'violet-600': '#a21caf',
+                'violet-600': '#8B7BA8',
                 'slate-500': '#64748b',
-                'sky-500': '#0ea5e9',
+                'sky-500': '#5FCDC5',
               };
-              hexAccent = colorMap[hexAccent] || '#1976d2';
+              hexAccent = colorMap[hexAccent] || '#40B5AD';
             }
             setAccent(hexAccent);
           } else {
@@ -226,13 +257,13 @@ export const ThemeProvider = ({ children }) => {
   useEffect(() => {
     if (organization) {
       setOrganizationColors({
-        primary: organization.primary_color || '#2563eb',
-        secondary: organization.secondary_color || '#1e40af'
+        primary: organization.primary_color || '#40B5AD',
+        secondary: organization.secondary_color || '#48C9B0'
       });
     } else {
       setOrganizationColors({
-        primary: '#2563eb',
-        secondary: '#1e40af'
+        primary: '#40B5AD',
+        secondary: '#48C9B0'
       });
     }
   }, [organization]);

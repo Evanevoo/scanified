@@ -1,9 +1,13 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination, Chip
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination, Chip, IconButton
 } from '@mui/material';
+import SearchIcon from '@mui/icons-material/Search';
+import ClearIcon from '@mui/icons-material/Clear';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useAuth } from '../hooks/useAuth';
 
@@ -93,7 +97,9 @@ function Customers({ profile }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState(''); // Input value
+  const [sortField, setSortField] = useState('name'); // Field to sort by
+  const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
   const [locationFilter, setLocationFilter] = useState('All');
   const [successMsg, setSuccessMsg] = useState('');
   const [page, setPage] = useState(1);
@@ -105,100 +111,127 @@ function Customers({ profile }) {
   const navigate = useNavigate();
   const { organization } = useAuth();
 
-  // Fetch customers with pagination
-  useEffect(() => {
+
+  // Create a stable fetch function
+  const fetchCustomers = async (searchTerm = '') => {
     if (!organization?.id) return;
-    const fetchCustomers = async () => {
-      console.log('Fetching customers...');
-      setLoading(true);
-      try {
+    
+    console.log('Fetching customers...');
+    setLoading(true);
+    try {
+      // Build base query
+      let query = supabase
+        .from('customers')
+        .select('*', { count: 'exact' })
+        .eq('organization_id', organization.id);
+
+      // Apply location filter
+      if (locationFilter !== 'All') {
+        query = query.eq('location', locationFilter);
+      }
+
+      // Apply search filter if search term exists
+      if (searchTerm.trim()) {
+        const searchLower = searchTerm.toLowerCase();
+        query = query.or(`name.ilike.%${searchLower}%,CustomerListID.ilike.%${searchLower}%,contact_details.ilike.%${searchLower}%,phone.ilike.%${searchLower}%,city.ilike.%${searchLower}%,postal_code.ilike.%${searchLower}%`);
+      }
+
+      // Apply sorting
+      const orderDirection = sortDirection === 'asc' ? 'asc' : 'desc';
+      query = query.order(sortField, { ascending: sortDirection === 'asc' });
+
+      // If searching, get all results; otherwise use pagination
+      let data, error, count;
+      if (searchTerm.trim()) {
+        // When searching, get all matching results
+        const result = await query;
+        data = result.data;
+        error = result.error;
+        count = result.count;
+      } else {
+        // When not searching, use pagination
         const from = (page - 1) * rowsPerPage;
         const to = from + rowsPerPage - 1;
-
-        // Build query with filters
-        let query = supabase
-          .from('customers')
-          .select('*', { count: 'exact', head: true })
-          .eq('organization_id', organization.id);
-
-        // Apply location filter
-        if (locationFilter !== 'All') {
-          query = query.eq('location', locationFilter);
-        }
-
-        // Get total count
-        const { count, error: countError } = await query;
-
-        if (countError) {
-          console.error('Error getting count:', countError);
-          throw countError;
-        }
-
-        setTotalCount(count || 0);
-
-        // Get paginated customers
-        let dataQuery = supabase
-          .from('customers')
-          .select('*')
-          .order('name')
-          .range(from, to)
-          .eq('organization_id', organization.id);
-
-        // Apply location filter to data query
-        if (locationFilter !== 'All') {
-          dataQuery = dataQuery.eq('location', locationFilter);
-        }
-
-        const { data, error } = await dataQuery;
-
-        if (error) {
-          console.error('Error fetching customers:', error);
-          throw error;
-        }
-        
-        console.log('Customers fetched successfully:', data?.length || 0);
-        setCustomers(data || []);
-
-        // Fetch asset counts for these customers
-        if (data && data.length > 0) {
-          const customerIds = data.map(c => c.CustomerListID);
-          const { data: rentalData, error: rentalError } = await supabase
-            .from('rentals')
-            .select('customer_id')
-            .in('customer_id', customerIds)
-            .is('rental_end_date', null); // Only active rentals
-
-          if (rentalError) {
-            console.error('Error fetching rental data:', rentalError);
-          } else {
-            const counts = {};
-            rentalData?.forEach(rental => {
-              counts[rental.customer_id] = (counts[rental.customer_id] || 0) + 1;
-            });
-            setAssetCounts(counts);
-          }
-        }
-      } catch (err) {
-        console.error('Error in fetchCustomers:', err);
-        setError(err.message);
+        const result = await query.range(from, to);
+        data = result.data;
+        error = result.error;
+        count = result.count;
       }
-      setLoading(false);
-    };
 
-    fetchCustomers();
-  }, [page, rowsPerPage, locationFilter, organization]);
+      if (error) {
+        console.error('Error fetching customers:', error);
+        throw error;
+      }
 
-  // Debounced search
-  const debouncedSearch = useMemo(() => {
-    let timeoutId;
-    return (value) => {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        setSearchTerm(value);
-        setPage(1); // Reset to first page when searching
-      }, 300);
-    };
-  }, []);
+      console.log('Customers fetched successfully:', data?.length || 0, 'Total count:', count);
+      setCustomers(data || []);
+      setTotalCount(count || 0);
+
+      // Fetch asset counts for these customers
+      if (data && data.length > 0) {
+        const customerIds = data.map(c => c.CustomerListID);
+        const { data: rentalData, error: rentalError } = await supabase
+          .from('rentals')
+          .select('customer_id')
+          .in('customer_id', customerIds)
+          .is('rental_end_date', null); // Only active rentals
+
+        if (rentalError) {
+          console.error('Error fetching rental data:', rentalError);
+        } else {
+          const counts = {};
+          rentalData?.forEach(rental => {
+            counts[rental.customer_id] = (counts[rental.customer_id] || 0) + 1;
+          });
+          setAssetCounts(counts);
+        }
+      }
+    } catch (err) {
+      console.error('Error in fetchCustomers:', err);
+      setError(err.message);
+    }
+    setLoading(false);
+  };
+
+  // Initial load and pagination changes
+  useEffect(() => {
+    fetchCustomers('');
+  }, [organization, locationFilter, page, rowsPerPage, sortField, sortDirection]);
+
+  // Search on Enter key press only
+  const handleSearch = (searchTerm) => {
+    setPage(1); // Reset to first page when searching
+    fetchCustomers(searchTerm);
+  };
+
+  const handleSearchChange = (e) => {
+    setSearchInput(e.target.value);
+  };
+
+  const handleSearchKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleSearch(searchInput);
+    }
+  };
+
+  const handleClearSearch = () => {
+    setSearchInput('');
+    setPage(1);
+    fetchCustomers(''); // Fetch all customers
+  };
+
+  const handleSort = (field) => {
+    console.log('Sorting by:', field, 'Current sort:', sortField, sortDirection);
+    if (sortField === field) {
+      // Toggle direction if same field
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      // New field, default to ascending
+      setSortField(field);
+      setSortDirection('asc');
+    }
+    setPage(1); // Reset to first page when sorting
+  };
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -393,16 +426,10 @@ function Customers({ profile }) {
     }
   };
 
-  // Defensive filter: only show customers for this organization
-  const filteredCustomers = customers
-    .filter(c => c.organization_id === organization?.id)
-    .filter(c => 
-      c.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.CustomerListID?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.contact_details?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+  // No need for client-side filtering since we search at database level
+  const filteredCustomers = customers;
 
-  const pageCount = Math.ceil(totalCount / rowsPerPage);
+  const pageCount = searchInput.trim() ? 1 : Math.ceil(totalCount / rowsPerPage);
 
   if (!organization?.id) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
   if (loading) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
@@ -480,13 +507,34 @@ function Customers({ profile }) {
           <Typography variant="h4" fontWeight={800} color="#1976d2" sx={{ mb: 2 }}>Customer Management</Typography>
           
           <Box display="flex" gap={2} alignItems="center" mb={3}>
-            <TextField
-              placeholder="Search customers by name, ID, or contact..."
-              onChange={e => debouncedSearch(e.target.value)}
-              fullWidth
-              size="medium"
-              sx={{ maxWidth: 400 }}
-            />
+            <Box display="flex" alignItems="center" sx={{ maxWidth: 450 }}>
+              <TextField
+                placeholder="Search customers by name, ID, or contact..."
+                value={searchInput}
+                onChange={handleSearchChange}
+                onKeyPress={handleSearchKeyPress}
+                fullWidth
+                size="medium"
+              />
+              <IconButton 
+                onClick={() => handleSearch(searchInput)}
+                color="primary"
+                sx={{ ml: 1 }}
+                title="Search (or press Enter)"
+              >
+                <SearchIcon />
+              </IconButton>
+              {searchInput && (
+                <IconButton 
+                  onClick={handleClearSearch}
+                  color="secondary"
+                  sx={{ ml: 0.5 }}
+                  title="Clear search"
+                >
+                  <ClearIcon />
+                </IconButton>
+              )}
+            </Box>
             <FormControl size="small" sx={{ minWidth: 150 }}>
               <Select
                 value={locationFilter}
@@ -516,8 +564,10 @@ function Customers({ profile }) {
           </Box>
           
           <Typography variant="body2" color="text.secondary" mb={2}>
-            Showing {customers.length} of {totalCount} customers
-            {searchTerm && ` (filtered by "${searchTerm}")`}
+            {searchInput.trim() 
+              ? `Found ${customers.length} customers matching "${searchInput}"`
+              : `Showing ${customers.length} of ${totalCount} customers`
+            }
             {locationFilter !== 'All' && ` (location: ${locationFilter})`}
           </Typography>
         </Box>
@@ -534,11 +584,71 @@ function Customers({ profile }) {
                     onChange={handleSelectAll}
                   />
                 </TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Name</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Customer #</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Contact</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Phone</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>
+                  <Box 
+                    display="flex" 
+                    alignItems="center" 
+                    sx={{ cursor: 'pointer', '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' } }}
+                    onClick={() => handleSort('name')}
+                  >
+                    Name
+                    {sortField === 'name' && (
+                      sortDirection === 'asc' ? <ArrowUpwardIcon sx={{ ml: 1, fontSize: 16 }} /> : <ArrowDownwardIcon sx={{ ml: 1, fontSize: 16 }} />
+                    )}
+                  </Box>
+                </TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>
+                  <Box 
+                    display="flex" 
+                    alignItems="center" 
+                    sx={{ cursor: 'pointer', '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' } }}
+                    onClick={() => handleSort('customer_type')}
+                  >
+                    Type
+                    {sortField === 'customer_type' && (
+                      sortDirection === 'asc' ? <ArrowUpwardIcon sx={{ ml: 1, fontSize: 16 }} /> : <ArrowDownwardIcon sx={{ ml: 1, fontSize: 16 }} />
+                    )}
+                  </Box>
+                </TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>
+                  <Box 
+                    display="flex" 
+                    alignItems="center" 
+                    sx={{ cursor: 'pointer', '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' } }}
+                    onClick={() => handleSort('CustomerListID')}
+                  >
+                    Customer #
+                    {sortField === 'CustomerListID' && (
+                      sortDirection === 'asc' ? <ArrowUpwardIcon sx={{ ml: 1, fontSize: 16 }} /> : <ArrowDownwardIcon sx={{ ml: 1, fontSize: 16 }} />
+                    )}
+                  </Box>
+                </TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>
+                  <Box 
+                    display="flex" 
+                    alignItems="center" 
+                    sx={{ cursor: 'pointer', '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' } }}
+                    onClick={() => handleSort('contact_details')}
+                  >
+                    Contact
+                    {sortField === 'contact_details' && (
+                      sortDirection === 'asc' ? <ArrowUpwardIcon sx={{ ml: 1, fontSize: 16 }} /> : <ArrowDownwardIcon sx={{ ml: 1, fontSize: 16 }} />
+                    )}
+                  </Box>
+                </TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>
+                  <Box 
+                    display="flex" 
+                    alignItems="center" 
+                    sx={{ cursor: 'pointer', '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' } }}
+                    onClick={() => handleSort('phone')}
+                  >
+                    Phone
+                    {sortField === 'phone' && (
+                      sortDirection === 'asc' ? <ArrowUpwardIcon sx={{ ml: 1, fontSize: 16 }} /> : <ArrowDownwardIcon sx={{ ml: 1, fontSize: 16 }} />
+                    )}
+                  </Box>
+                </TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Total Assets</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
               </TableRow>
@@ -622,19 +732,21 @@ function Customers({ profile }) {
           </Table>
         </TableContainer>
 
-        {/* Pagination */}
-        <Box display="flex" justifyContent="center" alignItems="center" my={2}>
-          <Pagination
-            count={pageCount}
-            page={page}
-            onChange={(_, value) => setPage(value)}
-            color="primary"
-            shape="rounded"
-            showFirstButton
-            showLastButton
-            size="large"
-          />
-        </Box>
+        {/* Pagination - hide when searching */}
+        {!searchInput.trim() && pageCount > 1 && (
+          <Box display="flex" justifyContent="center" alignItems="center" my={2}>
+            <Pagination
+              count={pageCount}
+              page={page}
+              onChange={(_, value) => setPage(value)}
+              color="primary"
+              shape="rounded"
+              showFirstButton
+              showLastButton
+              size="large"
+            />
+          </Box>
+        )}
 
         {/* Success/Error Messages */}
         <Snackbar open={!!successMsg} autoHideDuration={6000} onClose={() => setSuccessMsg('')}>

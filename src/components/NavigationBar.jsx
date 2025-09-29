@@ -107,7 +107,7 @@ export default function NavigationBar() {
   };
 
   // Don't show navigation on certain pages
-  const hideNavPages = ['/login', '/register'];
+  const hideNavPages = ['/login'];
   if (hideNavPages.includes(location.pathname) || profile) {
     return null;
   }
@@ -244,7 +244,7 @@ export default function NavigationBar() {
                 </Button>
                 <Button
                   variant="contained"
-                  onClick={() => navigate('/register')}
+                  onClick={() => navigate('/contact')}
                   sx={{
                     textTransform: 'none',
                     fontWeight: 600,
@@ -254,7 +254,7 @@ export default function NavigationBar() {
                     }
                   }}
                 >
-                  Start Free Trial
+                  Contact Us
                 </Button>
               </Stack>
 
@@ -368,14 +368,14 @@ export default function NavigationBar() {
                   <Button
                     fullWidth
                     variant="contained"
-                    onClick={() => handleNavigate('/register')}
+                    onClick={() => handleNavigate('/contact')}
                     sx={{
                       textTransform: 'none',
                       fontWeight: 600,
                       py: 1.5
                     }}
                   >
-                    Start Free Trial
+                    Contact Us
                   </Button>
                 </Stack>
               </Box>

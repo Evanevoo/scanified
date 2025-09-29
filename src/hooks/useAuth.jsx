@@ -26,6 +26,10 @@ export const AuthProvider = ({ children }) => {
   const lastAuthStateRef = useRef(null);
   const previousSessionRef = useRef(null);
   const isInitialLoadRef = useRef(true);
+  const inactivityTimerRef = useRef(null);
+
+  // 15 minutes inactivity auto-logout
+  const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
 
   // Only log initialization once
   useEffect(() => {
@@ -233,6 +237,61 @@ export const AuthProvider = ({ children }) => {
       }
     };
   }, []);
+
+  // Auto-logout on window close and after inactivity
+  useEffect(() => {
+    // Helper to safely sign out without redirect loops
+    const safeSignOut = () => {
+      try {
+        sessionStorage.setItem('skip_org_redirect_once', '1');
+      } catch (e) {}
+      try {
+        // Fire and forget
+        supabase.auth.signOut();
+      } catch (e) {
+        console.warn('Auto sign-out error (ignored):', e);
+      }
+    };
+
+    const resetInactivityTimer = () => {
+      if (!user) return; // Only track when logged in
+      if (inactivityTimerRef.current) {
+        clearTimeout(inactivityTimerRef.current);
+      }
+      inactivityTimerRef.current = setTimeout(() => {
+        safeSignOut();
+        // Hard navigate to login to ensure clean state
+        try { window.location.href = '/login'; } catch (e) {}
+      }, INACTIVITY_TIMEOUT_MS);
+    };
+
+    const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    const onActivity = () => resetInactivityTimer();
+
+    const onUnload = () => {
+      if (user) {
+        safeSignOut();
+      }
+    };
+
+    // Attach listeners only if user is logged in
+    if (user) {
+      activityEvents.forEach((evt) => window.addEventListener(evt, onActivity, { passive: true }));
+      window.addEventListener('beforeunload', onUnload);
+      window.addEventListener('pagehide', onUnload);
+      resetInactivityTimer();
+    }
+
+    return () => {
+      if (inactivityTimerRef.current) {
+        clearTimeout(inactivityTimerRef.current);
+        inactivityTimerRef.current = null;
+      }
+      activityEvents.forEach((evt) => window.removeEventListener(evt, onActivity));
+      window.removeEventListener('beforeunload', onUnload);
+      window.removeEventListener('pagehide', onUnload);
+    };
+  }, [user]);
 
   // Memoize the context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({
