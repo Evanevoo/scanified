@@ -24,7 +24,6 @@ import StatusIndicator from '../components/StatusIndicator';
 import FieldToolsPanel from '../components/FieldToolsPanel';
 import { fieldToolsService, LocationData } from '../services/fieldToolsService';
 import { customizationService } from '../services/customizationService';
-import CustomizationScreen from './CustomizationScreen';
 import { AccessibilityHelper, AccessibleButton, ScreenReaderAnnouncement } from '../components/AccessibilityHelper';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { 
@@ -93,7 +92,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   const [scanSpeed, setScanSpeed] = useState<'normal' | 'fast' | 'rapid'>('normal');
   const [showBatchSummary, setShowBatchSummary] = useState(false);
   const [showFieldTools, setShowFieldTools] = useState(false);
-  const [showCustomization, setShowCustomization] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [showScannedItems, setShowScannedItems] = useState(false);
   const [currentLocationData, setCurrentLocationData] = useState<LocationData | null>(null);
@@ -2049,14 +2047,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         }}
       />
 
-      {/* Customization Screen */}
-      <CustomizationScreen
-        visible={showCustomization}
-        onClose={() => {
-          setShowCustomization(false);
-          loadCustomizationSettings(); // Reload settings when closing
-        }}
-      />
 
       {/* Screen Reader Announcements */}
       {customizationSettings?.accessibility?.speakScanResults && (
