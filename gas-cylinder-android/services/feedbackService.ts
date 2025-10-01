@@ -68,22 +68,17 @@ class FeedbackService {
    * Preload sound effects for better performance
    */
   private async preloadSounds() {
-    // For now, we'll skip preloading actual sound files
-    // In production, you would add actual sound files to assets/sounds/
-    // and uncomment the code below
+    console.log('🔊 Preloading sound files...');
     
-    console.log('🔊 Sound preloading skipped - using haptic feedback instead');
-    
-    // TODO: Add actual sound files to assets/sounds/ and uncomment this:
-    /*
     const soundFiles = {
-      success: require('../assets/sounds/success.mp3'),
-      error: require('../assets/sounds/error.mp3'),
-      duplicate: require('../assets/sounds/duplicate.mp3'),
-      batch_complete: require('../assets/sounds/batch_complete.mp3'),
-      warning: require('../assets/sounds/warning.mp3'),
-      info: require('../assets/sounds/info.mp3'),
-      beep: require('../assets/sounds/beep.mp3'),
+      success: require('../assets/sounds/scan_success.mp3'),
+      error: require('../assets/sounds/scan_error.mp3'),
+      duplicate: require('../assets/sounds/scan_success.mp3'), // Use success sound for duplicates
+      batch_complete: require('../assets/sounds/sync_success.mp3'),
+      warning: require('../assets/sounds/scan_error.mp3'), // Use error sound for warnings
+      info: require('../assets/sounds/button_press.mp3'),
+      start_batch: require('../assets/sounds/button_press.mp3'),
+      quick_action: require('../assets/sounds/button_press.mp3'),
     };
 
     try {
@@ -94,15 +89,16 @@ class FeedbackService {
             volume: this.settings.volume,
           });
           this.sounds[key] = sound;
+          console.log(`🔊 Loaded sound: ${key}`);
         } catch (error) {
           this.sounds[key] = null;
-          console.log(`🔊 Using system sound for ${key} (audio file not found)`);
+          console.log(`🔊 Could not load sound for ${key}:`, error);
         }
       }
+      console.log('🔊 Sound preloading completed');
     } catch (error) {
       console.warn('⚠️ Could not preload sounds:', error);
     }
-    */
   }
 
   /**
@@ -163,7 +159,15 @@ class FeedbackService {
     if (!this.settings.soundEnabled) return;
 
     try {
-      // Try to play custom sound first
+      // Try to play preloaded sound first
+      const sound = this.sounds[type];
+      if (sound) {
+        await sound.replayAsync();
+        console.log(`🔊 Played sound: ${type}`);
+        return;
+      }
+
+      // Fallback to customization service
       let category: 'scan' | 'notification' | 'action' | 'error' = 'action';
       
       switch (type) {
@@ -187,7 +191,7 @@ class FeedbackService {
 
       await customizationService.playCustomSound(category);
     } catch (error) {
-      console.log('🔊 Custom sound not available, using haptic feedback only');
+      console.log('🔊 Sound not available, using haptic feedback only');
       // Don't call playSystemSound to avoid double haptic feedback
     }
   }
