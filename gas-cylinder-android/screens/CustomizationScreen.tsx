@@ -249,10 +249,10 @@ export default function CustomizationScreen({ visible, onClose }: CustomizationS
               onValueChange={(value) => updateLayoutOption('fontSize', value)}
               style={styles.picker}
             >
-              <Picker.Item label="Small" value="small" />
-              <Picker.Item label="Medium" value="medium" />
-              <Picker.Item label="Large" value="large" />
-              <Picker.Item label="Extra Large" value="extra-large" />
+              <Picker.Item label="S" value="small" />
+              <Picker.Item label="M" value="medium" />
+              <Picker.Item label="L" value="large" />
+              <Picker.Item label="XL" value="extra-large" />
             </Picker>
           </View>
         </View>
@@ -266,9 +266,9 @@ export default function CustomizationScreen({ visible, onClose }: CustomizationS
               onValueChange={(value) => updateLayoutOption('buttonSize', value)}
               style={styles.picker}
             >
-              <Picker.Item label="Compact" value="compact" />
-              <Picker.Item label="Comfortable" value="comfortable" />
-              <Picker.Item label="Large" value="large" />
+              <Picker.Item label="S" value="compact" />
+              <Picker.Item label="M" value="comfortable" />
+              <Picker.Item label="L" value="large" />
             </Picker>
           </View>
         </View>
@@ -284,7 +284,7 @@ export default function CustomizationScreen({ visible, onClose }: CustomizationS
             >
               <Picker.Item label="Tight" value="tight" />
               <Picker.Item label="Normal" value="normal" />
-              <Picker.Item label="Relaxed" value="relaxed" />
+              <Picker.Item label="Wide" value="relaxed" />
             </Picker>
           </View>
         </View>
@@ -310,15 +310,6 @@ export default function CustomizationScreen({ visible, onClose }: CustomizationS
           />
         </View>
 
-        <View style={styles.optionItem}>
-          <Text style={[styles.optionLabel, { color: theme.text }]}>High Contrast</Text>
-          <Switch
-            value={layoutOptions?.highContrast || false}
-            onValueChange={(value) => updateLayoutOption('highContrast', value)}
-            trackColor={{ false: '#767577', true: theme.primary }}
-            thumbColor={layoutOptions?.highContrast ? '#fff' : '#f4f3f4'}
-          />
-        </View>
       </View>
     </ScrollView>
   );
@@ -713,10 +704,10 @@ const styles = StyleSheet.create({
   },
   pickerContainer: {
     flex: 1,
-    maxWidth: 150,
+    maxWidth: 100,
   },
   picker: {
-    height: 50,
+    height: 40,
   },
   themePreview: {
     padding: 20,
