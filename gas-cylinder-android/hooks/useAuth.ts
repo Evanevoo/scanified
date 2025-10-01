@@ -29,6 +29,7 @@ export function useAuth() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [loading, setLoading] = useState(true);
+  const [organizationLoading, setOrganizationLoading] = useState(false);
 
   useEffect(() => {
     const getUser = async () => {
@@ -57,6 +58,7 @@ export function useAuth() {
 
   useEffect(() => {
     if (user) {
+      setOrganizationLoading(true);
       // Get user profile first
       supabase
         .from('profiles')
@@ -70,6 +72,7 @@ export function useAuth() {
               console.log('User ID:', user.id);
               setProfile(null);
               setOrganization(null);
+              setOrganizationLoading(false);
             } else if (profileData) {
               console.log('Profile loaded successfully:', {
                 id: profileData.id,
@@ -104,33 +107,40 @@ export function useAuth() {
                     } catch (error) {
                       console.error('❌ Error processing organization data:', error);
                       setOrganization(null);
+                    } finally {
+                      setOrganizationLoading(false);
                     }
                   })
                   .catch(error => {
                     console.error('❌ Error in organization query:', error);
                     setOrganization(null);
+                    setOrganizationLoading(false);
                   });
               } else {
                 console.log('Profile has no organization_id');
                 setOrganization(null);
+                setOrganizationLoading(false);
               }
             }
           } catch (error) {
             console.error('❌ Error processing profile data:', error);
             setProfile(null);
             setOrganization(null);
+            setOrganizationLoading(false);
           }
         })
         .catch(error => {
           console.error('❌ Error in profile query:', error);
           setProfile(null);
           setOrganization(null);
+          setOrganizationLoading(false);
         });
     } else {
       setProfile(null);
       setOrganization(null);
+      setOrganizationLoading(false);
     }
   }, [user]);
 
-  return { user, profile, organization, loading };
+  return { user, profile, organization, loading, organizationLoading };
 } 
