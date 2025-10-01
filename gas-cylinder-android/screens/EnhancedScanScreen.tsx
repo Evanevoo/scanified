@@ -66,7 +66,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   // Get order number and customer from route params
   const { orderNumber, customerName: routeCustomerName, customerId } = route?.params || {};
   
-  const { user, organization, loading: authLoading } = useAuth();
+  const { user, organization, loading: authLoading, organizationLoading } = useAuth();
   const { settings } = useSettings();
   
   // State
@@ -107,8 +107,8 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
 
   // Handle organization loading and errors
   useEffect(() => {
-    if (authLoading) {
-      console.log('Auth still loading, waiting...');
+    if (authLoading || organizationLoading) {
+      console.log('Auth or organization still loading, waiting...');
       setOrganizationError(null); // Clear any existing error while loading
       return;
     }
@@ -122,7 +122,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       console.log('Organization loaded successfully:', organization.name);
       setOrganizationError(null);
     }
-  }, [authLoading, user, organization]);
+  }, [authLoading, organizationLoading, user, organization]);
 
   // Network status monitoring
   useEffect(() => {
@@ -1444,7 +1444,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         )}
 
         {/* Error State */}
-        {organizationError && !authLoading && (
+        {organizationError && !authLoading && !organizationLoading && (
           <View style={styles.errorContainer}>
             <Text style={[styles.errorTitle, { color: theme.error }]}>
               ⚠️ Organization Error
@@ -1468,7 +1468,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         )}
 
         {/* Normal Content - Only show when organization is loaded */}
-        {!authLoading && !organizationError && organization && (
+        {!authLoading && !organizationLoading && !organizationError && organization && (
           <>
             <View style={styles.welcomeSection}>
               <Text style={[
