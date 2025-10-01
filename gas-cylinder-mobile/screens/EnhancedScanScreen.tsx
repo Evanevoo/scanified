@@ -249,10 +249,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       }
       
       // Spacing adjustments
-      if (layout.spacing === 'compact') {
-        dynamicStyles.spacingMultiplier = 0.8;
-      } else if (layout.spacing === 'comfortable') {
-        dynamicStyles.spacingMultiplier = 1.3;
+      if (layout.spacing === 'tight') {
+        dynamicStyles.spacingMultiplier = 0.7;
+      } else if (layout.spacing === 'relaxed') {
+        dynamicStyles.spacingMultiplier = 1.4;
       } else {
         dynamicStyles.spacingMultiplier = 1.0;
       }
@@ -1554,17 +1554,30 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         {/* Normal Content - Only show when organization is loaded */}
         {!authLoading && !organizationLoading && !organizationError && organization && (
           <>
-            <View style={styles.welcomeSection}>
+            <View style={[
+              styles.welcomeSection,
+              getDynamicStyles().spacingMultiplier && { 
+                marginBottom: styles.welcomeSection.marginBottom * getDynamicStyles().spacingMultiplier,
+                paddingVertical: styles.welcomeSection.paddingVertical * getDynamicStyles().spacingMultiplier
+              }
+            ]}>
               <Text style={[
                 styles.welcomeTitle,
                 getDynamicStyles().fontSizeMultiplier && { fontSize: styles.welcomeTitle.fontSize * getDynamicStyles().fontSizeMultiplier },
                 getDynamicStyles().fontWeight && { fontWeight: getDynamicStyles().fontWeight },
-                getDynamicStyles().customColors && { color: getDynamicStyles().customColors.textColor }
+                getDynamicStyles().customColors && { color: getDynamicStyles().customColors.textColor },
+                getDynamicStyles().spacingMultiplier && { 
+                  marginBottom: styles.welcomeTitle.marginBottom * getDynamicStyles().spacingMultiplier,
+                  lineHeight: styles.welcomeTitle.lineHeight * getDynamicStyles().spacingMultiplier
+                }
               ]}>Gas Cylinder Scanner</Text>
               <Text style={[
                 styles.welcomeSubtitle,
                 getDynamicStyles().fontSizeMultiplier && { fontSize: styles.welcomeSubtitle.fontSize * getDynamicStyles().fontSizeMultiplier },
-                getDynamicStyles().customColors && { color: getDynamicStyles().customColors.textColor }
+                getDynamicStyles().customColors && { color: getDynamicStyles().customColors.textColor },
+                getDynamicStyles().spacingMultiplier && { 
+                  lineHeight: styles.welcomeSubtitle.lineHeight * getDynamicStyles().spacingMultiplier
+                }
               ]}>
                 Scan barcodes to track cylinder shipments
               </Text>
@@ -1631,7 +1644,11 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
               style={[
                 styles.continueButton,
                 getDynamicStyles().buttonPadding && { paddingVertical: getDynamicStyles().buttonPadding },
-                getDynamicStyles().customColors && { backgroundColor: getDynamicStyles().customColors.primaryColor }
+                getDynamicStyles().customColors && { backgroundColor: getDynamicStyles().customColors.primaryColor },
+                getDynamicStyles().spacingMultiplier && { 
+                  marginBottom: styles.continueButton.marginBottom * getDynamicStyles().spacingMultiplier,
+                  paddingHorizontal: styles.continueButton.paddingHorizontal * getDynamicStyles().spacingMultiplier
+                }
               ]}
               onPress={() => {
                 if (organization) {
@@ -1654,7 +1671,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
               style={[
                 styles.manualEntryButton,
                 getDynamicStyles().buttonPadding && { paddingVertical: getDynamicStyles().buttonPadding },
-                getDynamicStyles().customColors && { backgroundColor: getDynamicStyles().customColors.secondaryColor }
+                getDynamicStyles().customColors && { backgroundColor: getDynamicStyles().customColors.secondaryColor },
+                getDynamicStyles().spacingMultiplier && { 
+                  paddingHorizontal: styles.manualEntryButton.paddingHorizontal * getDynamicStyles().spacingMultiplier
+                }
               ]}
               onPress={() => setShowManualEntry(true)}
             >
@@ -3043,17 +3063,20 @@ const styles = StyleSheet.create({
   welcomeSection: {
     alignItems: 'center',
     marginBottom: 40,
+    paddingVertical: 20,
   },
   welcomeTitle: {
     fontSize: 28,
     fontWeight: 'bold',
     color: '#1F2937',
     marginBottom: 8,
+    lineHeight: 34,
   },
   welcomeSubtitle: {
     fontSize: 16,
     color: '#6B7280',
     textAlign: 'center',
+    lineHeight: 22,
   },
   organizationInfo: {
     marginTop: 12,
