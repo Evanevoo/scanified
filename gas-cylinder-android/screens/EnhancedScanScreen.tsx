@@ -70,12 +70,15 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   // Debug organization data
   useEffect(() => {
     if (organization) {
-      console.log('EnhancedScanScreen - Organization data:', {
+      console.log('🔍 EnhancedScanScreen - Organization data:', {
         id: organization.id,
         name: organization.name,
         app_name: organization.app_name,
-        displayAppName: organization?.app_name || 'Scanified'
+        allFields: organization,
+        displayAppName: organization?.app_name || organization?.name || 'Scanified'
       });
+    } else {
+      console.log('🔍 EnhancedScanScreen - No organization data available');
     }
   }, [organization]);
   const { settings } = useSettings();
@@ -1495,7 +1498,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                   marginBottom: styles.welcomeTitle.marginBottom * getDynamicStyles().spacingMultiplier,
                   lineHeight: styles.welcomeTitle.lineHeight * getDynamicStyles().spacingMultiplier
                 }
-              ]}>{organization?.app_name || 'Scanified'}</Text>
+              ]}>{organization?.app_name || organization?.name || 'Scanified'}</Text>
               <Text style={[
                 styles.welcomeSubtitle,
                 getDynamicStyles().fontSizeMultiplier && { fontSize: styles.welcomeSubtitle.fontSize * getDynamicStyles().fontSizeMultiplier },
