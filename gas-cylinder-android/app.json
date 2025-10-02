@@ -20,7 +20,7 @@
     ],
     "privacy": "public",
     "splash": {
-      "image": "./assets/splash-icon.svg",
+      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#40B5AD"
     },
