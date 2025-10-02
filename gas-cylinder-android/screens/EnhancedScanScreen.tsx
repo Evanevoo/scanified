@@ -67,7 +67,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   
   const { user, organization, loading: authLoading, organizationLoading } = useAuth();
   
-  // Debug organization data
+  // Force component to re-render when organization changes
+  const [refreshKey, setRefreshKey] = useState(0);
+  
+  // Debug organization data and force re-render
   useEffect(() => {
     if (organization) {
       console.log('🔍 EnhancedScanScreen - Organization data:', {
@@ -77,8 +80,13 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         allFields: organization,
         displayAppName: organization?.app_name || organization?.name || 'Scanified'
       });
+      
+      // Force component re-render when organization data changes
+      setRefreshKey(prev => prev + 1);
+      console.log('🔄 Forcing component refresh due to organization data change');
     } else {
       console.log('🔍 EnhancedScanScreen - No organization data available');
+   的组织数据没有加载');
     }
   }, [organization]);
   const { settings } = useSettings();
@@ -1490,15 +1498,24 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 paddingVertical: styles.welcomeSection.paddingVertical * getDynamicStyles().spacingMultiplier
               }
             ]}>
-              <Text style={[styles.welcomeTitle,
-                getDynamicStyles().fontSizeMultiplier && { fontSize: styles.welcomeTitle.fontSize * getDynamicStyles().fontSizeMultiplier },
-                getDynamicStyles().fontWeight && { fontWeight: getDynamicStyles().fontWeight },
-                getDynamicStyles().customColors && { color: getDynamicStyles().customColors.textColor },
-                getDynamicStyles().spacingMultiplier && { 
-                  marginBottom: styles.welcomeTitle.marginBottom * getDynamicStyles().spacingMultiplier,
-                  lineHeight: styles.welcomeTitle.lineHeight * getDynamicStyles().spacingMultiplier
-                }
-              ]}>{organization?.app_name || organization?.name || 'Scanified'}</Text>
+              <Text 
+                key={refreshKey}
+                style={[styles.welcomeTitle,
+                  getDynamicStyles().fontSizeMultiplier && { fontSize: styles.welcomeTitle.fontSize * getDynamicStyles().fontSizeMultiplier },
+                  getDynamicStyles().fontWeight && { fontWeight: getDynamicStyles().fontWeight },
+                  getDynamicStyles().customColors && { color: getDynamicStyles().customColors.textColor },
+                  getDynamicStyles().spacingMultiplier && { 
+                    marginBottom: styles.welcomeTitle.marginBottom * getDynamicStyles().spacingMultiplier,
+                    lineHeight: styles.welcomeTitle.lineHeight * getDynamicStyles().spacingMultiplier
+                  }
+                ]}>
+                  {(organization?.app_name || organization?.name || 'Scanified')}
+                  {__DEV__ && (
+                    <Text style={{fontSize: 12, color: 'red'}}>
+                      {' [DEBUG: '}{organization?.app_name}{' | '}{organization?.name}{']'}
+                    </Text>
+                  )}
+                </Text>
               <Text style={[
                 styles.welcomeSubtitle,
                 getDynamicStyles().fontSizeMultiplier && { fontSize: styles.welcomeSubtitle.fontSize * getDynamicStyles().fontSizeMultiplier },
