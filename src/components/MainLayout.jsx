@@ -186,7 +186,11 @@ export default function MainLayout({ children }) {
 
   const handleLogout = async () => {
     try {
-      await supabase.auth.signOut();
+      console.log('MainLayout: Logout button clicked');
+      
+      // Use the consistent signOut from useAuth
+      const { signOut } = useAuth();
+      await signOut();
       
       // Clear any cached data
       if (window.indexedDB) {
@@ -196,12 +200,10 @@ export default function MainLayout({ children }) {
         });
       }
       
-      // Navigate to login page using React Router
-      navigate('/login');
     } catch (error) {
       console.error('Logout failed:', error);
-      // Fallback: navigate anyway
-      navigate('/login');
+      // Force redirect if everything else fails
+      window.location.href = '/login';
     }
   };
 

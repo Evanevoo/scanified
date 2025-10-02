@@ -144,6 +144,7 @@ const OrganizationAnalytics = lazy(() => import('./pages/OrganizationAnalytics')
 const OrganizationTools = lazy(() => import('./pages/OrganizationTools'));
 const Locations = lazy(() => import('./pages/Locations'));
 const TempCustomerManagement = lazy(() => import('./pages/TempCustomerManagement'));
+const TransferFromCustomers = lazy(() => import('./pages/TransferFromCustomers'));
 
 // Analytics tracking component
 function AnalyticsTracker() {
@@ -247,7 +248,9 @@ function AppContent() {
                   <Route element={<ProtectedRoute />}>
                     <Route path="/home" element={<Home />} />
                     <Route path="/customers" element={<Customers />} />
-                  <Route path="/temp-customer-management" element={<TempCustomerManagement />} />
+                    <Route path="/temp-customer-management" element={<TempCustomerManagement />} />
+                    <Route path="/transfer-from-customers" element={<TransferFromCustomers />} />
+                    <Route path="/customer/:id/transfer-to" element={<TransferFromCustomers />} />
                     <Route path="/locations" element={<Locations />} />
                     <Route path="/assets" element={<Assets />} />
                     <Route path="/inventory" element={<Assets />} />

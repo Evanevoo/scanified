@@ -19,9 +19,10 @@ import { SyncService } from '../services/SyncService';
 import { connectivityService } from '../services/ConnectivityService';
 import { notificationService } from '../services/NotificationService';
 import { offlineModeService } from '../services/OfflineModeService';
-import { customizationService, LayoutOptions, AccessibilityOptions } from '../services/customizationService';
+import { customizationService, LayoutOptions } from '../services/customizationService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
+import { useAccessibility } from '../hooks/useAccessibility';
 
 export default function SettingsScreen() {
   const navigation = useNavigation();
@@ -35,7 +36,7 @@ export default function SettingsScreen() {
   
   // Customization settings
   const [layoutOptions, setLayoutOptions] = useState<LayoutOptions | null>(null);
-  const [accessibilityOptions, setAccessibilityOptions] = useState<AccessibilityOptions | null>(null);
+  const { accessibilityOptions, updateAccessibilityOption } = useAccessibility();
 
   useEffect(() => {
     loadOfflineData();
@@ -58,7 +59,6 @@ export default function SettingsScreen() {
       const customizationSettings = customizationService.getSettings();
       if (customizationSettings) {
         setLayoutOptions(customizationSettings.layout);
-        setAccessibilityOptions(customizationSettings.accessibility);
       }
     } catch (error) {
       console.error('Failed to load customization settings:', error);
@@ -71,14 +71,6 @@ export default function SettingsScreen() {
     const updated = { ...layoutOptions, [key]: value };
     setLayoutOptions(updated);
     customizationService.updateLayoutOptions({ [key]: value });
-  };
-
-  const updateAccessibilityOption = (key: keyof AccessibilityOptions, value: boolean) => {
-    if (!accessibilityOptions) return;
-
-    const updated = { ...accessibilityOptions, [key]: value };
-    setAccessibilityOptions(updated);
-    customizationService.updateAccessibilityOptions({ [key]: value });
   };
 
   const handleSync = async () => {
