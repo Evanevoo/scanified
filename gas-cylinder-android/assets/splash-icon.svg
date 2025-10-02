@@ -1,0 +1,25 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#40B5AD;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#5FCDC5;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8B7BA8;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Large S shape with barcode -->
+  <path d="M 100 40 C 140 40 170 60 170 90 C 170 110 160 125 140 135 L 140 135 C 160 145 170 160 170 180 C 170 210 140 230 100 230 C 60 230 30 210 30 180 C 30 160 40 145 60 135 C 40 125 30 110 30 90 C 30 60 60 40 100 40 Z" 
+        fill="url(#logoGradient)" opacity="0.9"/>
+  
+  <!-- Barcode lines inside S -->
+  <g fill="#FFFFFF" opacity="0.9">
+    <rect x="85" y="80" width="4" height="90"/>
+    <rect x="92" y="80" width="3" height="90"/>
+    <rect x="98" y="80" width="6" height="90"/>
+    <rect x="107" y="80" width="3" height="90"/>
+    <rect x="113" y="80" width="4" height="90"/>
+    <rect x="120" y="80" width="2" height="90"/>
+    <rect x="125" y="80" width="5" height="90"/>
+    <rect x="133" y="80" width="3" height="90"/>
+  </g>
+</svg>
