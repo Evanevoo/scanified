@@ -86,7 +86,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       console.log('🔄 Forcing component refresh due to organization data change');
     } else {
       console.log('🔍 EnhancedScanScreen - No organization data available');
-   的组织数据没有加载');
     }
   }, [organization]);
   const { settings } = useSettings();
