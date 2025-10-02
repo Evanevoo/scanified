@@ -1475,8 +1475,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 paddingVertical: styles.welcomeSection.paddingVertical * getDynamicStyles().spacingMultiplier
               }
             ]}>
-              <Text style={[
-                styles.welcomeTitle,
+              <Text style={[styles.welcomeTitle,
                 getDynamicStyles().fontSizeMultiplier && { fontSize: styles.welcomeTitle.fontSize * getDynamicStyles().fontSizeMultiplier },
                 getDynamicStyles().fontWeight && { fontWeight: getDynamicStyles().fontWeight },
                 getDynamicStyles().customColors && { color: getDynamicStyles().customColors.textColor },
@@ -1484,7 +1483,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                   marginBottom: styles.welcomeTitle.marginBottom * getDynamicStyles().spacingMultiplier,
                   lineHeight: styles.welcomeTitle.lineHeight * getDynamicStyles().spacingMultiplier
                 }
-              ]}>Gas Cylinder Scanner</Text>
+              ]}>{organization?.app_name || 'Scanified'}</Text>
               <Text style={[
                 styles.welcomeSubtitle,
                 getDynamicStyles().fontSizeMultiplier && { fontSize: styles.welcomeSubtitle.fontSize * getDynamicStyles().fontSizeMultiplier },

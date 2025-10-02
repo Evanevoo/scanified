@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAccessibility } from '../hooks/useAccessibility';
 
 // Mobile theme definitions - Scanified Branding
 const mobileThemes = {
@@ -95,6 +96,7 @@ interface ThemeContextType {
   changeTheme: (themeName: ThemeType) => void;
   toggleDarkMode: () => void;
   availableThemes: typeof mobileThemes;
+  accessibilityStyles: any; // Accessibility styles for dynamic styling
 }
 
 // Create context with default theme
@@ -106,6 +108,7 @@ const ThemeContext = createContext<ThemeContextType>({
   changeTheme: () => {},
   toggleDarkMode: () => {},
   availableThemes: mobileThemes,
+  accessibilityStyles: { fontSizeMultiplier: 1.0, fontWeight: undefined, highContrast: false },
 });
 
 // Hook to use theme
@@ -139,6 +142,9 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const [currentTheme, setCurrentTheme] = useState<ThemeType>('light');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Get accessibility styles
+  const { getAccessibilityStyles } = useAccessibility();
 
   // Load theme from AsyncStorage on app start
   useEffect(() => {
@@ -188,7 +194,25 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     saveTheme(newTheme, newDarkMode);
   };
 
-  const theme = mobileThemes[currentTheme] || mobileThemes.light;
+  const baseTheme = mobileThemes[currentTheme] || mobileThemes.light;
+  const accessibilityStyles = getAccessibilityStyles();
+  
+  // Apply accessibility modifications to theme
+  let theme = { ...baseTheme };
+  
+  if (accessibilityStyles.fontSizeMultiplier > 1.0) {
+    // Font size adjustments will be applied via dynamic styles
+    console.log(`Accessibility: Font size multiplier set to ${accessibilityStyles.fontSizeMultiplier}`);
+  }
+  
+  if (accessibilityStyles.contrastColors) {
+    // Apply high contrast colors
+    theme = {
+      ...theme,
+      ...accessibilityStyles.contrastColors,
+    };
+    console.log('Accessibility: High contrast mode enabled');
+  }
 
   const contextValue: ThemeContextType = {
     theme,
@@ -197,6 +221,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     changeTheme,
     toggleDarkMode,
     availableThemes: mobileThemes,
+    accessibilityStyles, // Add accessibility styles to context
   };
 
   return (

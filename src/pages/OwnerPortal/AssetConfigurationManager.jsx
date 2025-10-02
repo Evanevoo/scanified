@@ -572,48 +572,182 @@ export default function AssetConfigurationManager() {
             </Box>
           )}
 
-          {/* Tab 3: Barcode & Number Formats */}
+          {/* Tab D: Barcode & Number Formats */}
           {activeTab === 3 && (
             <Grid container spacing={3}>
               <Grid item xs={12}>
-                <Typography variant="h6" gutterBottom>Barcode & Number Formats</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                  Barcode and number format configuration has been moved to dedicated pages for better organization.
-                </Typography>
+                  <Alert severity="info" sx={{ mb: 3 }}>
+                    <Typography variant="h6" gutterBottom>
+                      📋 Barcode & Number Format Configuration
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Location:</strong> Format configuration is available in the Settings page under the "Barcodes" tab for better organization and consistency. 
+                      Advanced format templates and bulk operations are also available.
+                    </Typography>
+                  </Alert>
               </Grid>
 
-              <Grid item xs={12} sm={6}>
-                <Paper sx={{ p: 3 }}>
-                  <Typography variant="subtitle1" gutterBottom>Barcode Formats</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Configure barcode patterns, validation rules, and examples.
+              <Grid item xs={12}>
+                <Card sx={{ p: 3, backgroundColor: '#f8f9fa', border: '1px solid #e9ecef' }}>
+                  <Typography variant="h6" gutterBottom color="primary">
+                    🎯 Format Configuration Options
                   </Typography>
-                  <Button
-                    variant="outlined"
-                    startIcon={<SettingsIcon />}
-                    onClick={() => window.location.href = '/settings?tab=barcodes'}
-                    fullWidth
-                  >
-                    Go to Barcode Settings
-                  </Button>
-                </Paper>
+                  
+                  <Grid container spacing={3} sx={{ mt: 1 }}>
+                    <Grid item xs={12} md={4}>
+                      <Card sx={{ p: 2, textAlign: 'center', border: '1px solid #dee2e6', '&:hover': { boxShadow: 3 } }}>
+                        <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
+                          📊 Basic Barcode Formats
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                          Configure standard barcode types, patterns, and validation rules
+                        </Typography>
+                        <Button
+                          variant="contained"
+                          size="small"
+                          startIcon={<SettingsIcon />}
+                          onClick={() => window.location.href = '/settings?tab=barcodes'}
+                          fullWidth
+                        >
+                          Settings → Barcodes
+                        </Button>
+                      </Card>
+                    </Grid>
+
+                    <Grid item xs={12} md={4}>
+                      <Card sx={{ p: 2, textAlign: 'center', border: '1px solid #dee2e6', '&:hover': { boxShadow: 3 } }}>
+                        <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
+                          🔧 Import/Export Formats
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                          Import bulk format rules or export your current configuration
+                        </Typography>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          startIcon={<CodeIcon />}
+                          onClick={() => window.location.href = '/import'}
+                          fullWidth
+                        >
+                          Import/Export
+                        </Button>
+                      </Card>
+                    </Grid>
+
+                    <Grid item xs={12} md={4}>
+                      <Card sx={{ p: 2, textAlign: 'center', border: '1px solid #dee2e6', '&:hover': { boxShadow: 3 } }}>
+                        <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
+                          🏷️ Asset Type Configuration
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                          Configure terminology and features for your asset type
+                        </Typography>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => setActiveTab(0)}
+                          fullWidth
+                        >
+                          This Page → Asset Types
+                        </Button>
+                      </Card>
+                    </Grid>
+                  </Grid>
+
+                  <Divider sx={{ my: 3 }} />
+
+                  <Typography variant="body2" color="text.secondary">
+                    <strong>Why separate configuration pages?</strong><br/>
+                    • <strong>Settings</strong> contains core format patterns (barcodes, orders, serials)<br/>
+                    • <strong>Import/Export</strong> provides bulk configuration management<br/>
+                    • <strong>Asset Config</strong> focuses on terminology and business logic<br/>
+                    <em>This separation keeps related settings organized and prevents confusion.</em>
+                  </Typography>
+                </Card>
               </Grid>
 
-              <Grid item xs={12} sm={6}>
-                <Paper sx={{ p: 3 }}>
-                  <Typography variant="subtitle1" gutterBottom>Advanced Format Configuration</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Advanced format templates and validation rules for power users.
-                  </Typography>
-                  <Button
-                    variant="outlined"
-                    startIcon={<CodeIcon />}
-                    onClick={() => window.location.href = '/format-configuration'}
-                    fullWidth
-                  >
-                    Go to Format Configuration Manager
-                  </Button>
-                </Paper>
+              {/* Quick Format Preview */}
+              <Grid item xs={12}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      📖 Quick Reference: Format Types
+                    </Typography>
+                    <Grid container spacing={2}>
+                      <Grid item xs={12} sm={4}>
+                        <Typography variant="subtitle2" gutterBottom>🎯 Barcode Formats</Typography>
+                        <List dense>
+                          <ListItem sx={{ py: 0 }}>
+                            <ListItemText 
+                              primary="Code 128" 
+                              secondary="ABC123-DEF456" 
+                              primaryTypographyProps={{ fontSize: '0.875rem' }}
+                              secondaryTypographyProps={{ fontSize: '0.75rem' }}
+                            />
+                          </ListItem>
+                          <ListItem sx={{ py: 0 }}>
+                            <ListItemText 
+                              primary="QR Code" 
+                              secondary="Any text" 
+                              primaryTypographyProps={{ fontSize: '0.875rem' }}
+                              secondaryTypographyProps={{ fontSize: '0.75rem' }}
+                            />
+                          </ListItem>
+                          <ListItem sx={{ py: 0 }}>
+                            <ListItemText 
+                              primary="EAN-13" 
+                              secondary="1234567890123" 
+                              primaryTypographyProps={{ fontSize: '0.875rem' }}
+                              secondaryTypographyProps={{ fontSize: '0.75rem' }}
+                            />
+                          </ListItem>
+                        </List>
+                      </Grid>
+                      <Grid item xs={12} sm={4}>
+                        <Typography variant="subtitle2" gutterBottom>📦 Order Numbers</Typography>
+                        <List dense>
+                          <ListItem sx={{ py: 0 }}>
+                            <ListItemText 
+                              primary="ORD + Numbers" 
+                              secondary="ORD123456" 
+                              primaryTypographyProps={{ fontSize: '0.875rem' }}
+                              secondaryTypographyProps={{ fontSize: '0.75rem' }}
+                            />
+                          </ListItem>
+                          <ListItem sx={{ py: 0 }}>
+                            <ListItemText 
+                              primary="Year + Sequence" 
+                              secondary="2024-001234" 
+                              primaryTypographyProps={{ fontSize: '0.875rem' }}
+                              secondaryTypographyProps={{ fontSize: '0.75rem' }}
+                            />
+                          </ListItem>
+                        </List>
+                      </Grid>
+                      <Grid item xs={12} sm={4}>
+                        <Typography variant="subtitle2" gutterBottom>🆔 Customer IDs</Typography>
+                        <List dense>
+                          <ListItem sx={{ py: 0 }}>
+                            <ListItemText 
+                              primary="Letters + Numbers" 
+                              secondary="AB1234567890" 
+                              primaryTypographyProps={{ fontSize: '0.875rem' }}
+                              secondaryTypographyProps={{ fontSize: '0.75rem' }}
+                            />
+                          </ListItem>
+                          <ListItem sx={{ py: 0 }}>
+                            <ListItemText 
+                              primary="Alphanumeric" 
+                              secondary="CUST123" 
+                              primaryTypographyProps={{ fontSize: '0.875rem' }}
+                              secondaryTypographyProps={{ fontSize: '0.75rem' }}
+                            />
+                          </ListItem>
+                        </List>
+                      </Grid>
+                    </Grid>
+                  </CardContent>
+                </Card>
               </Grid>
             </Grid>
           )}

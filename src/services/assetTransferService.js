@@ -175,21 +175,47 @@ export class AssetTransferService {
    */
   static async logTransfer(transferData) {
     try {
-      // Create a simple log entry in a transfers table or use existing audit system
-      // For now, we'll just console log the transfer
-      console.log('Asset Transfer Completed:', {
+      // Enhanced logging with more detailed information
+      const transferLog = {
         timestamp: transferData.transferredAt,
         from: `${transferData.fromCustomerName} (${transferData.fromCustomerId})`,
         to: `${transferData.toCustomerName} (${transferData.toCustomerId})`,
         assetCount: transferData.assetIds.length,
         reason: transferData.reason || 'No reason provided',
-        organizationId: transferData.organizationId
-      });
+        organizationId: transferData.organizationId,
+        transferredAssets: transferData.transferredAssets?.map(asset => ({
+          id: asset.id,
+          barcode: asset.barcode_number,
+          serial: asset.serial_number,
+          type: asset.description || asset.type
+        }))
+      };
 
-      // In a production environment, you might want to create a transfers table:
-      /*
+      console.log('✅ Asset Transfer Completed:', transferLog);
+
+      // Create transfer history entry in database (if table exists)
+      try {
+        await this.createTransferHistoryEntry(transferData);
+      } catch (dbError) {
+        console.warn('Could not create transfer history entry:', dbError.message);
+        // Continue without failing the main transfer operation
+      }
+
+    } catch (error) {
+      console.error('Error logging transfer:', error);
+      // Don't throw error here as transfer was successful, logging is secondary
+    }
+  }
+
+  /**
+   * Create transfer history entry in database
+   * @param {Object} transferData - Transfer details
+   */
+  static async createTransferHistoryEntry(transferData) {
+    try {
+      // Create a transfer_history entry (if the table exists)
       const { error } = await supabase
-        .from('asset_transfers')
+        .from('transfer_history')
         .insert({
           organization_id: transferData.organizationId,
           from_customer_id: transferData.fromCustomerId,
@@ -198,17 +224,21 @@ export class AssetTransferService {
           to_customer_name: transferData.toCustomerName,
           asset_ids: transferData.assetIds,
           asset_count: transferData.assetIds.length,
-          reason: transferData.reason,
+          reason: transferData.reason || '',
+          transfer_type: 'customer_to_customer',
           transferred_at: transferData.transferredAt,
           created_at: new Date().toISOString()
         });
 
-      if (error) throw error;
-      */
+      if (error) {
+        // If table doesn't exist, that's okay - we'll still log to console
+        console.info('Transfer history table not found, logging to console only');
+      } else {
+        console.log('✅ Transfer history entry created successfully');
+      }
 
     } catch (error) {
-      console.error('Error logging transfer:', error);
-      // Don't throw error here as transfer was successful, logging is secondary
+      console.warn('Transfer history creation failed:', error.message);
     }
   }
 

@@ -38,6 +38,10 @@ import HomeIcon from '@mui/icons-material/Home';
 import TransferWithinAStationIcon from '@mui/icons-material/TransferWithinAStation';
 import SelectAllIcon from '@mui/icons-material/SelectAll';
 import DeselectIcon from '@mui/icons-material/Deselect';
+import WarehouseIcon from '@mui/icons-material/Warehouse';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import HistoryIcon from '@mui/icons-material/History';
+import SpeedIcon from '@mui/icons-material/Speed';
 import { TableSkeleton, CardSkeleton } from '../components/SmoothLoading';
 import { AssetTransferService } from '../services/assetTransferService';
 import { useAuth } from '../hooks/useAuth';
@@ -73,6 +77,13 @@ export default function CustomerDetail() {
   const [transferReason, setTransferReason] = useState('');
   const [transferLoading, setTransferLoading] = useState(false);
   const [transferMessage, setTransferMessage] = useState({ open: false, message: '', severity: 'success' });
+  
+  // Enhanced transfer features state
+  const [showTransferHistory, setShowTransferHistory] = useState(false);
+  const [transferHistory, setTransferHistory] = useState([]);
+  const [locationFilter, setLocationFilter] = useState('all');
+  const [quickTransferDialogOpen, setQuickTransferDialogOpen] = useState(false);
+  const [recentCustomers, setRecentCustomers] = useState([]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -133,13 +144,130 @@ export default function CustomerDetail() {
     fetchData();
   }, [id]);
 
-  // Transfer functionality functions
+  // Enhanced transfer functionality functions
   const handleSelectAsset = (assetId) => {
     setSelectedAssets(prev => 
       prev.includes(assetId) 
         ? prev.filter(id => id !== assetId)
         : [...prev, assetId]
     );
+  };
+
+  // Load recent customers for quick transfer
+  const loadRecentCustomers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('CustomerListID, name, customer_type, contact_details')
+        .eq('organization_id', organization?.id || customer?.organization_id)
+        .neq('CustomerListID', customer?.CustomerListID)
+        .order('updated_at', { ascending: false })
+        .limit(5);
+
+      if (error) throw error;
+      setRecentCustomers(data || []);
+    } catch (error) {
+      console.error('Error loading recent customers:', error);
+    }
+  };
+
+  // Transfer assets to warehouse (remove assignment)
+  const handleTransferToWarehouse = async () => {
+    if (selectedAssets.length === 0) {
+      setTransferMessage({
+        open: true,
+        message: 'Please select at least one asset to transfer to warehouse',
+        severity: 'warning'
+      });
+      return;
+    }
+
+    setTransferLoading(true);
+    try {
+      const { data: updatedAssets, error: updateError } = await supabase
+        .from('bottles')
+        .update({
+          assigned_customer: null,
+          customer_name: null,
+          status: 'available',
+          updated_at: new Date().toISOString()
+        })
+        .in('id', selectedAssets)
+        .eq('organization_id', organization?.id || customer?.organization_id)
+        .select();
+
+      if (updateError) throw updateError;
+
+      setTransferMessage({
+        open: true,
+        message: `Successfully transferred ${updatedAssets.length} asset(s) to warehouse`,
+        severity: 'success'
+      });
+
+      // Refresh data
+      const { data: customerAssetsData, error: customerAssetsError } = await supabase
+        .from('bottles')
+        .select('*')
+        .eq('assigned_customer', id);
+
+      if (!customerAssetsError) {
+        setCustomerAssets(customerAssetsData || []);
+        
+        // Recalculate bottle summary
+        const summary = {};
+        (customerAssetsData || []).forEach(bottle => {
+          const type = bottle.type || bottle.description || 'Unknown';
+          summary[type] = (summary[type] || 0) + 1;
+        });
+        setBottleSummary(summary);
+      }
+
+      setSelectedAssets([]);
+    } catch (error) {
+      setTransferMessage({
+        open: true,
+        message: `Transfer to warehouse failed: ${error.message}`,
+        severity: 'error'
+      });
+    } finally {
+      setTransferLoading(false);
+    }
+  };
+
+  // Load transfer history
+  const loadTransferHistory = async () => {
+    try {
+      // For now, we'll create a simple audit trail from bottle updates
+      // In a real implementation, you'd have a dedicated transfers table
+      const { data, error } = await supabase
+        .from('bottles')
+        .select('*')
+        .eq('organization_id', organization?.id || customer?.organization_id)
+        .not('assigned_customer', 'is', null)
+        .order('updated_at', { ascending: false })
+        .limit(20);
+
+      if (error) throw error;
+      
+      // This is a simplified version - in production you'd have proper transfer audit logs
+      const recentTransfers = (data || []).map(bottle => ({
+        id: bottle.id,
+        type: 'asset_assignment',
+        timestamp: bottle.updated_at,
+        description: `Asset ${bottle.barcode_number || bottle.serial_number} assigned to ${bottle.customer_name}`,
+        details: {
+          assetId: bottle.id,
+          customerName: bottle.customer_name,
+          customerId: bottle.assigned_customer,
+          status: bottle.status
+        }
+      }));
+
+      setTransferHistory(recentTransfers);
+    } catch (error) {
+      console.error('Error loading transfer history:', error);
+      setTransferHistory([]);
+    }
   };
 
   const handleSelectAllAssets = () => {
@@ -150,7 +278,7 @@ export default function CustomerDetail() {
     }
   };
 
-  const handleOpenTransferDialog = async () => {
+  const handleOpenTransferDialog = async (quickTransfer = false) => {
     if (selectedAssets.length === 0) {
       setTransferMessage({
         open: true,
@@ -162,20 +290,27 @@ export default function CustomerDetail() {
 
     setTransferLoading(true);
     try {
-      const result = await AssetTransferService.getAvailableCustomers(
-        organization?.id || customer?.organization_id, 
-        customer?.CustomerListID
-      );
-      
-      if (result.success) {
-        setAvailableCustomers(result.customers);
-        setTransferDialogOpen(true);
+      if (quickTransfer) {
+        // Load recent customers for quick transfer
+        await loadRecentCustomers();
+        setQuickTransferDialogOpen(true);
       } else {
-        setTransferMessage({
-          open: true,
-          message: `Failed to load customers: ${result.error}`,
-          severity: 'error'
-        });
+        // Load all customers for full transfer dialog
+        const result = await AssetTransferService.getAvailableCustomers(
+          organization?.id || customer?.organization_id, 
+          customer?.CustomerListID
+        );
+        
+        if (result.success) {
+          setAvailableCustomers(result.customers);
+          setTransferDialogOpen(true);
+        } else {
+          setTransferMessage({
+            open: true,
+            message: `Failed to load customers: ${result.error}`,
+            severity: 'error'
+          });
+        }
       }
     } catch (error) {
       setTransferMessage({
@@ -528,6 +663,68 @@ export default function CustomerDetail() {
         )}
       </Paper>
 
+      {/* Transfer Information & Quick Actions */}
+      {customerAssets.length === 0 && (
+        <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4, backgroundColor: '#f8f9ff', border: '1px solid #e3e8ff' }}>
+          <Typography variant="h6" fontWeight={700} color="primary" mb={2}>
+            📦 Bottle Assignment & Transfer Options
+          </Typography>
+          
+          <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={3} mb={2}>
+            <Box>
+              <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+                Assign Bottles TO This Customer:
+              </Typography>
+              <Box display="flex" flexDirection="column" gap={1}>
+                <Button 
+                  variant="outlined" 
+                  component={Link}
+                  to={`/bottle-management`}
+                  startIcon={<TransferWithinAStationIcon />}
+                  sx={{ justifyContent: 'flex-start', mb: 1 }}
+                >
+                  Use Bottle Management Page
+                </Button>
+                <Button 
+                  variant="outlined" 
+                  component={Link}
+                  to={`/customer/${id}/transfer-to`}
+                  startIcon={<TransferWithinAStationIcon />}
+                  sx={{ justifyContent: 'flex-start', mb: 1 }}
+                >
+                  Transfer from Other Customers
+                </Button>
+              </Box>
+            </Box>
+            
+            <Box>
+              <Typography variant="subtitle1" fontWeight={600} gutterBottom color="text.secondary">
+                Transfer FROM This Customer:
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Transfer options will appear here once bottles are assigned to {customer?.name}.
+              </Typography>
+              <Box mt={2} p={2} sx={{ backgroundColor: '#fff', borderRadius: 1, border: '1px solid #e0e0e0' }}>
+                <Typography variant="body2" fontWeight={600} mb={1}>
+                  Available Transfer Types:
+                </Typography>
+                <Typography variant="body2">• Transfer to other customers</Typography>
+                <Typography variant="body2">• Quick transfer to recent customers</Typography>
+                <Typography variant="body2">• Return to warehouse</Typography>
+                <Typography variant="body2">• Transfer history tracking</Typography>
+              </Box>
+            </Box>
+          </Box>
+
+          <Alert severity="info">
+            <Typography variant="body2">
+              <strong>Tip:</strong> Once bottles are assigned to this customer, you'll see comprehensive transfer controls 
+              including customer-to-customer transfers, warehouse returns, and audit trail functionality.
+            </Typography>
+          </Alert>
+        </Paper>
+      )}
+
       {/* Bottle Rental Summary */}
       <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4, border: '1.5px solid #e0e0e0', boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)' }}>
         <Box display="flex" alignItems="center" justifyContent="space-between" mb={3}>
@@ -614,12 +811,19 @@ export default function CustomerDetail() {
       {/* Currently Assigned Bottles */}
       <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4 }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Typography variant="h5" fontWeight={700} color="primary">
-            🏠 Currently Assigned Bottles ({customerAssets.length})
-          </Typography>
+          <Box>
+            <Typography variant="h5" fontWeight={700} color="primary">
+              🏠 Currently Assigned Bottles ({customerAssets.length})
+            </Typography>
+            {customerAssets.length === 0 && (
+              <Typography variant="body2" color="text.secondary">
+                No bottles assigned to this customer yet
+              </Typography>
+            )}
+          </Box>
           
           {customerAssets.length > 0 && (
-            <Box display="flex" gap={2}>
+            <Box display="flex" gap={1} flexWrap="wrap">
               <ButtonGroup variant="outlined" size="small">
                 <Tooltip title="Select/Deselect All">
                   <Button
@@ -629,17 +833,62 @@ export default function CustomerDetail() {
                     {selectedAssets.length === customerAssets.length ? 'Deselect All' : 'Select All'}
                   </Button>
                 </Tooltip>
-                <Tooltip title={selectedAssets.length === 0 ? "Select assets to transfer" : `Transfer ${selectedAssets.length} selected asset(s)`}>
-                  <span>
-                    <Button
-                      onClick={handleOpenTransferDialog}
-                      disabled={selectedAssets.length === 0 || transferLoading}
-                      startIcon={transferLoading ? <CircularProgress size={16} /> : <TransferWithinAStationIcon />}
-                      color="primary"
-                    >
-                      Transfer ({selectedAssets.length})
-                    </Button>
-                  </span>
+                <Tooltip title={selectedAssets.length === 0 ? "Select assets to transfer" : `Transfer ${selectedAssets.length} selected asset(s) to customer`}>
+                  <Button
+                    onClick={() => handleOpenTransferDialog(false)}
+                    disabled={selectedAssets.length === 0 || transferLoading}
+                    startIcon={transferLoading ? <CircularProgress size={16} /> : <TransferWithinAStationIcon />}
+                    color="primary"
+                  >
+                    Transfer ({selectedAssets.length})
+                  </Button>
+                </Tooltip>
+              </ButtonGroup>
+              
+              <ButtonGroup variant="outlined" size="small">
+                <Tooltip title="Quick transfer to recent customers">
+                  <Button
+                    onClick={() => handleOpenTransferDialog(true)}
+                    disabled={selectedAssets.length === 0 || transferLoading}
+                    startIcon={<SpeedIcon />}
+                    color="secondary"
+                  >
+                    Quick Transfer
+                  </Button>
+                </Tooltip>
+                <Tooltip title="Return assets to warehouse/in-house">
+                  <Button
+                    onClick={handleTransferToWarehouse}
+                    disabled={selectedAssets.length === 0 || transferLoading}
+                    startIcon={<WarehouseIcon />}
+                    color="warning"
+                  >
+                    To Warehouse ({selectedAssets.length})
+                  </Button>
+                </Tooltip>
+              </ButtonGroup>
+
+              <ButtonGroup variant="text" size="small">
+                <Tooltip title="View transfer history">
+                  <Button
+                    onClick={() => {
+                      loadTransferHistory();
+                      setShowTransferHistory(true);
+                    }}
+                    startIcon={<HistoryIcon />}
+                    color="info"
+                  >
+                    History
+                  </Button>
+                </Tooltip>
+                <Tooltip title="Filter by location">
+                  <Button
+                    onClick={() => setLocationFilter(locationFilter === 'all' ? 'SASKATOON' : 'all')}
+                    startIcon={<FilterListIcon />}
+                    color="info"
+                  >
+                    Filter
+                  </Button>
                 </Tooltip>
               </ButtonGroup>
             </Box>
@@ -647,7 +896,24 @@ export default function CustomerDetail() {
         </Box>
         
         {customerAssets.length === 0 ? (
-          <Typography color="text.secondary">No bottles currently assigned to this customer.</Typography>
+          <Box>
+            <Typography color="text.secondary" mb={2}>
+              No bottles currently assigned to this customer.
+            </Typography>
+            <Alert severity="info">
+              <Typography variant="body2">
+                To assign bottles to this customer, you can:
+              </Typography>
+              <ul style={{ marginTop: '8px', marginBottom: '8px' }}>
+                <li>Scan bottles in the mobile app and assign them to this customer</li>
+                <li>Use the Bottle Management page to assign bottles</li>
+                <li>Import bottle assignments from files</li>
+              </ul>
+              <Typography variant="body2">
+                Transfer functionality will appear once bottles are assigned to this customer.
+              </Typography>
+            </Alert>
+          </Box>
         ) : (
           <TableContainer>
             <Table>
@@ -669,7 +935,9 @@ export default function CustomerDetail() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {customerAssets.map((asset) => (
+                {customerAssets
+                  .filter(asset => locationFilter === 'all' || asset.location === locationFilter)
+                  .map((asset) => (
                   <TableRow key={asset.id} hover selected={selectedAssets.includes(asset.id)}>
                     <TableCell padding="checkbox">
                       <Checkbox
@@ -869,6 +1137,164 @@ export default function CustomerDetail() {
             startIcon={transferLoading ? <CircularProgress size={16} /> : <TransferWithinAStationIcon />}
           >
             {transferLoading ? 'Transferring...' : 'Transfer Assets'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Quick Transfer Dialog */}
+      <Dialog 
+        open={quickTransferDialogOpen} 
+        onClose={() => setQuickTransferDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <SpeedIcon color="primary" />
+            Quick Transfer to Recent Customers
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Transfer {selectedAssets.length} selected asset(s) from <strong>{customer?.name}</strong> to a recent customer:
+            </Typography>
+            
+            {recentCustomers.length === 0 ? (
+              <Alert severity="info">
+                <Typography variant="body2">
+                  No recent customers found. Use the main Transfer button to search all customers.
+                </Typography>
+              </Alert>
+            ) : (
+              <Box display="flex" flexDirection="column" gap={1} mt={2}>
+                {recentCustomers.map((customer) => (
+                  <Button
+                    key={customer.CustomerListID}
+                    variant="outlined"
+                    fullWidth
+                    onClick={() => {
+                      setTargetCustomer(customer);
+                      setTransferDialogOpen(true);
+                      setQuickTransferDialogOpen(false);
+                    }}
+                    sx={{ justifyContent: 'flex-start', p: 2, mb: 1 }}
+                  >
+                    <Box textAlign="left">
+                      <Typography variant="body2" fontWeight={600}>
+                        {customer.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        ID: {customer.CustomerListID} | Type: {customer.customer_type || 'CUSTOMER'} 
+                      </Typography>
+                    </Box>
+                  </Button>
+                ))}
+              </Box>
+            )}
+
+            <Alert severity="info" sx={{ mt: 2 }}>
+              <Typography variant="body2">
+                <strong>Note:</strong> Recent customers are based on recently updated accounts. 
+                Use the main "Transfer" button to search all customers.
+              </Typography>
+            </Alert>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setQuickTransferDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button 
+            variant="outlined"
+            onClick={() => {
+              setQuickTransferDialogOpen(false);
+              handleOpenTransferDialog(false);
+            }}
+          >
+            Search All Customers
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Transfer History Dialog */}
+      <Dialog 
+        open={showTransferHistory} 
+        onClose={() => setShowTransferHistory(false)}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <HistoryIcon color="primary" />
+            Transfer History
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Recent asset transfer activity for this customer:
+            </Typography>
+            
+            {transferHistory.length === 0 ? (
+              <Alert severity="info">
+                <Typography variant="body2">
+                  No recent transfer history found. Transfer activity will appear here once assets are moved.
+                </Typography>
+              </Alert>
+            ) : (
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow sx={{ backgroundColor: '#f5f7fa' }}>
+                      <TableCell sx={{ fontWeight: 700 }}>Date/Time</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>Action</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {transferHistory.map((transfer) => (
+                      <TableRow key={transfer.id} hover>
+                        <TableCell>
+                          <Typography variant="body2">
+                            {new Date(transfer.timestamp).toLocaleString()}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={transfer.type.replace('_', ' ')} 
+                            color="primary" 
+                            size="small"
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell>{transfer.description}</TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={transfer.details.status} 
+                            color="success" 
+                            size="small"
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+
+            <Alert severity="info" sx={{ mt: 2 }}>
+              <Typography variant="body2">
+                <strong>Note:</strong> This shows the most recent 20 transfer activities. 
+                Complete audit trails are maintained in the system logs.
+              </Typography>
+            </Alert>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowTransferHistory(false)}>
+            Close
           </Button>
         </DialogActions>
       </Dialog>

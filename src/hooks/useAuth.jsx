@@ -365,10 +365,35 @@ export const AuthProvider = ({ children }) => {
     },
     signOut: async () => {
       try {
+        console.log('Auth: Starting sign out process...');
+        
+        // Clear local state immediately to prevent confusion
+        setUser(null);
+        setProfile(null);
+        setOrganization(null);
+        setLoading(true);
+        
+        // Clear session data and perform logout
+        sessionStorage.setItem('skip_org_redirect_once', '1');
         const { error } = await supabase.auth.signOut();
-        if (error) throw error;
+        
+        if (error) {
+          console.error('Supabase signOut error:', error);
+          throw error;
+        }
+        
+        console.log('Auth: Successfully signed out');
+        
+        // Navigate to login page
+        window.location.href = '/login';
+        
       } catch (error) {
         console.error('Error signing out:', error);
+        // Even if logout fails, clear local state and redirect
+        setUser(null);
+        setProfile(null);
+        setOrganization(null);
+        window.location.href = '/login';
       }
     },
     resetPassword: async (email) => {

@@ -290,8 +290,10 @@ export default function Settings() {
   const [profileChanged, setProfileChanged] = useState(false);
 
   // Password
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordChangeLoading, setPasswordChangeLoading] = useState(false);
 
 
   // Security Settings
@@ -377,8 +379,8 @@ export default function Settings() {
         appName: organization.app_name || 'Scanified',
         primaryColor: organization.primary_color || '#40B5AD',
         secondaryColor: organization.secondary_color || '#48C9B0',
-        appIcon: organization.app_icon || '/landing-icon.png',
-        showAppIcon: organization.show_app_icon !== undefined ? organization.show_app_icon : true,
+        appIcon: '/landing-icon.png', // Default icon - database column doesn't exist yet
+        showAppIcon: true, // Default to show - database column doesn't exist yet
       });
       
       // Load barcode config from organization's format_configuration
@@ -504,33 +506,71 @@ export default function Settings() {
     }
   };
 
-  // Password update
+  // Password update with current password verification
   const handlePasswordSave = async (e) => {
     e.preventDefault();
     setPasswordMsg('');
+    setPasswordChangeLoading(true);
+    
+    // Validate current password first
+    if (!currentPassword) {
+      setPasswordMsg('Please enter your current password.');
+      setPasswordChangeLoading(false);
+      setPasswordSnackbar(true);
+      return;
+    }
     
     if (newPassword !== confirmPassword) {
-      setPasswordMsg('Passwords do not match.');
+      setPasswordMsg('New passwords do not match.');
+      setPasswordChangeLoading(false);
       setPasswordSnackbar(true);
       return;
     }
     
     if (newPassword.length < 6) {
-      setPasswordMsg('Password must be at least 6 characters long.');
+      setPasswordMsg('New password must be at least 6 characters long.');
+      setPasswordChangeLoading(false);
+      setPasswordSnackbar(true);
+      return;
+    }
+
+    if (currentPassword === newPassword) {
+      setPasswordMsg('New password must be different from current password.');
+      setPasswordChangeLoading(false);
       setPasswordSnackbar(true);
       return;
     }
     
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) throw error;
+      // Verify current password by attempting to sign in
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword
+      });
+
+      if (signInError) {
+        setPasswordMsg('Current password is incorrect. Please verify and try again.');
+        setPasswordChangeLoading(false);
+        setPasswordSnackbar(true);
+        return;
+      }
+
+      // If current password is correct, update to new password
+      const { error: updateError } = await supabase.auth.updateUser({ 
+        password: newPassword 
+      });
+      
+      if (updateError) throw updateError;
       
       setPasswordMsg('Password updated successfully!');
+      setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (error) {
-      setPasswordMsg(error.message);
+      console.error('Password update error:', error);
+      setPasswordMsg(error.message || 'Failed to update password. Please try again.');
     } finally {
+      setPasswordChangeLoading(false);
       setPasswordSnackbar(true);
     }
   };
@@ -579,8 +619,7 @@ export default function Settings() {
           app_name: assetConfig.appName,
           primary_color: assetConfig.primaryColor,
           secondary_color: assetConfig.secondaryColor,
-          app_icon: assetConfig.appIcon,
-          show_app_icon: assetConfig.showAppIcon,
+          // app_icon and show_app_icon columns don't exist in database yet
         })
         .eq('id', profile.organization_id);
 
@@ -891,53 +930,216 @@ export default function Settings() {
           {/* Security Tab */}
           <TabPanel value={activeTab} index={1}>
             <Stack spacing={3}>
-              <Box component="form" onSubmit={handlePasswordSave}>
-                <Typography variant="h5" gutterBottom>Change Password</Typography>
-                <Stack spacing={2}>
-                  <TextField
-                    type="password"
-                    label="New Password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
+              <Paper sx={{ p: 3, backgroundColor: '#fff3cd', border: '1px solid #ffeaa7' }}>
+                <Typography variant="h5" gutterBottom sx={{ color: '#856404' }}>
+                  🔒 Change Password
+                </Typography>
+                <Alert severity="warning" sx={{ mb: 3 }}>
+                  <Typography variant="body2">
+                    <strong>Security Requirement:</strong> For your security, you must enter your current password before setting a new one.
+                  </Typography>
+                </Alert>
+                
+                <Box component="form" onSubmit={handlePasswordSave}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12}>
+                      <TextField
+                        type="password"
+                        label="Current Password"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        fullWidth
+                        required
+                        helperText="Enter your current password to verify your identity"
+                        sx={{ mb: 2 }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        type="password"
+                        label="New Password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        fullWidth
+                        required
+                        helperText="Minimum 6 characters"
+                        sx={{ mb: 2 }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        type="password"
+                        label="Confirm New Password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        fullWidth
+                        required
+                        helperText="Re-enter your new password"
+                        sx={{ mb: 2 }}
+                      />
+                    </Grid>
+                  </Grid>
+                  
+                  {/* Password Strength Indicators */}
+                  {newPassword && (
+                    <Card sx={{ mt: 2, mb: 2, backgroundColor: '#f8f9fa' }}>
+                      <CardContent sx={{ py: 2 }}>
+                        <Typography variant="body2" gutterBottom>
+                          <strong>Password Requirements:</strong>
+                        </Typography>
+                        <Stack spacing={1}>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            {newPassword.length >= 6 ? '✅' : '❌'}
+                            <Typography variant="body2" fontSize="0.875rem">
+                              At least 6 characters ({newPassword.length}/6)
+                            </Typography>
+                          </Box>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            {newPassword !== currentPassword ? '✅' : '❌'}
+                            <Typography variant="body2" fontSize="0.875rem">
+                              Different from current password
+                            </Typography>
+                          </Box>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            {newPassword === confirmPassword && newPassword ? '✅' : '❌'}
+                            <Typography variant="body2" fontSize="0.875rem">
+                              Passwords match
+                            </Typography>
+                          </Box>
+                        </Stack>
+                      </CardContent>
+                    </Card>
+                  )}
+                  
+                  <Button 
+                    type="submit" 
+                    variant="contained" 
+                    color="primary"
+                    disabled={passwordChangeLoading || !currentPassword || !newPassword || !confirmPassword}
+                    startIcon={passwordChangeLoading ? <CircularProgress size={20} /> : null}
                     fullWidth
-                  />
-                  <TextField
-                    type="password"
-                    label="Confirm Password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    fullWidth
-                  />
-                  <Button type="submit" variant="contained" color="primary">
-                    Update Password
+                    sx={{ mb: 2 }}
+                  >
+                    {passwordChangeLoading ? 'Updating Password...' : 'Update Password'}
                   </Button>
-                </Stack>
-              </Box>
+                  
+                  {passwordMsg && (
+                    <Alert 
+                      severity={passwordMsg.includes('successfully') ? 'success' : 'error'} 
+                      sx={{ mt: 2 }}
+                    >
+                      {passwordMsg}
+                    </Alert>
+                  )}
+                </Box>
+              </Paper>
               
               <Divider />
               
-              <Box>
-                <Typography variant="h5" gutterBottom>Security Preferences</Typography>
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="h5" gutterBottom>
+                  🛡️ Security Preferences
+                </Typography>
+                
+                {/* Current Security Status */}
+                <Card sx={{ mb: 3, backgroundColor: '#f8f9fa' }}>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom sx={{ color: '#2563eb' }}>
+                      Current Security Status
+                    </Typography>
+                    <Stack spacing={1}>
+                      <Box display="flex" alignItems="center" gap={2}>
+                        <Chip 
+                          label={securitySettings.passwordRequirements ? "Strong Password Required" : "Basic Password"} 
+                          color={securitySettings.passwordRequirements ? "success" : "warning"} 
+                          size="small" 
+                        />
+                        <Typography variant="body2">
+                          Password requirements: {securitySettings.passwordRequirements ? "Enabled" : "Disabled"}
+                        </Typography>
+                      </Box>
+                      <Box display="flex" alignItems="center" gap={2}>
+                        <Chip 
+                          label={securitySettings.loginHistory ? "Login Tracking On" : "Login Tracking Off"} 
+                          color={securitySettings.loginHistory ? "success" : "default"} 
+                          size="small" 
+                        />
+                        <Typography variant="body2">
+                          Activity tracking: {securitySettings.loginHistory ? "Enabled" : "Disabled"}
+                        </Typography>
+                      </Box>
+                      <Box display="flex" alignItems="center" gap={2}>
+                        <Chip 
+                          label={securitySettings.twoFactorEnabled ? "2FA Enabled" : "2FA Disabled"} 
+                          color={securitySettings.twoFactorEnabled ? "success" : "error"} 
+                          size="small" 
+                        />
+                        <Typography variant="body2">
+                          Two-factor authentication: {securitySettings.twoFactorEnabled ? "Enabled" : "Disabled"}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  </CardContent>
+                </Card>
+
                 <Stack spacing={2}>
+                  <Typography variant="h6">Security Controls</Typography>
+                  
                   <FormControlLabel
                     control={
                       <Switch 
                         checked={securitySettings.loginHistory} 
                         onChange={(e) => handleSecurityChange('loginHistory', e.target.checked)} 
+                        color="primary"
                       />
                     }
-                    label="Track Login History"
+                    label={
+                      <Box>
+                        <Typography>Track Login History</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Keep records of login attempts and locations for security monitoring
+                        </Typography>
+                      </Box>
+                    }
                   />
+                  
                   <FormControlLabel
                     control={
                       <Switch 
                         checked={securitySettings.twoFactorEnabled} 
                         onChange={(e) => handleSecurityChange('twoFactorEnabled', e.target.checked)} 
+                        color="primary"
                       />
                     }
-                    label="Two-Factor Authentication"
+                    label={
+                      <Box>
+                        <Typography>Two-Factor Authentication</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Requires a second verification step for enhanced security (coming soon)
+                        </Typography>
+                      </Box>
+                    }
                   />
-                  <Box>
+
+                  <FormControlLabel
+                    control={
+                      <Switch 
+                        checked={securitySettings.accountLockout} 
+                        onChange={(e) => handleSecurityChange('accountLockout', e.target.checked)} 
+                        color="primary"
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography>Account Lockout Protection</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Lock account after {securitySettings.failedAttempts} failed login attempts
+                        </Typography>
+                      </Box>
+                    }
+                  />
+
+                  <Box sx={{ mt: 2 }}>
                     <Typography gutterBottom>Session Timeout (minutes)</Typography>
                     <Slider
                       value={securitySettings.sessionTimeout}
@@ -947,22 +1149,56 @@ export default function Settings() {
                       step={15}
                       marks
                       valueLabelDisplay="auto"
+                      color="primary"
+                      sx={{ mb: 1 }}
                     />
-                    <Typography variant="caption" color="text.secondary">
-                      Current: {securitySettings.sessionTimeout} minutes
+                    <Typography variant="body2" color="text.secondary">
+                      Current session will timeout after {securitySettings.sessionTimeout} minutes of inactivity
                     </Typography>
                   </Box>
-                  {securityChanged && (
-                    <Button 
-                      variant="contained" 
-                      onClick={handleSecuritySave}
-                      startIcon={<SaveIcon />}
-                    >
-                      Save Security Settings
-                    </Button>
-                  )}
+
+                  <Box sx={{ mt: 3 }}>
+                    <Stack direction="row" spacing={2}>
+                      {securityChanged && (
+                        <Button 
+                          variant="contained" 
+                          onClick={handleSecuritySave}
+                          startIcon={<SaveIcon />}
+                          sx={{ minWidth: 180 }}
+                        >
+                          Save Security Settings
+                        </Button>
+                      )}
+                      <Button 
+                        variant="outlined" 
+                        onClick={() => {
+                          const defaultSettings = {
+                            sessionTimeout: 30,
+                            twoFactorEnabled: false,
+                            loginHistory: true,
+                            passwordRequirements: true,
+                            accountLockout: true,
+                            failedAttempts: 5,
+                          };
+                          setSecuritySettings(defaultSettings);
+                          setSecurityChanged(true);
+                        }}
+                        sx={{ minWidth: 180 }}
+                      >
+                        Reset to Defaults
+                      </Button>
+                    </Stack>
+                    
+                    {securityChanged && (
+                      <Alert severity="info" sx={{ mt: 2 }}>
+                        <Typography variant="body2">
+                          You have unsaved security changes. Click "Save Security Settings" to apply them.
+                        </Typography>
+                      </Alert>
+                    )}
+                  </Box>
                 </Stack>
-              </Box>
+              </Paper>
             </Stack>
           </TabPanel>
 
@@ -1147,14 +1383,22 @@ export default function Settings() {
                           sx={{ mb: 2 }}
                         />
                         
+                        <Alert severity="warning" sx={{ mb: 2 }}>
+                          <Typography variant="body2">
+                            <strong>App Icon Configuration:</strong> The database columns for app icon settings are not yet available. 
+                            This feature is coming soon!
+                          </Typography>
+                        </Alert>
+
                         <TextField
                           fullWidth
-                          label="App Icon URL"
+                          label="App Icon URL (Preview Only)"
                           value={assetConfig.appIcon || ''}
                           onChange={(e) => setAssetConfig(prev => ({ ...prev, appIcon: e.target.value }))}
                           sx={{ mb: 2 }}
                           placeholder="e.g., /landing-icon.png"
-                          helperText="URL path to your app icon image (recommended: 64x64px)"
+                          helperText="Preview only - cannot be saved yet"
+                          disabled={true}
                         />
                         
                         <FormControlLabel
@@ -1162,9 +1406,10 @@ export default function Settings() {
                             <Switch
                               checked={assetConfig.showAppIcon !== false}
                               onChange={(e) => setAssetConfig(prev => ({ ...prev, showAppIcon: e.target.checked }))}
+                              disabled={true}
                             />
                           }
-                          label="Show app icon in header"
+                          label="Show app icon in header (disabled)"
                           sx={{ mb: 1 }}
                         />
                         
@@ -1219,11 +1464,20 @@ export default function Settings() {
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
             <TabPanel value={activeTab} index={6}>
               <Box sx={{ maxWidth: 800 }}>
-                <Typography variant="h4" gutterBottom>
-                  Barcode Configuration
+                <Typography variant="h4" gutterBottom sx={{ color: 'primary', fontWeight: 600 }}>
+                  📋 Barcode & Number Format Configuration
                 </Typography>
+                
+                <Alert severity="info" sx={{ mb: 3 }}>
+                  <Typography variant="body2">
+                    <strong>Primary Configuration:</strong> This is the main location for all barcode and number format settings. 
+                    These settings are also accessible from the Asset Configuration page for convenience.
+                  </Typography>
+                </Alert>
+                
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                  Configure barcode formats and validation patterns for your organization.
+                  Configure barcode formats, order number patterns, and serial number validation rules for your organization.
+                  All format configurations are enforced across the application to ensure consistency.
                 </Typography>
                 
                 <Grid container spacing={3}>

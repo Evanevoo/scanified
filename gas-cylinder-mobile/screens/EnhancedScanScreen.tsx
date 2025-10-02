@@ -1568,7 +1568,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                   marginBottom: styles.welcomeTitle.marginBottom * getDynamicStyles().spacingMultiplier,
                   lineHeight: styles.welcomeTitle.lineHeight * getDynamicStyles().spacingMultiplier
                 }
-              ]}>Gas Cylinder Scanner</Text>
+              ]}>{organization?.app_name || 'Scanified'}</Text>
               <Text style={[
                 styles.welcomeSubtitle,
                 getDynamicStyles().fontSizeMultiplier && { fontSize: styles.welcomeSubtitle.fontSize * getDynamicStyles().fontSizeMultiplier },
