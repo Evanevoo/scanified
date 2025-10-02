@@ -22,6 +22,9 @@ interface Organization {
   max_customers: number;
   max_cylinders: number;
   is_active: boolean;
+  app_name?: string;
+  primary_color?: string;
+  secondary_color?: string;
 }
 
 export function useAuth() {
@@ -100,7 +103,10 @@ export function useAuth() {
                           id: orgData?.id,
                           name: orgData?.name,
                           slug: orgData?.slug,
-                          subscription_status: orgData?.subscription_status
+                          app_name: orgData?.app_name,
+                          subscription_status: orgData?.subscription_status,
+                          primary_color: orgData?.primary_color,
+                          secondary_color: orgData?.secondary_color
                         });
                         setOrganization(orgData);
                       }

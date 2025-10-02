@@ -66,6 +66,18 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   const { orderNumber, customerName: routeCustomerName, customerId } = route?.params || {};
   
   const { user, organization, loading: authLoading, organizationLoading } = useAuth();
+  
+  // Debug organization data
+  useEffect(() => {
+    if (organization) {
+      console.log('EnhancedScanScreen - Organization data:', {
+        id: organization.id,
+        name: organization.name,
+        app_name: organization.app_name,
+        displayAppName: organization?.app_name || 'Scanified'
+      });
+    }
+  }, [organization]);
   const { settings } = useSettings();
   
   // State
