@@ -293,7 +293,7 @@ export default function LoginScreen() {
                 <Ionicons 
                   name={biometricType === 'face' ? 'eye' : biometricType === 'touch' ? 'finger-print' : 'shield-checkmark'} 
                   size={20} 
-                  color={(!rememberMe || !email) ? "#9CA3AF" : "#3B82F6"} 
+                  color={(!rememberMe || !email) ? "#9CA3AF" : "#40B5AD"} 
                   style={{ marginRight: 8 }} 
                 />
                 <Text style={[

@@ -111,6 +111,13 @@ export const AssetProvider: React.FC<AssetProviderProps> = ({ children }) => {
         console.warn('Error loading asset config, using defaults:', orgError);
         setConfig(defaultConfig);
       } else {
+        console.log('🔧 AssetContext - Organization data:', {
+          app_name: orgData.app_name,
+          name: orgData.name,
+          primary_color: orgData.primary_color,
+          secondary_color: orgData.secondary_color
+        });
+        
         // Check if configuration has changed
         const newConfig = {
           assetType: orgData.asset_type || defaultConfig.assetType,
@@ -127,7 +134,12 @@ export const AssetProvider: React.FC<AssetProviderProps> = ({ children }) => {
         // Only update if configuration has actually changed
         const configChanged = JSON.stringify(newConfig) !== JSON.stringify(config);
         if (configChanged) {
-          console.log('Asset configuration updated:', newConfig);
+          console.log('🔧 Asset configuration updated:', {
+            appName: newConfig.appName,
+            orgAppName: orgData.app_name,
+            orgName: orgData.name,
+            primaryColor: newConfig.primaryColor
+          });
           setConfig(newConfig);
           setLastConfigUpdate(new Date());
         }
