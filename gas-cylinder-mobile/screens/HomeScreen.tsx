@@ -352,7 +352,9 @@ export default function HomeScreen() {
             <Text style={[styles.welcomeText, { color: colors.text }]}>
               Welcome back{profile?.full_name ? `, ${profile.full_name}` : ''}!
             </Text>
-            <Text style={[styles.appName, { color: colors.primary }]}>{assetConfig.appName}</Text>
+            <Text style={[styles.appName, { color: colors.primary }]}>
+              {organization?.app_name || organization?.name || assetConfig.appName}
+            </Text>
           </View>
           <View style={styles.headerActions}>
             <TouchableOpacity 
