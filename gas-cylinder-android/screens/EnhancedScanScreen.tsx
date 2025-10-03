@@ -1359,10 +1359,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
 
   // Action buttons
   const actions = [
-    { key: 'in', label: 'Check In', color: '#10B981', icon: '📥' },
-    { key: 'out', label: 'Check Out', color: '#EF4444', icon: '📤' },
-    { key: 'locate', label: 'Locate', color: '#8B5CF6', icon: '🔍' },
-    { key: 'fill', label: 'Fill', color: '#F59E0B', icon: '⛽' }
+    { key: 'in', label: 'Check In', color: theme.success, icon: '📥' },
+    { key: 'out', label: 'Check Out', color: theme.error, icon: '📤' },
+    { key: 'locate', label: 'Locate', color: theme.primary, icon: '🔍' },
+    { key: 'fill', label: 'Fill', color: theme.warning, icon: '⛽' }
   ];
 
   if (!permission) {
@@ -2097,7 +2097,7 @@ const styles = StyleSheet.create({
   
   // Purple Header - Matching Image Design
   purpleHeader: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#40B5AD',
     paddingHorizontal: 16,
     paddingVertical: 12,
     flexDirection: 'row',
@@ -2173,7 +2173,7 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   cameraButton: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#40B5AD',
     paddingHorizontal: 32,
     paddingVertical: 16,
     borderRadius: 12,
@@ -2209,7 +2209,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   shipButton: {
-    backgroundColor: '#E0E7FF',
+    backgroundColor: '#E8F7F5',
     borderColor: '#8B5CF6',
   },
   actionButtonContent: {
@@ -2312,7 +2312,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   manualButton: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#40B5AD',
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 8,
@@ -2494,7 +2494,7 @@ const styles = StyleSheet.create({
     color: '#374151',
   },
   permissionButton: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#40B5AD',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
@@ -2602,7 +2602,7 @@ const styles = StyleSheet.create({
     borderColor: '#D1D5DB',
   },
   selectedSpeedButton: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#40B5AD',
     borderColor: '#2563EB',
   },
   speedButtonText: {
@@ -2806,7 +2806,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   locateButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#40B5AD',
   },
   damageButton: {
     backgroundColor: '#F59E0B',
@@ -2842,7 +2842,7 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   enhancedAddButton: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#40B5AD',
     marginTop: 8,
     paddingVertical: 14,
     borderRadius: 10,
@@ -3253,7 +3253,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#E0E7FF',
+    backgroundColor: '#E8F7F5',
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#8B5CF6',
@@ -3265,7 +3265,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   continueButton: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#40B5AD',
     paddingHorizontal: 40,
     paddingVertical: 16,
     borderRadius: 12,
@@ -3320,7 +3320,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     color: '#8B5CF6',
-    backgroundColor: '#E0E7FF',
+    backgroundColor: '#E8F7F5',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
@@ -3337,12 +3337,12 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   cameraActionButtonSelected: {
-    backgroundColor: '#E0E7FF',
+    backgroundColor: '#E8F7F5',
     borderColor: '#8B5CF6',
     borderWidth: 3,
   },
   cameraShipButton: {
-    backgroundColor: '#E0E7FF',
+    backgroundColor: '#E8F7F5',
     borderColor: '#8B5CF6',
   },
   cameraActionButtonContent: {
