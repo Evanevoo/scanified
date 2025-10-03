@@ -58,6 +58,15 @@ export default function HomeScreen() {
   const { colors } = useTheme();
   const { user, profile, organization } = useAuth();
   const { config: assetConfig } = useAssetConfig();
+  
+  // Debug asset config
+  useEffect(() => {
+    console.log('🏠 HomeScreen - Asset config:', {
+      appName: assetConfig.appName,
+      organization: organization?.app_name || organization?.name
+    });
+  }, [assetConfig.appName, organization]);
+  
   const [search, setSearch] = useState('');
   const [customerResults, setCustomerResults] = useState([]);
   const [bottleResults, setBottleResults] = useState([]);
