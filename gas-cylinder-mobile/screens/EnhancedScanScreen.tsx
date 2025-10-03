@@ -72,6 +72,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   
   // Debug organization data and force re-render
   useEffect(() => {
+    console.log('🔍 EnhancedScanScreen - Auth loading:', authLoading);
+    console.log('🔍 EnhancedScanScreen - Organization loading:', organizationLoading);
+    console.log('🔍 EnhancedScanScreen - User:', user?.id);
+    
     if (organization) {
       console.log('🔍 EnhancedScanScreen - Organization data:', {
         id: organization.id,
@@ -87,7 +91,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     } else {
       console.log('🔍 EnhancedScanScreen - No organization data available');
     }
-  }, [organization]);
+  }, [organization, authLoading, organizationLoading]);
   const { settings } = useSettings();
   
   // State
