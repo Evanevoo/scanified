@@ -156,10 +156,6 @@ export const AuthProvider = ({ children }) => {
           
           // Sign out the user
           await supabase.auth.signOut();
-          
-          // Redirect to a disabled account page with reason
-          const reason = encodeURIComponent(profileData.disabled_reason || 'Your account has been disabled');
-          window.location.href = `/account-disabled?reason=${reason}`;
           return;
         }
 
@@ -178,19 +174,10 @@ export const AuthProvider = ({ children }) => {
           if (orgCheck && orgCheck.deleted_at) {
             // Organization has been deleted
             logger.error('Auth: Organization has been deleted');
-            setProfile(null);
+            // Clear organization but keep user and profile
             setOrganization(null);
-            setUser(null);
             setLoading(false);
             authFlowInProgressRef.current = false;
-            
-            // Sign out the user
-            await supabase.auth.signOut();
-            
-            // Redirect to deleted organization page
-            const email = encodeURIComponent(user.email);
-            const reason = encodeURIComponent(orgCheck.deletion_reason || 'Your organization has been removed');
-            window.location.href = `/organization-deleted?email=${email}&reason=${reason}`;
             return;
           }
 
@@ -243,12 +230,33 @@ export const AuthProvider = ({ children }) => {
 
     // --- Auth Listener ---
     // Check for an existing session on initial load
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setLoading(true);
-      previousSessionRef.current = session;
-      loadUserAndProfile(session?.user);
-      isInitialLoadRef.current = false;
-    });
+    const initializeAuth = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) {
+          logger.error('Auth: Error getting initial session:', error);
+          setLoading(false);
+          isInitialLoadRef.current = false;
+          return;
+        }
+        
+        logger.log('Auth: Initial session check:', session ? 'Session found' : 'No session');
+        previousSessionRef.current = session;
+        
+        if (session?.user) {
+          await loadUserAndProfile(session.user);
+        } else {
+          setLoading(false);
+        }
+      } catch (e) {
+        logger.error('Auth: Error during initialization:', e);
+        setLoading(false);
+      } finally {
+        isInitialLoadRef.current = false;
+      }
+    };
+    
+    initializeAuth();
 
     // Listen for changes in auth state (login/logout)
     const { data: listener } = supabase.auth.onAuthStateChange(
