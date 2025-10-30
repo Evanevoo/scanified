@@ -1256,20 +1256,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 10,
   },
-  debugInfo: {
-    position: 'absolute',
-    top: 100,
-    left: 20,
-    right: 20,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    padding: 10,
-    borderRadius: 8,
-  },
-  debugText: {
-    color: '#fff',
-    fontSize: 12,
-    marginBottom: 5,
-  },
   simpleOverlay: {
     position: 'absolute',
     top: 0,
