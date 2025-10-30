@@ -39,6 +39,7 @@ import {
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../hooks/usePermissions';
+import { MaintenanceScheduler } from '../services/MaintenanceScheduler';
 
 export default function MaintenanceWorkflows() {
   const { profile, organization } = useAuth();
@@ -47,6 +48,13 @@ export default function MaintenanceWorkflows() {
   const [workflows, setWorkflows] = useState([]);
   const [workflowTemplates, setWorkflowTemplates] = useState([]);
   const [maintenanceTasks, setMaintenanceTasks] = useState([]);
+  const [schedules, setSchedules] = useState([]);
+  const [scheduleStats, setScheduleStats] = useState({
+    activeSchedules: 0,
+    totalSchedules: 0,
+    upcomingTasks: 0,
+    overdueTasks: 0
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -55,6 +63,7 @@ export default function MaintenanceWorkflows() {
   const [createWorkflowDialog, setCreateWorkflowDialog] = useState(false);
   const [editWorkflowDialog, setEditWorkflowDialog] = useState(false);
   const [createTemplateDialog, setCreateTemplateDialog] = useState(false);
+  const [createScheduleDialog, setCreateScheduleDialog] = useState(false);
   const [viewWorkflowDialog, setViewWorkflowDialog] = useState(false);
   const [selectedWorkflow, setSelectedWorkflow] = useState(null);
   
@@ -80,6 +89,22 @@ export default function MaintenanceWorkflows() {
     checklist_template: [],
     parts_template: [],
     safety_template: []
+  });
+
+  const [scheduleForm, setScheduleForm] = useState({
+    workflowId: '',
+    name: '',
+    description: '',
+    frequencyType: 'monthly',
+    frequencyValue: 1,
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: '',
+    timeOfDay: '09:00',
+    daysOfWeek: [],
+    dayOfMonth: 1,
+    assignedTo: '',
+    notificationDaysBefore: 1,
+    autoCreateTasks: true
   });
 
   useEffect(() => {
@@ -132,6 +157,18 @@ export default function MaintenanceWorkflows() {
       setWorkflows(workflowsResult.data || []);
       setWorkflowTemplates(templatesResult.data || []);
       setMaintenanceTasks(tasksResult.data || []);
+
+      // Load schedules and stats
+      try {
+        const schedulesData = await MaintenanceScheduler.getSchedules(orgId);
+        setSchedules(schedulesData || []);
+
+        const stats = await MaintenanceScheduler.getScheduleStats(orgId);
+        setScheduleStats(stats);
+      } catch (scheduleError) {
+        logger.error('Error loading schedules:', scheduleError);
+        // Don't fail the whole page if schedules can't load
+      }
 
     } catch (error) {
       logger.error('Error fetching maintenance data:', error);
@@ -279,6 +316,47 @@ export default function MaintenanceWorkflows() {
     }
   };
 
+  const handleCreateSchedule = async () => {
+    try {
+      setError('');
+      
+      await MaintenanceScheduler.createSchedule(profile.organization_id, {
+        ...scheduleForm,
+        createdBy: profile.id
+      });
+
+      setSuccess('Maintenance schedule created successfully');
+      setCreateScheduleDialog(false);
+      resetScheduleForm();
+      fetchData();
+
+    } catch (error) {
+      logger.error('Error creating schedule:', error);
+      setError('Failed to create maintenance schedule');
+    }
+  };
+
+  const handleGenerateScheduledTasks = async () => {
+    try {
+      setError('');
+      setLoading(true);
+      
+      const tasksCreated = await MaintenanceScheduler.generateScheduledTasks(
+        profile.organization_id,
+        30 // Generate tasks for next 30 days
+      );
+
+      setSuccess(`Generated ${tasksCreated} scheduled maintenance tasks`);
+      fetchData();
+
+    } catch (error) {
+      logger.error('Error generating scheduled tasks:', error);
+      setError('Failed to generate scheduled tasks');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const resetWorkflowForm = () => {
     setWorkflowForm({
       name: '',
@@ -303,6 +381,24 @@ export default function MaintenanceWorkflows() {
       checklist_template: [],
       parts_template: [],
       safety_template: []
+    });
+  };
+
+  const resetScheduleForm = () => {
+    setScheduleForm({
+      workflowId: '',
+      name: '',
+      description: '',
+      frequencyType: 'monthly',
+      frequencyValue: 1,
+      startDate: new Date().toISOString().split('T')[0],
+      endDate: '',
+      timeOfDay: '09:00',
+      daysOfWeek: [],
+      dayOfMonth: 1,
+      assignedTo: '',
+      notificationDaysBefore: 1,
+      autoCreateTasks: true
     });
   };
 
