@@ -186,16 +186,37 @@ const ProtectedRoute = ({ children }) => {
     
     // Only redirect to organization setup for routes that require an organization
     // Allow access to public pages and registration pages
-    const publicRoutes = ['/', '/landing', '/login', '/register', '/setup', '/contact', '/pricing', '/faq', '/reviews', '/privacy-policy', '/terms-of-service', '/documentation'];
-    const isPublicRoute = publicRoutes.includes(location.pathname);
+    const publicRoutes = [
+      '/', '/landing', '/login', '/register', '/setup', '/contact', '/pricing', 
+      '/faq', '/reviews', '/privacy-policy', '/terms-of-service', '/documentation',
+      '/create-organization', '/verify-organization', '/accept-invite', '/organization-deleted'
+    ];
+    const isPublicRoute = publicRoutes.some(route => location.pathname.startsWith(route));
+    const isAuthRoute = ['/login', '/register', '/setup', '/create-organization'].includes(location.pathname);
     
-    logger.log('🛡️ ProtectedRoute: USER WITHOUT ORG - checking if public route:', { isPublicRoute, path: location.pathname });
+    logger.log('🛡️ ProtectedRoute: USER WITHOUT ORG - checking route:', { 
+      isPublicRoute, 
+      isAuthRoute,
+      path: location.pathname,
+      profileOrg: profile.organization_id 
+    });
     
-    if (!isPublicRoute && location.pathname !== '/register' && location.pathname !== '/setup') {
-      logger.log('🛡️ ProtectedRoute: REDIRECTING TO REGISTER - user needs organization');
-      return <Navigate to="/register" replace />;
+    // If user has an organization_id but organization is null, it might be loading or deleted
+    if (profile.organization_id && !organization && !loading) {
+      logger.log('🛡️ ProtectedRoute: User has org_id but no org loaded - may be deleted');
+      // Allow them to create a new organization
+      if (!isAuthRoute && location.pathname !== '/create-organization') {
+        return <Navigate to="/create-organization" replace />;
+      }
     }
-    logger.log('🛡️ ProtectedRoute: PUBLIC ROUTE - allowing access without org');
+    
+    // If no organization at all, redirect to create one
+    if (!isPublicRoute && !isAuthRoute) {
+      logger.log('🛡️ ProtectedRoute: REDIRECTING TO CREATE ORG - user needs organization');
+      return <Navigate to="/create-organization" replace />;
+    }
+    
+    logger.log('🛡️ ProtectedRoute: PUBLIC/AUTH ROUTE - allowing access without org');
     return children || <Outlet />;
   }
 
