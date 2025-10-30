@@ -100,7 +100,7 @@ const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
 const UserInvites = lazy(() => import('./pages/UserInvites'));
 // Debug routes - only available in development
 const DebugSession = lazy(() => import('./pages/DebugSession'));
-const Customers = lazy(() => import('./pages/Customers'));
+const Customers = lazy(() => import('./pages/Customers.jsx'));
 const Rentals = lazy(() => import('./pages/Rentals'));
 const LeaseAgreements = lazy(() => import('./pages/LeaseAgreements'));
 const IndustryAnalyticsDashboard = lazy(() => import('./pages/IndustryAnalyticsDashboard'));
@@ -157,7 +157,7 @@ const IntegrationSettings = lazy(() => import('./pages/IntegrationSettings'));
 const AutomationRules = lazy(() => import('./pages/AutomationRules'));
 const Locations = lazy(() => import('./pages/Locations'));
 const TempCustomerManagement = lazy(() => import('./pages/TempCustomerManagement'));
-const TransferFromCustomers = lazy(() => import('./pages/TransferFromCustomers'));
+const TransferFromCustomers = lazy(() => import('./pages/TransferFromCustomers.jsx'));
 const DailyUpdateAdmin = lazy(() => import('./pages/DailyUpdateAdmin'));
 
 // Analytics tracking component
