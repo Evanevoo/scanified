@@ -24,6 +24,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 import { deliveryService } from '../services/deliveryService';
+import { CustomerBillingService } from '../services/CustomerBillingService';
 
 function CustomerDashboard({ customer, stats }) {
   return (
@@ -759,6 +760,312 @@ function ServiceRequests({ customerId }) {
   );
 }
 
+function BillingInvoices({ customerId, organizationId }) {
+  const [loading, setLoading] = useState(true);
+  const [invoices, setInvoices] = useState([]);
+  const [billingSummary, setBillingSummary] = useState(null);
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [invoiceDialog, setInvoiceDialog] = useState(false);
+
+  useEffect(() => {
+    if (customerId && organizationId) {
+      loadBillingData();
+    }
+  }, [customerId, organizationId]);
+
+  const loadBillingData = async () => {
+    try {
+      setLoading(true);
+      
+      const [invoicesData, summary] = await Promise.all([
+        CustomerBillingService.getCustomerInvoices(customerId, organizationId),
+        CustomerBillingService.getCustomerBillingSummary(customerId, organizationId)
+      ]);
+
+      setInvoices(invoicesData || []);
+      setBillingSummary(summary);
+
+    } catch (error) {
+      logger.error('Error loading billing data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleViewInvoice = async (invoiceId) => {
+    try {
+      const details = await CustomerBillingService.getInvoiceDetails(invoiceId);
+      setSelectedInvoice(details);
+      setInvoiceDialog(true);
+    } catch (error) {
+      logger.error('Error loading invoice details:', error);
+    }
+  };
+
+  const handleDownloadInvoice = async (invoiceId) => {
+    try {
+      const result = await CustomerBillingService.generateInvoicePDF(invoiceId);
+      alert(result.message);
+    } catch (error) {
+      logger.error('Error downloading invoice:', error);
+    }
+  };
+
+  const getInvoiceStatusColor = (status) => {
+    switch (status) {
+      case 'paid': return 'success';
+      case 'partial': return 'info';
+      case 'pending': return 'warning';
+      case 'overdue': return 'error';
+      default: return 'default';
+    }
+  };
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  return (
+    <Box>
+      <Typography variant="h5" gutterBottom>
+        Billing & Invoices
+      </Typography>
+
+      {/* Billing Summary Cards */}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="text.secondary" gutterBottom>
+                Total Invoiced
+              </Typography>
+              <Typography variant="h5">
+                ${billingSummary?.totalInvoiced?.toFixed(2) || '0.00'}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="text.secondary" gutterBottom>
+                Total Paid
+              </Typography>
+              <Typography variant="h5" color="success.main">
+                ${billingSummary?.totalPaid?.toFixed(2) || '0.00'}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="text.secondary" gutterBottom>
+                Outstanding
+              </Typography>
+              <Typography variant="h5" color="warning.main">
+                ${billingSummary?.totalOutstanding?.toFixed(2) || '0.00'}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="text.secondary" gutterBottom>
+                Overdue Invoices
+              </Typography>
+              <Typography variant="h5" color="error.main">
+                {billingSummary?.overdueInvoices || 0}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Invoices Table */}
+      <Paper>
+        <Typography variant="h6" sx={{ p: 2 }}>
+          Invoice History
+        </Typography>
+        
+        {invoices.length === 0 ? (
+          <Box sx={{ p: 3, textAlign: 'center' }}>
+            <Typography color="text.secondary">
+              No invoices found
+            </Typography>
+          </Box>
+        ) : (
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Invoice #</TableCell>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Due Date</TableCell>
+                  <TableCell align="right">Amount</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {invoices.map((invoice) => (
+                  <TableRow key={invoice.id}>
+                    <TableCell>{invoice.invoice_number}</TableCell>
+                    <TableCell>
+                      {new Date(invoice.invoice_date).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>
+                      {invoice.due_date ? new Date(invoice.due_date).toLocaleDateString() : 'N/A'}
+                    </TableCell>
+                    <TableCell align="right">
+                      ${invoice.total_amount?.toFixed(2)}
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={invoice.status}
+                        color={getInvoiceStatusColor(invoice.status)}
+                        size="small"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="small"
+                        startIcon={<ViewIcon />}
+                        onClick={() => handleViewInvoice(invoice.id)}
+                        sx={{ mr: 1 }}
+                      >
+                        View
+                      </Button>
+                      <Button
+                        size="small"
+                        startIcon={<DownloadIcon />}
+                        onClick={() => handleDownloadInvoice(invoice.id)}
+                      >
+                        Download
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </Paper>
+
+      {/* Invoice Details Dialog */}
+      <Dialog
+        open={invoiceDialog}
+        onClose={() => setInvoiceDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          Invoice Details - {selectedInvoice?.invoice_number}
+        </DialogTitle>
+        <DialogContent>
+          {selectedInvoice && (
+            <Box>
+              <Grid container spacing={2} sx={{ mb: 3 }}>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2">Invoice Date:</Typography>
+                  <Typography>
+                    {new Date(selectedInvoice.invoice_date).toLocaleDateString()}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2">Due Date:</Typography>
+                  <Typography>
+                    {selectedInvoice.due_date ? 
+                      new Date(selectedInvoice.due_date).toLocaleDateString() : 
+                      'N/A'}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2">Customer:</Typography>
+                  <Typography>{selectedInvoice.customers?.name}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2">Status:</Typography>
+                  <Chip
+                    label={selectedInvoice.status}
+                    color={getInvoiceStatusColor(selectedInvoice.status)}
+                    size="small"
+                  />
+                </Grid>
+              </Grid>
+
+              <Divider sx={{ my: 2 }} />
+
+              <Typography variant="subtitle1" gutterBottom>
+                Line Items
+              </Typography>
+              {selectedInvoice.line_items && Array.isArray(selectedInvoice.line_items) ? (
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Description</TableCell>
+                        <TableCell align="right">Quantity</TableCell>
+                        <TableCell align="right">Unit Price</TableCell>
+                        <TableCell align="right">Total</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {selectedInvoice.line_items.map((item, index) => (
+                        <TableRow key={index}>
+                          <TableCell>{item.description}</TableCell>
+                          <TableCell align="right">{item.quantity}</TableCell>
+                          <TableCell align="right">${item.unit_price?.toFixed(2)}</TableCell>
+                          <TableCell align="right">
+                            ${(item.quantity * item.unit_price).toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Typography color="text.secondary">
+                  No line items available
+                </Typography>
+              )}
+
+              <Box sx={{ mt: 3, textAlign: 'right' }}>
+                <Typography variant="h6">
+                  Total: ${selectedInvoice.total_amount?.toFixed(2)}
+                </Typography>
+                {selectedInvoice.amount_paid > 0 && (
+                  <Typography variant="body2" color="success.main">
+                    Paid: ${selectedInvoice.amount_paid?.toFixed(2)}
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setInvoiceDialog(false)}>Close</Button>
+          <Button
+            variant="contained"
+            startIcon={<DownloadIcon />}
+            onClick={() => {
+              handleDownloadInvoice(selectedInvoice?.id);
+              setInvoiceDialog(false);
+            }}
+          >
+            Download PDF
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}
+
 export default function CustomerSelfService() {
   const { profile, organization } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -884,16 +1191,7 @@ export default function CustomerSelfService() {
       {activeTab === 1 && <CylinderTracking customerId={profile?.id} />}
       {activeTab === 2 && <DeliveryScheduling customerId={profile?.id} />}
       {activeTab === 3 && <ServiceRequests customerId={profile?.id} />}
-      {activeTab === 4 && (
-        <Box>
-          <Typography variant="h6" gutterBottom>
-            Billing & Invoices
-          </Typography>
-          <Alert severity="info">
-            Billing features coming soon. Contact support for billing inquiries.
-          </Alert>
-        </Box>
-      )}
+      {activeTab === 4 && <BillingInvoices customerId={profile?.id} organizationId={organization?.id} />}
     </Box>
   );
 } 
