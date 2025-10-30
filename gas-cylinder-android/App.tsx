@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, LogBox } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -34,6 +34,20 @@ import DataHealthScreen from './screens/DataHealthScreen';
 import NotificationSettingsScreen from './screens/NotificationSettingsScreen';
 import { notificationService } from './services/NotificationService';
 import { soundService } from './services/soundService';
+
+// Silence known, harmless development warnings in Expo Go
+if (__DEV__) {
+  LogBox.ignoreLogs([
+    // Expo Go push notifications informational message (SDK 53+)
+    'expo-notifications: Android Push notifications (remote notifications) functionality provided by expo-notifications was removed from Expo Go',
+    '`expo-notifications` functionality is not fully supported in Expo Go',
+    // Optional: sound placeholders during dev
+    'Sound Scan Success configured but not preloaded (placeholder file)',
+    'Sound Scan Error configured but not preloaded (placeholder file)',
+    'Sound Notification configured but not preloaded (placeholder file)',
+    'Sound Action configured but not preloaded (placeholder file)'
+  ]);
+}
 
 const Stack = createNativeStackNavigator();
 
