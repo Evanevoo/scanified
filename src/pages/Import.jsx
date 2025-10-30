@@ -12,6 +12,7 @@ import { getImportWorker, addImportWorkerListener, removeImportWorkerListener } 
 import { Box, Paper, Typography, Button, IconButton, Alert, LinearProgress, Card, CardContent, Stack, Chip, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 import { ArrowBack as ArrowBackIcon, Upload as UploadIcon, Search as SearchIcon, CheckCircle as CheckCircleIcon } from '@mui/icons-material';
 import { findCustomer, normalizeCustomerName } from '../utils/customerMatching';
+import { validateImportData, autoCorrectImportData, generateImportSummary } from '../utils/importValidation';
 
 // Import type definitions
 const IMPORT_TYPES = {
