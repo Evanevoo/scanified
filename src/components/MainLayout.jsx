@@ -381,9 +381,7 @@ export default function MainLayout({ children }) {
               sx={{
                 background: 'rgba(255,255,255,0.9)',
                 borderRadius: '20px',
-                border: '1.5px solid rgba(255,255,255,0.3)',
                 color: '#1976d2',
-                fontSize: '0.9rem',
                 width: '100%',
                 boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
                 '& .MuiOutlinedInput-root': {
@@ -392,8 +390,8 @@ export default function MainLayout({ children }) {
                   color: '#1976d2',
                   fontWeight: 500,
                   height: 36,
-                  display: 'flex',
-                  alignItems: 'center',
+                  paddingTop: 0,
+                  paddingBottom: 0,
                   '& fieldset': {
                     borderColor: 'rgba(255,255,255,0.3)',
                   },
@@ -403,13 +401,10 @@ export default function MainLayout({ children }) {
                   '&.Mui-focused fieldset': {
                     borderColor: 'white',
                     boxShadow: '0 0 0 2px rgba(255,255,255,0.2)',
-                    outline: 'none',
                   },
-                  '&.Mui-focused': {
-                    outline: 'none',
-                  },
-                  '& input:focus': {
-                    outline: 'none',
+                  '& .MuiInputAdornment-root': {
+                    marginTop: '0 !important',
+                    marginBottom: '0 !important',
                   },
                   '& .MuiInputAdornment-root .MuiSvgIcon-root': {
                     color: '#1976d2',
@@ -417,21 +412,18 @@ export default function MainLayout({ children }) {
                   },
                 },
                 '& .MuiOutlinedInput-input': {
-                  padding: '6px 10px',
-                  height: 36,
-                  display: 'flex',
-                  alignItems: 'center',
-                },
-                '& input': {
+                  padding: '8px 12px 8px 0',
                   color: '#1976d2',
                   fontWeight: 500,
                   fontSize: '0.9rem',
+                  height: 'auto',
+                  lineHeight: 1.5,
                 },
               }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <SearchIcon sx={{ color: '#1976d2', mr: 0.5, fontSize: 18 }} />
+                    <SearchIcon sx={{ color: '#1976d2', fontSize: 18 }} />
                   </InputAdornment>
                 ),
               }}
