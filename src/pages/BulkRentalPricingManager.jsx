@@ -53,7 +53,7 @@ export default function BulkRentalPricingManager() {
       setLoading(true);
       
       // Debug: Log organization info
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         logger.log('🔍 Organization Debug:', {
           organizationId: organization?.id,
           organizationName: organization?.name,

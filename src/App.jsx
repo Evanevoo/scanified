@@ -227,7 +227,7 @@ function AppContent() {
                   <Route path="/verify-organization" element={<VerifyOrganization />} />
                   <Route path="/accept-invite" element={<AcceptInvite />} />
                   {/* Debug routes - only available in development */}
-                  {process.env.NODE_ENV === 'development' && (
+                  {import.meta.env.DEV && (
                     <Route path="/debug-session" element={<DebugSession />} />
                   )}
                   <Route path="/login" element={

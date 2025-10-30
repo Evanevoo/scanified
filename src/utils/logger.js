@@ -3,8 +3,8 @@
  * Only logs errors and warnings in production
  */
 
-const isDevelopment = process.env.NODE_ENV === 'development';
-const isDebugEnabled = process.env.VITE_DEBUG === 'true';
+const isDevelopment = typeof import.meta !== 'undefined' ? import.meta.env.DEV : false;
+const isDebugEnabled = typeof import.meta !== 'undefined' ? (import.meta.env.VITE_DEBUG === 'true') : false;
 
 const logger = {
   log: (...args) => {

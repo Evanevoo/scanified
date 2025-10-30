@@ -32,7 +32,7 @@ const RoleProtectedRoute = ({ children, allowedRoles = [] }) => {
   const hasAccess = allowedRoles.some(role => normalizeRole(role) === userRole);
 
   // Debug logging (development only)
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     logger.log('RoleProtectedRoute Debug:', {
       userRole,
       allowedRoles,

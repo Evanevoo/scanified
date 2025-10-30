@@ -305,7 +305,7 @@ export const initAllTracking = () => {
 export const enableDebugMode = () => {
   if (typeof window !== 'undefined') {
     window.gtag_debug = true;
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       logger.log('Analytics debug mode enabled');
     }
   }
