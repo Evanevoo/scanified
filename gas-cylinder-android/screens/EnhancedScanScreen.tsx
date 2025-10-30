@@ -860,6 +860,27 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
 
   // Update bottle status
   const updateBottleStatus = async (barcode: string, action: 'in' | 'out' | 'locate' | 'fill') => {
+    // First, check current bottle status
+    const { data: currentBottle, error: fetchError } = await supabase
+      .from('bottles')
+      .select('status, last_scanned')
+      .eq('barcode_number', barcode)
+      .eq('organization_id', organization?.id)
+      .single();
+
+    if (fetchError) {
+      console.error('Error fetching current bottle status:', fetchError);
+      return;
+    }
+
+    console.log('Current bottle status:', { barcode, currentStatus: currentBottle?.status, action });
+
+    // Business logic: Prevent duplicate "shipped" scans, but allow "return" to override "shipped"
+    if (action === 'out' && currentBottle?.status === 'delivered') {
+      console.log('❌ Bottle already shipped, preventing duplicate shipment');
+      throw new Error(`Bottle ${barcode} has already been shipped and cannot be shipped again.`);
+    }
+
     let updateData: any = {
       last_scanned: new Date().toISOString()
     };
@@ -1224,6 +1245,33 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     }
   };
 
+  // Remove individual scanned item
+  const removeScannedItem = (index: number) => {
+    Alert.alert(
+      'Remove Item',
+      `Are you sure you want to remove this scanned item?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Remove', 
+          style: 'destructive',
+          onPress: () => {
+            const itemToRemove = scannedItems[index];
+            setScannedItems(prev => prev.filter((_, i) => i !== index));
+            
+            // Update scan count
+            setScanCount(prev => Math.max(0, prev - 1));
+            
+            // Remove from duplicates if it was there
+            setDuplicates(prev => prev.filter(dup => dup !== itemToRemove.barcode));
+            
+            console.log(`Removed scanned item: ${itemToRemove.barcode}`);
+          }
+        }
+      ]
+    );
+  };
+
   // Swipeable scan item component
   const SwipeableScanItem = ({ item }: { item: ScanResult }) => {
     const translateX = useSharedValue(0);
@@ -1407,7 +1455,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     <SafeAreaView style={styles.container}>
       {/* Purple Header Bar - Matching Image Design */}
       <View style={styles.purpleHeader}>
-        <Text style={styles.headerTitle}>Scan Ships</Text>
+        <Text style={styles.headerTitle}>Enhanced Scan</Text>
         <View style={styles.headerRight}>
           <Text style={styles.timeText}>
             {currentTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
@@ -1509,11 +1557,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                   }
                 ]}>
                   {(organization?.app_name || organization?.name || 'Scanified')}
-                  {__DEV__ && (
-                    <Text style={{fontSize: 12, color: 'red'}}>
-                      {' [DEBUG: '}{organization?.app_name}{' | '}{organization?.name}{']'}
-                    </Text>
-                  )}
                 </Text>
               <Text style={[
                 styles.welcomeSubtitle,
@@ -1523,7 +1566,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                   lineHeight: styles.welcomeSubtitle.lineHeight * getDynamicStyles().spacingMultiplier
                 }
               ]}>
-                Scan barcodes to track cylinder shipments
+                Scan barcodes for this order
               </Text>
               
               {/* Organization Info */}
@@ -1806,13 +1849,21 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                     <Text style={[styles.scannedItemBarcode, { color: theme.text }]}>
                       {item.barcode}
                     </Text>
-                    <View style={[
-                      styles.scannedItemStatus,
-                      { backgroundColor: item.synced ? '#10B981' : '#F59E0B' }
-                    ]}>
-                      <Text style={styles.scannedItemStatusText}>
-                        {item.synced ? '✓ Synced' : '⏳ Pending'}
-                      </Text>
+                    <View style={styles.scannedItemHeaderRight}>
+                      <View style={[
+                        styles.scannedItemStatus,
+                        { backgroundColor: item.synced ? '#10B981' : '#F59E0B' }
+                      ]}>
+                        <Text style={styles.scannedItemStatusText}>
+                          {item.synced ? '✓ Synced' : '⏳ Pending'}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.removeButton, { backgroundColor: '#EF4444' }]}
+                        onPress={() => removeScannedItem(index)}
+                      >
+                        <Text style={styles.removeButtonText}>✕</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
                   <Text style={[styles.scannedItemAction, { color: theme.textSecondary }]}>
@@ -3138,6 +3189,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
+  },
+  scannedItemHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  removeButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   scannedItemBarcode: {
     fontSize: 16,
