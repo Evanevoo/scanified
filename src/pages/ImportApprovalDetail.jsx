@@ -462,8 +462,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setActionMessage('Error: No organization found. Aborting action.');
       return;
     }
-    // Prevent verification unless shp/rtn and trk values match
-    if (action === 'Verify This Record') {
+    
+    // Check if this is a scanned-only record
+    const isScannedOnly = invoiceNumber && invoiceNumber.startsWith('scanned_');
+    
+    // Prevent verification unless shp/rtn and trk values match (only for non-scanned records)
+    if (action === 'Verify This Record' && !isScannedOnly) {
       const importData = importRecord?.data || {};
       const summary = importData.summary || {};
       if (!(summary.shp === summary.rtn && summary.shp === summary.trk)) {
@@ -474,11 +478,14 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     try {
       switch (action) {
         case 'Verify This Record': {
-          // 1. Update imported_invoices status
-          await supabase
-            .from('imported_invoices')
-            .update({ status: 'approved', approved_at: new Date().toISOString() })
-            .eq('id', invoiceNumber);
+          // Skip database update for scanned-only records
+          if (!isScannedOnly) {
+            // 1. Update imported_invoices status
+            await supabase
+              .from('imported_invoices')
+              .update({ status: 'approved', approved_at: new Date().toISOString() })
+              .eq('id', invoiceNumber);
+          }
 
           // 2. Assign delivered bottles to customer and add to rentals
           const importData = importRecord?.data || {};
@@ -536,20 +543,33 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         }
         case 'Delete This Record':
           if (window.confirm('Are you sure you want to delete this record?')) {
-            await supabase
-              .from('imported_invoices')
-              .delete()
-              .eq('id', invoiceNumber);
+            if (isScannedOnly) {
+              // For scanned-only records, delete from bottle_scans
+              const orderNumber = invoiceNumber.replace('scanned_', '');
+              await supabase
+                .from('bottle_scans')
+                .delete()
+                .eq('order_number', orderNumber);
+            } else {
+              await supabase
+                .from('imported_invoices')
+                .delete()
+                .eq('id', invoiceNumber);
+            }
             setActionMessage('Record deleted successfully!');
             setTimeout(() => navigate('/import-approvals'), 1500);
           }
           break;
         case 'Mark for Investigation':
-          await supabase
-            .from('imported_invoices')
-            .update({ status: 'investigation', notes: 'Marked for investigation' })
-            .eq('id', invoiceNumber);
-          setActionMessage('Record marked for investigation!');
+          if (!isScannedOnly) {
+            await supabase
+              .from('imported_invoices')
+              .update({ status: 'investigation', notes: 'Marked for investigation' })
+              .eq('id', invoiceNumber);
+            setActionMessage('Record marked for investigation!');
+          } else {
+            setActionMessage('Cannot mark scanned-only records for investigation');
+          }
           break;
         case 'Change Customer':
           setShowCustomerModal(true);
@@ -585,6 +605,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       return;
     }
 
+    const isScannedOnly = invoiceNumber && invoiceNumber.startsWith('scanned_');
+
     try {
       setActionMessage('Updating customer...');
       
@@ -592,6 +614,24 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       const customer = customers.find(c => c.CustomerListID === selectedCustomer);
       if (!customer) {
         setActionMessage('Selected customer not found');
+        return;
+      }
+
+      if (isScannedOnly) {
+        // For scanned-only records, update bottle_scans table
+        const orderNumber = invoiceNumber.replace('scanned_', '');
+        await supabase
+          .from('bottle_scans')
+          .update({ 
+            customer_name: customer.name,
+            customer_id: customer.CustomerListID 
+          })
+          .eq('order_number', orderNumber);
+        
+        setActionMessage('Customer updated successfully!');
+        setShowCustomerModal(false);
+        // Reload the page to reflect changes
+        window.location.reload();
         return;
       }
 
