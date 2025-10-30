@@ -1,290 +1,477 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform, Alert } from 'react-native';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+import { supabase } from '../supabase';
 
-export interface NotificationSettings {
-  enabled: boolean;
-  scanNotifications: boolean;
-  syncNotifications: boolean;
-  errorNotifications: boolean;
-  batchCompleteNotifications: boolean;
-}
+// Configure notification behavior
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 export interface NotificationData {
   title: string;
   body: string;
-  data?: any;
-  sound?: boolean;
-  priority?: 'min' | 'low' | 'default' | 'high' | 'max';
+  data?: Record<string, any>;
+  categoryId?: string;
 }
 
-class NotificationService {
+export class NotificationService {
+  private static instance: NotificationService;
+  private expoPushToken: string | null = null;
   private isInitialized = false;
+
+  private constructor() {}
+
+  public static getInstance(): NotificationService {
+    if (!NotificationService.instance) {
+      NotificationService.instance = new NotificationService();
+    }
+    return NotificationService.instance;
+  }
 
   /**
    * Initialize the notification service
    */
-  async initialize(): Promise<void> {
-    if (this.isInitialized) return;
-
-    try {
-      console.log('🔔 Initializing NotificationService (Basic Mode)');
-      this.isInitialized = true;
-      console.log('🔔 NotificationService initialized successfully');
-    } catch (error) {
-      console.error('❌ Failed to initialize NotificationService:', error);
+  public async initialize(): Promise<void> {
+    if (this.isInitialized) {
+      return;
     }
-  }
 
-  /**
-   * Check if notifications are enabled in settings
-   */
-  private async areNotificationsEnabled(): Promise<boolean> {
     try {
-      const settings = await AsyncStorage.getItem('app_settings');
-      if (settings) {
-        const parsedSettings = JSON.parse(settings);
-        return parsedSettings.notifications === true;
-      }
-      return true; // Default to enabled if no settings found
-    } catch (error) {
-      console.error('Error checking notification settings:', error);
-      return true;
-    }
-  }
-
-  /**
-   * Send a local notification (using Alert for now)
-   */
-  async sendLocalNotification(notification: NotificationData): Promise<void> {
-    try {
-      // Check if notifications are enabled
-      const enabled = await this.areNotificationsEnabled();
-      if (!enabled) {
-        console.log('🔔 Notifications disabled, skipping notification');
+      // Skip push token registration in Expo Go (SDK 53+ doesn't support remote push)
+      if (Constants.appOwnership === 'expo') {
+        console.log('📱 Running in Expo Go - skipping remote push setup');
+        console.log('ℹ️  Local notifications still work. Use a development build for full push support.');
+        this.isInitialized = true;
         return;
       }
 
-      if (!this.isInitialized) {
-        await this.initialize();
+      // Check if device supports push notifications
+      if (!Device.isDevice) {
+        console.log('Must use physical device for Push Notifications');
+        this.isInitialized = true;
+        return;
       }
 
-      // For now, use Alert as a fallback
-      console.log('🔔 Showing notification:', notification.title, notification.body);
-      
-      // In a real implementation, you would use expo-notifications here
-      // For now, we'll just log and show alerts for important notifications
-      if (notification.priority === 'high') {
-        Alert.alert(notification.title, notification.body);
+      // Request permissions
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
       }
+
+      if (finalStatus !== 'granted') {
+        console.log('Failed to get push token for push notification!');
+        this.isInitialized = true;
+        return;
+      }
+
+      // Get the push token
+      const token = await Notifications.getExpoPushTokenAsync({
+        projectId: 'd71ec042-1fec-4186-ac3b-0ae85a6af345',
+      });
+
+      this.expoPushToken = token.data;
+      console.log('Expo push token:', this.expoPushToken);
+
+      // Configure notification categories
+      await this.setupNotificationCategories();
+
+      // Set up notification listeners
+      this.setupNotificationListeners();
+
+      this.isInitialized = true;
+    } catch (error) {
+      console.error('Error initializing notification service:', error);
+      this.isInitialized = true;
+    }
+  }
+
+  /**
+   * Setup notification categories for different types of notifications
+   */
+  private async setupNotificationCategories(): Promise<void> {
+    await Notifications.setNotificationCategoryAsync('scan_complete', [
+      {
+        identifier: 'view_details',
+        buttonTitle: 'View Details',
+        options: {
+          opensAppToForeground: true,
+        },
+      },
+      {
+        identifier: 'dismiss',
+        buttonTitle: 'Dismiss',
+        options: {
+          opensAppToForeground: false,
+        },
+      },
+    ]);
+
+    await Notifications.setNotificationCategoryAsync('sync_status', [
+      {
+        identifier: 'retry_sync',
+        buttonTitle: 'Retry Sync',
+        options: {
+          opensAppToForeground: true,
+        },
+      },
+      {
+        identifier: 'dismiss',
+        buttonTitle: 'Dismiss',
+        options: {
+          opensAppToForeground: false,
+        },
+      },
+    ]);
+
+    await Notifications.setNotificationCategoryAsync('maintenance_reminder', [
+      {
+        identifier: 'schedule_maintenance',
+        buttonTitle: 'Schedule',
+        options: {
+          opensAppToForeground: true,
+        },
+      },
+      {
+        identifier: 'dismiss',
+        buttonTitle: 'Dismiss',
+        options: {
+          opensAppToForeground: false,
+        },
+      },
+    ]);
+  }
+
+  /**
+   * Setup notification event listeners
+   */
+  private setupNotificationListeners(): void {
+    // Handle notification received while app is foregrounded
+    Notifications.addNotificationReceivedListener(notification => {
+      console.log('Notification received:', notification);
+      // You can handle the notification here, e.g., show an in-app banner
+    });
+
+    // Handle notification response (when user taps on notification)
+    Notifications.addNotificationResponseReceivedListener(response => {
+      console.log('Notification response:', response);
+      this.handleNotificationResponse(response);
+    });
+  }
+
+  /**
+   * Handle notification response based on category and action
+   */
+  private handleNotificationResponse(response: Notifications.NotificationResponse): void {
+    const { actionIdentifier, notification } = response;
+    const data = notification.request.content.data;
+
+    switch (notification.request.content.categoryIdentifier) {
+      case 'scan_complete':
+        if (actionIdentifier === 'view_details') {
+          // Navigate to scan details
+          // You would typically use navigation here
+          console.log('Navigate to scan details:', data);
+        }
+        break;
+
+      case 'sync_status':
+        if (actionIdentifier === 'retry_sync') {
+          // Trigger sync retry
+          console.log('Retry sync requested');
+        }
+        break;
+
+      case 'maintenance_reminder':
+        if (actionIdentifier === 'schedule_maintenance') {
+          // Navigate to maintenance scheduling
+          console.log('Navigate to maintenance scheduling:', data);
+        }
+        break;
+
+      default:
+        // Default action - just open the app
+        console.log('Default notification action');
+        break;
+    }
+  }
+
+  /**
+   * Send a local notification
+   */
+  public async sendLocalNotification(data: NotificationData): Promise<void> {
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: data.title,
+          body: data.body,
+          data: data.data || {},
+          categoryIdentifier: data.categoryId,
+        },
+        trigger: null, // Show immediately
+      });
     } catch (error) {
       console.error('Error sending local notification:', error);
     }
   }
 
   /**
-   * Send scan success notification
+   * Schedule a notification for a specific time
    */
-  async sendScanSuccessNotification(barcode?: string, count?: number): Promise<void> {
-    const title = count ? `Batch Scan Complete` : `Scan Successful`;
-    const body = count 
-      ? `${count} items scanned successfully`
-      : barcode 
-        ? `Barcode ${barcode} scanned successfully`
-        : `Item scanned successfully`;
+  public async scheduleNotification(
+    data: NotificationData,
+    trigger: Notifications.NotificationTriggerInput
+  ): Promise<string> {
+    try {
+      const notificationId = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: data.title,
+          body: data.body,
+          data: data.data || {},
+          categoryIdentifier: data.categoryId,
+        },
+        trigger,
+      });
 
-    await this.sendLocalNotification({
-      title,
-      body,
-      data: { action: 'view_scan', barcode, count },
-      priority: 'default',
-    });
+      return notificationId;
+    } catch (error) {
+      console.error('Error scheduling notification:', error);
+      throw error;
+    }
   }
 
   /**
-   * Send scan error notification
+   * Cancel a scheduled notification
    */
-  async sendScanErrorNotification(error: string): Promise<void> {
-    await this.sendLocalNotification({
-      title: 'Scan Failed',
-      body: error,
-      data: { action: 'error' },
-      priority: 'high',
-    });
+  public async cancelNotification(notificationId: string): Promise<void> {
+    try {
+      await Notifications.cancelScheduledNotificationAsync(notificationId);
+    } catch (error) {
+      console.error('Error canceling notification:', error);
+    }
   }
 
   /**
-   * Send sync notification
+   * Cancel all scheduled notifications
    */
-  async sendSyncNotification(success: boolean, message: string, count?: number): Promise<void> {
-    const title = success ? 'Sync Complete' : 'Sync Failed';
-    const body = success 
-      ? count 
-        ? `Successfully synced ${count} items`
-        : message
-      : message;
-
-    await this.sendLocalNotification({
-      title,
-      body,
-      data: { action: 'sync', success, count },
-      priority: success ? 'default' : 'high',
-    });
+  public async cancelAllNotifications(): Promise<void> {
+    try {
+      await Notifications.cancelAllScheduledNotificationsAsync();
+    } catch (error) {
+      console.error('Error canceling all notifications:', error);
+    }
   }
 
   /**
-   * Send batch complete notification
+   * Get the Expo push token
    */
-  async sendBatchCompleteNotification(count: number): Promise<void> {
-    await this.sendLocalNotification({
-      title: 'Batch Complete',
-      body: `Successfully scanned ${count} items`,
-      data: { action: 'batch_complete', count },
-      priority: 'default',
-    });
+  public getExpoPushToken(): string | null {
+    return this.expoPushToken;
   }
 
   /**
-   * Send offline mode notification
+   * Register device for push notifications with Supabase
    */
-  async sendOfflineModeNotification(enabled: boolean): Promise<void> {
-    const title = enabled ? 'Offline Mode Enabled' : 'Offline Mode Disabled';
-    const body = enabled 
-      ? 'Data will be stored locally until connection is restored'
-      : 'Data will sync automatically when connected';
+  public async registerDevice(userId: string, organizationId: string): Promise<void> {
+    if (!this.expoPushToken) {
+      console.log('No push token available');
+      return;
+    }
 
-    await this.sendLocalNotification({
-      title,
-      body,
-      data: { action: 'offline_mode', enabled },
-      priority: 'low',
-    });
+    try {
+      const { error } = await supabase
+        .from('user_devices')
+        .upsert({
+          user_id: userId,
+          organization_id: organizationId,
+          device_token: this.expoPushToken,
+          platform: Platform.OS,
+          device_model: Device.modelName || 'Unknown',
+          os_version: Device.osVersion || 'Unknown',
+          app_version: '1.0.0', // You should get this from your app config
+          is_active: true,
+          last_seen: new Date().toISOString(),
+        }, {
+          onConflict: 'user_id,device_token'
+        });
+
+      if (error) {
+        console.error('Error registering device:', error);
+        // Don't throw error - just log it so the app doesn't crash
+        console.log('Device registration failed, but app will continue to work');
+      } else {
+        console.log('Device registered successfully');
+      }
+    } catch (error) {
+      console.error('Error registering device:', error);
+      // Don't throw error - just log it so the app doesn't crash
+      console.log('Device registration failed, but app will continue to work');
+    }
   }
 
   /**
-   * Send connection status notification
+   * Unregister device from push notifications
    */
-  async sendConnectionNotification(connected: boolean): Promise<void> {
-    const title = connected ? 'Connection Restored' : 'Connection Lost';
-    const body = connected 
-      ? 'Internet connection restored. Auto-sync will attempt to sync offline data.'
-      : 'Internet connection lost. Data will be stored offline.';
+  public async unregisterDevice(userId: string): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('user_devices')
+        .update({ is_active: false })
+        .eq('user_id', userId);
 
-    await this.sendLocalNotification({
-      title,
-      body,
-      data: { action: 'connection', connected },
-      priority: 'default',
-    });
+      if (error) {
+        console.error('Error unregistering device:', error);
+      } else {
+        console.log('Device unregistered successfully');
+      }
+    } catch (error) {
+      console.error('Error unregistering device:', error);
+    }
   }
 
   /**
-   * Show alert notification (fallback for when push notifications fail)
+   * Send a push notification to a specific user
    */
-  showAlertNotification(title: string, message: string): void {
-    Alert.alert(title, message);
+  public async sendPushNotification(
+    userId: string,
+    data: NotificationData
+  ): Promise<void> {
+    try {
+      // Get user's device tokens
+      const { data: devices, error } = await supabase
+        .from('user_devices')
+        .select('device_token')
+        .eq('user_id', userId)
+        .eq('is_active', true);
+
+      if (error) {
+        console.error('Error fetching user devices:', error);
+        return;
+      }
+
+      if (!devices || devices.length === 0) {
+        console.log('No active devices found for user');
+        return;
+      }
+
+      // Send notification to all user devices
+      const messages = devices.map(device => ({
+        to: device.device_token,
+        sound: 'default',
+        title: data.title,
+        body: data.body,
+        data: data.data || {},
+        categoryId: data.categoryId,
+      }));
+
+      // Send via Expo push service
+      const response = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Accept-encoding': 'gzip, deflate',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(messages),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Push notification failed: ${response.status}`);
+      }
+
+      console.log('Push notification sent successfully');
+    } catch (error) {
+      console.error('Error sending push notification:', error);
+    }
+  }
+
+  /**
+   * Send a push notification to all users in an organization
+   */
+  public async sendOrganizationNotification(
+    organizationId: string,
+    data: NotificationData
+  ): Promise<void> {
+    try {
+      // Get all active devices in the organization
+      const { data: devices, error } = await supabase
+        .from('user_devices')
+        .select('device_token')
+        .eq('organization_id', organizationId)
+        .eq('is_active', true);
+
+      if (error) {
+        console.error('Error fetching organization devices:', error);
+        return;
+      }
+
+      if (!devices || devices.length === 0) {
+        console.log('No active devices found for organization');
+        return;
+      }
+
+      // Send notification to all devices
+      const messages = devices.map(device => ({
+        to: device.device_token,
+        sound: 'default',
+        title: data.title,
+        body: data.body,
+        data: data.data || {},
+        categoryId: data.categoryId,
+      }));
+
+      const response = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Accept-encoding': 'gzip, deflate',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(messages),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Organization notification failed: ${response.status}`);
+      }
+
+      console.log('Organization notification sent successfully');
+    } catch (error) {
+      console.error('Error sending organization notification:', error);
+    }
+  }
+
+  /**
+   * Check if notifications are enabled
+   */
+  public async areNotificationsEnabled(): Promise<boolean> {
+    const { status } = await Notifications.getPermissionsAsync();
+    return status === 'granted';
+  }
+
+  /**
+   * Request notification permissions
+   */
+  public async requestPermissions(): Promise<boolean> {
+    const { status } = await Notifications.requestPermissionsAsync();
+    return status === 'granted';
   }
 
   /**
    * Get notification settings
    */
-  async getNotificationSettings(): Promise<NotificationSettings> {
-    try {
-      const settings = await AsyncStorage.getItem('notification_settings');
-      if (settings) {
-        return JSON.parse(settings);
-      }
-      
-      // Return default settings
-      return {
-        enabled: true,
-        scanNotifications: true,
-        syncNotifications: true,
-        errorNotifications: true,
-        batchCompleteNotifications: true,
-      };
-    } catch (error) {
-      console.error('Error getting notification settings:', error);
-      return {
-        enabled: true,
-        scanNotifications: true,
-        syncNotifications: true,
-        errorNotifications: true,
-        batchCompleteNotifications: true,
-      };
-    }
-  }
-
-  /**
-   * Update notification settings
-   */
-  async updateNotificationSettings(settings: Partial<NotificationSettings>): Promise<void> {
-    try {
-      const currentSettings = await this.getNotificationSettings();
-      const newSettings = { ...currentSettings, ...settings };
-      
-      await AsyncStorage.setItem('notification_settings', JSON.stringify(newSettings));
-      console.log('🔔 Notification settings updated:', newSettings);
-    } catch (error) {
-      console.error('Error updating notification settings:', error);
-    }
-  }
-
-  /**
-   * Clear all notifications
-   */
-  async clearAllNotifications(): Promise<void> {
-    try {
-      console.log('🔔 All notifications cleared');
-    } catch (error) {
-      console.error('Error clearing notifications:', error);
-    }
-  }
-
-  /**
-   * Get notification history
-   */
-  async getNotificationHistory(): Promise<any[]> {
-    try {
-      return [];
-    } catch (error) {
-      console.error('Error getting notification history:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Send delivery notification
-   */
-  async sendDeliveryNotification(delivery: any, organization: any): Promise<void> {
-    try {
-      const notificationData: NotificationData = {
-        title: 'Delivery Update',
-        body: `Your delivery status has been updated to ${delivery.status}`,
-        data: {
-          deliveryId: delivery.id,
-          status: delivery.status,
-          type: 'delivery_update'
-        },
-        sound: true,
-        priority: 'high'
-      };
-
-      await this.sendNotification(notificationData);
-      console.log('✅ Delivery notification sent successfully');
-    } catch (error) {
-      console.error('❌ Error sending delivery notification:', error);
-    }
-  }
-
-  /**
-   * Cleanup resources
-   */
-  cleanup(): void {
-    this.isInitialized = false;
-    console.log('🔔 NotificationService cleaned up');
+  public async getNotificationSettings(): Promise<Notifications.NotificationPermissionsStatus> {
+    return await Notifications.getPermissionsAsync();
   }
 }
 
 // Export singleton instance
-export const notificationService = new NotificationService();
+export const notificationService = NotificationService.getInstance();
 export default notificationService;
