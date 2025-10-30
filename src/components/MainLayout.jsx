@@ -384,16 +384,22 @@ export default function MainLayout({ children }) {
                 color: '#1976d2',
                 width: '100%',
                 boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
+                margin: 0,
+                verticalAlign: 'middle',
                 '& .MuiOutlinedInput-root': {
                   borderRadius: '20px',
                   background: 'rgba(255,255,255,0.9)',
                   color: '#1976d2',
                   fontWeight: 500,
                   height: 36,
-                  paddingTop: 0,
-                  paddingBottom: 0,
+                  margin: 0,
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
                   '& fieldset': {
                     borderColor: 'rgba(255,255,255,0.3)',
+                    margin: 0,
+                    padding: 0,
                   },
                   '&:hover fieldset': {
                     borderColor: 'rgba(255,255,255,0.5)',
@@ -403,8 +409,10 @@ export default function MainLayout({ children }) {
                     boxShadow: '0 0 0 2px rgba(255,255,255,0.2)',
                   },
                   '& .MuiInputAdornment-root': {
-                    marginTop: '0 !important',
-                    marginBottom: '0 !important',
+                    height: 36,
+                    maxHeight: 36,
+                    margin: '0 !important',
+                    padding: '0 !important',
                   },
                   '& .MuiInputAdornment-root .MuiSvgIcon-root': {
                     color: '#1976d2',
@@ -418,6 +426,10 @@ export default function MainLayout({ children }) {
                   fontSize: '0.9rem',
                   height: 'auto',
                   lineHeight: 1.5,
+                  margin: 0,
+                },
+                '& .MuiFormControl-root': {
+                  margin: 0,
                 },
               }}
               InputProps={{
