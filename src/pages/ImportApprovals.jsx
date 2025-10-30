@@ -1248,13 +1248,30 @@ export default function ImportApprovals() {
       if (error) throw error;
       const assetMap = {};
       (bottles || []).forEach(bottle => {
+        // Create entry by product code
         if (bottle.product_code) {
           assetMap[bottle.product_code] = {
             description: bottle.description || '',
             type: bottle.gas_type || bottle.type || '',  // Use gas_type as type
             size: bottle.size || '',
             group: bottle.gas_type || '',  // Use gas_type as group
-            category: bottle.size || ''    // Use size as category
+            category: bottle.size || '',    // Use size as category
+            barcode: bottle.barcode_number || '',
+            serial_number: bottle.serial_number || ''
+          };
+        }
+        
+        // Also create entry by barcode for direct lookup
+        if (bottle.barcode_number) {
+          assetMap[bottle.barcode_number] = {
+            description: bottle.description || '',
+            type: bottle.gas_type || bottle.type || '',
+            size: bottle.size || '',
+            group: bottle.gas_type || '',
+            category: bottle.size || '',
+            barcode: bottle.barcode_number || '',
+            serial_number: bottle.serial_number || '',
+            product_code: bottle.product_code || ''
           };
         }
       });
@@ -1974,11 +1991,31 @@ export default function ImportApprovals() {
   function getProductInfo(lineItem) {
     if (!lineItem) return {};
     
-    const productCode = lineItem.product_code || lineItem.ProductCode || lineItem.Item || '';
-    const assetInfo = productCodeToAssetInfo[productCode] || {};
+    // For scanned items, use barcode as the key to look up product info
+    const barcode = lineItem.barcode || lineItem.barcode_number || lineItem.cylinder_barcode || '';
+    const productCode = lineItem.product_code || lineItem.ProductCode || lineItem.Item || barcode || '';
+    
+    // Try to find asset info by barcode first, then by product code
+    let assetInfo = {};
+    
+    // Look up by barcode if available
+    if (barcode) {
+      // Find bottle by barcode
+      const bottleData = Object.values(productCodeToAssetInfo).find(info => 
+        info.barcode === barcode || info.serial_number === barcode
+      );
+      if (bottleData) {
+        assetInfo = bottleData;
+      }
+    }
+    
+    // Fallback to product code lookup
+    if (!assetInfo.category && productCode) {
+      assetInfo = productCodeToAssetInfo[productCode] || {};
+    }
     
     return {
-      productCode: productCode,
+      productCode: productCode || barcode,
       category: assetInfo.category || lineItem.category || '',
       group: assetInfo.group || lineItem.group || '',
       type: assetInfo.type || lineItem.type || '',
@@ -3235,39 +3272,36 @@ export default function ImportApprovals() {
                         }}
                       >
                         <Grid container spacing={2} alignItems="center">
-                          <Grid item xs={12} sm={3}>
-                            <Typography variant="body1" fontWeight={600} color="primary">
-                              {item.productInfo.productCode}
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              {item.productInfo.category} • {item.productInfo.type}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {item.productInfo.group}
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={6} sm={2}>
+                          <Grid item xs={12} sm={2}>
                             <Typography variant="caption" color="text.secondary" fontWeight={600}>
                               Category
                             </Typography>
-                            <Typography variant="body2">
-                              {item.productInfo.category || ''}
+                            <Typography variant="body2" fontWeight={500}>
+                              {item.productInfo.category || '-'}
                             </Typography>
                           </Grid>
-                          <Grid item xs={6} sm={2}>
+                          <Grid item xs={12} sm={2}>
                             <Typography variant="caption" color="text.secondary" fontWeight={600}>
                               Group
                             </Typography>
-                            <Typography variant="body2">
-                              {item.productInfo.group || ''}
+                            <Typography variant="body2" fontWeight={500}>
+                              {item.productInfo.group || '-'}
                             </Typography>
                           </Grid>
-                          <Grid item xs={6} sm={2}>
+                          <Grid item xs={12} sm={2}>
                             <Typography variant="caption" color="text.secondary" fontWeight={600}>
                               Type
                             </Typography>
-                            <Typography variant="body2">
-                              {item.productInfo.type || ''}
+                            <Typography variant="body2" fontWeight={500}>
+                              {item.productInfo.type || '-'}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={12} sm={2}>
+                            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                              Product Code
+                            </Typography>
+                            <Typography variant="body2" fontWeight={600} color="primary">
+                              {item.productInfo.productCode}
                             </Typography>
                           </Grid>
                           <Grid item xs={12} sm={3}>
@@ -3419,11 +3453,16 @@ export default function ImportApprovals() {
                   </Typography>
                   <Box sx={{ mt: 2 }}>
                     {detailedItems.slice(0, 3).map((item, index) => (
-                      <Box key={index} sx={{ mb: 1 }}>
-                        <Typography variant="caption" display="block">
-                          <strong>{item.productInfo.productCode}</strong> - {item.productInfo.category}
+                      <Box key={index} sx={{ mb: 1, p: 1, bgcolor: 'grey.50', borderRadius: 1 }}>
+                        <Typography variant="caption" display="block" fontWeight={600}>
+                          {item.productInfo.productCode || item.barcode || '-'}
                         </Typography>
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography variant="caption" display="block" color="text.secondary">
+                          Cat: {item.productInfo.category || '-'} | 
+                          Grp: {item.productInfo.group || '-'} | 
+                          Type: {item.productInfo.type || '-'}
+                        </Typography>
+                        <Typography variant="caption" color="primary">
                           SHP: {item.shipped} | RTN: {item.returned}
                         </Typography>
                       </Box>
@@ -3718,11 +3757,16 @@ export default function ImportApprovals() {
                   </Typography>
                   <Box sx={{ mt: 2 }}>
                     {detailedItems.slice(0, 3).map((item, index) => (
-                      <Box key={index} sx={{ mb: 1 }}>
-                        <Typography variant="caption" display="block">
-                          <strong>{item.productInfo.productCode}</strong> - {item.productInfo.category}
+                      <Box key={index} sx={{ mb: 1, p: 1, bgcolor: 'grey.50', borderRadius: 1 }}>
+                        <Typography variant="caption" display="block" fontWeight={600}>
+                          {item.productInfo.productCode || item.barcode || '-'}
                         </Typography>
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography variant="caption" display="block" color="text.secondary">
+                          Cat: {item.productInfo.category || '-'} | 
+                          Grp: {item.productInfo.group || '-'} | 
+                          Type: {item.productInfo.type || '-'}
+                        </Typography>
+                        <Typography variant="caption" color="primary">
                           SHP: {item.shipped} | RTN: {item.returned}
                         </Typography>
                       </Box>
