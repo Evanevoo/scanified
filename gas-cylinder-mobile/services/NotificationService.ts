@@ -459,6 +459,30 @@ export class NotificationService {
   public async getNotificationSettings(): Promise<Notifications.NotificationPermissionsStatus> {
     return await Notifications.getPermissionsAsync();
   }
+
+  /**
+   * Send a success notification for barcode scan
+   */
+  public async sendScanSuccessNotification(barcode: string): Promise<void> {
+    await this.sendLocalNotification({
+      title: 'Scan Successful',
+      body: `Barcode ${barcode} processed successfully`,
+      categoryId: 'scan_complete',
+      data: { barcode, type: 'scan_success' }
+    });
+  }
+
+  /**
+   * Send an error notification for barcode scan
+   */
+  public async sendScanErrorNotification(error: string): Promise<void> {
+    await this.sendLocalNotification({
+      title: 'Scan Failed',
+      body: error || 'Failed to process scan',
+      categoryId: 'sync_status',
+      data: { error, type: 'scan_error' }
+    });
+  }
 }
 
 // Export singleton instance

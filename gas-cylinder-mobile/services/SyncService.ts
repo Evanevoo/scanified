@@ -2,6 +2,7 @@ import logger from '../utils/logger';
 import { supabase } from '../supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
+import { conflictResolutionService } from './ConflictResolutionService';
 
 export interface SyncResult {
   success: boolean;
