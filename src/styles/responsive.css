@@ -1,0 +1,327 @@
+/* Responsive Design Utilities for Gas Cylinder App */
+
+/* Tablet-specific styles (768px - 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) {
+  /* Sidebar width is handled by MainLayout component */
+  
+  /* Optimize main content area */
+  .main-content {
+    width: calc(100vw - 240px) !important;
+    padding: 16px !important;
+  }
+  
+  /* Table optimizations */
+  .MuiTableContainer-root {
+    overflow-x: auto;
+  }
+  
+  .MuiTableCell-root {
+    padding: 8px 12px !important;
+    font-size: 0.875rem !important;
+  }
+  
+  /* Card optimizations */
+  .MuiCard-root {
+    margin-bottom: 16px;
+  }
+  
+  .MuiCardContent-root {
+    padding: 16px !important;
+  }
+  
+  /* Button optimizations */
+  .MuiButton-root {
+    min-width: 44px !important;
+    padding: 8px 16px !important;
+  }
+  
+  /* Typography optimizations */
+  .MuiTypography-h4 {
+    font-size: 1.5rem !important;
+  }
+  
+  .MuiTypography-h5 {
+    font-size: 1.25rem !important;
+  }
+  
+  .MuiTypography-h6 {
+    font-size: 1.125rem !important;
+  }
+  
+  /* Grid optimizations */
+  .MuiGrid-container {
+    margin: -8px !important;
+  }
+  
+  .MuiGrid-item {
+    padding: 8px !important;
+  }
+  
+  /* Dialog optimizations */
+  .MuiDialog-paper {
+    margin: 16px !important;
+    max-width: calc(100vw - 32px) !important;
+  }
+  
+  /* Form optimizations */
+  .MuiTextField-root {
+    margin-bottom: 16px !important;
+  }
+  
+  /* Chip optimizations */
+  .MuiChip-root {
+    height: 28px !important;
+    font-size: 0.75rem !important;
+  }
+  
+  /* Icon optimizations */
+  .MuiSvgIcon-root {
+    font-size: 1.25rem !important;
+  }
+}
+
+/* Mobile-specific styles (up to 767px) */
+@media (max-width: 767px) {
+  /* Hide sidebar on mobile */
+  .MuiDrawer-root {
+    display: none !important;
+  }
+  
+  /* Full width main content */
+  .main-content {
+    width: 100vw !important;
+    padding: 12px !important;
+  }
+  
+  /* Stack elements vertically */
+  .mobile-stack {
+    flex-direction: column !important;
+  }
+  
+  /* Reduce padding */
+  .MuiCardContent-root {
+    padding: 12px !important;
+  }
+  
+  /* Smaller buttons */
+  .MuiButton-root {
+    min-width: 40px !important;
+    padding: 6px 12px !important;
+    font-size: 0.875rem !important;
+  }
+  
+  /* Smaller typography */
+  .MuiTypography-h4 {
+    font-size: 1.25rem !important;
+  }
+  
+  .MuiTypography-h5 {
+    font-size: 1.125rem !important;
+  }
+  
+  .MuiTypography-h6 {
+    font-size: 1rem !important;
+  }
+  
+  /* Full width tables */
+  .MuiTableContainer-root {
+    width: 100% !important;
+    overflow-x: auto !important;
+  }
+  
+  /* Smaller table cells */
+  .MuiTableCell-root {
+    padding: 6px 8px !important;
+    font-size: 0.75rem !important;
+  }
+  
+  /* Stack form elements */
+  .MuiFormControl-root {
+    width: 100% !important;
+    margin-bottom: 12px !important;
+  }
+  
+  /* Full width dialogs */
+  .MuiDialog-paper {
+    margin: 8px !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100vh - 16px) !important;
+  }
+  
+  /* Smaller chips */
+  .MuiChip-root {
+    height: 24px !important;
+    font-size: 0.6875rem !important;
+  }
+  
+  /* Smaller icons */
+  .MuiSvgIcon-root {
+    font-size: 1rem !important;
+  }
+  
+  /* Hide non-essential elements */
+  .hide-mobile {
+    display: none !important;
+  }
+  
+  /* Show mobile-only elements */
+  .show-mobile {
+    display: block !important;
+  }
+}
+
+/* Large tablet and desktop styles (1025px+) */
+@media (min-width: 1025px) {
+  /* Restore full sidebar */
+  .MuiDrawer-paper {
+    width: 280px !important;
+  }
+  
+  /* Restore full main content */
+  .main-content {
+    width: calc(100vw - 280px) !important;
+    padding: 24px !important;
+  }
+  
+  /* Restore full table cells */
+  .MuiTableCell-root {
+    padding: 16px !important;
+    font-size: 0.875rem !important;
+  }
+  
+  /* Restore full card content */
+  .MuiCardContent-root {
+    padding: 24px !important;
+  }
+  
+  /* Restore full buttons */
+  .MuiButton-root {
+    min-width: 64px !important;
+    padding: 8px 16px !important;
+  }
+  
+  /* Restore full typography */
+  .MuiTypography-h4 {
+    font-size: 2.125rem !important;
+  }
+  
+  .MuiTypography-h5 {
+    font-size: 1.5rem !important;
+  }
+  
+  .MuiTypography-h6 {
+    font-size: 1.25rem !important;
+  }
+  
+  /* Restore full grid spacing */
+  .MuiGrid-container {
+    margin: -12px !important;
+  }
+  
+  .MuiGrid-item {
+    padding: 12px !important;
+  }
+  
+  /* Restore full dialogs */
+  .MuiDialog-paper {
+    margin: 32px !important;
+  }
+  
+  /* Restore full form spacing */
+  .MuiTextField-root {
+    margin-bottom: 24px !important;
+  }
+  
+  /* Restore full chips */
+  .MuiChip-root {
+    height: 32px !important;
+    font-size: 0.8125rem !important;
+  }
+  
+  /* Restore full icons */
+  .MuiSvgIcon-root {
+    font-size: 1.5rem !important;
+  }
+}
+
+/* Utility classes for responsive design */
+.responsive-table {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.responsive-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+@media (max-width: 767px) {
+  .responsive-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1024px) {
+  .responsive-grid {
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+  }
+}
+
+/* Responsive text utilities */
+.responsive-text-sm {
+  font-size: 0.875rem;
+}
+
+.responsive-text-base {
+  font-size: 1rem;
+}
+
+.responsive-text-lg {
+  font-size: 1.125rem;
+}
+
+@media (max-width: 767px) {
+  .responsive-text-sm {
+    font-size: 0.75rem;
+  }
+  
+  .responsive-text-base {
+    font-size: 0.875rem;
+  }
+  
+  .responsive-text-lg {
+    font-size: 1rem;
+  }
+}
+
+/* Responsive spacing utilities */
+.responsive-padding {
+  padding: 24px;
+}
+
+.responsive-margin {
+  margin: 16px;
+}
+
+@media (max-width: 767px) {
+  .responsive-padding {
+    padding: 12px;
+  }
+  
+  .responsive-margin {
+    margin: 8px;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1024px) {
+  .responsive-padding {
+    padding: 16px;
+  }
+  
+  .responsive-margin {
+    margin: 12px;
+  }
+}

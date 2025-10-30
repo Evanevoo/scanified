@@ -21,6 +21,7 @@ import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import Button from '@mui/material/Button';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
+import CircularProgress from '@mui/material/CircularProgress';
 import SettingsIcon from '@mui/icons-material/SettingsOutlined';
 import LogoutIcon from '@mui/icons-material/LogoutOutlined';
 import SearchIcon from '@mui/icons-material/Search';
@@ -42,19 +43,21 @@ const drawerWidth = 280;
 const collapsedWidth = 72;
 
 export default function MainLayout({ children }) {
-  const { profile, organization } = useAuth();
+  const { profile, organization, signOut } = useAuth();
   const { config: assetConfig } = useAssetConfig();
   const [integrationsOpen, setIntegrationsOpen] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [logoutLoading, setLogoutLoading] = useState(false);
   const searchRef = useRef();
   const navigate = useNavigate();
   const location = useLocation();
   const { isDarkMode } = useTheme();
   const { can } = usePermissions();
   const { isOwner } = useOwnerAccess();
+  const isOwnerPortal = profile?.role === 'owner' && location.pathname.startsWith('/owner-portal');
 
   // Top navigation links - only show for organizations, not for owner
   const topNavLinks = profile?.role === 'owner' 
@@ -118,16 +121,16 @@ export default function MainLayout({ children }) {
           console.error('Error fetching customers for search:', customerError);
         }
         
-        // Assets: by serial number or barcode (filtered by organization)
-        const { data: assets, error: assetError } = await supabase
-          .from('assets')
-          .select('id, serial_number, barcode_number, assigned_customer')
+        // Bottles: by serial number or barcode (filtered by organization)
+        const { data: bottles, error: bottleError } = await supabase
+          .from('bottles')
+          .select('id, serial_number, barcode_number, assigned_customer, product_code')
           .eq('organization_id', organization.id)
-          .or(`serial_number.ilike.%${searchTerm}%,barcode_number.ilike.%${searchTerm}%`)
+          .or(`serial_number.ilike.%${searchTerm}%,barcode_number.ilike.%${searchTerm}%,product_code.ilike.%${searchTerm}%`)
           .limit(5);
         
-        if (assetError) {
-          console.error('Error fetching assets for search:', assetError);
+        if (bottleError) {
+          console.error('Error fetching bottles for search:', bottleError);
         }
         
         const customerResults = (customers || []).map(c => ({
@@ -136,16 +139,16 @@ export default function MainLayout({ children }) {
           label: c.name,
           sub: c.CustomerListID,
         }));
-        const assetResults = (assets || []).map(a => ({
-          type: 'asset',
-          id: a.id,
-          label: a.serial_number || a.barcode_number,
-          sub: a.barcode_number || a.serial_number,
+        const bottleResults = (bottles || []).map(b => ({
+          type: 'bottle',
+          id: b.id,
+          label: b.barcode_number || b.serial_number || b.product_code,
+          sub: b.product_code || b.serial_number || b.barcode_number,
         }));
         
         if (active) {
-          console.log('Setting organization suggestions:', [...customerResults, ...assetResults]);
-          setSuggestions([...customerResults, ...assetResults]);
+          console.log('Setting organization suggestions:', [...customerResults, ...bottleResults]);
+          setSuggestions([...customerResults, ...bottleResults]);
         }
       } else {
         // No organization context - clear suggestions
@@ -174,35 +177,50 @@ export default function MainLayout({ children }) {
     setSearchTerm('');
     if (item.type === 'customer') {
       navigate(`/customer/${item.id}`);
+    } else if (item.type === 'bottle') {
+      // Navigate to bottle detail page
+      navigate(`/bottle/${item.id}`);
     } else if (item.type === 'asset') {
+      // Legacy support for old asset references
       navigate(`/asset/${item.id}`);
     } else if (item.type === 'organization') {
       navigate(`/owner-portal/customer-management?org=${item.id}`);
-    } else if (item.type === 'bottle') {
-      // Legacy support for old bottle references
-      navigate(`/asset/${item.id}`);
     }
   };
 
   const handleLogout = async () => {
+    console.log('MainLayout: Logout button clicked');
+    setLogoutLoading(true);
+    
     try {
-      console.log('MainLayout: Logout button clicked');
-      
-      // Use the consistent signOut from useAuth
-      const { signOut } = useAuth();
-      await signOut();
+      // Clear all storage immediately
+      localStorage.clear();
+      sessionStorage.clear();
       
       // Clear any cached data
       if (window.indexedDB) {
-        const databases = await window.indexedDB.databases();
-        databases.forEach(db => {
-          window.indexedDB.deleteDatabase(db.name);
-        });
+        try {
+          const databases = await window.indexedDB.databases();
+          databases.forEach(db => {
+            window.indexedDB.deleteDatabase(db.name);
+          });
+        } catch (indexedDBError) {
+          console.warn('Could not clear IndexedDB:', indexedDBError);
+        }
       }
       
+      // Sign out from Supabase directly
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('Supabase signOut error:', error);
+      }
+      
+      console.log('MainLayout: Logout completed, redirecting...');
+      
     } catch (error) {
-      console.error('Logout failed:', error);
-      // Force redirect if everything else fails
+      console.error('Logout error:', error);
+    } finally {
+      // Always redirect to login page
       window.location.href = '/login';
     }
   };
@@ -215,6 +233,12 @@ export default function MainLayout({ children }) {
       position: 'relative',
       background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
       overflow: 'hidden',
+      // Tablet-specific optimizations
+      '@media (min-width: 768px) and (max-width: 1024px)': {
+        '& .MuiDrawer-paper': {
+          width: sidebarCollapsed ? collapsedWidth : Math.min(drawerWidth, 240), // Reduce sidebar width on tablet
+        }
+      }
     }}>
       {/* Background overlay for depth */}
       <Box sx={{
@@ -227,30 +251,35 @@ export default function MainLayout({ children }) {
         zIndex: 0,
         pointerEvents: 'none',
       }} />
-      <Drawer
-        variant="permanent"
-        sx={{
-          width: sidebarCollapsed ? collapsedWidth : drawerWidth,
-          flexShrink: 0,
-          height: '100vh',
-          overflow: 'hidden',
-          transition: 'width 0.3s ease',
-          '& .MuiDrawer-paper': {
+      {!isOwnerPortal && (
+        <Drawer
+          variant="permanent"
+          sx={{
             width: sidebarCollapsed ? collapsedWidth : drawerWidth,
-            boxSizing: 'border-box',
-            top: 0,
+            flexShrink: 0,
             height: '100vh',
             overflow: 'hidden',
             transition: 'width 0.3s ease',
-            zIndex: (theme) => theme.zIndex.drawer
-          },
-        }}
-      >
-        <Sidebar 
-          isCollapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
-      </Drawer>
+            // Force width with !important to override any conflicting styles
+            '& .MuiDrawer-paper': {
+              width: `${sidebarCollapsed ? collapsedWidth : drawerWidth}px !important`,
+              minWidth: `${sidebarCollapsed ? collapsedWidth : drawerWidth}px !important`,
+              maxWidth: `${sidebarCollapsed ? collapsedWidth : drawerWidth}px !important`,
+              boxSizing: 'border-box',
+              top: 0,
+              height: '100vh',
+              overflow: 'hidden',
+              transition: 'width 0.3s ease',
+              zIndex: (theme) => theme.zIndex.drawer,
+            },
+          }}
+        >
+          <Sidebar 
+            isCollapsed={sidebarCollapsed}
+            onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+          />
+        </Drawer>
+      )}
       <AppBar
         position="fixed"
         elevation={0}
@@ -263,89 +292,84 @@ export default function MainLayout({ children }) {
           minHeight: 64,
         }}
       >
-        <Toolbar sx={{ minHeight: 64, px: 3 }}>
-          <IconButton
-            edge="start"
-            color="inherit"
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            sx={{ mr: 2, color: '#666' }}
-            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            <MenuIcon />
-          </IconButton>
-          <Box sx={{ display: 'flex', alignItems: 'center', mr: 3 }}>
-            {organization?.logo_url && (
-              <img 
-                key={organization.logo_url}
-                src={organization.logo_url} 
-                alt="Org Logo" 
-                style={{ 
-                  height: 32, 
-                  width: 32, 
-                  objectFit: 'contain', 
-                  borderRadius: 4, 
-                  background: '#fff', 
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  marginRight: 12
-                }} 
-                onError={(e) => {
-                  console.error('Failed to load logo in header:', organization.logo_url);
-                  e.target.style.display = 'none';
-                }}
-                onLoad={() => {
-                  console.log('Logo loaded successfully in header:', organization.logo_url);
-                }}
-              />
-            )}
-            <Typography
-              variant="h5"
-              component="div"
-              sx={{ fontFamily: 'Inter, Montserrat, Arial, sans-serif', fontWeight: 900, color: '#111', letterSpacing: '-0.01em', fontSize: '1.6rem', cursor: 'pointer' }}
-              onClick={() => navigate(profile?.role === 'owner' ? '/owner-portal' : '/home')}
-              title="Go to Home"
-            >
-              {assetConfig.appName}
-            </Typography>
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', ml: 4 }}>
-            {topNavLinks.map(link => (
-              <Button
-                key={link.label}
-                onClick={() => navigate(link.to)}
-                sx={{
-                  color: location.pathname === link.to ? '#1976d2' : '#111',
-                  fontWeight: 700,
-                  fontFamily: 'Inter, Montserrat, Arial, sans-serif',
-                  fontSize: '1.1rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
-                  mx: 1.5,
-                  px: 2,
-                  minWidth: 0,
-                  borderBottom: location.pathname === link.to ? '2.5px solid #1976d2' : '2.5px solid transparent',
-                  transition: 'color 0.2s, border-bottom 0.2s',
-                  '&:hover': {
-                    color: '#1976d2',
-                    backgroundColor: 'rgba(25,118,210,0.07)',
-                  },
-                }}
+        <Toolbar sx={{ minHeight: 64, px: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            {/* Logo and Company Name */}
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              {organization?.logo_url && (
+                <img 
+                  key={organization.logo_url}
+                  src={organization.logo_url} 
+                  alt="Org Logo" 
+                  style={{ 
+                    height: 32, 
+                    width: 32, 
+                    objectFit: 'contain', 
+                    borderRadius: 4, 
+                    background: '#fff', 
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    marginRight: 12
+                  }} 
+                  onError={(e) => {
+                    console.error('Failed to load logo in header:', organization.logo_url);
+                    e.target.style.display = 'none';
+                  }}
+                  onLoad={() => {
+                    console.log('Logo loaded successfully in header:', organization.logo_url);
+                  }}
+                />
+              )}
+              <Typography
+                variant="h5"
+                component="div"
+                sx={{ fontFamily: 'Inter, Montserrat, Arial, sans-serif', fontWeight: 900, color: '#111', letterSpacing: '-0.01em', fontSize: '1.5rem', cursor: 'pointer', lineHeight: 1 }}
+                onClick={() => navigate(profile?.role === 'owner' ? '/owner-portal' : '/home')}
+                title="Go to Home"
               >
-                {link.label}
-              </Button>
-            ))}
-            <IconButton sx={{ color: '#111', ml: 2, '&:hover': { backgroundColor: 'rgba(25,118,210,0.07)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
-              <SettingsIcon />
-            </IconButton>
-            <IconButton sx={{ color: '#111', ml: 1, '&:hover': { backgroundColor: 'rgba(25,118,210,0.07)' } }} onClick={handleLogout} aria-label="Logout">
-              <LogoutIcon />
-            </IconButton>
+                {assetConfig.appName}
+              </Typography>
+            </Box>
+            
+            {/* Navigation Links */}
+            <Box sx={{ display: 'flex', gap: 0.5 }}>
+              {topNavLinks.map(link => (
+                <Button
+                  key={link.label}
+                  onClick={() => navigate(link.to)}
+                  sx={{
+                    color: location.pathname === link.to ? '#1976d2' : '#111',
+                    fontWeight: 700,
+                    fontFamily: 'Inter, Montserrat, Arial, sans-serif',
+                    fontSize: '0.875rem',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    px: 2,
+                    py: 1,
+                    minHeight: 48,
+                    borderRadius: 0,
+                    borderBottom: location.pathname === link.to ? '2.5px solid #1976d2' : '2.5px solid transparent',
+                    transition: 'color 0.2s, border-bottom 0.2s',
+                    '&:hover': {
+                      color: '#1976d2',
+                      backgroundColor: 'rgba(25,118,210,0.07)',
+                    },
+                  }}
+                >
+                  {link.label}
+                </Button>
+              ))}
+            </Box>
           </Box>
-          <Box sx={{ flexGrow: 1, maxWidth: 400, ml: 1, position: 'relative' }} ref={searchRef}>
+          
+          {/* Right Section: Search, Settings, Logout */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {/* Search Bar */}
+            <Box sx={{ width: 400, position: 'relative' }} ref={searchRef}>
             <TextField
               placeholder={
                 isOwner && location.pathname.startsWith('/owner-portal') 
                   ? "Search organizations..." 
-                  : "Search customers, assets..."
+                  : "Search customers, bottles..."
               }
               size="small"
               variant="outlined"
@@ -357,14 +381,15 @@ export default function MainLayout({ children }) {
                 borderRadius: '24px',
                 border: '1.5px solid rgba(255,255,255,0.3)',
                 color: '#1976d2',
-                fontSize: '1.1rem',
-                width: 320,
+                fontSize: '0.95rem',
+                width: '100%',
                 boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
                 '& .MuiOutlinedInput-root': {
                   borderRadius: '24px',
                   background: 'rgba(255,255,255,0.9)',
                   color: '#1976d2',
                   fontWeight: 500,
+                  height: 40,
                   '& fieldset': {
                     borderColor: 'rgba(255,255,255,0.3)',
                   },
@@ -389,10 +414,8 @@ export default function MainLayout({ children }) {
                 '& input': {
                   color: '#1976d2',
                   fontWeight: 500,
-                  fontSize: '1.1rem',
-                  '&::placeholder': {
-                    color: 'rgba(25, 118, 210, 0.7)',
-                  },
+                  fontSize: '0.95rem',
+                  padding: '8px 12px',
                 },
               }}
               InputProps={{
@@ -433,12 +456,26 @@ export default function MainLayout({ children }) {
                       {item.label}
                     </Typography>
                     <Typography variant="caption" sx={{ color: '#666' }}>
-                      {item.type === 'customer' ? 'Customer' : 'Bottle'} • {item.sub}
+                      {item.type === 'customer' ? 'Customer' : item.type === 'organization' ? 'Organization' : 'Bottle'} • {item.sub}
                     </Typography>
                   </Box>
                 ))}
               </Box>
             )}
+            </Box>
+            
+            {/* Icon Buttons */}
+            <IconButton sx={{ color: '#111', width: 40, height: 40, '&:hover': { backgroundColor: 'rgba(25,118,210,0.07)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
+              <SettingsIcon />
+            </IconButton>
+            <IconButton 
+              sx={{ color: '#111', width: 40, height: 40, '&:hover': { backgroundColor: 'rgba(25,118,210,0.07)' } }} 
+              onClick={handleLogout} 
+              aria-label="Logout"
+              disabled={logoutLoading}
+            >
+              {logoutLoading ? <CircularProgress size={20} /> : <LogoutIcon />}
+            </IconButton>
           </Box>
         </Toolbar>
       </AppBar>
@@ -447,7 +484,7 @@ export default function MainLayout({ children }) {
         sx={{
           flexGrow: 1,
           p: 3,
-          width: `calc(100vw - ${sidebarCollapsed ? collapsedWidth : drawerWidth}px)`,
+          width: isOwnerPortal ? '100vw' : `calc(100vw - ${sidebarCollapsed ? collapsedWidth : drawerWidth}px)`,
           bgcolor: 'transparent',
           height: '100vh',
           position: 'relative',
@@ -457,6 +494,11 @@ export default function MainLayout({ children }) {
           alignItems: 'stretch',
           overflow: 'hidden',
           transition: 'width 0.3s ease',
+          // Tablet optimizations
+          '@media (min-width: 768px) and (max-width: 1024px)': {
+            width: isOwnerPortal ? '100vw' : `calc(100vw - ${sidebarCollapsed ? collapsedWidth : 240}px)`,
+            p: 2, // Reduce padding on tablet
+          }
         }}
       >
         <Toolbar sx={{ minHeight: 64 }} />

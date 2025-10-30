@@ -19,10 +19,8 @@ import { SyncService } from '../services/SyncService';
 import { connectivityService } from '../services/ConnectivityService';
 import { notificationService } from '../services/NotificationService';
 import { offlineModeService } from '../services/OfflineModeService';
-import { customizationService, LayoutOptions } from '../services/customizationService';
+import { soundService } from '../services/soundService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Picker } from '@react-native-picker/picker';
-import { useAccessibility } from '../hooks/useAccessibility';
 
 export default function SettingsScreen() {
   const navigation = useNavigation();
@@ -34,15 +32,20 @@ export default function SettingsScreen() {
   const [isConnected, setIsConnected] = useState(true);
   const [logoutLoading, setLogoutLoading] = useState(false);
   
-  // Customization settings
-  const [layoutOptions, setLayoutOptions] = useState<LayoutOptions | null>(null);
-  const { accessibilityOptions, updateAccessibilityOption } = useAccessibility();
 
   useEffect(() => {
     loadOfflineData();
     checkConnectivity();
-    loadCustomizationSettings();
+    initializeSoundService();
   }, []);
+
+  const initializeSoundService = async () => {
+    try {
+      await soundService.initialize();
+    } catch (error) {
+      console.error('Failed to initialize sound service:', error);
+    }
+  };
 
   const loadOfflineData = async () => {
     const count = await SyncService.getOfflineScanCount();
@@ -54,24 +57,6 @@ export default function SettingsScreen() {
     setIsConnected(connected);
   };
 
-  const loadCustomizationSettings = async () => {
-    try {
-      const customizationSettings = customizationService.getSettings();
-      if (customizationSettings) {
-        setLayoutOptions(customizationSettings.layout);
-      }
-    } catch (error) {
-      console.error('Failed to load customization settings:', error);
-    }
-  };
-
-  const updateLayoutOption = (key: keyof LayoutOptions, value: any) => {
-    if (!layoutOptions) return;
-
-    const updated = { ...layoutOptions, [key]: value };
-    setLayoutOptions(updated);
-    customizationService.updateLayoutOptions({ [key]: value });
-  };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -175,15 +160,28 @@ export default function SettingsScreen() {
     }
   }, [updateSetting]);
 
-  const handleSoundEffectsToggle = useCallback((value: boolean) => {
+  const handleSoundEffectsToggle = useCallback(async (value: boolean) => {
     console.log('🔄 Sound Effects toggle:', value);
     updateSetting('soundEnabled', value);
+    await soundService.updateSettings({ soundEnabled: value });
+    
+    // Test sound when enabling
+    if (value) {
+      await soundService.playSound('action');
+    }
   }, [updateSetting]);
 
-  const handleHapticFeedbackToggle = useCallback((value: boolean) => {
+  const handleHapticFeedbackToggle = useCallback(async (value: boolean) => {
     console.log('🔄 Haptic Feedback toggle:', value);
     updateSetting('hapticFeedback', value);
+    await soundService.updateSettings({ hapticFeedback: value });
+    
+    // Test haptic when enabling
+    if (value) {
+      await soundService.playHaptic('action');
+    }
   }, [updateSetting]);
+
 
   const SettingItem = ({ title, subtitle, onPress, rightComponent, showBorder = true }) => (
     <TouchableOpacity 
@@ -294,14 +292,22 @@ export default function SettingsScreen() {
             title="Notifications"
             subtitle="Push notifications and alerts"
             rightComponent={
-              <Switch
-                key="notifications"
-                value={settings.notifications}
-                onValueChange={handleNotificationsToggle}
-                trackColor={{ false: colors.border, true: colors.primary + '40' }}
-                thumbColor={settings.notifications ? colors.primary : colors.textSecondary}
-              />
+              <TouchableOpacity
+                onPress={() => navigation.navigate('NotificationSettings' as never)}
+                style={styles.chevronButton}
+              >
+                <Text style={[styles.chevronText, { color: colors.primary }]}>
+                  Configure
+                </Text>
+                <Text style={[styles.chevron, { color: colors.textSecondary }]}>›</Text>
+              </TouchableOpacity>
             }
+          />
+          <SettingItem
+            title="Notifications"
+            subtitle="Push notifications and alerts"
+            onPress={() => navigation.navigate('NotificationSettings')}
+            rightComponent={<Text style={styles.chevron}>›</Text>}
           />
           <SettingItem
             title="Sound Effects"
@@ -328,119 +334,10 @@ export default function SettingsScreen() {
                 thumbColor={settings.hapticFeedback ? colors.primary : colors.textSecondary}
               />
             }
-          />
-          <SettingItem
-            title="Font Size"
-            subtitle="Text size for better readability"
-            rightComponent={
-              <View style={styles.pickerContainer}>
-                <Picker
-                  selectedValue={layoutOptions?.fontSize || 'medium'}
-                  onValueChange={(value) => updateLayoutOption('fontSize', value)}
-                  style={styles.picker}
-                >
-                  <Picker.Item label="S" value="small" />
-                  <Picker.Item label="M" value="medium" />
-                  <Picker.Item label="L" value="large" />
-                  <Picker.Item label="XL" value="extra-large" />
-                </Picker>
-              </View>
-            }
-          />
-          <SettingItem
-            title="Button Size"
-            subtitle="Touch target size"
-            rightComponent={
-              <View style={styles.pickerContainer}>
-                <Picker
-                  selectedValue={layoutOptions?.buttonSize || 'comfortable'}
-                  onValueChange={(value) => updateLayoutOption('buttonSize', value)}
-                  style={styles.picker}
-                >
-                  <Picker.Item label="S" value="compact" />
-                  <Picker.Item label="M" value="comfortable" />
-                  <Picker.Item label="L" value="large" />
-                </Picker>
-              </View>
-            }
-          />
-          <SettingItem
-            title="Spacing"
-            subtitle="Element spacing and layout"
-            rightComponent={
-              <View style={styles.pickerContainer}>
-                <Picker
-                  selectedValue={layoutOptions?.spacing || 'normal'}
-                  onValueChange={(value) => updateLayoutOption('spacing', value)}
-                  style={styles.picker}
-                >
-                  <Picker.Item label="Tight" value="tight" />
-                  <Picker.Item label="Normal" value="normal" />
-                  <Picker.Item label="Wide" value="relaxed" />
-                </Picker>
-              </View>
-            }
             showBorder={false}
           />
         </View>
 
-        {/* Accessibility */}
-        <SectionHeader title="ACCESSIBILITY" />
-        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <SettingItem
-            title="Large Text"
-            subtitle="Increase text size for better readability"
-            rightComponent={
-              <Switch
-                key="largeText"
-                value={accessibilityOptions?.largeText || false}
-                onValueChange={(value) => updateAccessibilityOption('largeText', value)}
-                trackColor={{ false: colors.border, true: colors.primary + '40' }}
-                thumbColor={accessibilityOptions?.largeText ? colors.primary : colors.textSecondary}
-              />
-            }
-          />
-          <SettingItem
-            title="Bold Text"
-            subtitle="Make text bolder for better visibility"
-            rightComponent={
-              <Switch
-                key="boldText"
-                value={accessibilityOptions?.boldText || false}
-                onValueChange={(value) => updateAccessibilityOption('boldText', value)}
-                trackColor={{ false: colors.border, true: colors.primary + '40' }}
-                thumbColor={accessibilityOptions?.boldText ? colors.primary : colors.textSecondary}
-              />
-            }
-          />
-          <SettingItem
-            title="High Contrast"
-            subtitle="Increase contrast for better visibility"
-            rightComponent={
-              <Switch
-                key="highContrast"
-                value={accessibilityOptions?.highContrast || false}
-                onValueChange={(value) => updateAccessibilityOption('highContrast', value)}
-                trackColor={{ false: colors.border, true: colors.primary + '40' }}
-                thumbColor={accessibilityOptions?.highContrast ? colors.primary : colors.textSecondary}
-              />
-            }
-          />
-          <SettingItem
-            title="Reduce Motion"
-            subtitle="Minimize animations and transitions"
-            rightComponent={
-              <Switch
-                key="reduceMotion"
-                value={layoutOptions?.reduceMotion || false}
-                onValueChange={(value) => updateLayoutOption('reduceMotion', value)}
-                trackColor={{ false: colors.border, true: colors.primary + '40' }}
-                thumbColor={layoutOptions?.reduceMotion ? colors.primary : colors.textSecondary}
-              />
-            }
-            showBorder={false}
-          />
-        </View>
 
         {/* Data Management */}
         <SectionHeader title="DATA MANAGEMENT" />

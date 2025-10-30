@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Linking } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Linking, ScrollView } from 'react-native';
 import { supabase } from '../supabase';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Picker } from '@react-native-picker/picker';
@@ -26,6 +26,9 @@ export default function EditCylinderScreen() {
   const [customers, setCustomers] = useState([]);
   const [customersLoading, setCustomersLoading] = useState(false);
   const [customersError, setCustomersError] = useState('');
+  const [bottles, setBottles] = useState([]);
+  const [barcodeSuggestions, setBarcodeSuggestions] = useState([]);
+  const [showBarcodeSuggestions, setShowBarcodeSuggestions] = useState(false);
 
   // Fetch customers when cylinder is loaded (step 2)
   React.useEffect(() => {
@@ -50,6 +53,22 @@ export default function EditCylinderScreen() {
     }
   }, [step, profile]);
 
+  // Fetch bottles for barcode suggestions
+  React.useEffect(() => {
+    if (profile?.organization_id) {
+      supabase
+        .from('bottles')
+        .select('barcode_number')
+        .eq('organization_id', profile.organization_id)
+        .order('barcode_number')
+        .then(({ data, error }) => {
+          if (!error && data) {
+            setBottles(data);
+          }
+        });
+    }
+  }, [profile]);
+
   // Set initial owner fields when cylinder is loaded
   React.useEffect(() => {
     if (cylinder) {
@@ -58,6 +77,25 @@ export default function EditCylinderScreen() {
       setOwnerName(cylinder?.owner_name || '');
     }
   }, [cylinder]);
+
+  // Filter barcode suggestions
+  React.useEffect(() => {
+    if (barcode.trim() && bottles.length > 0 && step === 1) {
+      const searchText = barcode.toLowerCase();
+      const filtered = bottles
+        .filter(bottle =>
+          bottle.barcode_number &&
+          bottle.barcode_number.toLowerCase().includes(searchText) &&
+          bottle.barcode_number.toLowerCase() !== searchText
+        )
+        .slice(0, 5);
+      setBarcodeSuggestions(filtered);
+      setShowBarcodeSuggestions(filtered.length > 0);
+    } else {
+      setBarcodeSuggestions([]);
+      setShowBarcodeSuggestions(false);
+    }
+  }, [barcode, bottles, step]);
 
   const scanDelay = 1500; // ms
 
@@ -185,17 +223,38 @@ export default function EditCylinderScreen() {
       {step === 1 && (
         <>
           <Text style={styles.stepTitle}>Scan or Enter Cylinder Barcode</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter barcode"
-              value={barcode}
-              onChangeText={setBarcode}
-              autoCapitalize="none"
-            />
-            <TouchableOpacity style={styles.scanButton} onPress={() => setScannerVisible(true)}>
-              <Text style={{ fontSize: 22 }}>📷</Text>
-            </TouchableOpacity>
+          <View style={{ position: 'relative' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter barcode"
+                value={barcode}
+                onChangeText={setBarcode}
+                autoCapitalize="none"
+              />
+              <TouchableOpacity style={styles.scanButton} onPress={() => setScannerVisible(true)}>
+                <Text style={{ fontSize: 22 }}>📷</Text>
+              </TouchableOpacity>
+            </View>
+            {/* Barcode Suggestions */}
+            {showBarcodeSuggestions && barcodeSuggestions.length > 0 && (
+              <View style={styles.suggestionsContainer}>
+                <ScrollView style={{ maxHeight: 150 }}>
+                  {barcodeSuggestions.map((bottle, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={styles.suggestionItem}
+                      onPress={() => {
+                        setBarcode(bottle.barcode_number);
+                        setShowBarcodeSuggestions(false);
+                      }}
+                    >
+                      <Text style={styles.suggestionText}>{bottle.barcode_number}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
           </View>
           <TouchableOpacity
             style={styles.nextButton}
@@ -477,5 +536,32 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 14,
+  },
+  suggestionsContainer: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    marginTop: 4,
+    maxHeight: 150,
+    zIndex: 1000,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  suggestionItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  suggestionText: {
+    fontSize: 14,
+    color: '#222',
   },
 }); 

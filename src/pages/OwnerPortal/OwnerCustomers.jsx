@@ -23,11 +23,14 @@ import {
   CheckCircle as CheckCircleIcon,
   Payment as PaymentIcon,
   Download as DownloadIcon,
-  FileDownload as FileDownloadIcon
+  FileDownload as FileDownloadIcon,
+  Restore as RestoreIcon,
+  DeleteForever as DeleteForeverIcon
 } from '@mui/icons-material';
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import * as XLSX from 'xlsx';
+import { OrganizationDeletionService } from '../../services/organizationDeletionService';
 
 export default function OwnerCustomers() {
   const { profile } = useAuth();
@@ -52,11 +55,16 @@ export default function OwnerCustomers() {
   });
   const [deleteDialog, setDeleteDialog] = useState(false);
   const [orgToDelete, setOrgToDelete] = useState(null);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [restoreDialog, setRestoreDialog] = useState(false);
+  const [orgToRestore, setOrgToRestore] = useState(null);
   const [stats, setStats] = useState({
     total: 0,
     active: 0,
     trial: 0,
-    expired: 0
+    expired: 0,
+    deleted: 0
   });
 
   useEffect(() => {
@@ -87,11 +95,18 @@ export default function OwnerCustomers() {
       console.log('Fetching organizations...');
       console.log('Current profile:', profile);
       
-      // Fetch all organizations first
-      const { data: orgs, error } = await supabase
+      // Fetch all organizations first (including soft-deleted ones)
+      let query = supabase
         .from('organizations')
         .select('*')
         .order('created_at', { ascending: false });
+      
+      // Filter based on showDeleted toggle
+      if (!showDeleted) {
+        query = query.is('deleted_at', null);
+      }
+      
+      const { data: orgs, error } = await query;
 
       if (error) throw error;
 
@@ -149,14 +164,15 @@ export default function OwnerCustomers() {
       setOrganizations(orgsWithCounts || []);
       
       // Calculate stats
-      const total = orgs?.length || 0;
-      const active = orgs?.filter(org => org.status === 'active').length || 0;
-      const trial = orgs?.filter(org => org.status === 'trial').length || 0;
-      const expired = orgs?.filter(org => org.status === 'expired').length || 0;
+      const total = orgs?.filter(org => !org.deleted_at).length || 0;
+      const active = orgs?.filter(org => !org.deleted_at && org.status === 'active').length || 0;
+      const trial = orgs?.filter(org => !org.deleted_at && org.status === 'trial').length || 0;
+      const expired = orgs?.filter(org => !org.deleted_at && org.status === 'expired').length || 0;
+      const deleted = orgs?.filter(org => org.deleted_at).length || 0;
       
-      console.log('Calculated stats:', { total, active, trial, expired });
+      console.log('Calculated stats:', { total, active, trial, expired, deleted });
       
-      setStats({ total, active, trial, expired });
+      setStats({ total, active, trial, expired, deleted });
     } catch (error) {
       console.error('Error fetching organizations:', error);
     } finally {
@@ -731,78 +747,56 @@ export default function OwnerCustomers() {
     if (!orgToDelete) return;
     
     try {
-      // First, delete all related data
-      const orgId = orgToDelete.id;
-      
-      // Delete profiles (users)
-      const { error: profilesError } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('organization_id', orgId);
-      
-      if (profilesError) {
-        console.error('Error deleting profiles:', profilesError);
+      // Use soft delete service
+      const result = await OrganizationDeletionService.softDeleteOrganization(
+        orgToDelete.id,
+        deleteReason,
+        profile?.id
+      );
+
+      if (!result.success) {
+        throw new Error(result.message);
       }
-
-      // Delete customers
-      const { error: customersError } = await supabase
-        .from('customers')
-        .delete()
-        .eq('organization_id', orgId);
-      
-      if (customersError) {
-        console.error('Error deleting customers:', customersError);
-      }
-
-      // Delete bottles
-      const { error: bottlesError } = await supabase
-        .from('bottles')
-        .delete()
-        .eq('organization_id', orgId);
-      
-      if (bottlesError) {
-        console.error('Error deleting bottles:', bottlesError);
-      }
-
-      // Delete rentals
-      const { error: rentalsError } = await supabase
-        .from('rentals')
-        .delete()
-        .eq('organization_id', orgId);
-      
-      if (rentalsError) {
-        console.error('Error deleting rentals:', rentalsError);
-      }
-
-      // Finally, delete the organization
-      const { error: orgError } = await supabase
-        .from('organizations')
-        .delete()
-        .eq('id', orgId);
-
-      if (orgError) throw orgError;
-
-      // Update local state
-      setOrganizations(prev => prev.filter(org => org.id !== orgId));
-      
-      // Update stats
-      const newTotal = organizations.length - 1;
-      const newActive = organizations.filter(org => org.id !== orgId && org.status === 'active').length;
-      const newTrial = organizations.filter(org => org.id !== orgId && org.status === 'trial').length;
-      const newExpired = organizations.filter(org => org.id !== orgId && org.status === 'expired').length;
-      
-      setStats({ total: newTotal, active: newActive, trial: newTrial, expired: newExpired });
 
       setDeleteDialog(false);
       setOrgToDelete(null);
+      setDeleteReason('');
       
-      alert(`Organization "${orgToDelete.name}" and all its data have been permanently deleted.`);
+      alert(result.message);
       
       // Refresh the data
       fetchOrganizations();
     } catch (error) {
       console.error('Error deleting organization:', error);
       alert('Failed to delete organization: ' + error.message);
+    }
+  };
+
+  const handleRestoreOrganization = (org) => {
+    setOrgToRestore(org);
+    setRestoreDialog(true);
+  };
+
+  const confirmRestore = async () => {
+    if (!orgToRestore) return;
+    
+    try {
+      const result = await OrganizationDeletionService.restoreOrganization(orgToRestore.id);
+
+      if (!result.success) {
+        throw new Error(result.message);
+      }
+
+      setRestoreDialog(false);
+      setOrgToRestore(null);
+      
+      alert(result.message);
+      
+      // Refresh the data
+      fetchOrganizations();
+    } catch (error) {
+      console.error('Error restoring organization:', error);
+      alert('Failed to restore organization: ' + error.message);
     }
   };
 
@@ -868,7 +862,7 @@ export default function OwnerCustomers() {
 
       {/* Stats Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid item xs={12} sm={6} md={2.4}>
           <StatCard
             title="Total Organizations"
             value={stats.total}
@@ -876,7 +870,7 @@ export default function OwnerCustomers() {
             icon={<BusinessIcon />}
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid item xs={12} sm={6} md={2.4}>
           <StatCard
             title="Active Subscriptions"
             value={stats.active}
@@ -884,7 +878,7 @@ export default function OwnerCustomers() {
             icon={<CheckCircleIcon />}
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid item xs={12} sm={6} md={2.4}>
           <StatCard
             title="Trial Accounts"
             value={stats.trial}
@@ -892,7 +886,7 @@ export default function OwnerCustomers() {
             icon={<WarningIcon />}
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid item xs={12} sm={6} md={2.4}>
           <StatCard
             title="Expired Accounts"
             value={stats.expired}
@@ -900,19 +894,42 @@ export default function OwnerCustomers() {
             icon={<WarningIcon />}
           />
         </Grid>
+        <Grid item xs={12} sm={6} md={2.4}>
+          <StatCard
+            title="Deleted Organizations"
+            value={stats.deleted}
+            color="error"
+            icon={<DeleteIcon />}
+          />
+        </Grid>
       </Grid>
 
-      {/* Search */}
+      {/* Search and Filters */}
       <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
-        <TextField
-          fullWidth
-          placeholder="Search organizations by name, email, or ID..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          InputProps={{
-            startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
-          }}
-        />
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <TextField
+            fullWidth
+            placeholder="Search organizations by name, email, or ID..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            InputProps={{
+              startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
+            }}
+          />
+          <Button
+            variant={showDeleted ? 'contained' : 'outlined'}
+            color={showDeleted ? 'error' : 'primary'}
+            startIcon={showDeleted ? <RestoreIcon /> : <DeleteIcon />}
+            onClick={() => {
+              setShowDeleted(!showDeleted);
+              // Refetch when toggle changes
+              setTimeout(() => fetchOrganizations(), 100);
+            }}
+            sx={{ minWidth: 200, whiteSpace: 'nowrap' }}
+          >
+            {showDeleted ? 'Show Active Only' : 'Show Deleted'}
+          </Button>
+        </Box>
       </Paper>
 
       {/* Organizations Table */}
@@ -951,7 +968,14 @@ export default function OwnerCustomers() {
               {filteredOrganizations.map((org) => {
                 console.log('Rendering organization:', org);
                 return (
-                <TableRow key={org.id} hover>
+                <TableRow 
+                  key={org.id} 
+                  hover
+                  sx={{
+                    backgroundColor: org.deleted_at ? 'rgba(211, 47, 47, 0.08)' : 'inherit',
+                    opacity: org.deleted_at ? 0.7 : 1
+                  }}
+                >
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
                       <Avatar sx={{ mr: 2, bgcolor: 'primary.main' }}>
@@ -960,10 +984,23 @@ export default function OwnerCustomers() {
                       <Box>
                         <Typography variant="subtitle2" fontWeight={600}>
                           {org.name || 'Unnamed Organization'}
+                          {org.deleted_at && (
+                            <Chip 
+                              label="DELETED" 
+                              size="small" 
+                              color="error" 
+                              sx={{ ml: 1, fontSize: '0.7rem', height: 20 }}
+                            />
+                          )}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
                           ID: {org.organization_id || org.id}
                         </Typography>
+                        {org.deleted_at && (
+                          <Typography variant="caption" color="error" display="block">
+                            Deleted: {new Date(org.deleted_at).toLocaleDateString()}
+                          </Typography>
+                        )}
                       </Box>
                     </Box>
                   </TableCell>
@@ -1066,15 +1103,27 @@ export default function OwnerCustomers() {
                           <DownloadIcon />
                         </IconButton>
                       </Tooltip>
-                      <Tooltip title="Delete Organization">
-                        <IconButton 
-                          size="small"
-                          onClick={() => handleDeleteOrganization(org)}
-                          sx={{ color: 'error.main' }}
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </Tooltip>
+                      {org.deleted_at ? (
+                        <Tooltip title="Restore Organization">
+                          <IconButton 
+                            size="small"
+                            onClick={() => handleRestoreOrganization(org)}
+                            sx={{ color: 'success.main' }}
+                          >
+                            <RestoreIcon />
+                          </IconButton>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip title="Delete Organization">
+                          <IconButton 
+                            size="small"
+                            onClick={() => handleDeleteOrganization(org)}
+                            sx={{ color: 'error.main' }}
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     </Box>
                   </TableCell>
                 </TableRow>
@@ -1380,45 +1429,93 @@ export default function OwnerCustomers() {
        {/* Delete Confirmation Dialog */}
        <Dialog
          open={deleteDialog}
-         onClose={() => setDeleteDialog(false)}
+         onClose={() => {
+           setDeleteDialog(false);
+           setDeleteReason('');
+         }}
          maxWidth="sm"
          fullWidth
        >
-         <DialogTitle sx={{ color: 'error.main' }}>
+         <DialogTitle sx={{ color: 'warning.main' }}>
            <Box display="flex" alignItems="center" gap={1}>
-             <WarningIcon color="error" />
+             <WarningIcon color="warning" />
              Delete Organization
            </Box>
          </DialogTitle>
          <DialogContent>
            <Typography variant="body1" sx={{ mb: 2 }}>
-             Are you sure you want to permanently delete <strong>{orgToDelete?.name}</strong>?
+             Are you sure you want to delete <strong>{orgToDelete?.name}</strong>?
            </Typography>
-           <Typography variant="body2" color="error" sx={{ mb: 2 }}>
-             This action will permanently delete:
-           </Typography>
-           <Box component="ul" sx={{ pl: 2, mb: 2 }}>
-             <li>All users and their accounts</li>
-             <li>All customers and their data</li>
-             <li>All gas cylinders and bottles</li>
-             <li>All rental records and transactions</li>
-             <li>The organization itself</li>
-           </Box>
-           <Typography variant="body2" color="error" fontWeight="bold">
-             This action cannot be undone!
-           </Typography>
+           <Alert severity="info" sx={{ mb: 2 }}>
+             This organization will be soft-deleted and can be restored later if needed. All data will be preserved.
+           </Alert>
+           <TextField
+             fullWidth
+             label="Reason for deletion (optional)"
+             multiline
+             rows={3}
+             value={deleteReason}
+             onChange={(e) => setDeleteReason(e.target.value)}
+             placeholder="e.g., Customer requested cancellation, Non-payment, Testing, etc."
+             sx={{ mt: 2 }}
+           />
          </DialogContent>
          <DialogActions>
-           <Button onClick={() => setDeleteDialog(false)}>
+           <Button onClick={() => {
+             setDeleteDialog(false);
+             setDeleteReason('');
+           }}>
              Cancel
            </Button>
            <Button 
              onClick={confirmDelete} 
              variant="contained" 
-             color="error"
+             color="warning"
              startIcon={<DeleteIcon />}
            >
-             Delete Permanently
+             Delete Organization
+           </Button>
+         </DialogActions>
+       </Dialog>
+
+       {/* Restore Confirmation Dialog */}
+       <Dialog
+         open={restoreDialog}
+         onClose={() => setRestoreDialog(false)}
+         maxWidth="sm"
+         fullWidth
+       >
+         <DialogTitle sx={{ color: 'success.main' }}>
+           <Box display="flex" alignItems="center" gap={1}>
+             <RestoreIcon color="success" />
+             Restore Organization
+           </Box>
+         </DialogTitle>
+         <DialogContent>
+           <Typography variant="body1" sx={{ mb: 2 }}>
+             Are you sure you want to restore <strong>{orgToRestore?.name}</strong>?
+           </Typography>
+           <Alert severity="info" sx={{ mb: 2 }}>
+             This will restore the organization and make it active again. All preserved data will be accessible.
+           </Alert>
+           {orgToRestore?.deletion_reason && (
+             <Alert severity="warning" sx={{ mt: 2 }}>
+               <Typography variant="body2" fontWeight="bold">Original deletion reason:</Typography>
+               <Typography variant="body2">{orgToRestore.deletion_reason}</Typography>
+             </Alert>
+           )}
+         </DialogContent>
+         <DialogActions>
+           <Button onClick={() => setRestoreDialog(false)}>
+             Cancel
+           </Button>
+           <Button 
+             onClick={confirmRestore} 
+             variant="contained" 
+             color="success"
+             startIcon={<RestoreIcon />}
+           >
+             Restore Organization
            </Button>
          </DialogActions>
        </Dialog>

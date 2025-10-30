@@ -92,7 +92,7 @@ export default function LandingPage() {
             <Button 
               variant="contained" 
               size="large"
-              onClick={() => navigate('/register')}
+              onClick={() => navigate('/create-organization')}
               sx={{ 
                 py: 2, 
                 px: 6,
@@ -131,9 +131,62 @@ export default function LandingPage() {
             </Button>
           </Stack>
           
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
             ✅ 7-day free trial • ✅ No credit card required • ✅ Cancel anytime
           </Typography>
+
+          {/* Getting Started Options */}
+          <Box sx={{ 
+            maxWidth: 800, 
+            mx: 'auto', 
+            p: 4, 
+            bgcolor: 'rgba(59, 130, 246, 0.05)', 
+            borderRadius: 3, 
+            border: '1px solid rgba(59, 130, 246, 0.1)',
+            mb: 4
+          }}>
+            <Typography variant="h6" fontWeight={600} sx={{ mb: 3, textAlign: 'center' }}>
+              Two Ways to Get Started
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <Box sx={{ textAlign: 'center', p: 2 }}>
+                  <Typography variant="h6" fontWeight={600} color="primary.main" sx={{ mb: 1 }}>
+                    🏢 Create Your Organization
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Start your own organization and invite team members. Perfect for business owners and managers.
+                  </Typography>
+                  <Button 
+                    variant="contained" 
+                    size="small"
+                    onClick={() => navigate('/create-organization')}
+                    sx={{ textTransform: 'none' }}
+                  >
+                    Create Organization
+                  </Button>
+                </Box>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Box sx={{ textAlign: 'center', p: 2 }}>
+                  <Typography variant="h6" fontWeight={600} color="success.main" sx={{ mb: 1 }}>
+                    🔗 Join with Code/Link
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Received an invitation link or join code? Sign in to connect to your organization.
+                  </Typography>
+                  <Button 
+                    variant="outlined" 
+                    size="small"
+                    onClick={() => navigate('/login')}
+                    sx={{ textTransform: 'none' }}
+                  >
+                    Sign In to Join
+                  </Button>
+                </Box>
+              </Grid>
+            </Grid>
+          </Box>
         </Box>
 
         {/* Key Benefits Section */}
@@ -459,9 +512,11 @@ export default function LandingPage() {
       {/* CTA Section */}
       <CTABanner 
         title="Ready to Transform Your Asset Management?"
-        subtitle={`Start your free trial today and see how ${assetConfig.appName} can transform your asset management.`}
-        primaryAction="Start Free Trial"
+        subtitle={`Create your organization today and see how ${assetConfig.appName} can transform your asset management.`}
+        primaryAction="Create Organization"
         secondaryAction="Contact Sales"
+        primaryActionUrl="/create-organization"
+        secondaryActionUrl="/contact"
         variant="gradient"
         showBadges={true}
       />
@@ -502,9 +557,9 @@ export default function LandingPage() {
                       bgcolor: 'primary.dark' 
                     }
                   }}
-                  onClick={() => navigate('/register')}
+                  onClick={() => navigate('/create-organization')}
                 >
-                  Start Trial
+                  Create Organization
                 </Button>
               </Box>
             </Grid>

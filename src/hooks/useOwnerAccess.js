@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { useAuth } from './useAuth.jsx';
 import { supabase } from '../supabase/client';
 
-export const useOwnerAccess = () => {
-  const { user, profile } = useAuth();
+export const useOwnerAccess = (profile) => {
+  const { user } = useAuth();
   const [isOwner, setIsOwner] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -26,6 +26,13 @@ export const useOwnerAccess = () => {
                          user.email === 'evankorial7@gmail.com'; // Owner email
 
       setIsOwner(isOwnerUser);
+      
+      // If not owner, redirect to unauthorized page
+      if (!isOwnerUser) {
+        console.warn('Unauthorized access attempt to owner portal');
+        // You could redirect here if needed
+        // window.location.href = '/unauthorized';
+      }
     } catch (error) {
       console.error('Error checking owner access:', error);
       setIsOwner(false);

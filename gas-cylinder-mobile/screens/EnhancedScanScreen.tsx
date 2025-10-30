@@ -24,7 +24,7 @@ import StatusIndicator from '../components/StatusIndicator';
 import FieldToolsPanel from '../components/FieldToolsPanel';
 import { fieldToolsService, LocationData } from '../services/fieldToolsService';
 import { customizationService } from '../services/customizationService';
-import { AccessibilityHelper, AccessibleButton, ScreenReaderAnnouncement } from '../components/AccessibilityHelper';
+import AccessibilityHelper, { AccessibleButton, ScreenReaderAnnouncement } from '../components/AccessibilityHelper';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { 
   useSharedValue, 
@@ -72,10 +72,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   
   // Debug organization data and force re-render
   useEffect(() => {
-    console.log('🔍 EnhancedScanScreen - Auth loading:', authLoading);
-    console.log('🔍 EnhancedScanScreen - Organization loading:', organizationLoading);
-    console.log('🔍 EnhancedScanScreen - User:', user?.id);
-    
     if (organization) {
       console.log('🔍 EnhancedScanScreen - Organization data:', {
         id: organization.id,
@@ -91,7 +87,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     } else {
       console.log('🔍 EnhancedScanScreen - No organization data available');
     }
-  }, [organization, authLoading, organizationLoading]);
+  }, [organization]);
   const { settings } = useSettings();
   
   // State
@@ -110,7 +106,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   const [isOnline, setIsOnline] = useState(true);
   const [syncStatus, setSyncStatus] = useState({ pending: 0, synced: 0 });
   const [organizationError, setOrganizationError] = useState<string | null>(null);
-  const [isProcessingBarcode, setIsProcessingBarcode] = useState(false);
   
   // Batch scanning features
   const [batchMode, setBatchMode] = useState(false);
@@ -512,13 +507,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       return;
     }
     
-    if (!data || loading || isProcessingBarcode) {
-      console.log('📷 Skipping scan - no data, loading, or already processing');
+    if (!data || loading) {
+      console.log('📷 Skipping scan - no data or loading');
       return;
     }
-    
-    // Set processing flag to prevent multiple alerts
-    setIsProcessingBarcode(true);
 
     // Show what was scanned for feedback
     setLastScanAttempt(data);
@@ -593,6 +585,9 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     }
 
     try {
+      // Format validation disabled - using basic validation only
+      console.log('🔍 Using basic validation (FormatValidationService disabled)');
+      
       // For cylinders, use the original 9-digit barcode directly
       console.log('📷 Using cylinder serial number for lookup:', data);
       
@@ -610,15 +605,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         setIsScanning(true);
       }
     } catch (error) {
-      console.error('❌ Error processing scan:', error);
-      console.error('❌ Error details:', {
-        errorType: typeof error,
-        errorMessage: error?.message,
-        errorCode: error?.code,
-        errorDetails: error?.details,
-        errorHint: error?.hint,
-        fullError: error
-      });
+      console.error('Error processing scan:', error);
       
       // Provide error feedback
       await feedbackService.scanError('Failed to process scan');
@@ -627,53 +614,24 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       await notificationService.sendScanErrorNotification('Failed to process scan');
       
       if (!batchMode) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        Alert.alert('Error', `Failed to process scan: ${errorMessage}`);
+        Alert.alert('Error', 'Failed to process scan. Please try again.');
       }
     } finally {
       if (!batchMode) {
         setLoading(false);
       }
-      // Reset processing flag
-      setIsProcessingBarcode(false);
     }
   };
 
   // Process scan (online or offline)
   const processScan = async (barcode: string) => {
-    console.log('🔄 Starting processScan for barcode:', barcode);
-    console.log('🔄 Organization ID:', organization?.id);
-    console.log('🔄 User ID:', user?.id);
-    console.log('🔄 Is Online:', isOnline);
-    
     // Get current location data if available
     const locationData = fieldToolsService.getCurrentLocationData();
-    console.log('🔄 Location data:', locationData);
     
     // Look up item details
-    console.log('🔄 Looking up item details...');
     const itemDetails = await lookupItemDetails(barcode);
-    console.log('🔄 Item details found:', itemDetails);
     setLastScannedItemDetails(itemDetails);
     
-    // Check if barcode exists in the system BEFORE creating scan result
-    if (!itemDetails) {
-      console.log('❌ Barcode not found in system:', barcode);
-      Alert.alert(
-        'Barcode Not Found', 
-        `The barcode "${barcode}" is not in the system. Please check the barcode or contact your administrator.`,
-        [{ 
-          text: 'OK',
-          onPress: () => {
-            setIsProcessingBarcode(false); // Reset processing flag when alert is dismissed
-          }
-        }]
-      );
-      await feedbackService.scanError('Barcode not found in system');
-      return; // Stop processing if barcode not found - DON'T add to scanned items
-    }
-    
-    // Only create scan result if barcode exists in system
     const scanResult: ScanResult = {
       id: `scan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       barcode: barcode.trim(),
@@ -718,28 +676,14 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       timestamp: Date.now(),
     });
 
-    // Check for duplicates before adding
-    const isDuplicate = scannedItems.some(item => item.barcode === scanResult.barcode);
-    if (isDuplicate) {
-      console.log('⚠️ Duplicate barcode detected, not adding to list:', scanResult.barcode);
-      Alert.alert(
-        'Duplicate Barcode',
-        `Barcode "${scanResult.barcode}" has already been scanned.`,
-        [{ text: 'OK' }]
-      );
-      return; // Don't add duplicate
-    }
-
     // Add to local results immediately
     setScannedItems(prev => [scanResult, ...prev]);
     console.log('Added scan result to local items:', scanResult);
     console.log('Current scanned items count:', scannedItems.length + 1);
 
     if (isOnline) {
-      console.log('🌐 Device is online, attempting to sync scan...');
       try {
         // Try to sync immediately if online
-        console.log('🔄 Calling syncScanToServer...');
         await syncScanToServer(scanResult);
         
         // Mark as synced
@@ -747,11 +691,11 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         setScannedItems(prev => 
           prev.map(item => item.id === scanResult.id ? { ...item, synced: true } : item)
         );
-        console.log('✅ Item synced successfully:', scanResult.barcode);
+        console.log('Item synced successfully:', scanResult.barcode);
 
       } catch (error) {
-        console.error('❌ Failed to sync scan:', error);
-        console.error('❌ Sync error details:', {
+        console.error('Failed to sync scan:', error);
+        console.error('Sync error details:', {
           errorType: typeof error,
           errorMessage: error?.message,
           errorCode: error?.code,
@@ -762,7 +706,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         
         // Show user-friendly error message
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.log(`📱 Scan will be saved offline: ${errorMessage}`);
+        console.log(`Scan will be saved offline: ${errorMessage}`);
         
         // Add to offline queue
         await OfflineStorageService.addToOfflineQueue({
@@ -828,73 +772,59 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   // Sync scan to server
   const syncScanToServer = async (scanResult: ScanResult) => {
     try {
-      console.log('🔄 syncScanToServer called with:', scanResult);
-      console.log('🔄 Organization:', organization);
-      console.log('🔄 User:', user);
-      
       // Debug logging
       console.log('Sync attempt - Organization:', organization?.id, 'User:', user?.id);
       console.log('Scan data:', {
         barcode: scanResult.barcode,
         action: scanResult.action,
         location: scanResult.location,
-        notes: scanResult.notes,
+        // notes: scanResult.notes, // Removed - column doesn't exist in bottle_scans
         timestamp: scanResult.timestamp
       });
       
       if (!organization?.id) {
-        console.error('❌ No organization ID available');
         throw new Error('No organization ID available');
       }
       
       if (!user?.id) {
-        console.error('❌ No user ID available');
         throw new Error('No user ID available');
       }
 
       // Test database connection and table access
-      console.log('🔄 Testing database connection...');
-      try {
-        const { data: testData, error: testError } = await supabase
-          .from('bottle_scans')
-          .select('id')
-          .limit(1);
-        
-        if (testError) {
-          console.error('❌ Database test failed:', testError);
-          throw new Error(`Database connection failed: ${testError.message}`);
-        }
-        
-        console.log('✅ Database connection test passed');
-      } catch (dbTestError) {
-        console.error('❌ Database test error:', dbTestError);
-        throw dbTestError;
+      console.log('Testing database connection...');
+      const { data: testData, error: testError } = await supabase
+        .from('bottle_scans')
+        .select('id')
+        .limit(1);
+      
+      if (testError) {
+        console.error('Database test failed:', testError);
+        throw new Error(`Database connection failed: ${testError.message}`);
       }
+      
+      console.log('Database connection test passed');
 
       // Debug: Log the exact data being inserted  
       const insertData = {
         organization_id: organization.id,
         bottle_barcode: scanResult.barcode, // Changed from barcode_number to bottle_barcode
-        mode: scanResult.action.toUpperCase(), // Changed from action to mode, uppercase
+        mode: scanResult.action === 'out' ? 'SHIP' : scanResult.action === 'in' ? 'RETURN' : scanResult.action.toUpperCase(), // Map to database expected values
         location: scanResult.location,
-        // notes: scanResult.notes, // Removed - column doesn't exist in database
+        // notes: scanResult.notes, // Removed - column doesn't exist in bottle_scans
         user_id: user.id, // Changed from scanned_by to user_id
         order_number: orderNumber || null,
         customer_name: routeCustomerName || null,
         customer_id: customerId || null,
-        scan_date: new Date().toISOString(), // Add scan_date
+        // scan_date: new Date().toISOString(), // Removed - column doesn't exist in bottle_scans
         timestamp: new Date().toISOString(), // Add timestamp
         created_at: new Date().toISOString() // Add created_at
       };
       
-      console.log('🔄 Insert data for bottle_scans:', JSON.stringify(insertData, null, 2));
+      console.log('Insert data for bottle_scans:', JSON.stringify(insertData, null, 2));
 
-      console.log('🔄 Attempting to insert scan data...');
       const { data, error } = await supabase
         .from('bottle_scans')
         .insert([insertData]);
-      
-      console.log('🔄 Insert result - data:', data, 'error:', error);
 
       if (error) {
         console.error('Supabase error details:', {
@@ -913,26 +843,15 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         throw new Error(`Database error: ${errorMessage}`);
       }
 
-      console.log('✅ Scan synced successfully:', data);
+      console.log('Scan synced successfully:', data);
 
       // Also update bottle status and location
-      console.log('🔄 Updating bottle status...');
-      try {
-        await updateBottleStatus(scanResult.barcode, scanResult.action);
-        console.log('✅ Bottle status updated successfully');
-      } catch (bottleUpdateError) {
-        console.error('❌ Error updating bottle status:', bottleUpdateError);
-        // Don't throw here - scan was successful, bottle update is secondary
-      }
+      await updateBottleStatus(scanResult.barcode, scanResult.action);
     } catch (error) {
-      console.error('❌ Failed to sync scan to server:', error);
-      console.error('❌ Error type:', typeof error);
-      console.error('❌ Error constructor:', error?.constructor?.name);
-      console.error('❌ Error stack:', error?.stack);
-      console.error('❌ Error message:', error?.message);
-      console.error('❌ Error details:', error?.details);
-      console.error('❌ Error code:', error?.code);
-      console.error('❌ Error hint:', error?.hint);
+      console.error('Failed to sync scan to server:', error);
+      console.error('Error type:', typeof error);
+      console.error('Error constructor:', error?.constructor?.name);
+      console.error('Error stack:', error?.stack);
       
       const errorMessage = error instanceof Error ? error.message : 'Unknown sync error';
       throw new Error(`Sync failed: ${errorMessage}`);
@@ -941,9 +860,28 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
 
   // Update bottle status
   const updateBottleStatus = async (barcode: string, action: 'in' | 'out' | 'locate' | 'fill') => {
-    let updateData: any = {
-      last_scanned: new Date().toISOString()
-    };
+    // First, check current bottle status
+    const { data: currentBottle, error: fetchError } = await supabase
+      .from('bottles')
+      .select('status')
+      .eq('barcode_number', barcode)
+      .eq('organization_id', organization?.id)
+      .single();
+
+    if (fetchError) {
+      console.error('Error fetching current bottle status:', fetchError);
+      return;
+    }
+
+    console.log('Current bottle status:', { barcode, currentStatus: currentBottle?.status, action });
+
+    // Business logic: Prevent duplicate "shipped" scans, but allow "return" to override "shipped"
+    if (action === 'out' && currentBottle?.status === 'delivered') {
+      console.log('❌ Bottle already shipped, preventing duplicate shipment');
+      throw new Error(`Bottle ${barcode} has already been shipped and cannot be shipped again.`);
+    }
+
+    let updateData: any = {};
     
     switch (action) {
       case 'out':
@@ -959,7 +897,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         updateData.customer_name = null;
         break;
       case 'locate':
-        // Don't change status for locate, just update location and last scanned
+        // Don't change status for locate, just update location
         if (location) updateData.location = location;
         break;
       case 'fill':
@@ -1305,6 +1243,33 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     }
   };
 
+  // Remove individual scanned item
+  const removeScannedItem = (index: number) => {
+    Alert.alert(
+      'Remove Item',
+      `Are you sure you want to remove this scanned item?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Remove', 
+          style: 'destructive',
+          onPress: () => {
+            const itemToRemove = scannedItems[index];
+            setScannedItems(prev => prev.filter((_, i) => i !== index));
+            
+            // Update scan count
+            setScanCount(prev => Math.max(0, prev - 1));
+            
+            // Remove from duplicates if it was there
+            setDuplicates(prev => prev.filter(dup => dup !== itemToRemove.barcode));
+            
+            console.log(`Removed scanned item: ${itemToRemove.barcode}`);
+          }
+        }
+      ]
+    );
+  };
+
   // Swipeable scan item component
   const SwipeableScanItem = ({ item }: { item: ScanResult }) => {
     const translateX = useSharedValue(0);
@@ -1413,13 +1378,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                   onPress={() => handleSwipeAction(item, 'mark_damaged')}
                 >
                   <Text style={styles.quickActionText}>⚠️ DAMAGE</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  style={[styles.quickActionButton, styles.removeButton]}
-                  onPress={() => handleSwipeAction(item, 'delete')}
-                >
-                  <Text style={styles.quickActionText}>🗑️ REMOVE</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1587,8 +1545,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
             ]}>
               <Text 
                 key={refreshKey}
-                style={[
-                  styles.welcomeTitle,
+                style={[styles.welcomeTitle,
                   getDynamicStyles().fontSizeMultiplier && { fontSize: styles.welcomeTitle.fontSize * getDynamicStyles().fontSizeMultiplier },
                   getDynamicStyles().fontWeight && { fontWeight: getDynamicStyles().fontWeight },
                   getDynamicStyles().customColors && { color: getDynamicStyles().customColors.textColor },
@@ -1600,7 +1557,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                   {(organization?.app_name || organization?.name || 'Scanified')}
                   {__DEV__ && (
                     <Text style={{fontSize: 12, color: 'red'}}>
-                    {' [DEBUG: '}{organization?.app_name}{' | '}{organization?.name}{']'}
+                      {' [DEBUG: '}{organization?.app_name}{' | '}{organization?.name}{']'}
                     </Text>
                   )}
                 </Text>
@@ -1704,10 +1661,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
               style={[
                 styles.manualEntryButton,
                 getDynamicStyles().buttonPadding && { paddingVertical: getDynamicStyles().buttonPadding },
-                getDynamicStyles().customColors && { backgroundColor: getDynamicStyles().customColors.secondaryColor },
-                getDynamicStyles().spacingMultiplier && { 
-                  paddingHorizontal: styles.manualEntryButton.paddingHorizontal * getDynamicStyles().spacingMultiplier
-                }
+                getDynamicStyles().customColors && { backgroundColor: getDynamicStyles().customColors.secondaryColor }
               ]}
               onPress={() => setShowManualEntry(true)}
             >
@@ -1727,7 +1681,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         <View style={styles.cameraModal}>
           <CameraView
             style={styles.camera}
-            barcodeScannerEnabled={true}
             onBarcodeScanned={({ data, bounds }) => {
               console.log('📷 CameraView onBarcodeScanned triggered!');
               console.log('📷 Raw barcode data:', data, 'bounds:', bounds);
@@ -1898,13 +1851,21 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                     <Text style={[styles.scannedItemBarcode, { color: theme.text }]}>
                       {item.barcode}
                     </Text>
-                    <View style={[
-                      styles.scannedItemStatus,
-                      { backgroundColor: item.synced ? '#10B981' : '#F59E0B' }
-                    ]}>
-                      <Text style={styles.scannedItemStatusText}>
-                        {item.synced ? '✓ Synced' : '⏳ Pending'}
-                      </Text>
+                    <View style={styles.scannedItemHeaderRight}>
+                      <View style={[
+                        styles.scannedItemStatus,
+                        { backgroundColor: item.synced ? '#10B981' : '#F59E0B' }
+                      ]}>
+                        <Text style={styles.scannedItemStatusText}>
+                          {item.synced ? '✓ Synced' : '⏳ Pending'}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.removeButton, { backgroundColor: '#EF4444' }]}
+                        onPress={() => removeScannedItem(index)}
+                      >
+                        <Text style={styles.removeButtonText}>✕</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
                   <Text style={[styles.scannedItemAction, { color: theme.textSecondary }]}>
@@ -1949,35 +1910,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 </Text>
                 <Text style={[styles.submitOrderSubtext, { color: 'rgba(255,255,255,0.8)' }]}>
                   Finalize order and send to processing
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Clear All Button */}
-            {scannedItems.length > 0 && (
-              <TouchableOpacity 
-                style={[styles.clearAllButton, { backgroundColor: '#EF4444' }]}
-                onPress={() => {
-                  Alert.alert(
-                    'Clear All Items',
-                    `Are you sure you want to remove all ${scannedItems.length} scanned items?`,
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      { 
-                        text: 'Clear All', 
-                        style: 'destructive',
-                        onPress: () => {
-                          setScannedItems([]);
-                          setScanCount(0);
-                          setDuplicates([]);
-                        }
-                      }
-                    ]
-                  );
-                }}
-              >
-                <Text style={[styles.clearAllButtonText, { color: 'white' }]}>
-                  🗑️ Clear All ({scannedItems.length} items)
                 </Text>
               </TouchableOpacity>
             )}
@@ -2395,16 +2327,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
-  actionButton: {
-    flex: 1,
-    minWidth: '45%',
-    backgroundColor: '#f3f4f6',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
   actionIcon: {
     fontSize: 24,
     marginBottom: 4,
@@ -2540,14 +2462,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: 'transparent',
   },
-  scanInstructions: {
+  formatHint: {
     color: '#fff',
-    fontSize: 16,
-    marginTop: 20,
+    fontSize: 14,
+    marginTop: 8,
     textAlign: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    padding: 8,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    padding: 6,
     borderRadius: 4,
+    fontFamily: 'monospace',
+    opacity: 0.8,
   },
   scanFeedbackContainer: {
     marginTop: 16,
@@ -2921,9 +2845,6 @@ const styles = StyleSheet.create({
   damageButton: {
     backgroundColor: '#F59E0B',
   },
-  removeButton: {
-    backgroundColor: '#EF4444',
-  },
   quickActionText: {
     color: '#fff',
     fontSize: 10,
@@ -3252,6 +3173,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
+  scannedItemHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  removeButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
   scannedItemBarcode: {
     fontSize: 16,
     fontWeight: 'bold',
@@ -3300,17 +3238,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   syncButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  clearAllButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  clearAllButtonText: {
     fontSize: 16,
     fontWeight: '600',
   },

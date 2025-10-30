@@ -31,6 +31,8 @@ import { useAuth } from '../hooks/useAuth';
 export default function OrganizationTools() {
   const { profile, organization } = useAuth();
   
+  // Platform owners are blocked at route level, so this check is no longer needed
+  
   const [loading, setLoading] = useState(false);
   const [validationResults, setValidationResults] = useState({
     customers: { valid: 0, invalid: 0, issues: [] },
@@ -71,10 +73,10 @@ export default function OrganizationTools() {
 
       // Fetch real data from Supabase with error handling
       const [customersResult, bottlesResult, deliveriesResult, locationsResult] = await Promise.allSettled([
-        // Customers
+        // Customers - Use same query pattern as Customers page
         supabase
           .from('customers')
-          .select('id, name, email, phone')
+          .select('*', { count: 'exact' })
           .eq('organization_id', organization.id),
         
         // Bottles
@@ -107,14 +109,54 @@ export default function OrganizationTools() {
         bottles: bottles.length,
         deliveries: deliveries.length,
         locations: locations.length,
-        organizationId: organization.id
+        organizationId: organization.id,
+        organizationName: organization.name
       });
       
-      // Log any errors
-      if (customersResult.status === 'rejected') console.error('Customers query failed:', customersResult.reason);
-      if (bottlesResult.status === 'rejected') console.error('Bottles query failed:', bottlesResult.reason);
-      if (deliveriesResult.status === 'rejected') console.error('Deliveries query failed:', deliveriesResult.reason);
-      if (locationsResult.status === 'rejected') console.error('Locations query failed:', locationsResult.reason);
+      // Enhanced error logging
+      if (customersResult.status === 'rejected') {
+        console.error('❌ Customers query failed:', customersResult.reason);
+      } else if (customersResult.status === 'fulfilled') {
+        console.log('✅ Customers query successful:', {
+          count: customers.length,
+          error: customersResult.value.error,
+          data: customers.slice(0, 3) // Show first 3 customers
+        });
+      }
+      
+      if (bottlesResult.status === 'rejected') console.error('❌ Bottles query failed:', bottlesResult.reason);
+      if (deliveriesResult.status === 'rejected') console.error('❌ Deliveries query failed:', deliveriesResult.reason);
+      if (locationsResult.status === 'rejected') console.error('❌ Locations query failed:', locationsResult.reason);
+
+      // If no customers found, try a broader query to debug
+      if (customers.length === 0) {
+        console.log('🔍 No customers found for organization, running debug queries...');
+        
+        // Check if customers table has any data at all - Use same pattern as Customers page
+        const { data: allCustomers, error: allCustomersError } = await supabase
+          .from('customers')
+          .select('*', { count: 'exact' })
+          .eq('organization_id', organization.id)
+          .limit(5);
+        
+        console.log('🔍 All customers in database:', {
+          count: allCustomers?.length || 0,
+          error: allCustomersError,
+          sample: allCustomers
+        });
+        
+        // Check if there are customers with different organization IDs
+        const { data: customersWithOrgs, error: orgError } = await supabase
+          .from('customers')
+          .select('organization_id')
+          .not('organization_id', 'is', null);
+        
+        console.log('🔍 Customers with organization IDs:', {
+          count: customersWithOrgs?.length || 0,
+          error: orgError,
+          uniqueOrgs: [...new Set(customersWithOrgs?.map(c => c.organization_id) || [])]
+        });
+      }
 
       // Process customers
       const customerIssues = [];

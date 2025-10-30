@@ -158,7 +158,9 @@ export default function CylinderDetailsScreen() {
         
         <View style={styles.infoRow}>
           <Text style={[styles.label, { color: colors.text }]}>Current Location:</Text>
-          <Text style={[styles.value, { color: colors.textSecondary }]}>{cylinder.location || 'Not set'}</Text>
+          <Text style={[styles.value, { color: colors.textSecondary }]}>
+            {cylinder.location ? cylinder.location.replace(/_/g, ' ') : 'Not set'}
+          </Text>
         </View>
         
         <View style={styles.infoRow}>
@@ -238,10 +240,6 @@ export default function CylinderDetailsScreen() {
       <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.primary }]}>Maintenance & History</Text>
         
-        <View style={styles.infoRow}>
-          <Text style={[styles.label, { color: colors.text }]}>Last Scanned:</Text>
-          <Text style={[styles.value, { color: colors.textSecondary }]}>{formatDateTime(cylinder.last_scanned)}</Text>
-        </View>
         
         <View style={styles.infoRow}>
           <Text style={[styles.label, { color: colors.text }]}>Last Audited:</Text>

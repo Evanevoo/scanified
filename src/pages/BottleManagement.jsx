@@ -18,13 +18,17 @@ import {
   IconButton,
   Snackbar,
   Alert,
-  TablePagination,
-  Chip,
-  MenuItem,
-  Select,
   FormControl,
-  InputLabel
+  InputLabel,
+  Select,
+  MenuItem,
+  TablePagination,
+  Chip
 } from '@mui/material';
+import ResponsiveTable from '../components/ResponsiveTable';
+import OptimizedTable from '../components/OptimizedTable';
+import { usePagination } from '../hooks/usePagination';
+import { executeCachedQuery, createOptimizedQuery } from '../utils/queryOptimizer';
 import {
   Add as AddIcon,
   Edit as EditIcon,
@@ -44,11 +48,19 @@ const BottleManagement = () => {
   const [bottles, setBottles] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [totalCount, setTotalCount] = useState(0);
+  
+  // Use optimized pagination hook
+  const {
+    page,
+    rowsPerPage,
+    handleChangePage,
+    handleChangeRowsPerPage,
+    getPaginationInfo
+  } = usePagination(0, 25);
   
   // Dialog states
   const [uploadDialog, setUploadDialog] = useState(false);
@@ -65,23 +77,35 @@ const BottleManagement = () => {
       loadBottles();
       loadCustomers();
     }
-  }, [organization]);
+  }, [organization, page, rowsPerPage]);
 
   const loadBottles = async () => {
     try {
-      const { data, error } = await supabase
+      setLoading(true);
+      
+      // Get total count for pagination
+      const { count } = await supabase
         .from('bottles')
-        .select(`
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', organization.id);
+      
+      setTotalCount(count || 0);
+
+      // Use optimized query with pagination
+      const data = await executeCachedQuery(supabase, 'bottles', {
+        select: `
           *,
           customers:assigned_customer (
             "CustomerListID",
             name
           )
-        `)
-        .eq('organization_id', organization.id)
-        .order('customer_name', { ascending: true });
+        `,
+        filters: { organization_id: organization.id },
+        orderBy: { column: 'customer_name', ascending: true },
+        pagination: { page, pageSize: rowsPerPage },
+        cache: true
+      });
 
-      if (error) throw error;
       setBottles(data || []);
     } catch (error) {
       console.error('Error loading bottles:', error);
@@ -106,7 +130,7 @@ const BottleManagement = () => {
     }
   };
 
-  // Filter and paginate bottles
+  // Filter bottles (client-side filtering for search)
   const filteredBottles = useMemo(() => {
     let filtered = bottles;
 
@@ -127,11 +151,6 @@ const BottleManagement = () => {
 
     return filtered;
   }, [bottles, searchTerm, statusFilter]);
-
-  const paginatedBottles = useMemo(() => {
-    const start = page * rowsPerPage;
-    return filteredBottles.slice(start, start + rowsPerPage);
-  }, [filteredBottles, page, rowsPerPage]);
 
   // File upload handling
   const handleFileSelect = (event) => {
@@ -193,7 +212,7 @@ const BottleManagement = () => {
 
           if (existingCustomers) {
             existingCustomers.forEach(customer => {
-              customerMap.set(customer.CustomerListID, customer.name);
+              customerMap.set(customer.CustomerListID.toUpperCase(), customer.name);
             });
           }
 
@@ -210,15 +229,19 @@ const BottleManagement = () => {
 
           jsonData.forEach(row => {
             const customerName = row['Customer'] || row['customer_name'] || '';
-            const customerId = row['CustomerListID'] || row['customer_list_id'] || '';
+            const customerId = String(row['CustomerListID'] || row['customer_list_id'] || '').trim().toUpperCase();
             
-            // Collect unique customers
-            if (customerName.trim() && customerId.trim() && !processedCustomerIds.has(customerId.trim())) {
-              processedCustomerIds.add(customerId.trim());
+            // Collect unique customers (case-insensitive comparison)
+            if (customerName.trim() && customerId && !processedCustomerIds.has(customerId)) {
+              processedCustomerIds.add(customerId);
               
-              if (!customerMap.has(customerId.trim())) {
+              // Check if customer already exists in database OR is already queued for creation
+              const customerAlreadyExists = Array.from(customerMap.keys()).some(key => key.toUpperCase() === customerId);
+              const customerAlreadyQueued = customersToCreate.some(c => c.CustomerListID.toUpperCase() === customerId);
+              
+              if (!customerAlreadyExists && !customerAlreadyQueued) {
                 customersToCreate.push({
-                  CustomerListID: customerId.trim(),
+                  CustomerListID: customerId,
                   name: customerName.trim(),
                   organization_id: organization.id
                 });
@@ -229,8 +252,8 @@ const BottleManagement = () => {
             const location = row['Location'] || row['location'] || '';
             const isAtYourFacility = locationNames.some(loc => location.toLowerCase().includes(loc));
             
-            // Determine gas_type from description if not provided
-            let gasType = row['Gas Type'] || row['gas_type'] || row['GasType'] || row['Gas'] || '';
+            // Determine gas_type from Group, Gas Type, or description
+            let gasType = row['Group'] || row['group'] || row['Gas Type'] || row['gas_type'] || row['GasType'] || row['Gas'] || '';
             if (!gasType && row['Description']) {
               const desc = row['Description'].toUpperCase();
               if (desc.includes('ARGON')) gasType = 'ARGON';
@@ -241,14 +264,19 @@ const BottleManagement = () => {
             }
 
             const bottle = {
-              barcode_number: row['Barcode'] || row['barcode_number'] || row['Barcode Number'] || '',
-              serial_number: (row['Serial Number'] || row['serial_number'] || row['Serial'] || '').toString().trim(),
-              assigned_customer: customerMap.has(customerId.trim()) ? customerId.trim() : null,
+              barcode_number: String(row['Barcode'] || row['barcode_number'] || row['Barcode Number'] || '').trim(),
+              serial_number: (row['Serial Number'] || row['serial_number'] || row['Serial'] || row['SerialNumber'] || '').toString().trim(),
+              assigned_customer: Array.from(customerMap.keys()).some(key => key.toUpperCase() === customerId) ? customerId : null,
               customer_name: customerName,
               location: location,
               product_code: row['Product Code'] || row['product_code'] || row['ProductCode'] || row['Product'] || '',
               description: row['Description'] || row['description'] || row['Desc'] || '',
               gas_type: gasType,
+              group_name: row['Group'] || row['group'] || row['Group Name'] || '',
+              category: row['Category'] || row['category'] || '',
+              type: row['Type'] || row['type'] || '',
+              ownership: row['Ownership'] || row['ownership'] || '',
+              days_at_location: row['Days At Location'] || row['days_at_location'] || row['DaysAtLocation'] ? parseInt(row['Days At Location'] || row['days_at_location'] || row['DaysAtLocation']) : null,
               status: 'rented', // All bottles are rentals by default
               organization_id: organization.id
             };
@@ -301,9 +329,9 @@ const BottleManagement = () => {
           // Now update bottles with correct assigned_customer values
           bottlesToInsert.forEach(bottle => {
             if (bottle.customer_name && bottle.customer_name.trim()) {
-              // Find the customer ID for this bottle by matching customer name
+              // Find the customer ID for this bottle by matching customer name (case-insensitive)
               const customerId = Array.from(customerMap.keys()).find(id => 
-                customerMap.get(id) === bottle.customer_name.trim()
+                customerMap.get(id).toLowerCase() === bottle.customer_name.trim().toLowerCase()
               );
               if (customerId) {
                 bottle.assigned_customer = customerId;
@@ -319,21 +347,78 @@ const BottleManagement = () => {
             }
           });
 
-          // Insert bottles
-          const batchSize = 100;
-          for (let i = 0; i < bottlesToInsert.length; i += batchSize) {
-            const batch = bottlesToInsert.slice(i, i + batchSize);
-            const { error } = await supabase
+          // Check for existing bottles to prevent duplicates
+          const bottleBarcodes = bottlesToInsert.map(b => b.barcode_number).filter(b => b && b.trim() !== '');
+          const bottleSerials = bottlesToInsert.map(b => b.serial_number).filter(s => s && s.trim() !== '');
+          
+          console.log(`Checking for duplicates: ${bottleBarcodes.length} barcodes, ${bottleSerials.length} serials`);
+          
+          let existingBottles = [];
+          if (bottleBarcodes.length > 0 || bottleSerials.length > 0) {
+            // Get ALL existing bottles for this organization to check against
+            const { data: allExisting } = await supabase
               .from('bottles')
-              .insert(batch);
+              .select('barcode_number, serial_number, id')
+              .eq('organization_id', organization.id);
+            
+            existingBottles = allExisting || [];
+            console.log(`Found ${existingBottles.length} total existing bottles in database`);
+          }
+          
+          // Filter out bottles that already exist (check by barcode first, then serial)
+          const newBottles = [];
+          const duplicates = [];
+          
+          bottlesToInsert.forEach(bottle => {
+            const barcode = bottle.barcode_number?.trim();
+            const serial = bottle.serial_number?.trim();
+            
+            // Check for existing bottle by barcode
+            const hasExistingBarcode = barcode && existingBottles.some(existing => 
+              existing.barcode_number?.trim() === barcode
+            );
+            
+            // Check for existing bottle by serial
+            const hasExistingSerial = serial && existingBottles.some(existing => 
+              existing.serial_number?.trim() === serial
+            );
+            
+            if (hasExistingBarcode || hasExistingSerial) {
+              duplicates.push({
+                barcode: barcode || 'N/A',
+                serial: serial || 'N/A',
+                reason: hasExistingBarcode ? 'barcode' : 'serial'
+              });
+              console.log(`Skipping duplicate bottle: ${barcode || serial} (${hasExistingBarcode ? 'barcode' : 'serial'} match)`);
+            } else {
+              newBottles.push(bottle);
+            }
+          });
+          
+          console.log(`Found ${duplicates.length} duplicates, inserting ${newBottles.length} new bottles`);
 
-            if (error) {
-              console.error('Error inserting batch:', error);
-              throw error;
+          // Insert only new bottles
+          if (newBottles.length > 0) {
+            const batchSize = 100;
+            for (let i = 0; i < newBottles.length; i += batchSize) {
+              const batch = newBottles.slice(i, i + batchSize);
+              const { error } = await supabase
+                .from('bottles')
+                .insert(batch);
+
+              if (error) {
+                console.error('Error inserting batch:', error);
+                throw error;
+              }
             }
           }
 
-          setSnackbar({ open: true, message: `${bottlesToInsert.length} bottles uploaded successfully!`, severity: 'success' });
+          // Show proper success message with duplicate info
+          let message = `${newBottles.length} bottles uploaded successfully!`;
+          if (duplicates.length > 0) {
+            message += ` (${duplicates.length} duplicates skipped)`;
+          }
+          setSnackbar({ open: true, message, severity: 'success' });
           setUploadDialog(false);
           setUploadFile(null);
           setUploadPreview([]);
@@ -550,6 +635,58 @@ const BottleManagement = () => {
     setDeleteDialog(true);
   };
 
+  const handleDeleteAllBottles = async () => {
+    try {
+      // Get total count of all bottles for this organization
+      const { count: totalBottles } = await supabase
+        .from('bottles')
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', organization.id);
+
+      if (totalBottles === 0) {
+        setSnackbar({ open: true, message: 'No bottles to delete', severity: 'warning' });
+        return;
+      }
+
+      // Confirm deletion of ALL bottles
+      const confirmMessage = `Are you sure you want to delete ALL ${totalBottles} bottles for this organization?\n\nThis action cannot be undone!`;
+      if (!confirm(confirmMessage)) {
+        return;
+      }
+
+      setLoading(true);
+      
+      // Delete all bottles for this organization
+      const { error } = await supabase
+        .from('bottles')
+        .delete()
+        .eq('organization_id', organization.id);
+
+      if (error) {
+        throw error;
+      }
+
+      setSnackbar({ 
+        open: true, 
+        message: `Successfully deleted all ${totalBottles} bottles`, 
+        severity: 'success' 
+      });
+      
+      // Reload the bottles list
+      loadBottles();
+      
+    } catch (error) {
+      console.error('Error deleting all bottles:', error);
+      setSnackbar({ 
+        open: true, 
+        message: `Failed to delete all bottles: ${error.message}`, 
+        severity: 'error' 
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCreateMissingCustomers = async () => {
     try {
       // Get all unique customers from bottles that don't have assigned_customer
@@ -573,7 +710,7 @@ const BottleManagement = () => {
           const customerMap = new Map();
           jsonData.forEach(row => {
             const customerName = row['Customer'] || row['customer_name'] || '';
-            const customerId = row['CustomerListID'] || row['customer_list_id'] || '';
+            const customerId = String(row['CustomerListID'] || row['customer_list_id'] || '');
             
             if (customerName.trim() && customerId.trim()) {
               customerMap.set(customerName.trim(), customerId.trim());
@@ -674,8 +811,8 @@ const BottleManagement = () => {
             variant="outlined"
             color="error"
             startIcon={<DeleteIcon />}
-            onClick={handleBulkDelete}
-            disabled={bottles.length === 0}
+            onClick={handleDeleteAllBottles}
+            disabled={loading}
           >
             Delete All Bottles
           </Button>
@@ -721,102 +858,90 @@ const BottleManagement = () => {
         </FormControl>
       </Box>
 
-      {/* Table */}
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Serial Number</TableCell>
-              <TableCell>Barcode</TableCell>
-              <TableCell>Product Code</TableCell>
-              <TableCell>Description</TableCell>
-              <TableCell>Gas Type</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Location</TableCell>
-              <TableCell>Customer</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {paginatedBottles.map((bottle) => (
-              <TableRow key={bottle.id}>
-                <TableCell>{bottle.serial_number || '-'}</TableCell>
-                <TableCell 
-                  onClick={() => handleBottleDetails(bottle)}
-                  sx={{ 
-                    cursor: 'pointer',
-                    color: 'primary.main',
-                    textDecoration: 'underline',
-                    '&:hover': {
-                      backgroundColor: 'action.hover'
-                    }
-                  }}
-                >
-                  {bottle.barcode_number || '-'}
-                </TableCell>
-                <TableCell>{bottle.product_code || '-'}</TableCell>
-                <TableCell>{bottle.description || '-'}</TableCell>
-                <TableCell>{bottle.gas_type || '-'}</TableCell>
-                <TableCell>
-                  <Chip
-                    label={bottle.status}
-                    color={bottle.status === 'available' ? 'success' : 'warning'}
-                    size="small"
-                  />
-                </TableCell>
-                <TableCell>{bottle.location || '-'}</TableCell>
-                <TableCell 
-                  onClick={() => {
-                    if (bottle.customer_name && bottle.customer_name !== '-') {
-                      handleCustomerDetails(bottle.assigned_customer, bottle.customer_name);
-                    }
-                  }}
-                  sx={{ 
-                    cursor: (bottle.customer_name && bottle.customer_name !== '-') ? 'pointer' : 'default',
-                    color: (bottle.customer_name && bottle.customer_name !== '-') ? 'primary.main' : 'inherit',
-                    textDecoration: (bottle.customer_name && bottle.customer_name !== '-') ? 'underline' : 'none',
-                    '&:hover': {
-                      backgroundColor: (bottle.customer_name && bottle.customer_name !== '-') ? 'action.hover' : 'transparent'
-                    }
-                  }}
-                >
-                  {bottle.customer_name || '-'}
-                </TableCell>
-                <TableCell>
-                  <IconButton
-                    size="small"
-                    onClick={() => handleEditBottle(bottle)}
-                  >
-                    <EditIcon />
-                  </IconButton>
-                  <IconButton
-                    size="small"
-                    onClick={() => {
-                      setBottlesToDelete([bottle]);
-                      setDeleteDialog(true);
-                    }}
-                  >
-                    <DeleteIcon />
-                  </IconButton>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+      {/* Responsive Table */}
+      <ResponsiveTable
+        columns={[
+          { field: 'serial_number', header: 'Serial Number' },
+          { field: 'barcode_number', header: 'Barcode', render: (value, row) => (
+            <Box 
+              onClick={() => handleBottleDetails(row)}
+              sx={{ 
+                cursor: 'pointer',
+                color: 'primary.main',
+                textDecoration: 'underline',
+                '&:hover': { backgroundColor: 'action.hover' }
+              }}
+            >
+              {value || '-'}
+            </Box>
+          )},
+          { field: 'product_code', header: 'Product Code' },
+          { field: 'description', header: 'Description' },
+          { field: 'gas_type', header: 'Gas Type' },
+          { field: 'status', header: 'Status', chip: true, chipColor: 'success' },
+          { field: 'location', header: 'Location' },
+          { field: 'customer_name', header: 'Customer' }
+        ]}
+        data={filteredBottles}
+        keyField="id"
+        title="Bottle Inventory"
+        renderActions={(bottle) => (
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <IconButton 
+              size="small" 
+              onClick={() => handleEditBottle(bottle)}
+              color="primary"
+            >
+              <EditIcon />
+            </IconButton>
+            <IconButton 
+              size="small" 
+              onClick={() => handleDeleteBottle(bottle)}
+              color="error"
+            >
+              <DeleteIcon />
+            </IconButton>
+          </Box>
+        )}
+        renderExpandedContent={(bottle) => (
+          <Box sx={{ p: 2 }}>
+            <Typography variant="subtitle2" gutterBottom>Additional Details</Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Serial Number</Typography>
+                <Typography variant="body2">{bottle.serial_number || '-'}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Product Code</Typography>
+                <Typography variant="body2">{bottle.product_code || '-'}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Gas Type</Typography>
+                <Typography variant="body2">{bottle.gas_type || '-'}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Location</Typography>
+                <Typography variant="body2">{bottle.location || '-'}</Typography>
+              </Box>
+            </Box>
+          </Box>
+        )}
+        onRowClick={handleBottleDetails}
+      />
 
-      {/* Pagination */}
+      {/* Optimized Pagination */}
       <TablePagination
         component="div"
-        count={filteredBottles.length}
+        count={totalCount}
         page={page}
-        onPageChange={(e, newPage) => setPage(newPage)}
+        onPageChange={handleChangePage}
         rowsPerPage={rowsPerPage}
-        onRowsPerPageChange={(e) => {
-          setRowsPerPage(parseInt(e.target.value, 10));
-          setPage(0);
-        }}
+        onRowsPerPageChange={handleChangeRowsPerPage}
         rowsPerPageOptions={[10, 25, 50, 100]}
+        labelRowsPerPage="Rows per page:"
+        labelDisplayedRows={({ from, to, count }) => 
+          `${from}-${to} of ${count !== -1 ? count : `more than ${to}`}`
+        }
       />
 
       {/* Upload Dialog */}
@@ -894,12 +1019,19 @@ const BottleManagement = () => {
                 onChange={(e) => setEditingBottle({...editingBottle, customer_name: e.target.value})}
                 fullWidth
               />
-              <TextField
-                label="Location"
-                value={editingBottle.location || ''}
-                onChange={(e) => setEditingBottle({...editingBottle, location: e.target.value})}
-                fullWidth
-              />
+              <FormControl fullWidth>
+                <InputLabel>Location</InputLabel>
+                <Select
+                  value={editingBottle.location || ''}
+                  onChange={(e) => setEditingBottle({...editingBottle, location: e.target.value})}
+                  label="Location"
+                >
+                  <MenuItem value="SASKATOON">Saskatoon (Saskatchewan)</MenuItem>
+                  <MenuItem value="REGINA">Regina (Saskatchewan)</MenuItem>
+                  <MenuItem value="CHILLIWACK">Chilliwack (British Columbia)</MenuItem>
+                  <MenuItem value="PRINCE_GEORGE">Prince George (British Columbia)</MenuItem>
+                </Select>
+              </FormControl>
               <TextField
                 label="Product Code"
                 value={editingBottle.product_code || ''}

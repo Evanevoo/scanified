@@ -48,6 +48,7 @@ import PeopleIcon from '@mui/icons-material/People';
 import EditIcon from '@mui/icons-material/Edit';
 import SettingsIcon from '@mui/icons-material/Settings';
 import QrCodeIcon from '@mui/icons-material/QrCode';
+import SupportIcon from '@mui/icons-material/Support';
 import UserManagement from './UserManagement';
 import { usePermissions } from '../context/PermissionsContext';
 
@@ -259,7 +260,7 @@ function TabPanel({ children, value, index, ...other }) {
 }
 
 export default function Settings() {
-  const { user, profile, organization, reloadOrganization } = useAuth();
+  const { user, profile, organization, reloadOrganization, reloadUserData } = useAuth();
   const { isOrgAdmin } = usePermissions();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(0);
@@ -339,6 +340,16 @@ export default function Settings() {
   // Logo
   const [logoUrl, setLogoUrl] = useState(organization?.logo_url || '');
 
+  // Support form
+  const [supportForm, setSupportForm] = useState({
+    subject: '',
+    message: '',
+    category: 'general'
+  });
+  const [supportLoading, setSupportLoading] = useState(false);
+  const [supportMsg, setSupportMsg] = useState('');
+  const [supportSnackbar, setSupportSnackbar] = useState(false);
+
   // Tab configuration based on user role
   const getTabsConfig = () => {
     const baseTabs = [
@@ -346,6 +357,7 @@ export default function Settings() {
       { label: 'Security', icon: <SecurityIcon />, id: 'security' },
       { label: 'Appearance', icon: <BusinessIcon />, id: 'appearance' },
       { label: 'Billing', icon: <PaymentIcon />, id: 'billing' },
+      { label: 'Help & Support', icon: <SupportIcon />, id: 'support' },
     ];
 
     const adminTabs = [];
@@ -482,23 +494,35 @@ export default function Settings() {
     setProfileLoading(true);
     
     try {
-      const { error } = await supabase
+      console.log('Updating profile with data:', { 
+        id: user.id, 
+        full_name: profileData.full_name 
+      });
+      
+      const { data, error } = await supabase
         .from('profiles')
         .update({ 
           full_name: profileData.full_name
         })
-        .eq('id', user.id);
+        .eq('id', user.id)
+        .select()
+        .single();
         
-      if (error) throw error;
+      if (error) {
+        console.error('Profile update error:', error);
+        throw error;
+      }
       
+      console.log('Profile updated successfully:', data);
       setProfileMsg('Profile updated successfully!');
       setProfileChanged(false);
       
       // Reload auth context to get updated profile
-      if (reloadOrganization) {
-        await reloadOrganization();
+      if (reloadUserData) {
+        await reloadUserData();
       }
     } catch (error) {
+      console.error('Profile update failed:', error);
       setProfileMsg('Error updating profile: ' + error.message);
     } finally {
       setProfileLoading(false);
@@ -582,6 +606,53 @@ export default function Settings() {
     const updated = { ...securitySettings, [key]: value };
     setSecuritySettings(updated);
     setSecurityChanged(true);
+  };
+
+  // Support form submission
+  const handleSupportSubmit = async (e) => {
+    e.preventDefault();
+    setSupportMsg('');
+    setSupportLoading(true);
+    
+    try {
+      console.log('Submitting support ticket:', supportForm);
+      
+      const { data, error } = await supabase
+        .from('customer_support')
+        .insert({
+          user_id: user.id,
+          organization_id: profile?.organization_id,
+          email: user.email,
+          subject: supportForm.subject,
+          message: supportForm.message,
+          category: supportForm.category,
+          status: 'open',
+          priority: 'medium'
+        })
+        .select()
+        .single();
+        
+      if (error) {
+        console.error('Support ticket submission error:', error);
+        throw error;
+      }
+      
+      console.log('Support ticket submitted successfully:', data);
+      setSupportMsg('Support ticket submitted successfully! We\'ll get back to you soon.');
+      
+      // Reset form
+      setSupportForm({
+        subject: '',
+        message: '',
+        category: 'general'
+      });
+    } catch (error) {
+      console.error('Support ticket submission failed:', error);
+      setSupportMsg('Error submitting support ticket: ' + error.message);
+    } finally {
+      setSupportLoading(false);
+      setSupportSnackbar(true);
+    }
   };
 
   const handleSecuritySave = async () => {
@@ -1251,24 +1322,47 @@ export default function Settings() {
 
           {/* Billing Tab */}
             <TabPanel value={activeTab} index={3}>
-            <Typography variant="h4" gutterBottom>
-              Billing Settings
-            </Typography>
-            <Paper sx={{ p: 3, mb: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Subscription & Billing
-              </Typography>
-              <Typography variant="body2" color="text.secondary" paragraph>
-                Manage your subscription, billing information, and payment methods.
-              </Typography>
-              <Button 
-                variant="outlined" 
-                sx={{ mt: 2 }}
-                onClick={() => navigate('/billing')}
-              >
-                View Billing Details
-              </Button>
-            </Paper>
+            {profile?.role === 'owner' ? (
+              <Box sx={{ p: 3, textAlign: 'center' }}>
+                <Alert severity="info" sx={{ mb: 3 }}>
+                  <Typography variant="h6" gutterBottom>
+                    Platform Owner Account
+                  </Typography>
+                  <Typography variant="body2">
+                    As a platform owner, billing is managed through the Owner Portal. 
+                    Individual organization billing is not applicable to your account.
+                  </Typography>
+                </Alert>
+                <Button 
+                  variant="contained" 
+                  onClick={() => navigate('/owner-portal')}
+                  startIcon={<BusinessIcon />}
+                >
+                  Go to Owner Portal
+                </Button>
+              </Box>
+            ) : (
+              <>
+                <Typography variant="h4" gutterBottom>
+                  Billing Settings
+                </Typography>
+                <Paper sx={{ p: 3, mb: 3 }}>
+                  <Typography variant="h6" gutterBottom>
+                    Subscription & Billing
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    Manage your subscription, billing information, and payment methods.
+                  </Typography>
+                  <Button 
+                    variant="outlined" 
+                    sx={{ mt: 2 }}
+                    onClick={() => navigate('/billing')}
+                  >
+                    View Billing Details
+                  </Button>
+                </Paper>
+              </>
+            )}
           </TabPanel>
 
           {/* Team Tab (Admin/Owner only) */}
@@ -1726,6 +1820,121 @@ export default function Settings() {
             </TabPanel>
           )}
 
+          {/* Help & Support Tab */}
+          <TabPanel value={activeTab} index={4}>
+            <Typography variant="h4" gutterBottom>
+              Help & Support
+            </Typography>
+            
+            <Paper sx={{ p: 3, mb: 3 }}>
+              <Typography variant="h5" fontWeight={600} sx={{ mb: 3 }}>
+                Contact Support
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                Need help? Submit a support ticket and our team will get back to you as soon as possible.
+              </Typography>
+              
+              <form onSubmit={handleSupportSubmit}>
+                <Grid container spacing={3}>
+                  <Grid item xs={12}>
+                    <TextField
+                      fullWidth
+                      label="Subject"
+                      value={supportForm.subject}
+                      onChange={(e) => setSupportForm({ ...supportForm, subject: e.target.value })}
+                      variant="outlined"
+                      required
+                      placeholder="Brief description of your issue"
+                    />
+                  </Grid>
+                  
+                  <Grid item xs={12}>
+                    <FormControl fullWidth>
+                      <InputLabel>Category</InputLabel>
+                      <Select
+                        value={supportForm.category}
+                        onChange={(e) => setSupportForm({ ...supportForm, category: e.target.value })}
+                        label="Category"
+                      >
+                        <MenuItem value="general">General Question</MenuItem>
+                        <MenuItem value="technical">Technical Issue</MenuItem>
+                        <MenuItem value="billing">Billing Question</MenuItem>
+                        <MenuItem value="feature_request">Feature Request</MenuItem>
+                        <MenuItem value="bug_report">Bug Report</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  
+                  <Grid item xs={12}>
+                    <TextField
+                      fullWidth
+                      label="Message"
+                      value={supportForm.message}
+                      onChange={(e) => setSupportForm({ ...supportForm, message: e.target.value })}
+                      variant="outlined"
+                      multiline
+                      rows={6}
+                      required
+                      placeholder="Please provide detailed information about your issue..."
+                    />
+                  </Grid>
+                  
+                  <Grid item xs={12}>
+                    <Button
+                      type="submit"
+                      variant="contained"
+                      disabled={supportLoading || !supportForm.subject || !supportForm.message}
+                      startIcon={supportLoading ? <CircularProgress size={20} /> : <SupportIcon />}
+                      sx={{ minWidth: 200 }}
+                    >
+                      {supportLoading ? 'Submitting...' : 'Submit Support Ticket'}
+                    </Button>
+                  </Grid>
+                </Grid>
+              </form>
+              
+              {supportMsg && (
+                <Alert severity={supportMsg.includes('Error') ? 'error' : 'success'} sx={{ mt: 3 }}>
+                  {supportMsg}
+                </Alert>
+              )}
+            </Paper>
+            
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h5" fontWeight={600} sx={{ mb: 2 }}>
+                Quick Help
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Common questions and solutions:
+              </Typography>
+              <List>
+                <ListItem>
+                  <ListItemText 
+                    primary="How do I reset my password?" 
+                    secondary="Go to Security tab → Change Password section"
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemText 
+                    primary="How do I invite team members?" 
+                    secondary="Go to Team tab → Invite Users section"
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemText 
+                    primary="How do I customize my organization?" 
+                    secondary="Go to Appearance tab → Organization Settings"
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemText 
+                    primary="Need more help?" 
+                    secondary="Submit a support ticket above or contact us directly"
+                  />
+                </ListItem>
+              </List>
+            </Paper>
+          </TabPanel>
 
           {/* Snackbars */}
           <Snackbar open={profileSnackbar} autoHideDuration={3000} onClose={() => setProfileSnackbar(false)}>
@@ -1737,6 +1946,12 @@ export default function Settings() {
           <Snackbar open={passwordSnackbar} autoHideDuration={3000} onClose={() => setPasswordSnackbar(false)}>
             <Alert onClose={() => setPasswordSnackbar(false)} severity={passwordMsg.includes('successfully') ? 'success' : 'error'} sx={{ width: '100%' }}>
               {passwordMsg}
+            </Alert>
+          </Snackbar>
+          
+          <Snackbar open={supportSnackbar} autoHideDuration={3000} onClose={() => setSupportSnackbar(false)}>
+            <Alert onClose={() => setSupportSnackbar(false)} severity={supportMsg.includes('Error') ? 'error' : 'success'} sx={{ width: '100%' }}>
+              {supportMsg}
             </Alert>
           </Snackbar>
           

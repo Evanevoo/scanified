@@ -5,7 +5,7 @@ import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
 import { ListItem, ListItemButton, ListItemIcon, ListItemText, TextField, InputAdornment } from '@mui/material';
 import {
-  Drawer, List, Divider, Box, Typography, Collapse, Chip, IconButton, Tooltip
+  List, Divider, Box, Typography, Collapse, Chip, IconButton, Tooltip
 } from '@mui/material';
 import {
   Dashboard, People, Inventory, LocalShipping, Schedule, Receipt, 
@@ -26,7 +26,7 @@ import {
 } from '@mui/icons-material';
 
 const drawerWidth = 280;
-const collapsedWidth = 64;
+const collapsedWidth = 72;
 
 const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   const { profile, organization } = useAuth();
@@ -130,24 +130,9 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   // Show loading while fetching role
   if (roleLoading) {
     return (
-      <Drawer
-        variant="permanent"
-        sx={{
-          width: drawerWidth,
-          flexShrink: 0,
-          '& .MuiDrawer-paper': {
-            width: drawerWidth,
-            boxSizing: 'border-box',
-            top: 0,
-            height: '100%',
-            zIndex: (theme) => theme.zIndex.drawer
-          },
-        }}
-      >
-        <Box sx={{ overflow: 'auto', mt: 8, display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
-          <Typography variant="body2" color="text.secondary">Loading menu...</Typography>
-        </Box>
-      </Drawer>
+      <Box sx={{ overflow: 'auto', mt: 8, display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
+        <Typography variant="body2" color="text.secondary">Loading menu...</Typography>
+      </Box>
     );
   }
 
@@ -163,21 +148,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
     ];
 
     return (
-      <Drawer
-        variant="permanent"
-        sx={{
-          width: drawerWidth,
-          flexShrink: 0,
-          '& .MuiDrawer-paper': {
-            width: drawerWidth,
-            boxSizing: 'border-box',
-            top: 0,
-            height: '100%',
-            zIndex: (theme) => theme.zIndex.drawer
-          },
-        }}
-      >
-        <Box sx={{ overflow: 'auto', mt: 8 }}>
+      <Box sx={{ overflow: 'auto', mt: 8 }}>
           {/* Organization Info */}
           {organization && (
             <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -255,8 +226,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
               </ListItem>
             ))}
           </List>
-        </Box>
-      </Drawer>
+      </Box>
     );
   }
 
@@ -359,36 +329,37 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   };
 
   return (
-    <Drawer
-      variant="permanent"
-      sx={{
-        width: isCollapsed ? collapsedWidth : drawerWidth,
-        flexShrink: 0,
-        transition: 'width 0.3s ease',
-        '& .MuiDrawer-paper': {
-          width: isCollapsed ? collapsedWidth : drawerWidth,
-          boxSizing: 'border-box',
-          top: 0,
-          height: '100%',
-          zIndex: (theme) => theme.zIndex.drawer,
-          transition: 'width 0.3s ease',
-          overflowX: 'hidden'
-        },
-      }}
-    >
-      <Box sx={{ overflow: 'auto', mt: 8, height: 'calc(100% - 64px)' }}>
+    <Box sx={{ 
+      overflow: 'auto', 
+      mt: 8, 
+      height: 'calc(100% - 64px)',
+      backgroundColor: '#fafbfc',
+      borderRight: '1px solid #e1e5e9'
+    }}>
         {/* Collapse Toggle */}
         <Box sx={{ 
           display: 'flex', 
           justifyContent: isCollapsed ? 'center' : 'flex-end', 
-          p: 1, 
-          borderBottom: 1, 
-          borderColor: 'divider' 
+          p: 2, 
+          borderBottom: '1px solid #e1e5e9',
+          backgroundColor: '#ffffff',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
         }}>
           <Tooltip title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
             <IconButton 
               onClick={onToggleCollapse}
               size="small"
+              sx={{
+                backgroundColor: isCollapsed ? 'primary.main' : '#f8f9fa',
+                color: isCollapsed ? 'white' : 'text.secondary',
+                borderRadius: 2,
+                border: '1px solid #e1e5e9',
+                '&:hover': {
+                  backgroundColor: isCollapsed ? 'primary.dark' : '#e9ecef',
+                  transform: 'scale(1.05)',
+                  transition: 'all 0.2s ease'
+                }
+              }}
             >
               {isCollapsed ? <ChevronRight /> : <ChevronLeft />}
             </IconButton>
@@ -396,14 +367,31 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         </Box>
 
         {/* Organization Info */}
-        {organization && !isCollapsed && (
-          <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 2 }}>
+        {organization && (
+          <Box sx={{ 
+            p: isCollapsed ? 1.5 : 2.5, 
+            borderBottom: '1px solid #e1e5e9', 
+            backgroundColor: '#ffffff',
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: isCollapsed ? 'center' : 'flex-start',
+            gap: isCollapsed ? 0 : 2,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+          }}>
             {organization.logo_url ? (
               <img 
                 key={organization.logo_url}
                 src={organization.logo_url} 
                 alt="Org Logo" 
-                style={{ height: 32, width: 32, objectFit: 'contain', borderRadius: 4, background: '#fff', border: '1px solid #eee' }}
+                style={{ 
+                  height: isCollapsed ? 28 : 36, 
+                  width: isCollapsed ? 28 : 36, 
+                  objectFit: 'contain', 
+                  borderRadius: 8, 
+                  background: '#fff', 
+                  border: '2px solid #e1e5e9',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                }}
                 onError={(e) => {
                   console.error('Failed to load logo:', organization.logo_url);
                   e.target.style.display = 'none';
@@ -412,45 +400,70 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
             ) : (
               <Box 
                 sx={{ 
-                  height: 32, 
-                  width: 32, 
-                  borderRadius: 4, 
-                  background: '#f0f0f0', 
-                  border: '1px solid #eee',
+                  height: isCollapsed ? 28 : 36, 
+                  width: isCollapsed ? 28 : 36, 
+                  borderRadius: 8, 
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 
+                  border: '2px solid #e1e5e9',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: '#999',
-                  fontSize: '12px'
+                  color: '#fff',
+                  fontSize: isCollapsed ? '12px' : '14px',
+                  fontWeight: 'bold',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                 }}
               >
                 {organization.name?.charAt(0)?.toUpperCase() || '?'}
               </Box>
             )}
-            <Box sx={{ minWidth: 0 }}>
-              <Typography variant="subtitle2" color="primary" noWrap>
-                {organization.name}
-              </Typography>
-              <Typography variant="caption" color="text.secondary" noWrap>
-                {getRoleDisplayName(actualRole)} • {profile?.full_name}
-              </Typography>
-            </Box>
+            {!isCollapsed && (
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="subtitle2" color="primary" noWrap sx={{ fontWeight: 600, fontSize: '14px' }}>
+                  {organization.name}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: '12px' }}>
+                  {getRoleDisplayName(actualRole)} • {profile?.full_name}
+                </Typography>
+              </Box>
+            )}
           </Box>
         )}
 
         {/* Search */}
         {!isCollapsed && (
-          <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
+          <Box sx={{ 
+            p: 2.5, 
+            borderBottom: '1px solid #e1e5e9',
+            backgroundColor: '#ffffff',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+          }}>
             <TextField
               size="small"
               placeholder="Search menu..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               fullWidth
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: 2,
+                  backgroundColor: '#f8f9fa',
+                  border: '1px solid #e1e5e9',
+                  '&:hover': {
+                    borderColor: '#667eea',
+                    backgroundColor: '#ffffff'
+                  },
+                  '&.Mui-focused': {
+                    borderColor: '#667eea',
+                    backgroundColor: '#ffffff',
+                    boxShadow: '0 0 0 3px rgba(102, 126, 234, 0.1)'
+                  }
+                }
+              }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <SearchIcon fontSize="small" />
+                    <SearchIcon fontSize="small" sx={{ color: '#6c757d' }} />
                   </InputAdornment>
                 ),
               }}
@@ -460,22 +473,39 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
 
         {/* Menu Sections */}
         <List sx={{ py: 0 }}>
-          {Object.entries(filteredSections).map(([sectionKey, section]) => (
+          {Object.entries(filteredSections).map(([sectionKey, section], sectionIndex) => (
             <React.Fragment key={sectionKey}>
+              {/* Section Divider */}
+              {sectionIndex > 0 && <Divider />}
+              
               {/* Section Header */}
               <ListItem disablePadding>
                 <ListItemButton
                   onClick={() => !isCollapsed && toggleSection(sectionKey)}
                   sx={{ 
-                    py: 0.5,
-                    bgcolor: 'action.hover',
-                    borderBottom: 1,
-                    borderColor: 'divider'
+                    py: 1.5,
+                    px: 2,
+                    backgroundColor: '#f8f9fa',
+                    borderBottom: '1px solid #e1e5e9',
+                    borderRadius: 0,
+                    '&:hover': {
+                      backgroundColor: '#e9ecef',
+                      transform: 'translateX(2px)',
+                      transition: 'all 0.2s ease'
+                    }
                   }}
                 >
                   <ListItemIcon sx={{ minWidth: isCollapsed ? 'auto' : 40 }}>
                     <Tooltip title={isCollapsed ? section.title : ''} placement="right">
-                      {section.icon}
+                      <Box sx={{ 
+                        color: '#667eea',
+                        fontSize: '20px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        {section.icon}
+                      </Box>
                     </Tooltip>
                   </ListItemIcon>
                   {!isCollapsed && (
@@ -484,11 +514,20 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                         primary={section.title}
                         primaryTypographyProps={{ 
                           variant: 'body2', 
-                          fontWeight: 600,
-                          color: 'text.secondary'
+                          fontWeight: 700,
+                          color: '#495057',
+                          fontSize: '13px',
+                          letterSpacing: '0.5px',
+                          textTransform: 'uppercase'
                         }}
                       />
-                      {sections[sectionKey] ? <ExpandLess /> : <ExpandMore />}
+                      <Box sx={{ 
+                        color: '#6c757d',
+                        transition: 'transform 0.2s ease',
+                        transform: sections[sectionKey] ? 'rotate(180deg)' : 'rotate(0deg)'
+                      }}>
+                        {sections[sectionKey] ? <ExpandLess /> : <ExpandMore />}
+                      </Box>
                     </>
                   )}
                 </ListItemButton>
@@ -497,48 +536,73 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
               {/* Section Items */}
               <Collapse in={isCollapsed || sections[sectionKey]} timeout="auto" unmountOnExit>
                 <List component="div" disablePadding>
-                  {section.items.map((item) => (
-                    <ListItem key={item.path} disablePadding>
-                      <ListItemButton
-                        selected={isActive(item.path)}
-                        onClick={() => handleNavigation(item.path)}
-                        sx={{
-                          pl: isCollapsed ? 1 : 3,
-                          py: 0.5,
-                          '&.Mui-selected': {
-                            backgroundColor: 'primary.light',
+                  {section.items.map((item, index) => (
+                    <React.Fragment key={item.path}>
+                      <ListItem disablePadding>
+                        <ListItemButton
+                          selected={isActive(item.path)}
+                          onClick={() => handleNavigation(item.path)}
+                          sx={{
+                            pl: isCollapsed ? 1.5 : 3.5,
+                            py: 1.2,
+                            px: 2,
+                            borderBottom: index < section.items.length - 1 ? '1px solid #e9ecef' : 'none',
+                            borderRadius: 0,
+                            backgroundColor: isActive(item.path) ? '#e3f2fd' : 'transparent',
+                            borderLeft: isActive(item.path) ? '4px solid #667eea' : '4px solid transparent',
+                            transition: 'all 0.2s ease',
                             '&:hover': {
-                              backgroundColor: 'primary.light',
+                              backgroundColor: isActive(item.path) ? '#e3f2fd' : '#f8f9fa',
+                              transform: 'translateX(4px)',
+                              borderLeft: '4px solid #667eea',
+                              boxShadow: '0 2px 8px rgba(102, 126, 234, 0.15)'
                             },
-                          },
-                        }}
-                      >
-                        <ListItemIcon sx={{ minWidth: isCollapsed ? 'auto' : 40 }}>
-                          <Tooltip title={isCollapsed ? item.title : ''} placement="right">
-                            <Box sx={{ color: isActive(item.path) ? 'primary.main' : 'inherit' }}>
-                              {item.icon}
-                            </Box>
-                          </Tooltip>
-                        </ListItemIcon>
-                        {!isCollapsed && (
-                          <ListItemText 
-                            primary={item.title}
-                            primaryTypographyProps={{
-                              variant: 'body2',
-                              fontWeight: isActive(item.path) ? 600 : 400,
-                            }}
-                          />
-                        )}
-                      </ListItemButton>
-                    </ListItem>
+                            '&.Mui-selected': {
+                              backgroundColor: '#e3f2fd',
+                              borderLeft: '4px solid #667eea',
+                              '&:hover': {
+                                backgroundColor: '#e3f2fd',
+                                transform: 'translateX(4px)',
+                              },
+                            },
+                          }}
+                        >
+                          <ListItemIcon sx={{ minWidth: isCollapsed ? 'auto' : 40 }}>
+                            <Tooltip title={isCollapsed ? item.title : ''} placement="right">
+                              <Box sx={{ 
+                                color: isActive(item.path) ? '#667eea' : '#6c757d',
+                                fontSize: '18px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                transition: 'color 0.2s ease'
+                              }}>
+                                {item.icon}
+                              </Box>
+                            </Tooltip>
+                          </ListItemIcon>
+                          {!isCollapsed && (
+                            <ListItemText 
+                              primary={item.title}
+                              primaryTypographyProps={{
+                                variant: 'body2',
+                                fontWeight: isActive(item.path) ? 600 : 500,
+                                color: isActive(item.path) ? '#495057' : '#6c757d',
+                                fontSize: '14px',
+                                transition: 'all 0.2s ease'
+                              }}
+                            />
+                          )}
+                        </ListItemButton>
+                      </ListItem>
+                    </React.Fragment>
                   ))}
                 </List>
               </Collapse>
             </React.Fragment>
           ))}
         </List>
-      </Box>
-    </Drawer>
+    </Box>
   );
 };
 

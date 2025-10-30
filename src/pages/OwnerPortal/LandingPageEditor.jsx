@@ -373,23 +373,6 @@ export default React.memo(function LandingPageEditor() {
 
   return (
     <Box sx={{ p: 3 }}>
-      {/* DEBUG: Simple test input */}
-      <Box sx={{ mb: 3, p: 2, border: '2px solid red', bgcolor: 'yellow' }}>
-        <Typography variant="h6" color="error">DEBUG: Test Input</Typography>
-        <input
-          type="text"
-          defaultValue="Test input - try typing here"
-          style={{
-            width: '100%',
-            padding: '8px',
-            border: '1px solid #ccc',
-            fontSize: '16px'
-          }}
-          onFocus={() => console.log('DEBUG: Test input focused')}
-          onBlur={() => console.log('DEBUG: Test input blurred')}
-        />
-        <Typography variant="caption">If this input loses focus while typing, the issue is with the browser or React setup.</Typography>
-      </Box>
 
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" gutterBottom>

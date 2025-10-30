@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet, TouchableOpacity, Image } from 'react-native';
 
 interface LoadingScreenProps {
   timeout?: number;
@@ -27,6 +27,11 @@ export default function LoadingScreen({ timeout = 10000, onTimeout }: LoadingScr
   if (showTimeoutMessage) {
     return (
       <View style={styles.container}>
+        <Image 
+          source={require('../assets/splash-icon.png')} 
+          style={styles.logo}
+          resizeMode="contain"
+        />
         <Text style={styles.title}>Scanified</Text>
         <Text style={styles.timeoutText}>Loading is taking longer than expected</Text>
         <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
@@ -39,9 +44,14 @@ export default function LoadingScreen({ timeout = 10000, onTimeout }: LoadingScr
 
   return (
     <View style={styles.container}>
+      <Image 
+        source={require('../assets/splash-icon.png')} 
+        style={styles.logo}
+        resizeMode="contain"
+      />
       <Text style={styles.title}>Scanified</Text>
-      <ActivityIndicator size="large" color="#2563eb" style={styles.loader} />
-      <Text style={styles.text}>Initializing...</Text>
+      <ActivityIndicator size="large" color="#40B5AD" style={styles.loader} />
+      <Text style={styles.text}>Loading your app...</Text>
     </View>
   );
 }
@@ -51,14 +61,21 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#FFFFFF',
     padding: 20,
   },
+  logo: {
+    width: 180,
+    height: 180,
+    marginBottom: 40,
+    borderRadius: 30,
+  },
   title: {
-    fontSize: 24,
+    fontSize: 32,
     fontWeight: 'bold',
     color: '#2563eb',
-    marginBottom: 20,
+    marginBottom: 10,
+    letterSpacing: 1,
   },
   loader: {
     marginVertical: 20,

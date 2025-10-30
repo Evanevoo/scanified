@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { templates } = require('./email-templates');
 
 exports.handler = async (event, context) => {
   // Handle CORS preflight requests
@@ -133,16 +134,29 @@ exports.handler = async (event, context) => {
     }
 
     // Generate email content based on template
-    const emailContent = generateEmailContent(template, data);
+    let emailContent, emailText, emailSubject;
+    
+    // Use new template system if available
+    if (templates[template]) {
+      const templateData = templates[template](data);
+      emailContent = templateData.html;
+      emailText = templateData.text;
+      emailSubject = templateData.subject || subject;
+    } else {
+      // Fallback to old template system
+      emailContent = generateEmailContent(template, data);
+      emailSubject = subject;
+    }
 
     // Send email
-    console.log(`Sending email via ${emailService} to:`, to, 'with subject:', subject);
+    console.log(`Sending email via ${emailService} to:`, to, 'with subject:', emailSubject);
     
     const mailOptions = {
       from: process.env.SMTP2GO_FROM || process.env.EMAIL_FROM || process.env.OUTLOOK_FROM,
       to: to,
-      subject: subject,
-      html: emailContent
+      subject: emailSubject,
+      html: emailContent,
+      text: emailText
     };
 
     const info = await transporter.sendMail(mailOptions);

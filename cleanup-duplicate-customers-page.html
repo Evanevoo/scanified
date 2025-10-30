@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Duplicate Customer Cleanup</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8fafc;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #1e40af;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background-color: #f9fafb;
+        }
+        .section h2 {
+            color: #374151;
+            margin-top: 0;
+        }
+        button {
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #2563eb;
+        }
+        button:disabled {
+            background-color: #9ca3af;
+            cursor: not-allowed;
+        }
+        .danger {
+            background-color: #ef4444;
+        }
+        .danger:hover {
+            background-color: #dc2626;
+        }
+        .success {
+            background-color: #10b981;
+        }
+        .warning {
+            background-color: #f59e0b;
+        }
+        .log {
+            background-color: #1f2937;
+            color: #f9fafb;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .duplicate-item {
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .duplicate-item h4 {
+            margin: 0 0 10px 0;
+            color: #1f2937;
+        }
+        .customer-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 5px 0;
+        }
+        .keep-customer {
+            background-color: #d1fae5;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .delete-customer {
+            background-color: #fee2e2;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #e5e7eb;
+        }
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #3b82f6;
+        }
+        .stat-label {
+            color: #6b7280;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Duplicate Customer Cleanup Tool</h1>
+        
+        <div class="section">
+            <h2>📊 Overview</h2>
+            <p>This tool helps identify and remove duplicate customers that have the same CustomerListID but different cases (e.g., "80000C0A" vs "80000c0a").</p>
+            <div class="stats" id="stats">
+                <div class="stat-card">
+                    <div class="stat-number" id="totalCustomers">-</div>
+                    <div class="stat-label">Total Customers</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="duplicateGroups">-</div>
+                    <div class="stat-label">Duplicate Groups</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="duplicateCustomers">-</div>
+                    <div class="stat-label">Customers to Delete</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="bottlesToReassign">-</div>
+                    <div class="stat-label">Bottles to Reassign</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🔍 Step 1: Identify Duplicates</h2>
+            <p>Scan the database for customers with duplicate CustomerListIDs (case-insensitive).</p>
+            <button onclick="identifyDuplicates()">Scan for Duplicates</button>
+            <div id="duplicatesList"></div>
+        </div>
+
+        <div class="section">
+            <h2>📋 Step 2: Review Cleanup Plan</h2>
+            <p>Review which customers will be merged and which will be deleted.</p>
+            <button onclick="createCleanupPlan()" id="planBtn" disabled>Create Cleanup Plan</button>
+            <div id="cleanupPlan"></div>
+        </div>
+
+        <div class="section">
+            <h2>🧪 Step 3: Dry Run</h2>
+            <p>Test the cleanup process without making any changes.</p>
+            <button onclick="dryRun()" id="dryRunBtn" disabled>Run Dry Test</button>
+            <div id="dryRunResults"></div>
+        </div>
+
+        <div class="section">
+            <h2>🚀 Step 4: Execute Cleanup</h2>
+            <p><strong>WARNING:</strong> This will permanently delete duplicate customers and reassign their bottles.</p>
+            <button onclick="executeCleanup()" id="executeBtn" disabled class="danger">Execute Cleanup</button>
+            <div id="executionResults"></div>
+        </div>
+
+        <div class="section">
+            <h2>📝 Activity Log</h2>
+            <div class="log" id="log">Ready to start cleanup process...\n</div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import Supabase (you'll need to adjust this path)
+        import { createClient } from 'https://cdn.skypack.dev/@supabase/supabase-js';
+        
+        // Initialize Supabase client (replace with your actual URL and key)
+        const supabaseUrl = 'YOUR_SUPABASE_URL';
+        const supabaseKey = 'YOUR_SUPABASE_ANON_KEY';
+        const supabase = createClient(supabaseUrl, supabaseKey);
+
+        let duplicates = [];
+        let cleanupPlan = [];
+
+        function log(message) {
+            const logElement = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.textContent += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        async function identifyDuplicates() {
+            log('🔍 Identifying duplicate customers...');
+            
+            try {
+                // Get all customers
+                const { data: customers, error } = await supabase
+                    .from('customers')
+                    .select('id, CustomerListID, name, created_at')
+                    .not('CustomerListID', 'is', null)
+                    .neq('CustomerListID', '');
+
+                if (error) throw error;
+
+                // Update stats
+                document.getElementById('totalCustomers').textContent = customers.length;
+
+                // Group by normalized (uppercase) CustomerListID
+                const customerGroups = new Map();
+                
+                customers.forEach(customer => {
+                    const normalizedId = customer.CustomerListID.toUpperCase();
+                    if (!customerGroups.has(normalizedId)) {
+                        customerGroups.set(normalizedId, []);
+                    }
+                    customerGroups.get(normalizedId).push(customer);
+                });
+
+                // Find duplicates
+                duplicates = Array.from(customerGroups.entries())
+                    .filter(([normalizedId, group]) => group.length > 1)
+                    .map(([normalizedId, group]) => ({
+                        normalizedId,
+                        customers: group.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+                    }));
+
+                // Update stats
+                document.getElementById('duplicateGroups').textContent = duplicates.length;
+                const totalDuplicates = duplicates.reduce((sum, group) => sum + group.customers.length - 1, 0);
+                document.getElementById('duplicateCustomers').textContent = totalDuplicates;
+
+                // Display duplicates
+                const duplicatesList = document.getElementById('duplicatesList');
+                if (duplicates.length === 0) {
+                    duplicatesList.innerHTML = '<p style="color: green;">✅ No duplicate customers found!</p>';
+                    log('✅ No duplicate customers found');
+                } else {
+                    duplicatesList.innerHTML = duplicates.map(duplicate => `
+                        <div class="duplicate-item">
+                            <h4>ID: ${duplicate.normalizedId}</h4>
+                            ${duplicate.customers.map((customer, index) => `
+                                <div class="customer-info">
+                                    <span>${index === 0 ? '✅ KEEP' : '❌ DELETE'}: ${customer.CustomerListID} - ${customer.name}</span>
+                                    <span>Created: ${new Date(customer.created_at).toLocaleDateString()}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `).join('');
+                    log(`Found ${duplicates.length} duplicate groups with ${totalDuplicates} customers to delete`);
+                }
+
+                document.getElementById('planBtn').disabled = duplicates.length === 0;
+                
+            } catch (error) {
+                log(`❌ Error identifying duplicates: ${error.message}`);
+                console.error('Error:', error);
+            }
+        }
+
+        async function createCleanupPlan() {
+            log('📋 Creating cleanup plan...');
+            
+            cleanupPlan = [];
+            let totalBottlesToReassign = 0;
+
+            for (const duplicate of duplicates) {
+                const keepCustomer = duplicate.customers[0]; // Keep the first (oldest) customer
+                const deleteCustomers = duplicate.customers.slice(1);
+
+                for (const deleteCustomer of deleteCustomers) {
+                    // Check how many bottles are assigned to this customer
+                    const { data: bottles, error } = await supabase
+                        .from('bottles')
+                        .select('id')
+                        .eq('assigned_customer', deleteCustomer.id);
+
+                    if (error) {
+                        log(`❌ Error checking bottles for customer ${deleteCustomer.CustomerListID}: ${error.message}`);
+                        continue;
+                    }
+
+                    const bottleCount = bottles?.length || 0;
+                    totalBottlesToReassign += bottleCount;
+
+                    cleanupPlan.push({
+                        action: 'merge_and_delete',
+                        keepCustomer: {
+                            id: keepCustomer.id,
+                            CustomerListID: keepCustomer.CustomerListID,
+                            name: keepCustomer.name
+                        },
+                        deleteCustomer: {
+                            id: deleteCustomer.id,
+                            CustomerListID: deleteCustomer.CustomerListID,
+                            name: deleteCustomer.name
+                        },
+                        bottlesToReassign: bottleCount
+                    });
+                }
+            }
+
+            // Update stats
+            document.getElementById('bottlesToReassign').textContent = totalBottlesToReassign;
+
+            // Display cleanup plan
+            const cleanupPlanDiv = document.getElementById('cleanupPlan');
+            cleanupPlanDiv.innerHTML = cleanupPlan.map((plan, index) => `
+                <div class="duplicate-item">
+                    <h4>Action ${index + 1}: Merge and Delete</h4>
+                    <div class="customer-info">
+                        <div class="keep-customer">
+                            <strong>KEEP:</strong> ${plan.keepCustomer.CustomerListID} - ${plan.keepCustomer.name}
+                        </div>
+                        <div class="delete-customer">
+                            <strong>DELETE:</strong> ${plan.deleteCustomer.CustomerListID} - ${plan.deleteCustomer.name}
+                        </div>
+                    </div>
+                    <p><strong>Bottles to reassign:</strong> ${plan.bottlesToReassign}</p>
+                </div>
+            `).join('');
+
+            log(`Cleanup plan created: ${cleanupPlan.length} actions, ${totalBottlesToReassign} bottles to reassign`);
+            document.getElementById('dryRunBtn').disabled = false;
+        }
+
+        async function dryRun() {
+            log('🧪 Running dry test...');
+            
+            let successCount = 0;
+            let errorCount = 0;
+
+            for (const plan of cleanupPlan) {
+                try {
+                    // Simulate the operations
+                    log(`Would reassign ${plan.bottlesToReassign} bottles from "${plan.deleteCustomer.CustomerListID}" to "${plan.keepCustomer.CustomerListID}"`);
+                    log(`Would delete customer: ${plan.deleteCustomer.CustomerListID}`);
+                    successCount++;
+                } catch (error) {
+                    log(`❌ Error in dry run for ${plan.deleteCustomer.CustomerListID}: ${error.message}`);
+                    errorCount++;
+                }
+            }
+
+            const dryRunResults = document.getElementById('dryRunResults');
+            dryRunResults.innerHTML = `
+                <p><strong>Dry run completed:</strong></p>
+                <ul>
+                    <li>✅ ${successCount} operations would succeed</li>
+                    <li>❌ ${errorCount} operations would fail</li>
+                </ul>
+            `;
+
+            log(`Dry run completed: ${successCount} would succeed, ${errorCount} would fail`);
+            document.getElementById('executeBtn').disabled = errorCount > 0;
+        }
+
+        async function executeCleanup() {
+            const confirmed = confirm('Are you sure you want to proceed with the cleanup? This will permanently delete duplicate customers and reassign their bottles.');
+            
+            if (!confirmed) {
+                log('❌ Cleanup cancelled by user');
+                return;
+            }
+
+            log('🚀 Executing cleanup...');
+            let successCount = 0;
+            let errorCount = 0;
+
+            for (const plan of cleanupPlan) {
+                try {
+                    // Step 1: Reassign bottles
+                    if (plan.bottlesToReassign > 0) {
+                        const { error: bottleError } = await supabase
+                            .from('bottles')
+                            .update({ assigned_customer: plan.keepCustomer.id })
+                            .eq('assigned_customer', plan.deleteCustomer.id);
+
+                        if (bottleError) throw bottleError;
+                        log(`✅ Reassigned ${plan.bottlesToReassign} bottles from ${plan.deleteCustomer.CustomerListID} to ${plan.keepCustomer.CustomerListID}`);
+                    }
+
+                    // Step 2: Delete duplicate customer
+                    const { error: deleteError } = await supabase
+                        .from('customers')
+                        .delete()
+                        .eq('id', plan.deleteCustomer.id);
+
+                    if (deleteError) throw deleteError;
+                    log(`✅ Deleted duplicate customer: ${plan.deleteCustomer.CustomerListID}`);
+                    successCount++;
+
+                } catch (error) {
+                    log(`❌ Error processing ${plan.deleteCustomer.CustomerListID}: ${error.message}`);
+                    errorCount++;
+                }
+            }
+
+            const executionResults = document.getElementById('executionResults');
+            executionResults.innerHTML = `
+                <p><strong>Cleanup completed:</strong></p>
+                <ul>
+                    <li>✅ ${successCount} operations successful</li>
+                    <li>❌ ${errorCount} operations failed</li>
+                </ul>
+            `;
+
+            log(`Cleanup completed: ${successCount} successful, ${errorCount} errors`);
+            
+            // Disable execute button
+            document.getElementById('executeBtn').disabled = true;
+        }
+
+        // Make functions available globally
+        window.identifyDuplicates = identifyDuplicates;
+        window.createCleanupPlan = createCleanupPlan;
+        window.dryRun = dryRun;
+        window.executeCleanup = executeCleanup;
+    </script>
+</body>
+</html>

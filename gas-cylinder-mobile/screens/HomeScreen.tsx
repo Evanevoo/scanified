@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../context/AssetContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Platform } from '../utils/platform';
+import { soundService } from '../services/soundService';
 
 // Quick Actions Configuration - will be updated with dynamic terms
 const getQuickActions = (config) => [
@@ -50,6 +51,20 @@ const getQuickActions = (config) => [
     icon: '📊',
     action: 'History',
     color: '#6B7280'
+  },
+  {
+    title: 'Analytics',
+    subtitle: 'View performance metrics',
+    icon: '📈',
+    action: 'Analytics',
+    color: '#8B5CF6'
+  },
+  {
+    title: 'Data Health',
+    subtitle: 'Monitor sync status',
+    icon: '🔍',
+    action: 'DataHealth',
+    color: '#10B981'
   }
 ];
 
@@ -315,7 +330,10 @@ export default function HomeScreen() {
     }
   };
 
-  const handleQuickAction = (action: string) => {
+  const handleQuickAction = async (action: string) => {
+    // Play sound feedback for actions
+    await soundService.playSound('action');
+    
     switch (action) {
       case 'ScanCylinders':
         navigation.navigate('ScanCylinders');
@@ -335,7 +353,14 @@ export default function HomeScreen() {
       case 'FillCylinder':
         navigation.navigate('FillCylinder');
         break;
+      case 'Analytics':
+        navigation.navigate('Analytics');
+        break;
+      case 'DataHealth':
+        navigation.navigate('DataHealth');
+        break;
       default:
+        console.log('Unknown action:', action);
         break;
     }
   };

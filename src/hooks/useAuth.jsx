@@ -6,7 +6,7 @@ const AuthContext = createContext({});
 export const useAuth = () => {
   const context = useContext(AuthContext);
   
-  // Add debugging to track hook usage
+  // Track hook usage in development
   if (import.meta.env.DEV) {
     console.log('useAuth hook called from:', new Error().stack?.split('\n')[2]?.trim() || 'unknown location');
   }
@@ -31,10 +31,12 @@ export const AuthProvider = ({ children }) => {
   // 15 minutes inactivity auto-logout
   const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
 
-  // Only log initialization once
+  // Initialize hook once
   useEffect(() => {
     if (!isInitialized) {
-      console.log('useAuth hook initialized');
+      if (import.meta.env.DEV) {
+        console.log('useAuth hook initialized');
+      }
       setIsInitialized(true);
     }
   }, [isInitialized]);
@@ -49,27 +51,35 @@ export const AuthProvider = ({ children }) => {
     const loadUserAndProfile = async (sessionUser) => {
       // Prevent multiple auth flows from running simultaneously
       if (authFlowInProgressRef.current) {
-        console.log('Auth: Auth flow already in progress, skipping...');
+        if (import.meta.env.DEV) {
+          console.log('Auth: Auth flow already in progress, skipping...');
+        }
         return;
       }
 
       // Check if auth state hasn't actually changed
       const currentAuthState = sessionUser?.id;
       if (lastAuthStateRef.current === currentAuthState && user && profile && organization) {
-        console.log('Auth: Auth state unchanged, skipping flow...');
+        if (import.meta.env.DEV) {
+          console.log('Auth: Auth state unchanged, skipping flow...');
+        }
         return;
       }
 
       // Additional check: if we have a valid session and user, don't restart
       if (sessionUser && user && sessionUser.id === user.id && profile && organization) {
-        console.log('Auth: Valid session already exists, skipping restart...');
+        if (import.meta.env.DEV) {
+          console.log('Auth: Valid session already exists, skipping restart...');
+        }
         return;
       }
 
       authFlowInProgressRef.current = true;
       lastAuthStateRef.current = currentAuthState;
 
-      console.log('Auth: Starting auth flow for user:', sessionUser?.id);
+      if (import.meta.env.DEV) {
+        console.log('Auth: Starting auth flow for user:', sessionUser?.id);
+      }
       
       // If no user, reset everything
       if (!sessionUser) {
@@ -133,15 +143,62 @@ export const AuthProvider = ({ children }) => {
           }
         }
 
+        // Check if account is disabled
+        if (profileData.is_active === false || profileData.disabled_at) {
+          console.error('Auth: User account is disabled');
+          console.log('Disabled reason:', profileData.disabled_reason);
+          setProfile(null);
+          setOrganization(null);
+          setUser(null);
+          setLoading(false);
+          authFlowInProgressRef.current = false;
+          
+          // Sign out the user
+          await supabase.auth.signOut();
+          
+          // Redirect to a disabled account page with reason
+          const reason = encodeURIComponent(profileData.disabled_reason || 'Your account has been disabled');
+          window.location.href = `/account-disabled?reason=${reason}`;
+          return;
+        }
+
         setProfile(profileData);
         console.log('Auth: Profile loaded successfully');
 
         // Step 2: If profile has an organization_id, fetch the organization
         if (profileData?.organization_id) {
+          // First check if organization is deleted
+          const { data: orgCheck, error: orgCheckError } = await supabase
+            .from('organizations')
+            .select('id, name, deleted_at, deletion_reason')
+            .eq('id', profileData.organization_id)
+            .single();
+
+          if (orgCheck && orgCheck.deleted_at) {
+            // Organization has been deleted
+            console.error('Auth: Organization has been deleted');
+            setProfile(null);
+            setOrganization(null);
+            setUser(null);
+            setLoading(false);
+            authFlowInProgressRef.current = false;
+            
+            // Sign out the user
+            await supabase.auth.signOut();
+            
+            // Redirect to deleted organization page
+            const email = encodeURIComponent(user.email);
+            const reason = encodeURIComponent(orgCheck.deletion_reason || 'Your organization has been removed');
+            window.location.href = `/organization-deleted?email=${email}&reason=${reason}`;
+            return;
+          }
+
+          // Fetch the active organization
           const { data: orgData, error: orgError } = await supabase
             .from('organizations')
             .select('*')
             .eq('id', profileData.organization_id)
+            .is('deleted_at', null) // Only fetch active (non-deleted) organizations
             .single();
 
           if (orgError) {
@@ -293,6 +350,49 @@ export const AuthProvider = ({ children }) => {
     };
   }, [user]);
 
+  // Generate unique slug function
+  const generateUniqueSlug = async (orgName) => {
+    // Generate base slug from organization name
+    let baseSlug = orgName.toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    
+    // If slug is empty, use a default
+    if (!baseSlug) {
+      baseSlug = 'organization';
+    }
+    
+    let slug = baseSlug;
+    let counter = 1;
+    
+    // Keep checking until we find a unique slug
+    while (true) {
+      const { data: existingOrg } = await supabase
+        .from('organizations')
+        .select('id')
+        .eq('slug', slug)
+        .is('deleted_at', null)
+        .maybeSingle();
+      
+      if (!existingOrg) {
+        return slug; // Found unique slug
+      }
+      
+      // Try with a number suffix
+      slug = `${baseSlug}-${counter}`;
+      counter++;
+      
+      // Prevent infinite loop
+      if (counter > 100) {
+        // Use timestamp as fallback
+        slug = `${baseSlug}-${Date.now()}`;
+        break;
+      }
+    }
+    
+    return slug;
+  };
+
   // Memoize the context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({
     user,
@@ -316,11 +416,14 @@ export const AuthProvider = ({ children }) => {
 
         // If organization data is provided, create organization
         if (organizationData && data.user) {
+          // Generate unique slug
+          const slug = await generateUniqueSlug(organizationData.name);
+          
           const { data: orgData, error: orgError } = await supabase
             .from('organizations')
             .insert({
               name: organizationData.name,
-              slug: organizationData.slug,
+              slug: slug,
               subscription_status: 'trial',
               trial_end_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
               max_users: 5,
@@ -448,6 +551,7 @@ export const AuthProvider = ({ children }) => {
           .from('organizations')
           .select('*')
           .eq('id', profile.organization_id)
+          .is('deleted_at', null) // Only fetch active (non-deleted) organizations
           .single();
         
         if (orgError) {
@@ -460,6 +564,63 @@ export const AuthProvider = ({ children }) => {
         setOrganization(orgData);
       } catch (e) {
         console.error('reloadOrganization: Exception:', e);
+      }
+    },
+    reloadUserData: async () => {
+      try {
+        console.log('reloadUserData: Starting to reload user data...');
+        
+        // Get current user
+        const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
+        
+        if (userError || !currentUser) {
+          console.error('reloadUserData: Error getting user:', userError);
+          return;
+        }
+        
+        console.log('reloadUserData: User found:', currentUser.email);
+        
+        // Reload profile
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', currentUser.id)
+          .single();
+        
+        if (profileError) {
+          console.error('reloadUserData: Error loading profile:', profileError);
+          return;
+        }
+        
+        console.log('reloadUserData: Profile loaded:', profileData);
+        setProfile(profileData);
+        
+        // If profile has organization, reload it
+        if (profileData?.organization_id) {
+          console.log('reloadUserData: Loading organization:', profileData.organization_id);
+          
+          const { data: orgData, error: orgError } = await supabase
+            .from('organizations')
+            .select('*')
+            .eq('id', profileData.organization_id)
+            .is('deleted_at', null)
+            .single();
+          
+          if (orgError) {
+            console.error('reloadUserData: Error loading organization:', orgError);
+            setOrganization(null);
+          } else {
+            console.log('reloadUserData: Organization loaded:', orgData.name);
+            setOrganization(orgData);
+          }
+        } else {
+          console.log('reloadUserData: No organization linked to profile');
+          setOrganization(null);
+        }
+        
+        console.log('✅ reloadUserData: Complete');
+      } catch (e) {
+        console.error('reloadUserData: Exception:', e);
       }
     },
   }), [user, profile, organization, loading, trialExpired]);

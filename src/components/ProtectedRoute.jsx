@@ -16,16 +16,18 @@ const ProtectedRoute = ({ children }) => {
   const navigate = useNavigate();
 
   // Log the state for debugging purposes.
-  console.log('🛡️ ProtectedRoute DEBUG:', { 
-    loading, 
-    user: !!user, 
-    profile: !!profile, 
-    organization: !!organization,
-    profileRole: profile?.role,
-    organizationId: profile?.organization_id,
-    trialExpired,
-    currentPath: location.pathname
-  });
+  if (process.env.NODE_ENV === 'development') {
+    console.log('🛡️ ProtectedRoute DEBUG:', { 
+      loading, 
+      user: !!user, 
+      profile: !!profile, 
+      organization: !!organization,
+      profileRole: profile?.role,
+      organizationId: profile?.organization_id,
+      trialExpired,
+      currentPath: location.pathname
+    });
+  }
 
   if (loading) {
     // Show a full-page loading spinner while auth state is being determined.

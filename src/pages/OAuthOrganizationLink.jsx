@@ -47,7 +47,8 @@ export default function OAuthOrganizationLink() {
 
     // Check if user already has organization
     if (profile?.organization_id) {
-      navigate('/dashboard');
+      // Check if the organization was deleted
+      checkIfOrganizationDeleted();
       return;
     }
 
@@ -55,6 +56,31 @@ export default function OAuthOrganizationLink() {
     checkForInviteToken();
     checkEmailDomainMatch();
   }, [user, profile, navigate]);
+
+  const checkIfOrganizationDeleted = async () => {
+    try {
+      const { data: orgData, error } = await supabase
+        .from('organizations')
+        .select('id, name, deleted_at, deletion_reason')
+        .eq('id', profile.organization_id)
+        .single();
+
+      if (orgData && orgData.deleted_at) {
+        // Organization was deleted, redirect to organization deleted page
+        const email = encodeURIComponent(user.email);
+        const reason = encodeURIComponent(orgData.deletion_reason || 'Your organization has been removed');
+        window.location.href = `/organization-deleted?email=${email}&reason=${reason}`;
+        return;
+      }
+
+      // Organization exists and is active, redirect to dashboard
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Error checking organization status:', error);
+      // If we can't check, assume it's fine and redirect to dashboard
+      navigate('/dashboard');
+    }
+  };
 
   const checkForInviteToken = () => {
     // Check if there's an invite token stored from OAuth redirect
@@ -419,18 +445,29 @@ export default function OAuthOrganizationLink() {
   };
 
   const handleCreateOrganization = () => {
-    navigate('/register');
+    // Redirect to the new create organization page
+    window.location.href = '/create-organization';
   };
 
   const handleSignOut = async () => {
     try {
-      // Set a flag to prevent root redirects during sign-out
-      sessionStorage.setItem('skip_org_redirect_once', '1');
+      // Clear any redirect flags
+      sessionStorage.removeItem('skip_org_redirect_once');
+      
+      // Sign out completely
       await supabase.auth.signOut();
+      
+      // Clear all storage
+      localStorage.clear();
+      sessionStorage.clear();
+      
       // Force full navigation to clear any state
       window.location.href = '/login';
     } catch (error) {
       console.error('Error signing out:', error);
+      // Clear storage anyway
+      localStorage.clear();
+      sessionStorage.clear();
       // Force navigation anyway
       window.location.href = '/login';
     }

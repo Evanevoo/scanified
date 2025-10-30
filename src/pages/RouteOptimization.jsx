@@ -1,611 +1,110 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  Box, Paper, Typography, Button, Grid, Card, CardContent,
+  Box, Typography, Paper, Grid, Card, CardContent, CardActions,
+  Button, Chip, IconButton, TextField, InputAdornment,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Chip, IconButton, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, FormControl, InputLabel, Select, MenuItem, Alert,
-  CircularProgress, Tabs, Tab, Switch, FormControlLabel, Divider,
-  List, ListItem, ListItemText, ListItemIcon, ListItemSecondaryAction,
-  Accordion, AccordionSummary, AccordionDetails, Avatar, Tooltip
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  Alert, CircularProgress, Avatar, Tooltip, Badge,
+  FormControl, InputLabel, Select, MenuItem, Container,
+  Accordion, AccordionSummary, AccordionDetails,
+  List, ListItem, ListItemText, ListItemIcon,
+  Divider, Switch, FormControlLabel, FormGroup,
+  Stepper, Step, StepLabel, StepContent,
+  Tabs, Tab, Slider, FormControlLabel as MuiFormControlLabel,
+  Checkbox, RadioGroup, Radio
 } from '@mui/material';
 import {
-  Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
-  Navigation as RouteIcon, Map as MapIcon, Traffic as TrafficIcon,
-  Schedule as ScheduleIcon, CheckCircle as CheckIcon, Warning as WarningIcon, 
-  LocationOn as LocationIcon, LocalShipping as TruckIcon,
-  Timer as TimerIcon, TrendingUp as OptimizeIcon, Refresh as RefreshIcon,
-  Print as PrintIcon, Send as SendIcon, ExpandMore as ExpandMoreIcon,
-  MyLocation as CurrentLocationIcon, DirectionsCar as DirectionsIcon
+  Route as RouteIcon,
+  Directions as DirectionsIcon,
+  Schedule as ScheduleIcon,
+  LocalShipping as TruckIcon,
+  Person as PersonIcon,
+  LocationOn as LocationIcon,
+  AccessTime as TimeIcon,
+  Distance as DistanceIcon,
+  GasStation as FuelIcon,
+  Add as AddIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  PlayArrow as PlayIcon,
+  Pause as PauseIcon,
+  Stop as StopIcon,
+  Refresh as RefreshIcon,
+  Visibility as ViewIcon,
+  Download as DownloadIcon,
+  Upload as UploadIcon,
+  Settings as SettingsIcon,
+  Timeline as TimelineIcon,
+  Map as MapIcon,
+  Navigation as NavigationIcon,
+  Speed as SpeedIcon,
+  Eco as EcoIcon,
+  Warning as WarningIcon,
+  CheckCircle as CheckCircleIcon,
+  Error as ErrorIcon
 } from '@mui/icons-material';
-import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
-import { deliveryService } from '../services/deliveryService';
+import { useAuth } from '../hooks/useAuth';
+import { usePermissions } from '../hooks/usePermissions';
 
-// Google Maps integration component
-function RouteMap({ routes, selectedRoute, onRouteSelect, center, zoom = 10 }) {
-  const mapRef = useRef(null);
-  const [map, setMap] = useState(null);
-  const [directionsService, setDirectionsService] = useState(null);
-  const [directionsRenderer, setDirectionsRenderer] = useState(null);
-
-  useEffect(() => {
-    if (window.google && mapRef.current) {
-      const googleMap = new window.google.maps.Map(mapRef.current, {
-        center: center || { lat: 40.7128, lng: -74.0060 }, // Default to NYC
-        zoom: zoom,
-        mapTypeId: 'roadmap'
-      });
-
-      const service = new window.google.maps.DirectionsService();
-      const renderer = new window.google.maps.DirectionsRenderer({
-        draggable: true,
-        panel: null
-      });
-
-      renderer.setMap(googleMap);
-
-      setMap(googleMap);
-      setDirectionsService(service);
-      setDirectionsRenderer(renderer);
-    }
-  }, [center, zoom]);
-
-  useEffect(() => {
-    if (selectedRoute && directionsService && directionsRenderer) {
-      displayRoute(selectedRoute);
-    }
-  }, [selectedRoute, directionsService, directionsRenderer]);
-
-  const displayRoute = (route) => {
-    if (!route.waypoints || route.waypoints.length < 2) return;
-
-    const waypoints = route.waypoints.slice(1, -1).map(wp => ({
-      location: wp.address,
-      stopover: true
-    }));
-
-    const request = {
-      origin: route.waypoints[0].address,
-      destination: route.waypoints[route.waypoints.length - 1].address,
-      waypoints: waypoints,
-      optimizeWaypoints: true,
-      travelMode: window.google.maps.TravelMode.DRIVING,
-      avoidHighways: false,
-      avoidTolls: false
-    };
-
-    directionsService.route(request, (result, status) => {
-      if (status === 'OK') {
-        directionsRenderer.setDirections(result);
-      } else {
-        console.error('Directions request failed:', status);
-      }
-    });
-  };
-
-  return (
-    <Box sx={{ height: '500px', width: '100%', position: 'relative' }}>
-      <div ref={mapRef} style={{ height: '100%', width: '100%' }} />
-      {!window.google && (
-        <Box sx={{ 
-          position: 'absolute', 
-          top: 0, 
-          left: 0, 
-          right: 0, 
-          bottom: 0, 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'center',
-          backgroundColor: 'rgba(0,0,0,0.1)'
-        }}>
-          <Alert severity="warning">
-            Google Maps API not loaded. Please check your API key configuration.
-          </Alert>
-        </Box>
-      )}
-    </Box>
-  );
-}
-
-function RouteBuilder({ onRouteCreated, customers, drivers, trucks }) {
-  const [routeData, setRouteData] = useState({
-    name: '',
-    driver_id: '',
-    truck_id: '',
-    planned_date: '',
-    waypoints: [],
-    optimization_preference: 'time', // time, distance, fuel
-    avoid_highways: false,
-    avoid_tolls: false,
-    max_driving_time: 8 * 60, // 8 hours in minutes
-    max_stops: 20
-  });
-  const [selectedCustomers, setSelectedCustomers] = useState([]);
-  const [routeAnalysis, setRouteAnalysis] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [optimizing, setOptimizing] = useState(false);
-
-  const addCustomerToRoute = (customer) => {
-    if (!selectedCustomers.find(c => c.id === customer.id)) {
-      setSelectedCustomers(prev => [...prev, customer]);
-      setRouteData(prev => ({
-        ...prev,
-        waypoints: [...prev.waypoints, {
-          customer_id: customer.id,
-          address: customer.address,
-          name: customer.name,
-          estimated_service_time: 15, // minutes
-          priority: 'normal'
-        }]
-      }));
-    }
-  };
-
-  const removeCustomerFromRoute = (customerId) => {
-    setSelectedCustomers(prev => prev.filter(c => c.id !== customerId));
-    setRouteData(prev => ({
-      ...prev,
-      waypoints: prev.waypoints.filter(wp => wp.customer_id !== customerId)
-    }));
-  };
-
-  const optimizeRoute = async () => {
-    if (routeData.waypoints.length < 2) {
-      alert('Please add at least 2 stops to optimize the route');
-      return;
-    }
-
-    setOptimizing(true);
-    try {
-      // Call route optimization service
-      const response = await fetch('/api/optimize-route', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          waypoints: routeData.waypoints,
-          optimization_preference: routeData.optimization_preference,
-          avoid_highways: routeData.avoid_highways,
-          avoid_tolls: routeData.avoid_tolls,
-          max_driving_time: routeData.max_driving_time
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Route optimization failed');
-      }
-
-      const optimizedData = await response.json();
-      
-      setRouteAnalysis(optimizedData);
-      setRouteData(prev => ({
-        ...prev,
-        waypoints: optimizedData.optimized_waypoints,
-        total_distance: optimizedData.total_distance,
-        total_time: optimizedData.total_time,
-        estimated_fuel_cost: optimizedData.estimated_fuel_cost
-      }));
-
-    } catch (error) {
-      console.error('Route optimization error:', error);
-      alert('Failed to optimize route. Using simple distance-based optimization.');
-      
-      // Fallback: simple distance-based optimization
-      const optimizedWaypoints = [...routeData.waypoints].sort((a, b) => {
-        // Simple heuristic based on alphabetical order of addresses
-        return a.address.localeCompare(b.address);
-      });
-      
-      setRouteData(prev => ({
-        ...prev,
-        waypoints: optimizedWaypoints
-      }));
-    } finally {
-      setOptimizing(false);
-    }
-  };
-
-  const createRoute = async () => {
-    if (!routeData.name || !routeData.driver_id || !routeData.truck_id || routeData.waypoints.length === 0) {
-      alert('Please fill all required fields and add at least one stop');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('delivery_routes')
-        .insert({
-          ...routeData,
-          waypoints: JSON.stringify(routeData.waypoints),
-          status: 'planned',
-          created_at: new Date().toISOString()
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      onRouteCreated(data);
-      
-      // Reset form
-      setRouteData({
-        name: '',
-        driver_id: '',
-        truck_id: '',
-        planned_date: '',
-        waypoints: [],
-        optimization_preference: 'time',
-        avoid_highways: false,
-        avoid_tolls: false,
-        max_driving_time: 8 * 60,
-        max_stops: 20
-      });
-      setSelectedCustomers([]);
-      setRouteAnalysis(null);
-
-    } catch (error) {
-      console.error('Error creating route:', error);
-      alert('Failed to create route');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Paper sx={{ p: 3, mb: 3 }}>
-      <Typography variant="h6" gutterBottom>
-        <RouteIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-        Route Builder
-      </Typography>
-
-      <Grid container spacing={3}>
-        {/* Route Configuration */}
-        <Grid item xs={12} md={6}>
-          <Card sx={{ p: 2, mb: 2 }}>
-            <Typography variant="subtitle1" gutterBottom>
-              Route Configuration
-            </Typography>
-            
-            <Grid container spacing={2}>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Route Name"
-                  value={routeData.name}
-                  onChange={(e) => setRouteData({ ...routeData, name: e.target.value })}
-                />
-              </Grid>
-              
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Driver</InputLabel>
-                  <Select
-                    value={routeData.driver_id}
-                    onChange={(e) => setRouteData({ ...routeData, driver_id: e.target.value })}
-                    label="Driver"
-                  >
-                    {drivers.map(driver => (
-                      <MenuItem key={driver.id} value={driver.id}>
-                        {driver.full_name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Truck</InputLabel>
-                  <Select
-                    value={routeData.truck_id}
-                    onChange={(e) => setRouteData({ ...routeData, truck_id: e.target.value })}
-                    label="Truck"
-                  >
-                    {trucks.map(truck => (
-                      <MenuItem key={truck.id} value={truck.id}>
-                        {truck.license_plate} - {truck.model}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Planned Date"
-                  type="date"
-                  value={routeData.planned_date}
-                  onChange={(e) => setRouteData({ ...routeData, planned_date: e.target.value })}
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-              
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Optimization</InputLabel>
-                  <Select
-                    value={routeData.optimization_preference}
-                    onChange={(e) => setRouteData({ ...routeData, optimization_preference: e.target.value })}
-                    label="Optimization"
-                  >
-                    <MenuItem value="time">Minimize Time</MenuItem>
-                    <MenuItem value="distance">Minimize Distance</MenuItem>
-                    <MenuItem value="fuel">Minimize Fuel Cost</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={routeData.avoid_highways}
-                      onChange={(e) => setRouteData({ ...routeData, avoid_highways: e.target.checked })}
-                    />
-                  }
-                  label="Avoid Highways"
-                />
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={routeData.avoid_tolls}
-                      onChange={(e) => setRouteData({ ...routeData, avoid_tolls: e.target.checked })}
-                    />
-                  }
-                  label="Avoid Tolls"
-                />
-              </Grid>
-            </Grid>
-          </Card>
-
-          {/* Customer Selection */}
-          <Card sx={{ p: 2 }}>
-            <Typography variant="subtitle1" gutterBottom>
-              Add Customers ({selectedCustomers.length} selected)
-            </Typography>
-            
-            <Box sx={{ maxHeight: 300, overflow: 'auto' }}>
-              <List dense>
-                {customers.map(customer => (
-                  <ListItem key={customer.id}>
-                    <ListItemIcon>
-                      <LocationIcon />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={customer.name}
-                      secondary={customer.address}
-                    />
-                    <ListItemSecondaryAction>
-                      {selectedCustomers.find(c => c.id === customer.id) ? (
-                        <Button
-                          size="small"
-                          onClick={() => removeCustomerFromRoute(customer.id)}
-                          color="error"
-                        >
-                          Remove
-                        </Button>
-                      ) : (
-                        <Button
-                          size="small"
-                          onClick={() => addCustomerToRoute(customer)}
-                          variant="outlined"
-                        >
-                          Add
-                        </Button>
-                      )}
-                    </ListItemSecondaryAction>
-                  </ListItem>
-                ))}
-              </List>
-            </Box>
-          </Card>
-        </Grid>
-
-        {/* Route Preview */}
-        <Grid item xs={12} md={6}>
-          <Card sx={{ p: 2, mb: 2 }}>
-            <Typography variant="subtitle1" gutterBottom>
-              Route Preview
-            </Typography>
-            
-            {routeData.waypoints.length > 0 ? (
-              <Box>
-                <List dense>
-                  {routeData.waypoints.map((waypoint, index) => (
-                    <ListItem key={index}>
-                      <ListItemIcon>
-                        <Avatar sx={{ width: 24, height: 24, fontSize: '0.8rem' }}>
-                          {index + 1}
-                        </Avatar>
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={waypoint.name}
-                        secondary={waypoint.address}
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-                
-                <Divider sx={{ my: 2 }} />
-                
-                <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-                  <Button
-                    variant="outlined"
-                    onClick={optimizeRoute}
-                    disabled={optimizing}
-                    startIcon={optimizing ? <CircularProgress size={20} /> : <OptimizeIcon />}
-                  >
-                    {optimizing ? 'Optimizing...' : 'Optimize Route'}
-                  </Button>
-                </Box>
-                
-                {routeAnalysis && (
-                  <Alert severity="info" sx={{ mb: 2 }}>
-                    <Typography variant="body2">
-                      <strong>Route Analysis:</strong><br/>
-                      Total Distance: {routeAnalysis.total_distance || 'N/A'}<br/>
-                      Estimated Time: {routeAnalysis.total_time || 'N/A'}<br/>
-                      Fuel Cost: ${routeAnalysis.estimated_fuel_cost || 'N/A'}
-                    </Typography>
-                  </Alert>
-                )}
-              </Box>
-            ) : (
-              <Typography color="text.secondary">
-                Add customers to see route preview
-              </Typography>
-            )}
-          </Card>
-
-          {/* Route Actions */}
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            <Button
-              variant="contained"
-              onClick={createRoute}
-              disabled={loading || routeData.waypoints.length === 0}
-              startIcon={loading ? <CircularProgress size={20} /> : <CheckIcon />}
-            >
-              Create Route
-            </Button>
-            <Button
-              variant="outlined"
-              disabled={routeData.waypoints.length === 0}
-              startIcon={<PrintIcon />}
-            >
-              Print Route
-            </Button>
-          </Box>
-        </Grid>
-      </Grid>
-    </Paper>
-  );
-}
-
-function RouteTracker({ routes }) {
-  const [selectedRoute, setSelectedRoute] = useState(null);
-  const [liveTracking, setLiveTracking] = useState(false);
-
-  const startTracking = (route) => {
-    setSelectedRoute(route);
-    setLiveTracking(true);
-    // Start real-time tracking
-    console.log('Starting live tracking for route:', route.id);
-  };
-
-  const stopTracking = () => {
-    setLiveTracking(false);
-    setSelectedRoute(null);
-  };
-
-  return (
-    <Paper sx={{ p: 3 }}>
-      <Typography variant="h6" gutterBottom>
-        <TrafficIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-        Live Route Tracking
-      </Typography>
-
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={4}>
-          <Typography variant="subtitle1" gutterBottom>
-            Active Routes
-          </Typography>
-          
-          <List>
-            {routes.filter(r => r.status === 'in_progress').map(route => (
-              <ListItem key={route.id} button onClick={() => setSelectedRoute(route)}>
-                <ListItemIcon>
-                  <TruckIcon />
-                </ListItemIcon>
-                <ListItemText
-                  primary={route.name}
-                  secondary={`Driver: ${route.driver_name} | ${route.waypoints?.length || 0} stops`}
-                />
-                <ListItemSecondaryAction>
-                  <Chip 
-                    label={route.status} 
-                    color="primary" 
-                    size="small"
-                  />
-                </ListItemSecondaryAction>
-              </ListItem>
-            ))}
-          </List>
-        </Grid>
-
-        <Grid item xs={12} md={8}>
-          {selectedRoute ? (
-            <Box>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6">
-                  {selectedRoute.name}
-                </Typography>
-                <Box>
-                  {liveTracking ? (
-                    <Button
-                      variant="outlined"
-                      onClick={stopTracking}
-                      color="error"
-                      startIcon={<DirectionsIcon />}
-                    >
-                      Stop Tracking
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="contained"
-                      onClick={() => startTracking(selectedRoute)}
-                      startIcon={<DirectionsIcon />}
-                    >
-                      Start Tracking
-                    </Button>
-                  )}
-                </Box>
-              </Box>
-
-              <RouteMap
-                routes={[selectedRoute]}
-                selectedRoute={selectedRoute}
-                onRouteSelect={setSelectedRoute}
-              />
-
-              {liveTracking && (
-                <Alert severity="info" sx={{ mt: 2 }}>
-                  <Typography variant="body2">
-                    🔴 Live tracking active - Route progress will update in real-time
-                  </Typography>
-                </Alert>
-              )}
-            </Box>
-          ) : (
-            <Box sx={{ 
-              height: 400, 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
-              border: '2px dashed #ccc',
-              borderRadius: 2
-            }}>
-              <Typography color="text.secondary">
-                Select a route to view tracking details
-              </Typography>
-            </Box>
-          )}
-        </Grid>
-      </Grid>
-    </Paper>
-  );
-}
-
-function RouteOptimization() {
-  const { profile } = useAuth();
-  const [activeTab, setActiveTab] = useState(0);
+export default function RouteOptimization() {
+  const { profile, organization } = useAuth();
+  const { can } = usePermissions();
+  
   const [routes, setRoutes] = useState([]);
-  const [customers, setCustomers] = useState([]);
+  const [optimizedRoutes, setOptimizedRoutes] = useState([]);
+  const [deliveries, setDeliveries] = useState([]);
   const [drivers, setDrivers] = useState([]);
-  const [trucks, setTrucks] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [vehicles, setVehicles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [optimizing, setOptimizing] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  
+  // Dialog states
+  const [createRouteDialog, setCreateRouteDialog] = useState(false);
+  const [editRouteDialog, setEditRouteDialog] = useState(false);
+  const [optimizeDialog, setOptimizeDialog] = useState(false);
+  const [viewRouteDialog, setViewRouteDialog] = useState(false);
+  const [selectedRoute, setSelectedRoute] = useState(null);
+  
+  // Form states
+  const [routeForm, setRouteForm] = useState({
+    name: '',
+    description: '',
+    driver_id: '',
+    vehicle_id: '',
+    delivery_ids: [],
+    start_location: '',
+    end_location: '',
+    start_time: '',
+    end_time: '',
+    max_stops: 50,
+    max_distance: 500,
+    fuel_cost_per_mile: 0.50,
+    driver_cost_per_hour: 25.00,
+    priority: 'medium'
+  });
+  
+  const [optimizationSettings, setOptimizationSettings] = useState({
+    algorithm: 'time_based',
+    constraints: {
+      max_distance: 500,
+      max_time: 8,
+      max_stops: 50,
+      avoid_tolls: false,
+      avoid_highways: false,
+      fuel_efficiency: true
+    },
+    preferences: {
+      minimize_time: true,
+      minimize_distance: false,
+      minimize_cost: false,
+      balance_load: true
+    }
+  });
+
+  const [activeTab, setActiveTab] = useState(0);
 
   useEffect(() => {
     if (profile?.organization_id) {
@@ -614,210 +113,890 @@ function RouteOptimization() {
   }, [profile]);
 
   const fetchData = async () => {
-    setLoading(true);
     try {
-      // Fetch routes
-      const { data: routesData, error: routesError } = await supabase
-        .from('delivery_routes')
-        .select(`
-          *,
-          drivers:profiles!delivery_routes_driver_id_fkey(full_name),
-          trucks(license_plate, model)
-        `)
-        .eq('organization_id', profile.organization_id)
-        .order('created_at', { ascending: false });
+      setLoading(true);
+      setError('');
 
-      if (routesError) throw routesError;
+      const orgId = profile.organization_id;
 
-      // Fetch customers
-      const { data: customersData, error: customersError } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('organization_id', profile.organization_id)
-        .order('name');
+      // Fetch routes, deliveries, drivers, and vehicles in parallel
+      const [routesResult, deliveriesResult, driversResult, vehiclesResult] = await Promise.all([
+        supabase
+          .from('delivery_routes')
+          .select(`
+            *,
+            driver:profiles!delivery_routes_driver_id_fkey(full_name, email),
+            vehicle:vehicles(name, type, capacity)
+          `)
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: false }),
+        
+        supabase
+          .from('deliveries')
+          .select(`
+            *,
+            customer:customers(name, address, city, state, postal_code, phone, email)
+          `)
+          .eq('organization_id', orgId)
+          .eq('status', 'pending')
+          .order('delivery_date', { ascending: true }),
+        
+        supabase
+          .from('profiles')
+          .select('id, full_name, email, role')
+          .eq('organization_id', orgId)
+          .in('role', ['driver', 'admin', 'manager']),
+        
+        supabase
+          .from('vehicles')
+          .select('*')
+          .eq('organization_id', orgId)
+          .eq('is_active', true)
+      ]);
 
-      if (customersError) throw customersError;
+      if (routesResult.error) throw routesResult.error;
+      if (deliveriesResult.error) throw deliveriesResult.error;
+      if (driversResult.error) throw driversResult.error;
+      if (vehiclesResult.error) throw vehiclesResult.error;
 
-      // Fetch drivers
-      const { data: driversData, error: driversError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('organization_id', profile.organization_id)
-        .eq('role', 'driver')
-        .order('full_name');
-
-      if (driversError) throw driversError;
-
-      // Fetch trucks
-      const { data: trucksData, error: trucksError } = await supabase
-        .from('trucks')
-        .select('*')
-        .eq('organization_id', profile.organization_id)
-        .eq('status', 'idle')
-        .order('license_plate');
-
-      if (trucksError) throw trucksError;
-
-      setRoutes(routesData || []);
-      setCustomers(customersData || []);
-      setDrivers(driversData || []);
-      setTrucks(trucksData || []);
+      setRoutes(routesResult.data || []);
+      setDeliveries(deliveriesResult.data || []);
+      setDrivers(driversResult.data || []);
+      setVehicles(vehiclesResult.data || []);
 
     } catch (error) {
-      console.error('Error fetching data:', error);
+      console.error('Error fetching route data:', error);
+      setError('Failed to load route optimization data');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleRouteCreated = (route) => {
-    setRoutes(prev => [route, ...prev]);
-    setActiveTab(1); // Switch to routes tab
+  const handleOptimizeRoutes = async () => {
+    try {
+      setOptimizing(true);
+      setError('');
+      
+      // Simulate route optimization (in a real app, this would call a routing API)
+      const optimizationResult = await simulateRouteOptimization();
+      
+      setOptimizedRoutes(optimizationResult);
+      setSuccess('Routes optimized successfully');
+      setOptimizeDialog(false);
+
+    } catch (error) {
+      console.error('Error optimizing routes:', error);
+      setError('Failed to optimize routes');
+    } finally {
+      setOptimizing(false);
+    }
   };
 
-  const stats = {
-    totalRoutes: routes.length,
-    activeRoutes: routes.filter(r => r.status === 'in_progress').length,
-    completedRoutes: routes.filter(r => r.status === 'completed').length,
-    totalDistance: routes.reduce((sum, r) => sum + (r.total_distance || 0), 0)
+  const simulateRouteOptimization = async () => {
+    // Simulate API call delay
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Generate mock optimized routes
+    const mockOptimizedRoutes = deliveries.slice(0, 3).map((delivery, index) => ({
+      id: `optimized_${index}`,
+      name: `Optimized Route ${index + 1}`,
+      driver: drivers[index % drivers.length],
+      vehicle: vehicles[index % vehicles.length],
+      deliveries: [delivery],
+      total_distance: Math.random() * 100 + 50,
+      total_time: Math.random() * 4 + 2,
+      total_cost: Math.random() * 200 + 100,
+      fuel_cost: Math.random() * 50 + 25,
+      driver_cost: Math.random() * 100 + 50,
+      efficiency_score: Math.random() * 20 + 80,
+      stops: [
+        {
+          order: 1,
+          delivery: delivery,
+          estimated_arrival: new Date(Date.now() + index * 60 * 60 * 1000).toISOString(),
+          estimated_departure: new Date(Date.now() + (index + 1) * 60 * 60 * 1000).toISOString(),
+          distance_from_previous: Math.random() * 20 + 5
+        }
+      ]
+    }));
+    
+    return mockOptimizedRoutes;
   };
+
+  const handleCreateRoute = async () => {
+    try {
+      setError('');
+      
+      const { data, error } = await supabase
+        .from('delivery_routes')
+        .insert({
+          organization_id: profile.organization_id,
+          name: routeForm.name,
+          description: routeForm.description,
+          driver_id: routeForm.driver_id || null,
+          vehicle_id: routeForm.vehicle_id || null,
+          delivery_ids: routeForm.delivery_ids,
+          start_location: routeForm.start_location,
+          end_location: routeForm.end_location,
+          start_time: routeForm.start_time,
+          end_time: routeForm.end_time,
+          max_stops: routeForm.max_stops,
+          max_distance: routeForm.max_distance,
+          fuel_cost_per_mile: routeForm.fuel_cost_per_mile,
+          driver_cost_per_hour: routeForm.driver_cost_per_hour,
+          priority: routeForm.priority,
+          status: 'draft'
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setSuccess('Route created successfully');
+      setCreateRouteDialog(false);
+      resetRouteForm();
+      fetchData();
+
+    } catch (error) {
+      console.error('Error creating route:', error);
+      setError('Failed to create route');
+    }
+  };
+
+  const resetRouteForm = () => {
+    setRouteForm({
+      name: '',
+      description: '',
+      driver_id: '',
+      vehicle_id: '',
+      delivery_ids: [],
+      start_location: '',
+      end_location: '',
+      start_time: '',
+      end_time: '',
+      max_stops: 50,
+      max_distance: 500,
+      fuel_cost_per_mile: 0.50,
+      driver_cost_per_hour: 25.00,
+      priority: 'medium'
+    });
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'completed': return 'success';
+      case 'active': return 'primary';
+      case 'pending': return 'warning';
+      case 'draft': return 'default';
+      case 'cancelled': return 'error';
+      default: return 'default';
+    }
+  };
+
+  const getPriorityColor = (priority) => {
+    switch (priority) {
+      case 'high': return 'error';
+      case 'medium': return 'warning';
+      case 'low': return 'success';
+      default: return 'default';
+    }
+  };
+
+  const formatDuration = (minutes) => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours}h ${mins}m`;
+  };
+
+  const formatDistance = (miles) => {
+    return `${miles.toFixed(1)} mi`;
+  };
+
+  const formatCost = (cost) => {
+    return `$${cost.toFixed(2)}`;
+  };
+
+  if (loading) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+          <CircularProgress />
+        </Box>
+      </Container>
+    );
+  }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">Route Optimization</Typography>
-        <Button
-          variant="contained"
-          startIcon={<RefreshIcon />}
-          onClick={fetchData}
-          disabled={loading}
-        >
-          Refresh
-        </Button>
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      {/* Header */}
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+        <Box>
+          <Typography variant="h4" gutterBottom>
+            Route Optimization
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Optimize delivery routes for efficiency and cost savings
+          </Typography>
+        </Box>
+        <Box>
+          <Button
+            variant="outlined"
+            startIcon={<SettingsIcon />}
+            onClick={() => setOptimizeDialog(true)}
+            sx={{ mr: 2 }}
+          >
+            Optimize Routes
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => setCreateRouteDialog(true)}
+          >
+            New Route
+          </Button>
+        </Box>
       </Box>
 
+      {/* Alerts */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
+          {error}
+        </Alert>
+      )}
+      {success && (
+        <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess('')}>
+          {success}
+        </Alert>
+      )}
+
       {/* Statistics Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Total Routes
-              </Typography>
-              <Typography variant="h4">{stats.totalRoutes}</Typography>
+              <Box display="flex" alignItems="center">
+                <RouteIcon color="primary" sx={{ mr: 2 }} />
+                <Box>
+                  <Typography variant="h6">{routes.length}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Total Routes
+                  </Typography>
+                </Box>
+              </Box>
             </CardContent>
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Active Routes
-              </Typography>
-              <Typography variant="h4" color="primary.main">{stats.activeRoutes}</Typography>
+              <Box display="flex" alignItems="center">
+                <TruckIcon color="warning" sx={{ mr: 2 }} />
+                <Box>
+                  <Typography variant="h6">{deliveries.length}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Pending Deliveries
+                  </Typography>
+                </Box>
+              </Box>
             </CardContent>
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Completed Today
-              </Typography>
-              <Typography variant="h4" color="success.main">{stats.completedRoutes}</Typography>
+              <Box display="flex" alignItems="center">
+                <PersonIcon color="success" sx={{ mr: 2 }} />
+                <Box>
+                  <Typography variant="h6">{drivers.length}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Available Drivers
+                  </Typography>
+                </Box>
+              </Box>
             </CardContent>
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Total Distance
-              </Typography>
-              <Typography variant="h4">{stats.totalDistance.toFixed(1)} mi</Typography>
+              <Box display="flex" alignItems="center">
+                <DirectionsIcon color="info" sx={{ mr: 2 }} />
+                <Box>
+                  <Typography variant="h6">{optimizedRoutes.length}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Optimized Routes
+                  </Typography>
+                </Box>
+              </Box>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
       {/* Tabs */}
-      <Paper sx={{ mb: 3 }}>
+      <Paper sx={{ mb: 4 }}>
         <Tabs value={activeTab} onChange={(e, newValue) => setActiveTab(newValue)}>
-          <Tab label="Create Route" />
-          <Tab label="Manage Routes" />
-          <Tab label="Live Tracking" />
+          <Tab label="Active Routes" />
+          <Tab label="Optimized Routes" />
+          <Tab label="Pending Deliveries" />
+          <Tab label="Route Analytics" />
         </Tabs>
       </Paper>
 
       {/* Tab Content */}
       {activeTab === 0 && (
-        <RouteBuilder
-          onRouteCreated={handleRouteCreated}
-          customers={customers}
-          drivers={drivers}
-          trucks={trucks}
-        />
+        <Paper sx={{ mb: 4 }}>
+          <Box p={3}>
+            <Typography variant="h6" gutterBottom>
+              Active Routes
+            </Typography>
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Route Name</TableCell>
+                    <TableCell>Driver</TableCell>
+                    <TableCell>Vehicle</TableCell>
+                    <TableCell>Deliveries</TableCell>
+                    <TableCell>Distance</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {routes.map((route) => (
+                    <TableRow key={route.id}>
+                      <TableCell>
+                        <Box>
+                          <Typography variant="subtitle2">{route.name}</Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {route.description}
+                          </Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        {route.driver?.full_name || 'Unassigned'}
+                      </TableCell>
+                      <TableCell>
+                        {route.vehicle?.name || 'Unassigned'}
+                      </TableCell>
+                      <TableCell>
+                        {route.delivery_ids?.length || 0}
+                      </TableCell>
+                      <TableCell>
+                        {formatDistance(route.estimated_distance || 0)}
+                      </TableCell>
+                      <TableCell>
+                        <Chip 
+                          label={route.status} 
+                          size="small" 
+                          color={getStatusColor(route.status)}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Box display="flex" gap={1}>
+                          <Tooltip title="View Details">
+                            <IconButton 
+                              size="small"
+                              onClick={() => {
+                                setSelectedRoute(route);
+                                setViewRouteDialog(true);
+                              }}
+                            >
+                              <ViewIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Edit">
+                            <IconButton 
+                              size="small"
+                              onClick={() => {
+                                setSelectedRoute(route);
+                                setEditRouteDialog(true);
+                              }}
+                            >
+                              <EditIcon />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+        </Paper>
       )}
 
       {activeTab === 1 && (
-        <Paper>
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Route Name</TableCell>
-                  <TableCell>Driver</TableCell>
-                  <TableCell>Truck</TableCell>
-                  <TableCell>Stops</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell>Distance</TableCell>
-                  <TableCell>Est. Time</TableCell>
-                  <TableCell>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {routes.map(route => (
-                  <TableRow key={route.id}>
-                    <TableCell>
-                      <Typography variant="subtitle2">{route.name}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {route.planned_date}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>{route.drivers?.full_name}</TableCell>
-                    <TableCell>{route.trucks?.license_plate}</TableCell>
-                    <TableCell>{JSON.parse(route.waypoints || '[]').length}</TableCell>
-                    <TableCell>
-                      <Chip
-                        label={route.status}
-                        color={route.status === 'completed' ? 'success' : 
-                               route.status === 'in_progress' ? 'primary' : 'default'}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>{route.total_distance || 'N/A'}</TableCell>
-                    <TableCell>{route.total_time || 'N/A'}</TableCell>
-                    <TableCell>
-                      <IconButton size="small">
-                        <EditIcon />
-                      </IconButton>
-                      <IconButton size="small">
-                        <MapIcon />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
+        <Paper sx={{ mb: 4 }}>
+          <Box p={3}>
+            <Typography variant="h6" gutterBottom>
+              Optimized Routes
+            </Typography>
+            {optimizedRoutes.length > 0 ? (
+              <Grid container spacing={3}>
+                {optimizedRoutes.map((route) => (
+                  <Grid item xs={12} md={6} key={route.id}>
+                    <Card>
+                      <CardContent>
+                        <Box display="flex" justifyContent="space-between" alignItems="start" mb={2}>
+                          <Typography variant="h6">{route.name}</Typography>
+                          <Chip 
+                            label={`${route.efficiency_score.toFixed(0)}% Efficient`}
+                            color="success"
+                            size="small"
+                          />
+                        </Box>
+                        
+                        <Box mb={2}>
+                          <Typography variant="body2" color="text.secondary">
+                            Driver: {route.driver?.full_name}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Vehicle: {route.vehicle?.name}
+                          </Typography>
+                        </Box>
+                        
+                        <Grid container spacing={2}>
+                          <Grid item xs={4}>
+                            <Box textAlign="center">
+                              <DistanceIcon color="primary" />
+                              <Typography variant="h6">{formatDistance(route.total_distance)}</Typography>
+                              <Typography variant="caption">Distance</Typography>
+                            </Box>
+                          </Grid>
+                          <Grid item xs={4}>
+                            <Box textAlign="center">
+                              <TimeIcon color="primary" />
+                              <Typography variant="h6">{formatDuration(route.total_time * 60)}</Typography>
+                              <Typography variant="caption">Time</Typography>
+                            </Box>
+                          </Grid>
+                          <Grid item xs={4}>
+                            <Box textAlign="center">
+                              <FuelIcon color="primary" />
+                              <Typography variant="h6">{formatCost(route.total_cost)}</Typography>
+                              <Typography variant="caption">Cost</Typography>
+                            </Box>
+                          </Grid>
+                        </Grid>
+                        
+                        <Box mt={2}>
+                          <Typography variant="body2" color="text.secondary">
+                            Deliveries: {route.deliveries.length}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Fuel Cost: {formatCost(route.fuel_cost)}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Driver Cost: {formatCost(route.driver_cost)}
+                          </Typography>
+                        </Box>
+                      </CardContent>
+                      <CardActions>
+                        <Button size="small" startIcon={<ViewIcon />}>
+                          View Details
+                        </Button>
+                        <Button size="small" startIcon={<PlayIcon />} color="primary">
+                          Accept Route
+                        </Button>
+                      </CardActions>
+                    </Card>
+                  </Grid>
                 ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+              </Grid>
+            ) : (
+              <Box textAlign="center" py={4}>
+                <DirectionsIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                <Typography variant="h6" color="text.secondary">
+                  No Optimized Routes
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Run route optimization to see suggested routes
+                </Typography>
+                <Button
+                  variant="contained"
+                  startIcon={<SettingsIcon />}
+                  onClick={() => setOptimizeDialog(true)}
+                >
+                  Optimize Routes
+                </Button>
+              </Box>
+            )}
+          </Box>
         </Paper>
       )}
 
       {activeTab === 2 && (
-        <RouteTracker routes={routes} />
+        <Paper sx={{ mb: 4 }}>
+          <Box p={3}>
+            <Typography variant="h6" gutterBottom>
+              Pending Deliveries
+            </Typography>
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Customer</TableCell>
+                    <TableCell>Address</TableCell>
+                    <TableCell>Delivery Date</TableCell>
+                    <TableCell>Priority</TableCell>
+                    <TableCell>Items</TableCell>
+                    <TableCell>Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {deliveries.map((delivery) => (
+                    <TableRow key={delivery.id}>
+                      <TableCell>
+                        <Box>
+                          <Typography variant="subtitle2">{delivery.customer?.name}</Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {delivery.customer?.phone}
+                          </Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Box>
+                          <Typography variant="body2">{delivery.customer?.address}</Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {delivery.customer?.city}, {delivery.customer?.state} {delivery.customer?.postal_code}
+                          </Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        {delivery.delivery_date ? new Date(delivery.delivery_date).toLocaleDateString() : '-'}
+                      </TableCell>
+                      <TableCell>
+                        <Chip 
+                          label={delivery.priority || 'medium'} 
+                          size="small" 
+                          color={getPriorityColor(delivery.priority || 'medium')}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {delivery.items?.length || 0}
+                      </TableCell>
+                      <TableCell>
+                        <Button size="small" startIcon={<AddIcon />}>
+                          Add to Route
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+        </Paper>
       )}
-    </Box>
+
+      {activeTab === 3 && (
+        <Paper sx={{ mb: 4 }}>
+          <Box p={3}>
+            <Typography variant="h6" gutterBottom>
+              Route Analytics
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Performance Metrics
+                    </Typography>
+                    <Box mb={2}>
+                      <Typography variant="body2">Average Route Efficiency</Typography>
+                      <Typography variant="h4" color="primary">87%</Typography>
+                    </Box>
+                    <Box mb={2}>
+                      <Typography variant="body2">Average Delivery Time</Typography>
+                      <Typography variant="h4" color="primary">4.2h</Typography>
+                    </Box>
+                    <Box mb={2}>
+                      <Typography variant="body2">Fuel Cost per Mile</Typography>
+                      <Typography variant="h4" color="primary">$0.52</Typography>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Cost Analysis
+                    </Typography>
+                    <Box mb={2}>
+                      <Typography variant="body2">Total Monthly Cost</Typography>
+                      <Typography variant="h4" color="primary">$12,450</Typography>
+                    </Box>
+                    <Box mb={2}>
+                      <Typography variant="body2">Fuel Savings</Typography>
+                      <Typography variant="h4" color="success">$1,200</Typography>
+                    </Box>
+                    <Box mb={2}>
+                      <Typography variant="body2">Time Savings</Typography>
+                      <Typography variant="h4" color="success">15%</Typography>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </Box>
+        </Paper>
+      )}
+
+      {/* Optimize Routes Dialog */}
+      <Dialog 
+        open={optimizeDialog} 
+        onClose={() => setOptimizeDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Optimize Delivery Routes</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Grid container spacing={3}>
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <InputLabel>Optimization Algorithm</InputLabel>
+                  <Select
+                    value={optimizationSettings.algorithm}
+                    onChange={(e) => setOptimizationSettings({
+                      ...optimizationSettings,
+                      algorithm: e.target.value
+                    })}
+                  >
+                    <MenuItem value="time_based">Time-Based Optimization</MenuItem>
+                    <MenuItem value="distance_based">Distance-Based Optimization</MenuItem>
+                    <MenuItem value="cost_based">Cost-Based Optimization</MenuItem>
+                    <MenuItem value="balanced">Balanced Optimization</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom>
+                  Constraints
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={6}>
+                    <TextField
+                      fullWidth
+                      label="Max Distance (miles)"
+                      type="number"
+                      value={optimizationSettings.constraints.max_distance}
+                      onChange={(e) => setOptimizationSettings({
+                        ...optimizationSettings,
+                        constraints: {
+                          ...optimizationSettings.constraints,
+                          max_distance: parseInt(e.target.value) || 0
+                        }
+                      })}
+                    />
+                  </Grid>
+                  <Grid item xs={6}>
+                    <TextField
+                      fullWidth
+                      label="Max Time (hours)"
+                      type="number"
+                      value={optimizationSettings.constraints.max_time}
+                      onChange={(e) => setOptimizationSettings({
+                        ...optimizationSettings,
+                        constraints: {
+                          ...optimizationSettings.constraints,
+                          max_time: parseInt(e.target.value) || 0
+                        }
+                      })}
+                    />
+                  </Grid>
+                </Grid>
+              </Grid>
+              
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom>
+                  Preferences
+                </Typography>
+                <FormGroup>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={optimizationSettings.preferences.minimize_time}
+                        onChange={(e) => setOptimizationSettings({
+                          ...optimizationSettings,
+                          preferences: {
+                            ...optimizationSettings.preferences,
+                            minimize_time: e.target.checked
+                          }
+                        })}
+                      />
+                    }
+                    label="Minimize Time"
+                  />
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={optimizationSettings.preferences.minimize_distance}
+                        onChange={(e) => setOptimizationSettings({
+                          ...optimizationSettings,
+                          preferences: {
+                            ...optimizationSettings.preferences,
+                            minimize_distance: e.target.checked
+                          }
+                        })}
+                      />
+                    }
+                    label="Minimize Distance"
+                  />
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={optimizationSettings.preferences.minimize_cost}
+                        onChange={(e) => setOptimizationSettings({
+                          ...optimizationSettings,
+                          preferences: {
+                            ...optimizationSettings.preferences,
+                            minimize_cost: e.target.checked
+                          }
+                        })}
+                      />
+                    }
+                    label="Minimize Cost"
+                  />
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={optimizationSettings.preferences.balance_load}
+                        onChange={(e) => setOptimizationSettings({
+                          ...optimizationSettings,
+                          preferences: {
+                            ...optimizationSettings.preferences,
+                            balance_load: e.target.checked
+                          }
+                        })}
+                      />
+                    }
+                    label="Balance Load"
+                  />
+                </FormGroup>
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOptimizeDialog(false)}>Cancel</Button>
+          <Button 
+            onClick={handleOptimizeRoutes} 
+            variant="contained"
+            disabled={optimizing}
+            startIcon={optimizing ? <CircularProgress size={20} /> : <SettingsIcon />}
+          >
+            {optimizing ? 'Optimizing...' : 'Optimize Routes'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Create Route Dialog */}
+      <Dialog 
+        open={createRouteDialog} 
+        onClose={() => setCreateRouteDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Create New Route</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Grid container spacing={3}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Route Name"
+                  value={routeForm.name}
+                  onChange={(e) => setRouteForm({ ...routeForm, name: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={3}
+                  label="Description"
+                  value={routeForm.description}
+                  onChange={(e) => setRouteForm({ ...routeForm, description: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Driver</InputLabel>
+                  <Select
+                    value={routeForm.driver_id}
+                    onChange={(e) => setRouteForm({ ...routeForm, driver_id: e.target.value })}
+                  >
+                    {drivers.map((driver) => (
+                      <MenuItem key={driver.id} value={driver.id}>
+                        {driver.full_name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Vehicle</InputLabel>
+                  <Select
+                    value={routeForm.vehicle_id}
+                    onChange={(e) => setRouteForm({ ...routeForm, vehicle_id: e.target.value })}
+                  >
+                    {vehicles.map((vehicle) => (
+                      <MenuItem key={vehicle.id} value={vehicle.id}>
+                        {vehicle.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Start Location"
+                  value={routeForm.start_location}
+                  onChange={(e) => setRouteForm({ ...routeForm, start_location: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="End Location"
+                  value={routeForm.end_location}
+                  onChange={(e) => setRouteForm({ ...routeForm, end_location: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Max Stops"
+                  type="number"
+                  value={routeForm.max_stops}
+                  onChange={(e) => setRouteForm({ ...routeForm, max_stops: parseInt(e.target.value) || 0 })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Max Distance (miles)"
+                  type="number"
+                  value={routeForm.max_distance}
+                  onChange={(e) => setRouteForm({ ...routeForm, max_distance: parseInt(e.target.value) || 0 })}
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCreateRouteDialog(false)}>Cancel</Button>
+          <Button onClick={handleCreateRoute} variant="contained">Create</Button>
+        </DialogActions>
+      </Dialog>
+    </Container>
   );
 }
-
-export default RouteOptimization; 

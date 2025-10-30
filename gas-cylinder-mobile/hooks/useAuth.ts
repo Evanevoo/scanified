@@ -33,30 +33,50 @@ export function useAuth() {
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [loading, setLoading] = useState(true);
   const [organizationLoading, setOrganizationLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    
     const getUser = async () => {
       try {
+        // Add timeout protection to prevent infinite loading
+        timeoutId = setTimeout(() => {
+          console.warn('⚠️ Auth loading timeout - forcing completion');
+          setLoading(false);
+          setAuthError('Authentication timeout - please restart the app');
+        }, 10000); // 10 second timeout
+
         const { data: { session } } = await supabase.auth.getSession();
         setUser(session?.user || null);
+        setAuthError(null);
       } catch (error) {
         console.error('❌ Error getting session:', error);
         setUser(null);
+        setAuthError('Authentication failed - please restart the app');
       } finally {
+        clearTimeout(timeoutId);
         setLoading(false);
       }
     };
+    
     getUser();
     
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       try {
         setUser(session?.user || null);
+        setAuthError(null);
       } catch (error) {
         console.error('❌ Error in auth state change:', error);
         setUser(null);
+        setAuthError('Authentication state change failed');
       }
     });
-    return () => listener.subscription.unsubscribe();
+    
+    return () => {
+      clearTimeout(timeoutId);
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -148,5 +168,5 @@ export function useAuth() {
     }
   }, [user]);
 
-  return { user, profile, organization, loading, organizationLoading };
+  return { user, profile, organization, loading, organizationLoading, authError };
 } 

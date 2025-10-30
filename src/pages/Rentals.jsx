@@ -75,6 +75,7 @@ function RentalsImproved() {
     customer_type: 'all',
     search: ''
   });
+  const [locations, setLocations] = useState([]);
 
   // Statistics
   const [stats, setStats] = useState({
@@ -88,6 +89,7 @@ function RentalsImproved() {
     if (organization?.id) {
       fetchRentals();
       fetchCustomers();
+      fetchLocations();
     }
   }, [organization]);
 
@@ -157,10 +159,16 @@ function RentalsImproved() {
       for (const rental of rentalsData || []) {
         const bottle = bottlesMap[rental.bottle_barcode];
         if (bottle) {
+          // Update rental with location-specific tax rate if not already set
+          const rentalLocation = (rental.location || bottle.location || 'SASKATOON').toUpperCase();
+          const locationTaxRate = locationTaxMap[rentalLocation] || rental.tax_rate || 0.11;
+          
           allRentalData.push({
             ...rental,
             source: 'rental',
-            bottles: bottle
+            bottles: bottle,
+            tax_rate: locationTaxRate,
+            location: rentalLocation
           });
         }
       }
@@ -178,6 +186,19 @@ function RentalsImproved() {
         map[pricing.customer_id] = pricing;
         return map;
       }, {});
+
+      // Load location tax rates
+      const { data: locations } = await supabase
+        .from('locations')
+        .select('id, name, total_tax_rate')
+        .eq('organization_id', organization.id);
+      
+      const locationTaxMap = (locations || []).reduce((map, location) => {
+        map[location.name.toUpperCase()] = location.total_tax_rate / 100; // Convert percentage to decimal
+        return map;
+      }, {});
+      
+      console.log('Location tax rates loaded:', locationTaxMap);
       
       for (const bottle of assignedBottles || []) {
         const barcode = bottle.barcode_number || bottle.barcode;
@@ -197,6 +218,10 @@ function RentalsImproved() {
             rentalType = customerPricing.rental_period || 'monthly';
           }
           
+          // Get location-specific tax rate
+          const bottleLocation = (bottle.location || 'SASKATOON').toUpperCase();
+          const locationTaxRate = locationTaxMap[bottleLocation] || 0.11; // Default to 11% if location not found
+          
           allRentalData.push({
             id: `bottle_${bottle.id}`,
             source: 'bottle_assignment',
@@ -209,8 +234,8 @@ function RentalsImproved() {
             rental_amount: rentalAmount,
             rental_type: rentalType,
             tax_code: 'GST+PST',
-            tax_rate: 0.11,
-            location: bottle.location || 'SASKATOON'
+            tax_rate: locationTaxRate,
+            location: bottleLocation
           });
         }
       }
@@ -297,9 +322,11 @@ function RentalsImproved() {
       const inHouseTotal = unassignedBottles + bottlesWithVendors; // Unassigned + vendors = in-house
       // All filtered rentals are now customer rentals (vendors excluded)
       const rentedToCustomers = filteredRentals.length;
-      // Calculate revenue from customer rentals (vendors already excluded)
+      // Calculate revenue from customer rentals (vendors already excluded) including tax
       const totalRevenue = filteredRentals?.reduce((sum, rental) => {
-        return sum + (rental.rental_amount || 0);
+        const baseAmount = rental.rental_amount || 0;
+        const taxAmount = baseAmount * (rental.tax_rate || 0);
+        return sum + baseAmount + taxAmount;
       }, 0) || 0;
 
       setStats({ 
@@ -355,6 +382,27 @@ function RentalsImproved() {
       setCustomers(customersData);
     } catch (error) {
       console.error('Error fetching customers:', error);
+    }
+  };
+
+  const fetchLocations = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('locations')
+        .select('id, name, province')
+        .order('name');
+
+      if (error) throw error;
+      setLocations(data || []);
+    } catch (error) {
+      console.error('Error fetching locations:', error);
+      // Fallback to hardcoded locations if database fails
+      setLocations([
+        { id: 'saskatoon', name: 'Saskatoon', province: 'Saskatchewan' },
+        { id: 'regina', name: 'Regina', province: 'Saskatchewan' },
+        { id: 'chilliwack', name: 'Chilliwack', province: 'British Columbia' },
+        { id: 'prince-george', name: 'Prince George', province: 'British Columbia' }
+      ]);
     }
   };
 
@@ -497,10 +545,11 @@ function RentalsImproved() {
     let invoiceNumber = next;
     const { invoiceDate, dueDate } = getInvoiceDates();
     const rate = 10;
-    const taxRate = 0.11;
     const rows = customers.map(({ customer, rentals }, idx) => {
       const numBottles = rentals.length;
       const base = numBottles * rate;
+      // Use the actual tax rate from the first rental (they should all be the same for a customer)
+      const taxRate = rentals[0]?.tax_rate || 0.11;
       const tax = +(base * taxRate).toFixed(1);
       const total = +(base + tax).toFixed(2);
       return {
@@ -845,6 +894,9 @@ function RentalsImproved() {
                       <Typography variant="body2">
                         {rentals[0]?.tax_code || 'GST+PST'}
                       </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        ({(rentals[0]?.tax_rate || 0.11) * 100}% tax)
+                      </Typography>
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2">
@@ -988,10 +1040,11 @@ function RentalsImproved() {
                       }))}
                       label="Location"
                     >
-                      <MenuItem value="SASKATOON">SASKATOON</MenuItem>
-                      <MenuItem value="REGINA">REGINA</MenuItem>
-                      <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
-                      <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
+                      {locations.map((location) => (
+                        <MenuItem key={location.id} value={location.name.toUpperCase()}>
+                          {location.name} ({location.province})
+                        </MenuItem>
+                      ))}
                     </Select>
                   </FormControl>
                 </Grid>

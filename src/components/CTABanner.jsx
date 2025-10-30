@@ -20,6 +20,8 @@ export default function CTABanner({
   subtitle = "Join thousands of businesses already using Scanified",
   primaryAction = "Start Free Trial",
   secondaryAction = "Schedule Demo",
+  primaryActionUrl = "/login",
+  secondaryActionUrl = "/demo",
   showBadges = true,
   variant = "gradient" // gradient, simple, urgent
 }) {
@@ -170,7 +172,7 @@ export default function CTABanner({
                 {...getButtonStyles(true)}
                 size="large"
                 startIcon={<RocketIcon />}
-                onClick={() => navigate('/contact')}
+                onClick={() => navigate(primaryActionUrl)}
                 sx={{ 
                   px: 4,
                   py: 1.5,
@@ -185,7 +187,7 @@ export default function CTABanner({
                 {...getButtonStyles(false)}
                 size="large"
                 startIcon={<PhoneIcon />}
-                onClick={() => navigate('/demo')}
+                onClick={() => navigate(secondaryActionUrl)}
                 sx={{ 
                   px: 4,
                   py: 1.5,

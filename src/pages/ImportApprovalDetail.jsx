@@ -287,33 +287,111 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       const allDelivered = importData.delivered || importData.rows || importData.line_items || [];
       const allReturned = importData.returned || [];
       
-      // Get all unique product codes
+      console.log('🔍 Import data structure:', { allDelivered, allReturned });
+      
+      // Get all unique barcodes AND product codes from imported data
+      const barcodes = new Set();
       const productCodes = new Set();
+      
       [...allDelivered, ...allReturned].forEach(item => {
-        if (item.product_code) {
-          productCodes.add(item.product_code.trim());
+        // Check for barcode first (this is what we really want to match)
+        const barcode = item.barcode || item.barcode_number || item.Barcode || item.BarcodeNumber;
+        if (barcode) {
+          console.log('📦 Found barcode in import:', barcode);
+          barcodes.add(String(barcode).trim());
+        }
+        
+        // Also get product code as fallback
+        const prodCode = item.product_code || item.ProductCode || item.productCode;
+        if (prodCode) {
+          console.log('📦 Found product code in import:', prodCode);
+          productCodes.add(String(prodCode).trim());
         }
       });
       
-      if (productCodes.size === 0) return;
+      console.log('📋 Barcodes to search:', Array.from(barcodes));
+      console.log('📋 Product codes to search:', Array.from(productCodes));
+      
+      if (barcodes.size === 0 && productCodes.size === 0) {
+        console.warn('⚠️ No barcodes or product codes found in import data');
+        return;
+      }
       
       try {
-        const { data: bottles, error } = await supabase
-          .from('bottles')
-          .select('product_code, category, group_name, type, description, gas_type')
-          .in('product_code', Array.from(productCodes))
-          .eq('organization_id', organization.id);
+        // Try to find bottles by barcode_number first (most accurate)
+        let bottles = [];
         
-        if (error) {
-          console.error('Error fetching asset info:', error);
-          return;
+        if (barcodes.size > 0) {
+          const { data, error } = await supabase
+            .from('bottles')
+            .select('barcode_number, product_code, category, group_name, type, description, gas_type')
+            .in('barcode_number', Array.from(barcodes))
+            .eq('organization_id', organization.id);
+          
+          if (error) {
+            console.error('❌ Error fetching bottles by barcode:', error);
+          } else {
+            bottles = data || [];
+            console.log('✅ Found bottles by barcode_number:', bottles);
+          }
         }
         
-        // Create a map of product_code to asset info
+        // If no bottles found by barcode, try product_code
+        if (bottles.length === 0 && productCodes.size > 0) {
+          const { data, error } = await supabase
+            .from('bottles')
+            .select('barcode_number, product_code, category, group_name, type, description, gas_type')
+            .in('product_code', Array.from(productCodes))
+            .eq('organization_id', organization.id);
+          
+          if (error) {
+            console.error('❌ Error fetching bottles by product_code:', error);
+          } else {
+            bottles = data || [];
+            console.log('✅ Found bottles by product_code:', bottles);
+          }
+        }
+        
+        // Create a map of barcode_number OR product_code to asset info
         const map = {};
-        (bottles || []).forEach(bottle => {
-          if (bottle.product_code) {
-            map[bottle.product_code.trim()] = {
+        bottles.forEach(bottle => {
+          const barcode = bottle.barcode_number?.trim();
+          const prodCode = bottle.product_code?.trim();
+          
+          console.log(`📊 Bottle - Barcode: ${barcode}, ProductCode: ${prodCode}:`, {
+            category: bottle.category,
+            group: bottle.group_name,
+            type: bottle.type
+          });
+          
+          // Map by barcode if available (most accurate)
+          if (barcode) {
+            console.log(`✅ Mapping bottle data for barcode: ${barcode}`, {
+              category: bottle.category || 'EMPTY',
+              group: bottle.group_name || 'EMPTY',
+              type: bottle.type || 'EMPTY',
+              description: bottle.description || 'EMPTY',
+              gas_type: bottle.gas_type || 'EMPTY'
+            });
+            map[barcode] = {
+              category: bottle.category || '',
+              group: bottle.group_name || '',
+              type: bottle.type || '',
+              description: bottle.description || '',
+              gas_type: bottle.gas_type || ''
+            };
+          }
+          
+          // Also map by product_code if available
+          if (prodCode) {
+            console.log(`✅ Mapping bottle data for product_code: ${prodCode}`, {
+              category: bottle.category || 'EMPTY',
+              group: bottle.group_name || 'EMPTY',
+              type: bottle.type || 'EMPTY',
+              description: bottle.description || 'EMPTY',
+              gas_type: bottle.gas_type || 'EMPTY'
+            });
+            map[prodCode] = {
               category: bottle.category || '',
               group: bottle.group_name || '',
               type: bottle.type || '',
@@ -323,9 +401,17 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           }
         });
         
+        console.log('🗺️ Final asset info map:', map);
         setAssetInfoMap(map);
+        
+        // Show warning if bottles not found
+        if (bottles.length === 0) {
+          console.warn('⚠️ No matching bottles found in database');
+          console.warn('   Looked for barcodes:', Array.from(barcodes));
+          console.warn('   Looked for product_codes:', Array.from(productCodes));
+        }
       } catch (error) {
-        console.error('Error fetching asset info:', error);
+        console.error('❌ Error fetching asset info:', error);
       }
     }
     
@@ -851,10 +937,17 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const delivered = filterLineItems(allDelivered);
   const returned = filterLineItems(allReturned);
 
-  // Helper function to get asset info for a product code
-  const getAssetInfo = (productCode) => {
-    if (!productCode) return {};
-    return assetInfoMap[productCode.trim()] || {};
+  // Helper function to get asset info for a barcode or product code
+  const getAssetInfo = (identifier) => {
+    if (!identifier) {
+      console.warn('⚠️ No identifier provided to getAssetInfo');
+      return {};
+    }
+    const trimmed = String(identifier).trim();
+    console.log('🔍 Looking up asset info for:', trimmed, 'Map keys:', Object.keys(assetInfoMap));
+    const info = assetInfoMap[trimmed] || {};
+    console.log('🔍 Found asset info:', info);
+    return info;
   };
 
   const getStatusColor = (status) => {
@@ -1048,16 +1141,27 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                         </TableCell>
                       </TableRow>
                     ) : delivered.map((row, i) => {
-                      const assetInfo = getAssetInfo(row.product_code);
+                      // Try barcode first, then product_code
+                      const barcode = row.barcode || row.barcode_number || row.Barcode || row.BarcodeNumber;
+                      const prodCode = row.product_code || row.ProductCode || row.productCode;
+                      const identifier = barcode || prodCode;
+                      
+                      const assetInfo = getAssetInfo(identifier);
+                      console.log(`🎯 Row ${i}:`, {
+                        barcode: barcode,
+                        productCode: prodCode,
+                        identifier: identifier,
+                        assetInfo: assetInfo,
+                      });
                       return (
                         <TableRow key={i} sx={{ 
                           backgroundColor: i % 2 === 0 ? '#ffffff' : '#f8f9fa',
                           '&:hover': { backgroundColor: '#f0f0f0' },
                           borderBottom: '1px solid #e0e6ed'
                         }}>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.category || row.category || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.group || row.group || row.group_name || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.type || row.type || ''}</TableCell>
+                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.category || ''}</TableCell>
+                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.group || ''}</TableCell>
+                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.type || ''}</TableCell>
                           <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
                             <Chip label={row.product_code} size="small" variant="outlined" sx={{ 
                               border: '2px solid #333',
@@ -1128,9 +1232,9 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                           '&:hover': { backgroundColor: '#f0f0f0' },
                           borderBottom: '1px solid #e0e6ed'
                         }}>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.category || row.category || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.group || row.group || row.group_name || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.type || row.type || ''}</TableCell>
+                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.category || ''}</TableCell>
+                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.group || ''}</TableCell>
+                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.type || ''}</TableCell>
                           <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
                             <Chip label={row.product_code} size="small" variant="outlined" sx={{ 
                               border: '2px solid #333',

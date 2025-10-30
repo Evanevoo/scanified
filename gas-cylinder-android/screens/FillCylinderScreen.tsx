@@ -35,7 +35,45 @@ export default function FillCylinderScreen() {
   const [scanned, setScanned] = useState(false);
   const [scannedAssets, setScannedAssets] = useState<ScannedAsset[]>([]);
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [bottles, setBottles] = useState([]);
+  const [barcodeSuggestions, setBarcodeSuggestions] = useState([]);
+  const [showBarcodeSuggestions, setShowBarcodeSuggestions] = useState(false);
   const scanDelay = 1500;
+
+  // Fetch bottles for barcode suggestions
+  React.useEffect(() => {
+    if (profile?.organization_id) {
+      supabase
+        .from('bottles')
+        .select('barcode_number')
+        .eq('organization_id', profile.organization_id)
+        .order('barcode_number')
+        .then(({ data, error }) => {
+          if (!error && data) {
+            setBottles(data);
+          }
+        });
+    }
+  }, [profile]);
+
+  // Filter barcode suggestions
+  React.useEffect(() => {
+    if (barcode.trim() && bottles.length > 0) {
+      const searchText = barcode.toLowerCase();
+      const filtered = bottles
+        .filter(bottle =>
+          bottle.barcode_number &&
+          bottle.barcode_number.toLowerCase().includes(searchText) &&
+          bottle.barcode_number.toLowerCase() !== searchText
+        )
+        .slice(0, 5);
+      setBarcodeSuggestions(filtered);
+      setShowBarcodeSuggestions(filtered.length > 0);
+    } else {
+      setBarcodeSuggestions([]);
+      setShowBarcodeSuggestions(false);
+    }
+  }, [barcode, bottles]);
 
   const handleBarcodeScanned = (event) => {
     // Only accept barcodes within the border area if boundingBox is available
@@ -437,7 +475,7 @@ export default function FillCylinderScreen() {
                   <Text style={styles.scanButtonText}>SCAN {assetConfig?.assetDisplayName?.toUpperCase() || 'ASSET'}</Text>
       </TouchableOpacity>
       
-      <View style={styles.inputSection}>
+      <View style={[styles.inputSection, { position: 'relative', zIndex: 1 }]}>
         <Text style={styles.inputLabel}>Barcode Number</Text>
         <TextInput
           style={styles.input}
@@ -446,6 +484,25 @@ export default function FillCylinderScreen() {
           onChangeText={setBarcode}
           autoCapitalize="none"
         />
+        {/* Barcode Suggestions */}
+        {showBarcodeSuggestions && barcodeSuggestions.length > 0 && (
+          <View style={styles.suggestionsContainer}>
+            <ScrollView style={{ maxHeight: 150 }}>
+              {barcodeSuggestions.map((bottle, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={styles.suggestionItem}
+                  onPress={() => {
+                    setBarcode(bottle.barcode_number);
+                    setShowBarcodeSuggestions(false);
+                  }}
+                >
+                  <Text style={styles.suggestionText}>{bottle.barcode_number}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
       </View>
 
       {/* Serial Number Input */}
@@ -1013,5 +1070,32 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  suggestionsContainer: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    marginTop: 4,
+    maxHeight: 150,
+    zIndex: 1000,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  suggestionItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  suggestionText: {
+    fontSize: 14,
+    color: '#222',
   },
 }); 

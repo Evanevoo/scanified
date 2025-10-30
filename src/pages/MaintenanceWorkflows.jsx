@@ -1,134 +1,317 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Box,
-  Typography,
-  Paper,
-  Grid,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  IconButton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Stepper,
-  Step,
-  StepLabel,
-  LinearProgress
+  Box, Typography, Paper, Grid, Card, CardContent, CardActions,
+  Button, Chip, IconButton, TextField, InputAdornment,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  Alert, CircularProgress, Avatar, Tooltip, Badge,
+  FormControl, InputLabel, Select, MenuItem, Container,
+  Accordion, AccordionSummary, AccordionDetails,
+  List, ListItem, ListItemText, ListItemIcon,
+  Divider, Switch, FormControlLabel, FormGroup,
+  Stepper, Step, StepLabel, StepContent
 } from '@mui/material';
 import {
   Build as BuildIcon,
+  Schedule as ScheduleIcon,
+  Assignment as AssignmentIcon,
+  CheckCircle as CheckCircleIcon,
+  Warning as WarningIcon,
+  Error as ErrorIcon,
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  PlayArrow as StartIcon,
+  PlayArrow as PlayIcon,
   Pause as PauseIcon,
-  CheckCircle as CompleteIcon,
-  Schedule as ScheduleIcon,
-  Person as AssignIcon
+  Stop as StopIcon,
+  Refresh as RefreshIcon,
+  Visibility as ViewIcon,
+  Download as DownloadIcon,
+  Upload as UploadIcon,
+  Settings as SettingsIcon,
+  Timeline as TimelineIcon,
+  Person as PersonIcon,
+  LocationOn as LocationIcon,
+  CalendarToday as CalendarIcon,
+  Notifications as NotificationIcon
 } from '@mui/icons-material';
+import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
-import { useDynamicAssetTerms } from '../hooks/useDynamicAssetTerms';
+import { usePermissions } from '../hooks/usePermissions';
 
 export default function MaintenanceWorkflows() {
   const { profile, organization } = useAuth();
-  const { terms, isReady } = useDynamicAssetTerms();
+  const { can } = usePermissions();
+  
   const [workflows, setWorkflows] = useState([]);
+  const [workflowTemplates, setWorkflowTemplates] = useState([]);
+  const [maintenanceTasks, setMaintenanceTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [addDialog, setAddDialog] = useState(false);
-  const [detailDialog, setDetailDialog] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  
+  // Dialog states
+  const [createWorkflowDialog, setCreateWorkflowDialog] = useState(false);
+  const [editWorkflowDialog, setEditWorkflowDialog] = useState(false);
+  const [createTemplateDialog, setCreateTemplateDialog] = useState(false);
+  const [viewWorkflowDialog, setViewWorkflowDialog] = useState(false);
   const [selectedWorkflow, setSelectedWorkflow] = useState(null);
-  const [newWorkflow, setNewWorkflow] = useState({
-    asset_id: '',
-    type: '',
-    priority: 'medium',
-    assigned_to: '',
+  
+  // Form states
+  const [workflowForm, setWorkflowForm] = useState({
+    name: '',
     description: '',
-    due_date: ''
+    category: 'preventive',
+    priority: 'medium',
+    frequency: 'monthly',
+    estimated_duration: 60,
+    assigned_to: '',
+    checklist_items: [],
+    required_parts: [],
+    safety_requirements: [],
+    documentation_required: false
+  });
+  
+  const [templateForm, setTemplateForm] = useState({
+    name: '',
+    description: '',
+    category: 'preventive',
+    checklist_template: [],
+    parts_template: [],
+    safety_template: []
   });
 
   useEffect(() => {
-    // Simulate loading workflow data
-    setTimeout(() => {
-      setWorkflows([
-        {
-          id: 1,
-          asset_id: 'CYL-001',
-          type: 'Scheduled Inspection',
-          status: 'in_progress',
-          priority: 'high',
-          assigned_to: 'John Smith',
-          created_date: '2024-01-10',
-          due_date: '2024-01-15',
-          completion: 60,
-          description: 'Monthly safety inspection',
-          steps: [
-            { id: 1, name: 'Visual Inspection', status: 'completed' },
-            { id: 2, name: 'Pressure Test', status: 'in_progress' },
-            { id: 3, name: 'Documentation', status: 'pending' },
-            { id: 4, name: 'Final Approval', status: 'pending' }
-          ]
-        },
-        {
-          id: 2,
-          asset_id: 'CYL-002',
-          type: 'Repair',
-          status: 'pending',
-          priority: 'medium',
-          assigned_to: 'Jane Doe',
-          created_date: '2024-01-12',
-          due_date: '2024-01-20',
-          completion: 0,
-          description: 'Valve replacement required',
-          steps: [
-            { id: 1, name: 'Diagnosis', status: 'pending' },
-            { id: 2, name: 'Parts Ordering', status: 'pending' },
-            { id: 3, name: 'Repair Work', status: 'pending' },
-            { id: 4, name: 'Quality Check', status: 'pending' }
-          ]
-        },
-        {
-          id: 3,
-          asset_id: 'CYL-003',
-          type: 'Preventive Maintenance',
-          status: 'completed',
-          priority: 'low',
-          assigned_to: 'Mike Johnson',
-          created_date: '2024-01-05',
-          due_date: '2024-01-10',
-          completion: 100,
-          description: 'Regular maintenance cycle',
-          steps: [
-            { id: 1, name: 'Cleaning', status: 'completed' },
-            { id: 2, name: 'Lubrication', status: 'completed' },
-            { id: 3, name: 'Calibration', status: 'completed' },
-            { id: 4, name: 'Documentation', status: 'completed' }
-          ]
-        }
+    if (profile?.organization_id) {
+      fetchData();
+    }
+  }, [profile]);
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      setError('');
+
+      const orgId = profile.organization_id;
+
+      // Fetch workflows, templates, and tasks in parallel
+      const [workflowsResult, templatesResult, tasksResult] = await Promise.all([
+        supabase
+          .from('maintenance_workflows')
+          .select(`
+            *,
+            assigned_user:profiles!maintenance_workflows_assigned_to_fkey(full_name, email),
+            created_user:profiles!maintenance_workflows_created_by_fkey(full_name, email)
+          `)
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: false }),
+        
+        supabase
+          .from('maintenance_templates')
+          .select('*')
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: false }),
+        
+        supabase
+          .from('maintenance_tasks')
+          .select(`
+            *,
+            workflow:maintenance_workflows(name),
+            assigned_user:profiles!maintenance_tasks_assigned_to_fkey(full_name, email),
+            completed_user:profiles!maintenance_tasks_completed_by_fkey(full_name, email)
+          `)
+          .eq('organization_id', orgId)
+          .order('due_date', { ascending: true })
       ]);
+
+      if (workflowsResult.error) throw workflowsResult.error;
+      if (templatesResult.error) throw templatesResult.error;
+      if (tasksResult.error) throw tasksResult.error;
+
+      setWorkflows(workflowsResult.data || []);
+      setWorkflowTemplates(templatesResult.data || []);
+      setMaintenanceTasks(tasksResult.data || []);
+
+    } catch (error) {
+      console.error('Error fetching maintenance data:', error);
+      setError('Failed to load maintenance workflows');
+    } finally {
       setLoading(false);
-    }, 1000);
-  }, []);
+    }
+  };
+
+  const handleCreateWorkflow = async () => {
+    try {
+      setError('');
+      
+      const { data, error } = await supabase
+        .from('maintenance_workflows')
+        .insert({
+          organization_id: profile.organization_id,
+          created_by: profile.id,
+          assigned_to: workflowForm.assigned_to || null,
+          name: workflowForm.name,
+          description: workflowForm.description,
+          category: workflowForm.category,
+          priority: workflowForm.priority,
+          frequency: workflowForm.frequency,
+          estimated_duration: workflowForm.estimated_duration,
+          checklist_items: workflowForm.checklist_items,
+          required_parts: workflowForm.required_parts,
+          safety_requirements: workflowForm.safety_requirements,
+          documentation_required: workflowForm.documentation_required,
+          status: 'draft'
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setSuccess('Workflow created successfully');
+      setCreateWorkflowDialog(false);
+      resetWorkflowForm();
+      fetchData();
+
+    } catch (error) {
+      console.error('Error creating workflow:', error);
+      setError('Failed to create workflow');
+    }
+  };
+
+  const handleCreateTemplate = async () => {
+    try {
+      setError('');
+      
+      const { data, error } = await supabase
+        .from('maintenance_templates')
+        .insert({
+          organization_id: profile.organization_id,
+          name: templateForm.name,
+          description: templateForm.description,
+          category: templateForm.category,
+          checklist_template: templateForm.checklist_template,
+          parts_template: templateForm.parts_template,
+          safety_template: templateForm.safety_template
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setSuccess('Template created successfully');
+      setCreateTemplateDialog(false);
+      resetTemplateForm();
+      fetchData();
+
+    } catch (error) {
+      console.error('Error creating template:', error);
+      setError('Failed to create template');
+    }
+  };
+
+  const handleStartWorkflow = async (workflowId) => {
+    try {
+      setError('');
+      
+      // Update workflow status to active
+      const { error: updateError } = await supabase
+        .from('maintenance_workflows')
+        .update({ 
+          status: 'active',
+          started_at: new Date().toISOString()
+        })
+        .eq('id', workflowId);
+
+      if (updateError) throw updateError;
+
+      // Create maintenance tasks based on workflow
+      const workflow = workflows.find(w => w.id === workflowId);
+      if (workflow) {
+        const tasks = workflow.checklist_items.map((item, index) => ({
+          organization_id: profile.organization_id,
+          workflow_id: workflowId,
+          assigned_to: workflow.assigned_to,
+          name: item.name || `Task ${index + 1}`,
+          description: item.description || '',
+          status: 'pending',
+          priority: workflow.priority,
+          due_date: new Date(Date.now() + (index + 1) * 24 * 60 * 60 * 1000).toISOString()
+        }));
+
+        const { error: tasksError } = await supabase
+          .from('maintenance_tasks')
+          .insert(tasks);
+
+        if (tasksError) throw tasksError;
+      }
+
+      setSuccess('Workflow started successfully');
+      fetchData();
+
+    } catch (error) {
+      console.error('Error starting workflow:', error);
+      setError('Failed to start workflow');
+    }
+  };
+
+  const handleCompleteTask = async (taskId) => {
+    try {
+      setError('');
+      
+      const { error } = await supabase
+        .from('maintenance_tasks')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          completed_by: profile.id
+        })
+        .eq('id', taskId);
+
+      if (error) throw error;
+
+      setSuccess('Task completed successfully');
+      fetchData();
+
+    } catch (error) {
+      console.error('Error completing task:', error);
+      setError('Failed to complete task');
+    }
+  };
+
+  const resetWorkflowForm = () => {
+    setWorkflowForm({
+      name: '',
+      description: '',
+      category: 'preventive',
+      priority: 'medium',
+      frequency: 'monthly',
+      estimated_duration: 60,
+      assigned_to: '',
+      checklist_items: [],
+      required_parts: [],
+      safety_requirements: [],
+      documentation_required: false
+    });
+  };
+
+  const resetTemplateForm = () => {
+    setTemplateForm({
+      name: '',
+      description: '',
+      category: 'preventive',
+      checklist_template: [],
+      parts_template: [],
+      safety_template: []
+    });
+  };
 
   const getStatusColor = (status) => {
     switch (status) {
       case 'completed': return 'success';
-      case 'in_progress': return 'info';
+      case 'active': return 'primary';
       case 'pending': return 'warning';
       case 'overdue': return 'error';
+      case 'draft': return 'default';
       default: return 'default';
     }
   };
@@ -142,69 +325,84 @@ export default function MaintenanceWorkflows() {
     }
   };
 
-  const handleAddWorkflow = () => {
-    const newId = Math.max(...workflows.map(w => w.id), 0) + 1;
-    setWorkflows([...workflows, {
-      ...newWorkflow,
-      id: newId,
-      status: 'pending',
-      created_date: new Date().toISOString().split('T')[0],
-      completion: 0,
-      steps: [
-        { id: 1, name: 'Initial Assessment', status: 'pending' },
-        { id: 2, name: 'Work Execution', status: 'pending' },
-        { id: 3, name: 'Quality Check', status: 'pending' },
-        { id: 4, name: 'Final Documentation', status: 'pending' }
-      ]
-    }]);
-    setNewWorkflow({
-      asset_id: '',
-      type: '',
-      priority: 'medium',
-      assigned_to: '',
-      description: '',
-      due_date: ''
-    });
-    setAddDialog(false);
-  };
-
-  const assetName = isReady ? terms.asset : 'Asset';
-  const assetsName = isReady ? terms.assets : 'Assets';
-
   if (loading) {
     return (
-      <Box p={3}>
-        <Typography variant="h4" gutterBottom>
-          Maintenance Workflows
-        </Typography>
-        <Typography>Loading workflow data...</Typography>
-      </Box>
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+          <CircularProgress />
+        </Box>
+      </Container>
     );
   }
 
-  const pendingCount = workflows.filter(w => w.status === 'pending').length;
-  const inProgressCount = workflows.filter(w => w.status === 'in_progress').length;
-  const completedCount = workflows.filter(w => w.status === 'completed').length;
-
   return (
-    <Box p={3}>
-      <Typography variant="h4" gutterBottom>
-        Maintenance Workflows
-      </Typography>
-      <Typography variant="body1" color="text.secondary" mb={3}>
-        Manage maintenance tasks and workflows for your {assetsName.toLowerCase()}
-      </Typography>
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      {/* Header */}
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+        <Box>
+          <Typography variant="h4" gutterBottom>
+            Maintenance Workflows
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Manage preventive and corrective maintenance processes
+          </Typography>
+        </Box>
+        <Box>
+          <Button
+            variant="outlined"
+            startIcon={<AddIcon />}
+            onClick={() => setCreateTemplateDialog(true)}
+            sx={{ mr: 2 }}
+          >
+            New Template
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => setCreateWorkflowDialog(true)}
+          >
+            New Workflow
+          </Button>
+        </Box>
+      </Box>
 
-      {/* Workflow Overview Cards */}
-      <Grid container spacing={3} mb={4}>
-        <Grid item xs={12} md={3}>
+      {/* Alerts */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
+          {error}
+        </Alert>
+      )}
+      {success && (
+        <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess('')}>
+          {success}
+        </Alert>
+      )}
+
+      {/* Statistics Cards */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Box display="flex" alignItems="center" gap={2}>
-                <ScheduleIcon color="warning" fontSize="large" />
+              <Box display="flex" alignItems="center">
+                <BuildIcon color="primary" sx={{ mr: 2 }} />
                 <Box>
-                  <Typography variant="h4" color="warning.main">
-                    {pendingCount}
+                  <Typography variant="h6">{workflows.length}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Total Workflows
+                  </Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center">
+                <ScheduleIcon color="warning" sx={{ mr: 2 }} />
+                <Box>
+                  <Typography variant="h6">
+                    {maintenanceTasks.filter(t => t.status === 'pending').length}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Pending Tasks
@@ -214,50 +412,32 @@ export default function MaintenanceWorkflows() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Box display="flex" alignItems="center" gap={2}>
-                <BuildIcon color="info" fontSize="large" />
+              <Box display="flex" alignItems="center">
+                <CheckCircleIcon color="success" sx={{ mr: 2 }} />
                 <Box>
-                  <Typography variant="h4" color="info.main">
-                    {inProgressCount}
+                  <Typography variant="h6">
+                    {maintenanceTasks.filter(t => t.status === 'completed').length}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    In Progress
+                    Completed Tasks
                   </Typography>
                 </Box>
               </Box>
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Box display="flex" alignItems="center" gap={2}>
-                <CompleteIcon color="success" fontSize="large" />
+              <Box display="flex" alignItems="center">
+                <AssignmentIcon color="info" sx={{ mr: 2 }} />
                 <Box>
-                  <Typography variant="h4" color="success.main">
-                    {completedCount}
-                  </Typography>
+                  <Typography variant="h6">{workflowTemplates.length}</Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Completed
-                  </Typography>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" gap={2}>
-                <Box>
-                  <Typography variant="h4">
-                    {workflows.length}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Total Workflows
+                    Templates
                   </Typography>
                 </Box>
               </Box>
@@ -266,214 +446,424 @@ export default function MaintenanceWorkflows() {
         </Grid>
       </Grid>
 
-      {/* Action Buttons */}
-      <Box display="flex" gap={2} mb={3}>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => setAddDialog(true)}
-        >
-          Create Workflow
-        </Button>
-        <Button
-          variant="outlined"
-          startIcon={<ScheduleIcon />}
-        >
-          Schedule Maintenance
-        </Button>
-      </Box>
-
       {/* Workflows Table */}
-      <Paper>
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>{assetName} ID</TableCell>
-                <TableCell>Type</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Priority</TableCell>
-                <TableCell>Assigned To</TableCell>
-                <TableCell>Due Date</TableCell>
-                <TableCell>Progress</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {workflows.map((workflow) => (
-                <TableRow key={workflow.id}>
-                  <TableCell>{workflow.asset_id}</TableCell>
-                  <TableCell>{workflow.type}</TableCell>
-                  <TableCell>
-                    <Chip
-                      label={workflow.status.replace('_', ' ')}
-                      color={getStatusColor(workflow.status)}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={workflow.priority}
-                      color={getPriorityColor(workflow.priority)}
-                      size="small"
-                      variant="outlined"
-                    />
-                  </TableCell>
-                  <TableCell>{workflow.assigned_to}</TableCell>
-                  <TableCell>{workflow.due_date}</TableCell>
-                  <TableCell>
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <LinearProgress
-                        variant="determinate"
-                        value={workflow.completion}
-                        sx={{ width: 60, height: 6 }}
-                      />
-                      <Typography variant="caption">
-                        {workflow.completion}%
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <IconButton 
-                      size="small"
-                      onClick={() => {
-                        setSelectedWorkflow(workflow);
-                        setDetailDialog(true);
-                      }}
-                    >
-                      <EditIcon />
-                    </IconButton>
-                    <IconButton size="small" color="error">
-                      <DeleteIcon />
-                    </IconButton>
-                  </TableCell>
+      <Paper sx={{ mb: 4 }}>
+        <Box p={3}>
+          <Typography variant="h6" gutterBottom>
+            Active Workflows
+          </Typography>
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Name</TableCell>
+                  <TableCell>Category</TableCell>
+                  <TableCell>Priority</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Assigned To</TableCell>
+                  <TableCell>Due Date</TableCell>
+                  <TableCell>Actions</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+              </TableHead>
+              <TableBody>
+                {workflows.map((workflow) => (
+                  <TableRow key={workflow.id}>
+                    <TableCell>
+                      <Box>
+                        <Typography variant="subtitle2">{workflow.name}</Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {workflow.description}
+                        </Typography>
+                      </Box>
+                    </TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={workflow.category} 
+                        size="small" 
+                        variant="outlined"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={workflow.priority} 
+                        size="small" 
+                        color={getPriorityColor(workflow.priority)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={workflow.status} 
+                        size="small" 
+                        color={getStatusColor(workflow.status)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      {workflow.assigned_user?.full_name || 'Unassigned'}
+                    </TableCell>
+                    <TableCell>
+                      {workflow.due_date ? new Date(workflow.due_date).toLocaleDateString() : '-'}
+                    </TableCell>
+                    <TableCell>
+                      <Box display="flex" gap={1}>
+                        <Tooltip title="View Details">
+                          <IconButton 
+                            size="small"
+                            onClick={() => {
+                              setSelectedWorkflow(workflow);
+                              setViewWorkflowDialog(true);
+                            }}
+                          >
+                            <ViewIcon />
+                          </IconButton>
+                        </Tooltip>
+                        {workflow.status === 'draft' && (
+                          <Tooltip title="Start Workflow">
+                            <IconButton 
+                              size="small"
+                              onClick={() => handleStartWorkflow(workflow.id)}
+                            >
+                              <PlayIcon />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        <Tooltip title="Edit">
+                          <IconButton 
+                            size="small"
+                            onClick={() => {
+                              setSelectedWorkflow(workflow);
+                              setEditWorkflowDialog(true);
+                            }}
+                          >
+                            <EditIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
       </Paper>
 
-      {/* Add Workflow Dialog */}
-      <Dialog open={addDialog} onClose={() => setAddDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Create Maintenance Workflow</DialogTitle>
+      {/* Maintenance Tasks */}
+      <Paper sx={{ mb: 4 }}>
+        <Box p={3}>
+          <Typography variant="h6" gutterBottom>
+            Maintenance Tasks
+          </Typography>
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Task</TableCell>
+                  <TableCell>Workflow</TableCell>
+                  <TableCell>Priority</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Assigned To</TableCell>
+                  <TableCell>Due Date</TableCell>
+                  <TableCell>Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {maintenanceTasks.map((task) => (
+                  <TableRow key={task.id}>
+                    <TableCell>
+                      <Box>
+                        <Typography variant="subtitle2">{task.name}</Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {task.description}
+                        </Typography>
+                      </Box>
+                    </TableCell>
+                    <TableCell>
+                      {task.workflow?.name || '-'}
+                    </TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={task.priority} 
+                        size="small" 
+                        color={getPriorityColor(task.priority)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={task.status} 
+                        size="small" 
+                        color={getStatusColor(task.status)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      {task.assigned_user?.full_name || 'Unassigned'}
+                    </TableCell>
+                    <TableCell>
+                      {task.due_date ? new Date(task.due_date).toLocaleDateString() : '-'}
+                    </TableCell>
+                    <TableCell>
+                      {task.status === 'pending' && (
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="success"
+                          onClick={() => handleCompleteTask(task.id)}
+                        >
+                          Complete
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+      </Paper>
+
+      {/* Create Workflow Dialog */}
+      <Dialog 
+        open={createWorkflowDialog} 
+        onClose={() => setCreateWorkflowDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Create New Maintenance Workflow</DialogTitle>
         <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label={`${assetName} ID`}
-                value={newWorkflow.asset_id}
-                onChange={(e) => setNewWorkflow({ ...newWorkflow, asset_id: e.target.value })}
-              />
+          <Box sx={{ pt: 2 }}>
+            <Grid container spacing={3}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Workflow Name"
+                  value={workflowForm.name}
+                  onChange={(e) => setWorkflowForm({ ...workflowForm, name: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={3}
+                  label="Description"
+                  value={workflowForm.description}
+                  onChange={(e) => setWorkflowForm({ ...workflowForm, description: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Category</InputLabel>
+                  <Select
+                    value={workflowForm.category}
+                    onChange={(e) => setWorkflowForm({ ...workflowForm, category: e.target.value })}
+                  >
+                    <MenuItem value="preventive">Preventive</MenuItem>
+                    <MenuItem value="corrective">Corrective</MenuItem>
+                    <MenuItem value="predictive">Predictive</MenuItem>
+                    <MenuItem value="emergency">Emergency</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Priority</InputLabel>
+                  <Select
+                    value={workflowForm.priority}
+                    onChange={(e) => setWorkflowForm({ ...workflowForm, priority: e.target.value })}
+                  >
+                    <MenuItem value="low">Low</MenuItem>
+                    <MenuItem value="medium">Medium</MenuItem>
+                    <MenuItem value="high">High</MenuItem>
+                    <MenuItem value="critical">Critical</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Frequency</InputLabel>
+                  <Select
+                    value={workflowForm.frequency}
+                    onChange={(e) => setWorkflowForm({ ...workflowForm, frequency: e.target.value })}
+                  >
+                    <MenuItem value="daily">Daily</MenuItem>
+                    <MenuItem value="weekly">Weekly</MenuItem>
+                    <MenuItem value="monthly">Monthly</MenuItem>
+                    <MenuItem value="quarterly">Quarterly</MenuItem>
+                    <MenuItem value="annually">Annually</MenuItem>
+                    <MenuItem value="as_needed">As Needed</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Estimated Duration (minutes)"
+                  type="number"
+                  value={workflowForm.estimated_duration}
+                  onChange={(e) => setWorkflowForm({ ...workflowForm, estimated_duration: parseInt(e.target.value) || 0 })}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={workflowForm.documentation_required}
+                      onChange={(e) => setWorkflowForm({ ...workflowForm, documentation_required: e.target.checked })}
+                    />
+                  }
+                  label="Documentation Required"
+                />
+              </Grid>
             </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Maintenance Type</InputLabel>
-                <Select
-                  value={newWorkflow.type}
-                  onChange={(e) => setNewWorkflow({ ...newWorkflow, type: e.target.value })}
-                  label="Maintenance Type"
-                >
-                  <MenuItem value="Scheduled Inspection">Scheduled Inspection</MenuItem>
-                  <MenuItem value="Preventive Maintenance">Preventive Maintenance</MenuItem>
-                  <MenuItem value="Repair">Repair</MenuItem>
-                  <MenuItem value="Emergency Maintenance">Emergency Maintenance</MenuItem>
-                  <MenuItem value="Calibration">Calibration</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Priority</InputLabel>
-                <Select
-                  value={newWorkflow.priority}
-                  onChange={(e) => setNewWorkflow({ ...newWorkflow, priority: e.target.value })}
-                  label="Priority"
-                >
-                  <MenuItem value="low">Low</MenuItem>
-                  <MenuItem value="medium">Medium</MenuItem>
-                  <MenuItem value="high">High</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Assigned To"
-                value={newWorkflow.assigned_to}
-                onChange={(e) => setNewWorkflow({ ...newWorkflow, assigned_to: e.target.value })}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                type="date"
-                label="Due Date"
-                value={newWorkflow.due_date}
-                onChange={(e) => setNewWorkflow({ ...newWorkflow, due_date: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                multiline
-                rows={3}
-                label="Description"
-                value={newWorkflow.description}
-                onChange={(e) => setNewWorkflow({ ...newWorkflow, description: e.target.value })}
-              />
-            </Grid>
-          </Grid>
+          </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setAddDialog(false)}>Cancel</Button>
-          <Button onClick={handleAddWorkflow} variant="contained">
-            Create Workflow
-          </Button>
+          <Button onClick={() => setCreateWorkflowDialog(false)}>Cancel</Button>
+          <Button onClick={handleCreateWorkflow} variant="contained">Create</Button>
         </DialogActions>
       </Dialog>
 
-      {/* Workflow Detail Dialog */}
-      <Dialog open={detailDialog} onClose={() => setDetailDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>
-          Workflow Details - {selectedWorkflow?.asset_id}
-        </DialogTitle>
+      {/* Create Template Dialog */}
+      <Dialog 
+        open={createTemplateDialog} 
+        onClose={() => setCreateTemplateDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Create New Maintenance Template</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Grid container spacing={3}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Template Name"
+                  value={templateForm.name}
+                  onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={3}
+                  label="Description"
+                  value={templateForm.description}
+                  onChange={(e) => setTemplateForm({ ...templateForm, description: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <InputLabel>Category</InputLabel>
+                  <Select
+                    value={templateForm.category}
+                    onChange={(e) => setTemplateForm({ ...templateForm, category: e.target.value })}
+                  >
+                    <MenuItem value="preventive">Preventive</MenuItem>
+                    <MenuItem value="corrective">Corrective</MenuItem>
+                    <MenuItem value="predictive">Predictive</MenuItem>
+                    <MenuItem value="emergency">Emergency</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCreateTemplateDialog(false)}>Cancel</Button>
+          <Button onClick={handleCreateTemplate} variant="contained">Create</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* View Workflow Dialog */}
+      <Dialog 
+        open={viewWorkflowDialog} 
+        onClose={() => setViewWorkflowDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Workflow Details</DialogTitle>
         <DialogContent>
           {selectedWorkflow && (
-            <Box>
+            <Box sx={{ pt: 2 }}>
               <Typography variant="h6" gutterBottom>
-                {selectedWorkflow.type}
+                {selectedWorkflow.name}
               </Typography>
-              <Typography variant="body2" color="text.secondary" mb={3}>
+              <Typography variant="body1" color="text.secondary" paragraph>
                 {selectedWorkflow.description}
               </Typography>
               
-              <Stepper orientation="vertical">
-                {selectedWorkflow.steps.map((step) => (
-                  <Step key={step.id} active={step.status !== 'pending'} completed={step.status === 'completed'}>
-                    <StepLabel>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        <Typography>{step.name}</Typography>
-                        <Chip 
-                          label={step.status} 
-                          size="small" 
-                          color={getStatusColor(step.status)} 
+              <Grid container spacing={2} sx={{ mb: 3 }}>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2">Category</Typography>
+                  <Chip label={selectedWorkflow.category} size="small" />
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2">Priority</Typography>
+                  <Chip 
+                    label={selectedWorkflow.priority} 
+                    size="small" 
+                    color={getPriorityColor(selectedWorkflow.priority)}
+                  />
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2">Status</Typography>
+                  <Chip 
+                    label={selectedWorkflow.status} 
+                    size="small" 
+                    color={getStatusColor(selectedWorkflow.status)}
+                  />
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2">Frequency</Typography>
+                  <Typography variant="body2">{selectedWorkflow.frequency}</Typography>
+                </Grid>
+              </Grid>
+
+              {selectedWorkflow.checklist_items && selectedWorkflow.checklist_items.length > 0 && (
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="h6" gutterBottom>
+                    Checklist Items
+                  </Typography>
+                  <List>
+                    {selectedWorkflow.checklist_items.map((item, index) => (
+                      <ListItem key={index}>
+                        <ListItemIcon>
+                          <CheckCircleIcon color="action" />
+                        </ListItemIcon>
+                        <ListItemText 
+                          primary={item.name || `Item ${index + 1}`}
+                          secondary={item.description}
                         />
-                      </Box>
-                    </StepLabel>
-                  </Step>
-                ))}
-              </Stepper>
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              )}
+
+              {selectedWorkflow.safety_requirements && selectedWorkflow.safety_requirements.length > 0 && (
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="h6" gutterBottom>
+                    Safety Requirements
+                  </Typography>
+                  <List>
+                    {selectedWorkflow.safety_requirements.map((requirement, index) => (
+                      <ListItem key={index}>
+                        <ListItemIcon>
+                          <WarningIcon color="warning" />
+                        </ListItemIcon>
+                        <ListItemText primary={requirement} />
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              )}
             </Box>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDetailDialog(false)}>Close</Button>
-          <Button variant="contained">Update Progress</Button>
+          <Button onClick={() => setViewWorkflowDialog(false)}>Close</Button>
         </DialogActions>
       </Dialog>
-    </Box>
+    </Container>
   );
 }

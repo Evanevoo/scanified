@@ -408,6 +408,7 @@ export default function CustomerDetail() {
       .trim();
     const updateFields = {
       name: editForm.name,
+      email: editForm.email,
       phone: editForm.phone,
       contact_details: editForm.contact_details,
       address: editForm.address,
@@ -516,6 +517,29 @@ export default function CustomerDetail() {
             ) : (
               <Typography variant="body1" fontFamily="monospace" sx={{ mb: 2 }}>
                 {customer.barcode || <em style={{ color: '#888' }}>No barcode set</em>}
+              </Typography>
+            )}
+            <Typography variant="body2" color="text.secondary">Email</Typography>
+            {editing ? (
+              <TextField 
+                name="email" 
+                value={editForm.email || ''} 
+                onChange={handleEditChange} 
+                size="small" 
+                label="Email" 
+                type="email"
+                sx={{ mb: 2, minWidth: 200 }} 
+                placeholder="customer@example.com"
+              />
+            ) : (
+              <Typography variant="body1" sx={{ mb: 2 }}>
+                {customer.email ? (
+                  <a href={`mailto:${customer.email}`} style={{ color: '#1976d2', textDecoration: 'none' }}>
+                    {customer.email}
+                  </a>
+                ) : (
+                  <em style={{ color: '#888' }}>Not provided</em>
+                )}
               </Typography>
             )}
             <Typography variant="body2" color="text.secondary">Phone</Typography>
