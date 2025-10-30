@@ -432,12 +432,13 @@ export default function ImportApprovals() {
         await Promise.all([
           fetchData(),
           fetchCustomers(),
-          fetchScannedCounts()
+          fetchScannedCounts(),
+          fetchCylinders(),  // Load product code to group mapping
+          fetchBottles()     // Load product code to asset info mapping
         ]);
         
         // Load secondary data in background
         Promise.all([
-          fetchCylinders(),
           fetchAllScanned(),
           fetchScannedOrders(),
           fetchGasTypes(),
@@ -993,10 +994,13 @@ export default function ImportApprovals() {
 
   // Fetch all cylinders for group lookup
   async function fetchCylinders() {
-    const { data: cylinders } = await supabase.from('bottles').select('product_code, group_name');
+    const { data: cylinders } = await supabase.from('bottles').select('product_code, gas_type, size');
     const map = {};
     (cylinders || []).forEach(c => {
-      if (c.product_code) map[c.product_code.trim()] = c.group_name || '';
+      if (c.product_code) {
+        // Use gas_type as the group name, or combine gas_type and size
+        map[c.product_code.trim()] = c.gas_type || '';
+      }
     });
     setProductCodeToGroup(map);
   }
@@ -1247,10 +1251,10 @@ export default function ImportApprovals() {
         if (bottle.product_code) {
           assetMap[bottle.product_code] = {
             description: bottle.description || '',
-            type: bottle.type || '',
+            type: bottle.gas_type || bottle.type || '',  // Use gas_type as type
             size: bottle.size || '',
-            group: bottle.group_name || '',
-            category: bottle.category || '' // ADD THIS!
+            group: bottle.gas_type || '',  // Use gas_type as group
+            category: bottle.size || ''    // Use size as category
           };
         }
       });
