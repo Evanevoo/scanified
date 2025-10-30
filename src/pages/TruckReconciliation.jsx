@@ -2,354 +2,462 @@ import React, { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
-  Paper,
   Grid,
   Button,
-  Card,
-  CardContent,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Chip,
+  TextField,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  IconButton,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  Chip,
   Alert,
-  Tabs,
-  Tab
+  Card,
+  CardContent,
+  IconButton,
+  Tooltip,
+  LinearProgress,
+  Stepper,
+  Step,
+  StepLabel,
+  StepContent
 } from '@mui/material';
 import {
   LocalShipping as TruckIcon,
-  CheckCircle as CheckIcon,
+  Assignment as ManifestIcon,
+  CheckCircle as CompleteIcon,
   Warning as WarningIcon,
-  Error as ErrorIcon,
+  Edit as EditIcon,
+  Visibility as ViewIcon,
   Add as AddIcon,
-  FileDownload as DownloadIcon,
-  Sync as SyncIcon,
-  Visibility as ViewIcon
+  Print as PrintIcon,
+  CloudDownload as ExportIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
-import { useDynamicAssetTerms } from '../hooks/useDynamicAssetTerms';
+import { TruckReconciliationService } from '../services/truckReconciliationService';
+import { 
+  PageHeader, 
+  StyledCard, 
+  StatusChip,
+  InfoCard,
+  GridContainer,
+  PrimaryButton,
+  SecondaryButton,
+  StyledTableContainer,
+  EmptyState,
+  LoadingCard
+} from '../components/ui/StyledComponents';
+import logger from '../utils/logger';
 
 export default function TruckReconciliation() {
   const { profile, organization } = useAuth();
-  const { terms, isReady } = useDynamicAssetTerms();
-  const [activeTab, setActiveTab] = useState(0);
-  const [reconciliations, setReconciliations] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [newReconciliation, setNewReconciliation] = useState({
-    truck_id: '',
-    driver: '',
-    route: '',
-    expected_assets: 0,
-    actual_assets: 0
+  const [manifests, setManifests] = useState([]);
+  const [selectedManifest, setSelectedManifest] = useState(null);
+  const [reconciliationDialog, setReconciliationDialog] = useState(false);
+  const [activeStep, setActiveStep] = useState(0);
+  const [actualCounts, setActualCounts] = useState({
+    out: 0,
+    in: 0,
+    exchange: 0
+  });
+  const [notes, setNotes] = useState('');
+  const [stats, setStats] = useState({
+    totalManifests: 0,
+    pendingReconciliation: 0,
+    completedToday: 0,
+    accuracyRate: 0
   });
 
   useEffect(() => {
-    // Simulate loading reconciliation data
-    setTimeout(() => {
-      setReconciliations([
-        {
-          id: 1,
-          truck_id: 'TRUCK-001',
-          driver: 'John Smith',
-          route: 'Route A - Downtown',
-          date: '2024-01-15',
-          status: 'completed',
-          expected_assets: 25,
-          actual_assets: 25,
-          discrepancies: 0,
-          items: [
-            { asset_id: 'CYL-001', expected: 'loaded', actual: 'loaded', status: 'match' },
-            { asset_id: 'CYL-002', expected: 'loaded', actual: 'loaded', status: 'match' },
-            { asset_id: 'CYL-003', expected: 'delivered', actual: 'delivered', status: 'match' }
-          ]
-        },
-        {
-          id: 2,
-          truck_id: 'TRUCK-002',
-          driver: 'Jane Doe',
-          route: 'Route B - Industrial',
-          date: '2024-01-15',
-          status: 'discrepancy',
-          expected_assets: 30,
-          actual_assets: 28,
-          discrepancies: 2,
-          items: [
-            { asset_id: 'CYL-010', expected: 'loaded', actual: 'missing', status: 'missing' },
-            { asset_id: 'CYL-011', expected: 'delivered', actual: 'loaded', status: 'not_delivered' },
-            { asset_id: 'CYL-012', expected: 'loaded', actual: 'loaded', status: 'match' }
-          ]
-        },
-        {
-          id: 3,
-          truck_id: 'TRUCK-003',
-          driver: 'Mike Johnson',
-          route: 'Route C - Suburbs',
-          date: '2024-01-15',
-          status: 'pending',
-          expected_assets: 20,
-          actual_assets: null,
-          discrepancies: null,
-          items: []
-        }
-      ]);
+    if (profile?.organization_id) {
+      loadData();
+    }
+  }, [profile?.organization_id]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      
+      // Load manifests
+      const manifestsData = await TruckReconciliationService.getDeliveryManifests(
+        profile.organization_id,
+        { status: 'all' }
+      );
+      setManifests(manifestsData || []);
+
+      // Calculate stats
+      const today = new Date().toISOString().split('T')[0];
+      const pendingCount = manifestsData?.filter(m => m.status === 'pending').length || 0;
+      const completedToday = manifestsData?.filter(m => 
+        m.status === 'completed' && 
+        m.updated_at?.startsWith(today)
+      ).length || 0;
+
+      // Calculate accuracy rate
+      const completed = manifestsData?.filter(m => m.reconciliation) || [];
+      const accuracySum = completed.reduce((sum, m) => {
+        const expected = m.expected_out + m.expected_in;
+        const actual = m.reconciliation?.actual_out + m.reconciliation?.actual_in;
+        return sum + (expected > 0 ? (actual / expected) * 100 : 100);
+      }, 0);
+      const accuracyRate = completed.length > 0 ? (accuracySum / completed.length).toFixed(1) : 100;
+
+      setStats({
+        totalManifests: manifestsData?.length || 0,
+        pendingReconciliation: pendingCount,
+        completedToday,
+        accuracyRate
+      });
+
+    } catch (error) {
+      logger.error('Error loading truck reconciliation data:', error);
+    } finally {
       setLoading(false);
-    }, 1000);
-  }, []);
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'completed': return 'success';
-      case 'discrepancy': return 'error';
-      case 'pending': return 'warning';
-      case 'in_progress': return 'info';
-      default: return 'default';
     }
   };
 
-  const getItemStatusColor = (status) => {
-    switch (status) {
-      case 'match': return 'success';
-      case 'missing': return 'error';
-      case 'not_delivered': return 'warning';
-      case 'extra': return 'info';
-      default: return 'default';
+  const handleStartReconciliation = async (manifest) => {
+    try {
+      setSelectedManifest(manifest);
+      setActualCounts({
+        out: manifest.expected_out || 0,
+        in: manifest.expected_in || 0,
+        exchange: manifest.expected_exchange || 0
+      });
+      setNotes('');
+      setActiveStep(0);
+      setReconciliationDialog(true);
+    } catch (error) {
+      logger.error('Error starting reconciliation:', error);
     }
   };
 
-  const assetName = isReady ? terms.asset : 'Asset';
-  const assetsName = isReady ? terms.assets : 'Assets';
+  const handleCompleteReconciliation = async () => {
+    try {
+      // Start reconciliation first
+      const reconciliation = await TruckReconciliationService.startTruckReconciliation(
+        selectedManifest.id,
+        profile.id
+      );
+
+      // Complete it with actual counts
+      await TruckReconciliationService.completeTruckReconciliation(
+        reconciliation.id,
+        actualCounts,
+        notes
+      );
+
+      setReconciliationDialog(false);
+      loadData();
+      
+    } catch (error) {
+      logger.error('Error completing reconciliation:', error);
+      alert('Failed to complete reconciliation: ' + error.message);
+    }
+  };
+
+  const handleViewReconciliation = async (manifest) => {
+    try {
+      const report = await TruckReconciliationService.generateReconciliationReport(
+        manifest.reconciliation.id
+      );
+      
+      // Show report in a new dialog or navigate to report page
+      logger.log('Reconciliation report:', report);
+      alert('Reconciliation report generated. See console for details.');
+      
+    } catch (error) {
+      logger.error('Error viewing reconciliation:', error);
+    }
+  };
+
+  const steps = [
+    'Verify Expected Counts',
+    'Enter Actual Counts',
+    'Review Discrepancies',
+    'Complete Reconciliation'
+  ];
 
   if (loading) {
-    return (
-      <Box p={3}>
-        <Typography variant="h4" gutterBottom>
-          Truck Reconciliation
-        </Typography>
-        <Typography>Loading reconciliation data...</Typography>
-      </Box>
-    );
+    return <LoadingCard message="Loading truck reconciliation data..." />;
   }
 
-  const completedCount = reconciliations.filter(r => r.status === 'completed').length;
-  const discrepancyCount = reconciliations.filter(r => r.status === 'discrepancy').length;
-  const pendingCount = reconciliations.filter(r => r.status === 'pending').length;
-
   return (
-    <Box p={3}>
-      <Typography variant="h4" gutterBottom>
-        Truck Reconciliation
-      </Typography>
-      <Typography variant="body1" color="text.secondary" mb={3}>
-        Track and reconcile {assetsName.toLowerCase()} on delivery trucks
-      </Typography>
+    <Box sx={{ p: 3 }}>
+      <PageHeader
+        title="Truck Reconciliation"
+        subtitle="Manage delivery manifests and reconcile truck inventory"
+        actions={[
+          <SecondaryButton
+            startIcon={<ExportIcon />}
+            onClick={() => logger.log('Export data')}
+          >
+            Export
+          </SecondaryButton>,
+          <PrimaryButton
+            startIcon={<AddIcon />}
+            onClick={() => logger.log('Create manifest')}
+          >
+            Create Manifest
+          </PrimaryButton>
+        ]}
+      />
 
-      {/* Overview Cards */}
-      <Grid container spacing={3} mb={4}>
-        <Grid item xs={12} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" gap={2}>
-                <CheckIcon color="success" fontSize="large" />
-                <Box>
-                  <Typography variant="h4" color="success.main">
-                    {completedCount}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Completed
-                  </Typography>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" gap={2}>
-                <ErrorIcon color="error" fontSize="large" />
-                <Box>
-                  <Typography variant="h4" color="error.main">
-                    {discrepancyCount}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Discrepancies
-                  </Typography>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" gap={2}>
-                <WarningIcon color="warning" fontSize="large" />
-                <Box>
-                  <Typography variant="h4" color="warning.main">
-                    {pendingCount}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Pending
-                  </Typography>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" gap={2}>
-                <TruckIcon color="primary" fontSize="large" />
-                <Box>
-                  <Typography variant="h4">
-                    {reconciliations.length}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Total Trucks
-                  </Typography>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      {/* Statistics Cards */}
+      <GridContainer columns={4} sx={{ mb: 3 }}>
+        <InfoCard
+          title="Total Manifests"
+          value={stats.totalManifests}
+          icon={<ManifestIcon />}
+          color="primary"
+        />
+        <InfoCard
+          title="Pending Reconciliation"
+          value={stats.pendingReconciliation}
+          icon={<WarningIcon />}
+          color="warning"
+        />
+        <InfoCard
+          title="Completed Today"
+          value={stats.completedToday}
+          icon={<CompleteIcon />}
+          color="success"
+        />
+        <InfoCard
+          title="Accuracy Rate"
+          value={`${stats.accuracyRate}%`}
+          icon={<TruckIcon />}
+          color="info"
+        />
+      </GridContainer>
 
-      {/* Action Buttons */}
-      <Box display="flex" gap={2} mb={3}>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-        >
-          Start Reconciliation
-        </Button>
-        <Button
-          variant="outlined"
-          startIcon={<SyncIcon />}
-        >
-          Sync Data
-        </Button>
-        <Button
-          variant="outlined"
-          startIcon={<DownloadIcon />}
-        >
-          Export Report
-        </Button>
-      </Box>
+      {/* Manifests Table */}
+      <StyledCard>
+        <Typography variant="h6" sx={{ mb: 2 }}>
+          Delivery Manifests
+        </Typography>
 
-      {/* Discrepancy Alert */}
-      {discrepancyCount > 0 && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            Discrepancies Found
-          </Typography>
-          {discrepancyCount} truck(s) have discrepancies that require attention.
-        </Alert>
-      )}
-
-      {/* Tabs */}
-      <Paper sx={{ mb: 3 }}>
-        <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)}>
-          <Tab label="Today's Reconciliations" />
-          <Tab label="Historical Data" />
-          <Tab label="Discrepancy Reports" />
-        </Tabs>
-      </Paper>
-
-      {/* Reconciliation Table */}
-      <Paper>
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Truck ID</TableCell>
-                <TableCell>Driver</TableCell>
-                <TableCell>Route</TableCell>
-                <TableCell>Date</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Expected</TableCell>
-                <TableCell>Actual</TableCell>
-                <TableCell>Discrepancies</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {reconciliations.map((reconciliation) => (
-                <TableRow key={reconciliation.id}>
-                  <TableCell>{reconciliation.truck_id}</TableCell>
-                  <TableCell>{reconciliation.driver}</TableCell>
-                  <TableCell>{reconciliation.route}</TableCell>
-                  <TableCell>{reconciliation.date}</TableCell>
-                  <TableCell>
-                    <Chip
-                      label={reconciliation.status.replace('_', ' ')}
-                      color={getStatusColor(reconciliation.status)}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>{reconciliation.expected_assets}</TableCell>
-                  <TableCell>{reconciliation.actual_assets || '-'}</TableCell>
-                  <TableCell>
-                    {reconciliation.discrepancies !== null && reconciliation.discrepancies > 0 ? (
-                      <Chip
-                        label={reconciliation.discrepancies}
-                        color="error"
-                        size="small"
-                      />
-                    ) : reconciliation.discrepancies === 0 ? (
-                      <Chip
-                        label="0"
-                        color="success"
-                        size="small"
-                      />
-                    ) : '-'}
-                  </TableCell>
-                  <TableCell>
-                    <IconButton size="small">
-                      <ViewIcon />
-                    </IconButton>
-                  </TableCell>
+        {manifests.length === 0 ? (
+          <EmptyState
+            icon={<ManifestIcon sx={{ fontSize: 48 }} />}
+            title="No manifests found"
+            subtitle="Create your first delivery manifest to get started"
+            action={
+              <PrimaryButton onClick={() => logger.log('Create manifest')}>
+                Create Manifest
+              </PrimaryButton>
+            }
+          />
+        ) : (
+          <StyledTableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Manifest #</TableCell>
+                  <TableCell>Driver</TableCell>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Expected Out/In</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Actions</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+              </TableHead>
+              <TableBody>
+                {manifests.map((manifest) => (
+                  <TableRow key={manifest.id}>
+                    <TableCell>{manifest.manifest_number}</TableCell>
+                    <TableCell>{manifest.driver?.full_name || 'N/A'}</TableCell>
+                    <TableCell>
+                      {new Date(manifest.manifest_date).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>
+                      {manifest.expected_out} / {manifest.expected_in}
+                    </TableCell>
+                    <TableCell>
+                      <StatusChip status={manifest.status} />
+                    </TableCell>
+                    <TableCell>
+                      {manifest.status === 'pending' ? (
+                        <PrimaryButton
+                          size="small"
+                          onClick={() => handleStartReconciliation(manifest)}
+                        >
+                          Reconcile
+                        </PrimaryButton>
+                      ) : (
+                        <SecondaryButton
+                          size="small"
+                          startIcon={<ViewIcon />}
+                          onClick={() => handleViewReconciliation(manifest)}
+                        >
+                          View
+                        </SecondaryButton>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </StyledTableContainer>
+        )}
+      </StyledCard>
 
-      {/* Tab Content */}
-      {activeTab === 1 && (
-        <Box mt={3}>
-          <Typography variant="h6" gutterBottom>
-            Historical Reconciliation Data
-          </Typography>
-          <Typography color="text.secondary">
-            View reconciliation history and trends over time.
-          </Typography>
-        </Box>
-      )}
+      {/* Reconciliation Dialog */}
+      <Dialog
+        open={reconciliationDialog}
+        onClose={() => setReconciliationDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          Truck Reconciliation - {selectedManifest?.manifest_number}
+        </DialogTitle>
+        <DialogContent>
+          <Stepper activeStep={activeStep} orientation="vertical">
+            <Step>
+              <StepLabel>Verify Expected Counts</StepLabel>
+              <StepContent>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  Expected counts from manifest:
+                </Alert>
+                <Grid container spacing={2}>
+                  <Grid item xs={4}>
+                    <Typography>Out: {selectedManifest?.expected_out}</Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Typography>In: {selectedManifest?.expected_in}</Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Typography>Exchange: {selectedManifest?.expected_exchange}</Typography>
+                  </Grid>
+                </Grid>
+                <Button onClick={() => setActiveStep(1)} sx={{ mt: 2 }}>
+                  Continue
+                </Button>
+              </StepContent>
+            </Step>
 
-      {activeTab === 2 && (
-        <Box mt={3}>
-          <Typography variant="h6" gutterBottom>
-            Discrepancy Reports
-          </Typography>
-          <Typography color="text.secondary">
-            Detailed analysis of discrepancies and resolution tracking.
-          </Typography>
-        </Box>
-      )}
+            <Step>
+              <StepLabel>Enter Actual Counts</StepLabel>
+              <StepContent>
+                <Grid container spacing={2}>
+                  <Grid item xs={4}>
+                    <TextField
+                      label="Actual Out"
+                      type="number"
+                      fullWidth
+                      value={actualCounts.out}
+                      onChange={(e) => setActualCounts({
+                        ...actualCounts,
+                        out: parseInt(e.target.value) || 0
+                      })}
+                    />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <TextField
+                      label="Actual In"
+                      type="number"
+                      fullWidth
+                      value={actualCounts.in}
+                      onChange={(e) => setActualCounts({
+                        ...actualCounts,
+                        in: parseInt(e.target.value) || 0
+                      })}
+                    />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <TextField
+                      label="Actual Exchange"
+                      type="number"
+                      fullWidth
+                      value={actualCounts.exchange}
+                      onChange={(e) => setActualCounts({
+                        ...actualCounts,
+                        exchange: parseInt(e.target.value) || 0
+                      })}
+                    />
+                  </Grid>
+                </Grid>
+                <Box sx={{ mt: 2 }}>
+                  <Button onClick={() => setActiveStep(0)} sx={{ mr: 1 }}>
+                    Back
+                  </Button>
+                  <Button onClick={() => setActiveStep(2)}>
+                    Continue
+                  </Button>
+                </Box>
+              </StepContent>
+            </Step>
+
+            <Step>
+              <StepLabel>Review Discrepancies</StepLabel>
+              <StepContent>
+                {(actualCounts.out !== selectedManifest?.expected_out ||
+                  actualCounts.in !== selectedManifest?.expected_in ||
+                  actualCounts.exchange !== selectedManifest?.expected_exchange) ? (
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    Discrepancies detected!
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      Out: {actualCounts.out - (selectedManifest?.expected_out || 0)}<br />
+                      In: {actualCounts.in - (selectedManifest?.expected_in || 0)}<br />
+                      Exchange: {actualCounts.exchange - (selectedManifest?.expected_exchange || 0)}
+                    </Typography>
+                  </Alert>
+                ) : (
+                  <Alert severity="success" sx={{ mb: 2 }}>
+                    All counts match! No discrepancies found.
+                  </Alert>
+                )}
+                
+                <TextField
+                  label="Reconciliation Notes"
+                  multiline
+                  rows={4}
+                  fullWidth
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Enter any notes about discrepancies or issues..."
+                />
+                
+                <Box sx={{ mt: 2 }}>
+                  <Button onClick={() => setActiveStep(1)} sx={{ mr: 1 }}>
+                    Back
+                  </Button>
+                  <Button onClick={() => setActiveStep(3)}>
+                    Continue
+                  </Button>
+                </Box>
+              </StepContent>
+            </Step>
+
+            <Step>
+              <StepLabel>Complete Reconciliation</StepLabel>
+              <StepContent>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  Review and confirm the reconciliation details before completing.
+                </Alert>
+                <Box sx={{ mt: 2 }}>
+                  <Button onClick={() => setActiveStep(2)} sx={{ mr: 1 }}>
+                    Back
+                  </Button>
+                  <PrimaryButton onClick={handleCompleteReconciliation}>
+                    Complete Reconciliation
+                  </PrimaryButton>
+                </Box>
+              </StepContent>
+            </Step>
+          </Stepper>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setReconciliationDialog(false)}>
+            Cancel
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
