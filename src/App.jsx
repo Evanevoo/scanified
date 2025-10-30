@@ -7,6 +7,9 @@ import { ImportProgressProvider } from './components/ImportProgressContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { Toaster } from 'react-hot-toast';
 import ErrorBoundary from './components/ErrorBoundary';
+import { ThemeProvider as MuiThemeProvider } from '@mui/material/styles';
+import { GlobalStyles } from '@mui/material';
+import theme, { globalStyles } from './styles/theme';
 import LoadingSpinner from './components/LoadingSpinner';
 import ProtectedRoute from './components/ProtectedRoute';
 import OwnerProtectedRoute from './components/OwnerProtectedRoute';
@@ -551,11 +554,14 @@ function AppContent() {
 
 function App() {
   return (
-    <AuthProvider>
-      <Suspense fallback={<LoadingSpinner />}>
-        <AppContent />
-      </Suspense>
-    </AuthProvider>
+    <MuiThemeProvider theme={theme}>
+      <GlobalStyles styles={globalStyles} />
+      <AuthProvider>
+        <Suspense fallback={<LoadingSpinner />}>
+          <AppContent />
+        </Suspense>
+      </AuthProvider>
+    </MuiThemeProvider>
   );
 }
 
