@@ -1,10 +1,10 @@
 import logger from '../utils/logger';
+import { supabase } from '../supabase/client';
+
 /**
  * Truck Reconciliation Service
  * Handles delivery manifests, route management, and truck reconciliation
  */
-
-import { supabase } from '../supabase/client';
 
 export class TruckReconciliationService {
   /**
