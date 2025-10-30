@@ -1992,7 +1992,14 @@ export default function ImportApprovals() {
     if (!lineItem) return {};
     
     // For scanned items, use barcode as the key to look up product info
-    const barcode = lineItem.barcode || lineItem.barcode_number || lineItem.cylinder_barcode || '';
+    const barcode =
+      lineItem.barcode ||
+      lineItem.barcode_number ||
+      lineItem.bottle_barcode ||
+      lineItem.cylinder_barcode ||
+      lineItem.BottleBarcode ||
+      lineItem.Barcode ||
+      '';
     const productCode = lineItem.product_code || lineItem.ProductCode || lineItem.Item || barcode || '';
     
     // Try to find asset info by barcode first, then by product code
