@@ -596,8 +596,13 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       // Provide success feedback
       await feedbackService.scanSuccess(data);
       
-      // Send notification for successful scan
-      await notificationService.sendScanSuccessNotification(data);
+      // Send local notification for successful scan (Expo Go/dev build)
+      await notificationService.sendLocalNotification({
+        title: 'Scan successful',
+        body: `Barcode ${data} processed`,
+        categoryId: 'scan_complete',
+        data: { barcode: data }
+      });
       
       if (batchMode) {
         setScanCount(prev => prev + 1);
@@ -610,8 +615,13 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       // Provide error feedback
       await feedbackService.scanError('Failed to process scan');
       
-      // Send notification for scan error
-      await notificationService.sendScanErrorNotification('Failed to process scan');
+      // Send local notification for scan error (Expo Go/dev build)
+      await notificationService.sendLocalNotification({
+        title: 'Scan failed',
+        body: 'Failed to process scan',
+        categoryId: 'sync_status',
+        data: { reason: 'processing_error' }
+      });
       
       if (!batchMode) {
         Alert.alert('Error', 'Failed to process scan. Please try again.');
@@ -863,7 +873,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     // First, check current bottle status
     const { data: currentBottle, error: fetchError } = await supabase
       .from('bottles')
-      .select('status, last_scanned')
+      .select('status')
       .eq('barcode_number', barcode)
       .eq('organization_id', organization?.id)
       .single();
@@ -881,9 +891,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       throw new Error(`Bottle ${barcode} has already been shipped and cannot be shipped again.`);
     }
 
-    let updateData: any = {
-      last_scanned: new Date().toISOString()
-    };
+    let updateData: any = {};
     
     switch (action) {
       case 'out':
@@ -899,7 +907,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         updateData.customer_name = null;
         break;
       case 'locate':
-        // Don't change status for locate, just update location and last scanned
+        // Don't change status for locate, just update location
         if (location) updateData.location = location;
         break;
       case 'fill':
