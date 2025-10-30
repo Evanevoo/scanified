@@ -380,18 +380,18 @@ export default function MainLayout({ children }) {
               onFocus={() => setShowSuggestions(true)}
               sx={{
                 background: 'rgba(255,255,255,0.9)',
-                borderRadius: '24px',
+                borderRadius: '20px',
                 border: '1.5px solid rgba(255,255,255,0.3)',
                 color: '#1976d2',
-                fontSize: '0.95rem',
+                fontSize: '0.9rem',
                 width: '100%',
                 boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
                 '& .MuiOutlinedInput-root': {
-                  borderRadius: '24px',
+                  borderRadius: '20px',
                   background: 'rgba(255,255,255,0.9)',
                   color: '#1976d2',
                   fontWeight: 500,
-                  height: 40,
+                  height: 36,
                   display: 'flex',
                   alignItems: 'center',
                   '& fieldset': {
@@ -413,24 +413,25 @@ export default function MainLayout({ children }) {
                   },
                   '& .MuiInputAdornment-root .MuiSvgIcon-root': {
                     color: '#1976d2',
+                    fontSize: 18,
                   },
                 },
                 '& .MuiOutlinedInput-input': {
-                  padding: '8px 12px',
-                  height: 40,
+                  padding: '6px 10px',
+                  height: 36,
                   display: 'flex',
                   alignItems: 'center',
                 },
                 '& input': {
                   color: '#1976d2',
                   fontWeight: 500,
-                  fontSize: '0.95rem',
+                  fontSize: '0.9rem',
                 },
               }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <SearchIcon sx={{ color: '#1976d2', mr: 1 }} />
+                    <SearchIcon sx={{ color: '#1976d2', mr: 0.5, fontSize: 18 }} />
                   </InputAdornment>
                 ),
               }}
@@ -476,16 +477,16 @@ export default function MainLayout({ children }) {
             </Box>
             
             {/* Icon Buttons */}
-            <IconButton sx={{ color: '#111', width: 40, height: 40, '&:hover': { backgroundColor: 'rgba(25,118,210,0.07)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
+            <IconButton sx={{ color: '#111', width: 36, height: 36, '&:hover': { backgroundColor: 'rgba(25,118,210,0.07)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
               <SettingsIcon />
             </IconButton>
             <IconButton 
-              sx={{ color: '#111', width: 40, height: 40, '&:hover': { backgroundColor: 'rgba(25,118,210,0.07)' } }} 
+              sx={{ color: '#111', width: 36, height: 36, '&:hover': { backgroundColor: 'rgba(25,118,210,0.07)' } }} 
               onClick={handleLogout} 
               aria-label="Logout"
               disabled={logoutLoading}
             >
-              {logoutLoading ? <CircularProgress size={20} /> : <LogoutIcon />}
+              {logoutLoading ? <CircularProgress size={18} /> : <LogoutIcon />}
             </IconButton>
           </Box>
         </Toolbar>
