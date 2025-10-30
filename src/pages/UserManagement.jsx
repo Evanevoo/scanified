@@ -52,7 +52,7 @@ export default function UserManagement() {
   const { can, isOrgAdmin } = usePermissions();
   
   // Debug logging (development only)
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     logger.log('UserManagement Debug:', {
       profile,
       organization,

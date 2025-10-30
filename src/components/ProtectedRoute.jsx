@@ -17,7 +17,7 @@ const ProtectedRoute = ({ children }) => {
   const navigate = useNavigate();
 
   // Log the state for debugging purposes.
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     logger.log('🛡️ ProtectedRoute DEBUG:', { 
       loading, 
       user: !!user, 

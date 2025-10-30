@@ -205,7 +205,7 @@ export const validateInput = {
 
 // Content Security Policy helper
 export const getCSPDirectives = () => {
-  const isDevelopment = process.env.NODE_ENV === 'development';
+  const isDevelopment = import.meta.env.DEV;
   
   const directives = {
     'default-src': ["'self'"],
