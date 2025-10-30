@@ -1806,21 +1806,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
             </TouchableOpacity>
           </View>
 
-          {/* Test Feedback Button - Remove in production */}
-          <TouchableOpacity
-            style={styles.testButton}
-            onPress={async () => {
-              logger.log('🔊 Testing feedback...');
-              try {
-                await feedbackService.scanSuccess('TEST123');
-                logger.log('🔊 Success feedback test completed');
-              } catch (error) {
-                logger.error('❌ Feedback test failed:', error);
-              }
-            }}
-          >
-            <Text style={styles.testButtonText}>Test Feedback</Text>
-          </TouchableOpacity>
         </View>
       </Modal>
 
@@ -3267,12 +3252,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  debugText: {
-    fontSize: 10,
-    textAlign: 'center',
-    marginTop: 4,
-    opacity: 0.7,
-  },
   createOrderButton: {
     paddingVertical: 12,
     paddingHorizontal: 24,
@@ -3507,19 +3486,6 @@ const styles = StyleSheet.create({
   manualEntryActionButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: 'bold',
-  },
-  testButton: {
-    backgroundColor: '#ff6b6b',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 6,
-    marginTop: 10,
-    alignSelf: 'center',
-  },
-  testButtonText: {
-    color: '#ffffff',
-    fontSize: 12,
     fontWeight: 'bold',
   },
 });
