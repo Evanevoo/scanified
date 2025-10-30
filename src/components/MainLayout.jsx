@@ -366,7 +366,7 @@ export default function MainLayout({ children }) {
           {/* Right Section: Search, Settings, Logout */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, height: 48 }}>
             {/* Search Bar */}
-            <Box sx={{ width: 400, position: 'relative', display: 'flex', alignItems: 'center', transform: 'translateY(3px)' }} ref={searchRef}>
+            <Box sx={{ width: 400, position: 'relative', display: 'flex', alignItems: 'center', transform: 'translateY(5px)' }} ref={searchRef}>
             <TextField
               placeholder={
                 isOwner && location.pathname.startsWith('/owner-portal') 
@@ -386,6 +386,7 @@ export default function MainLayout({ children }) {
                 boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
                 margin: 0,
                 verticalAlign: 'middle',
+                transform: 'translateY(5px)',
                 '& .MuiOutlinedInput-root': {
                   borderRadius: '20px',
                   background: 'rgba(255,255,255,0.9)',
