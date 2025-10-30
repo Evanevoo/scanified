@@ -26,12 +26,18 @@ export default function EditCylinderScreen() {
   const [customers, setCustomers] = useState([]);
   const [customersLoading, setCustomersLoading] = useState(false);
   const [customersError, setCustomersError] = useState('');
+  const [locations, setLocations] = useState([]);
+  const [locationsLoading, setLocationsLoading] = useState(false);
+  const [locationsError, setLocationsError] = useState('');
+  const [selectedLocation, setSelectedLocation] = useState('');
 
-  // Fetch customers when cylinder is loaded (step 2)
+  // Fetch customers and locations when cylinder is loaded (step 2)
   React.useEffect(() => {
     if (step === 2 && profile?.organization_id) {
       setCustomersLoading(true);
+      setLocationsLoading(true);
       
+      // Fetch customers
       supabase
         .from('customers')
         .select('CustomerListID, name')
@@ -47,15 +53,39 @@ export default function EditCylinderScreen() {
           }
           setCustomersLoading(false);
         });
+
+      // Fetch locations
+      supabase
+        .from('locations')
+        .select('id, name, province')
+        .order('name')
+        .then(({ data, error }) => {
+          if (error) {
+            console.log('❌ Error loading locations:', error);
+            setLocationsError('Failed to load locations');
+            // Fallback to hardcoded locations
+            setLocations([
+              { id: 'saskatoon', name: 'Saskatoon', province: 'Saskatchewan' },
+              { id: 'regina', name: 'Regina', province: 'Saskatchewan' },
+              { id: 'chilliwack', name: 'Chilliwack', province: 'British Columbia' },
+              { id: 'prince-george', name: 'Prince George', province: 'British Columbia' }
+            ]);
+          } else {
+            console.log('✅ Loaded locations:', data?.length || 0);
+            setLocations(data || []);
+          }
+          setLocationsLoading(false);
+        });
     }
   }, [step, profile]);
 
-  // Set initial owner fields when cylinder is loaded
+  // Set initial owner fields and location when cylinder is loaded
   React.useEffect(() => {
     if (cylinder) {
       setOwnerType(cylinder?.owner_type || 'organization');
       setOwnerCustomerId(cylinder?.owner_id || '');
       setOwnerName(cylinder?.owner_name || '');
+      setSelectedLocation(cylinder?.location || '');
     }
   }, [cylinder]);
 
@@ -133,8 +163,12 @@ export default function EditCylinderScreen() {
       setError('Serial number already exists on another cylinder.');
       return;
     }
-    // Update cylinder with ownership fields
-    const updateFields = { barcode, serial_number: serial };
+    // Update cylinder with ownership fields and location
+    const updateFields = { 
+      barcode, 
+      serial_number: serial,
+      location: selectedLocation 
+    };
     if (ownerType === 'organization') {
       updateFields.owner_type = 'organization';
       updateFields.owner_id = null;
@@ -224,6 +258,30 @@ export default function EditCylinderScreen() {
             onChangeText={setSerial}
             autoCapitalize="none"
           />
+          
+          {/* Location Picker */}
+          <Text style={styles.label}>Location</Text>
+          {locationsLoading ? (
+            <Text>Loading locations...</Text>
+          ) : locationsError ? (
+            <Text style={styles.error}>{locationsError}</Text>
+          ) : (
+            <Picker
+              selectedValue={selectedLocation}
+              onValueChange={setSelectedLocation}
+              style={{ marginBottom: 12 }}
+            >
+              <Picker.Item label="Select a location..." value="" />
+              {locations.map(location => (
+                <Picker.Item 
+                  key={location.id} 
+                  label={`${location.name} (${location.province})`} 
+                  value={location.name.toUpperCase()} 
+                />
+              ))}
+            </Picker>
+          )}
+          
           {/* Ownership Management UI */}
           <Text style={styles.label}>Owner Type</Text>
           <Picker

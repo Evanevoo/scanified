@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert, ScrollView } from 'react-native';
 import { supabase } from '../supabase';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
@@ -19,10 +19,175 @@ export default function HistoryScreen() {
   const [editCustomer, setEditCustomer] = useState('');
   const [editAssets, setEditAssets] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  const [showCustomerPicker, setShowCustomerPicker] = useState(false);
+  const [customerSuggestions, setCustomerSuggestions] = useState([]);
+  const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false);
+  const [bottleSuggestions, setBottleSuggestions] = useState([]);
+  const [showBottleSuggestions, setShowBottleSuggestions] = useState({});
+  const [bottles, setBottles] = useState([]);
+  const [itemDetails, setItemDetails] = useState({});
+
+  // Fetch customers
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      if (!profile?.organization_id) return;
+      
+      const { data, error } = await supabase
+        .from('customers')
+        .select('name, CustomerListID')
+        .eq('organization_id', profile.organization_id)
+        .order('name');
+      
+      if (error) {
+        console.error('Error fetching customers:', error);
+      } else {
+        setCustomers(data || []);
+      }
+    };
+    
+    if (profile?.organization_id) {
+      fetchCustomers();
+    }
+  }, [profile]);
+
+  // Fetch bottles
+  useEffect(() => {
+    const fetchBottles = async () => {
+      if (!profile?.organization_id) return;
+      
+      const { data, error } = await supabase
+        .from('bottles')
+        .select('barcode_number')
+        .eq('organization_id', profile.organization_id)
+        .order('barcode_number');
+      
+      if (error) {
+        console.error('Error fetching bottles:', error);
+      } else {
+        setBottles(data || []);
+      }
+    };
+    
+    if (profile?.organization_id) {
+      fetchBottles();
+    }
+  }, [profile]);
+
+  // Filter customer suggestions
+  useEffect(() => {
+    if (editCustomer.trim() && customers.length > 0) {
+      const searchText = editCustomer.toLowerCase();
+      const filtered = customers.filter(customer => 
+        customer.name.toLowerCase().includes(searchText) &&
+        customer.name.toLowerCase() !== searchText
+      ).slice(0, 5);
+      setCustomerSuggestions(filtered);
+      setShowCustomerSuggestions(filtered.length > 0);
+    } else {
+      setCustomerSuggestions([]);
+      setShowCustomerSuggestions(false);
+    }
+  }, [editCustomer, customers]);
+
+  // Filter bottle suggestions
+  const filterBottleSuggestions = (searchText, index) => {
+    if (searchText && searchText.trim() && bottles.length > 0) {
+      const filtered = bottles
+        .filter(bottle => 
+          bottle.barcode_number && 
+          bottle.barcode_number.toLowerCase().includes(searchText.toLowerCase())
+        )
+        .slice(0, 5);
+      
+      setBottleSuggestions(filtered);
+      setShowBottleSuggestions(prev => ({ ...prev, [index]: filtered.length > 0 }));
+    } else {
+      setShowBottleSuggestions(prev => ({ ...prev, [index]: false }));
+    }
+  };
+
+  // Fetch item details
+  const fetchItemDetails = async (barcode) => {
+    if (!barcode || !profile?.organization_id) return null;
+    
+    try {
+      console.log('🔍 Fetching item details for barcode:', barcode);
+      
+      const { data, error } = await supabase
+        .from('bottles')
+        .select('barcode_number, product_code, description, status, location, customer_name')
+        .eq('barcode_number', barcode)
+        .eq('organization_id', profile.organization_id)
+        .maybeSingle();
+      
+      console.log('🔍 Item details result:', { data, error });
+      
+      if (error) {
+        console.error('❌ Error fetching item details:', error);
+        return null;
+      }
+      
+      if (!data) {
+        console.log('⚠️ No item found for barcode:', barcode);
+        return null;
+      }
+      
+      const details = {
+        barcode: data.barcode_number,
+        productCode: data.product_code,
+        description: data.description,
+        status: data.status,
+        location: data.location,
+        customerName: data.customer_name,
+      };
+      
+      console.log('✅ Item details fetched:', details);
+      return details;
+    } catch (err) {
+      console.error('❌ Error in fetchItemDetails:', err);
+      return null;
+    }
+  };
+
+  const handleAssetChange = async (index, value) => {
+    const oldValue = editAssets[index];
+    updateAsset(index, value);
+    
+    // Clear old details
+    if (oldValue && oldValue !== value && itemDetails[oldValue]) {
+      setItemDetails(prev => {
+        const newDetails = { ...prev };
+        delete newDetails[oldValue];
+        return newDetails;
+      });
+    }
+    
+    // Show suggestions if there's text
+    if (value.trim()) {
+      filterBottleSuggestions(value, index);
+    } else {
+      setShowBottleSuggestions(prev => ({ ...prev, [index]: false }));
+    }
+    
+    // Fetch details after a delay
+    if (value.trim() && value.length >= 3) {
+      setTimeout(async () => {
+        console.log('🔍 Fetching details after timeout for:', value);
+        const details = await fetchItemDetails(value);
+        if (details) {
+          console.log('✅ Setting item details:', value, details);
+          setItemDetails(prev => ({ ...prev, [value]: details }));
+        } else {
+          console.log('⚠️ No details found for:', value);
+        }
+      }, 500);
+    }
+  };
 
   useEffect(() => {
     const fetchScans = async () => {
-      if (!profile?.organization_id && !authLoading) {
+      if (!profile?.organization_id) {
         setError('Organization not found');
         setLoading(false);
         return;
@@ -91,21 +256,36 @@ export default function HistoryScreen() {
     
     setEditScan(scan);
     setEditCustomer(scan.customer_name || '');
-    setEditAssets(scan.assets || scan.bottle_barcode ? [scan.bottle_barcode] : []);
+    // Parse assets if they exist, otherwise use bottle_barcode
+    if (scan.assets && Array.isArray(scan.assets)) {
+      setEditAssets(scan.assets);
+    } else if (scan.bottle_barcode) {
+      setEditAssets([scan.bottle_barcode]);
+    } else {
+      setEditAssets(['']);
+    }
   };
 
   const saveEdit = async () => {
-    if (!profile?.organization_id && !authLoading) {
+    if (!profile?.organization_id) {
       setError('Organization not found');
       return;
     }
 
     setSaving(true);
+    // Get the first asset barcode or empty string
+    const assetBarcode = editAssets.length > 0 ? editAssets[0] : '';
+    
     const { error } = await supabase
       .from('bottle_scans')
-      .update({ customer_name: editCustomer, bottle_barcode: editAssets[0] })
+      .update({ 
+        customer_name: editCustomer, 
+        bottle_barcode: assetBarcode,
+        assets: editAssets 
+      })
       .eq('id', editScan?.id)
       .eq('organization_id', profile.organization_id);
+    
     setSaving(false);
     setEditScan(null);
     // Refresh list
@@ -117,6 +297,68 @@ export default function HistoryScreen() {
       .gte('created_at', since)
       .order('created_at', { ascending: false });
     setScans(data || []);
+  };
+
+  const deleteScan = async () => {
+    Alert.alert(
+      'Delete Scan',
+      'Are you sure you want to delete this scan? This action cannot be undone.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (!profile?.organization_id) {
+              setError('Organization not found');
+              return;
+            }
+
+            setSaving(true);
+            const { error } = await supabase
+              .from('bottle_scans')
+              .delete()
+              .eq('id', editScan?.id)
+              .eq('organization_id', profile.organization_id);
+
+            setSaving(false);
+            
+            if (error) {
+              Alert.alert('Error', 'Failed to delete scan. Please try again.');
+            } else {
+              setEditScan(null);
+              // Refresh list
+              const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+              const { data } = await supabase
+                .from('bottle_scans')
+                .select('*')
+                .eq('organization_id', profile.organization_id)
+                .gte('created_at', since)
+                .order('created_at', { ascending: false });
+              setScans(data || []);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const addAsset = () => {
+    setEditAssets([...editAssets, '']);
+  };
+
+  const removeAsset = (index) => {
+    const newAssets = editAssets.filter((_, i) => i !== index);
+    setEditAssets(newAssets);
+  };
+
+  const updateAsset = (index, value) => {
+    const newAssets = [...editAssets];
+    newAssets[index] = value;
+    setEditAssets(newAssets);
   };
 
   return (
@@ -155,28 +397,176 @@ export default function HistoryScreen() {
         <View style={styles.modalBg}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Edit Scan</Text>
+            
+            {/* Customer Selection */}
             <Text style={styles.label}>Customer</Text>
-            <TextInput
-              style={styles.input}
-              value={editCustomer}
-              onChangeText={setEditCustomer}
-              placeholder="Customer Name"
-            />
-            <Text style={styles.label}>{assetConfig?.assetDisplayName || 'Asset'} Barcode</Text>
-            <TextInput
-              style={styles.input}
-              value={editAssets[0] || ''}
-              onChangeText={v => setEditAssets([v])}
-              placeholder={`${assetConfig?.assetDisplayName || 'Asset'} Barcode`}
-            />
-            <View style={{ flexDirection: 'row', marginTop: 18 }}>
-              <TouchableOpacity style={[styles.btn, { backgroundColor: '#eee', flex: 1, marginRight: 8 }]} onPress={() => setEditScan(null)}>
-                <Text style={{ color: '#2563eb', fontWeight: 'bold' }}>Cancel</Text>
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={[styles.input, { flex: 1 }]}
+                value={editCustomer}
+                onChangeText={(v) => {
+                  setEditCustomer(v);
+                  setCustomerSearch(v);
+                }}
+                placeholder="Type or select customer..."
+              />
+              <TouchableOpacity 
+                style={styles.pickerButton}
+                onPress={() => setShowCustomerPicker(true)}
+              >
+                <Text style={styles.pickerButtonText}>📋</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.btn, { backgroundColor: '#2563eb', flex: 1, marginLeft: 8 }]} onPress={saveEdit} disabled={saving}>
-                <Text style={{ color: '#fff', fontWeight: 'bold' }}>{saving ? 'Saving...' : 'Save'}</Text>
+              {showCustomerSuggestions && customerSuggestions.length > 0 && (
+                <View style={styles.suggestionsContainer}>
+                  {customerSuggestions.map((customer) => (
+                    <TouchableOpacity
+                      key={customer.CustomerListID}
+                      style={styles.suggestionItem}
+                      onPress={() => {
+                        setEditCustomer(customer.name);
+                        setShowCustomerSuggestions(false);
+                      }}
+                    >
+                      <Text style={styles.suggestionText}>{customer.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            {/* Assets List */}
+            <Text style={styles.label}>{assetConfig?.assetDisplayNamePlural || 'Assets'} ({editAssets.length})</Text>
+            {editAssets.map((asset, index) => (
+              <View key={index} style={styles.assetRowContainer}>
+                <View style={styles.assetRow}>
+                  <TextInput
+                    style={[styles.input, styles.assetInput]}
+                    value={asset}
+                    onChangeText={v => handleAssetChange(index, v)}
+                    placeholder={`${assetConfig?.assetDisplayName || 'Asset'} ${index + 1} barcode`}
+                  />
+                  {editAssets.length > 1 && (
+                    <TouchableOpacity 
+                      style={styles.removeButton}
+                      onPress={() => removeAsset(index)}
+                    >
+                      <Text style={styles.removeButtonText}>🗑️</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {/* Item Details */}
+                {itemDetails[asset] && asset.trim() && (
+                  <View style={styles.itemDetailsContainer}>
+                    <Text style={styles.itemDetailsLabel}>Item Details:</Text>
+                    <Text style={styles.itemDetailsText}>
+                      {itemDetails[asset].description || itemDetails[asset].productCode || 'No description'}
+                      {itemDetails[asset].productCode && ` • ${itemDetails[asset].productCode}`}
+                      {itemDetails[asset].status && ` • Status: ${itemDetails[asset].status}`}
+                      {itemDetails[asset].location && ` • Location: ${itemDetails[asset].location}`}
+                      {itemDetails[asset].customerName && ` • Customer: ${itemDetails[asset].customerName}`}
+                    </Text>
+                  </View>
+                )}
+                {/* Bottle Suggestions */}
+                {showBottleSuggestions[index] && bottleSuggestions.length > 0 && (
+                  <View style={styles.suggestionsContainer}>
+                    <ScrollView style={{ maxHeight: 120 }}>
+                      {bottleSuggestions.map((bottle, i) => (
+                        <TouchableOpacity
+                          key={i}
+                          style={styles.suggestionItem}
+                        onPress={async () => {
+                          const barcode = bottle.barcode_number;
+                          updateAsset(index, barcode);
+                          setShowBottleSuggestions(prev => ({ ...prev, [index]: false }));
+                          setBottleSuggestions([]);
+                          
+                          // Fetch details for the selected barcode
+                          const details = await fetchItemDetails(barcode);
+                          if (details) {
+                            setItemDetails(prev => ({ ...prev, [barcode]: details }));
+                          }
+                        }}
+                        >
+                          <Text style={styles.suggestionText}>{bottle.barcode_number}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
+            ))}
+            
+            {/* Add Asset Button */}
+            <TouchableOpacity 
+              style={styles.addButton}
+              onPress={addAsset}
+            >
+              <Text style={styles.addButtonText}>+ Add {assetConfig?.assetDisplayName || 'Asset'}</Text>
+            </TouchableOpacity>
+
+            {/* Delete Button */}
+            <TouchableOpacity 
+              style={[styles.btn, { backgroundColor: '#dc2626', marginTop: 12 }]} 
+              onPress={deleteScan} 
+              disabled={saving}
+            >
+              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Delete Scan</Text>
+            </TouchableOpacity>
+
+            {/* Action Buttons */}
+            <View style={{ flexDirection: 'row', marginTop: 12 }}>
+              <TouchableOpacity style={[styles.btn, { backgroundColor: '#eee', flex: 1, marginRight: 8 }]} onPress={() => setEditScan(null)}>                   
+                <Text style={{ color: '#2563eb', fontWeight: 'bold' }}>Cancel</Text>                                                                            
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.btn, { backgroundColor: '#2563eb', flex: 1, marginLeft: 8 }]} onPress={saveEdit} disabled={saving}>              
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>{saving ? 'Saving...' : 'Save'}</Text>                                                      
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Customer Picker Modal */}
+      <Modal 
+        visible={showCustomerPicker} 
+        animationType="slide" 
+        transparent 
+        onRequestClose={() => setShowCustomerPicker(false)}
+      >
+        <View style={styles.modalBg}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Select Customer</Text>
+            <ScrollView style={styles.customerList}>
+              <TouchableOpacity 
+                style={styles.customerItem}
+                onPress={() => {
+                  setEditCustomer('');
+                  setShowCustomerPicker(false);
+                }}
+              >
+                <Text style={styles.customerItemText}>
+                  {editCustomer === '' ? '✓ No customer' : 'No customer'}
+                </Text>
+              </TouchableOpacity>
+              {customers.map((customer) => (
+                <TouchableOpacity 
+                  key={customer.CustomerListID}
+                  style={styles.customerItem}
+                  onPress={() => {
+                    setEditCustomer(customer.name);
+                    setShowCustomerPicker(false);
+                  }}
+                >
+                  <Text style={[styles.customerItemText, editCustomer === customer.name && { fontWeight: 'bold', color: '#2563eb' }]}>
+                    {editCustomer === customer.name && '✓ '}{customer.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={[styles.btn, { backgroundColor: '#2563eb', marginTop: 18 }]} onPress={() => setShowCustomerPicker(false)}>
+              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Close</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -281,5 +671,116 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 14,
     alignItems: 'center',
+  },
+  inputText: {
+    fontSize: 16,
+    color: '#222',
+  },
+  assetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  assetInput: {
+    flex: 1,
+  },
+  removeButton: {
+    marginLeft: 8,
+    padding: 8,
+  },
+  removeButtonText: {
+    fontSize: 20,
+  },
+  addButton: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 10,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginTop: 8,
+  },
+  addButtonText: {
+    color: '#2563eb',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  customerList: {
+    maxHeight: 400,
+  },
+  customerItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  customerItemText: {
+    fontSize: 16,
+    color: '#222',
+  },
+  inputContainer: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pickerButton: {
+    marginLeft: 8,
+    padding: 8,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 8,
+    minWidth: 40,
+    alignItems: 'center',
+  },
+  pickerButtonText: {
+    fontSize: 20,
+  },
+  assetRowContainer: {
+    position: 'relative',
+    marginBottom: 8,
+  },
+  suggestionsContainer: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    marginTop: 4,
+    maxHeight: 150,
+    zIndex: 1000,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  suggestionItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  suggestionText: {
+    fontSize: 14,
+    color: '#222',
+  },
+  itemDetailsContainer: {
+    backgroundColor: '#F0F9FF',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  itemDetailsLabel: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#2563eb',
+    marginBottom: 4,
+  },
+  itemDetailsText: {
+    fontSize: 13,
+    color: '#374151',
+    lineHeight: 18,
   },
 }); 

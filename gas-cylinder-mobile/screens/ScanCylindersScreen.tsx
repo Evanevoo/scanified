@@ -49,7 +49,7 @@ const levenshteinDistance = (str1: string, str2: string): number => {
 // (common Code 39 start/stop characters). Stored values are not altered.
 const normalizeBarcode = (value: string): string => {
   if (!value) return '';
-  return value.trim().replace(/^\*+|\*+$/g, '');
+  return value.trim().replace(/^[%*]+|[%*]+$/g, '');
 };
 
 // Check if barcode is within scan rectangle bounds - More lenient
@@ -245,6 +245,7 @@ export default function ScanCylindersScreen() {
   const [scannerTarget, setScannerTarget] = useState<'customer' | 'order' | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
+  const [scannerEnabled, setScannerEnabled] = useState(true);
   const scanDelay = 1500; // ms
   const [showCustomerPopup, setShowCustomerPopup] = useState(false);
   const [showCustomerScan, setShowCustomerScan] = useState(false);
@@ -402,6 +403,13 @@ export default function ScanCylindersScreen() {
     
     // Set scanned immediately to prevent duplicate scans
     setScanned(true);
+    setScannerEnabled(false); // Disable scanner temporarily
+    
+    // Reset scanned state and re-enable scanner after 2 seconds
+    setTimeout(() => {
+      setScanned(false);
+      setScannerEnabled(true);
+    }, 2000);
     
     // Add a small delay to allow the UI to update
     setTimeout(async () => {
@@ -416,22 +424,111 @@ export default function ScanCylindersScreen() {
         
         // Check if the scanned barcode matches any existing customer
         const scannedBarcode = normalizeBarcode(data);
+        
+        // Multiple normalization strategies for comprehensive matching
+        const normalizeForMatching = (barcode: string): string => {
+          if (!barcode) return '';
+          return barcode
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, ''); // Remove all non-alphanumeric characters
+        };
+        
+        const normalizeWithDashes = (barcode: string): string => {
+          if (!barcode) return '';
+          return barcode
+            .toUpperCase()
+            .replace(/[^A-Z0-9-]/g, ''); // Keep dashes
+        };
+        
+        const normalizeLoose = (barcode: string): string => {
+          if (!barcode) return '';
+          return barcode
+            .toUpperCase()
+            .replace(/[\s\-_]/g, ''); // Remove spaces, dashes, underscores
+        };
+        
+        const scannedNormalized = normalizeForMatching(scannedBarcode);
+        const scannedWithDashes = normalizeWithDashes(scannedBarcode);
+        const scannedLoose = normalizeLoose(scannedBarcode);
+        
+        console.log('═══════════════════════════════════════════════════════');
+        console.log('🔍 CUSTOMER BARCODE SCAN DEBUG');
+        console.log('═══════════════════════════════════════════════════════');
+        console.log('📱 Raw scanned data:', data);
+        console.log('🧹 After normalization:', scannedBarcode);
+        console.log('🔢 Fully normalized (no special chars):', scannedNormalized);
+        console.log('➖ With dashes preserved:', scannedWithDashes);
+        console.log('🧩 Loose normalized:', scannedLoose);
+        console.log('👥 Total customers to search:', customers.length);
+        console.log('🏢 Current organization:', customers[0]?.organization_id || 'N/A');
+        console.log('═══════════════════════════════════════════════════════');
+        
+        // First, log ALL customer barcodes for reference
+        console.log('📋 ALL CUSTOMER BARCODES IN SYSTEM:');
+        customers.forEach((customer, index) => {
+          if (customer.CustomerListID) {
+            console.log(`  ${index + 1}. "${customer.name}": "${customer.CustomerListID}" → Normalized: "${normalizeForMatching(customer.CustomerListID)}"`);
+          }
+        });
+        console.log('═══════════════════════════════════════════════════════');
+        
         const matchingCustomer = customers.find(customer => {
-          if (!customer.barcode) return false;
+          if (!customer.CustomerListID) {
+            console.log(`⏭️ Skipping customer "${customer.name}" - no CustomerListID`);
+            return false;
+          }
           
-          const customerBarcode = normalizeBarcode(customer.barcode);
+          const customerBarcode = normalizeBarcode(customer.CustomerListID);
+          const customerNormalized = normalizeForMatching(customerBarcode);
+          const customerWithDashes = normalizeWithDashes(customerBarcode);
+          const customerLoose = normalizeLoose(customerBarcode);
           
-          // Exact match (case insensitive)
+          // Log each customer barcode for debugging
+          console.log(`\n🔍 Checking customer "${customer.name}"`);
+          console.log(`   📱 Stored CustomerListID: "${customer.CustomerListID}"`);
+          console.log(`   🧹 After normalization: "${customerBarcode}"`);
+          console.log(`   🔢 Fully normalized: "${customerNormalized}"`);
+          console.log(`   ➖ With dashes: "${customerWithDashes}"`);
+          console.log(`   🧩 Loose: "${customerLoose}"`);
+          console.log(`   📊 Comparing to scanned: "${scannedNormalized}"`);
+          
+          // Strategy 1: Exact match (case insensitive)
           if (customerBarcode.toLowerCase() === scannedBarcode.toLowerCase()) {
+            console.log('✅ Match found: Exact match');
             return true;
           }
           
-          // Handle common barcode variations (A/a endings)
-          if (scannedBarcode.length > 1) {
+          // Strategy 2: Fully normalized match (removes ALL special characters)
+          if (customerNormalized === scannedNormalized) {
+            console.log('✅ Match found: Normalized match');
+            return true;
+          }
+          
+          // Strategy 3: Match with dashes preserved
+          if (customerWithDashes === scannedWithDashes) {
+            console.log('✅ Match found: Dashes match');
+            return true;
+          }
+          
+          // Strategy 4: Loose match (removes spaces, dashes, underscores)
+          if (customerLoose === scannedLoose) {
+            console.log('✅ Match found: Loose match');
+            return true;
+          }
+          
+          // Strategy 5: Partial match (contains)
+          if (customerNormalized.includes(scannedNormalized) || scannedNormalized.includes(customerNormalized)) {
+            console.log('✅ Match found: Partial match');
+            return true;
+          }
+          
+          // Strategy 6: Handle common barcode variations (A/a endings)
+          if (scannedBarcode.length > 1 && customerBarcode.length > 1) {
             const baseScanned = scannedBarcode.slice(0, -1);
             const baseCustomer = customerBarcode.slice(0, -1);
             
             if (baseScanned.toLowerCase() === baseCustomer.toLowerCase()) {
+              console.log('✅ Match found: Base match (without last character)');
               return true;
             }
           }
@@ -444,8 +541,8 @@ export default function ScanCylindersScreen() {
           
           // Find similar barcodes for helpful suggestions
           const similarBarcodes = customers
-            .filter(customer => customer.barcode)
-            .map(customer => normalizeBarcode(customer.barcode))
+            .filter(customer => customer.CustomerListID)
+            .map(customer => normalizeBarcode(customer.CustomerListID))
             .filter(barcode => {
               const similarity = calculateSimilarity(scannedBarcode.toLowerCase(), barcode.toLowerCase());
               return similarity > 0.7; // 70% similarity threshold
@@ -460,16 +557,17 @@ export default function ScanCylindersScreen() {
           
           message += '\n\nPlease verify the barcode or add this customer to your system.';
           
+          // Close the camera scanner immediately to prevent repeated scans
+          setShowCustomerScan(false);
+          setScannerVisible(false);
+          setScannerTarget(null);
+          
           Alert.alert(
             'Customer Not Found',
             message,
             [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Use Anyway', onPress: () => {
+              { text: 'OK', onPress: () => {
                 setSearch(scannedBarcode);
-                setShowCustomerScan(false);
-                setScannerVisible(false);
-                setScannerTarget(null);
               }}
             ]
           );
@@ -479,7 +577,7 @@ export default function ScanCylindersScreen() {
         
         // Customer found, proceed normally
         console.log('✅ Customer found:', matchingCustomer.name);
-        setSearch(normalizeBarcode(matchingCustomer.barcode || data));
+        setSearch(normalizeBarcode(matchingCustomer.CustomerListID || data));
         setSelectedCustomer(matchingCustomer);
         setShowCustomerScan(false);
         setScannerVisible(false);
@@ -814,6 +912,7 @@ export default function ScanCylindersScreen() {
           <CameraView
             style={styles.fullscreenCamera}
             facing="back"
+            barcodeScannerEnabled={scannerEnabled}
             barcodeScannerSettings={{
               barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "codabar", "itf14"],
             }}
@@ -824,107 +923,8 @@ export default function ScanCylindersScreen() {
               
               const barcode = data.trim();
               if (barcode) {
-                // Close camera first
-                setShowCustomerScan(false);
-                
-                // Try multiple matching strategies
-                const exactMatch = customers.find(customer => 
-                  customer.barcode && customer.barcode.toLowerCase() === barcode.toLowerCase()
-                );
-                
-                const partialMatch = customers.find(customer => 
-                  customer.barcode && (customer.barcode.toLowerCase().includes(barcode.toLowerCase()) || barcode.toLowerCase().includes(customer.barcode.toLowerCase()))
-                );
-                
-                // Try multiple normalization strategies for scanner vs website format differences
-                const normalizeBarcode = (b) => {
-                  if (!b) return '';
-                  return b
-                    .replace(/[^a-zA-Z0-9]/g, '') // Remove all special characters
-                    .toUpperCase() // Convert to uppercase
-                    .trim();
-                };
-                
-                const normalizeForScanner = (b) => {
-                  if (!b) return '';
-                  return b
-                    .replace(/^%/, '') // Remove leading %
-                    .replace(/-/g, '') // Remove dashes
-                    .toUpperCase() // Convert to uppercase
-                    .trim();
-                };
-                
-                // Enhanced normalization for the specific format: *%800006A2-1610382989A*
-                const normalizeStoredBarcode = (b) => {
-                  if (!b) return '';
-                  return b
-                    .replace(/^\*%/, '') // Remove leading *%
-                    .replace(/\*$/, '') // Remove trailing *
-                    .replace(/-/g, '') // Remove dashes
-                    .toUpperCase() // Convert to uppercase
-                    .trim();
-                };
-                
-                const normalizedScanned = normalizeBarcode(barcode);
-                const scannerNormalizedScanned = normalizeForScanner(barcode);
-                
-                const normalizedMatch = customers.find(customer => 
-                  customer.barcode && normalizeBarcode(customer.barcode) === normalizedScanned
-                );
-                
-                const scannerMatch = customers.find(customer => 
-                  customer.barcode && normalizeForScanner(customer.barcode) === scannerNormalizedScanned
-                );
-                
-                // Enhanced matching for the specific stored format
-                const storedFormatMatch = customers.find(customer => 
-                  customer.barcode && normalizeStoredBarcode(customer.barcode) === scannerNormalizedScanned
-                );
-                
-                console.log('📷 Exact match:', exactMatch);
-                console.log('📷 Partial match:', partialMatch);
-                console.log('📷 Normalized match:', normalizedMatch);
-                console.log('📷 Normalized scanned:', normalizedScanned);
-                console.log('📷 Scanner normalized scanned:', scannerNormalizedScanned);
-                console.log('📷 Scanner match:', scannerMatch);
-                console.log('📷 Stored format match:', storedFormatMatch);
-                
-                // Debug: Show what each customer barcode normalizes to
-                customers.forEach(customer => {
-                  if (customer.barcode) {
-                    console.log(`📷 Customer "${customer.name}": "${customer.barcode}" -> normalizeStoredBarcode: "${normalizeStoredBarcode(customer.barcode)}"`);
-                  }
-                });
-                
-                if (exactMatch) {
-                  setSearch(exactMatch.barcode);
-                  setSelectedCustomer(exactMatch);
-                  setShowCustomerScan(false); // Close scanner after finding customer
-                  Alert.alert('Customer Found!', `Found: ${exactMatch.name}\nBarcode: ${barcode}`);
-                } else if (storedFormatMatch) {
-                  setSearch(storedFormatMatch.barcode);
-                  setSelectedCustomer(storedFormatMatch);
-                  setShowCustomerScan(false); // Close scanner after finding customer
-                  Alert.alert('Customer Found (Stored Format Match)!', `Found: ${storedFormatMatch.name}\nScanned: ${barcode}\nStored: ${storedFormatMatch.barcode}`);
-                } else if (scannerMatch) {
-                  setSearch(scannerMatch.barcode);
-                  setSelectedCustomer(scannerMatch);
-                  setShowCustomerScan(false); // Close scanner after finding customer
-                  Alert.alert('Customer Found (Scanner Format Match)!', `Found: ${scannerMatch.name}\nScanned: ${barcode}\nStored: ${scannerMatch.barcode}`);
-                } else if (normalizedMatch) {
-                  setSearch(normalizedMatch.barcode);
-                  setSelectedCustomer(normalizedMatch);
-                  setShowCustomerScan(false); // Close scanner after finding customer
-                  Alert.alert('Customer Found (Normalized Match)!', `Found: ${normalizedMatch.name}\nScanned: ${barcode}\nStored: ${normalizedMatch.barcode}`);
-                } else if (partialMatch) {
-                  setSearch(partialMatch.barcode);
-                  setSelectedCustomer(partialMatch);
-                  setShowCustomerScan(false); // Close scanner after finding customer
-                  Alert.alert('Customer Found (Partial Match)!', `Found: ${partialMatch.name}\nScanned: ${barcode}\nStored: ${partialMatch.barcode}`);
-                } else {
-                  setSearch(barcode);
-                  Alert.alert('Barcode Scanned', `Scanned: ${barcode}\nNo matching customer found.\n\nAvailable barcodes:\n${customers.map(c => c.barcode).filter(Boolean).slice(0, 5).join('\n')}`);
-                }
+                // Use the main handleBarcodeScanned function to prevent duplicates
+                handleBarcodeScanned({ data: barcode, type: 'camera' });
               }
             }}
           />
@@ -957,6 +957,7 @@ export default function ScanCylindersScreen() {
           <CameraView
             style={styles.fullscreenCamera}
             facing="back"
+            barcodeScannerEnabled={scannerEnabled}
             barcodeScannerSettings={{
               barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "codabar", "itf14"],
             }}

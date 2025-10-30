@@ -9,13 +9,16 @@ import { Toaster } from 'react-hot-toast';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingSpinner from './components/LoadingSpinner';
 import ProtectedRoute from './components/ProtectedRoute';
+import OwnerProtectedRoute from './components/OwnerProtectedRoute';
+import RoleProtectedRoute from './components/RoleProtectedRoute';
 import { initAllTracking, trackPageView } from './utils/analytics';
 import { initializeDisasterRecovery } from './utils/disasterRecovery';
+import './styles/responsive.css';
+import './styles/accessibility.css';
 import Billing from './pages/Billing';
 import OwnerDashboard from './pages/OwnerDashboard';
 import CustomerPortal from './pages/CustomerPortal';
 import BarcodeGenerator from './pages/BarcodeGenerator';
-import IntegrationSettings from './pages/OwnerPortal/IntegrationSettings';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import LandingPage from './pages/LandingPage';
 import FixOrganizationLink from './pages/FixOrganizationLink';
@@ -60,22 +63,15 @@ import ReviewManagement from './pages/OwnerPortal/ReviewManagement';
 import WebsiteManagement from './pages/OwnerPortal/WebsiteManagement';
 import VisualPageBuilder from './pages/OwnerPortal/VisualPageBuilder';
 import DisasterRecoveryDashboard from './components/admin/DisasterRecoveryDashboard';
-import AcceptInvite from './pages/AcceptInvite';
 
 // NEW ADVANCED FEATURES
-import HazmatCompliance from './pages/HazmatCompliance';
-import MaintenanceWorkflows from './pages/MaintenanceWorkflows';
 import TruckReconciliation from './pages/TruckReconciliation';
-import ChainOfCustody from './pages/ChainOfCustody';
-import PalletizationSystem from './pages/PalletizationSystem';
-import AdvancedRentalCalculations from './pages/AdvancedRentalCalculations';
 import BulkRentalPricingManager from './pages/BulkRentalPricingManager';
 import MainLayout from './components/MainLayout';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 import { supabase } from './supabase/client';
 import WorkflowAutomation from './pages/WorkflowAutomation';
-import RouteOptimization from './pages/RouteOptimization';
 import CustomerSelfService from './pages/CustomerSelfService';
 import ThemeShowcase from './pages/ThemeShowcase';
 import FAQ from './pages/FAQ';
@@ -95,6 +91,12 @@ import Security from './pages/Security';
 
 // Lazy load all page components
 const LoginPage = lazy(() => import('./pages/LoginPage'));
+const CreateOrganization = lazy(() => import('./pages/CreateOrganization'));
+const VerifyOrganization = lazy(() => import('./pages/VerifyOrganization'));
+const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
+const UserInvites = lazy(() => import('./pages/UserInvites'));
+// Debug routes - only available in development
+const DebugSession = lazy(() => import('./pages/DebugSession'));
 const Customers = lazy(() => import('./pages/Customers'));
 const Rentals = lazy(() => import('./pages/Rentals'));
 const LeaseAgreements = lazy(() => import('./pages/LeaseAgreements'));
@@ -142,9 +144,18 @@ const SmartInventory = lazy(() => import('./pages/SmartInventory'));
 const SupportCenter = lazy(() => import('./pages/SupportCenter'));
 const OrganizationAnalytics = lazy(() => import('./pages/OrganizationAnalytics'));
 const OrganizationTools = lazy(() => import('./pages/OrganizationTools'));
+const MaintenanceWorkflows = lazy(() => import('./pages/MaintenanceWorkflows'));
+const RouteOptimization = lazy(() => import('./pages/RouteOptimization'));
+const PalletManagement = lazy(() => import('./pages/PalletManagement'));
+const HazmatCompliance = lazy(() => import('./pages/HazmatCompliance'));
+const ChainOfCustody = lazy(() => import('./pages/ChainOfCustody'));
+const AdvancedRentals = lazy(() => import('./pages/AdvancedRentals'));
+const IntegrationSettings = lazy(() => import('./pages/IntegrationSettings'));
+const AutomationRules = lazy(() => import('./pages/AutomationRules'));
 const Locations = lazy(() => import('./pages/Locations'));
 const TempCustomerManagement = lazy(() => import('./pages/TempCustomerManagement'));
 const TransferFromCustomers = lazy(() => import('./pages/TransferFromCustomers'));
+const DailyUpdateAdmin = lazy(() => import('./pages/DailyUpdateAdmin'));
 
 // Analytics tracking component
 function AnalyticsTracker() {
@@ -179,7 +190,12 @@ function AppContent() {
       <ImportProgressProvider>
         <PermissionsProvider>
           <ThemeProvider>
-            <Router>
+            <Router
+              future={{
+                v7_startTransition: true,
+                v7_relativeSplatPath: true
+              }}
+            >
               {/* Optional dev skip flag: prevent redirect loops after sign-out */}
               {(() => {
                 const skip = sessionStorage.getItem('skip_org_redirect_once');
@@ -204,14 +220,24 @@ function AppContent() {
                     ))
                   } />
                   <Route path="/landing" element={<LandingPage />} />
+                  <Route path="/create-organization" element={<CreateOrganization />} />
+                  <Route path="/verify-organization" element={<VerifyOrganization />} />
+                  <Route path="/accept-invite" element={<AcceptInvite />} />
+                  {/* Debug routes - only available in development */}
+                  {process.env.NODE_ENV === 'development' && (
+                    <Route path="/debug-session" element={<DebugSession />} />
+                  )}
                   <Route path="/login" element={
-                    loading ? <LoginPage /> :
-                    (sessionStorage.getItem('skip_org_redirect_once') ? <LoginPage /> : (
-                      profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
-                      profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
-                      profile && !organization ? <Navigate to="/connect-organization" replace /> :
-                      <LoginPage />
-                    ))
+                    <Suspense fallback={<LoadingSpinner />}>
+                      {loading ? <LoginPage /> :
+                        (sessionStorage.getItem('skip_org_redirect_once') ? <LoginPage /> : (
+                          profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
+                          profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
+                          profile && !organization ? <Navigate to="/connect-organization" replace /> :
+                          <LoginPage />
+                        ))
+                      }
+                    </Suspense>
                   } />
                   {/* Registration routes removed per App Store guidelines */}
                   <Route path="/contact" element={<ContactUs />} />
@@ -225,7 +251,6 @@ function AppContent() {
                   <Route path="/reset-password" element={<ResetPassword />} />
                   {/* Customer registration route removed per App Store guidelines */}
                   <Route path="/portal" element={<CustomerPortal />} />
-                  <Route path="/accept-invite" element={<AcceptInvite />} />
                   <Route path="/fix-organization-link" element={<FixOrganizationLink />} />
                   <Route path="/connect-organization" element={<OAuthOrganizationLink />} />
 
@@ -301,6 +326,7 @@ function AppContent() {
                     <Route path="/import-customer-info" element={<ImportCustomerInfo />} />
                     <Route path="/scanned-orders" element={<ScannedOrders />} />
                     <Route path="/user-management" element={<UserManagement />} />
+                    <Route path="/user-invites" element={<UserInvites />} />
                     <Route path="/role-management" element={<ComprehensiveRoleManager />} />
                     <Route path="/organization-join-codes" element={<OrganizationJoinCodes />} />
                     
@@ -316,48 +342,96 @@ function AppContent() {
                     <Route path="/orders-report" element={<ScannedOrders />} />
                     {/* Generate ID route removed per App Store guidelines */}
                     <Route path="/barcode-generator" element={<BarcodeGenerator />} />
-                    <Route path="/owner-portal/integration-settings" element={<IntegrationSettings />} />
+                    {/* Organization-level routes - accessible to all organization users */}
                     <Route path="/bottle/:id" element={<AssetDetail />} />
                     <Route path="/bottle-management" element={<BottleManagement />} />
+                    <Route path="/daily-update-admin" element={<DailyUpdateAdmin />} />
                     <Route path="/assets/:id" element={<AssetDetail />} />
                     <Route path="/asset/:id" element={<AssetDetail />} />
                     <Route path="/orders" element={<ScannedOrders />} />
-                    <Route path="/billing" element={<Billing />} />
+                    <Route path="/billing" element={
+                      <RoleProtectedRoute allowedRoles={['admin', 'manager', 'user']}>
+                        <Billing />
+                      </RoleProtectedRoute>
+                    } />
                     <Route path="/payments" element={<CustomerPayments />} />
                     <Route path="/smart-inventory" element={<SmartInventory />} />
                     <Route path="/customer-portal" element={<CustomerSelfService />} />
                     <Route path="/support" element={<SupportCenter />} />
                     <Route path="/organization-analytics" element={<OrganizationAnalytics />} />
-                    <Route path="/organization-tools" element={<OrganizationTools />} />
+                    <Route path="/organization-tools" element={
+                      <RoleProtectedRoute allowedRoles={['admin', 'manager', 'user']}>
+                        <OrganizationTools />
+                      </RoleProtectedRoute>
+                    } />
+                    <Route path="/maintenance-workflows" element={
+                      <RoleProtectedRoute allowedRoles={['admin', 'owner', 'manager']}>
+                        <MaintenanceWorkflows />
+                      </RoleProtectedRoute>
+                    } />
+                    <Route path="/route-optimization" element={
+                      <RoleProtectedRoute allowedRoles={['admin', 'owner', 'manager']}>
+                        <RouteOptimization />
+                      </RoleProtectedRoute>
+                    } />
+                    <Route path="/pallet-management" element={
+                      <RoleProtectedRoute allowedRoles={['admin', 'owner', 'manager']}>
+                        <PalletManagement />
+                      </RoleProtectedRoute>
+                    } />
+                    <Route path="/hazmat-compliance" element={
+                      <RoleProtectedRoute allowedRoles={['admin', 'owner', 'manager']}>
+                        <HazmatCompliance />
+                      </RoleProtectedRoute>
+                    } />
+                    <Route path="/chain-of-custody" element={
+                      <RoleProtectedRoute allowedRoles={['admin', 'owner', 'manager']}>
+                        <ChainOfCustody />
+                      </RoleProtectedRoute>
+                    } />
+                    <Route path="/advanced-rentals" element={
+                      <RoleProtectedRoute allowedRoles={['admin', 'owner', 'manager']}>
+                        <AdvancedRentals />
+                      </RoleProtectedRoute>
+                    } />
                     <Route path="/data-utilities" element={<DataUtilities />} />
-                    <Route path="/owner-portal" element={<OwnerPortalLanding />} />
-                    <Route path="/owner-portal/analytics" element={<Analytics />} />
-                    <Route path="/owner-portal/tools" element={<DataUtilities />} />
-                    <Route path="/owner-portal/support" element={<SupportTickets />} />
-                    <Route path="/owner-portal/customer-management" element={<OwnerCustomers />} />
-                    <Route path="/owner-portal/billing" element={<BillingManagement />} />
-                    <Route path="/owner-portal/system-health" element={<SystemHealth />} />
-                    <Route path="/owner-portal/disaster-recovery" element={<DisasterRecoveryDashboard />} />
-                    <Route path="/owner-portal/security" element={<SecurityEvents />} />
-                    <Route path="/owner-portal/user-management" element={<UserManagementAllOrgs />} />
-                    <Route path="/owner-portal/audit-log" element={<AuditLog />} />
-                    <Route path="/owner-portal/impersonation" element={<Impersonation />} />
-                    <Route path="/owner-portal/plans" element={<PlanManagement />} />
+                    
+                    {/* Owner-only routes */}
+                    <Route element={<OwnerProtectedRoute />}>
+                      <Route path="/owner-portal/integration-settings" element={
+                        <RoleProtectedRoute allowedRoles={['admin', 'owner']}>
+                          <IntegrationSettings />
+                        </RoleProtectedRoute>
+                      } />
+                      <Route path="/owner-portal" element={<OwnerPortalLanding />} />
+                      <Route path="/owner-portal/analytics" element={<Analytics />} />
+                      <Route path="/owner-portal/tools" element={<DataUtilities />} />
+                      <Route path="/owner-portal/support" element={<SupportTickets />} />
+                      <Route path="/owner-portal/customer-management" element={<OwnerCustomers />} />
+                      <Route path="/owner-portal/billing" element={<BillingManagement />} />
+                      <Route path="/owner-portal/system-health" element={<SystemHealth />} />
+                      <Route path="/owner-portal/disaster-recovery" element={<DisasterRecoveryDashboard />} />
+                      <Route path="/owner-portal/security" element={<SecurityEvents />} />
+                      <Route path="/owner-portal/user-management" element={<UserManagementAllOrgs />} />
+                      <Route path="/owner-portal/audit-log" element={<AuditLog />} />
+                      <Route path="/owner-portal/impersonation" element={<Impersonation />} />
+                      <Route path="/owner-portal/plans" element={<PlanManagement />} />
                     <Route path="/asset-demo" element={<AssetTypeDemo />} />
                                       <Route path="/asset-configuration" element={<AssetConfigurationManager />} />
-                  <Route path="/owner-portal/asset-configuration" element={<AssetConfigurationManager />} />
-                  <Route path="/file-format-manager" element={<FileFormatManager />} />
-                  <Route path="/owner-portal/file-format-manager" element={<FileFormatManager />} />
-                  <Route path="/owner-portal/format-configuration" element={<FormatConfigurationManager />} />
-                  <Route path="/owner-portal/roles" element={<RoleManagement />} />
-                    <Route path="/owner-portal/page-builder" element={<PageBuilder />} />
-                    <Route path="/owner-portal/contact-management" element={<ContactManagement />} />
-                    <Route path="/owner-portal/landing-editor" element={<LandingPageEditor />} />
-                    <Route path="/owner-portal/reviews" element={<ReviewManagement />} />
-                    <Route path="/owner-portal/website-management" element={<WebsiteManagement />} />
-                    <Route path="/owner-portal/visual-builder" element={<VisualPageBuilder />} />
-                    <Route path="/owner-portal/command-center" element={<OwnerCommandCenter />} />
-                    <Route path="/owner-portal/cms" element={<OwnerCMS />} />
+                      <Route path="/owner-portal/asset-configuration" element={<AssetConfigurationManager />} />
+                      <Route path="/owner-portal/file-format-manager" element={<FileFormatManager />} />
+                      <Route path="/owner-portal/format-configuration" element={<FormatConfigurationManager />} />
+                      <Route path="/owner-portal/roles" element={<RoleManagement />} />
+                      <Route path="/owner-portal/page-builder" element={<PageBuilder />} />
+                      <Route path="/owner-portal/contact-management" element={<ContactManagement />} />
+                      <Route path="/owner-portal/landing-editor" element={<LandingPageEditor />} />
+                      <Route path="/owner-portal/reviews" element={<ReviewManagement />} />
+                      <Route path="/owner-portal/website-management" element={<WebsiteManagement />} />
+                      <Route path="/owner-portal/visual-builder" element={<VisualPageBuilder />} />
+                      <Route path="/owner-portal/command-center" element={<OwnerCommandCenter />} />
+                      <Route path="/owner-portal/cms" element={<OwnerCMS />} />
+                    </Route>
+                    <Route path="/file-format-manager" element={<FileFormatManager />} />
                   </Route>
                   
                   {/* NEW ADVANCED FEATURES ROUTES */}
@@ -383,13 +457,23 @@ function AppContent() {
                   } />
                   <Route path="/palletization-system" element={
                     <ProtectedRoute>
-                      <PalletizationSystem />
+                      <PalletManagement />
                     </ProtectedRoute>
                   } />
                   <Route path="/advanced-rental-calculations" element={
                     <ProtectedRoute>
-                      <AdvancedRentalCalculations />
+                      <AdvancedRentals />
                     </ProtectedRoute>
+                  } />
+                  <Route path="/integration-settings" element={
+                    <RoleProtectedRoute allowedRoles={['admin', 'owner']}>
+                      <IntegrationSettings />
+                    </RoleProtectedRoute>
+                  } />
+                  <Route path="/automation-rules" element={
+                    <RoleProtectedRoute allowedRoles={['admin', 'owner']}>
+                      <AutomationRules />
+                    </RoleProtectedRoute>
                   } />
                   <Route path="/bulk-rental-pricing" element={
                     <ProtectedRoute>

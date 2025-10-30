@@ -52,11 +52,13 @@ export default function BulkRentalPricingManager() {
       setLoading(true);
       
       // Debug: Log organization info
-      console.log('🔍 Organization Debug:', {
-        organizationId: organization?.id,
-        organizationName: organization?.name,
-        organizationData: organization
-      });
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔍 Organization Debug:', {
+          organizationId: organization?.id,
+          organizationName: organization?.name,
+          organizationData: organization
+        });
+      }
       
       // Load customers
       const { data: customersData, error: customersError } = await supabase

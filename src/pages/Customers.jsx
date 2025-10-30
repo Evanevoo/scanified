@@ -92,7 +92,7 @@ function Customers({ profile }) {
   console.log('Customers component rendering, profile:', profile);
   
   const [customers, setCustomers] = useState([]);
-  const [form, setForm] = useState({ CustomerListID: '', name: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
+  const [form, setForm] = useState({ CustomerListID: '', name: '', email: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -247,7 +247,7 @@ function Customers({ profile }) {
       const { error } = await supabase.from('customers').insert([{ ...form, organization_id: organization.id }]);
       if (error) throw error;
       
-      setForm({ CustomerListID: '', name: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
+      setForm({ CustomerListID: '', name: '', email: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
       setSuccessMsg('Customer added successfully!');
       
       // Refresh the current page
@@ -284,7 +284,7 @@ function Customers({ profile }) {
       if (error) throw error;
       
       setEditingId(null);
-      setForm({ CustomerListID: '', name: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
+      setForm({ CustomerListID: '', name: '', email: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
       setSuccessMsg('Customer updated successfully!');
       
       // Refresh current page

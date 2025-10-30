@@ -50,13 +50,16 @@ export default function UserManagement() {
   const { profile, organization } = useAuth();
   const { can, isOrgAdmin } = usePermissions();
   
-  // Debug logging
-  console.log('UserManagement Debug:');
-  console.log('- Profile:', profile);
-  console.log('- Organization:', organization);
-  console.log('- Can manage users:', can('manage:users'));
-  console.log('- IsOrgAdmin:', isOrgAdmin);
-  console.log('- Profile role:', profile?.role);
+  // Debug logging (development only)
+  if (process.env.NODE_ENV === 'development') {
+    console.log('UserManagement Debug:', {
+      profile,
+      organization,
+      canManageUsers: can('manage:users'),
+      isOrgAdmin,
+      profileRole: profile?.role
+    });
+  }
   
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
@@ -176,16 +179,21 @@ export default function UserManagement() {
       // Check if email is already registered with ANY organization (global check)
       const { data: existingProfile, error: profileCheckError } = await supabase
         .from('profiles')
-        .select('email, organization_id, organizations(name)')
+        .select('email, organization_id, is_active, deleted_at, disabled_at, organizations(name)')
         .eq('email', newEmail)
-        .single();
+        .maybeSingle();
 
-      if (existingProfile && existingProfile.organization_id) {
-        if (existingProfile.organization_id === organization.id) {
-          throw new Error(`This email (${newEmail}) is already registered in your organization.`);
-        } else {
-          throw new Error(`This email (${newEmail}) is already registered with another organization "${existingProfile.organizations?.name}". Each email can only be associated with one organization globally. Please use a different email address.`);
+      if (existingProfile) {
+        // Check if profile is active and has an organization
+        if (existingProfile.organization_id && existingProfile.is_active !== false && !existingProfile.deleted_at && !existingProfile.disabled_at) {
+          if (existingProfile.organization_id === organization.id) {
+            throw new Error(`This email (${newEmail}) is already registered in your organization.`);
+          } else {
+            throw new Error(`This email (${newEmail}) is already registered with another organization "${existingProfile.organizations?.name}". Each email can only be associated with one organization globally. Please use a different email address.`);
+          }
         }
+        // If profile exists but is deleted/disabled, we'll allow the invite
+        // The user can reactivate their account when they accept the invite
       }
 
       // Check if there's already a pending invite for this email in ANY organization
@@ -216,6 +224,9 @@ export default function UserManagement() {
         // Check if it's a constraint violation and provide user-friendly message
         if (error.message.includes('organization_invites_organization_id_email_key')) {
           throw new Error('An invite has already been sent to this email from your organization. Please check the existing invites or wait for the user to respond.');
+        }
+        if (error.message.includes('profiles_pkey') || error.message.includes('duplicate key value')) {
+          throw new Error(`This email (${newEmail}) already has an account. They can sign in directly or contact support if they need to join your organization.`);
         }
         throw error;
       }
@@ -251,16 +262,30 @@ export default function UserManagement() {
           });
 
           if (!emailResponse.ok) {
-            const errorData = await emailResponse.json();
-            console.error('Email sending failed:', errorData);
-            throw new Error(`Failed to send email: ${errorData.error || 'Unknown error'}`);
+            // Try to parse error response, but handle empty responses
+            let errorMessage = 'Unknown error';
+            try {
+              const errorData = await emailResponse.json();
+              errorMessage = errorData.error || errorData.message || 'Email service unavailable';
+            } catch (parseError) {
+              errorMessage = `Email service returned status ${emailResponse.status}`;
+            }
+            console.error('Email sending failed:', errorMessage);
+            throw new Error(errorMessage);
           }
 
           console.log('Invitation email sent successfully to:', newEmail);
         } catch (emailError) {
           console.error('Error sending invitation email:', emailError);
           // Don't throw here - the invite was created successfully, just email failed
-          setError(`Invite created but email failed to send: ${emailError.message}. You can copy the invite link manually from the pending invites section.`);
+          const errorMsg = emailError.message || 'Unknown error';
+          setError(`✅ Invite created successfully! However, email sending failed: ${errorMsg}\n\n📋 Copy the invite link from the "Pending Invites" section below and send it manually.`);
+          // Still fetch updated data even though email failed
+          fetchUsers();
+          fetchPendingInvites();
+          setNewEmail('');
+          setNewRoleId(roles.length > 0 ? roles[0].id : '');
+          setShowAddDialog(false);
           return; // Exit early to avoid showing success message
         }
       }
@@ -299,23 +324,35 @@ export default function UserManagement() {
   }
 
   async function handleDeleteUser(userId, userEmail) {
-    if (!confirm(`Are you sure you want to remove ${userEmail} from your organization?`)) {
+    if (!confirm(`Are you sure you want to PERMANENTLY DELETE ${userEmail}? This will remove them from Supabase Auth and they will need to create a new account to rejoin.`)) {
       return;
     }
 
     try {
-      const { error } = await supabase
+      // Step 1: Delete from Supabase Auth (permanent deletion)
+      const { error: authError } = await supabase.auth.admin.deleteUser(userId);
+      
+      if (authError) {
+        console.warn('Could not delete from auth (may not have admin privileges):', authError);
+        // Continue with profile deletion even if auth deletion fails
+      } else {
+        console.log('✅ User deleted from Supabase Auth');
+      }
+
+      // Step 2: Delete from profiles table
+      const { error: profileError } = await supabase
         .from('profiles')
         .delete()
         .eq('id', userId)
         .eq('organization_id', organization.id);
 
-      if (error) throw error;
-      setSuccess('User removed from organization successfully!');
+      if (profileError) throw profileError;
+
+      setSuccess(`User ${userEmail} has been PERMANENTLY DELETED from Supabase. They will need to create a new account to rejoin.`);
       fetchUsers();
     } catch (err) {
       console.error('Error deleting user:', err);
-      setError(err.message);
+      setError(`Failed to delete user: ${err.message}`);
     }
   }
 

@@ -308,6 +308,7 @@ export default function ImportApprovals() {
   const { user, organization } = useAuth();
   const [pendingInvoices, setPendingInvoices] = useState([]);
   const [pendingReceipts, setPendingReceipts] = useState([]);
+  const [allLocations, setAllLocations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [snackbar, setSnackbar] = useState('');
@@ -332,6 +333,12 @@ export default function ImportApprovals() {
     orderNumber: null, 
     customerId: null, 
     organizationId: null 
+  });
+  const [confirmationDialog, setConfirmationDialog] = useState({ 
+    open: false, 
+    action: null, 
+    record: null, 
+    type: null 
   });
   
   // Existing state
@@ -433,7 +440,8 @@ export default function ImportApprovals() {
           fetchAllScanned(),
           fetchScannedOrders(),
           fetchGasTypes(),
-          fetchBottles()
+          fetchBottles(),
+          fetchLocations()
         ]).catch(console.error);
         
       } catch (error) {
@@ -496,14 +504,20 @@ export default function ImportApprovals() {
         }
       }
       
-      // Status filter
+      // Status filter - skip rejected records by default
       if (statusFilter !== 'all') {
+        // Skip rejected records unless explicitly showing them
+        if (record.status === 'rejected') return false;
+        
         const recordStatus = determineVerificationStatus(record);
         if (statusFilter === 'pending' && recordStatus !== 'PENDING') return false;
         if (statusFilter === 'verified' && recordStatus !== 'VERIFIED') return false;
         if (statusFilter === 'exception' && recordStatus !== 'EXCEPTION') return false;
         if (statusFilter === 'investigation' && recordStatus !== 'INVESTIGATION') return false;
         if (statusFilter === 'scanned_only' && recordStatus !== 'SCANNED_ONLY') return false;
+      } else {
+        // Even when showing "all", hide rejected records by default
+        if (record.status === 'rejected') return false;
       }
       
       // Location filter
@@ -527,22 +541,64 @@ export default function ImportApprovals() {
   // Get unique locations from all records
   const getUniqueLocations = () => {
     const locations = new Set(['All']);
-    [...pendingInvoices, ...pendingReceipts].forEach(record => {
-      const data = parseDataField(record.data);
-      const location = data.location || data.summary?.location || 'Unknown';
-      locations.add(location);
+    console.log('🔍 Debug locations - pendingInvoices:', pendingInvoices.length, 'pendingReceipts:', pendingReceipts.length);
+    console.log('🔍 Debug locations - allLocations from database:', allLocations.length);
+    
+    // Always use locations from database first (same as Locations page)
+    allLocations.forEach(location => {
+      locations.add(location.name);
     });
+    
+    // Also add any unique locations found in imported data
+    [...pendingInvoices, ...pendingReceipts].forEach((record, index) => {
+      const data = parseDataField(record.data);
+      const location = data.location || data.summary?.location || data.location_name || data.Location;
+      
+      if (location && location !== 'Unknown') {
+        locations.add(location);
+      }
+      
+      if (index < 3) { // Debug first 3 records
+        console.log(`🔍 Record ${index}:`, {
+          id: record.id,
+          location: location,
+          dataKeys: Object.keys(data),
+          hasLocation: !!data.location,
+          hasSummaryLocation: !!(data.summary && data.summary.location),
+          hasLocationName: !!data.location_name,
+          hasLocationCap: !!data.Location
+        });
+      }
+    });
+    
+    console.log('🔍 Final locations:', Array.from(locations));
     return Array.from(locations);
   };
 
   // Enhanced data fetching functions
   async function fetchPendingInvoices() {
     try {
+      console.log('🔍 Processing existing imported invoices for auto-approval...');
+      console.log('🔍 Organization ID:', organization?.id);
+      
+      if (!organization?.id) {
+        console.log('⚠️ No organization ID found, skipping invoice processing');
+        return;
+      }
+      
       const { data, error } = await supabase
         .from('imported_invoices')
-        .select('*');
+        .select('*')
+        .eq('organization_id', organization.id)
+        .neq('status', 'rejected'); // EXCLUDE REJECTED RECORDS
       
       if (error) throw error;
+      
+      console.log('🔍 Found invoices for organization:', data?.length || 0);
+      if (data && data.length > 0) {
+        console.log('🔍 First invoice organization_id:', data[0].organization_id);
+        console.log('🔍 Current organization_id:', organization.id);
+      }
       
       // Split grouped imports into individual records (professional workflow)
       const individualRecords = [];
@@ -581,11 +637,26 @@ export default function ImportApprovals() {
 
   async function fetchPendingReceipts() {
     try {
+      console.log('🔍 Processing existing imported receipts for auto-approval...');
+      console.log('🔍 Organization ID:', organization?.id);
+      
+      if (!organization?.id) {
+        console.log('⚠️ No organization ID found, skipping receipt processing');
+        return;
+      }
+      
       const { data, error } = await supabase
         .from('imported_sales_receipts')
-        .select('*');
+        .select('*')
+        .eq('organization_id', organization.id);
       
       if (error) throw error;
+      
+      console.log('🔍 Found receipts for organization:', data?.length || 0);
+      if (data && data.length > 0) {
+        console.log('🔍 First receipt organization_id:', data[0].organization_id);
+        console.log('🔍 Current organization_id:', organization.id);
+      }
       
       // Split grouped imports into individual records (professional workflow)
       const individualRecords = [];
@@ -617,8 +688,16 @@ export default function ImportApprovals() {
       
       const startTime = Date.now();
       
-      const { data: invoices, error: invoiceError } = await supabase.from('imported_invoices').select('*').eq('organization_id', organization.id);
-      const { data: receipts, error: receiptError } = await supabase.from('imported_sales_receipts').select('*').eq('organization_id', organization.id);
+      const { data: invoices, error: invoiceError } = await supabase
+        .from('imported_invoices')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .neq('status', 'rejected'); // EXCLUDE REJECTED
+      const { data: receipts, error: receiptError } = await supabase
+        .from('imported_sales_receipts')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .neq('status', 'rejected'); // EXCLUDE REJECTED
       
       if (invoiceError) {
         console.error('❌ Invoice query error:', invoiceError);
@@ -701,7 +780,7 @@ export default function ImportApprovals() {
         .select('*')
         .not('order_number', 'is', null)
         .eq('organization_id', organization.id)
-        .or('status.is.null,status.eq.pending,status.eq.approved')
+        .neq('status', 'rejected') // EXCLUDE REJECTED
         .order('created_at', { ascending: false })
         .limit(1000); // Limit to prevent slow queries
       
@@ -728,7 +807,8 @@ export default function ImportApprovals() {
       
       const { data: importedInvoices } = await supabase
         .from('imported_invoices')
-        .select('data');
+        .select('data')
+        .eq('organization_id', organization.id);
         
       console.log('🔍 Imported invoices:', importedInvoices?.length || 0);
       
@@ -961,11 +1041,11 @@ export default function ImportApprovals() {
       const { data: scannedRows, error: scanError } = await supabase.from('bottle_scans').select('*');
       if (scanError) throw scanError;
       
-      // Also get from scans table (legacy/mobile scans)
+      // Also get from scans table (legacy/mobile scans) - EXCLUDE REJECTED
       const { data: mobileScans, error: mobileError } = await supabase
         .from('scans')
         .select('*')
-        .or('status.is.null,status.eq.pending,status.eq.approved');
+        .not('status', 'eq', 'rejected');
       
       if (mobileError) console.error('Error fetching mobile scans:', mobileError);
       
@@ -1008,7 +1088,7 @@ export default function ImportApprovals() {
         .from('scans')
         .select('*')
         .not('order_number', 'is', null)
-        .or('status.is.null,status.eq.pending,status.eq.approved');
+        .not('status', 'eq', 'rejected'); // EXCLUDE REJECTED SCANS
       
       if (mobileError) throw mobileError;
       
@@ -1027,7 +1107,8 @@ export default function ImportApprovals() {
       // Get all order numbers that have been imported
       const { data: importedInvoices, error: invError } = await supabase
         .from('imported_invoices')
-        .select('data');
+        .select('data')
+        .eq('organization_id', organization.id);
       
       if (invError) throw invError;
 
@@ -1045,9 +1126,12 @@ export default function ImportApprovals() {
 
       console.log('📋 Imported order numbers:', Array.from(importedOrderNumbers));
 
-      // Group ALL scanned rows by order number (don't exclude any)
+      // Group scanned rows by order number - EXCLUDE REJECTED
       const orderGroups = {};
       allScannedRows.forEach(scan => {
+        // Skip rejected scans (both from scans and bottle_scans tables)
+        if (scan.status === 'rejected') return;
+        
         const orderNum = scan.order_number?.toString().trim();
         if (orderNum) {
           if (!orderGroups[orderNum]) {
@@ -1136,6 +1220,22 @@ export default function ImportApprovals() {
     }
   }
 
+  // Fetch locations from database (same as Locations page)
+  async function fetchLocations() {
+    try {
+      const { data: locations, error } = await supabase
+        .from('locations')
+        .select('*')
+        .order('name');
+      
+      if (error) throw error;
+      setAllLocations(locations || []);
+      console.log('🔍 Fetched locations:', locations?.length || 0);
+    } catch (error) {
+      console.error('Error fetching locations:', error);
+    }
+  }
+
   // Fetch all bottles for product code lookup
   async function fetchBottles() {
     try {
@@ -1148,7 +1248,8 @@ export default function ImportApprovals() {
             description: bottle.description || '',
             type: bottle.type || '',
             size: bottle.size || '',
-            group: bottle.group_name || ''
+            group: bottle.group_name || '',
+            category: bottle.category || '' // ADD THIS!
           };
         }
       });
@@ -1873,9 +1974,9 @@ export default function ImportApprovals() {
     
     return {
       productCode: productCode,
-      category: assetInfo.category || lineItem.category || 'BULK TANKS',
-      group: assetInfo.group || lineItem.group || assetInfo.type || 'PROPYLENE',
-      type: assetInfo.type || lineItem.type || '1000 GALLON',
+      category: assetInfo.category || lineItem.category || '',
+      group: assetInfo.group || lineItem.group || '',
+      type: assetInfo.type || lineItem.type || '',
       description: lineItem.description || assetInfo.description || productCode,
       billingCode: lineItem.billing_code || lineItem.BillingCode || productCode
     };
@@ -1968,23 +2069,23 @@ export default function ImportApprovals() {
     if (!data) return null;
     
     // Try direct properties first
-    if (data.customer_id || data.CustomerID || data.CustomerId) {
-      return data.customer_id || data.CustomerID || data.CustomerId;
+    if (data.customer_id || data.CustomerID || data.CustomerId || data.CustomerListID) {
+      return data.customer_id || data.CustomerID || data.CustomerId || data.CustomerListID;
     }
     
     // Try to get from rows array
     if (data.rows && data.rows.length > 0) {
       const firstRow = data.rows[0];
-      if (firstRow.customer_id || firstRow.CustomerID || firstRow.CustomerId) {
-        return firstRow.customer_id || firstRow.CustomerID || firstRow.CustomerId;
+      if (firstRow.customer_id || firstRow.CustomerID || firstRow.CustomerId || firstRow.CustomerListID) {
+        return firstRow.customer_id || firstRow.CustomerID || firstRow.CustomerId || firstRow.CustomerListID;
       }
     }
     
     // Try to get from line_items array
     if (data.line_items && data.line_items.length > 0) {
       const firstItem = data.line_items[0];
-      if (firstItem.customer_id || firstItem.CustomerID || firstItem.CustomerId) {
-        return firstItem.customer_id || firstItem.CustomerID || firstItem.CustomerId;
+      if (firstItem.customer_id || firstItem.CustomerID || firstItem.CustomerId || firstItem.CustomerListID) {
+        return firstItem.customer_id || firstItem.CustomerID || firstItem.CustomerId || firstItem.CustomerListID;
       }
     }
     
@@ -2436,9 +2537,6 @@ export default function ImportApprovals() {
           <Typography variant="h4" gutterBottom>
             Import Verification Center
           </Typography>
-          <Typography variant="subtitle1" color="textSecondary">
-            Professional verification workflow for import approvals
-          </Typography>
         </Box>
         <Box display="flex" gap={2}>
           <FormControlLabel
@@ -2492,14 +2590,19 @@ export default function ImportApprovals() {
       <Paper sx={{ p: 2, mb: 3 }}>
         <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
           <TextField
-            label="Search Records"
+            placeholder="Search Records"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             size="small"
             InputProps={{
               startAdornment: <SearchIcon />
             }}
-            sx={{ minWidth: 200 }}
+            sx={{
+              minWidth: 200,
+              '& .MuiOutlinedInput-root': {
+                height: 40, // Match the height of other controls
+              }
+            }}
           />
           <FormControl size="small" sx={{ minWidth: 120 }}>
             <InputLabel>Status</InputLabel>
@@ -2550,6 +2653,7 @@ export default function ImportApprovals() {
             </Button>
           </ButtonGroup>
           <Button
+            size="small"
             startIcon={<FilterListIcon />}
             onClick={() => setFilterDialog({ open: true })}
           >
@@ -2847,6 +2951,53 @@ export default function ImportApprovals() {
         </DialogActions>
       </Dialog>
 
+      {/* Confirmation Dialog for Approve/Reject */}
+      <Dialog 
+        open={confirmationDialog.open} 
+        onClose={() => setConfirmationDialog({ open: false, action: null, record: null, type: null })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {confirmationDialog.action === 'approve' ? 'Approve Record' : 'Reject Record'}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" sx={{ mb: 2 }}>
+            Are you sure you want to {confirmationDialog.action} this record?
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            This action {confirmationDialog.action === 'reject' ? 'will mark the record as rejected and hide it from the pending list.' : 'will approve the record and assign bottles to customers.'}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmationDialog({ open: false, action: null, record: null, type: null })}>
+            Cancel
+          </Button>
+          <Button 
+            variant="contained" 
+            color={confirmationDialog.action === 'reject' ? 'error' : 'success'}
+            onClick={async () => {
+              try {
+                setLoading(true);
+                if (confirmationDialog.action === 'approve') {
+                  await confirmApprove(confirmationDialog.type, confirmationDialog.record);
+                } else if (confirmationDialog.action === 'reject') {
+                  await confirmReject(confirmationDialog.type, confirmationDialog.record);
+                }
+                setConfirmationDialog({ open: false, action: null, record: null, type: null });
+              } catch (error) {
+                console.error(`${confirmationDialog.action} failed:`, error);
+                setSnackbar(`Failed to ${confirmationDialog.action} record: ${error.message}`);
+              } finally {
+                setLoading(false);
+              }
+            }}
+          >
+            {confirmationDialog.action === 'approve' ? 'Approve' : 'Reject'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Settings Dialog */}
       <Dialog 
         open={settingsDialog.open} 
@@ -2972,17 +3123,18 @@ export default function ImportApprovals() {
                             textDecoration: 'underline'
                           }
                         }}
-                        onClick={(e) => {
-                          e.stopPropagation(); // Prevent card click
-                          const customerName = getCustomerInfo(data);
-                          const customerId = data.customer_id || data.CustomerListID;
-                          if (customerId) {
-                            navigate(`/customer/${customerId}`);
-                          } else {
-                            // Try to find customer by name first
-                            navigate(`/customers?search=${encodeURIComponent(customerName)}`);
-                          }
-                        }}
+                      onClick={(e) => {
+                        e.stopPropagation(); // Prevent card click
+                        const customerName = getCustomerInfo(data);
+                        const customerId = getCustomerId(data);
+                        console.log('Customer click - Name:', customerName, 'ID:', customerId, 'Data:', data);
+                        if (customerId) {
+                          navigate(`/customer/${customerId}`);
+                        } else {
+                          // Try to find customer by name first
+                          navigate(`/customers?search=${encodeURIComponent(customerName)}`);
+                        }
+                      }}
                       >
                         {customerInfo}
                       </Typography>
@@ -3034,7 +3186,7 @@ export default function ImportApprovals() {
                           variant="outlined"
                           color="success"
                           startIcon={<ApprovalIcon />}
-                          onClick={() => setVerificationDialog({ open: true, record: invoice })}
+                          onClick={() => handleApprove('invoice', invoice)}
                         >
                           Verify
                         </Button>
@@ -3045,7 +3197,7 @@ export default function ImportApprovals() {
                       variant="outlined"
                       color="error"
                       startIcon={<ErrorIcon />}
-                      onClick={() => setVerificationDialog({ open: true, record: invoice })}
+                      onClick={() => handleReject('invoice', invoice)}
                     >
                       Reject
                     </Button>
@@ -3094,7 +3246,7 @@ export default function ImportApprovals() {
                               Category
                             </Typography>
                             <Typography variant="body2">
-                              {item.productInfo.category || 'INDUSTRIAL CYLINDERS'}
+                              {item.productInfo.category || ''}
                             </Typography>
                           </Grid>
                           <Grid item xs={6} sm={2}>
@@ -3102,7 +3254,7 @@ export default function ImportApprovals() {
                               Group
                             </Typography>
                             <Typography variant="body2">
-                              {item.productInfo.group || 'MIXGAS'}
+                              {item.productInfo.group || ''}
                             </Typography>
                           </Grid>
                           <Grid item xs={6} sm={2}>
@@ -3110,7 +3262,7 @@ export default function ImportApprovals() {
                               Type
                             </Typography>
                             <Typography variant="body2">
-                              {item.productInfo.type || item.productInfo.productCode}
+                              {item.productInfo.type || ''}
                             </Typography>
                           </Grid>
                           <Grid item xs={12} sm={3}>
@@ -3218,7 +3370,29 @@ export default function ImportApprovals() {
                       />
                     </Box>
                   }
-                  subheader={customerInfo}
+                  subheader={
+                    <Typography 
+                      variant="body2" 
+                      sx={{ 
+                        cursor: 'pointer',
+                        '&:hover': { 
+                          color: 'primary.main',
+                          textDecoration: 'underline'
+                        }
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        console.log('Grid customer click - Info:', customerInfo, 'ID:', customerId, 'Data:', data);
+                        if (customerId) {
+                          navigate(`/customer/${customerId}`);
+                        } else {
+                          navigate(`/customers?search=${encodeURIComponent(customerInfo)}`);
+                        }
+                      }}
+                    >
+                      {customerInfo}
+                    </Typography>
+                  }
                   action={
                     <Checkbox
                       checked={selectedRecords.includes(invoice.id)}
@@ -3438,7 +3612,7 @@ export default function ImportApprovals() {
                         variant="outlined"
                         color="success"
                         startIcon={<ApprovalIcon />}
-                        onClick={() => setVerificationDialog({ open: true, record: invoice })}
+                        onClick={() => handleApprove('invoice', invoice)}
                       >
                         Verify
                       </Button>
@@ -3497,7 +3671,29 @@ export default function ImportApprovals() {
                       />
                     </Box>
                   }
-                  subheader={customerInfo}
+                  subheader={
+                    <Typography 
+                      variant="body2" 
+                      sx={{ 
+                        cursor: 'pointer',
+                        '&:hover': { 
+                          color: 'primary.main',
+                          textDecoration: 'underline'
+                        }
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const customerId = getCustomerId(data);
+                        if (customerId) {
+                          navigate(`/customer/${customerId}`);
+                        } else {
+                          navigate(`/customers?search=${encodeURIComponent(customerInfo)}`);
+                        }
+                      }}
+                    >
+                      {customerInfo}
+                    </Typography>
+                  }
                   action={
                     <Checkbox
                       checked={selectedRecords.includes(receipt.id)}
@@ -3594,7 +3790,28 @@ export default function ImportApprovals() {
                   </Typography>
                 </Box>
                 <Typography variant="body2" color="text.secondary" gutterBottom>
-                  Customer: {customerInfo}
+                  Customer: <Typography 
+                    component="span"
+                    sx={{ 
+                      cursor: 'pointer',
+                      color: 'primary.main',
+                      '&:hover': { 
+                        textDecoration: 'underline'
+                      }
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const customerId = getCustomerId(data);
+                      console.log('Receipt customer click - Info:', customerInfo, 'ID:', customerId, 'Data:', data);
+                      if (customerId) {
+                        navigate(`/customer/${customerId}`);
+                      } else {
+                        navigate(`/customers?search=${encodeURIComponent(customerInfo)}`);
+                      }
+                    }}
+                  >
+                    {customerInfo}
+                  </Typography>
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Date: {recordDate}
@@ -3621,7 +3838,25 @@ export default function ImportApprovals() {
   }
 
   // Enhanced action handlers
-  async function handleApprove(type, row) {
+  function requestApprove(type, row) {
+    setConfirmationDialog({
+      open: true,
+      action: 'approve',
+      record: row,
+      type: type
+    });
+  }
+
+  function requestReject(type, row) {
+    setConfirmationDialog({
+      open: true,
+      action: 'reject',
+      record: row,
+      type: type
+    });
+  }
+
+  async function confirmApprove(type, row) {
     try {
       const tableName = type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts';
       const { error } = await supabase
@@ -3645,8 +3880,41 @@ export default function ImportApprovals() {
     }
   }
 
-  async function handleReject(type, row) {
+  async function confirmReject(type, row) {
     try {
+      // Handle scanned-only records
+      if (typeof row.id === 'string' && row.id.startsWith('scanned_')) {
+        const orderNumber = row.id.replace('scanned_', '');
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        
+        // Mark all scans for this order as rejected in scans table
+        const { error: scanError } = await supabase
+          .from('scans')
+          .update({
+            status: 'rejected',
+            rejected_at: new Date().toISOString(),
+            rejected_by: currentUser.id
+          })
+          .eq('order_number', orderNumber);
+        
+        if (scanError) throw scanError;
+        
+        // Delete bottle_scans for this order (since it has no status column)
+        const { error: bottleScanError } = await supabase
+          .from('bottle_scans')
+          .delete()
+          .eq('order_number', orderNumber);
+        
+        if (bottleScanError) {
+          console.error('Error deleting bottle_scans:', bottleScanError);
+        }
+        
+        setSnackbar('Scanned records rejected successfully');
+        await fetchData();
+        return;
+      }
+      
+      // Handle regular imported records
       const tableName = type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts';
       const { error } = await supabase
         .from(tableName)
@@ -3664,6 +3932,14 @@ export default function ImportApprovals() {
     } catch (error) {
       setError('Failed to reject record: ' + error.message);
     }
+  }
+
+  async function handleApprove(type, row) {
+    requestApprove(type, row);
+  }
+
+  async function handleReject(type, row) {
+    requestReject(type, row);
   }
 
   async function handleDelete(type, row) {
@@ -3751,7 +4027,7 @@ export default function ImportApprovals() {
       const quantitiesMatch = await checkQuantityMatch(record);
       
       if (quantitiesMatch) {
-        console.log(`✅ Auto-approving record ${record.id} - quantities match`);
+        console.log(`✅ Auto-approving existing record ${record.id} - quantities match`);
         
         // Update record status to approved
         const tableName = record.is_scanned_only ? 'imported_invoices' : 'imported_invoices';
@@ -3776,7 +4052,7 @@ export default function ImportApprovals() {
         
         return true;
       } else {
-        console.log(`❌ Not auto-approving record ${record.id} - quantities don't match`);
+        console.log(`❌ Not auto-approving existing record ${record.id} - quantities don't match`);
         return false;
       }
     } catch (error) {

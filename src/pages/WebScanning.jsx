@@ -288,7 +288,6 @@ export default function WebScanning() {
           status: 'delivered',
           location: customerInfo?.name || 'Customer Location',
           assigned_customer: customerInfo?.id || null,
-          last_scanned: new Date().toISOString()
         };
         message = `Delivered to ${customerInfo?.name || 'customer'}`;
         break;
@@ -298,7 +297,6 @@ export default function WebScanning() {
           status: 'picked_up',
           location: 'In Transit',
           assigned_customer: null,
-          last_scanned: new Date().toISOString()
         };
         message = 'Picked up from customer';
         break;
@@ -307,7 +305,6 @@ export default function WebScanning() {
         updateData = {
           last_audited: new Date().toISOString(),
           audit_location: location ? `${location.latitude},${location.longitude}` : null,
-          last_scanned: new Date().toISOString()
         };
         message = 'Audit scan completed';
         break;
@@ -316,16 +313,13 @@ export default function WebScanning() {
         updateData = {
           status: 'maintenance',
           last_maintenance: new Date().toISOString(),
-          last_scanned: new Date().toISOString()
         };
         message = 'Marked for maintenance';
         break;
 
       case 'locate':
-        // Just update last scanned time for locate
-        updateData = {
-          last_scanned: new Date().toISOString()
-        };
+        // Just update location for locate
+        updateData = {};
         message = `Located at ${asset.location || 'Unknown location'}`;
         break;
 

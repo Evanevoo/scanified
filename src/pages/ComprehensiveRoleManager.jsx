@@ -104,12 +104,13 @@ export default function ComprehensiveRoleManager() {
 
       console.log(`📋 Found ${rolesData?.length || 0} roles in database`);
 
-      // Also fetch usage count for each role
+      // Also fetch usage count for each role (filtered by organization)
       const rolesWithUsage = await Promise.all((rolesData || []).map(async (role) => {
         const { count } = await supabase
           .from('profiles')
           .select('*', { count: 'exact', head: true })
-          .eq('role_id', role.id);
+          .eq('role_id', role.id)
+          .eq('organization_id', organization?.id);
 
         return { ...role, usage_count: count || 0 };
       }));
@@ -266,7 +267,29 @@ export default function ComprehensiveRoleManager() {
 
     setSaving(true);
     try {
+      // Check if role name was changed
+      const originalRole = roles.find(r => r.id === editDialog.role.id);
+      const nameChanged = originalRole && originalRole.name !== editDialog.role.name;
+      
+      if (nameChanged) {
+        // Normalize the new role name
+        const normalizedName = editDialog.role.name.toLowerCase().trim().replace(/\s+/g, '_');
+        
+        // Check if new name already exists
+        const { data: existingRole } = await supabase
+          .from('roles')
+          .select('id')
+          .ilike('name', normalizedName)
+          .neq('id', editDialog.role.id);
+
+        if (existingRole && existingRole.length > 0) {
+          showSnackbar('A role with this name already exists', 'error');
+          return;
+        }
+      }
+
       const updatedRole = {
+        name: editDialog.role.name.toLowerCase().trim().replace(/\s+/g, '_'),
         display_name: editDialog.role.display_name,
         description: editDialog.role.description
       };
@@ -283,10 +306,11 @@ export default function ComprehensiveRoleManager() {
       const { error: permError } = await supabase
         .from('role_permissions')
         .update({
+          role_name: updatedRole.name,
           display_name: editDialog.role.display_name,
           description: editDialog.role.description
         })
-        .eq('role_name', editDialog.role.name);
+        .eq('role_name', originalRole.name);
 
       if (permError) {
         console.warn('Could not update role_permissions entry:', permError);
@@ -689,10 +713,21 @@ export default function ComprehensiveRoleManager() {
                 onChange={(e) => {
                   if (editDialog.isNew) {
                     setNewRole({ ...newRole, name: e.target.value });
+                  } else {
+                    setEditDialog({
+                      ...editDialog,
+                      role: { ...editDialog.role, name: e.target.value }
+                    });
                   }
                 }}
-                disabled={!editDialog.isNew}
-                helperText={editDialog.isNew ? "Role name will be normalized (lowercase, underscores)" : "Role name cannot be changed"}
+                disabled={!editDialog.isNew && profile?.role !== 'owner'}
+                helperText={
+                  editDialog.isNew 
+                    ? "Role name will be normalized (lowercase, underscores)" 
+                    : profile?.role === 'owner' 
+                      ? "Role name will be normalized (lowercase, underscores)" 
+                      : "Only owners can change role names"
+                }
               />
             </Grid>
             <Grid item xs={12}>

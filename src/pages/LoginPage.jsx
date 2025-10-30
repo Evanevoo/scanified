@@ -21,6 +21,22 @@ function LoginPage() {
   const [resetLoading, setResetLoading] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
   const [resetError, setResetError] = useState('');
+  const [signupDialog, setSignupDialog] = useState(false);
+  const [signupData, setSignupData] = useState({ name: '', email: '', password: '', organizationName: '' });
+  const [signupLoading, setSignupLoading] = useState(false);
+  const [signupError, setSignupError] = useState('');
+
+  useEffect(() => {
+    // Check if there's a pending organization to create (from OrganizationDeleted page)
+    const pendingOrgName = sessionStorage.getItem('pending_org_name');
+    const createOrgAfterLogin = sessionStorage.getItem('create_org_after_login');
+    
+    if (pendingOrgName && createOrgAfterLogin && !user) {
+      // User came from organization creation page, open signup dialog
+      setSignupData(prev => ({ ...prev, organizationName: pendingOrgName }));
+      setSignupDialog(true);
+    }
+  }, [user]);
 
   useEffect(() => {
     // Simplified navigation logic
@@ -32,9 +48,44 @@ function LoginPage() {
         // Platform owner without organization
         navigate('/owner-portal');
       } else if (user && profile && !organization && profile.role !== 'owner') {
+        // Check if there's a redirect flag set
+        const redirectAfterLogin = sessionStorage.getItem('redirect_after_login');
+        if (redirectAfterLogin) {
+          sessionStorage.removeItem('redirect_after_login');
+          navigate(redirectAfterLogin);
+          return;
+        }
+        
         // User without organization (needs to create or join one)
         setShowOrgError(true);
         setError('Your account is not linked to any organization. Please create a new organization or contact support.');
+      } else if (user && !profile) {
+        // User is authenticated but profile is still loading
+        // Check if there's a redirect flag set (for new users)
+        const redirectAfterLogin = sessionStorage.getItem('redirect_after_login');
+        if (redirectAfterLogin) {
+          // Don't remove the flag yet, wait for profile to load
+          console.log('User authenticated, waiting for profile to load before redirecting to:', redirectAfterLogin);
+        }
+      } else if (user && profile === null) {
+        // User is authenticated but has no profile (new user)
+        // Check if there's a pending organization to create
+        const createOrgAfterLogin = sessionStorage.getItem('create_org_after_login');
+        const pendingOrgName = sessionStorage.getItem('pending_org_name');
+        
+        if (createOrgAfterLogin && pendingOrgName) {
+          // Create organization automatically
+          createOrganizationForNewUser(pendingOrgName);
+          return;
+        }
+        
+        // Check if there's a redirect flag set
+        const redirectAfterLogin = sessionStorage.getItem('redirect_after_login');
+        if (redirectAfterLogin) {
+          sessionStorage.removeItem('redirect_after_login');
+          navigate(redirectAfterLogin);
+          return;
+        }
       }
       // Otherwise, stay on login page
     }
@@ -94,6 +145,195 @@ function LoginPage() {
     setForgotPasswordOpen(false);
     setResetEmail('');
     setResetError('');
+  };
+
+  const handleSignup = async (e) => {
+    e.preventDefault();
+    setSignupLoading(true);
+    setSignupError('');
+
+    try {
+      // Check if user already exists with a deleted profile
+      const { data: existingProfile, error: profileCheckError } = await supabase
+        .from('profiles')
+        .select('id, email, deleted_at, disabled_at')
+        .eq('email', signupData.email)
+        .maybeSingle();
+
+      if (existingProfile && (existingProfile.deleted_at || existingProfile.disabled_at || existingProfile.is_active === false)) {
+        // User exists but is deleted/disabled, allow them to reactivate
+        console.log('User exists but is deleted/disabled, allowing reactivation');
+      } else if (existingProfile && !existingProfile.deleted_at && !existingProfile.disabled_at && existingProfile.is_active !== false) {
+        // User exists and is active
+        throw new Error('An account with this email already exists. Please sign in instead.');
+      }
+
+      // Sign up the user (no email confirmation required)
+      const { data, error } = await supabase.auth.signUp({
+        email: signupData.email,
+        password: signupData.password,
+        options: {
+          emailRedirectTo: undefined, // No email confirmation
+          data: {
+            name: signupData.name,
+            organizationName: signupData.organizationName,
+          }
+        }
+      });
+
+      if (error) {
+        // If it's a "User already registered" error, check if we can reactivate
+        if (error.message.includes('User already registered')) {
+          if (existingProfile && (existingProfile.deleted_at || existingProfile.disabled_at || existingProfile.is_active === false)) {
+            console.log('User already registered but profile is deleted/disabled, proceeding with reactivation');
+            // Continue with the flow - we'll reactivate the profile
+          } else {
+            // User exists and is active, they should sign in instead
+            throw new Error('An account with this email already exists. Please sign in instead.');
+          }
+        } else {
+          throw error;
+        }
+      }
+
+      // Store organization name for after email confirmation
+      if (signupData.organizationName) {
+        sessionStorage.setItem('pending_org_name', signupData.organizationName);
+        sessionStorage.setItem('create_org_after_login', 'true');
+      }
+      
+      // Show success message
+      alert(`Account created successfully! Please check your email (${signupData.email}) to confirm your account, then sign in. ${signupData.organizationName ? 'Your organization will be created automatically after you confirm your email.' : ''}`);
+      
+      // Close dialog and reset form
+      setSignupDialog(false);
+      setSignupData({ name: '', email: '', password: '', organizationName: '' });
+      
+    } catch (err) {
+      console.error('Signup error:', err);
+      setSignupError(err.message || 'Failed to create account. Please try again.');
+    } finally {
+      setSignupLoading(false);
+    }
+  };
+
+  const generateUniqueSlug = async (orgName) => {
+    // Generate base slug from organization name
+    let baseSlug = orgName.toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    
+    // If slug is empty, use a default
+    if (!baseSlug) {
+      baseSlug = 'organization';
+    }
+    
+    let slug = baseSlug;
+    let counter = 1;
+    
+    // Keep checking until we find a unique slug
+    while (true) {
+      const { data: existingOrg } = await supabase
+        .from('organizations')
+        .select('id')
+        .eq('slug', slug)
+        .is('deleted_at', null)
+        .maybeSingle();
+      
+      if (!existingOrg) {
+        return slug; // Found unique slug
+      }
+      
+      // Try with a number suffix
+      slug = `${baseSlug}-${counter}`;
+      counter++;
+      
+      // Prevent infinite loop
+      if (counter > 100) {
+        // Use timestamp as fallback
+        slug = `${baseSlug}-${Date.now()}`;
+        break;
+      }
+    }
+    
+    return slug;
+  };
+
+  const createOrganizationForNewUser = async (orgName) => {
+    try {
+      console.log('Creating organization for new user:', orgName);
+      
+      // Generate unique slug
+      const slug = await generateUniqueSlug(orgName);
+
+      // Create new organization
+      const { data: newOrg, error: orgError } = await supabase
+        .from('organizations')
+        .insert({
+          name: orgName.trim(),
+          slug: slug,
+          subscription_status: 'trial',
+          trial_end_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(), // 14 days trial
+        })
+        .select()
+        .single();
+
+      if (orgError) throw orgError;
+
+      // Create default admin role for the organization
+      const { data: adminRole, error: roleError } = await supabase
+        .from('roles')
+        .insert({
+          name: 'admin',
+          organization_id: newOrg.id,
+          permissions: {
+            bottles: { view: true, create: true, edit: true, delete: true },
+            customers: { view: true, create: true, edit: true, delete: true },
+            reports: { view: true, create: true },
+            settings: { view: true, edit: true }
+          }
+        })
+        .select()
+        .single();
+
+      if (roleError) {
+        console.error('Error creating admin role:', roleError);
+      }
+
+      // Update user profile to link to new organization (reactivate if deleted)
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          organization_id: newOrg.id,
+          role_id: adminRole?.id,
+          role: 'admin',
+          is_active: true,
+          disabled_at: null,
+          disabled_reason: null,
+          deleted_at: null // Reactivate deleted profile
+        })
+        .eq('id', user.id);
+
+      if (profileError) throw profileError;
+
+      console.log('✅ Organization created successfully for new user');
+      
+      // Clear the flags
+      sessionStorage.removeItem('create_org_after_login');
+      sessionStorage.removeItem('pending_org_name');
+      
+      // Show success message
+      alert(`Welcome! Your organization "${orgName}" has been created successfully. You now have admin access.`);
+      
+      // Redirect to home
+      window.location.href = '/home';
+
+    } catch (err) {
+      console.error('Error creating organization for new user:', err);
+      setError(`Failed to create organization: ${err.message}`);
+      sessionStorage.removeItem('create_org_after_login');
+      sessionStorage.removeItem('pending_org_name');
+    }
   };
 
   const handleLogout = async () => {
@@ -243,34 +483,25 @@ function LoginPage() {
               Don't have an account?
             </Typography>
             <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <Typography
-                variant="body2"
-                onClick={() => navigate('/signup')}
-                sx={{ 
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  color: 'primary.main',
-                  '&:hover': {
-                    textDecoration: 'underline'
-                  }
+              <Button
+                variant="contained"
+                size="large"
+                fullWidth
+                onClick={() => {
+                  sessionStorage.setItem('redirect_after_login', '/connect-organization');
+                  setSignupDialog(true);
                 }}
+                sx={{ mb: 1 }}
               >
-                Join Organization
+                Create Free Account
+              </Button>
+              <Typography variant="caption" color="text.secondary" display="block" textAlign="center">
+                Join an existing organization or start your own
               </Typography>
-              <Typography variant="body2" color="text.secondary">•</Typography>
-              <Typography
-                variant="body2"
-                onClick={() => navigate('/register')}
-                sx={{ 
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  color: 'primary.main',
-                  '&:hover': {
-                    textDecoration: 'underline'
-                  }
-                }}
-              >
-                Start Trial
+            </Box>
+            <Box sx={{ mt: 2, textAlign: 'center' }}>
+              <Typography variant="body2" color="text.secondary">
+                Already have an account? Sign in above
               </Typography>
             </Box>
           </Box>
@@ -340,6 +571,81 @@ function LoginPage() {
         onClose={() => setResetSuccess(false)}
         message="Password reset link sent! Check your email."
       />
+
+      {/* Signup Dialog */}
+      <Dialog
+        open={signupDialog}
+        onClose={() => setSignupDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <form onSubmit={handleSignup}>
+          <DialogTitle>Create Your Free Account</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mb: 2 }}>
+              {signupData.organizationName 
+                ? `Create an account to set up "${signupData.organizationName}"`
+                : "Create an account to join an organization or start your own"
+              }
+            </Typography>
+            {signupError && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {signupError}
+              </Alert>
+            )}
+            <TextField
+              fullWidth
+              label="Full Name"
+              value={signupData.name}
+              onChange={(e) => setSignupData({ ...signupData, name: e.target.value })}
+              required
+              autoFocus
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              fullWidth
+              label="Email"
+              type="email"
+              value={signupData.email}
+              onChange={(e) => setSignupData({ ...signupData, email: e.target.value })}
+              required
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              fullWidth
+              label="Password"
+              type="password"
+              value={signupData.password}
+              onChange={(e) => setSignupData({ ...signupData, password: e.target.value })}
+              required
+              helperText="Must be at least 6 characters"
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              fullWidth
+              label="Organization Name (Optional)"
+              value={signupData.organizationName}
+              onChange={(e) => setSignupData({ ...signupData, organizationName: e.target.value })}
+              placeholder="e.g., ABC Gas Company"
+              helperText="Leave blank if you want to join an existing organization"
+              sx={{ mb: 2 }}
+            />
+            <Alert severity="info" sx={{ mt: 2 }}>
+              After creating your account, you'll receive a confirmation email. Once confirmed, you can sign in. {signupData.organizationName ? 'Your organization will be created automatically.' : 'You can then join an existing organization or create your own.'}
+            </Alert>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setSignupDialog(false)}>Cancel</Button>
+            <Button 
+              type="submit" 
+              variant="contained" 
+              disabled={signupLoading || !signupData.name || !signupData.email || !signupData.password || signupData.password.length < 6}
+            >
+              {signupLoading ? <CircularProgress size={20} /> : 'Create Account'}
+            </Button>
+          </DialogActions>
+        </form>
+      </Dialog>
     </Box>
   );
 }

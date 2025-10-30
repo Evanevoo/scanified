@@ -17,7 +17,11 @@ import {
   Divider,
   Card,
   CardContent,
-  CircularProgress
+  CircularProgress,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
@@ -42,9 +46,11 @@ export default function AssetDetail() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [locations, setLocations] = useState([]);
 
   useEffect(() => {
     fetchAssetDetail();
+    fetchLocations();
   }, [id]);
 
   const fetchAssetDetail = async () => {
@@ -65,6 +71,27 @@ export default function AssetDetail() {
       setError('Failed to load asset details');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchLocations = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('locations')
+        .select('id, name, province')
+        .order('name');
+
+      if (error) throw error;
+      setLocations(data || []);
+    } catch (error) {
+      console.error('Error fetching locations:', error);
+      // Fallback to hardcoded locations if database fails
+      setLocations([
+        { id: 'saskatoon', name: 'Saskatoon', province: 'Saskatchewan' },
+        { id: 'regina', name: 'Regina', province: 'Saskatchewan' },
+        { id: 'chilliwack', name: 'Chilliwack', province: 'British Columbia' },
+        { id: 'prince-george', name: 'Prince George', province: 'British Columbia' }
+      ]);
     }
   };
 
@@ -239,16 +266,24 @@ export default function AssetDetail() {
                 {asset.customer_name || '-'}
               </Typography>
             </Grid>
-            <Grid item xs={12} md={6}>
-              <Typography variant="body2" color="textSecondary">
-                Days at Location
-              </Typography>
-              <Typography variant="body1" fontWeight="bold">
-                {asset.days_at_location || 0} days
-              </Typography>
-            </Grid>
+          <Grid item xs={12} md={6}>
+            <Typography variant="body2" color="textSecondary">
+              Days at Location
+            </Typography>
+            <Typography variant="body1" fontWeight="bold">
+              {asset.days_at_location || 0} days
+            </Typography>
           </Grid>
-        </Paper>
+          <Grid item xs={12} md={6}>
+            <Typography variant="body2" color="textSecondary">
+              Ownership
+            </Typography>
+            <Typography variant="body1" fontWeight="bold">
+              {asset.ownership || '-'}
+            </Typography>
+          </Grid>
+        </Grid>
+      </Paper>
       )}
 
       {/* Edit Dialog */}
@@ -281,11 +316,27 @@ export default function AssetDetail() {
               />
             </Grid>
             <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <InputLabel>Location</InputLabel>
+                <Select
+                  value={editData.location || ''}
+                  onChange={(e) => setEditData({ ...editData, location: e.target.value })}
+                  label="Location"
+                >
+                  {locations.map((location) => (
+                    <MenuItem key={location.id} value={location.name.toUpperCase()}>
+                      {location.name} ({location.province})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} md={6}>
               <TextField
                 fullWidth
-                label="Location"
-                value={editData.location || ''}
-                onChange={(e) => setEditData({ ...editData, location: e.target.value })}
+                label="Ownership"
+                value={editData.ownership || ''}
+                onChange={(e) => setEditData({ ...editData, ownership: e.target.value })}
               />
             </Grid>
 

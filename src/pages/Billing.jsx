@@ -975,13 +975,7 @@ export default function Billing() {
     return <Alert severity="error">No organization found.</Alert>;
   }
 
-  if (profile?.role === 'owner') {
-    return (
-      <div style={{ padding: 32, textAlign: 'center' }}>
-        <h2>Billing is not applicable for the platform owner account.</h2>
-      </div>
-    );
-  }
+  // Platform owners are blocked at route level, so this check is no longer needed
 
   const currentPlan = getCurrentPlan();
   const isSubscriptionActive = subscription?.subscription_status === 'active';

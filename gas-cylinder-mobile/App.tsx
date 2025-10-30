@@ -7,6 +7,8 @@ import { ThemeProvider } from './context/ThemeContext';
 import { SettingsProvider } from './context/SettingsContext';
 import { AssetProvider } from './context/AssetContext';
 import { useAuth } from './hooks/useAuth';
+import { notificationService } from './services/NotificationService';
+import { soundService } from './services/soundService';
 
 // Import all screens
 import HomeScreen from './screens/HomeScreen';
@@ -28,6 +30,9 @@ import RecentScansScreen from './screens/RecentScansScreen';
 import SupportTicketScreen from './screens/SupportTicketScreen';
 import UserManagementScreen from './screens/UserManagementScreen';
 import DriverDashboard from './screens/DriverDashboard';
+import AnalyticsScreen from './screens/AnalyticsScreen';
+import DataHealthScreen from './screens/DataHealthScreen';
+import NotificationSettingsScreen from './screens/NotificationSettingsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -64,7 +69,20 @@ const styles = StyleSheet.create({
 });
 
 function AppContent() {
-  const { user, profile, organization, loading } = useAuth();
+  const { user, profile, organization, loading, organizationLoading, authError } = useAuth();
+
+  // Initialize services when user is authenticated
+  React.useEffect(() => {
+    if (user && profile?.organization_id) {
+      // Initialize notification service
+      notificationService.initialize().then(() => {
+        notificationService.registerDevice(user.id, profile.organization_id);
+      });
+      
+      // Initialize sound service
+      soundService.initialize();
+    }
+  }, [user, profile]);
   
   if (loading) {
     return (
@@ -72,6 +90,50 @@ function AppContent() {
         <View style={styles.content}>
           <Text style={styles.title}>🔄 Loading...</Text>
           <Text style={styles.text}>Please wait while we load your data.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Handle authentication errors
+  if (authError) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.content}>
+          <Text style={styles.title}>⚠️ Authentication Error</Text>
+          <Text style={styles.text}>{authError}</Text>
+          <Text style={styles.subtext}>
+            Please restart the app or contact support if the problem persists.
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Handle users without organizations (only show if not loading)
+  if (user && !organization && !organizationLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.content}>
+          <Text style={styles.title}>🏢 No Organization</Text>
+          <Text style={styles.text}>
+            You are not associated with any organization.
+          </Text>
+          <Text style={styles.subtext}>
+            Please contact your administrator or create a new organization.
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Show loading while organization is being fetched
+  if (user && organizationLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.content}>
+          <Text style={styles.title}>🔄 Loading...</Text>
+          <Text style={styles.text}>Loading your organization data...</Text>
         </View>
       </SafeAreaView>
     );
@@ -177,6 +239,21 @@ function AppContent() {
               name="DriverDashboard" 
               component={DriverDashboard}
               options={{ title: 'Driver Dashboard' }}
+            />
+            <Stack.Screen 
+              name="Analytics" 
+              component={AnalyticsScreen}
+              options={{ title: 'Analytics' }}
+            />
+            <Stack.Screen 
+              name="DataHealth" 
+              component={DataHealthScreen}
+              options={{ title: 'Data Health' }}
+            />
+            <Stack.Screen 
+              name="NotificationSettings" 
+              component={NotificationSettingsScreen}
+              options={{ title: 'Notifications' }}
             />
           </>
         )}
