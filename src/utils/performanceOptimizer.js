@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 /**
  * Performance Optimization Utilities
  * Provides various performance optimization techniques
@@ -96,13 +97,13 @@ export const usePerformanceMonitor = (label) => {
 
   const start = useCallback(() => {
     startTime.current = performance.now();
-    console.log(`🚀 Starting: ${label}`);
+    logger.log(`🚀 Starting: ${label}`);
   }, [label]);
 
   const end = useCallback(() => {
     if (startTime.current) {
       const duration = performance.now() - startTime.current;
-      console.log(`⏱️ ${label}: ${duration.toFixed(2)}ms`);
+      logger.log(`⏱️ ${label}: ${duration.toFixed(2)}ms`);
       startTime.current = null;
     }
   }, [label]);
@@ -188,7 +189,7 @@ export const bundleOptimizer = {
       const module = await import(modulePath);
       return module.default || module;
     } catch (error) {
-      console.error(`Failed to load module: ${modulePath}`, error);
+      logger.error(`Failed to load module: ${modulePath}`, error);
       return null;
     }
   }

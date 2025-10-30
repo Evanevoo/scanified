@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../supabase';
 
@@ -61,9 +62,9 @@ class StatsService {
       await this.loadTodayStats();
       await this.loadAchievements();
       this.isInitialized = true;
-      console.log('📊 StatsService initialized successfully');
+      logger.log('📊 StatsService initialized successfully');
     } catch (error) {
-      console.error('❌ Failed to initialize StatsService:', error);
+      logger.error('❌ Failed to initialize StatsService:', error);
     }
   }
 
@@ -81,7 +82,7 @@ class StatsService {
         this.todayStats = this.createEmptyDayStats(today);
       }
     } catch (error) {
-      console.error('Error loading today stats:', error);
+      logger.error('Error loading today stats:', error);
       const today = new Date().toISOString().split('T')[0];
       this.todayStats = this.createEmptyDayStats(today);
     }
@@ -97,7 +98,7 @@ class StatsService {
         this.achievements = JSON.parse(stored);
       }
     } catch (error) {
-      console.error('Error loading achievements:', error);
+      logger.error('Error loading achievements:', error);
       this.achievements = [];
     }
   }
@@ -405,7 +406,7 @@ class StatsService {
             if (dayStats.scansCount > 0) daysWithData++;
           }
         } catch (error) {
-          console.warn(`Error loading stats for ${dateStr}:`, error);
+          logger.warn(`Error loading stats for ${dateStr}:`, error);
         }
       }
 
@@ -416,7 +417,7 @@ class StatsService {
 
       return weekStats;
     } catch (error) {
-      console.error('Error getting weekly stats:', error);
+      logger.error('Error getting weekly stats:', error);
       const today = new Date();
       const weekStart = new Date(today);
       weekStart.setDate(today.getDate() - today.getDay());
@@ -462,7 +463,7 @@ class StatsService {
         JSON.stringify(this.todayStats)
       );
     } catch (error) {
-      console.error('Error saving today stats:', error);
+      logger.error('Error saving today stats:', error);
     }
   }
 
@@ -473,7 +474,7 @@ class StatsService {
     try {
       await AsyncStorage.setItem('user_achievements', JSON.stringify(this.achievements));
     } catch (error) {
-      console.error('Error saving achievements:', error);
+      logger.error('Error saving achievements:', error);
     }
   }
 
@@ -496,9 +497,9 @@ class StatsService {
       
       await AsyncStorage.multiRemove(statsKeys);
       
-      console.log('📊 All statistics cleared');
+      logger.log('📊 All statistics cleared');
     } catch (error) {
-      console.error('Error clearing stats:', error);
+      logger.error('Error clearing stats:', error);
     }
   }
 

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -85,7 +86,7 @@ export default function SmartAutoCompleteInput({
       setSuggestions(results);
       setShowSuggestions(results.length > 0);
     } catch (error) {
-      console.error('Error loading suggestions:', error);
+      logger.error('Error loading suggestions:', error);
     } finally {
       setIsLoading(false);
     }
@@ -134,7 +135,7 @@ export default function SmartAutoCompleteInput({
       setSuggestions(recentSuggestions);
       setShowSuggestions(recentSuggestions.length > 0);
     } catch (error) {
-      console.error('Error loading recent suggestions:', error);
+      logger.error('Error loading recent suggestions:', error);
     }
   };
 

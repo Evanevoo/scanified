@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -128,7 +129,7 @@ function PaymentMethodForm({ onSuccess, onCancel }) {
         setError(error.message);
       } else {
         // Save payment method to backend
-        console.log('Payment method created:', paymentMethod);
+        logger.log('Payment method created:', paymentMethod);
         onSuccess(paymentMethod);
       }
     } catch (err) {
@@ -233,7 +234,7 @@ export default function CustomerPayments() {
       setPaymentMethods(mockPaymentMethods);
       
     } catch (error) {
-      console.error('Error loading billing data:', error);
+      logger.error('Error loading billing data:', error);
       // Use mock data as fallback
       setInvoices(mockInvoices);
       setPaymentMethods(mockPaymentMethods);
@@ -284,7 +285,7 @@ export default function CustomerPayments() {
       const { client_secret } = await response.json();
 
       // For now, simulate successful payment
-      console.log('Processing payment for invoice:', invoice.id);
+      logger.log('Processing payment for invoice:', invoice.id);
       await new Promise(resolve => setTimeout(resolve, 2000));
       
       // Update invoice status in database
@@ -303,7 +304,7 @@ export default function CustomerPayments() {
       await loadBillingData();
       alert('Payment processed successfully!');
     } catch (error) {
-      console.error('Payment failed:', error);
+      logger.error('Payment failed:', error);
       alert('Payment failed: ' + error.message);
     } finally {
       setLoading(false);
@@ -311,7 +312,7 @@ export default function CustomerPayments() {
   };
 
   const handleAddPaymentMethod = (paymentMethod) => {
-    console.log('Adding payment method:', paymentMethod);
+    logger.log('Adding payment method:', paymentMethod);
     setAddPaymentDialog(false);
     // Refresh payment methods
   };

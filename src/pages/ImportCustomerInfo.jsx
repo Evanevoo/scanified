@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase/client';
 import * as XLSX from 'xlsx';
@@ -227,7 +228,7 @@ const ImportCustomerInfo = () => {
       let rows;
       let rawContent = evt.target.result;
       // Debug: log raw file content
-      console.log('Raw file content:', rawContent.slice(0, 500));
+      logger.log('Raw file content:', rawContent.slice(0, 500));
       if (ext === 'xls' || ext === 'xlsx') {
         const bstr = rawContent;
         const wb = XLSX.read(bstr, { type: 'binary' });
@@ -253,8 +254,8 @@ const ImportCustomerInfo = () => {
         detectedColumns = ALLOWED_FIELDS.map(f => f.label);
       }
       // Debug: log detected columns and first 3 rows
-      console.log('Detected columns:', detectedColumns);
-      console.log('First 3 data rows:', dataRows.slice(0,3));
+      logger.log('Detected columns:', detectedColumns);
+      logger.log('First 3 data rows:', dataRows.slice(0,3));
       setColumns(detectedColumns);
       // Enhanced auto-map columns by name or position
       const normalize = (s) => (s || '').toString().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -297,7 +298,7 @@ const ImportCustomerInfo = () => {
           setTimeout(processBatch, 0);
         } else {
           // Debug: log preview data
-          console.log('Preview data:', previewData.slice(0,3));
+          logger.log('Preview data:', previewData.slice(0,3));
           setPreview(previewData);
           window._rawImportData = previewData;
           setLoading(false);
@@ -313,7 +314,7 @@ const ImportCustomerInfo = () => {
   };
 
   const handleParse = () => {
-    console.log('Parse button clicked. File:', file);
+    logger.log('Parse button clicked. File:', file);
     if (!file) {
       setError('Please select a file before parsing.');
       return;
@@ -422,7 +423,7 @@ const ImportCustomerInfo = () => {
       }
       
       // Batch lookup all existing customers (single database query)
-      console.log(`Checking ${validCustomers.length} customers against database...`);
+      logger.log(`Checking ${validCustomers.length} customers against database...`);
       const existingCustomerMap = await batchFindCustomers(validCustomers, profile.organization_id);
       
       // Process each customer using the batch lookup results
@@ -508,7 +509,7 @@ const ImportCustomerInfo = () => {
       
       // Batch update existing customers
       if (customersToUpdate.length > 0) {
-        console.log(`Updating ${customersToUpdate.length} existing customers...`);
+        logger.log(`Updating ${customersToUpdate.length} existing customers...`);
         for (const { CustomerListID, updateData, displayName } of customersToUpdate) {
           const { error: updateError } = await supabase
             .from('customers')
@@ -525,7 +526,7 @@ const ImportCustomerInfo = () => {
       
       // Import new customers with conflict handling
       if (customersToProcess.length > 0) {
-        console.log(`Importing ${customersToProcess.length} new customers...`);
+        logger.log(`Importing ${customersToProcess.length} new customers...`);
         
         // Use upsert to handle duplicate key conflicts gracefully
         const { data: insertData, error: insertError } = await supabase
@@ -536,11 +537,11 @@ const ImportCustomerInfo = () => {
           });
         
         if (insertError) {
-          console.error('Insert error:', insertError);
+          logger.error('Insert error:', insertError);
           
           // If it's a constraint violation, try individual inserts to identify the problem
           if (insertError.code === '23505' || insertError.message.includes('duplicate key')) {
-            console.log('Constraint violation detected, trying individual inserts...');
+            logger.log('Constraint violation detected, trying individual inserts...');
             
             let successCount = 0;
             let conflictCount = 0;
@@ -556,7 +557,7 @@ const ImportCustomerInfo = () => {
                   if (singleInsertError.code === '23505' || singleInsertError.message.includes('duplicate key')) {
                     conflictCount++;
                     conflictCustomers.push(`${customer.name} (${customer.CustomerListID})`);
-                    console.log(`Conflict: ${customer.name} (${customer.CustomerListID})`);
+                    logger.log(`Conflict: ${customer.name} (${customer.CustomerListID})`);
                   } else {
                     throw singleInsertError;
                   }
@@ -564,7 +565,7 @@ const ImportCustomerInfo = () => {
                   successCount++;
                 }
               } catch (err) {
-                console.error(`Error inserting ${customer.name}:`, err);
+                logger.error(`Error inserting ${customer.name}:`, err);
                 conflictCount++;
                 conflictCustomers.push(`${customer.name} (${customer.CustomerListID})`);
               }
@@ -574,7 +575,7 @@ const ImportCustomerInfo = () => {
             duplicateCustomers.push(...conflictCustomers.map(name => `${name} - duplicate CustomerListID`));
             
             if (successCount > 0) {
-              console.log(`Successfully imported ${successCount} customers, ${conflictCount} conflicts resolved`);
+              logger.log(`Successfully imported ${successCount} customers, ${conflictCount} conflicts resolved`);
             }
           } else {
             throw new Error(`Import error: ${insertError.message}`);

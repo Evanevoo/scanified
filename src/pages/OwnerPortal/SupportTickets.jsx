@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -67,7 +68,7 @@ export default function SupportTickets() {
           .in('id', userIds);
         
         if (profilesError) {
-          console.error('Error fetching profiles:', profilesError);
+          logger.error('Error fetching profiles:', profilesError);
         } else {
           profilesData = profiles || [];
         }
@@ -84,7 +85,7 @@ export default function SupportTickets() {
           .in('id', organizationIds);
         
         if (organizationsError) {
-          console.error('Error fetching organizations:', organizationsError);
+          logger.error('Error fetching organizations:', organizationsError);
         } else {
           organizationsData = organizations || [];
         }
@@ -99,7 +100,7 @@ export default function SupportTickets() {
 
       setTickets(ticketsWithData);
     } catch (error) {
-      console.error('Error fetching tickets:', error);
+      logger.error('Error fetching tickets:', error);
       setSnackbar({ open: true, message: 'Error loading tickets', severity: 'error' });
     } finally {
       setLoading(false);
@@ -124,7 +125,7 @@ export default function SupportTickets() {
       if (error) throw error;
       setTicketMessages(data || []);
     } catch (error) {
-      console.error('Error fetching ticket messages:', error);
+      logger.error('Error fetching ticket messages:', error);
       setSnackbar({ open: true, message: 'Error loading messages', severity: 'error' });
     } finally {
       setLoadingMessages(false);
@@ -164,9 +165,9 @@ export default function SupportTickets() {
       // Notify the ticket creator of the reply
       try {
         // Create notification for ticket reply (notification service removed)
-        console.log(`Support ticket reply sent for: ${selectedTicket.title}`);
+        logger.log(`Support ticket reply sent for: ${selectedTicket.title}`);
       } catch (error) {
-        console.error('Error notifying user of reply:', error);
+        logger.error('Error notifying user of reply:', error);
       }
       
       // Refresh messages if ticket dialog is open
@@ -177,7 +178,7 @@ export default function SupportTickets() {
       // Refresh tickets
       fetchTickets();
     } catch (error) {
-      console.error('Error sending reply:', error);
+      logger.error('Error sending reply:', error);
       setSnackbar({ open: true, message: 'Error sending reply', severity: 'error' });
     } finally {
       setLoading(false);
@@ -205,7 +206,7 @@ export default function SupportTickets() {
         setSelectedTicket(prev => ({ ...prev, status: newStatus }));
       }
     } catch (error) {
-      console.error('Error updating ticket status:', error);
+      logger.error('Error updating ticket status:', error);
       setSnackbar({ open: true, message: 'Error updating ticket status', severity: 'error' });
     } finally {
       setLoading(false);
@@ -233,7 +234,7 @@ export default function SupportTickets() {
         setSelectedTicket(prev => ({ ...prev, status: 'closed' }));
       }
     } catch (error) {
-      console.error('Error closing ticket:', error);
+      logger.error('Error closing ticket:', error);
       setSnackbar({ open: true, message: 'Error closing ticket', severity: 'error' });
     } finally {
       setLoading(false);
@@ -261,7 +262,7 @@ export default function SupportTickets() {
         setSelectedTicket(prev => ({ ...prev, status: 'open' }));
       }
     } catch (error) {
-      console.error('Error reopening ticket:', error);
+      logger.error('Error reopening ticket:', error);
       setSnackbar({ open: true, message: 'Error reopening ticket', severity: 'error' });
     } finally {
       setLoading(false);

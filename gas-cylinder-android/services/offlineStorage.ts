@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 
@@ -57,14 +58,14 @@ export class OfflineStorageService {
         JSON.stringify(cachedData)
       );
 
-      console.log('📱 Data cached for offline use:', {
+      logger.log('📱 Data cached for offline use:', {
         bottles: cachedData.bottles.length,
         customers: cachedData.customers.length,
         rentals: cachedData.rentals.length
       });
 
     } catch (error) {
-      console.error('❌ Error caching data:', error);
+      logger.error('❌ Error caching data:', error);
     }
   }
 
@@ -76,7 +77,7 @@ export class OfflineStorageService {
       const data = await AsyncStorage.getItem(`${this.CACHED_DATA_KEY}_${organizationId}`);
       return data ? JSON.parse(data) : null;
     } catch (error) {
-      console.error('❌ Error getting cached data:', error);
+      logger.error('❌ Error getting cached data:', error);
       return null;
     }
   }
@@ -99,10 +100,10 @@ export class OfflineStorageService {
       
       await AsyncStorage.setItem(this.OFFLINE_QUEUE_KEY, JSON.stringify(queue));
       
-      console.log('📱 Added to offline queue:', newOperation.type, newOperation.id);
+      logger.log('📱 Added to offline queue:', newOperation.type, newOperation.id);
 
     } catch (error) {
-      console.error('❌ Error adding to offline queue:', error);
+      logger.error('❌ Error adding to offline queue:', error);
     }
   }
 
@@ -114,7 +115,7 @@ export class OfflineStorageService {
       const data = await AsyncStorage.getItem(this.OFFLINE_QUEUE_KEY);
       return data ? JSON.parse(data) : [];
     } catch (error) {
-      console.error('❌ Error getting offline queue:', error);
+      logger.error('❌ Error getting offline queue:', error);
       return [];
     }
   }
@@ -126,7 +127,7 @@ export class OfflineStorageService {
     try {
       const isOnline = await this.isOnline();
       if (!isOnline) {
-        console.log('📱 Device is offline, skipping sync');
+        logger.log('📱 Device is offline, skipping sync');
         return { success: 0, failed: 0 };
       }
 
@@ -134,11 +135,11 @@ export class OfflineStorageService {
       const unsyncedOperations = queue.filter(op => !op.synced);
 
       if (unsyncedOperations.length === 0) {
-        console.log('📱 No offline operations to sync');
+        logger.log('📱 No offline operations to sync');
         return { success: 0, failed: 0 };
       }
 
-      console.log(`📱 Syncing ${unsyncedOperations.length} offline operations...`);
+      logger.log(`📱 Syncing ${unsyncedOperations.length} offline operations...`);
 
       let successCount = 0;
       let failedCount = 0;
@@ -152,7 +153,7 @@ export class OfflineStorageService {
           successCount++;
           
         } catch (error) {
-          console.error(`❌ Failed to sync operation ${operation.id}:`, error);
+          logger.error(`❌ Failed to sync operation ${operation.id}:`, error);
           failedCount++;
         }
       }
@@ -160,12 +161,12 @@ export class OfflineStorageService {
       // Update queue with sync status
       await AsyncStorage.setItem(this.OFFLINE_QUEUE_KEY, JSON.stringify(queue));
 
-      console.log(`📱 Sync completed: ${successCount} success, ${failedCount} failed`);
+      logger.log(`📱 Sync completed: ${successCount} success, ${failedCount} failed`);
       
       return { success: successCount, failed: failedCount };
 
     } catch (error) {
-      console.error('❌ Error syncing offline operations:', error);
+      logger.error('❌ Error syncing offline operations:', error);
       return { success: 0, failed: 0 };
     }
   }
@@ -196,7 +197,7 @@ export class OfflineStorageService {
    * Sync scan operation
    */
   private static async syncScanOperation(supabase: any, operation: OfflineData): Promise<void> {
-    console.log('🔄 Syncing scan operation:', {
+    logger.log('🔄 Syncing scan operation:', {
       organizationId: operation.organizationId,
       userId: operation.userId,
       customerId: operation.data.customer_id,
@@ -217,11 +218,11 @@ export class OfflineStorageService {
       }]);
 
     if (error) {
-      console.error('❌ Scan sync error:', error);
+      logger.error('❌ Scan sync error:', error);
       throw error;
     }
     
-    console.log('✅ Scan synced successfully');
+    logger.log('✅ Scan synced successfully');
   }
 
   /**
@@ -279,10 +280,10 @@ export class OfflineStorageService {
       
       await AsyncStorage.setItem(this.OFFLINE_QUEUE_KEY, JSON.stringify(unsyncedOperations));
       
-      console.log(`📱 Cleared ${queue.length - unsyncedOperations.length} synced operations`);
+      logger.log(`📱 Cleared ${queue.length - unsyncedOperations.length} synced operations`);
 
     } catch (error) {
-      console.error('❌ Error clearing synced operations:', error);
+      logger.error('❌ Error clearing synced operations:', error);
     }
   }
 
@@ -302,7 +303,7 @@ export class OfflineStorageService {
       };
 
     } catch (error) {
-      console.error('❌ Error getting queue stats:', error);
+      logger.error('❌ Error getting queue stats:', error);
       return { total: 0, pending: 0, synced: 0 };
     }
   }
@@ -321,10 +322,10 @@ export class OfflineStorageService {
 
       await AsyncStorage.multiRemove(relevantKeys);
       
-      console.log('📱 Cleared all offline data');
+      logger.log('📱 Cleared all offline data');
 
     } catch (error) {
-      console.error('❌ Error clearing offline data:', error);
+      logger.error('❌ Error clearing offline data:', error);
     }
   }
 
@@ -340,7 +341,7 @@ export class OfflineStorageService {
       return age > maxAge;
 
     } catch (error) {
-      console.error('❌ Error checking data staleness:', error);
+      logger.error('❌ Error checking data staleness:', error);
       return true;
     }
   }
@@ -350,7 +351,7 @@ export class OfflineStorageService {
    */
   static async preloadEssentialData(supabase: any, organizationId: string): Promise<void> {
     try {
-      console.log('📱 Preloading essential data for offline use...');
+      logger.log('📱 Preloading essential data for offline use...');
 
       const [bottlesResult, customersResult, rentalsResult] = await Promise.allSettled([
         supabase.from('bottles').select('*').eq('organization_id', organizationId).limit(1000),
@@ -364,10 +365,10 @@ export class OfflineStorageService {
 
       await this.cacheData(organizationId, { bottles, customers, rentals });
 
-      console.log('📱 Essential data preloaded successfully');
+      logger.log('📱 Essential data preloaded successfully');
 
     } catch (error) {
-      console.error('❌ Error preloading essential data:', error);
+      logger.error('❌ Error preloading essential data:', error);
     }
   }
 }

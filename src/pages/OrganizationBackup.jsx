@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState } from 'react';
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
@@ -84,7 +85,7 @@ export default function OrganizationBackup() {
       });
 
     } catch (error) {
-      console.error('Backup error:', error);
+      logger.error('Backup error:', error);
       setMessage({ 
         type: 'error', 
         text: `Backup failed: ${error.message}` 
@@ -151,7 +152,7 @@ export default function OrganizationBackup() {
       });
 
     } catch (error) {
-      console.error('Export error:', error);
+      logger.error('Export error:', error);
       setMessage({ 
         type: 'error', 
         text: `Export failed: ${error.message}` 

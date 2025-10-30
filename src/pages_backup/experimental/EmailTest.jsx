@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState } from 'react';
 import {
   Box,
@@ -47,15 +48,15 @@ export default function EmailTest() {
     setResult(null);
 
     try {
-      console.log('Testing email function...');
+      logger.log('Testing email function...');
       const response = await fetch('/.netlify/functions/test-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to: testEmail })
       });
 
-      console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
+      logger.log('Response status:', response.status);
+      logger.log('Response headers:', response.headers);
 
       if (!response.ok) {
         // Try to get error text if JSON parsing fails
@@ -75,7 +76,7 @@ export default function EmailTest() {
       let data;
       try {
         const responseText = await response.text();
-        console.log('Response text:', responseText);
+        logger.log('Response text:', responseText);
         
         if (!responseText) {
           throw new Error('Empty response from server');
@@ -83,14 +84,14 @@ export default function EmailTest() {
         
         data = JSON.parse(responseText);
       } catch (jsonError) {
-        console.error('JSON parsing error:', jsonError);
+        logger.error('JSON parsing error:', jsonError);
         setError(`Invalid response from server. Check if Netlify functions are deployed properly.`);
         return;
       }
 
       setResult(data);
     } catch (err) {
-      console.error('Email test error:', err);
+      logger.error('Email test error:', err);
       setError(`Network error: ${err.message}. Make sure you're running on a deployed Netlify site, not localhost.`);
     } finally {
       setLoading(false);
@@ -113,7 +114,7 @@ export default function EmailTest() {
     setResult(null);
 
     try {
-      console.log('Testing invitation email function...');
+      logger.log('Testing invitation email function...');
       const response = await fetch('/.netlify/functions/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -129,7 +130,7 @@ export default function EmailTest() {
         })
       });
 
-      console.log('Invite response status:', response.status);
+      logger.log('Invite response status:', response.status);
 
       if (!response.ok) {
         // Try to get error text if JSON parsing fails
@@ -149,7 +150,7 @@ export default function EmailTest() {
       let data;
       try {
         const responseText = await response.text();
-        console.log('Invite response text:', responseText);
+        logger.log('Invite response text:', responseText);
         
         if (!responseText) {
           throw new Error('Empty response from server');
@@ -157,14 +158,14 @@ export default function EmailTest() {
         
         data = JSON.parse(responseText);
       } catch (jsonError) {
-        console.error('Invite JSON parsing error:', jsonError);
+        logger.error('Invite JSON parsing error:', jsonError);
         setError(`Invalid response from server. Check if Netlify functions are deployed properly.`);
         return;
       }
 
       setResult({ ...data, type: 'invite' });
     } catch (err) {
-      console.error('Invite test error:', err);
+      logger.error('Invite test error:', err);
       setError(`Network error: ${err.message}. Make sure you're running on a deployed Netlify site, not localhost.`);
     } finally {
       setLoading(false);
@@ -182,7 +183,7 @@ export default function EmailTest() {
     setResult(null);
 
     try {
-      console.log('Testing Supabase email configuration...');
+      logger.log('Testing Supabase email configuration...');
       
       // Test Supabase email via Netlify function (more reliable)
       const response = await fetch('/.netlify/functions/test-email', {
@@ -191,7 +192,7 @@ export default function EmailTest() {
         body: JSON.stringify({ to: testEmail })
       });
 
-      console.log('Supabase test response status:', response.status);
+      logger.log('Supabase test response status:', response.status);
 
       if (!response.ok) {
         // Try to get error text if JSON parsing fails
@@ -211,7 +212,7 @@ export default function EmailTest() {
       let data;
       try {
         const responseText = await response.text();
-        console.log('Supabase test response text:', responseText);
+        logger.log('Supabase test response text:', responseText);
         
         if (!responseText) {
           throw new Error('Empty response from server');
@@ -219,7 +220,7 @@ export default function EmailTest() {
         
         data = JSON.parse(responseText);
       } catch (jsonError) {
-        console.error('Supabase test JSON parsing error:', jsonError);
+        logger.error('Supabase test JSON parsing error:', jsonError);
         setError(`Invalid response from server. Check if Netlify functions are deployed properly.`);
         return;
       }
@@ -233,7 +234,7 @@ export default function EmailTest() {
       
       setSuccess('Supabase email test sent! Check your email (including spam folder).');
     } catch (err) {
-      console.error('Supabase email test error:', err);
+      logger.error('Supabase email test error:', err);
       setError(`Supabase email test error: ${err.message}`);
     } finally {
       setLoading(false);

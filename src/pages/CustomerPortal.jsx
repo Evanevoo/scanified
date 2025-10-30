@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Card, CardContent, Typography, Button, Grid, 
@@ -89,7 +90,7 @@ export default function CustomerPortal() {
 
       setInvoices(invoicesData || []);
     } catch (err) {
-      console.error('Error fetching customer data:', err);
+      logger.error('Error fetching customer data:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -122,7 +123,7 @@ export default function CustomerPortal() {
       });
       fetchCustomerData();
     } catch (err) {
-      console.error('Error creating order:', err);
+      logger.error('Error creating order:', err);
       setError(err.message);
     }
   };
@@ -148,7 +149,7 @@ export default function CustomerPortal() {
       a.download = `invoice-${invoiceId}.pdf`;
       a.click();
     } catch (err) {
-      console.error('Error downloading invoice:', err);
+      logger.error('Error downloading invoice:', err);
       setError('Failed to download invoice');
     }
   };

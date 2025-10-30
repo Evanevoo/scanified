@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
@@ -52,7 +53,7 @@ export default function UserManagement() {
   
   // Debug logging (development only)
   if (process.env.NODE_ENV === 'development') {
-    console.log('UserManagement Debug:', {
+    logger.log('UserManagement Debug:', {
       profile,
       organization,
       canManageUsers: can('manage:users'),
@@ -127,10 +128,10 @@ export default function UserManagement() {
       .eq('organization_id', organization.id)
       .order('created_at', { ascending: false });
     
-    console.log('Fetched users with roles:', data);
+    logger.log('Fetched users with roles:', data);
     
     if (error) {
-      console.error('Error fetching users:', error);
+      logger.error('Error fetching users:', error);
       setError(error.message);
     } else {
       setUsers(data);
@@ -143,7 +144,7 @@ export default function UserManagement() {
       const usageData = await subscriptionService.getOrganizationUsage(organization.id);
       setUsage(usageData);
     } catch (error) {
-      console.error('Error fetching usage:', error);
+      logger.error('Error fetching usage:', error);
     }
   }
 
@@ -270,13 +271,13 @@ export default function UserManagement() {
             } catch (parseError) {
               errorMessage = `Email service returned status ${emailResponse.status}`;
             }
-            console.error('Email sending failed:', errorMessage);
+            logger.error('Email sending failed:', errorMessage);
             throw new Error(errorMessage);
           }
 
-          console.log('Invitation email sent successfully to:', newEmail);
+          logger.log('Invitation email sent successfully to:', newEmail);
         } catch (emailError) {
-          console.error('Error sending invitation email:', emailError);
+          logger.error('Error sending invitation email:', emailError);
           // Don't throw here - the invite was created successfully, just email failed
           const errorMsg = emailError.message || 'Unknown error';
           setError(`✅ Invite created successfully! However, email sending failed: ${errorMsg}\n\n📋 Copy the invite link from the "Pending Invites" section below and send it manually.`);
@@ -297,7 +298,7 @@ export default function UserManagement() {
       fetchUsers();
       fetchPendingInvites();
     } catch (err) {
-      console.error('Error adding user:', err);
+      logger.error('Error adding user:', err);
       setError(err.message);
     } finally {
       setAdding(false);
@@ -318,7 +319,7 @@ export default function UserManagement() {
       setEditingUser(null);
       fetchUsers();
     } catch (err) {
-      console.error('Error updating user:', err);
+      logger.error('Error updating user:', err);
       setError(err.message);
     }
   }
@@ -333,10 +334,10 @@ export default function UserManagement() {
       const { error: authError } = await supabase.auth.admin.deleteUser(userId);
       
       if (authError) {
-        console.warn('Could not delete from auth (may not have admin privileges):', authError);
+        logger.warn('Could not delete from auth (may not have admin privileges):', authError);
         // Continue with profile deletion even if auth deletion fails
       } else {
-        console.log('✅ User deleted from Supabase Auth');
+        logger.log('✅ User deleted from Supabase Auth');
       }
 
       // Step 2: Delete from profiles table
@@ -351,7 +352,7 @@ export default function UserManagement() {
       setSuccess(`User ${userEmail} has been PERMANENTLY DELETED from Supabase. They will need to create a new account to rejoin.`);
       fetchUsers();
     } catch (err) {
-      console.error('Error deleting user:', err);
+      logger.error('Error deleting user:', err);
       setError(`Failed to delete user: ${err.message}`);
     }
   }
@@ -387,15 +388,15 @@ export default function UserManagement() {
   };
 
   if (!can('manage:users')) {
-    console.log('UserManagement Access Check:');
-    console.log('- Profile:', profile);
-    console.log('- Profile role:', profile?.role);
-    console.log('- Can manage users:', can('manage:users'));
-    console.log('- Is org admin:', isOrgAdmin);
+    logger.log('UserManagement Access Check:');
+    logger.log('- Profile:', profile);
+    logger.log('- Profile role:', profile?.role);
+    logger.log('- Can manage users:', can('manage:users'));
+    logger.log('- Is org admin:', isOrgAdmin);
     
     // Fallback for admin users
     if (profile?.role === 'admin' || isOrgAdmin) {
-      console.log('- Allowing access via admin fallback');
+      logger.log('- Allowing access via admin fallback');
     } else {
       return (
         <Box sx={{ p: 3 }}>

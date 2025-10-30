@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAccessibility } from '../hooks/useAccessibility';
@@ -164,7 +165,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
         setIsDarkMode(true);
       }
     } catch (error) {
-      console.error('Error loading theme:', error);
+      logger.error('Error loading theme:', error);
     } finally {
       setIsLoading(false);
     }
@@ -175,7 +176,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
       await AsyncStorage.setItem('app-theme', themeName);
       await AsyncStorage.setItem('app-dark-mode', darkMode.toString());
     } catch (error) {
-      console.error('Error saving theme:', error);
+      logger.error('Error saving theme:', error);
     }
   };
 
@@ -202,7 +203,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   
   if (accessibilityStyles.fontSizeMultiplier > 1.0) {
     // Font size adjustments will be applied via dynamic styles
-    console.log(`Accessibility: Font size multiplier set to ${accessibilityStyles.fontSizeMultiplier}`);
+    logger.log(`Accessibility: Font size multiplier set to ${accessibilityStyles.fontSizeMultiplier}`);
   }
   
   if (accessibilityStyles.contrastColors) {
@@ -211,7 +212,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
       ...theme,
       ...accessibilityStyles.contrastColors,
     };
-    console.log('Accessibility: High contrast mode enabled');
+    logger.log('Accessibility: High contrast mode enabled');
   }
 
   const contextValue: ThemeContextType = {

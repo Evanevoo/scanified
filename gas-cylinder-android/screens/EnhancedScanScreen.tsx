@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, 
@@ -73,7 +74,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   // Debug organization data and force re-render
   useEffect(() => {
     if (organization) {
-      console.log('🔍 EnhancedScanScreen - Organization data:', {
+      logger.log('🔍 EnhancedScanScreen - Organization data:', {
         id: organization.id,
         name: organization.name,
         app_name: organization.app_name,
@@ -83,9 +84,9 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       
       // Force component re-render when organization data changes
       setRefreshKey(prev => prev + 1);
-      console.log('🔄 Forcing component refresh due to organization data change');
+      logger.log('🔄 Forcing component refresh due to organization data change');
     } else {
-      console.log('🔍 EnhancedScanScreen - No organization data available');
+      logger.log('🔍 EnhancedScanScreen - No organization data available');
     }
   }, [organization]);
   const { settings } = useSettings();
@@ -128,7 +129,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   // Handle organization loading and errors
   useEffect(() => {
     if (authLoading || organizationLoading) {
-      console.log('Auth or organization still loading, waiting...');
+      logger.log('Auth or organization still loading, waiting...');
       setOrganizationError(null); // Clear any existing error while loading
       return;
     }
@@ -136,10 +137,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     if (!user) {
       setOrganizationError('Please log in to use the scanner');
     } else if (!organization) {
-      console.log('No organization found after auth completed');
+      logger.log('No organization found after auth completed');
       setOrganizationError('No organization associated with your account. Please contact your administrator.');
     } else {
-      console.log('Organization loaded successfully:', organization.name);
+      logger.log('Organization loaded successfully:', organization.name);
       setOrganizationError(null);
     }
   }, [authLoading, organizationLoading, user, organization]);
@@ -187,25 +188,25 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       
       // Apply customization settings
       if (settings) {
-        console.log('Applying customization settings:', settings);
+        logger.log('Applying customization settings:', settings);
         
         // Apply layout settings
         if (settings.layout) {
-          console.log('Layout settings:', settings.layout);
+          logger.log('Layout settings:', settings.layout);
         }
         
         // Apply accessibility settings
         if (settings.accessibility) {
-          console.log('Accessibility settings:', settings.accessibility);
+          logger.log('Accessibility settings:', settings.accessibility);
         }
         
         // Apply custom theme if available
         if (settings.customTheme) {
-          console.log('Custom theme:', settings.customTheme);
+          logger.log('Custom theme:', settings.customTheme);
         }
       }
     } catch (error) {
-      console.error('Failed to load customization settings:', error);
+      logger.error('Failed to load customization settings:', error);
     }
   };
 
@@ -224,23 +225,23 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       }
       
       setCustomizationSettings(newSettings);
-      console.log('Customization settings saved:', newSettings);
+      logger.log('Customization settings saved:', newSettings);
     } catch (error) {
-      console.error('Failed to save customization settings:', error);
+      logger.error('Failed to save customization settings:', error);
     }
   };
 
   // Get dynamic styles based on customization settings
   const getDynamicStyles = () => {
     if (!customizationSettings) {
-      console.log('No customization settings available');
+      logger.log('No customization settings available');
       return {};
     }
     
     const { layout, accessibility, customTheme } = customizationSettings;
     const dynamicStyles: any = {};
     
-    console.log('Applying customization settings:', {
+    logger.log('Applying customization settings:', {
       layout: layout ? 'Available' : 'Not available',
       accessibility: accessibility ? 'Available' : 'Not available',
       customTheme: customTheme ? 'Available' : 'Not available'
@@ -248,7 +249,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     
     // Apply layout settings
     if (layout) {
-      console.log('Layout settings:', layout);
+      logger.log('Layout settings:', layout);
       // Font size adjustments
       if (layout.fontSize === 'small') {
         dynamicStyles.fontSizeMultiplier = 0.9;
@@ -279,7 +280,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     
     // Apply accessibility settings
     if (accessibility) {
-      console.log('Accessibility settings:', accessibility);
+      logger.log('Accessibility settings:', accessibility);
       if (accessibility.largeText) {
         dynamicStyles.fontSizeMultiplier = (dynamicStyles.fontSizeMultiplier || 1.0) * 1.2;
       }
@@ -295,11 +296,11 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     
     // Apply custom theme
     if (customTheme) {
-      console.log('Custom theme:', customTheme);
+      logger.log('Custom theme:', customTheme);
       dynamicStyles.customColors = customTheme;
     }
     
-    console.log('Final dynamic styles:', dynamicStyles);
+    logger.log('Final dynamic styles:', dynamicStyles);
     return dynamicStyles;
   };
 
@@ -373,7 +374,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       barcodeY <= scanAreaBottom
     );
     
-    console.log('📍 Enhanced scan barcode position check:', {
+    logger.log('📍 Enhanced scan barcode position check:', {
       barcodeX,
       barcodeY,
       scanAreaLeft,
@@ -453,10 +454,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   // Look up item details by barcode
   const lookupItemDetails = async (barcode: string) => {
     try {
-      console.log('Looking up item details for barcode:', barcode);
+      logger.log('Looking up item details for barcode:', barcode);
       
       if (!organization?.id) {
-        console.log('No organization ID, skipping item lookup');
+        logger.log('No organization ID, skipping item lookup');
         return null;
       }
 
@@ -469,12 +470,12 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         .maybeSingle();
 
       if (bottleError) {
-        console.error('Error looking up bottle:', bottleError);
+        logger.error('Error looking up bottle:', bottleError);
         return null;
       }
 
       if (bottleData) {
-        console.log('Found bottle details:', bottleData);
+        logger.log('Found bottle details:', bottleData);
         return {
           type: 'bottle' as const,
           barcode: bottleData.barcode_number,
@@ -487,28 +488,28 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         };
       }
 
-      console.log('No item found for barcode:', barcode);
+      logger.log('No item found for barcode:', barcode);
       return null;
     } catch (error) {
-      console.error('Error in lookupItemDetails:', error);
+      logger.error('Error in lookupItemDetails:', error);
       return null;
     }
   };
 
   // Handle barcode scan
   const handleBarcodeScan = async (data: string) => {
-    console.log('📷 EnhancedScanScreen barcode detected:', data);
-    console.log('📷 Scanning ready state:', scanningReady);
-    console.log('📷 Countdown:', scanningCountdown);
+    logger.log('📷 EnhancedScanScreen barcode detected:', data);
+    logger.log('📷 Scanning ready state:', scanningReady);
+    logger.log('📷 Countdown:', scanningCountdown);
     
     // Don't process scans until countdown is finished
     if (!scanningReady) {
-      console.log('📷 Skipping scan - countdown still active');
+      logger.log('📷 Skipping scan - countdown still active');
       return;
     }
     
     if (!data || loading) {
-      console.log('📷 Skipping scan - no data or loading');
+      logger.log('📷 Skipping scan - no data or loading');
       return;
     }
 
@@ -518,8 +519,8 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     // Validate cylinder serial number format first
     const serialValidation = validateCylinderSerial(data);
     if (!serialValidation.isValid) {
-      console.log('📷 Barcode scanned but invalid format:', serialValidation.scannedValue);
-      console.log('📷 Validation error:', serialValidation.error);
+      logger.log('📷 Barcode scanned but invalid format:', serialValidation.scannedValue);
+      logger.log('📷 Validation error:', serialValidation.error);
       setScanFeedback(`❌ ${serialValidation.error}`);
       
       // Clear feedback after 3 seconds
@@ -535,7 +536,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
 
     // Check if barcode is in scan region (future enhancement)
     if (!isBarcodeInScanRegion(data)) {
-      console.log('📷 Barcode not in scan region');
+      logger.log('📷 Barcode not in scan region');
       setScanFeedback('📍 Point camera directly at barcode');
       setTimeout(() => setScanFeedback(''), 2000);
       return;
@@ -586,10 +587,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
 
     try {
       // Format validation disabled - using basic validation only
-      console.log('🔍 Using basic validation (FormatValidationService disabled)');
+      logger.log('🔍 Using basic validation (FormatValidationService disabled)');
       
       // For cylinders, use the original 9-digit barcode directly
-      console.log('📷 Using cylinder serial number for lookup:', data);
+      logger.log('📷 Using cylinder serial number for lookup:', data);
       
       await processScan(data);
       
@@ -610,7 +611,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         setIsScanning(true);
       }
     } catch (error) {
-      console.error('Error processing scan:', error);
+      logger.error('Error processing scan:', error);
       
       // Provide error feedback
       await feedbackService.scanError('Failed to process scan');
@@ -688,8 +689,8 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
 
     // Add to local results immediately
     setScannedItems(prev => [scanResult, ...prev]);
-    console.log('Added scan result to local items:', scanResult);
-    console.log('Current scanned items count:', scannedItems.length + 1);
+    logger.log('Added scan result to local items:', scanResult);
+    logger.log('Current scanned items count:', scannedItems.length + 1);
 
     if (isOnline) {
       try {
@@ -701,11 +702,11 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         setScannedItems(prev => 
           prev.map(item => item.id === scanResult.id ? { ...item, synced: true } : item)
         );
-        console.log('Item synced successfully:', scanResult.barcode);
+        logger.log('Item synced successfully:', scanResult.barcode);
 
       } catch (error) {
-        console.error('Failed to sync scan:', error);
-        console.error('Sync error details:', {
+        logger.error('Failed to sync scan:', error);
+        logger.error('Sync error details:', {
           errorType: typeof error,
           errorMessage: error?.message,
           errorCode: error?.code,
@@ -716,7 +717,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         
         // Show user-friendly error message
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.log(`Scan will be saved offline: ${errorMessage}`);
+        logger.log(`Scan will be saved offline: ${errorMessage}`);
         
         // Add to offline queue
         await OfflineStorageService.addToOfflineQueue({
@@ -783,8 +784,8 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   const syncScanToServer = async (scanResult: ScanResult) => {
     try {
       // Debug logging
-      console.log('Sync attempt - Organization:', organization?.id, 'User:', user?.id);
-      console.log('Scan data:', {
+      logger.log('Sync attempt - Organization:', organization?.id, 'User:', user?.id);
+      logger.log('Scan data:', {
         barcode: scanResult.barcode,
         action: scanResult.action,
         location: scanResult.location,
@@ -801,18 +802,18 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       }
 
       // Test database connection and table access
-      console.log('Testing database connection...');
+      logger.log('Testing database connection...');
       const { data: testData, error: testError } = await supabase
         .from('bottle_scans')
         .select('id')
         .limit(1);
       
       if (testError) {
-        console.error('Database test failed:', testError);
+        logger.error('Database test failed:', testError);
         throw new Error(`Database connection failed: ${testError.message}`);
       }
       
-      console.log('Database connection test passed');
+      logger.log('Database connection test passed');
 
       // Debug: Log the exact data being inserted  
       const insertData = {
@@ -830,14 +831,14 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         created_at: new Date().toISOString() // Add created_at
       };
       
-      console.log('Insert data for bottle_scans:', JSON.stringify(insertData, null, 2));
+      logger.log('Insert data for bottle_scans:', JSON.stringify(insertData, null, 2));
 
       const { data, error } = await supabase
         .from('bottle_scans')
         .insert([insertData]);
 
       if (error) {
-        console.error('Supabase error details:', {
+        logger.error('Supabase error details:', {
           message: error.message,
           details: error.details,
           hint: error.hint,
@@ -846,22 +847,22 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         });
         
         // Log the full error object to see what properties it has
-        console.error('Full error object keys:', Object.keys(error));
-        console.error('Full error object:', JSON.stringify(error, null, 2));
+        logger.error('Full error object keys:', Object.keys(error));
+        logger.error('Full error object:', JSON.stringify(error, null, 2));
         
         const errorMessage = error.message || error.details || error.hint || error.code || 'Unknown database error';
         throw new Error(`Database error: ${errorMessage}`);
       }
 
-      console.log('Scan synced successfully:', data);
+      logger.log('Scan synced successfully:', data);
 
       // Also update bottle status and location
       await updateBottleStatus(scanResult.barcode, scanResult.action);
     } catch (error) {
-      console.error('Failed to sync scan to server:', error);
-      console.error('Error type:', typeof error);
-      console.error('Error constructor:', error?.constructor?.name);
-      console.error('Error stack:', error?.stack);
+      logger.error('Failed to sync scan to server:', error);
+      logger.error('Error type:', typeof error);
+      logger.error('Error constructor:', error?.constructor?.name);
+      logger.error('Error stack:', error?.stack);
       
       const errorMessage = error instanceof Error ? error.message : 'Unknown sync error';
       throw new Error(`Sync failed: ${errorMessage}`);
@@ -879,15 +880,15 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       .single();
 
     if (fetchError) {
-      console.error('Error fetching current bottle status:', fetchError);
+      logger.error('Error fetching current bottle status:', fetchError);
       return;
     }
 
-    console.log('Current bottle status:', { barcode, currentStatus: currentBottle?.status, action });
+    logger.log('Current bottle status:', { barcode, currentStatus: currentBottle?.status, action });
 
     // Business logic: Prevent duplicate "shipped" scans, but allow "return" to override "shipped"
     if (action === 'out' && currentBottle?.status === 'delivered') {
-      console.log('❌ Bottle already shipped, preventing duplicate shipment');
+      logger.log('❌ Bottle already shipped, preventing duplicate shipment');
       throw new Error(`Bottle ${barcode} has already been shipped and cannot be shipped again.`);
     }
 
@@ -918,7 +919,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         break;
     }
 
-    console.log('Updating bottle status:', { barcode, updateData });
+    logger.log('Updating bottle status:', { barcode, updateData });
 
     const { error } = await supabase
       .from('bottles')
@@ -927,9 +928,9 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       .eq('organization_id', organization?.id);
 
     if (error) {
-      console.error('Error updating bottle status:', error);
+      logger.error('Error updating bottle status:', error);
     } else {
-      console.log(`Bottle ${barcode} status updated:`, updateData);
+      logger.log(`Bottle ${barcode} status updated:`, updateData);
     }
   };
 
@@ -998,7 +999,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       await loadSyncStatus();
 
     } catch (error) {
-      console.error('Sync error:', error);
+      logger.error('Sync error:', error);
       Alert.alert('Sync Error', 'Failed to sync offline data. Please try again.');
     } finally {
       setLoading(false);
@@ -1064,7 +1065,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   // Submit order for processing
   const submitOrder = async () => {
     try {
-      console.log('Submitting order for processing...');
+      logger.log('Submitting order for processing...');
       
       if (!organization?.id) {
         Alert.alert('Error', 'No organization found. Please try again.');
@@ -1087,7 +1088,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       // First, ensure all items are synced
       const pendingItems = scannedItems.filter(i => !i.synced);
       if (pendingItems.length > 0) {
-        console.log(`Syncing ${pendingItems.length} pending items before submission...`);
+        logger.log(`Syncing ${pendingItems.length} pending items before submission...`);
         
         for (const item of pendingItems) {
           try {
@@ -1100,9 +1101,9 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                   : scannedItem
               )
             );
-            console.log(`Successfully synced item: ${item.barcode}`);
+            logger.log(`Successfully synced item: ${item.barcode}`);
           } catch (error) {
-            console.error(`Failed to sync item ${item.barcode}:`, error);
+            logger.error(`Failed to sync item ${item.barcode}:`, error);
             throw new Error(`Failed to sync item ${item.barcode}. Please try again.`);
           }
         }
@@ -1138,11 +1139,11 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           .single();
 
         if (error) {
-          console.error('Error updating sales order:', error);
+          logger.error('Error updating sales order:', error);
           throw new Error(`Failed to update order: ${error.message}`);
         }
         orderResult = data;
-        console.log('Updated existing sales order:', orderResult);
+        logger.log('Updated existing sales order:', orderResult);
       } else {
         // Create new order
         const { data, error } = await supabase
@@ -1152,11 +1153,11 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           .single();
 
         if (error) {
-          console.error('Error creating sales order:', error);
+          logger.error('Error creating sales order:', error);
           throw new Error(`Failed to create order: ${error.message}`);
         }
         orderResult = data;
-        console.log('Created new sales order:', orderResult);
+        logger.log('Created new sales order:', orderResult);
       }
 
       // Mark all scanned items as submitted
@@ -1181,10 +1182,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         ]
       );
 
-      console.log('Order submission completed successfully');
+      logger.log('Order submission completed successfully');
 
     } catch (error) {
-      console.error('Error submitting order:', error);
+      logger.error('Error submitting order:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       Alert.alert(
         'Error Submitting Order',
@@ -1204,7 +1205,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         // Navigate to edit screen or show edit modal
         Alert.alert('Edit Item', `Edit ${item.barcode}`, [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Edit', onPress: () => console.log('Edit:', item.barcode) }
+          { text: 'Edit', onPress: () => logger.log('Edit:', item.barcode) }
         ]);
         break;
         
@@ -1212,7 +1213,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         // Show location or navigate to locate screen
         Alert.alert('Locate Item', `Find ${item.barcode}`, [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Locate', onPress: () => console.log('Locate:', item.barcode) }
+          { text: 'Locate', onPress: () => logger.log('Locate:', item.barcode) }
         ]);
         break;
         
@@ -1273,7 +1274,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
             // Remove from duplicates if it was there
             setDuplicates(prev => prev.filter(dup => dup !== itemToRemove.barcode));
             
-            console.log(`Removed scanned item: ${itemToRemove.barcode}`);
+            logger.log(`Removed scanned item: ${itemToRemove.barcode}`);
           }
         }
       ]
@@ -1477,7 +1478,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           <TouchableOpacity 
             style={styles.doneButton}
             onPress={() => {
-              console.log('Done button pressed');
+              logger.log('Done button pressed');
               // Show scanned items list
               setShowScannedItems(true);
             }}
@@ -1688,23 +1689,23 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
             style={styles.camera}
             barcodeScannerEnabled={true}
             onBarcodeScanned={({ data, bounds }) => {
-              console.log('📷 CameraView onBarcodeScanned triggered!');
-              console.log('📷 Raw barcode data:', data, 'bounds:', bounds);
+              logger.log('📷 CameraView onBarcodeScanned triggered!');
+              logger.log('📷 Raw barcode data:', data, 'bounds:', bounds);
               
               // Check if barcode is within scan area (if bounds are available)
               if (bounds && !isBarcodeInScanArea(bounds)) {
-                console.log('📷 Enhanced scan barcode outside scan area, ignoring');
+                logger.log('📷 Enhanced scan barcode outside scan area, ignoring');
                 return;
               }
               
               handleBarcodeScan(data);
             }}
             onCameraReady={() => {
-              console.log('📷 Camera is ready and active');
-              console.log('📷 Camera ready - should be detecting barcodes now');
+              logger.log('📷 Camera is ready and active');
+              logger.log('📷 Camera ready - should be detecting barcodes now');
             }}
             onMountError={(error) => {
-              console.error('❌ Camera mount error:', error);
+              logger.error('❌ Camera mount error:', error);
               Alert.alert('Camera Error', 'Failed to start camera: ' + error.message);
             }}
           />
@@ -1736,7 +1737,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           <TouchableOpacity
             style={styles.closeCameraButton}
             onPress={() => {
-              console.log('Close button pressed');
+              logger.log('Close button pressed');
               setIsScanning(false);
             }}
           >
@@ -1758,7 +1759,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 selectedAction === 'in' && styles.cameraActionButtonSelected
               ]}
               onPress={() => {
-                console.log('RETURN button pressed');
+                logger.log('RETURN button pressed');
                 setSelectedAction('in');
                 // Provide haptic feedback
                 feedbackService.quickAction('return selected');
@@ -1784,7 +1785,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 selectedAction === 'out' && styles.cameraActionButtonSelected
               ]}
               onPress={() => {
-                console.log('SHIP button pressed');
+                logger.log('SHIP button pressed');
                 setSelectedAction('out');
                 // Provide haptic feedback
                 feedbackService.quickAction('ship selected');
@@ -1809,12 +1810,12 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           <TouchableOpacity
             style={styles.testButton}
             onPress={async () => {
-              console.log('🔊 Testing feedback...');
+              logger.log('🔊 Testing feedback...');
               try {
                 await feedbackService.scanSuccess('TEST123');
-                console.log('🔊 Success feedback test completed');
+                logger.log('🔊 Success feedback test completed');
               } catch (error) {
-                console.error('❌ Feedback test failed:', error);
+                logger.error('❌ Feedback test failed:', error);
               }
             }}
           >
@@ -1907,7 +1908,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
               <TouchableOpacity 
                 style={[styles.submitOrderButton, { backgroundColor: '#059669' }]}
                 onPress={async () => {
-                  console.log('Submit Order button pressed');
+                  logger.log('Submit Order button pressed');
                   await submitOrder();
                 }}
               >
@@ -1924,9 +1925,9 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
             <TouchableOpacity 
               style={[styles.syncButton, { backgroundColor: theme.primary }]}
               onPress={async () => {
-                console.log('Sync All button pressed');
+                logger.log('Sync All button pressed');
                 const pendingItems = scannedItems.filter(i => !i.synced);
-                console.log(`Syncing ${pendingItems.length} pending items`);
+                logger.log(`Syncing ${pendingItems.length} pending items`);
                 
                 // Sync all pending items
                 for (const item of pendingItems) {
@@ -1940,14 +1941,14 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                           : scannedItem
                       )
                     );
-                    console.log(`Successfully synced item: ${item.barcode}`);
+                    logger.log(`Successfully synced item: ${item.barcode}`);
                   } catch (error) {
-                    console.error(`Failed to sync item ${item.barcode}:`, error);
+                    logger.error(`Failed to sync item ${item.barcode}:`, error);
                   }
                 }
                 
                 await loadSyncStatus();
-                console.log('Sync All completed');
+                logger.log('Sync All completed');
               }}
             >
               <Text style={[styles.syncButtonText, { color: theme.surface }]}>

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
 import { supabase } from '../supabase';
@@ -27,7 +28,7 @@ export default function RecentScansScreen() {
         .order('created_at', { ascending: false })
         .limit(20);
       if (error) {
-        console.log('Supabase error:', error);
+        logger.log('Supabase error:', error);
         setError(error.message || 'Failed to load scans.');
       } else {
         setError('');

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 // Global cache store
@@ -73,7 +74,7 @@ export const useDataCache = (key, fetchFn, dependencies = []) => {
     } catch (err) {
       if (mountedRef.current) {
         setError(err);
-        console.error(`Cache fetch error for ${key}:`, err);
+        logger.error(`Cache fetch error for ${key}:`, err);
       }
       throw err;
     } finally {
@@ -139,7 +140,7 @@ export const invalidateCache = (pattern) => {
     cacheTimestamps.delete(key);
   });
   
-  console.log(`Invalidated ${keysToInvalidate.length} cache entries for pattern: ${pattern}`);
+  logger.log(`Invalidated ${keysToInvalidate.length} cache entries for pattern: ${pattern}`);
 };
 
 // Manual cache control
@@ -172,7 +173,7 @@ export const preloadData = async (key, fetchFn, dependencies = []) => {
     cacheTimestamps.set(cacheKey, Date.now());
     return result;
   } catch (error) {
-    console.error(`Preload error for ${key}:`, error);
+    logger.error(`Preload error for ${key}:`, error);
     throw error;
   }
 };
@@ -219,7 +220,7 @@ export const useBatchData = (requests) => {
       setData(batchData);
     } catch (err) {
       setError(err);
-      console.error('Batch fetch error:', err);
+      logger.error('Batch fetch error:', err);
     } finally {
       setLoading(false);
     }

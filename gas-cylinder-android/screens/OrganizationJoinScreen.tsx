@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -43,7 +44,7 @@ export default function OrganizationJoinScreen({
       // Check for stored invite token from OAuth redirect
       const inviteToken = await AsyncStorage.getItem('pending_invite_token');
       if (inviteToken) {
-        console.log('📧 Found pending invite token:', inviteToken);
+        logger.log('📧 Found pending invite token:', inviteToken);
         
         const { data: inviteData, error } = await supabase
           .from('organization_invites')
@@ -82,7 +83,7 @@ export default function OrganizationJoinScreen({
         }
       }
     } catch (error) {
-      console.warn('Error checking for pending invite:', error);
+      logger.warn('Error checking for pending invite:', error);
     } finally {
       setCheckingInvite(false);
     }
@@ -100,7 +101,7 @@ export default function OrganizationJoinScreen({
         setOrganizations(data || []);
       }
     } catch (error) {
-      console.warn('Error fetching organizations:', error);
+      logger.warn('Error fetching organizations:', error);
     }
   };
 
@@ -137,7 +138,7 @@ export default function OrganizationJoinScreen({
       );
 
     } catch (error) {
-      console.error('Error accepting invite:', error);
+      logger.error('Error accepting invite:', error);
       Alert.alert('Error', error.message);
     } finally {
       setLoading(false);
@@ -193,7 +194,7 @@ export default function OrganizationJoinScreen({
       );
 
     } catch (error) {
-      console.error('Error joining organization:', error);
+      logger.error('Error joining organization:', error);
       Alert.alert('Error', error.message);
     } finally {
       setLoading(false);
@@ -222,7 +223,7 @@ export default function OrganizationJoinScreen({
       );
 
     } catch (error) {
-      console.error('Error joining by domain:', error);
+      logger.error('Error joining by domain:', error);
       Alert.alert('Error', error.message);
     } finally {
       setLoading(false);

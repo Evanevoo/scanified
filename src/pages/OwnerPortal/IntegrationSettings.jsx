@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Card, CardContent, Typography, Grid, Switch, FormControlLabel,
@@ -236,7 +237,7 @@ export default function IntegrationSettings() {
         setIntegrationSettings({ ...integrationSettings, ...JSON.parse(savedSettings) });
       }
     } catch (error) {
-      console.error('Error loading integration settings:', error);
+      logger.error('Error loading integration settings:', error);
       // Try localStorage as fallback
       const savedSettings = localStorage.getItem(`integration_settings_${profile.organization_id}`);
       if (savedSettings) {
@@ -271,7 +272,7 @@ export default function IntegrationSettings() {
       setTimeout(() => setSuccess(''), 5000);
       
     } catch (error) {
-      console.error('Error saving integration settings:', error);
+      logger.error('Error saving integration settings:', error);
       // Fallback to localStorage
       localStorage.setItem(`integration_settings_${profile.organization_id}`, JSON.stringify(integrationSettings));
       setSuccess('✅ Integration settings saved successfully! Your configuration is active and ready to use.');

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../supabase/client';
 import { 
@@ -205,7 +206,7 @@ function parseDataField(data) {
       const parsed = JSON.parse(data);
       return parsed;
     } catch {
-      console.log('JSON parse error for data:', data);
+      logger.log('JSON parse error for data:', data);
       return { _raw: data, _error: 'Malformed JSON' };
     }
   }
@@ -242,7 +243,7 @@ function mergeScannedWithImported(importedInvoices, scannedRecords) {
       // Mark these scanned records as processed
       matchingScanned.forEach(scan => processedScannedIds.add(scan.id));
       
-      console.log(`🔗 Merged order ${invoiceOrderNum}: invoice + ${matchingScanned.length} scanned records`);
+      logger.log(`🔗 Merged order ${invoiceOrderNum}: invoice + ${matchingScanned.length} scanned records`);
     } else {
       // No matching scans, keep as regular import
       merged.push(invoice);
@@ -253,7 +254,7 @@ function mergeScannedWithImported(importedInvoices, scannedRecords) {
   const remainingScanned = scannedRecords.filter(scan => !processedScannedIds.has(scan.id));
   merged.push(...remainingScanned);
   
-  console.log(`📊 Merge result: ${merged.length} total records (${importedInvoices.length} imports, ${remainingScanned.length} scanned-only)`);
+  logger.log(`📊 Merge result: ${merged.length} total records (${importedInvoices.length} imports, ${remainingScanned.length} scanned-only)`);
   
   return merged;
 }
@@ -445,7 +446,7 @@ export default function ImportApprovals() {
         ]).catch(console.error);
         
       } catch (error) {
-        console.error('Error initializing data:', error);
+        logger.error('Error initializing data:', error);
         setError('Failed to load data: ' + error.message);
       } finally {
         setLoading(false);
@@ -535,14 +536,14 @@ export default function ImportApprovals() {
   const filteredReceipts = filterRecords(pendingReceipts);
   
   // Debug: Log the data to see what we're working with
-  console.log('Pending invoices:', pendingInvoices);
-  console.log('Filtered invoices:', filteredInvoices);
+  logger.log('Pending invoices:', pendingInvoices);
+  logger.log('Filtered invoices:', filteredInvoices);
 
   // Get unique locations from all records
   const getUniqueLocations = () => {
     const locations = new Set(['All']);
-    console.log('🔍 Debug locations - pendingInvoices:', pendingInvoices.length, 'pendingReceipts:', pendingReceipts.length);
-    console.log('🔍 Debug locations - allLocations from database:', allLocations.length);
+    logger.log('🔍 Debug locations - pendingInvoices:', pendingInvoices.length, 'pendingReceipts:', pendingReceipts.length);
+    logger.log('🔍 Debug locations - allLocations from database:', allLocations.length);
     
     // Always use locations from database first (same as Locations page)
     allLocations.forEach(location => {
@@ -559,7 +560,7 @@ export default function ImportApprovals() {
       }
       
       if (index < 3) { // Debug first 3 records
-        console.log(`🔍 Record ${index}:`, {
+        logger.log(`🔍 Record ${index}:`, {
           id: record.id,
           location: location,
           dataKeys: Object.keys(data),
@@ -571,18 +572,18 @@ export default function ImportApprovals() {
       }
     });
     
-    console.log('🔍 Final locations:', Array.from(locations));
+    logger.log('🔍 Final locations:', Array.from(locations));
     return Array.from(locations);
   };
 
   // Enhanced data fetching functions
   async function fetchPendingInvoices() {
     try {
-      console.log('🔍 Processing existing imported invoices for auto-approval...');
-      console.log('🔍 Organization ID:', organization?.id);
+      logger.log('🔍 Processing existing imported invoices for auto-approval...');
+      logger.log('🔍 Organization ID:', organization?.id);
       
       if (!organization?.id) {
-        console.log('⚠️ No organization ID found, skipping invoice processing');
+        logger.log('⚠️ No organization ID found, skipping invoice processing');
         return;
       }
       
@@ -594,10 +595,10 @@ export default function ImportApprovals() {
       
       if (error) throw error;
       
-      console.log('🔍 Found invoices for organization:', data?.length || 0);
+      logger.log('🔍 Found invoices for organization:', data?.length || 0);
       if (data && data.length > 0) {
-        console.log('🔍 First invoice organization_id:', data[0].organization_id);
-        console.log('🔍 Current organization_id:', organization.id);
+        logger.log('🔍 First invoice organization_id:', data[0].organization_id);
+        logger.log('🔍 Current organization_id:', organization.id);
       }
       
       // Split grouped imports into individual records (professional workflow)
@@ -607,7 +608,7 @@ export default function ImportApprovals() {
         individualRecords.push(...splitRecords);
       });
       
-      console.log('Split invoices into individual records:', individualRecords.length);
+      logger.log('Split invoices into individual records:', individualRecords.length);
       
       // Check for auto-approval opportunities
       const autoApprovedRecords = [];
@@ -623,25 +624,25 @@ export default function ImportApprovals() {
       }
       
       if (autoApprovedRecords.length > 0) {
-        console.log(`✅ Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
+        logger.log(`✅ Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
         setSnackbar(`Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
       }
       
       // Don't set pendingInvoices here - let fetchVerificationStats handle it
-      console.log('📊 fetchPendingInvoices completed, remaining records:', remainingRecords.length);
+      logger.log('📊 fetchPendingInvoices completed, remaining records:', remainingRecords.length);
     } catch (error) {
-      console.error('Error fetching pending invoices:', error);
+      logger.error('Error fetching pending invoices:', error);
       setError('Failed to fetch pending invoices');
     }
   }
 
   async function fetchPendingReceipts() {
     try {
-      console.log('🔍 Processing existing imported receipts for auto-approval...');
-      console.log('🔍 Organization ID:', organization?.id);
+      logger.log('🔍 Processing existing imported receipts for auto-approval...');
+      logger.log('🔍 Organization ID:', organization?.id);
       
       if (!organization?.id) {
-        console.log('⚠️ No organization ID found, skipping receipt processing');
+        logger.log('⚠️ No organization ID found, skipping receipt processing');
         return;
       }
       
@@ -652,10 +653,10 @@ export default function ImportApprovals() {
       
       if (error) throw error;
       
-      console.log('🔍 Found receipts for organization:', data?.length || 0);
+      logger.log('🔍 Found receipts for organization:', data?.length || 0);
       if (data && data.length > 0) {
-        console.log('🔍 First receipt organization_id:', data[0].organization_id);
-        console.log('🔍 Current organization_id:', organization.id);
+        logger.log('🔍 First receipt organization_id:', data[0].organization_id);
+        logger.log('🔍 Current organization_id:', organization.id);
       }
       
       // Split grouped imports into individual records (professional workflow)
@@ -665,10 +666,10 @@ export default function ImportApprovals() {
         individualRecords.push(...splitRecords);
       });
       
-      console.log('Split receipts into individual records:', individualRecords.length);
+      logger.log('Split receipts into individual records:', individualRecords.length);
       setPendingReceipts(individualRecords);
     } catch (error) {
-      console.error('Error fetching pending receipts:', error);
+      logger.error('Error fetching pending receipts:', error);
       setError('Failed to fetch pending receipts');
     }
   }
@@ -676,11 +677,11 @@ export default function ImportApprovals() {
   async function fetchVerificationStats() {
     try {
       setLoading(true);
-      console.log('🚀 Starting data fetch...');
-      console.log('🔍 Organization:', organization);
+      logger.log('🚀 Starting data fetch...');
+      logger.log('🔍 Organization:', organization);
       
       if (!organization || !organization.id) {
-        console.error('❌ No organization found');
+        logger.error('❌ No organization found');
         setError('No organization found. Please log in again.');
         setLoading(false);
         return;
@@ -700,18 +701,18 @@ export default function ImportApprovals() {
         .neq('status', 'rejected'); // EXCLUDE REJECTED
       
       if (invoiceError) {
-        console.error('❌ Invoice query error:', invoiceError);
+        logger.error('❌ Invoice query error:', invoiceError);
         throw invoiceError;
       }
       
       if (receiptError) {
-        console.error('❌ Receipt query error:', receiptError);
+        logger.error('❌ Receipt query error:', receiptError);
         throw receiptError;
       }
       
-      console.log('⏱️ Database queries completed in:', Date.now() - startTime, 'ms');
+      logger.log('⏱️ Database queries completed in:', Date.now() - startTime, 'ms');
       
-      console.log('🔍 Organization filter:', {
+      logger.log('🔍 Organization filter:', {
         organizationId: organization.id,
         invoicesFound: invoices?.length || 0,
         receiptsFound: receipts?.length || 0
@@ -720,31 +721,31 @@ export default function ImportApprovals() {
       // Split grouped imports into individual records (same as in fetchPendingInvoices/fetchPendingReceipts)
       const individualInvoices = [];
       (invoices || []).forEach(importRecord => {
-        console.log('🔍 Processing invoice record:', {
+        logger.log('🔍 Processing invoice record:', {
           id: importRecord.id,
           filename: importRecord.filename,
           dataKeys: Object.keys(importRecord.data || {})
         });
         
         const splitRecords = splitImportIntoIndividualRecords(importRecord);
-        console.log('📊 Split into individual records:', splitRecords.length);
+        logger.log('📊 Split into individual records:', splitRecords.length);
         individualInvoices.push(...splitRecords);
       });
       
       const individualReceipts = [];
       (receipts || []).forEach(importRecord => {
-        console.log('🔍 Processing receipt record:', {
+        logger.log('🔍 Processing receipt record:', {
           id: importRecord.id,
           filename: importRecord.filename,
           dataKeys: Object.keys(importRecord.data || {})
         });
         
         const splitRecords = splitImportIntoIndividualRecords(importRecord);
-        console.log('📊 Split into individual records:', splitRecords.length);
+        logger.log('📊 Split into individual records:', splitRecords.length);
         individualReceipts.push(...splitRecords);
       });
       
-      console.log('🔍 Individual records:', {
+      logger.log('🔍 Individual records:', {
         invoices: invoices?.length || 0,
         receipts: receipts?.length || 0,
         individualInvoices: individualInvoices.length,
@@ -754,7 +755,7 @@ export default function ImportApprovals() {
       });
       
       // Debug: Show first few individual records
-      console.log('🔍 First 3 individual invoices:', individualInvoices.slice(0, 3).map(inv => ({
+      logger.log('🔍 First 3 individual invoices:', individualInvoices.slice(0, 3).map(inv => ({
         id: inv.id,
         displayId: inv.displayId,
         customerName: inv.data.customer_name,
@@ -763,7 +764,7 @@ export default function ImportApprovals() {
       })));
       
       // Get scanned-only records from both bottle_scans and scans tables
-      console.log('⏱️ Fetching scanned data...');
+      logger.log('⏱️ Fetching scanned data...');
       const scanStartTime = Date.now();
       
       const { data: scannedRows, error: scannedError } = await supabase
@@ -785,21 +786,21 @@ export default function ImportApprovals() {
         .limit(1000); // Limit to prevent slow queries
       
       if (scannedError) {
-        console.error('❌ Scanned rows query error:', scannedError);
+        logger.error('❌ Scanned rows query error:', scannedError);
         throw scannedError;
       }
       
       if (mobileError) {
-        console.error('❌ Mobile scans query error:', mobileError);
+        logger.error('❌ Mobile scans query error:', mobileError);
         throw mobileError;
       }
       
-      console.log('⏱️ Scanned data queries completed in:', Date.now() - scanStartTime, 'ms');
+      logger.log('⏱️ Scanned data queries completed in:', Date.now() - scanStartTime, 'ms');
       
       // Combine both scan sources
       const allScannedRows = [...(scannedRows || []), ...(mobileScans || [])];
       
-      console.log('🔍 Data fetch results:', {
+      logger.log('🔍 Data fetch results:', {
         scannedRows: scannedRows?.length || 0,
         mobileScans: mobileScans?.length || 0,
         allScannedRows: allScannedRows.length
@@ -810,7 +811,7 @@ export default function ImportApprovals() {
         .select('data')
         .eq('organization_id', organization.id);
         
-      console.log('🔍 Imported invoices:', importedInvoices?.length || 0);
+      logger.log('🔍 Imported invoices:', importedInvoices?.length || 0);
       
       // Extract order numbers from imported invoices
       const importedOrderNumbers = new Set();
@@ -836,11 +837,11 @@ export default function ImportApprovals() {
         }
       });
       
-      console.log('🔍 Order groups created:', Object.keys(orderGroups).length);
-      console.log('🔍 Order numbers:', Object.keys(orderGroups));
+      logger.log('🔍 Order groups created:', Object.keys(orderGroups).length);
+      logger.log('🔍 Order numbers:', Object.keys(orderGroups));
 
       // Convert to the same format as imported invoices for consistency
-      console.log('⏱️ Processing scanned records...');
+      logger.log('⏱️ Processing scanned records...');
       const processStartTime = Date.now();
       
       const scannedOnlyRecords = Object.entries(orderGroups).map(([orderNumber, scans]) => {
@@ -848,7 +849,7 @@ export default function ImportApprovals() {
         const customerName = firstScan.customer_name || firstScan.customer || 'Unknown Customer';
         const hasMatchingImport = importedOrderNumbers.has(orderNumber);
         
-        console.log('🔍 Creating scanned record:', { 
+        logger.log('🔍 Creating scanned record:', { 
           orderNumber, 
           customerName, 
           hasMatchingImport, 
@@ -886,13 +887,13 @@ export default function ImportApprovals() {
         };
       });
       
-      console.log('⏱️ Scanned records processing completed in:', Date.now() - processStartTime, 'ms');
-      console.log('📊 Final scanned records count:', scannedOnlyRecords.length);
+      logger.log('⏱️ Scanned records processing completed in:', Date.now() - processStartTime, 'ms');
+      logger.log('📊 Final scanned records count:', scannedOnlyRecords.length);
       
       const allRecords = [...individualInvoices, ...individualReceipts, ...scannedOnlyRecords];
-      console.log('📊 All records count:', allRecords.length);
+      logger.log('📊 All records count:', allRecords.length);
       
-      console.log('🔍 Final allRecords:', {
+      logger.log('🔍 Final allRecords:', {
         individualInvoices: individualInvoices.length,
         individualReceipts: individualReceipts.length,
         scannedOnlyRecords: scannedOnlyRecords.length,
@@ -900,7 +901,7 @@ export default function ImportApprovals() {
       });
       
       // Debug: Show first few final records
-      console.log('🔍 First 3 final records:', allRecords.slice(0, 3).map(record => ({
+      logger.log('🔍 First 3 final records:', allRecords.slice(0, 3).map(record => ({
         id: record.id,
         displayId: record.displayId,
         customerName: record.data?.customer_name,
@@ -947,21 +948,21 @@ export default function ImportApprovals() {
         }
       });
       
-      console.log('⏱️ Total data fetch completed in:', Date.now() - startTime, 'ms');
-      console.log('📊 Final stats calculated:', displayStats);
-      console.log('📊 Setting verification stats...');
+      logger.log('⏱️ Total data fetch completed in:', Date.now() - startTime, 'ms');
+      logger.log('📊 Final stats calculated:', displayStats);
+      logger.log('📊 Setting verification stats...');
       setVerificationStats(displayStats);
-      console.log('📊 Verification stats set successfully');
-      console.log('📊 Pending invoices set to:', allRecords.length, 'records');
+      logger.log('📊 Verification stats set successfully');
+      logger.log('📊 Pending invoices set to:', allRecords.length, 'records');
       setLoading(false);
       
     } catch (error) {
-      console.error('Error fetching verification stats:', error);
+      logger.error('Error fetching verification stats:', error);
       setError('Failed to fetch data: ' + error.message);
       
       // Fallback: try to show basic data even if main function fails
       try {
-        console.log('🔄 Attempting fallback data fetch...');
+        logger.log('🔄 Attempting fallback data fetch...');
         const { data: fallbackInvoices } = await supabase
           .from('imported_invoices')
           .select('*')
@@ -969,7 +970,7 @@ export default function ImportApprovals() {
           .limit(50);
         
         if (fallbackInvoices && fallbackInvoices.length > 0) {
-          console.log('✅ Fallback data found:', fallbackInvoices.length, 'records');
+          logger.log('✅ Fallback data found:', fallbackInvoices.length, 'records');
           setPendingInvoices(fallbackInvoices);
           setVerificationStats({
             total: fallbackInvoices.length,
@@ -983,7 +984,7 @@ export default function ImportApprovals() {
           });
         }
       } catch (fallbackError) {
-        console.error('❌ Fallback also failed:', fallbackError);
+        logger.error('❌ Fallback also failed:', fallbackError);
       }
       
       setLoading(false);
@@ -1013,7 +1014,7 @@ export default function ImportApprovals() {
       setCustomerNameToId(map);
       customerLookupDone.current = true;
     } catch (error) {
-      console.error('Error fetching customers:', error);
+      logger.error('Error fetching customers:', error);
     }
   }
 
@@ -1030,7 +1031,7 @@ export default function ImportApprovals() {
       });
       setScannedCounts(counts);
     } catch (error) {
-      console.error('Error fetching scanned counts:', error);
+      logger.error('Error fetching scanned counts:', error);
     }
   }
 
@@ -1047,15 +1048,15 @@ export default function ImportApprovals() {
         .select('*')
         .not('status', 'eq', 'rejected');
       
-      if (mobileError) console.error('Error fetching mobile scans:', mobileError);
+      if (mobileError) logger.error('Error fetching mobile scans:', mobileError);
       
       // Combine both sources
       const allScans = [...(scannedRows || []), ...(mobileScans || [])];
-      console.log('📊 Loaded scans:', { bottleScans: scannedRows?.length || 0, mobileScans: mobileScans?.length || 0, total: allScans.length });
+      logger.log('📊 Loaded scans:', { bottleScans: scannedRows?.length || 0, mobileScans: mobileScans?.length || 0, total: allScans.length });
       
       setAllScannedRows(allScans);
     } catch (error) {
-      console.error('Error fetching all scanned rows:', error);
+      logger.error('Error fetching all scanned rows:', error);
     }
   }
 
@@ -1066,7 +1067,7 @@ export default function ImportApprovals() {
       if (error) throw error;
       setScannedOrders(orders || []);
     } catch (error) {
-      console.error('Error fetching scanned orders:', error);
+      logger.error('Error fetching scanned orders:', error);
     }
   }
 
@@ -1079,7 +1080,7 @@ export default function ImportApprovals() {
         .select('*')
         .not('order_number', 'is', null);
       
-      console.log('🔍 Fetched bottle_scans:', scannedRows?.length || 0, 'records');
+      logger.log('🔍 Fetched bottle_scans:', scannedRows?.length || 0, 'records');
       
       if (scanError) throw scanError;
 
@@ -1092,14 +1093,14 @@ export default function ImportApprovals() {
       
       if (mobileError) throw mobileError;
       
-      console.log('🔍 Fetched mobile scans:', mobileScans?.length || 0, 'records');
+      logger.log('🔍 Fetched mobile scans:', mobileScans?.length || 0, 'records');
       
       // Debug: Check if any scans have status 'rejected'
       const { data: rejectedScans } = await supabase
         .from('scans')
         .select('order_number, status, rejected_at')
         .eq('status', 'rejected');
-      console.log('Rejected scans in database:', rejectedScans);
+      logger.log('Rejected scans in database:', rejectedScans);
 
       // Combine both scan sources
       const allScannedRows = [...(scannedRows || []), ...(mobileScans || [])];
@@ -1124,7 +1125,7 @@ export default function ImportApprovals() {
         });
       });
 
-      console.log('📋 Imported order numbers:', Array.from(importedOrderNumbers));
+      logger.log('📋 Imported order numbers:', Array.from(importedOrderNumbers));
 
       // Group scanned rows by order number - EXCLUDE REJECTED
       const orderGroups = {};
@@ -1141,8 +1142,8 @@ export default function ImportApprovals() {
         }
       });
 
-      console.log('📦 All scanned order groups:', Object.keys(orderGroups));
-      console.log('📋 Imported order numbers:', Array.from(importedOrderNumbers));
+      logger.log('📦 All scanned order groups:', Object.keys(orderGroups));
+      logger.log('📋 Imported order numbers:', Array.from(importedOrderNumbers));
 
       // Convert to the same format as imported invoices for consistency
       // Only create scanned-only records for orders that DON'T have matching imports
@@ -1197,15 +1198,15 @@ export default function ImportApprovals() {
       }
       
       if (autoApprovedScannedRecords.length > 0) {
-        console.log(`✅ Auto-approved ${autoApprovedScannedRecords.length} scanned-only records with matching quantities`);
+        logger.log(`✅ Auto-approved ${autoApprovedScannedRecords.length} scanned-only records with matching quantities`);
         setSnackbar(`Auto-approved ${autoApprovedScannedRecords.length} scanned-only records with matching quantities`);
       }
 
       // Don't set pendingInvoices here - let fetchVerificationStats handle it
-      console.log('📊 fetchScannedOnlyOrders completed, remaining scanned records:', remainingScannedRecords.length);
+      logger.log('📊 fetchScannedOnlyOrders completed, remaining scanned records:', remainingScannedRecords.length);
 
     } catch (error) {
-      console.error('Error fetching scanned-only orders:', error);
+      logger.error('Error fetching scanned-only orders:', error);
     }
   }
 
@@ -1216,7 +1217,7 @@ export default function ImportApprovals() {
       if (error) throw error;
       setGasTypes(gasTypes || []);
     } catch (error) {
-      console.error('Error fetching gas types:', error);
+      logger.error('Error fetching gas types:', error);
     }
   }
 
@@ -1230,9 +1231,9 @@ export default function ImportApprovals() {
       
       if (error) throw error;
       setAllLocations(locations || []);
-      console.log('🔍 Fetched locations:', locations?.length || 0);
+      logger.log('🔍 Fetched locations:', locations?.length || 0);
     } catch (error) {
-      console.error('Error fetching locations:', error);
+      logger.error('Error fetching locations:', error);
     }
   }
 
@@ -1255,7 +1256,7 @@ export default function ImportApprovals() {
       });
       setProductCodeToAssetInfo(assetMap);
     } catch (error) {
-      console.error('Error fetching bottles:', error);
+      logger.error('Error fetching bottles:', error);
     }
   }
 
@@ -1312,13 +1313,13 @@ export default function ImportApprovals() {
 
       scanner.render(
         (decodedText) => handleScanSuccess(decodedText),
-        (error) => console.debug('Scan error:', error)
+        (error) => logger.debug('Scan error:', error)
       );
 
       scannerRef.current = scanner;
       setScannerActive(true);
     } catch (error) {
-      console.error('Failed to initialize scanner:', error);
+      logger.error('Failed to initialize scanner:', error);
       setError('Failed to initialize scanner: ' + error.message);
     }
   };
@@ -1431,7 +1432,7 @@ export default function ImportApprovals() {
       };
 
     } catch (error) {
-      console.error('Error processing scanned barcode:', error);
+      logger.error('Error processing scanned barcode:', error);
       return {
         status: 'error',
         error: error.message,
@@ -1607,7 +1608,7 @@ export default function ImportApprovals() {
           serial_number: row.serial_number || row.product_code
         });
         if (lineItemError) {
-          console.error('Error creating line item:', lineItemError);
+          logger.error('Error creating line item:', lineItemError);
         }
       }
 
@@ -1641,7 +1642,7 @@ export default function ImportApprovals() {
             .eq('barcode_number', scan.cylinder_barcode);
           
           if (bottleError) {
-            console.error('Error assigning bottle to customer:', bottleError);
+            logger.error('Error assigning bottle to customer:', bottleError);
           }
 
           // Create rental record for delivered bottles (qty_out > 0)
@@ -1662,7 +1663,7 @@ export default function ImportApprovals() {
                 taxRate = locationData.total_tax_rate;
               }
             } catch (e) {
-              console.warn('Could not fetch tax rate for location:', rentalLocation);
+              logger.warn('Could not fetch tax rate for location:', rentalLocation);
             }
 
             const { error: rentalError } = await supabase
@@ -1680,7 +1681,7 @@ export default function ImportApprovals() {
               });
             
             if (rentalError) {
-              console.error('Error creating rental record:', rentalError);
+              logger.error('Error creating rental record:', rentalError);
             }
           }
 
@@ -1695,7 +1696,7 @@ export default function ImportApprovals() {
               .is('rental_end_date', null);
             
             if (rentalUpdateError) {
-              console.error('Error ending rental record:', rentalUpdateError);
+              logger.error('Error ending rental record:', rentalUpdateError);
             }
 
             // Remove customer assignment and mark as empty for returned bottles
@@ -1709,7 +1710,7 @@ export default function ImportApprovals() {
               .eq('barcode_number', scan.cylinder_barcode);
             
             if (bottleUnassignError) {
-              console.error('Error unassigning bottle from customer:', bottleUnassignError);
+              logger.error('Error unassigning bottle from customer:', bottleUnassignError);
             }
           }
         }
@@ -1851,7 +1852,7 @@ export default function ImportApprovals() {
           serial_number: row.serial_number || row.product_code
         });
         if (lineItemError) {
-          console.error('Error creating line item:', lineItemError);
+          logger.error('Error creating line item:', lineItemError);
         }
       }
 
@@ -1885,7 +1886,7 @@ export default function ImportApprovals() {
             .eq('barcode_number', scan.cylinder_barcode);
           
           if (bottleError) {
-            console.error('Error assigning bottle to customer:', bottleError);
+            logger.error('Error assigning bottle to customer:', bottleError);
           }
 
           // Create rental record for delivered bottles (qty_out > 0)
@@ -1906,7 +1907,7 @@ export default function ImportApprovals() {
                 taxRate = locationData.total_tax_rate;
               }
             } catch (e) {
-              console.warn('Could not fetch tax rate for location:', rentalLocation);
+              logger.warn('Could not fetch tax rate for location:', rentalLocation);
             }
 
             const { error: rentalError } = await supabase
@@ -1924,7 +1925,7 @@ export default function ImportApprovals() {
               });
             
             if (rentalError) {
-              console.error('Error creating rental record:', rentalError);
+              logger.error('Error creating rental record:', rentalError);
             }
           }
 
@@ -1939,7 +1940,7 @@ export default function ImportApprovals() {
               .is('rental_end_date', null);
             
             if (rentalUpdateError) {
-              console.error('Error ending rental record:', rentalUpdateError);
+              logger.error('Error ending rental record:', rentalUpdateError);
             }
 
             // Remove customer assignment and mark as empty for returned bottles
@@ -1953,7 +1954,7 @@ export default function ImportApprovals() {
               .eq('barcode_number', scan.cylinder_barcode);
             
             if (bottleUnassignError) {
-              console.error('Error unassigning bottle from customer:', bottleUnassignError);
+              logger.error('Error unassigning bottle from customer:', bottleUnassignError);
             }
           }
         }
@@ -2095,11 +2096,11 @@ export default function ImportApprovals() {
   function getLineItems(data) {
     if (!data) return [];
     
-    console.log('getLineItems called with:', data);
+    logger.log('getLineItems called with:', data);
     
     // Try rows array first (THIS IS THE MAIN CASE for your imports)
     if (data.rows && Array.isArray(data.rows)) {
-      console.log('Found rows array with length:', data.rows.length);
+      logger.log('Found rows array with length:', data.rows.length);
       return data.rows;
     }
     
@@ -2116,7 +2117,7 @@ export default function ImportApprovals() {
       return data.items;
     }
     
-    console.log('No line items found, returning empty array');
+    logger.log('No line items found, returning empty array');
     return [];
   }
 
@@ -2238,7 +2239,7 @@ export default function ImportApprovals() {
       const customerName = getCustomerInfo(data);
       const customerId = data.customer_id || data.CustomerListID;
       
-      console.log('🔍 Auto-verifying order:', { orderNumber, customerName, customerId });
+      logger.log('🔍 Auto-verifying order:', { orderNumber, customerName, customerId });
       
       // Get all scanned data for this order
       const { data: scannedData, error: scannedError } = await supabase
@@ -2248,18 +2249,18 @@ export default function ImportApprovals() {
         .eq('organization_id', organization.id);
       
       if (scannedError) {
-        console.error('❌ Error fetching scanned data:', scannedError);
+        logger.error('❌ Error fetching scanned data:', scannedError);
         return;
       }
       
-      console.log('📦 Found scanned data:', scannedData?.length || 0);
+      logger.log('📦 Found scanned data:', scannedData?.length || 0);
       
       // Process each scanned item
       for (const scan of scannedData || []) {
         const barcode = scan.bottle_barcode || scan.barcode_number;
         const mode = scan.mode;
         
-        console.log('🔍 Processing scan:', { barcode, mode, customerName });
+        logger.log('🔍 Processing scan:', { barcode, mode, customerName });
         
         if (mode === 'SHIP' || mode === 'out') {
           // SHIP: Assign to customer (rental)
@@ -2276,7 +2277,7 @@ export default function ImportApprovals() {
         .update({ status: 'verified' })
         .eq('id', record.id);
       
-      console.log('✅ Auto-verification completed');
+      logger.log('✅ Auto-verification completed');
       setSnackbar('✅ Order verified and assets assigned successfully!');
       onComplete(stepIndex, { verified: true, assetsAssigned: true });
       
@@ -2284,7 +2285,7 @@ export default function ImportApprovals() {
       await fetchData();
       
     } catch (error) {
-      console.error('❌ Auto-verification failed:', error);
+      logger.error('❌ Auto-verification failed:', error);
       onComplete(stepIndex, { verified: false, error: error.message });
     }
   };
@@ -2301,7 +2302,7 @@ export default function ImportApprovals() {
         .single();
       
       if (bottleError || !bottle) {
-        console.error('❌ Bottle not found:', barcode);
+        logger.error('❌ Bottle not found:', barcode);
         return;
       }
       
@@ -2319,7 +2320,7 @@ export default function ImportApprovals() {
         .eq('id', bottle.id);
       
       if (updateError) {
-        console.error('❌ Error updating bottle:', updateError);
+        logger.error('❌ Error updating bottle:', updateError);
         return;
       }
       
@@ -2338,14 +2339,14 @@ export default function ImportApprovals() {
         });
       
       if (rentalError) {
-        console.error('❌ Error creating rental record:', rentalError);
+        logger.error('❌ Error creating rental record:', rentalError);
         return;
       }
       
-      console.log('✅ Asset assigned to customer:', { barcode, customerName });
+      logger.log('✅ Asset assigned to customer:', { barcode, customerName });
       
     } catch (error) {
-      console.error('❌ Error assigning asset:', error);
+      logger.error('❌ Error assigning asset:', error);
     }
   };
   
@@ -2361,7 +2362,7 @@ export default function ImportApprovals() {
         .single();
       
       if (bottleError || !bottle) {
-        console.error('❌ Bottle not found:', barcode);
+        logger.error('❌ Bottle not found:', barcode);
         return;
       }
       
@@ -2379,7 +2380,7 @@ export default function ImportApprovals() {
         .eq('id', bottle.id);
       
       if (updateError) {
-        console.error('❌ Error updating bottle:', updateError);
+        logger.error('❌ Error updating bottle:', updateError);
         return;
       }
       
@@ -2396,14 +2397,14 @@ export default function ImportApprovals() {
         .is('rental_end_date', null);
       
       if (rentalError) {
-        console.error('❌ Error updating rental record:', rentalError);
+        logger.error('❌ Error updating rental record:', rentalError);
         return;
       }
       
-      console.log('✅ Asset returned to inventory:', { barcode });
+      logger.log('✅ Asset returned to inventory:', { barcode });
       
     } catch (error) {
-      console.error('❌ Error returning asset:', error);
+      logger.error('❌ Error returning asset:', error);
     }
   };
 
@@ -2725,7 +2726,7 @@ export default function ImportApprovals() {
           record={verificationDialog.record}
           onClose={() => setVerificationDialog({ open: false, record: null })}
           onComplete={(data) => {
-            console.log('Verification completed:', data);
+            logger.log('Verification completed:', data);
             setVerificationDialog({ open: false, record: null });
             fetchData();
           }}
@@ -2903,9 +2904,9 @@ export default function ImportApprovals() {
                   const recordsToReject = filteredInvoices.filter(invoice => 
                     selectedRecords.includes(invoice.id)
                   );
-                  console.log('Selected records:', selectedRecords);
-                  console.log('Filtered invoices:', filteredInvoices);
-                  console.log('Records to reject:', recordsToReject);
+                  logger.log('Selected records:', selectedRecords);
+                  logger.log('Filtered invoices:', filteredInvoices);
+                  logger.log('Records to reject:', recordsToReject);
                   await handleBulkReject(recordsToReject);
                 } else if (actionId === 'bulk_investigate') {
                   const recordsToInvestigate = filteredInvoices.filter(invoice => 
@@ -2920,7 +2921,7 @@ export default function ImportApprovals() {
                   );
                   await handleBulkExport(recordsToExport);
                 } else {
-                  console.log('Unknown bulk action:', actionId);
+                  logger.log('Unknown bulk action:', actionId);
                 }
                 
                 setBulkActionDialog({ open: false, action: null });
@@ -2931,8 +2932,8 @@ export default function ImportApprovals() {
                 await fetchPendingInvoices();
                 
               } catch (error) {
-                console.error('Bulk action failed:', error);
-                console.error('Error details:', {
+                logger.error('Bulk action failed:', error);
+                logger.error('Error details:', {
                   message: error.message,
                   code: error.code,
                   details: error.details,
@@ -2986,7 +2987,7 @@ export default function ImportApprovals() {
                 }
                 setConfirmationDialog({ open: false, action: null, record: null, type: null });
               } catch (error) {
-                console.error(`${confirmationDialog.action} failed:`, error);
+                logger.error(`${confirmationDialog.action} failed:`, error);
                 setSnackbar(`Failed to ${confirmationDialog.action} record: ${error.message}`);
               } finally {
                 setLoading(false);
@@ -3127,7 +3128,7 @@ export default function ImportApprovals() {
                         e.stopPropagation(); // Prevent card click
                         const customerName = getCustomerInfo(data);
                         const customerId = getCustomerId(data);
-                        console.log('Customer click - Name:', customerName, 'ID:', customerId, 'Data:', data);
+                        logger.log('Customer click - Name:', customerName, 'ID:', customerId, 'Data:', data);
                         if (customerId) {
                           navigate(`/customer/${customerId}`);
                         } else {
@@ -3173,7 +3174,7 @@ export default function ImportApprovals() {
                           color="success"
                           startIcon={<ApprovalIcon />}
                           onClick={() => handleAutoVerify(invoice, () => {
-                            console.log('Auto-verification completed from main table');
+                            logger.log('Auto-verification completed from main table');
                             setSnackbar('✅ Order verified and assets assigned successfully!');
                             fetchData();
                           }, 0)}
@@ -3322,7 +3323,7 @@ export default function ImportApprovals() {
 
   // Grid and Timeline view functions
   function renderInvoicesGrid() {
-    console.log('renderInvoicesGrid called with filteredInvoices:', filteredInvoices);
+    logger.log('renderInvoicesGrid called with filteredInvoices:', filteredInvoices);
     
     return (
       <Grid container spacing={3}>
@@ -3335,7 +3336,7 @@ export default function ImportApprovals() {
           const recordDate = getRecordDate(data);
           const status = determineVerificationStatus(invoice);
           
-          console.log('Processing invoice:', { 
+          logger.log('Processing invoice:', { 
             id: invoice.id, 
             orderNum, 
             customerInfo, 
@@ -3382,7 +3383,7 @@ export default function ImportApprovals() {
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        console.log('Grid customer click - Info:', customerInfo, 'ID:', customerId, 'Data:', data);
+                        logger.log('Grid customer click - Info:', customerInfo, 'ID:', customerId, 'Data:', data);
                         if (customerId) {
                           navigate(`/customer/${customerId}`);
                         } else {
@@ -3802,7 +3803,7 @@ export default function ImportApprovals() {
                     onClick={(e) => {
                       e.stopPropagation();
                       const customerId = getCustomerId(data);
-                      console.log('Receipt customer click - Info:', customerInfo, 'ID:', customerId, 'Data:', data);
+                      logger.log('Receipt customer click - Info:', customerInfo, 'ID:', customerId, 'Data:', data);
                       if (customerId) {
                         navigate(`/customer/${customerId}`);
                       } else {
@@ -3906,7 +3907,7 @@ export default function ImportApprovals() {
           .eq('order_number', orderNumber);
         
         if (bottleScanError) {
-          console.error('Error deleting bottle_scans:', bottleScanError);
+          logger.error('Error deleting bottle_scans:', bottleScanError);
         }
         
         setSnackbar('Scanned records rejected successfully');
@@ -3967,7 +3968,7 @@ export default function ImportApprovals() {
       const orderNumber = data.order_number || data.reference_number || data.invoice_number;
       
       if (!orderNumber) {
-        console.log('No order number found for quantity check');
+        logger.log('No order number found for quantity check');
         return false;
       }
 
@@ -3978,7 +3979,7 @@ export default function ImportApprovals() {
         .eq('order_number', orderNumber);
 
       if (scannedError) {
-        console.error('Error fetching scanned data:', scannedError);
+        logger.error('Error fetching scanned data:', scannedError);
         return false;
       }
 
@@ -4008,7 +4009,7 @@ export default function ImportApprovals() {
         const scannedQty = scannedQuantities[productCode] || { shipped: 0, returned: 0 };
         
         if (invoiceShipped !== scannedQty.shipped || invoiceReturned !== scannedQty.returned) {
-          console.log(`Quantity mismatch for ${productCode}: Invoice(${invoiceShipped}/${invoiceReturned}) vs Scanned(${scannedQty.shipped}/${scannedQty.returned})`);
+          logger.log(`Quantity mismatch for ${productCode}: Invoice(${invoiceShipped}/${invoiceReturned}) vs Scanned(${scannedQty.shipped}/${scannedQty.returned})`);
           allQuantitiesMatch = false;
           break;
         }
@@ -4016,7 +4017,7 @@ export default function ImportApprovals() {
 
       return allQuantitiesMatch;
     } catch (error) {
-      console.error('Error checking quantity match:', error);
+      logger.error('Error checking quantity match:', error);
       return false;
     }
   }
@@ -4027,7 +4028,7 @@ export default function ImportApprovals() {
       const quantitiesMatch = await checkQuantityMatch(record);
       
       if (quantitiesMatch) {
-        console.log(`✅ Auto-approving existing record ${record.id} - quantities match`);
+        logger.log(`✅ Auto-approving existing record ${record.id} - quantities match`);
         
         // Update record status to approved
         const tableName = record.is_scanned_only ? 'imported_invoices' : 'imported_invoices';
@@ -4043,7 +4044,7 @@ export default function ImportApprovals() {
           .eq('id', record.id);
         
         if (error) {
-          console.error('Error auto-approving record:', error);
+          logger.error('Error auto-approving record:', error);
           return false;
         }
         
@@ -4052,11 +4053,11 @@ export default function ImportApprovals() {
         
         return true;
       } else {
-        console.log(`❌ Not auto-approving existing record ${record.id} - quantities don't match`);
+        logger.log(`❌ Not auto-approving existing record ${record.id} - quantities don't match`);
         return false;
       }
     } catch (error) {
-      console.error('Error in auto-approval:', error);
+      logger.error('Error in auto-approval:', error);
       return false;
     }
   }
@@ -4081,7 +4082,7 @@ export default function ImportApprovals() {
             .limit(1);
           
           if (bottleError) {
-            console.error('Error finding bottle:', bottleError);
+            logger.error('Error finding bottle:', bottleError);
             continue;
           }
           
@@ -4102,20 +4103,20 @@ export default function ImportApprovals() {
               .eq('id', bottle.id);
             
             if (updateError) {
-              console.error('Error updating bottle:', updateError);
+              logger.error('Error updating bottle:', updateError);
             } else {
-              console.log(`✅ Assigned bottle ${bottle.barcode_number} to customer ${customerName}`);
+              logger.log(`✅ Assigned bottle ${bottle.barcode_number} to customer ${customerName}`);
               
               // Create rental record if it doesn't exist
               await createRentalRecord(bottle, customerName, row);
             }
           } else {
-            console.warn(`⚠️ Bottle not found for barcode: ${row.bottle_barcode || row.barcode || row.product_code}`);
+            logger.warn(`⚠️ Bottle not found for barcode: ${row.bottle_barcode || row.barcode || row.product_code}`);
           }
         }
       }
     } catch (error) {
-      console.error('Error assigning bottles to customer:', error);
+      logger.error('Error assigning bottles to customer:', error);
     }
   }
 
@@ -4131,7 +4132,7 @@ export default function ImportApprovals() {
         .limit(1);
 
       if (existingRental && existingRental.length > 0) {
-        console.log(`Rental record already exists for bottle ${bottle.barcode_number}`);
+        logger.log(`Rental record already exists for bottle ${bottle.barcode_number}`);
         return;
       }
 
@@ -4156,12 +4157,12 @@ export default function ImportApprovals() {
         });
 
       if (rentalError) {
-        console.error('Error creating rental record:', rentalError);
+        logger.error('Error creating rental record:', rentalError);
       } else {
-        console.log(`✅ Created rental record for bottle ${bottle.barcode_number}`);
+        logger.log(`✅ Created rental record for bottle ${bottle.barcode_number}`);
       }
     } catch (error) {
-      console.error('Error creating rental record:', error);
+      logger.error('Error creating rental record:', error);
     }
   }
 
@@ -4177,7 +4178,7 @@ export default function ImportApprovals() {
     for (const record of records) {
       // Check if this is a scanned-only record that shouldn't be processed
       if (typeof record.id === 'string' && record.id.startsWith('scanned_')) {
-        console.log('Skipping scanned-only record:', record.id);
+        logger.log('Skipping scanned-only record:', record.id);
         continue;
       }
       
@@ -4191,7 +4192,7 @@ export default function ImportApprovals() {
       }
       
       if (isNaN(recordId)) {
-        console.error('Cannot convert ID to number:', record.id);
+        logger.error('Cannot convert ID to number:', record.id);
         throw new Error(`Invalid ID format: ${record.id}`);
       }
       
@@ -4218,7 +4219,7 @@ export default function ImportApprovals() {
 
   // Bulk reject records
   async function handleBulkReject(records) {
-    console.log('Starting bulk reject for records:', records);
+    logger.log('Starting bulk reject for records:', records);
     
     // Get current user ID
     const { data: { user: currentUser } } = await supabase.auth.getUser();
@@ -4226,22 +4227,22 @@ export default function ImportApprovals() {
       throw new Error('User not authenticated');
     }
     
-    console.log('Current user ID:', currentUser.id);
+    logger.log('Current user ID:', currentUser.id);
 
     // Update each record individually to avoid upsert issues
     for (const record of records) {
-      console.log('Processing record:', record);
-      console.log('Record ID:', record.id, 'Type:', typeof record.id);
+      logger.log('Processing record:', record);
+      logger.log('Record ID:', record.id, 'Type:', typeof record.id);
       
       // Check if this is a scanned-only record that needs special handling
       if (typeof record.id === 'string' && record.id.startsWith('scanned_')) {
-        console.log('Processing scanned-only record:', record.id);
+        logger.log('Processing scanned-only record:', record.id);
         
         // Extract order number from scanned_ prefix
         const orderNumber = record.id.replace('scanned_', '');
         
         // Mark all scans for this order as rejected
-        console.log('Attempting to reject scans for order:', orderNumber);
+        logger.log('Attempting to reject scans for order:', orderNumber);
         const { data: updateData, error: scanError } = await supabase
           .from('scans')
           .update({
@@ -4253,10 +4254,10 @@ export default function ImportApprovals() {
           .select();
         
         if (scanError) {
-          console.error('Error rejecting scans for order:', orderNumber, scanError);
+          logger.error('Error rejecting scans for order:', orderNumber, scanError);
           // Continue with other records even if this one fails
         } else {
-          console.log('Successfully marked scans as rejected for order:', orderNumber, 'Updated records:', updateData);
+          logger.log('Successfully marked scans as rejected for order:', orderNumber, 'Updated records:', updateData);
         }
         continue;
       }
@@ -4270,10 +4271,10 @@ export default function ImportApprovals() {
         recordId = record.id;
       }
       
-      console.log('Converted ID:', recordId, 'Type:', typeof recordId);
+      logger.log('Converted ID:', recordId, 'Type:', typeof recordId);
       
       if (isNaN(recordId)) {
-        console.error('Cannot convert ID to number:', record.id);
+        logger.error('Cannot convert ID to number:', record.id);
         throw new Error(`Invalid ID format: ${record.id}`);
       }
       
@@ -4285,7 +4286,7 @@ export default function ImportApprovals() {
         .single();
       
       if (checkError) {
-        console.error('Record not found in imported_invoices:', recordId, checkError);
+        logger.error('Record not found in imported_invoices:', recordId, checkError);
         
         // Check if it's in the scans table instead
         const { data: scanRecord, error: scanError } = await supabase
@@ -4295,10 +4296,10 @@ export default function ImportApprovals() {
           .single();
         
         if (scanError) {
-          console.error('Record not found in scans table either:', recordId, scanError);
+          logger.error('Record not found in scans table either:', recordId, scanError);
           
           // Check other possible tables
-          console.log('Checking other tables for record:', recordId);
+          logger.log('Checking other tables for record:', recordId);
           
           // Check bottle_scans table
           const { data: bottleScanRecord, error: bottleScanError } = await supabase
@@ -4308,8 +4309,8 @@ export default function ImportApprovals() {
             .single();
           
           if (!bottleScanError) {
-            console.log('Found record in bottle_scans table:', bottleScanRecord);
-            console.log('Skipping bottle_scan record:', recordId);
+            logger.log('Found record in bottle_scans table:', bottleScanRecord);
+            logger.log('Skipping bottle_scan record:', recordId);
             continue;
           }
           
@@ -4321,8 +4322,8 @@ export default function ImportApprovals() {
             .single();
           
           if (!salesOrderError) {
-            console.log('Found record in sales_orders table:', salesOrderRecord);
-            console.log('Skipping sales_order record:', recordId);
+            logger.log('Found record in sales_orders table:', salesOrderRecord);
+            logger.log('Skipping sales_order record:', recordId);
             continue;
           }
           
@@ -4334,29 +4335,29 @@ export default function ImportApprovals() {
             .single();
           
           if (!receiptError) {
-            console.log('Found record in imported_sales_receipts table:', receiptRecord);
-            console.log('Skipping sales_receipt record:', recordId);
+            logger.log('Found record in imported_sales_receipts table:', receiptRecord);
+            logger.log('Skipping sales_receipt record:', recordId);
             continue;
           }
           
-          console.error('Record not found in any table:', recordId);
+          logger.error('Record not found in any table:', recordId);
           
           // Check if this might be a "scanned only" record that shouldn't be rejected
           if (record.displayId && record.displayId.startsWith('scanned_')) {
-            console.log('This appears to be a scanned-only record, skipping rejection:', recordId);
+            logger.log('This appears to be a scanned-only record, skipping rejection:', recordId);
             continue;
           }
           
           throw new Error(`Record with ID ${recordId} not found in any table`);
         }
         
-        console.log('Found record in scans table:', scanRecord);
+        logger.log('Found record in scans table:', scanRecord);
         // Skip this record as it's not an imported invoice
-        console.log('Skipping scan record:', recordId);
+        logger.log('Skipping scan record:', recordId);
         continue;
       }
       
-      console.log('Found existing record in imported_invoices:', existingRecord);
+      logger.log('Found existing record in imported_invoices:', existingRecord);
       
       const { error } = await supabase
         .from('imported_invoices')
@@ -4368,17 +4369,17 @@ export default function ImportApprovals() {
         .eq('id', recordId);
 
       if (error) {
-        console.error('Error updating record:', recordId, error);
-        console.error('Record details:', record);
+        logger.error('Error updating record:', recordId, error);
+        logger.error('Record details:', record);
         throw error;
       }
-      console.log('Successfully updated record:', recordId);
+      logger.log('Successfully updated record:', recordId);
     }
   }
 
   // Individual reject record
   async function handleIndividualReject(record) {
-    console.log('Starting individual reject for record:', record);
+    logger.log('Starting individual reject for record:', record);
     
     // Get current user ID
     const { data: { user: currentUser } } = await supabase.auth.getUser();
@@ -4386,11 +4387,11 @@ export default function ImportApprovals() {
       throw new Error('User not authenticated');
     }
     
-    console.log('Current user ID:', currentUser.id);
+    logger.log('Current user ID:', currentUser.id);
 
     // Check if this is a scanned-only record
     if (typeof record.id === 'string' && record.id.startsWith('scanned_')) {
-      console.log('Cannot reject scanned-only record:', record.id);
+      logger.log('Cannot reject scanned-only record:', record.id);
       setSnackbar('Scanned-only records cannot be rejected individually. Use bulk reject instead.');
       return;
     }
@@ -4404,10 +4405,10 @@ export default function ImportApprovals() {
       recordId = record.id;
     }
     
-    console.log('Converted ID:', recordId, 'Type:', typeof recordId);
+    logger.log('Converted ID:', recordId, 'Type:', typeof recordId);
     
     if (isNaN(recordId)) {
-      console.error('Cannot convert ID to number:', record.id);
+      logger.error('Cannot convert ID to number:', record.id);
       throw new Error(`Invalid ID format: ${record.id}`);
     }
     
@@ -4420,7 +4421,7 @@ export default function ImportApprovals() {
         .single();
       
       if (checkError) {
-        console.error('Record not found in imported_invoices:', recordId, checkError);
+        logger.error('Record not found in imported_invoices:', recordId, checkError);
         setSnackbar('Record not found in database');
         return;
       }
@@ -4436,18 +4437,18 @@ export default function ImportApprovals() {
         .eq('id', recordId);
 
       if (error) {
-        console.error('Error updating record:', recordId, error);
+        logger.error('Error updating record:', recordId, error);
         throw error;
       }
       
-      console.log('Successfully rejected record:', recordId);
+      logger.log('Successfully rejected record:', recordId);
       setSnackbar('Record rejected successfully');
       
       // Refresh the data
       await fetchData();
       
     } catch (error) {
-      console.error('Error rejecting record:', error);
+      logger.error('Error rejecting record:', error);
       setSnackbar('Failed to reject record: ' + error.message);
     }
   }
@@ -4464,7 +4465,7 @@ export default function ImportApprovals() {
     for (const record of records) {
       // Check if this is a scanned-only record that shouldn't be processed
       if (typeof record.id === 'string' && record.id.startsWith('scanned_')) {
-        console.log('Skipping scanned-only record:', record.id);
+        logger.log('Skipping scanned-only record:', record.id);
         continue;
       }
       
@@ -4478,7 +4479,7 @@ export default function ImportApprovals() {
       }
       
       if (isNaN(recordId)) {
-        console.error('Cannot convert ID to number:', record.id);
+        logger.error('Cannot convert ID to number:', record.id);
         throw new Error(`Invalid ID format: ${record.id}`);
       }
       
@@ -4586,7 +4587,7 @@ export default function ImportApprovals() {
       if (error) throw error;
       return customers || [];
     } catch (error) {
-      console.error('Error searching customers:', error);
+      logger.error('Error searching customers:', error);
       return [];
     } finally {
       setCustomerSearchLoading(false);
@@ -4594,7 +4595,7 @@ export default function ImportApprovals() {
   }
 
   async function handleSidebarAction(option) {
-    console.log('Sidebar action:', option);
+    logger.log('Sidebar action:', option);
     // Implement sidebar action logic
   }
 
@@ -4609,13 +4610,13 @@ export default function ImportApprovals() {
   // Process invoice data for verification
   async function processInvoice(invoiceData) {
     // Implementation for processing invoice data
-    console.log('Processing invoice:', invoiceData);
+    logger.log('Processing invoice:', invoiceData);
   }
 
   // Process receipt data for verification
   async function processReceipt(receiptData) {
     // Implementation for processing receipt data
-    console.log('Processing receipt:', receiptData);
+    logger.log('Processing receipt:', receiptData);
   }
 
   function getOrderNumber(data) {
@@ -4661,7 +4662,7 @@ export default function ImportApprovals() {
     const data = parseDataField(importRecord.data);
     const rows = data.rows || [];
     
-    console.log('🔍 splitImportIntoIndividualRecords:', {
+    logger.log('🔍 splitImportIntoIndividualRecords:', {
       importId: importRecord.id,
       filename: importRecord.filename,
       rowsCount: rows.length,
@@ -4688,7 +4689,7 @@ export default function ImportApprovals() {
       groupedByOrder[orderNumber].push(row);
     });
     
-    console.log('🔍 Grouped by order:', Object.keys(groupedByOrder).map(orderNum => ({
+    logger.log('🔍 Grouped by order:', Object.keys(groupedByOrder).map(orderNum => ({
       orderNumber: orderNum,
       rowCount: groupedByOrder[orderNum].length
     })));
@@ -4699,7 +4700,7 @@ export default function ImportApprovals() {
       const orderRows = groupedByOrder[orderNumber];
       const firstRow = orderRows[0];
       
-      console.log('🔍 Creating grouped record:', {
+      logger.log('🔍 Creating grouped record:', {
         index,
         orderNumber,
         customerName: firstRow.customer_name,
@@ -4725,7 +4726,7 @@ export default function ImportApprovals() {
       });
     });
     
-    console.log('📊 Created consolidated records:', individualRecords.length);
+    logger.log('📊 Created consolidated records:', individualRecords.length);
     return individualRecords;
   }
 
@@ -4734,7 +4735,7 @@ export default function ImportApprovals() {
     // type: 'out' (delivered/shipped) or 'in' (returned)
     if (!orderNum || !productCode) return 0;
     
-    console.log('🔍 getScannedQty:', { orderNum, productCode, type, totalScans: allScannedRows.length });
+    logger.log('🔍 getScannedQty:', { orderNum, productCode, type, totalScans: allScannedRows.length });
     
     const matches = allScannedRows.filter(row => {
       const orderMatch = row.order_number === orderNum || row.invoice_number === orderNum;
@@ -4761,7 +4762,7 @@ export default function ImportApprovals() {
       ));
       
       if (orderMatch && productMatch && typeMatch) {
-        console.log('📦 Scan match found:', { 
+        logger.log('📦 Scan match found:', { 
           order: row.order_number, 
           product: row.product_code || row.bottle_barcode || row.barcode_number, 
           mode: row.mode, 
@@ -4773,7 +4774,7 @@ export default function ImportApprovals() {
       return orderMatch && productMatch && typeMatch;
     });
     
-    console.log(`📊 Found ${matches.length} scans for ${orderNum}/${productCode}/${type}`);
+    logger.log(`📊 Found ${matches.length} scans for ${orderNum}/${productCode}/${type}`);
     return matches.length;
   }
 } 

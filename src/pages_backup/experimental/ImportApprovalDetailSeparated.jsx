@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/client';
@@ -20,7 +21,7 @@ function parseDataField(data) {
       const parsed = JSON.parse(data);
       return parsed;
     } catch {
-      console.log('JSON parse error for data:', data);
+      logger.log('JSON parse error for data:', data);
       return { _raw: data, _error: 'Malformed JSON' };
     }
   }
@@ -137,7 +138,7 @@ export default function ImportApprovalDetailSeparated({ invoiceNumber: propInvoi
       if (data) {
         const splitRecords = splitImportIntoIndividualRecords(data);
         setIndividualRecords(splitRecords);
-        console.log(`Split import ${data.id} into ${splitRecords.length} individual records:`, splitRecords);
+        logger.log(`Split import ${data.id} into ${splitRecords.length} individual records:`, splitRecords);
         
         // Filter to specific customer/order if parameters are provided
         if (filterCustomer && filterOrder) {
@@ -149,9 +150,9 @@ export default function ImportApprovalDetailSeparated({ invoiceNumber: propInvoi
           
           if (specificRecord) {
             setFilteredRecords([specificRecord]);
-            console.log(`Filtered to specific record for customer: ${filterCustomer}, order: ${filterOrder}`);
+            logger.log(`Filtered to specific record for customer: ${filterCustomer}, order: ${filterOrder}`);
           } else {
-            console.warn(`No record found for customer: ${filterCustomer}, order: ${filterOrder}`);
+            logger.warn(`No record found for customer: ${filterCustomer}, order: ${filterOrder}`);
             setFilteredRecords(splitRecords);
           }
         } else {
@@ -179,7 +180,7 @@ export default function ImportApprovalDetailSeparated({ invoiceNumber: propInvoi
         });
         setAssetInfoMap(assetMap);
       } catch (error) {
-        console.error('Error fetching asset info:', error);
+        logger.error('Error fetching asset info:', error);
       }
     }
     fetchAssetInfo();

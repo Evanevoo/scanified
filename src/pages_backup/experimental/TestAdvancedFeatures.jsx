@@ -1,7 +1,8 @@
+import logger from '../../utils/logger';
 import React from 'react';
 
 const TestAdvancedFeatures = () => {
-  console.log('TestAdvancedFeatures component is rendering');
+  logger.log('TestAdvancedFeatures component is rendering');
   
   return (
     <div style={{ padding: '20px', backgroundColor: '#f0f0f0', minHeight: '100vh' }}>

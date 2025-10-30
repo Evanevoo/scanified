@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 // Backup Manager Utility
 // Easy-to-use functions for creating backups and cleaning up old ones
 
@@ -9,17 +10,17 @@ import { createEmergencyBackup, clearOldBackups, createBackupWithCleanup } from 
  */
 export const createBackupAndCleanup = async () => {
   try {
-    console.log('🚀 Starting backup and cleanup process...');
+    logger.log('🚀 Starting backup and cleanup process...');
     
     const result = await createBackupWithCleanup();
     
-    console.log('✅ Backup and cleanup completed successfully!');
-    console.log(`📦 New backup ID: ${result.summary.newBackupId}`);
-    console.log(`🗑️ Old backups cleared: ${result.summary.oldBackupsCleared}`);
+    logger.log('✅ Backup and cleanup completed successfully!');
+    logger.log(`📦 New backup ID: ${result.summary.newBackupId}`);
+    logger.log(`🗑️ Old backups cleared: ${result.summary.oldBackupsCleared}`);
     
     return result;
   } catch (error) {
-    console.error('❌ Backup and cleanup failed:', error);
+    logger.error('❌ Backup and cleanup failed:', error);
     throw error;
   }
 };
@@ -30,12 +31,12 @@ export const createBackupAndCleanup = async () => {
  */
 export const createNewBackup = async () => {
   try {
-    console.log('📦 Creating new backup...');
+    logger.log('📦 Creating new backup...');
     const backup = await createEmergencyBackup();
-    console.log(`✅ Backup created successfully: ${backup.id}`);
+    logger.log(`✅ Backup created successfully: ${backup.id}`);
     return backup;
   } catch (error) {
-    console.error('❌ Backup creation failed:', error);
+    logger.error('❌ Backup creation failed:', error);
     throw error;
   }
 };
@@ -47,18 +48,18 @@ export const createNewBackup = async () => {
  */
 export const clearOldBackupsOnly = async (cutoffDate = new Date('2024-07-01')) => {
   try {
-    console.log(`🧹 Clearing backups from before ${cutoffDate.toISOString()}...`);
+    logger.log(`🧹 Clearing backups from before ${cutoffDate.toISOString()}...`);
     const result = await clearOldBackups(cutoffDate);
     
     if (result.success) {
-      console.log(`✅ Cleanup completed: ${result.clearedCount} old backups removed`);
+      logger.log(`✅ Cleanup completed: ${result.clearedCount} old backups removed`);
     } else {
-      console.warn(`⚠️ Cleanup had issues: ${result.errors?.join(', ')}`);
+      logger.warn(`⚠️ Cleanup had issues: ${result.errors?.join(', ')}`);
     }
     
     return result;
   } catch (error) {
-    console.error('❌ Cleanup failed:', error);
+    logger.error('❌ Cleanup failed:', error);
     throw error;
   }
 };
@@ -71,10 +72,10 @@ export const listAllBackups = async () => {
   try {
     const { disasterRecovery } = await import('./disasterRecovery.js');
     const backups = await disasterRecovery.listAvailableBackups();
-    console.log(`📋 Found ${backups.length} available backups`);
+    logger.log(`📋 Found ${backups.length} available backups`);
     return backups;
   } catch (error) {
-    console.error('❌ Failed to list backups:', error);
+    logger.error('❌ Failed to list backups:', error);
     throw error;
   }
 };
@@ -100,7 +101,7 @@ export const getBackupStats = async () => {
     
     return stats;
   } catch (error) {
-    console.error('❌ Failed to get backup stats:', error);
+    logger.error('❌ Failed to get backup stats:', error);
     throw error;
   }
 };

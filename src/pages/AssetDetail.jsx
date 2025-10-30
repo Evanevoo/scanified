@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -67,7 +68,7 @@ export default function AssetDetail() {
       setAsset(data);
       setEditData(data);
     } catch (error) {
-      console.error('Error fetching asset:', error);
+      logger.error('Error fetching asset:', error);
       setError('Failed to load asset details');
     } finally {
       setLoading(false);
@@ -84,7 +85,7 @@ export default function AssetDetail() {
       if (error) throw error;
       setLocations(data || []);
     } catch (error) {
-      console.error('Error fetching locations:', error);
+      logger.error('Error fetching locations:', error);
       // Fallback to hardcoded locations if database fails
       setLocations([
         { id: 'saskatoon', name: 'Saskatoon', province: 'Saskatchewan' },
@@ -109,7 +110,7 @@ export default function AssetDetail() {
       setEditDialog(false);
       setSuccess('Asset updated successfully');
     } catch (error) {
-      console.error('Error updating asset:', error);
+      logger.error('Error updating asset:', error);
       setError('Failed to update asset');
     } finally {
       setSaving(false);
@@ -129,7 +130,7 @@ export default function AssetDetail() {
 
       navigate('/inventory-management');
     } catch (error) {
-      console.error('Error deleting asset:', error);
+      logger.error('Error deleting asset:', error);
       setError('Failed to delete asset');
     }
   };

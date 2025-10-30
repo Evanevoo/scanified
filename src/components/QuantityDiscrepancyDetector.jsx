@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -113,7 +114,7 @@ export default function QuantityDiscrepancyDetector({ orderNumber, customerId, o
                 }
               }
             } catch (parseError) {
-              console.warn('Failed to parse data for invoice:', invoice.id);
+              logger.warn('Failed to parse data for invoice:', invoice.id);
             }
           }
         }
@@ -180,7 +181,7 @@ export default function QuantityDiscrepancyDetector({ orderNumber, customerId, o
                   }
                 }
               } catch (parseError) {
-                console.warn('Failed to parse data for invoice:', invoice.id);
+                logger.warn('Failed to parse data for invoice:', invoice.id);
               }
             }
           }
@@ -237,7 +238,7 @@ export default function QuantityDiscrepancyDetector({ orderNumber, customerId, o
         .eq('order_number', orderNumber)
         .eq('organization_id', organizationId);
       
-      console.log('🔍 QuantityDiscrepancyDetector - Scanned data:', {
+      logger.log('🔍 QuantityDiscrepancyDetector - Scanned data:', {
         orderNumber,
         organizationId,
         scannedData: scannedData?.length || 0,
@@ -245,7 +246,7 @@ export default function QuantityDiscrepancyDetector({ orderNumber, customerId, o
       });
       
       if (scannedError) {
-        console.error('❌ Error fetching scanned data:', scannedError);
+        logger.error('❌ Error fetching scanned data:', scannedError);
         // Continue without scanned data
       }
       
@@ -269,7 +270,7 @@ export default function QuantityDiscrepancyDetector({ orderNumber, customerId, o
             for (const scan of scannedData) {
               // Check if this scan matches the product code
               const scanProductCode = scan.product_code || scan.bottle_barcode || scan.barcode_number;
-              console.log('🔍 Checking scan:', {
+              logger.log('🔍 Checking scan:', {
                 scanProductCode,
                 productCode,
                 mode: scan.mode,
@@ -281,10 +282,10 @@ export default function QuantityDiscrepancyDetector({ orderNumber, customerId, o
                 // Count based on mode
                 if (scan.mode === 'SHIP' || scan.mode === 'out' || scan.scan_type === 'delivery') {
                   scannedShip++;
-                  console.log('📦 Scanned SHIP count:', scannedShip);
+                  logger.log('📦 Scanned SHIP count:', scannedShip);
                 } else if (scan.mode === 'RETURN' || scan.mode === 'in' || scan.scan_type === 'pickup') {
                   scannedReturn++;
-                  console.log('📦 Scanned RETURN count:', scannedReturn);
+                  logger.log('📦 Scanned RETURN count:', scannedReturn);
                 }
               }
             }

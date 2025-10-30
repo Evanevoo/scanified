@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { useState, useEffect } from 'react';
 import { useAuth } from './useAuth.jsx';
 import { supabase } from '../supabase/client';
@@ -29,12 +30,12 @@ export const useOwnerAccess = (profile) => {
       
       // If not owner, redirect to unauthorized page
       if (!isOwnerUser) {
-        console.warn('Unauthorized access attempt to owner portal');
+        logger.warn('Unauthorized access attempt to owner portal');
         // You could redirect here if needed
         // window.location.href = '/unauthorized';
       }
     } catch (error) {
-      console.error('Error checking owner access:', error);
+      logger.error('Error checking owner access:', error);
       setIsOwner(false);
     } finally {
       setLoading(false);

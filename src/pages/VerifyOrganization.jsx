@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
@@ -44,7 +45,7 @@ export default function VerifyOrganization() {
         if (expirationTime && Date.now() < parseInt(expirationTime)) {
           password = localStorage.getItem('pending_org_password');
           email = localStorage.getItem('pending_org_email');
-          console.log('📦 Using localStorage backup data');
+          logger.log('📦 Using localStorage backup data');
         } else if (expirationTime) {
           // Expired, clean up
           localStorage.removeItem('pending_org_password');
@@ -61,7 +62,7 @@ export default function VerifyOrganization() {
         return;
       }
 
-      console.log('🔍 Verification data found:', { 
+      logger.log('🔍 Verification data found:', { 
         hasToken: !!token, 
         hasPassword: !!password, 
         hasEmail: !!email,
@@ -79,13 +80,13 @@ export default function VerifyOrganization() {
 
         if (signInData.user) {
           user = signInData.user;
-          console.log('User already exists, signed in successfully');
+          logger.log('User already exists, signed in successfully');
         } else {
           throw new Error('Sign in failed, will try sign up');
         }
       } catch (signInErr) {
         // If sign in fails, try to sign up
-        console.log('Sign in failed, attempting sign up:', signInErr.message);
+        logger.log('Sign in failed, attempting sign up:', signInErr.message);
         
         const { data: signupData, error: signupError } = await supabase.auth.signUp({
           email: email,
@@ -108,7 +109,7 @@ export default function VerifyOrganization() {
         }
 
         user = signupData.user;
-        console.log('New user created successfully');
+        logger.log('New user created successfully');
       }
 
       // Step 2: Create organization using verified token
@@ -125,7 +126,7 @@ export default function VerifyOrganization() {
       }
 
       // Step 3: User is already signed in from Step 1, no need to sign in again
-      console.log('User is already authenticated, proceeding to dashboard');
+      logger.log('User is already authenticated, proceeding to dashboard');
 
       // Clean up both session and local storage
       sessionStorage.removeItem('pending_org_password');
@@ -146,7 +147,7 @@ export default function VerifyOrganization() {
       }, 2000);
 
     } catch (err) {
-      console.error('Verification error:', err);
+      logger.error('Verification error:', err);
       setStatus('error');
       
       if (err.message.includes('expired')) {

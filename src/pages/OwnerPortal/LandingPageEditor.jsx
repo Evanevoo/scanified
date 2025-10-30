@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box, Typography, Grid, Card, CardContent, Button, TextField, 
@@ -296,7 +297,7 @@ export default React.memo(function LandingPageEditor() {
   ));
 
   // Debug: Let's see what's causing the re-renders
-  console.log('LandingPageEditor render', { activeTab, loading });
+  logger.log('LandingPageEditor render', { activeTab, loading });
 
   // Simple native HTML input that works (like the debug input)
   const NativeInput = React.memo(({ 

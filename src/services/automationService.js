@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 /**
  * Automation Service
  * Handles automation rules, triggers, and workflow execution
@@ -30,9 +31,9 @@ class AutomationService {
       this.setupEventListeners();
       
       this.isInitialized = true;
-      console.log('Automation service initialized');
+      logger.log('Automation service initialized');
     } catch (error) {
-      console.error('Failed to initialize automation service:', error);
+      logger.error('Failed to initialize automation service:', error);
       throw error;
     }
   }
@@ -394,14 +395,14 @@ class AutomationService {
 
       const trigger = this.getTrigger(triggerId);
       if (!trigger) {
-        console.warn(`Unknown trigger: ${triggerId}`);
+        logger.warn(`Unknown trigger: ${triggerId}`);
         return;
       }
 
       // Get organization ID from the data
       const organizationId = newData.organization_id;
       if (!organizationId) {
-        console.warn(`No organization ID found for trigger: ${triggerId}`);
+        logger.warn(`No organization ID found for trigger: ${triggerId}`);
         return;
       }
 
@@ -414,7 +415,7 @@ class AutomationService {
         .eq('is_active', true);
 
       if (error) {
-        console.error('Error fetching automation rules:', error);
+        logger.error('Error fetching automation rules:', error);
         return;
       }
 
@@ -432,7 +433,7 @@ class AutomationService {
         });
       }
     } catch (error) {
-      console.error(`Error handling trigger ${triggerId}:`, error);
+      logger.error(`Error handling trigger ${triggerId}:`, error);
     }
   }
 
@@ -445,7 +446,7 @@ class AutomationService {
       // Evaluate conditions
       const conditionsMet = await this.evaluateConditions(rule.conditions, context);
       if (!conditionsMet) {
-        console.log(`Rule ${rule.name}: Conditions not met`);
+        logger.log(`Rule ${rule.name}: Conditions not met`);
         return;
       }
 
@@ -460,7 +461,7 @@ class AutomationService {
             result
           });
         } catch (actionError) {
-          console.error(`Action ${actionConfig.type} failed:`, actionError);
+          logger.error(`Action ${actionConfig.type} failed:`, actionError);
           results.push({
             action: actionConfig.type,
             success: false,
@@ -491,9 +492,9 @@ class AutomationService {
           executed_at: new Date().toISOString()
         });
 
-      console.log(`Rule ${rule.name} executed successfully`);
+      logger.log(`Rule ${rule.name} executed successfully`);
     } catch (error) {
-      console.error(`Error executing rule ${rule.name}:`, error);
+      logger.error(`Error executing rule ${rule.name}:`, error);
       
       // Update error count
       await supabase
@@ -580,7 +581,7 @@ class AutomationService {
       case 'not_in':
         return Array.isArray(expectedValue) && !expectedValue.includes(contextValue);
       default:
-        console.warn(`Unknown operator: ${operator}`);
+        logger.warn(`Unknown operator: ${operator}`);
         return false;
     }
   }
@@ -647,12 +648,12 @@ class AutomationService {
       const finalBody = this.replaceVariables(templateData.body, context);
       
       // Send email using your email service
-      console.log('Sending email:', { to, subject: finalSubject, body: finalBody });
+      logger.log('Sending email:', { to, subject: finalSubject, body: finalBody });
       return { success: true, messageId: 'email-' + Date.now() };
     }
     
     // Send email directly
-    console.log('Sending email:', { to, subject: processedSubject, body: processedBody });
+    logger.log('Sending email:', { to, subject: processedSubject, body: processedBody });
     return { success: true, messageId: 'email-' + Date.now() };
   }
 
@@ -677,12 +678,12 @@ class AutomationService {
       const finalMessage = this.replaceVariables(templateData.body, context);
       
       // Send SMS using your SMS service
-      console.log('Sending SMS:', { phoneNumber, message: finalMessage });
+      logger.log('Sending SMS:', { phoneNumber, message: finalMessage });
       return { success: true, messageId: 'sms-' + Date.now() };
     }
     
     // Send SMS directly
-    console.log('Sending SMS:', { phoneNumber, message: processedMessage });
+    logger.log('Sending SMS:', { phoneNumber, message: processedMessage });
     return { success: true, messageId: 'sms-' + Date.now() };
   }
 
@@ -768,7 +769,7 @@ class AutomationService {
     const processedBody = this.replaceVariables(body, context);
     
     // Send push notification
-    console.log('Sending notification:', { userId, title: processedTitle, body: processedBody, data });
+    logger.log('Sending notification:', { userId, title: processedTitle, body: processedBody, data });
     return { success: true, notificationId: 'notification-' + Date.now() };
   }
 

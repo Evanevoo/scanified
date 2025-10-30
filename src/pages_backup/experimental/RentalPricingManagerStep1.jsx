@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, Button, Alert, Card, CardContent } from '@mui/material';
 import { useAuth } from '../hooks/useAuth';
@@ -25,12 +26,12 @@ export default function RentalPricingManagerStep1() {
         .order('min_quantity');
       
       if (tiersError) {
-        console.error('Error loading pricing tiers:', tiersError);
+        logger.error('Error loading pricing tiers:', tiersError);
       }
 
       setPricingTiers(tiers || []);
     } catch (error) {
-      console.error('Error loading pricing data:', error);
+      logger.error('Error loading pricing data:', error);
     } finally {
       setLoading(false);
     }

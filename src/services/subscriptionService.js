@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 // Cache for subscription plans to avoid repeated database calls
@@ -41,7 +42,7 @@ const fetchSubscriptionPlans = async () => {
     
     return plansObject;
   } catch (error) {
-    console.error('Error fetching subscription plans:', error);
+    logger.error('Error fetching subscription plans:', error);
     // Return fallback plans if database fetch fails
     return {
       basic: {

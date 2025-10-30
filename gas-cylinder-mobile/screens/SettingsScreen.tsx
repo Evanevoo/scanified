@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
@@ -43,7 +44,7 @@ export default function SettingsScreen() {
     try {
       await soundService.initialize();
     } catch (error) {
-      console.error('Failed to initialize sound service:', error);
+      logger.error('Failed to initialize sound service:', error);
     }
   };
 
@@ -92,7 +93,7 @@ export default function SettingsScreen() {
               await supabase.auth.signOut();
               await AsyncStorage.clear();
             } catch (error) {
-              console.error('Logout error:', error);
+              logger.error('Logout error:', error);
             } finally {
               setLogoutLoading(false);
             }
@@ -123,7 +124,7 @@ export default function SettingsScreen() {
 
   // Individual toggle handlers to prevent interference
   const handleAutoSyncToggle = useCallback(async (value: boolean) => {
-    console.log('🔄 Auto Sync toggle:', value);
+    logger.log('🔄 Auto Sync toggle:', value);
     updateSetting('autoSync', value);
     
     // Send notification about auto-sync change
@@ -134,7 +135,7 @@ export default function SettingsScreen() {
   }, [updateSetting]);
 
   const handleOfflineModeToggle = useCallback(async (value: boolean) => {
-    console.log('🔄 Offline Mode toggle:', value);
+    logger.log('🔄 Offline Mode toggle:', value);
     updateSetting('offlineMode', value);
     
     // Update offline mode service
@@ -145,7 +146,7 @@ export default function SettingsScreen() {
   }, [updateSetting]);
 
   const handleNotificationsToggle = useCallback(async (value: boolean) => {
-    console.log('🔄 Notifications toggle:', value);
+    logger.log('🔄 Notifications toggle:', value);
     updateSetting('notifications', value);
     
     // Update notification service settings
@@ -162,7 +163,7 @@ export default function SettingsScreen() {
   }, [updateSetting]);
 
   const handleSoundEffectsToggle = useCallback(async (value: boolean) => {
-    console.log('🔄 Sound Effects toggle:', value);
+    logger.log('🔄 Sound Effects toggle:', value);
     updateSetting('soundEnabled', value);
     await soundService.updateSettings({ soundEnabled: value });
     
@@ -173,7 +174,7 @@ export default function SettingsScreen() {
   }, [updateSetting]);
 
   const handleHapticFeedbackToggle = useCallback(async (value: boolean) => {
-    console.log('🔄 Haptic Feedback toggle:', value);
+    logger.log('🔄 Haptic Feedback toggle:', value);
     updateSetting('hapticFeedback', value);
     await soundService.updateSettings({ hapticFeedback: value });
     
@@ -455,7 +456,7 @@ export default function SettingsScreen() {
                           'Your account has been successfully deleted.'
                         );
                       } catch (error) {
-                        console.error('Error deleting account:', error);
+                        logger.error('Error deleting account:', error);
                         Alert.alert(
                           'Error',
                           'Failed to delete account. Please try again or contact support.'

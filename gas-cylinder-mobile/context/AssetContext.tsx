@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../supabase';
 
@@ -108,10 +109,10 @@ export const AssetProvider: React.FC<AssetProviderProps> = ({ children }) => {
         .single();
 
       if (orgError) {
-        console.warn('Error loading asset config, using defaults:', orgError);
+        logger.warn('Error loading asset config, using defaults:', orgError);
         setConfig(defaultConfig);
       } else {
-        console.log('🔧 AssetContext - Organization data:', {
+        logger.log('🔧 AssetContext - Organization data:', {
           app_name: orgData.app_name,
           name: orgData.name,
           primary_color: orgData.primary_color,
@@ -134,7 +135,7 @@ export const AssetProvider: React.FC<AssetProviderProps> = ({ children }) => {
         // Only update if configuration has actually changed
         const configChanged = JSON.stringify(newConfig) !== JSON.stringify(config);
         if (configChanged) {
-          console.log('🔧 Asset configuration updated:', {
+          logger.log('🔧 Asset configuration updated:', {
             appName: newConfig.appName,
             orgAppName: orgData.app_name,
             orgName: orgData.name,
@@ -145,7 +146,7 @@ export const AssetProvider: React.FC<AssetProviderProps> = ({ children }) => {
         }
       }
     } catch (err) {
-      console.error('Error loading asset config:', err);
+      logger.error('Error loading asset config:', err);
       setError(err instanceof Error ? err.message : 'Failed to load asset configuration');
       setConfig(defaultConfig);
     } finally {
@@ -181,7 +182,7 @@ export const AssetProvider: React.FC<AssetProviderProps> = ({ children }) => {
               filter: `id=eq.${profile.organization_id}`
             },
             (payload) => {
-              console.log('Organization configuration changed:', payload);
+              logger.log('Organization configuration changed:', payload);
               // Refresh configuration when organization is updated
               loadAssetConfig();
             }
@@ -199,7 +200,7 @@ export const AssetProvider: React.FC<AssetProviderProps> = ({ children }) => {
           clearInterval(pollInterval);
         };
       } catch (error) {
-        console.error('Error setting up subscription:', error);
+        logger.error('Error setting up subscription:', error);
       }
     };
 

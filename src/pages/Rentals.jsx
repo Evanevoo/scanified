@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
@@ -103,7 +104,7 @@ function RentalsImproved() {
         return;
       }
 
-      console.log('Fetching rentals for organization:', organization.id);
+      logger.log('Fetching rentals for organization:', organization.id);
 
       // Simplified approach - get all data separately to debug
       // 1. Get all active rentals (from rentals table)
@@ -113,11 +114,11 @@ function RentalsImproved() {
         .is('rental_end_date', null);
 
       if (rentalsError) {
-        console.error('Rentals query error:', rentalsError);
+        logger.error('Rentals query error:', rentalsError);
         throw rentalsError;
       }
 
-      console.log('All active rentals:', rentalsData?.length || 0);
+      logger.log('All active rentals:', rentalsData?.length || 0);
 
       // 2. Get all assigned bottles for this organization
       const { data: assignedBottles, error: bottlesError } = await supabase
@@ -127,11 +128,11 @@ function RentalsImproved() {
         .not('assigned_customer', 'is', null);
 
       if (bottlesError) {
-        console.error('Bottles query error:', bottlesError);
+        logger.error('Bottles query error:', bottlesError);
         throw bottlesError;
       }
 
-      console.log('Assigned bottles for org:', assignedBottles?.length || 0);
+      logger.log('Assigned bottles for org:', assignedBottles?.length || 0);
 
       // 3. Get all bottles for this organization (to join with rentals)
       const { data: allBottles, error: allBottlesError } = await supabase
@@ -140,7 +141,7 @@ function RentalsImproved() {
         .eq('organization_id', organization.id);
 
       if (allBottlesError) {
-        console.error('All bottles query error:', allBottlesError);
+        logger.error('All bottles query error:', allBottlesError);
         throw allBottlesError;
       }
 
@@ -150,7 +151,7 @@ function RentalsImproved() {
         return map;
       }, {});
 
-      console.log('Total bottles for org:', allBottles?.length || 0);
+      logger.log('Total bottles for org:', allBottles?.length || 0);
 
       // 4. Combine rentals with bottles from this organization
       const allRentalData = [];
@@ -198,7 +199,7 @@ function RentalsImproved() {
         return map;
       }, {});
       
-      console.log('Location tax rates loaded:', locationTaxMap);
+      logger.log('Location tax rates loaded:', locationTaxMap);
       
       for (const bottle of assignedBottles || []) {
         const barcode = bottle.barcode_number || bottle.barcode;
@@ -260,9 +261,9 @@ function RentalsImproved() {
         }
       }
       
-      console.log('Before deduplication:', allRentalData.length, 'After deduplication:', deduplicatedData.length);
+      logger.log('Before deduplication:', allRentalData.length, 'After deduplication:', deduplicatedData.length);
 
-      console.log('Combined rental data:', deduplicatedData.length);
+      logger.log('Combined rental data:', deduplicatedData.length);
 
       // 5. Get customers with their types (with fallback)
       const customerIds = Array.from(new Set(deduplicatedData.map(r => r.customer_id).filter(Boolean)));
@@ -283,7 +284,7 @@ function RentalsImproved() {
             }, {});
           }
         } catch (error) {
-          console.log('Customer_type column not found, using fallback');
+          logger.log('Customer_type column not found, using fallback');
           const { data: customersData } = await supabase
             .from('customers')
             .select('CustomerListID, name, contact_details, phone')
@@ -299,7 +300,7 @@ function RentalsImproved() {
         }
       }
 
-      console.log('Customers found:', Object.keys(customersMap).length);
+      logger.log('Customers found:', Object.keys(customersMap).length);
 
       // 6. Attach customer info to each rental
       const rentalsWithCustomer = deduplicatedData.map(r => ({
@@ -336,7 +337,7 @@ function RentalsImproved() {
         totalRevenue 
       });
 
-      console.log('Final results:', {
+      logger.log('Final results:', {
         unassignedBottles: unassignedBottles,
         bottlesWithVendors: bottlesWithVendors,
         availableAssets: inHouseTotal, // Renamed from inHouseTotal
@@ -347,7 +348,7 @@ function RentalsImproved() {
 
 
     } catch (err) {
-      console.error('Error in fetchRentals:', err);
+      logger.error('Error in fetchRentals:', err);
       setError(err.message);
     }
     setLoading(false);
@@ -368,7 +369,7 @@ function RentalsImproved() {
         customersData = data || [];
       } catch (error) {
         // If there's an error (possibly due to missing customer_type), try basic query
-        console.log('Falling back to basic customer query');
+        logger.log('Falling back to basic customer query');
         const { data, error: fallbackError } = await supabase
           .from('customers')
           .select('CustomerListID, name, contact_details, phone')
@@ -381,7 +382,7 @@ function RentalsImproved() {
       
       setCustomers(customersData);
     } catch (error) {
-      console.error('Error fetching customers:', error);
+      logger.error('Error fetching customers:', error);
     }
   };
 
@@ -395,7 +396,7 @@ function RentalsImproved() {
       if (error) throw error;
       setLocations(data || []);
     } catch (error) {
-      console.error('Error fetching locations:', error);
+      logger.error('Error fetching locations:', error);
       // Fallback to hardcoded locations if database fails
       setLocations([
         { id: 'saskatoon', name: 'Saskatoon', province: 'Saskatchewan' },
@@ -474,7 +475,7 @@ function RentalsImproved() {
       await fetchAssets();
       setEditDialog({ open: false, asset: null });
     } catch (error) {
-      console.error('Error updating asset:', error);
+      logger.error('Error updating asset:', error);
     }
   };
 
@@ -605,7 +606,7 @@ function RentalsImproved() {
         const totalAmount = yearlyRentals.reduce((sum, r) => sum + (r.rental_amount || 0), 0);
         
         // Log yearly rental notification (notification service removed)
-        console.log(`Yearly rental notification for ${customer.name}: ${yearlyRentals.length} bottles, $${totalAmount}`);
+        logger.log(`Yearly rental notification for ${customer.name}: ${yearlyRentals.length} bottles, $${totalAmount}`);
         notificationsCreated++;
       }
 
@@ -617,12 +618,12 @@ function RentalsImproved() {
       }, 0);
 
       // Log yearly invoice summary (notification service removed)
-      console.log(`Yearly invoices ready for ${yearlyCustomers.length} customers, total revenue: $${totalRevenue}`);
+      logger.log(`Yearly invoices ready for ${yearlyCustomers.length} customers, total revenue: $${totalRevenue}`);
 
       alert(`Successfully created ${notificationsCreated + 1} notifications for yearly rental invoices!`);
 
     } catch (error) {
-      console.error('Error generating yearly invoice notifications:', error);
+      logger.error('Error generating yearly invoice notifications:', error);
       alert('Error generating notifications: ' + error.message);
     }
   };
@@ -1080,19 +1081,19 @@ function RentalsImproved() {
                   .eq('customer_id', editDialog.customer.CustomerListID);
 
                 if (error) {
-                  console.error('Error updating rentals:', error);
+                  logger.error('Error updating rentals:', error);
                   alert('Error updating rentals: ' + error.message);
                   return;
                 }
 
-                console.log('Successfully updated rentals for customer:', editDialog.customer?.CustomerListID);
+                logger.log('Successfully updated rentals for customer:', editDialog.customer?.CustomerListID);
                 setEditDialog({ open: false, customer: null, rentals: [] });
                 // Refresh data
                 await fetchRentals();
                 // Show success message
                 alert(`Successfully updated rental settings for ${editDialog.customer?.name}`);
               } catch (error) {
-                console.error('Error updating rentals:', error);
+                logger.error('Error updating rentals:', error);
                 alert('Error updating rentals: ' + error.message);
               }
             }}

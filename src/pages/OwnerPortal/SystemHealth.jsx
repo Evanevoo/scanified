@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Button, Grid, Card, CardContent, CardActions,
@@ -90,7 +91,7 @@ export default function SystemHealth() {
         }
       });
     } catch (error) {
-      console.error('Error loading system health:', error);
+      logger.error('Error loading system health:', error);
     } finally {
       setLoading(false);
     }

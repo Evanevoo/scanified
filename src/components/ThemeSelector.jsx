@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState } from 'react';
 import {
   Box, Paper, Typography, Grid, Card, CardContent, CardActionArea,
@@ -19,7 +20,7 @@ function ThemePreview({ themeName, theme, isSelected, onSelect }) {
   
   // Safety check - if metadata is undefined, provide defaults
   if (!metadata) {
-    console.warn(`Theme metadata not found for: ${themeName}`);
+    logger.warn(`Theme metadata not found for: ${themeName}`);
     return null; // or return a default preview
   }
   

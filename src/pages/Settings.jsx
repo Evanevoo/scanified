@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
@@ -494,7 +495,7 @@ export default function Settings() {
     setProfileLoading(true);
     
     try {
-      console.log('Updating profile with data:', { 
+      logger.log('Updating profile with data:', { 
         id: user.id, 
         full_name: profileData.full_name 
       });
@@ -509,11 +510,11 @@ export default function Settings() {
         .single();
         
       if (error) {
-        console.error('Profile update error:', error);
+        logger.error('Profile update error:', error);
         throw error;
       }
       
-      console.log('Profile updated successfully:', data);
+      logger.log('Profile updated successfully:', data);
       setProfileMsg('Profile updated successfully!');
       setProfileChanged(false);
       
@@ -522,7 +523,7 @@ export default function Settings() {
         await reloadUserData();
       }
     } catch (error) {
-      console.error('Profile update failed:', error);
+      logger.error('Profile update failed:', error);
       setProfileMsg('Error updating profile: ' + error.message);
     } finally {
       setProfileLoading(false);
@@ -591,7 +592,7 @@ export default function Settings() {
       setNewPassword('');
       setConfirmPassword('');
     } catch (error) {
-      console.error('Password update error:', error);
+      logger.error('Password update error:', error);
       setPasswordMsg(error.message || 'Failed to update password. Please try again.');
     } finally {
       setPasswordChangeLoading(false);
@@ -615,7 +616,7 @@ export default function Settings() {
     setSupportLoading(true);
     
     try {
-      console.log('Submitting support ticket:', supportForm);
+      logger.log('Submitting support ticket:', supportForm);
       
       const { data, error } = await supabase
         .from('customer_support')
@@ -633,11 +634,11 @@ export default function Settings() {
         .single();
         
       if (error) {
-        console.error('Support ticket submission error:', error);
+        logger.error('Support ticket submission error:', error);
         throw error;
       }
       
-      console.log('Support ticket submitted successfully:', data);
+      logger.log('Support ticket submitted successfully:', data);
       setSupportMsg('Support ticket submitted successfully! We\'ll get back to you soon.');
       
       // Reset form
@@ -647,7 +648,7 @@ export default function Settings() {
         category: 'general'
       });
     } catch (error) {
-      console.error('Support ticket submission failed:', error);
+      logger.error('Support ticket submission failed:', error);
       setSupportMsg('Error submitting support ticket: ' + error.message);
     } finally {
       setSupportLoading(false);
@@ -671,7 +672,7 @@ export default function Settings() {
         setNotifSnackbar(true);
       }
     } catch (error) {
-      console.error('Error saving security settings:', error);
+      logger.error('Error saving security settings:', error);
     }
   };
 
@@ -704,7 +705,7 @@ export default function Settings() {
         await reloadOrganization();
       }
     } catch (error) {
-      console.error('Error saving asset config:', error);
+      logger.error('Error saving asset config:', error);
       setAssetConfigMsg('Error saving asset configuration: ' + error.message);
     } finally {
       setAssetConfigLoading(false);
@@ -797,7 +798,7 @@ export default function Settings() {
         await reloadOrganization();
       }
     } catch (error) {
-      console.error('Error saving barcode config:', error);
+      logger.error('Error saving barcode config:', error);
       setBarcodeConfigMsg('Error saving barcode configuration: ' + error.message);
     } finally {
       setBarcodeConfigLoading(false);
@@ -847,7 +848,7 @@ export default function Settings() {
         await reloadOrganization();
       }
     } catch (err) {
-      console.error('Logo upload error:', err);
+      logger.error('Logo upload error:', err);
       setLogoMsg('Error uploading logo: ' + err.message);
     } finally {
       setLogoUploading(false);

@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Grid, Card, CardContent, CardActions,
@@ -85,15 +86,15 @@ export default function OwnerCustomers() {
       if (error) throw error;
       setAvailablePlans(plans || []);
     } catch (error) {
-      console.error('Error fetching plans:', error);
+      logger.error('Error fetching plans:', error);
     }
   };
 
   const fetchOrganizations = async () => {
     setLoading(true);
     try {
-      console.log('Fetching organizations...');
-      console.log('Current profile:', profile);
+      logger.log('Fetching organizations...');
+      logger.log('Current profile:', profile);
       
       // Fetch all organizations first (including soft-deleted ones)
       let query = supabase
@@ -119,7 +120,7 @@ export default function OwnerCustomers() {
             .select('email, role')
             .eq('organization_id', org.id);
           
-          console.log(`Organization ${org.name} (${org.id}):`, {
+          logger.log(`Organization ${org.name} (${org.id}):`, {
             profiles: profiles?.length || 0,
             userCount: userCount,
             profilesError: profilesError,
@@ -152,14 +153,14 @@ export default function OwnerCustomers() {
         })
       );
 
-      console.log('Organizations with counts:', orgsWithCounts);
+      logger.log('Organizations with counts:', orgsWithCounts);
       
       // Also try a simple count query to see if we can access the table
       const { count, error: countError } = await supabase
         .from('organizations')
         .select('*', { count: 'exact', head: true });
       
-      console.log('Organizations count:', { count, countError });
+      logger.log('Organizations count:', { count, countError });
 
       setOrganizations(orgsWithCounts || []);
       
@@ -170,11 +171,11 @@ export default function OwnerCustomers() {
       const expired = orgs?.filter(org => !org.deleted_at && org.status === 'expired').length || 0;
       const deleted = orgs?.filter(org => org.deleted_at).length || 0;
       
-      console.log('Calculated stats:', { total, active, trial, expired, deleted });
+      logger.log('Calculated stats:', { total, active, trial, expired, deleted });
       
       setStats({ total, active, trial, expired, deleted });
     } catch (error) {
-      console.error('Error fetching organizations:', error);
+      logger.error('Error fetching organizations:', error);
     } finally {
       setLoading(false);
     }
@@ -331,7 +332,7 @@ export default function OwnerCustomers() {
         .eq('organization_id', orgId);
 
       if (usersError) {
-        console.error('Error fetching users:', usersError);
+        logger.error('Error fetching users:', usersError);
       }
 
       // Get customers
@@ -341,7 +342,7 @@ export default function OwnerCustomers() {
         .eq('organization_id', orgId);
 
       if (customersError) {
-        console.error('Error fetching customers:', customersError);
+        logger.error('Error fetching customers:', customersError);
       }
 
       // Get assets/bottles
@@ -351,7 +352,7 @@ export default function OwnerCustomers() {
         .eq('organization_id', orgId);
 
       if (assetsError) {
-        console.error('Error fetching assets:', assetsError);
+        logger.error('Error fetching assets:', assetsError);
       }
 
       // Get rentals
@@ -361,7 +362,7 @@ export default function OwnerCustomers() {
         .eq('organization_id', orgId);
 
       if (rentalsError) {
-        console.error('Error fetching rentals:', rentalsError);
+        logger.error('Error fetching rentals:', rentalsError);
       }
 
       // Create workbook with multiple sheets
@@ -493,7 +494,7 @@ export default function OwnerCustomers() {
       XLSX.writeFile(wb, `organization-${org.name?.replace(/[^a-zA-Z0-9]/g, '_')}-complete-data-${new Date().toISOString().slice(0,10)}.xlsx`);
       
     } catch (error) {
-      console.error('Error exporting organization to Excel:', error);
+      logger.error('Error exporting organization to Excel:', error);
       alert('Error exporting organization data. Please try again.');
     }
   };
@@ -560,7 +561,7 @@ export default function OwnerCustomers() {
       XLSX.writeFile(wb, `all-organizations-summary-${new Date().toISOString().slice(0,10)}.xlsx`);
       
     } catch (error) {
-      console.error('Error exporting all organizations to Excel:', error);
+      logger.error('Error exporting all organizations to Excel:', error);
       alert('Error exporting organizations data. Please try again.');
     }
   };
@@ -633,7 +634,7 @@ export default function OwnerCustomers() {
       
       alert(`Complete data export for "${org.name}" has been downloaded.`);
     } catch (error) {
-      console.error('Error exporting organization data:', error);
+      logger.error('Error exporting organization data:', error);
       alert('Error exporting organization data: ' + error.message);
     }
   };
@@ -679,7 +680,7 @@ export default function OwnerCustomers() {
       // Refresh the data
       fetchOrganizations();
     } catch (error) {
-      console.error('Error updating organization:', error);
+      logger.error('Error updating organization:', error);
       alert('Failed to update organization: ' + error.message);
     }
   };
@@ -733,7 +734,7 @@ export default function OwnerCustomers() {
       // Refresh the data
       fetchOrganizations();
     } catch (error) {
-      console.error('Error updating subscription:', error);
+      logger.error('Error updating subscription:', error);
       alert('Failed to update subscription: ' + error.message);
     }
   };
@@ -767,7 +768,7 @@ export default function OwnerCustomers() {
       // Refresh the data
       fetchOrganizations();
     } catch (error) {
-      console.error('Error deleting organization:', error);
+      logger.error('Error deleting organization:', error);
       alert('Failed to delete organization: ' + error.message);
     }
   };
@@ -795,7 +796,7 @@ export default function OwnerCustomers() {
       // Refresh the data
       fetchOrganizations();
     } catch (error) {
-      console.error('Error restoring organization:', error);
+      logger.error('Error restoring organization:', error);
       alert('Failed to restore organization: ' + error.message);
     }
   };
@@ -966,7 +967,7 @@ export default function OwnerCustomers() {
             </TableHead>
             <TableBody>
               {filteredOrganizations.map((org) => {
-                console.log('Rendering organization:', org);
+                logger.log('Rendering organization:', org);
                 return (
                 <TableRow 
                   key={org.id} 

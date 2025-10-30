@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 /**
@@ -13,7 +14,7 @@ export class TemporaryCustomerService {
    */
   static async getTempCustomerAccount(organizationId) {
     try {
-      console.log('Getting temp customer account for organization:', organizationId);
+      logger.log('Getting temp customer account for organization:', organizationId);
       
       if (!organizationId) {
         throw new Error('Organization ID is required');
@@ -35,7 +36,7 @@ export class TemporaryCustomerService {
       } catch (columnError) {
         // If customer_type column doesn't exist, search by name only
         if (columnError.message.includes('customer_type')) {
-          console.log('customer_type column not found, searching by name only...');
+          logger.log('customer_type column not found, searching by name only...');
           const result = await supabase
             .from('customers')
             .select('*')
@@ -49,11 +50,11 @@ export class TemporaryCustomerService {
         }
       }
 
-      console.log('Temp customer query result:', { data, error });
+      logger.log('Temp customer query result:', { data, error });
 
       if (error && error.code === 'PGRST116') {
         // If temp customer doesn't exist, create it
-        console.log('Temp customer not found, creating new one...');
+        logger.log('Temp customer not found, creating new one...');
         return await this.createTempCustomerAccount(organizationId);
       }
 
@@ -66,7 +67,7 @@ export class TemporaryCustomerService {
       };
 
     } catch (error) {
-      console.error('Error getting temp customer account:', error);
+      logger.error('Error getting temp customer account:', error);
       return {
         success: false,
         error: error.message,
@@ -82,7 +83,7 @@ export class TemporaryCustomerService {
    */
   static async createTempCustomerAccount(organizationId) {
     try {
-      console.log('Creating temp customer account for organization:', organizationId);
+      logger.log('Creating temp customer account for organization:', organizationId);
       
       const tempCustomerData = {
         CustomerListID: `TEMP-CUSTOMER-${organizationId}`,
@@ -95,7 +96,7 @@ export class TemporaryCustomerService {
         customer_barcode: `TEMP-CUSTOMER-${organizationId}`
       };
 
-      console.log('Temp customer data to insert:', tempCustomerData);
+      logger.log('Temp customer data to insert:', tempCustomerData);
 
       const { data, error } = await supabase
         .from('customers')
@@ -103,11 +104,11 @@ export class TemporaryCustomerService {
         .select()
         .single();
 
-      console.log('Temp customer insert result:', { data, error });
+      logger.log('Temp customer insert result:', { data, error });
 
       // Handle duplicate key error - temp customer already exists
       if (error && (error.message.includes('duplicate key') || error.message.includes('unique constraint'))) {
-        console.log('Temp customer already exists, fetching existing one...');
+        logger.log('Temp customer already exists, fetching existing one...');
         
         // Fetch the existing temp customer
         const { data: existingData, error: fetchError } = await supabase
@@ -118,11 +119,11 @@ export class TemporaryCustomerService {
           .single();
         
         if (fetchError) {
-          console.error('Failed to fetch existing temp customer:', fetchError);
+          logger.error('Failed to fetch existing temp customer:', fetchError);
           throw fetchError;
         }
         
-        console.log('Found existing temp customer:', existingData);
+        logger.log('Found existing temp customer:', existingData);
         return {
           success: true,
           customer: existingData,
@@ -132,7 +133,7 @@ export class TemporaryCustomerService {
 
       // If error is due to missing customer_type column, try without it (migration not applied yet)
       if (error && error.message.includes('customer_type')) {
-        console.log('customer_type column not found, trying without it...');
+        logger.log('customer_type column not found, trying without it...');
         const fallbackData = { ...tempCustomerData };
         delete fallbackData.customer_type;
         
@@ -145,7 +146,7 @@ export class TemporaryCustomerService {
         if (fallbackError) {
           // Check if this is also a duplicate key error
           if (fallbackError.message.includes('duplicate key') || fallbackError.message.includes('unique constraint')) {
-            console.log('Fallback: temp customer already exists, fetching...');
+            logger.log('Fallback: temp customer already exists, fetching...');
             const { data: existingData, error: fetchError } = await supabase
               .from('customers')
               .select('*')
@@ -162,11 +163,11 @@ export class TemporaryCustomerService {
             };
           }
           
-          console.error('Fallback insert also failed:', fallbackError);
+          logger.error('Fallback insert also failed:', fallbackError);
           throw fallbackError;
         }
         
-        console.log('Fallback insert successful:', fallbackResult);
+        logger.log('Fallback insert successful:', fallbackResult);
         return {
           success: true,
           customer: fallbackResult,
@@ -183,8 +184,8 @@ export class TemporaryCustomerService {
       };
 
     } catch (error) {
-      console.error('Error creating temp customer account:', error);
-      console.error('Error details:', {
+      logger.error('Error creating temp customer account:', error);
+      logger.error('Error details:', {
         message: error.message,
         code: error.code,
         details: error.details,
@@ -233,7 +234,7 @@ export class TemporaryCustomerService {
       };
 
     } catch (error) {
-      console.error('Error assigning to temp customer:', error);
+      logger.error('Error assigning to temp customer:', error);
       return {
         success: false,
         error: error.message,
@@ -283,7 +284,7 @@ export class TemporaryCustomerService {
       };
 
     } catch (error) {
-      console.error('Error reassigning from temp customer:', error);
+      logger.error('Error reassigning from temp customer:', error);
       return {
         success: false,
         error: error.message,
@@ -323,7 +324,7 @@ export class TemporaryCustomerService {
       };
 
     } catch (error) {
-      console.error('Error getting temp customer items:', error);
+      logger.error('Error getting temp customer items:', error);
       return {
         success: false,
         error: error.message,
@@ -364,7 +365,7 @@ export class TemporaryCustomerService {
       };
 
     } catch (error) {
-      console.error('Error searching customers:', error);
+      logger.error('Error searching customers:', error);
       return {
         success: false,
         error: error.message,

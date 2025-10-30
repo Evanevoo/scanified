@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 // Google Analytics and tracking utilities
 export const GA_TRACKING_ID = import.meta.env.VITE_GA_TRACKING_ID || 'G-XXXXXXXXXX';
 
@@ -305,7 +306,7 @@ export const enableDebugMode = () => {
   if (typeof window !== 'undefined') {
     window.gtag_debug = true;
     if (process.env.NODE_ENV === 'development') {
-      console.log('Analytics debug mode enabled');
+      logger.log('Analytics debug mode enabled');
     }
   }
 }; 

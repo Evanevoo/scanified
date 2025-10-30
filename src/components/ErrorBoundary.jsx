@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React from 'react';
 import { Box, Button, Typography, Paper, Alert, Link, Fade, Chip } from '@mui/material';
 import { Error as ErrorIcon, Refresh as RefreshIcon, Home as HomeIcon, Support as SupportIcon } from '@mui/icons-material';
@@ -22,7 +23,7 @@ class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     // Log the error to console and any error reporting service
-    console.error('Error caught by boundary:', error, errorInfo);
+    logger.error('Error caught by boundary:', error, errorInfo);
     
     this.setState({
       error: error,

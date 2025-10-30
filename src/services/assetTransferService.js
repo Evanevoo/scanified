@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 export class AssetTransferService {
@@ -99,7 +100,7 @@ export class AssetTransferService {
       };
 
     } catch (error) {
-      console.error('Error transferring assets:', error);
+      logger.error('Error transferring assets:', error);
       return {
         success: false,
         error: error.message,
@@ -136,7 +137,7 @@ export class AssetTransferService {
       };
 
     } catch (error) {
-      console.error('Error fetching customers:', error);
+      logger.error('Error fetching customers:', error);
       return {
         success: false,
         error: error.message,
@@ -160,7 +161,7 @@ export class AssetTransferService {
         transfers: []
       };
     } catch (error) {
-      console.error('Error fetching transfer history:', error);
+      logger.error('Error fetching transfer history:', error);
       return {
         success: false,
         error: error.message,
@@ -191,18 +192,18 @@ export class AssetTransferService {
         }))
       };
 
-      console.log('✅ Asset Transfer Completed:', transferLog);
+      logger.log('✅ Asset Transfer Completed:', transferLog);
 
       // Create transfer history entry in database (if table exists)
       try {
         await this.createTransferHistoryEntry(transferData);
       } catch (dbError) {
-        console.warn('Could not create transfer history entry:', dbError.message);
+        logger.warn('Could not create transfer history entry:', dbError.message);
         // Continue without failing the main transfer operation
       }
 
     } catch (error) {
-      console.error('Error logging transfer:', error);
+      logger.error('Error logging transfer:', error);
       // Don't throw error here as transfer was successful, logging is secondary
     }
   }
@@ -232,13 +233,13 @@ export class AssetTransferService {
 
       if (error) {
         // If table doesn't exist, that's okay - we'll still log to console
-        console.info('Transfer history table not found, logging to console only');
+        logger.info('Transfer history table not found, logging to console only');
       } else {
-        console.log('✅ Transfer history entry created successfully');
+        logger.log('✅ Transfer history entry created successfully');
       }
 
     } catch (error) {
-      console.warn('Transfer history creation failed:', error.message);
+      logger.warn('Transfer history creation failed:', error.message);
     }
   }
 
@@ -293,7 +294,7 @@ export class AssetTransferService {
       };
 
     } catch (error) {
-      console.error('Error validating transfer:', error);
+      logger.error('Error validating transfer:', error);
       return {
         success: false,
         issues: [`Validation error: ${error.message}`],

@@ -1,3 +1,4 @@
+import logger from './utils/logger';
 import React, { useState, useEffect } from 'react';
 import { 
   View, 
@@ -77,7 +78,7 @@ export default function LoginScreen() {
           setPassword(savedPassword);
         }
       } catch (error) {
-        console.warn('Error loading saved credentials:', error);
+        logger.warn('Error loading saved credentials:', error);
       }
 
       try {
@@ -87,7 +88,7 @@ export default function LoginScreen() {
         setBiometricSupported(hasHardware);
         setBiometricAvailable(isEnrolled);
       } catch (error) {
-        console.warn('Error checking biometric support:', error);
+        logger.warn('Error checking biometric support:', error);
         setBiometricSupported(false);
         setBiometricAvailable(false);
       }
@@ -121,11 +122,11 @@ export default function LoginScreen() {
           await SecureStore.deleteItemAsync('rememberedPassword');
         } catch (error) {
           // SecureStore.deleteItemAsync can throw if key doesn't exist, which is fine
-          console.warn('Could not delete remembered password:', error);
+          logger.warn('Could not delete remembered password:', error);
         }
       }
     } catch (error) {
-      console.warn('Error managing saved credentials:', error);
+      logger.warn('Error managing saved credentials:', error);
       // Continue with login even if saving credentials fails
     }
     

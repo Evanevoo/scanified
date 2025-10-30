@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../supabase/client';
@@ -387,7 +388,7 @@ export default function Import() {
             }
           })
           .catch(err => {
-            console.error('Customer validation error:', err);
+            logger.error('Customer validation error:', err);
             errors.push({ 
               row: idx, 
               field: 'customer_id', 
@@ -413,7 +414,7 @@ export default function Import() {
       const dataHash = JSON.stringify(preview).length + '_' + preview.length;
       const importKey = `${type}_${dataHash}_${user.id}`;
       
-      console.log('Checking for existing import with key:', importKey);
+      logger.log('Checking for existing import with key:', importKey);
       
       // Check if an import with similar data already exists
       const { data: existingImports, error: checkError } = await supabase
@@ -424,16 +425,16 @@ export default function Import() {
         .limit(5);
       
       if (checkError) {
-        console.error('Error checking existing imports:', checkError);
+        logger.error('Error checking existing imports:', checkError);
         return null; // Continue with new import
       }
       
-      console.log('Found existing imports:', existingImports);
+      logger.log('Found existing imports:', existingImports);
       
       // If we have recent pending imports, update the most recent one
       if (existingImports && existingImports.length > 0) {
         const mostRecent = existingImports[0];
-        console.log('Updating existing import:', mostRecent.id);
+        logger.log('Updating existing import:', mostRecent.id);
         
         const { data: updatedImport, error: updateError } = await supabase
           .from(type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts')
@@ -456,17 +457,17 @@ export default function Import() {
           .single();
         
         if (updateError) {
-          console.error('Error updating existing import:', updateError);
+          logger.error('Error updating existing import:', updateError);
           return null; // Continue with new import
         }
         
-        console.log('Successfully updated existing import:', updatedImport);
+        logger.log('Successfully updated existing import:', updatedImport);
         return updatedImport;
       }
       
       return null; // No existing import to update
     } catch (error) {
-      console.error('Error in checkAndUpdateExistingImport:', error);
+      logger.error('Error in checkAndUpdateExistingImport:', error);
       return null; // Continue with new import
     }
   }
@@ -508,7 +509,7 @@ export default function Import() {
     // Get current user and organization
     const user = await getCurrentUser();
     if (!user) {
-      console.error('User not authenticated');
+      logger.error('User not authenticated');
       return false;
     }
     
@@ -520,7 +521,7 @@ export default function Import() {
       .single();
     
     if (profileError || !userProfile?.organization_id) {
-      console.error('User not assigned to an organization');
+      logger.error('User not assigned to an organization');
       return false;
     }
     
@@ -550,7 +551,7 @@ export default function Import() {
       const user = await getCurrentUser();
       if (!user) throw new Error('User not authenticated');
       
-      console.log('Creating invoice import with data:', {
+      logger.log('Creating invoice import with data:', {
         previewLength: preview.length,
         userId: user.id,
         status: 'pending'
@@ -588,12 +589,12 @@ export default function Import() {
         .select()
         .single();
 
-      console.log('Invoice import result:', { importedInvoice, importError });
+      logger.log('Invoice import result:', { importedInvoice, importError });
 
       if (importError) {
         // If RLS policy error, try without uploaded_by field
         if (importError.message.includes('row-level security policy')) {
-          console.log('RLS policy error detected, trying without uploaded_by field...');
+          logger.log('RLS policy error detected, trying without uploaded_by field...');
           
           const { data: retryInvoice, error: retryError } = await supabase
             .from('imported_invoices')
@@ -634,7 +635,7 @@ export default function Import() {
       });
 
     } catch (error) {
-      console.error('Invoice import error:', error);
+      logger.error('Invoice import error:', error);
       setError(error.message);
     }
     setLoading(false);
@@ -648,7 +649,7 @@ export default function Import() {
       const user = await getCurrentUser();
       if (!user) throw new Error('User not authenticated');
       
-      console.log('Creating sales receipt import with data:', {
+      logger.log('Creating sales receipt import with data:', {
         previewLength: preview.length,
         userId: user.id,
         status: 'pending'
@@ -673,12 +674,12 @@ export default function Import() {
         .select()
         .single();
 
-      console.log('Sales receipt import result:', { importedReceipt, importError });
+      logger.log('Sales receipt import result:', { importedReceipt, importError });
 
       if (importError) {
         // If RLS policy error, try without uploaded_by field
         if (importError.message.includes('row-level security policy')) {
-          console.log('RLS policy error detected, trying without uploaded_by field...');
+          logger.log('RLS policy error detected, trying without uploaded_by field...');
           
           const { data: retryReceipt, error: retryError } = await supabase
             .from('imported_sales_receipts')
@@ -719,7 +720,7 @@ export default function Import() {
       });
 
     } catch (error) {
-      console.error('Sales receipt import error:', error);
+      logger.error('Sales receipt import error:', error);
       setError(error.message);
     }
     setLoading(false);
@@ -906,7 +907,7 @@ export default function Import() {
   const [customerImportReport, setCustomerImportReport] = useState(null);
 
   async function createMissingCustomers() {
-    console.log('createMissingCustomers called');
+    logger.log('createMissingCustomers called');
     
     // Get current user and organization
     const user = await getCurrentUser();
@@ -927,18 +928,18 @@ export default function Import() {
       return;
     }
     
-    console.log('User organization_id:', userProfile.organization_id);
+    logger.log('User organization_id:', userProfile.organization_id);
     
     // Get all unique customer IDs from the preview (same logic as checkPreviewStatuses)
     const allCustomerIds = Array.from(new Set(preview.map(row => (row.customer_id || '').trim().toLowerCase()))).filter(Boolean);
     
     if (allCustomerIds.length === 0) {
-      console.log('No customer IDs found in preview');
+      logger.log('No customer IDs found in preview');
       toast.error('No customers to create');
       return;
     }
     
-    console.log('All customer IDs from preview:', allCustomerIds);
+    logger.log('All customer IDs from preview:', allCustomerIds);
     
     // Check which customers exist in THIS organization
     const { data: existingCustomers, error: fetchError } = await supabase
@@ -947,7 +948,7 @@ export default function Import() {
       .eq('organization_id', userProfile.organization_id);
     
     if (fetchError) {
-      console.error('Error fetching existing customers:', fetchError);
+      logger.error('Error fetching existing customers:', fetchError);
       toast.error('Error checking existing customers');
       return;
     }
@@ -955,15 +956,15 @@ export default function Import() {
     const existingIds = new Set((existingCustomers || []).map(c => (c.CustomerListID || '').trim().toLowerCase()));
     const missingCustomerIds = allCustomerIds.filter(cid => !existingIds.has(cid));
     
-    console.log('Missing customer IDs:', missingCustomerIds);
+    logger.log('Missing customer IDs:', missingCustomerIds);
     
     if (missingCustomerIds.length === 0) {
-      console.log('No customers to create');
+      logger.log('No customers to create');
       toast.success('No customers to create');
       return;
     }
 
-    console.log('Creating customers:', missingCustomerIds);
+    logger.log('Creating customers:', missingCustomerIds);
     setLoading(true);
     let createdCount = 0;
     let errorCount = 0;
@@ -982,7 +983,7 @@ export default function Import() {
       );
       
       if (customerRow && !seenInBatch.has(customerId)) {
-        console.log(`Customer ${customerId} will be created for this organization`);
+        logger.log(`Customer ${customerId} will be created for this organization`);
         customersToCreate.push({
           CustomerListID: customerRow.customer_id, // Use original case
           name: customerRow.customer_name || `Customer ${customerRow.customer_id}`,
@@ -994,10 +995,10 @@ export default function Import() {
       }
     }
     
-    console.log('Customers to create:', customersToCreate);
+    logger.log('Customers to create:', customersToCreate);
 
     if (customersToCreate.length === 0) {
-      console.log('No customers to create after processing');
+      logger.log('No customers to create after processing');
       setLoading(false);
       toast.success('No customers to create');
       return;
@@ -1007,7 +1008,7 @@ export default function Import() {
     const batchSize = 10;
     for (let i = 0; i < customersToCreate.length; i += batchSize) {
       const batch = customersToCreate.slice(i, i + batchSize);
-      console.log(`Creating batch ${Math.floor(i / batchSize) + 1}:`, batch);
+      logger.log(`Creating batch ${Math.floor(i / batchSize) + 1}:`, batch);
       
       try {
         const { data, error } = await supabase
@@ -1015,25 +1016,25 @@ export default function Import() {
           .insert(batch)
           .select();
         
-        console.log('Supabase response - data:', data);
-        console.log('Supabase response - error:', error);
+        logger.log('Supabase response - data:', data);
+        logger.log('Supabase response - error:', error);
         
         if (error && (error.code === '23505' || error.message.includes('duplicate key'))) {
-          console.log('Batch failed due to duplicate, trying one-by-one...');
+          logger.log('Batch failed due to duplicate, trying one-by-one...');
           // Batch failed due to duplicate, try one-by-one
           for (const customer of batch) {
-            console.log('Trying to create customer one-by-one:', customer);
+            logger.log('Trying to create customer one-by-one:', customer);
             const { data: singleData, error: singleError } = await supabase
               .from('customers')
               .insert([customer])
               .select();
             
-            console.log('Single customer response - data:', singleData);
-            console.log('Single customer response - error:', singleError);
+            logger.log('Single customer response - data:', singleData);
+            logger.log('Single customer response - error:', singleError);
             
             if (singleError && (singleError.code === '23505' || singleError.message.includes('duplicate key'))) {
               // Skip duplicate, do not increment errorCount
-              console.log('Customer already exists (primary key constraint):', customer.CustomerListID);
+              logger.log('Customer already exists (primary key constraint):', customer.CustomerListID);
               skippedCustomers.push({
                 CustomerListID: customer.CustomerListID,
                 name: customer.name,
@@ -1052,11 +1053,11 @@ export default function Import() {
             }
           }
         } else if (error) {
-          console.error('Batch error:', error);
+          logger.error('Batch error:', error);
           errorCount += batch.length;
           errors.push(`Batch ${Math.floor(i / batchSize) + 1}: ${error.message}`);
         } else if (data && data.length > 0) {
-          console.log('Batch created successfully:', data);
+          logger.log('Batch created successfully:', data);
           createdCount += data.length;
           for (const c of data) {
             createdCustomers.push({
@@ -1065,16 +1066,16 @@ export default function Import() {
             });
           }
         } else {
-          console.log('No data returned from batch insert, but no error either');
+          logger.log('No data returned from batch insert, but no error either');
         }
       } catch (e) {
-        console.error('Exception in batch creation:', e);
+        logger.error('Exception in batch creation:', e);
         errorCount += batch.length;
         errors.push(`Batch ${Math.floor(i / batchSize) + 1}: ${e.message}`);
       }
     }
 
-    console.log('Customer creation completed. Created:', createdCount, 'Errors:', errorCount);
+    logger.log('Customer creation completed. Created:', createdCount, 'Errors:', errorCount);
     setLoading(false);
 
     // After building skippedCustomers, deduplicate by CustomerListID
@@ -1082,13 +1083,13 @@ export default function Import() {
     setCustomerImportReport({ created: createdCustomers, skipped: dedupedSkipped });
 
     if (createdCount > 0) {
-      console.log('Showing success toast');
+      logger.log('Showing success toast');
       toast.success(`Successfully created ${createdCount} customers`);
     }
     if (errorCount > 0) {
-      console.log('Showing error toast');
+      logger.log('Showing error toast');
       toast.error(`Failed to create ${errorCount} customers. Check console for details.`);
-      console.error('Customer creation errors:', errors);
+      logger.error('Customer creation errors:', errors);
     }
     
     // Show detailed results
@@ -1108,7 +1109,7 @@ export default function Import() {
       const user = await getCurrentUser();
       if (!user) throw new Error('User not authenticated');
       
-      console.log('Starting direct import with automatic customer creation...');
+      logger.log('Starting direct import with automatic customer creation...');
       
       let imported = 0, errors = 0;
       let customersCreated = 0, customersExisting = 0;
@@ -1169,7 +1170,7 @@ export default function Import() {
         }
         
         if (newCustomers.length) {
-          console.log(`Creating ${newCustomers.length} new customers...`);
+          logger.log(`Creating ${newCustomers.length} new customers...`);
           
           // Validate organization_id before attempting insert
           if (!userProfile.organization_id) {
@@ -1179,11 +1180,11 @@ export default function Import() {
           // Enhanced customer creation with RLS-friendly approach
           const { error: customerError } = await supabase.from('customers').insert(newCustomers);
           if (customerError) {
-            console.error('Error creating customers:', customerError);
+            logger.error('Error creating customers:', customerError);
             
             // Handle RLS policy errors specifically
             if (customerError.message.includes('row-level security policy')) {
-              console.log('RLS policy error detected. Trying individual inserts with explicit organization context...');
+              logger.log('RLS policy error detected. Trying individual inserts with explicit organization context...');
               
               // Try one-by-one with explicit organization context
               for (const customer of newCustomers) {
@@ -1201,21 +1202,21 @@ export default function Import() {
                   if (singleError) {
                     if (singleError.code === '23505') {
                       // Duplicate key error - customer already exists
-                      console.log('Customer already exists (ignoring):', customer.CustomerListID);
+                      logger.log('Customer already exists (ignoring):', customer.CustomerListID);
                     } else if (singleError.message.includes('row-level security policy')) {
-                      console.error('RLS policy violation for customer:', customer.CustomerListID);
-                      console.error('Customer data:', customerWithOrgId);
-                      console.error('User profile:', userProfile);
+                      logger.error('RLS policy violation for customer:', customer.CustomerListID);
+                      logger.error('Customer data:', customerWithOrgId);
+                      logger.error('User profile:', userProfile);
                       errors++;
                     } else {
-                      console.error('Error creating customer:', customer.CustomerListID, singleError);
+                      logger.error('Error creating customer:', customer.CustomerListID, singleError);
                       errors++;
                     }
                   } else {
                     customersCreated++;
                   }
                 } catch (err) {
-                  console.error('Unexpected error creating customer:', customer.CustomerListID, err);
+                  logger.error('Unexpected error creating customer:', customer.CustomerListID, err);
                   errors++;
                 }
               }
@@ -1224,10 +1225,10 @@ export default function Import() {
               for (const customer of newCustomers) {
                 const { error: singleError } = await supabase.from('customers').insert([customer]);
                 if (singleError && singleError.code !== '23505') { // Ignore duplicate errors
-                  console.error('Error creating customer:', customer.CustomerListID, singleError);
+                  logger.error('Error creating customer:', customer.CustomerListID, singleError);
                   errors++;
                 } else if (singleError && singleError.code === '23505') {
-                  console.log('Customer already exists (ignoring):', customer.CustomerListID);
+                  logger.log('Customer already exists (ignoring):', customer.CustomerListID);
                 } else {
                   customersCreated++;
                 }
@@ -1273,7 +1274,7 @@ export default function Import() {
                 .single();
 
               if (receiptError) {
-                console.error('Error creating sales receipt:', receiptError);
+                logger.error('Error creating sales receipt:', receiptError);
                 errors++;
                 continue;
               }
@@ -1295,7 +1296,7 @@ export default function Import() {
                 });
 
               if (lineItemError) {
-                console.error('Error creating line item:', lineItemError);
+                logger.error('Error creating line item:', lineItemError);
                 errors++;
               } else {
                 lineItemsCreated++;
@@ -1330,7 +1331,7 @@ export default function Import() {
                 .single();
 
               if (invoiceError) {
-                console.error('Error creating invoice:', invoiceError);
+                logger.error('Error creating invoice:', invoiceError);
                 errors++;
                 continue;
               }
@@ -1352,7 +1353,7 @@ export default function Import() {
                 });
 
               if (lineItemError) {
-                console.error('Error creating line item:', lineItemError);
+                logger.error('Error creating line item:', lineItemError);
                 errors++;
               } else {
                 lineItemsCreated++;
@@ -1384,7 +1385,7 @@ export default function Import() {
       });
 
     } catch (error) {
-      console.error('Direct import error:', error);
+      logger.error('Direct import error:', error);
       setError(error.message);
     }
     setLoading(false);

@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -129,7 +130,7 @@ export default function FileFormatManager() {
       if (error) throw error;
       setFormats(data || []);
     } catch (error) {
-      console.error('Error loading file formats:', error);
+      logger.error('Error loading file formats:', error);
     } finally {
       setLoading(false);
     }
@@ -170,7 +171,7 @@ export default function FileFormatManager() {
       setDialogOpen(false);
       resetForm();
     } catch (error) {
-      console.error('Error saving file format:', error);
+      logger.error('Error saving file format:', error);
       alert('Error saving file format: ' + error.message);
     }
   };
@@ -187,7 +188,7 @@ export default function FileFormatManager() {
       if (error) throw error;
       await loadFileFormats();
     } catch (error) {
-      console.error('Error deleting file format:', error);
+      logger.error('Error deleting file format:', error);
       alert('Error deleting file format: ' + error.message);
     }
   };

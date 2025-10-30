@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase';
 import { useAuth } from '../hooks/useAuth';
 
@@ -30,7 +31,7 @@ export class FormatValidationService {
     }
 
     try {
-      console.log('🔍 Fetching organization formats for ID:', organizationId);
+      logger.log('🔍 Fetching organization formats for ID:', organizationId);
       const { data, error } = await supabase
         .from('organizations')
         .select('format_configuration')
@@ -41,7 +42,7 @@ export class FormatValidationService {
 
       // Parse the format_configuration JSONB column
       const formatConfig = data?.format_configuration || {};
-      console.log('🔍 Raw format_configuration from database:', formatConfig);
+      logger.log('🔍 Raw format_configuration from database:', formatConfig);
       
       // Set default formats if not configured
       const formats: OrganizationFormats = {
@@ -78,13 +79,13 @@ export class FormatValidationService {
       this.cachedFormats = formats;
       this.lastFetch = now;
 
-      console.log('🔍 Final barcode format being used:', formats.barcode_format);
-      console.log('🔍 Pattern:', formats.barcode_format.pattern);
-      console.log('🔍 Description:', formats.barcode_format.description);
+      logger.log('🔍 Final barcode format being used:', formats.barcode_format);
+      logger.log('🔍 Pattern:', formats.barcode_format.pattern);
+      logger.log('🔍 Description:', formats.barcode_format.description);
 
       return formats;
     } catch (error) {
-      console.error('Error fetching organization formats:', error);
+      logger.error('Error fetching organization formats:', error);
       
       // Return default formats on error
       return {
@@ -129,20 +130,20 @@ export class FormatValidationService {
 
     try {
       const regex = new RegExp(formatConfig.pattern);
-      console.log('🔍 Testing regex pattern:', formatConfig.pattern);
-      console.log('🔍 Testing against value:', trimmed);
-      console.log('🔍 Regex test result:', regex.test(trimmed));
+      logger.log('🔍 Testing regex pattern:', formatConfig.pattern);
+      logger.log('🔍 Testing against value:', trimmed);
+      logger.log('🔍 Regex test result:', regex.test(trimmed));
       
       if (!regex.test(trimmed)) {
-        console.log('❌ Regex test failed for:', trimmed);
+        logger.log('❌ Regex test failed for:', trimmed);
         return { 
           isValid: false, 
           error: `Invalid format. Expected: ${formatConfig.description}` 
         };
       }
-      console.log('✅ Regex test passed for:', trimmed);
+      logger.log('✅ Regex test passed for:', trimmed);
     } catch (error) {
-      console.warn('Invalid regex pattern in format config:', error);
+      logger.warn('Invalid regex pattern in format config:', error);
       return { isValid: false, error: 'Invalid format configuration' };
     }
 
@@ -172,7 +173,7 @@ export class FormatValidationService {
       
       return this.validateFormat(value, formatConfig);
     } catch (error) {
-      console.error(`Error validating ${formatKey}:`, error);
+      logger.error(`Error validating ${formatKey}:`, error);
       return { isValid: false, error: 'Validation failed' };
     }
   }

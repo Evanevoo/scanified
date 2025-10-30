@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -204,7 +205,7 @@ export default function AnalyticsScreen() {
       });
 
     } catch (error) {
-      console.error('Error fetching analytics data:', error);
+      logger.error('Error fetching analytics data:', error);
       setError(error instanceof Error ? error.message : 'Failed to load analytics');
     } finally {
       setLoading(false);

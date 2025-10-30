@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView } from 'react-native';
 import { supabase } from '../supabase';
@@ -176,7 +177,7 @@ export default function AddCylinderScreen() {
       .eq('serial_number', serial);
     
     if (barcodeError || serialError) {
-      console.error('Duplicate check error:', barcodeError || serialError);
+      logger.error('Duplicate check error:', barcodeError || serialError);
       setError('Error checking duplicates: ' + (barcodeError?.message || serialError?.message));
       setLoading(false);
       return;

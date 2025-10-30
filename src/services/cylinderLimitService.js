@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 import { usageService } from './usageService';
 
@@ -38,7 +39,7 @@ export const cylinderLimitService = {
         quantity
       };
     } catch (error) {
-      console.error('Error checking cylinder limits:', error);
+      logger.error('Error checking cylinder limits:', error);
       return { 
         canAdd: false, 
         current: 0, 

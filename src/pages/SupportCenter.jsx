@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Button, Grid, Card, CardContent, CardActions,
@@ -82,7 +83,7 @@ export default function SupportCenter() {
       if (error) throw error;
       setTickets(data || []);
     } catch (error) {
-      console.error('Error fetching tickets:', error);
+      logger.error('Error fetching tickets:', error);
       setSnackbar({ open: true, message: 'Error loading tickets', severity: 'error' });
     } finally {
       setLoading(false);
@@ -114,15 +115,15 @@ export default function SupportCenter() {
       
       // Notify owners of new ticket
       try {
-        console.log('Sending support ticket notification email...');
+        logger.log('Sending support ticket notification email...');
         await sendSupportTicketNotification(data, profile, organization);
-        console.log('Support ticket notification sent successfully');
+        logger.log('Support ticket notification sent successfully');
       } catch (error) {
-        console.error('Error sending support ticket notification:', error);
+        logger.error('Error sending support ticket notification:', error);
         // Don't fail the ticket creation if email fails
       }
     } catch (error) {
-      console.error('Error submitting ticket:', error);
+      logger.error('Error submitting ticket:', error);
       setSnackbar({ open: true, message: 'Error submitting ticket', severity: 'error' });
     } finally {
       setLoading(false);
@@ -160,19 +161,19 @@ export default function SupportCenter() {
       
       // Notify owners of ticket reply
       try {
-        console.log('Sending support ticket reply notification email...');
+        logger.log('Sending support ticket reply notification email...');
         const replyData = {
           message: replyMessage,
           created_at: new Date().toISOString()
         };
         await sendSupportTicketReplyNotification(selectedTicket, replyData, profile);
-        console.log('Support ticket reply notification sent successfully');
+        logger.log('Support ticket reply notification sent successfully');
       } catch (error) {
-        console.error('Error sending support ticket reply notification:', error);
+        logger.error('Error sending support ticket reply notification:', error);
         // Don't fail the reply if email fails
       }
     } catch (error) {
-      console.error('Error sending reply:', error);
+      logger.error('Error sending reply:', error);
       setSnackbar({ open: true, message: 'Error sending reply', severity: 'error' });
     } finally {
       setLoading(false);
@@ -197,7 +198,7 @@ export default function SupportCenter() {
       if (error) throw error;
       setTicketMessages(data || []);
     } catch (error) {
-      console.error('Error fetching ticket messages:', error);
+      logger.error('Error fetching ticket messages:', error);
       setSnackbar({ open: true, message: 'Error loading messages', severity: 'error' });
     } finally {
       setLoadingMessages(false);
@@ -230,7 +231,7 @@ export default function SupportCenter() {
         setSelectedTicket(prev => ({ ...prev, status: 'open' }));
       }
     } catch (error) {
-      console.error('Error reopening ticket:', error);
+      logger.error('Error reopening ticket:', error);
       setSnackbar({ open: true, message: 'Error reopening ticket', severity: 'error' });
     } finally {
       setLoading(false);
@@ -251,7 +252,7 @@ export default function SupportCenter() {
       setTicketToDelete(null);
       setSnackbar({ open: true, message: 'Ticket deleted successfully', severity: 'success' });
     } catch (error) {
-      console.error('Error deleting ticket:', error);
+      logger.error('Error deleting ticket:', error);
       setSnackbar({ open: true, message: 'Error deleting ticket', severity: 'error' });
     } finally {
       setLoading(false);

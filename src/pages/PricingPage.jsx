@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { Box, Card, CardContent, Typography, Button, Grid, Chip, CircularProgress } from '@mui/material';
 import CheckIcon from '@mui/icons-material/Check';
@@ -19,7 +20,7 @@ function PricingPage() {
         .order('price', { ascending: true });
 
       if (error) {
-        console.error('Error fetching pricing plans:', error);
+        logger.error('Error fetching pricing plans:', error);
       } else {
         setPlans(data);
       }

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
@@ -69,9 +70,9 @@ class CustomizationService {
       await this.loadSettings();
       await this.preloadSounds();
       this.isInitialized = true;
-      console.log('CustomizationService initialized');
+      logger.log('CustomizationService initialized');
     } catch (error) {
-      console.error('Failed to initialize CustomizationService:', error);
+      logger.error('Failed to initialize CustomizationService:', error);
     }
   }
 
@@ -84,7 +85,7 @@ class CustomizationService {
         await this.createDefaultSettings();
       }
     } catch (error) {
-      console.error('Failed to load customization settings:', error);
+      logger.error('Failed to load customization settings:', error);
       await this.createDefaultSettings();
     }
   }
@@ -153,14 +154,14 @@ class CustomizationService {
   private async preloadSounds(): Promise<void> {
     if (!this.settings) return;
 
-    console.log('🔊 Preloading sounds...');
+    logger.log('🔊 Preloading sounds...');
     
     for (const sound of this.settings.sounds) {
       if (sound.enabled) {
         try {
           // Skip preloading for now since we don't have actual sound files
           // In production, you would uncomment the code below and add real MP3 files
-          console.log(`🔊 Sound ${sound.name} configured but not preloaded (placeholder file)`);
+          logger.log(`🔊 Sound ${sound.name} configured but not preloaded (placeholder file)`);
           
           /*
           const { sound: audioSound } = await Audio.Sound.createAsync(
@@ -170,12 +171,12 @@ class CustomizationService {
           this.soundCache.set(sound.id, audioSound);
           */
         } catch (error) {
-          console.log(`🔊 Sound file ${sound.file} not found, skipping...`);
+          logger.log(`🔊 Sound file ${sound.file} not found, skipping...`);
         }
       }
     }
     
-    console.log('🔊 Sound preloading completed (using haptic feedback)');
+    logger.log('🔊 Sound preloading completed (using haptic feedback)');
   }
 
   async playCustomSound(category: CustomSound['category'], customSoundId?: string): Promise<void> {
@@ -188,7 +189,7 @@ class CustomizationService {
     );
 
     if (!sound) {
-      console.log(`🔊 No sound configured for category: ${category}`);
+      logger.log(`🔊 No sound configured for category: ${category}`);
       return;
     }
 
@@ -196,14 +197,14 @@ class CustomizationService {
       const audioSound = this.soundCache.get(sound.id);
       if (audioSound) {
         await audioSound.replayAsync();
-        console.log(`🔊 Played sound: ${sound.name}`);
+        logger.log(`🔊 Played sound: ${sound.name}`);
       } else {
-        console.log(`🔊 Sound ${sound.name} not loaded (using haptic feedback instead)`);
+        logger.log(`🔊 Sound ${sound.name} not loaded (using haptic feedback instead)`);
         // Trigger haptic feedback as fallback
         await this.playHapticFeedback(category);
       }
     } catch (error) {
-      console.log(`🔊 Could not play sound ${sound.name}, using haptic feedback instead`);
+      logger.log(`🔊 Could not play sound ${sound.name}, using haptic feedback instead`);
       await this.playHapticFeedback(category);
     }
   }
@@ -227,7 +228,7 @@ class CustomizationService {
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
     } catch (error) {
-      console.log('🔊 Haptic feedback failed:', error);
+      logger.log('🔊 Haptic feedback failed:', error);
     }
   }
 
@@ -251,7 +252,7 @@ class CustomizationService {
         );
         this.soundCache.set(newSound.id, audioSound);
       } catch (error) {
-        console.warn(`Failed to preload new sound ${newSound.name}:`, error);
+        logger.warn(`Failed to preload new sound ${newSound.name}:`, error);
       }
     }
 
@@ -282,7 +283,7 @@ class CustomizationService {
         );
         this.soundCache.set(soundId, audioSound);
       } catch (error) {
-        console.warn(`Failed to preload updated sound:`, error);
+        logger.warn(`Failed to preload updated sound:`, error);
       }
     }
   }
@@ -349,9 +350,9 @@ class CustomizationService {
     try {
       // This would integrate with a text-to-speech service
       // For now, we'll use a simple implementation
-      console.log(`Speaking: ${text}`);
+      logger.log(`Speaking: ${text}`);
     } catch (error) {
-      console.warn('Failed to speak text:', error);
+      logger.warn('Failed to speak text:', error);
     }
   }
 
@@ -423,7 +424,7 @@ class CustomizationService {
     try {
       await AsyncStorage.setItem('customization_settings', JSON.stringify(this.settings));
     } catch (error) {
-      console.error('Failed to save customization settings:', error);
+      logger.error('Failed to save customization settings:', error);
     }
   }
 
@@ -440,7 +441,7 @@ class CustomizationService {
       try {
         await sound.unloadAsync();
       } catch (error) {
-        console.warn(`Failed to unload sound ${id}:`, error);
+        logger.warn(`Failed to unload sound ${id}:`, error);
       }
     }
     this.soundCache.clear();

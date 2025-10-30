@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React from 'react';
 import { Box, Typography, Paper, Button } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
@@ -83,14 +84,14 @@ export default function DebugAuth() {
                 .select();
               
               if (error) {
-                console.error('Test update error:', error);
+                logger.error('Test update error:', error);
                 alert('Error updating organization: ' + error.message);
               } else {
-                console.log('Test update success:', data);
+                logger.log('Test update success:', data);
                 alert('Test logo URL updated successfully! Check the sidebar.');
               }
             } catch (err) {
-              console.error('Test error:', err);
+              logger.error('Test error:', err);
               alert('Test failed: ' + err.message);
             }
           }}
@@ -109,14 +110,14 @@ export default function DebugAuth() {
                 .limit(1);
               
               if (error) {
-                console.error('Column test error:', error);
+                logger.error('Column test error:', error);
                 alert('Error testing column: ' + error.message);
               } else {
-                console.log('Column test success:', data);
+                logger.log('Column test success:', data);
                 alert('logo_url column exists! Data: ' + JSON.stringify(data));
               }
             } catch (err) {
-              console.error('Column test error:', err);
+              logger.error('Column test error:', err);
               alert('Column test failed: ' + err.message);
             }
           }}

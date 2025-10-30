@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 
@@ -22,16 +23,16 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    logger.error('ErrorBoundary caught an error:', error, errorInfo);
     
     // Log additional details for debugging
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-    console.error('Component stack:', errorInfo.componentStack);
+    logger.error('Error message:', error.message);
+    logger.error('Error stack:', error.stack);
+    logger.error('Component stack:', errorInfo.componentStack);
     
     // Check if it's the reduce error we're looking for
     if (error.message && error.message.includes('reduce')) {
-      console.error('🔍 REDUCE ERROR DETECTED:', {
+      logger.error('🔍 REDUCE ERROR DETECTED:', {
         message: error.message,
         stack: error.stack,
         componentStack: errorInfo.componentStack
@@ -57,7 +58,7 @@ export class ErrorBoundary extends Component<Props, State> {
             text: 'Report', 
             onPress: () => {
               // In a real app, you would send this to your error reporting service
-              console.log('Error reported:', this.state.error);
+              logger.log('Error reported:', this.state.error);
               Alert.alert('Thank you', 'Error has been reported.');
             }
           }

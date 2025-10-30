@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import * as Location from 'expo-location';
 import { Camera } from 'expo-camera';
 import { Alert, Linking } from 'react-native';
@@ -55,9 +56,9 @@ class FieldToolsService {
     try {
       await this.initializeLocation();
       this.isInitialized = true;
-      console.log('🛰️ FieldToolsService initialized successfully');
+      logger.log('🛰️ FieldToolsService initialized successfully');
     } catch (error) {
-      console.error('❌ Failed to initialize FieldToolsService:', error);
+      logger.error('❌ Failed to initialize FieldToolsService:', error);
     }
   }
 
@@ -96,9 +97,9 @@ class FieldToolsService {
       // Get initial location
       await this.getCurrentLocation();
       
-      console.log('📍 Location services initialized');
+      logger.log('📍 Location services initialized');
     } catch (error) {
-      console.error('Error initializing location:', error);
+      logger.error('Error initializing location:', error);
     }
   }
 
@@ -147,13 +148,13 @@ class FieldToolsService {
             .join(', ');
         }
       } catch (error) {
-        console.warn('Could not get address for location:', error);
+        logger.warn('Could not get address for location:', error);
       }
 
       this.currentLocation = locationData;
       return locationData;
     } catch (error) {
-      console.error('Error getting current location:', error);
+      logger.error('Error getting current location:', error);
       return null;
     }
   }
@@ -190,9 +191,9 @@ class FieldToolsService {
         }
       );
 
-      console.log('📍 Location tracking started');
+      logger.log('📍 Location tracking started');
     } catch (error) {
-      console.error('Error starting location tracking:', error);
+      logger.error('Error starting location tracking:', error);
     }
   }
 
@@ -203,7 +204,7 @@ class FieldToolsService {
     if (this.locationWatcher) {
       this.locationWatcher.remove();
       this.locationWatcher = null;
-      console.log('📍 Location tracking stopped');
+      logger.log('📍 Location tracking stopped');
     }
   }
 
@@ -215,16 +216,16 @@ class FieldToolsService {
       if (this.isFlashlightOn) {
         await Camera.setFlashlightAsync(false);
         this.isFlashlightOn = false;
-        console.log('🔦 Flashlight turned OFF');
+        logger.log('🔦 Flashlight turned OFF');
       } else {
         await Camera.setFlashlightAsync(true);
         this.isFlashlightOn = true;
-        console.log('🔦 Flashlight turned ON');
+        logger.log('🔦 Flashlight turned ON');
       }
       
       return this.isFlashlightOn;
     } catch (error) {
-      console.error('Error toggling flashlight:', error);
+      logger.error('Error toggling flashlight:', error);
       Alert.alert('Flashlight Error', 'Could not control flashlight. Make sure camera permissions are granted.');
       return this.isFlashlightOn;
     }
@@ -379,7 +380,7 @@ class FieldToolsService {
         const supported = await Linking.canOpenURL(option.scheme);
         if (supported) {
           await Linking.openURL(option.scheme);
-          console.log(`🗺️ Opened ${option.name} for navigation`);
+          logger.log(`🗺️ Opened ${option.name} for navigation`);
           return;
         }
       } catch (error) {
@@ -390,9 +391,9 @@ class FieldToolsService {
     // Fallback to web URL
     try {
       await Linking.openURL(navigationOptions[0].url);
-      console.log('🗺️ Opened web navigation');
+      logger.log('🗺️ Opened web navigation');
     } catch (error) {
-      console.error('Error opening navigation:', error);
+      logger.error('Error opening navigation:', error);
       Alert.alert('Navigation Error', 'Could not open navigation app.');
     }
   }
@@ -445,7 +446,7 @@ class FieldToolsService {
     }
     
     this.isInitialized = false;
-    console.log('🛰️ FieldToolsService cleaned up');
+    logger.log('🛰️ FieldToolsService cleaned up');
   }
 }
 

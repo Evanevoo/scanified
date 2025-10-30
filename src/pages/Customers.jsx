@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
@@ -83,13 +84,13 @@ async function exportAllCustomersToCSV(organizationId) {
     
     exportToCSV(allCustomers);
   } catch (error) {
-    console.error('Error exporting customers:', error);
+    logger.error('Error exporting customers:', error);
     alert('Error exporting customers: ' + error.message);
   }
 }
 
 function Customers({ profile }) {
-  console.log('Customers component rendering, profile:', profile);
+  logger.log('Customers component rendering, profile:', profile);
   
   const [customers, setCustomers] = useState([]);
   const [form, setForm] = useState({ CustomerListID: '', name: '', email: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
@@ -116,7 +117,7 @@ function Customers({ profile }) {
   const fetchCustomers = async (searchTerm = '') => {
     if (!organization?.id) return;
     
-    console.log('Fetching customers...');
+    logger.log('Fetching customers...');
     setLoading(true);
     try {
       // Build base query
@@ -159,11 +160,11 @@ function Customers({ profile }) {
       }
 
       if (error) {
-        console.error('Error fetching customers:', error);
+        logger.error('Error fetching customers:', error);
         throw error;
       }
 
-      console.log('Customers fetched successfully:', data?.length || 0, 'Total count:', count);
+      logger.log('Customers fetched successfully:', data?.length || 0, 'Total count:', count);
       setCustomers(data || []);
       setTotalCount(count || 0);
 
@@ -177,7 +178,7 @@ function Customers({ profile }) {
           .is('rental_end_date', null); // Only active rentals
 
         if (rentalError) {
-          console.error('Error fetching rental data:', rentalError);
+          logger.error('Error fetching rental data:', rentalError);
         } else {
           const counts = {};
           rentalData?.forEach(rental => {
@@ -187,7 +188,7 @@ function Customers({ profile }) {
         }
       }
     } catch (err) {
-      console.error('Error in fetchCustomers:', err);
+      logger.error('Error in fetchCustomers:', err);
       setError(err.message);
     }
     setLoading(false);
@@ -221,7 +222,7 @@ function Customers({ profile }) {
   };
 
   const handleSort = (field) => {
-    console.log('Sorting by:', field, 'Current sort:', sortField, sortDirection);
+    logger.log('Sorting by:', field, 'Current sort:', sortField, sortDirection);
     if (sortField === field) {
       // Toggle direction if same field
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -308,7 +309,7 @@ function Customers({ profile }) {
     
     setError(null);
     try {
-      console.log(`Deleting customer with ID: ${id}`);
+      logger.log(`Deleting customer with ID: ${id}`);
       
       // First, unassign any bottles from this customer
       const { error: unassignError } = await supabase
@@ -318,9 +319,9 @@ function Customers({ profile }) {
         .eq('organization_id', organization.id);
       
       if (unassignError) {
-        console.warn('Warning: Could not unassign bottles from customer:', unassignError);
+        logger.warn('Warning: Could not unassign bottles from customer:', unassignError);
       } else {
-        console.log('Successfully unassigned bottles from customer');
+        logger.log('Successfully unassigned bottles from customer');
       }
       
       // Delete the customer
@@ -336,7 +337,7 @@ function Customers({ profile }) {
         throw new Error('Customer not found or already deleted');
       }
       
-      console.log(`Customer ${id} deleted successfully from database`);
+      logger.log(`Customer ${id} deleted successfully from database`);
       setSuccessMsg('Customer deleted successfully from database!');
       setSelected(prev => prev.filter(sid => sid !== id));
       
@@ -352,7 +353,7 @@ function Customers({ profile }) {
       setCustomers(data || []);
       setTotalCount(prev => prev - 1);
     } catch (err) {
-      console.error('Error deleting customer:', err);
+      logger.error('Error deleting customer:', err);
       setError(`Failed to delete customer: ${err.message}`);
     }
   };
@@ -377,7 +378,7 @@ function Customers({ profile }) {
     
     setError(null);
     try {
-      console.log(`Bulk deleting ${selected.length} customers:`, selected);
+      logger.log(`Bulk deleting ${selected.length} customers:`, selected);
       
       // First, unassign any bottles from these customers
       const { error: unassignError } = await supabase
@@ -387,9 +388,9 @@ function Customers({ profile }) {
         .eq('organization_id', organization.id);
       
       if (unassignError) {
-        console.warn('Warning: Could not unassign bottles from customers:', unassignError);
+        logger.warn('Warning: Could not unassign bottles from customers:', unassignError);
       } else {
-        console.log('Successfully unassigned bottles from customers');
+        logger.log('Successfully unassigned bottles from customers');
       }
       
       // Delete the customers
@@ -405,7 +406,7 @@ function Customers({ profile }) {
         throw new Error('No customers found or already deleted');
       }
       
-      console.log(`${count} customers deleted successfully from database`);
+      logger.log(`${count} customers deleted successfully from database`);
       setSuccessMsg(`${count} customers deleted successfully from database!`);
       setSelected([]);
       
@@ -421,7 +422,7 @@ function Customers({ profile }) {
       setCustomers(data || []);
       setTotalCount(prev => prev - count);
     } catch (err) {
-      console.error('Error bulk deleting customers:', err);
+      logger.error('Error bulk deleting customers:', err);
       setError(`Failed to delete customers: ${err.message}`);
     }
   };

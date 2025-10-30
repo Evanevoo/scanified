@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 export class OrganizationDeletionService {
@@ -10,7 +11,7 @@ export class OrganizationDeletionService {
    */
   static async softDeleteOrganization(organizationId, reason = '', userId = null) {
     try {
-      console.log('🗑️ Soft deleting organization:', organizationId);
+      logger.log('🗑️ Soft deleting organization:', organizationId);
       
       // First, get the organization info
       const { data: orgData, error: orgError } = await supabase
@@ -27,7 +28,7 @@ export class OrganizationDeletionService {
         return { success: false, message: 'Organization is already deleted' };
       }
 
-      console.log('📋 Soft deleting organization:', orgData.name);
+      logger.log('📋 Soft deleting organization:', orgData.name);
 
       // Step 1: Get all users in this organization
       const { data: users, error: usersError } = await supabase
@@ -36,10 +37,10 @@ export class OrganizationDeletionService {
         .eq('organization_id', organizationId);
 
       if (usersError) {
-        console.error('Error fetching users:', usersError);
+        logger.error('Error fetching users:', usersError);
       }
 
-      console.log(`Found ${users?.length || 0} users to permanently delete`);
+      logger.log(`Found ${users?.length || 0} users to permanently delete`);
 
       // Step 2: PERMANENTLY DELETE user profiles
       // This allows the email addresses to be reused
@@ -50,13 +51,13 @@ export class OrganizationDeletionService {
           .eq('organization_id', organizationId);
 
         if (deleteError) {
-          console.error('Error deleting user profiles:', deleteError);
+          logger.error('Error deleting user profiles:', deleteError);
           return { 
             success: false, 
             message: `Failed to delete user profiles: ${deleteError.message}` 
           };
         } else {
-          console.log(`✅ Permanently deleted ${users.length} user profiles`);
+          logger.log(`✅ Permanently deleted ${users.length} user profiles`);
         }
       }
 
@@ -67,7 +68,7 @@ export class OrganizationDeletionService {
         .eq('organization_id', organizationId);
 
       if (invitesError) {
-        console.warn('Error deleting invites:', invitesError);
+        logger.warn('Error deleting invites:', invitesError);
       }
 
       // Step 4: Update organization to mark as deleted (soft delete for data retention)
@@ -84,7 +85,7 @@ export class OrganizationDeletionService {
         throw updateError;
       }
 
-      console.log('✅ Organization soft deleted successfully');
+      logger.log('✅ Organization soft deleted successfully');
 
       return {
         success: true,
@@ -92,7 +93,7 @@ export class OrganizationDeletionService {
       };
 
     } catch (error) {
-      console.error('❌ Error soft deleting organization:', error);
+      logger.error('❌ Error soft deleting organization:', error);
       return {
         success: false,
         message: `Failed to delete organization: ${error.message}`
@@ -107,7 +108,7 @@ export class OrganizationDeletionService {
    */
   static async restoreOrganization(organizationId) {
     try {
-      console.log('♻️ Restoring organization:', organizationId);
+      logger.log('♻️ Restoring organization:', organizationId);
       
       // First, get the organization info
       const { data: orgData, error: orgError } = await supabase
@@ -124,7 +125,7 @@ export class OrganizationDeletionService {
         return { success: false, message: 'Organization is not deleted' };
       }
 
-      console.log('📋 Restoring organization:', orgData.name);
+      logger.log('📋 Restoring organization:', orgData.name);
 
       // Update organization to mark as active
       const { error: updateError } = await supabase
@@ -140,7 +141,7 @@ export class OrganizationDeletionService {
         throw updateError;
       }
 
-      console.log('✅ Organization restored successfully');
+      logger.log('✅ Organization restored successfully');
 
       return {
         success: true,
@@ -148,7 +149,7 @@ export class OrganizationDeletionService {
       };
 
     } catch (error) {
-      console.error('❌ Error restoring organization:', error);
+      logger.error('❌ Error restoring organization:', error);
       return {
         success: false,
         message: `Failed to restore organization: ${error.message}`
@@ -163,7 +164,7 @@ export class OrganizationDeletionService {
    */
   static async permanentlyDeleteOrganization(organizationId) {
     try {
-      console.log('🗑️ Starting safe organization deletion for:', organizationId);
+      logger.log('🗑️ Starting safe organization deletion for:', organizationId);
       
       // First, get the organization info
       const { data: orgData, error: orgError } = await supabase
@@ -176,7 +177,7 @@ export class OrganizationDeletionService {
         return { success: false, message: 'Organization not found' };
       }
 
-      console.log('📋 Deleting organization:', orgData.name);
+      logger.log('📋 Deleting organization:', orgData.name);
 
       const deletedCounts = {};
 
@@ -188,7 +189,7 @@ export class OrganizationDeletionService {
         .delete({ count: 'exact' })
         .eq('organization_id', organizationId);
       deletedCounts.bottle_scans = bottleScansCount || 0;
-      console.log(`✅ Deleted ${deletedCounts.bottle_scans} bottle scans`);
+      logger.log(`✅ Deleted ${deletedCounts.bottle_scans} bottle scans`);
 
       // 2. Delete bottles
       const { count: bottlesCount } = await supabase
@@ -196,7 +197,7 @@ export class OrganizationDeletionService {
         .delete({ count: 'exact' })
         .eq('organization_id', organizationId);
       deletedCounts.bottles = bottlesCount || 0;
-      console.log(`✅ Deleted ${deletedCounts.bottles} bottles`);
+      logger.log(`✅ Deleted ${deletedCounts.bottles} bottles`);
 
       // 3. Delete customers
       const { count: customersCount } = await supabase
@@ -204,7 +205,7 @@ export class OrganizationDeletionService {
         .delete({ count: 'exact' })
         .eq('organization_id', organizationId);
       deletedCounts.customers = customersCount || 0;
-      console.log(`✅ Deleted ${deletedCounts.customers} customers`);
+      logger.log(`✅ Deleted ${deletedCounts.customers} customers`);
 
       // 4. Delete rentals
       const { count: rentalsCount } = await supabase
@@ -212,7 +213,7 @@ export class OrganizationDeletionService {
         .delete({ count: 'exact' })
         .eq('organization_id', organizationId);
       deletedCounts.rentals = rentalsCount || 0;
-      console.log(`✅ Deleted ${deletedCounts.rentals} rentals`);
+      logger.log(`✅ Deleted ${deletedCounts.rentals} rentals`);
 
       // 5. Delete invoices
       const { count: invoicesCount } = await supabase
@@ -220,7 +221,7 @@ export class OrganizationDeletionService {
         .delete({ count: 'exact' })
         .eq('organization_id', organizationId);
       deletedCounts.invoices = invoicesCount || 0;
-      console.log(`✅ Deleted ${deletedCounts.invoices} invoices`);
+      logger.log(`✅ Deleted ${deletedCounts.invoices} invoices`);
 
       // 6. Delete organization invites
       const { count: invitesCount } = await supabase
@@ -228,7 +229,7 @@ export class OrganizationDeletionService {
         .delete({ count: 'exact' })
         .eq('organization_id', organizationId);
       deletedCounts.organization_invites = invitesCount || 0;
-      console.log(`✅ Deleted ${deletedCounts.organization_invites} organization invites`);
+      logger.log(`✅ Deleted ${deletedCounts.organization_invites} organization invites`);
 
       // 7. Delete profiles (users)
       const { count: profilesCount } = await supabase
@@ -236,7 +237,7 @@ export class OrganizationDeletionService {
         .delete({ count: 'exact' })
         .eq('organization_id', organizationId);
       deletedCounts.profiles = profilesCount || 0;
-      console.log(`✅ Deleted ${deletedCounts.profiles} user profiles`);
+      logger.log(`✅ Deleted ${deletedCounts.profiles} user profiles`);
 
       // 8. Finally, delete the organization
       const { error: deleteError } = await supabase
@@ -248,7 +249,7 @@ export class OrganizationDeletionService {
         throw deleteError;
       }
 
-      console.log('🎉 Organization deletion completed successfully');
+      logger.log('🎉 Organization deletion completed successfully');
 
       return {
         success: true,
@@ -257,7 +258,7 @@ export class OrganizationDeletionService {
       };
 
     } catch (error) {
-      console.error('❌ Error deleting organization:', error);
+      logger.error('❌ Error deleting organization:', error);
       return {
         success: false,
         message: `Failed to delete organization: ${error.message}`
@@ -319,7 +320,7 @@ export class OrganizationDeletionService {
       };
 
     } catch (error) {
-      console.error('Error getting deletion preview:', error);
+      logger.error('Error getting deletion preview:', error);
       return {
         success: false,
         message: `Failed to get deletion preview: ${error.message}`

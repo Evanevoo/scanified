@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
@@ -30,7 +31,7 @@ export default function FailedSalesOrderImports() {
       if (error) throw error;
       setData(failedImports || []);
     } catch (error) {
-      console.error('Error fetching failed imports:', error);
+      logger.error('Error fetching failed imports:', error);
       setData([]);
     } finally {
       setLoading(false);

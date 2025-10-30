@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Button, Grid, Card, CardContent, CardActions,
@@ -67,7 +68,7 @@ export default function OrganizationTools() {
     setLoading(true);
     try {
       if (!organization?.id) {
-        console.error('No organization ID available');
+        logger.error('No organization ID available');
         return;
       }
 
@@ -104,7 +105,7 @@ export default function OrganizationTools() {
       const deliveries = deliveriesResult.status === 'fulfilled' ? (deliveriesResult.value.data || []) : [];
       const locations = locationsResult.status === 'fulfilled' ? (locationsResult.value.data || []) : [];
       
-      console.log('Organization Tools - Data loaded:', {
+      logger.log('Organization Tools - Data loaded:', {
         customers: customers.length,
         bottles: bottles.length,
         deliveries: deliveries.length,
@@ -115,22 +116,22 @@ export default function OrganizationTools() {
       
       // Enhanced error logging
       if (customersResult.status === 'rejected') {
-        console.error('❌ Customers query failed:', customersResult.reason);
+        logger.error('❌ Customers query failed:', customersResult.reason);
       } else if (customersResult.status === 'fulfilled') {
-        console.log('✅ Customers query successful:', {
+        logger.log('✅ Customers query successful:', {
           count: customers.length,
           error: customersResult.value.error,
           data: customers.slice(0, 3) // Show first 3 customers
         });
       }
       
-      if (bottlesResult.status === 'rejected') console.error('❌ Bottles query failed:', bottlesResult.reason);
-      if (deliveriesResult.status === 'rejected') console.error('❌ Deliveries query failed:', deliveriesResult.reason);
-      if (locationsResult.status === 'rejected') console.error('❌ Locations query failed:', locationsResult.reason);
+      if (bottlesResult.status === 'rejected') logger.error('❌ Bottles query failed:', bottlesResult.reason);
+      if (deliveriesResult.status === 'rejected') logger.error('❌ Deliveries query failed:', deliveriesResult.reason);
+      if (locationsResult.status === 'rejected') logger.error('❌ Locations query failed:', locationsResult.reason);
 
       // If no customers found, try a broader query to debug
       if (customers.length === 0) {
-        console.log('🔍 No customers found for organization, running debug queries...');
+        logger.log('🔍 No customers found for organization, running debug queries...');
         
         // Check if customers table has any data at all - Use same pattern as Customers page
         const { data: allCustomers, error: allCustomersError } = await supabase
@@ -139,7 +140,7 @@ export default function OrganizationTools() {
           .eq('organization_id', organization.id)
           .limit(5);
         
-        console.log('🔍 All customers in database:', {
+        logger.log('🔍 All customers in database:', {
           count: allCustomers?.length || 0,
           error: allCustomersError,
           sample: allCustomers
@@ -151,7 +152,7 @@ export default function OrganizationTools() {
           .select('organization_id')
           .not('organization_id', 'is', null);
         
-        console.log('🔍 Customers with organization IDs:', {
+        logger.log('🔍 Customers with organization IDs:', {
           count: customersWithOrgs?.length || 0,
           error: orgError,
           uniqueOrgs: [...new Set(customersWithOrgs?.map(c => c.organization_id) || [])]
@@ -379,7 +380,7 @@ export default function OrganizationTools() {
         locations: locations
       });
     } catch (error) {
-      console.error('Error loading validation results:', error);
+      logger.error('Error loading validation results:', error);
       // Set empty results on error
       setValidationResults({
         customers: { valid: 0, invalid: 0, issues: [] },
@@ -435,9 +436,9 @@ export default function OrganizationTools() {
       await loadValidationResults();
       setEditingBottle(null);
       
-      console.log('Bottle updated successfully');
+      logger.log('Bottle updated successfully');
     } catch (error) {
-      console.error('Error updating bottle:', error);
+      logger.error('Error updating bottle:', error);
       alert('Failed to update bottle: ' + error.message);
     } finally {
       setSaveLoading(false);
@@ -490,9 +491,9 @@ export default function OrganizationTools() {
       setBulkCleanupDialog(false);
       
       alert(`Successfully deleted ${invalidBottles.length} invalid bottles!`);
-      console.log('Bulk cleanup completed successfully');
+      logger.log('Bulk cleanup completed successfully');
     } catch (error) {
-      console.error('Error during bulk cleanup:', error);
+      logger.error('Error during bulk cleanup:', error);
       alert('Failed to clean up bottles: ' + error.message);
     } finally {
       setCleanupLoading(false);

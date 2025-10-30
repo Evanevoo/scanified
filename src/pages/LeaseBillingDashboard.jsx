@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -78,7 +79,7 @@ export default function LeaseBillingDashboard() {
         fetchRecentBilling()
       ]);
     } catch (error) {
-      console.error('Error fetching billing data:', error);
+      logger.error('Error fetching billing data:', error);
     } finally {
       setLoading(false);
     }
@@ -103,7 +104,7 @@ export default function LeaseBillingDashboard() {
         agreementsOverdue: 0 // Will be calculated from overdue billing
       });
     } catch (error) {
-      console.error('Error fetching billing stats:', error);
+      logger.error('Error fetching billing stats:', error);
     }
   };
 
@@ -126,7 +127,7 @@ export default function LeaseBillingDashboard() {
         agreementsDue: data?.length || 0
       }));
     } catch (error) {
-      console.error('Error fetching due billing:', error);
+      logger.error('Error fetching due billing:', error);
     }
   };
 
@@ -140,7 +141,7 @@ export default function LeaseBillingDashboard() {
         agreementsOverdue: overdue.length
       }));
     } catch (error) {
-      console.error('Error fetching overdue billing:', error);
+      logger.error('Error fetching overdue billing:', error);
     }
   };
 
@@ -162,7 +163,7 @@ export default function LeaseBillingDashboard() {
       if (error) throw error;
       setRecentBilling(data || []);
     } catch (error) {
-      console.error('Error fetching recent billing:', error);
+      logger.error('Error fetching recent billing:', error);
     }
   };
 
@@ -182,7 +183,7 @@ export default function LeaseBillingDashboard() {
       
       await fetchBillingData();
     } catch (error) {
-      console.error('Error processing billing:', error);
+      logger.error('Error processing billing:', error);
       setSnackbar({
         open: true,
         message: 'Error processing billing',
@@ -211,7 +212,7 @@ export default function LeaseBillingDashboard() {
       setPaymentData({ payment_method: '', payment_reference: '' });
       await fetchBillingData();
     } catch (error) {
-      console.error('Error marking as paid:', error);
+      logger.error('Error marking as paid:', error);
       setSnackbar({
         open: true,
         message: 'Error recording payment',

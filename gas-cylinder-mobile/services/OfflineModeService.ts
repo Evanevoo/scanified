@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../supabase';
 
@@ -35,7 +36,7 @@ class OfflineModeService {
     if (this.isInitialized) return;
 
     try {
-      console.log('📱 Initializing OfflineModeService');
+      logger.log('📱 Initializing OfflineModeService');
 
       // Load offline mode settings
       await this.loadOfflineModeSettings();
@@ -44,9 +45,9 @@ class OfflineModeService {
       await this.loadOfflineData();
 
       this.isInitialized = true;
-      console.log('📱 OfflineModeService initialized successfully');
+      logger.log('📱 OfflineModeService initialized successfully');
     } catch (error) {
-      console.error('❌ Failed to initialize OfflineModeService:', error);
+      logger.error('❌ Failed to initialize OfflineModeService:', error);
     }
   }
 
@@ -59,10 +60,10 @@ class OfflineModeService {
       if (settings) {
         const parsedSettings = JSON.parse(settings);
         this.isOfflineMode = parsedSettings.offlineMode === true;
-        console.log('📱 Offline mode setting loaded:', this.isOfflineMode);
+        logger.log('📱 Offline mode setting loaded:', this.isOfflineMode);
       }
     } catch (error) {
-      console.error('Error loading offline mode settings:', error);
+      logger.error('Error loading offline mode settings:', error);
     }
   }
 
@@ -74,7 +75,7 @@ class OfflineModeService {
       const data = await AsyncStorage.getItem('offline_data');
       if (data) {
         this.offlineData = JSON.parse(data);
-        console.log('📱 Offline data loaded:', {
+        logger.log('📱 Offline data loaded:', {
           scans: this.offlineData.scans.length,
           customers: this.offlineData.customers.length,
           cylinders: this.offlineData.cylinders.length,
@@ -83,7 +84,7 @@ class OfflineModeService {
         });
       }
     } catch (error) {
-      console.error('Error loading offline data:', error);
+      logger.error('Error loading offline data:', error);
     }
   }
 
@@ -94,7 +95,7 @@ class OfflineModeService {
     try {
       await AsyncStorage.setItem('offline_data', JSON.stringify(this.offlineData));
     } catch (error) {
-      console.error('Error saving offline data:', error);
+      logger.error('Error saving offline data:', error);
     }
   }
 
@@ -120,10 +121,10 @@ class OfflineModeService {
         await AsyncStorage.setItem('app_settings', JSON.stringify(parsedSettings));
       }
     } catch (error) {
-      console.error('Error updating offline mode setting:', error);
+      logger.error('Error updating offline mode setting:', error);
     }
 
-    console.log('📱 Offline mode', enabled ? 'enabled' : 'disabled');
+    logger.log('📱 Offline mode', enabled ? 'enabled' : 'disabled');
   }
 
   /**
@@ -131,7 +132,7 @@ class OfflineModeService {
    */
   async storeOfflineData(type: keyof OfflineData, data: any): Promise<void> {
     if (!this.isOfflineMode) {
-      console.log('📱 Offline mode disabled, not storing data locally');
+      logger.log('📱 Offline mode disabled, not storing data locally');
       return;
     }
 
@@ -147,9 +148,9 @@ class OfflineModeService {
       this.offlineData[type].push(offlineItem);
       await this.saveOfflineData();
 
-      console.log(`📱 Stored ${type} data offline:`, offlineItem.offline_id);
+      logger.log(`📱 Stored ${type} data offline:`, offlineItem.offline_id);
     } catch (error) {
-      console.error(`Error storing ${type} data offline:`, error);
+      logger.error(`Error storing ${type} data offline:`, error);
     }
   }
 
@@ -227,7 +228,7 @@ class OfflineModeService {
     try {
       if (type) {
         this.offlineData[type] = [];
-        console.log(`📱 Cleared offline ${type} data`);
+        logger.log(`📱 Cleared offline ${type} data`);
       } else {
         this.offlineData = {
           scans: [],
@@ -236,12 +237,12 @@ class OfflineModeService {
           rentals: [],
           fills: [],
         };
-        console.log('📱 Cleared all offline data');
+        logger.log('📱 Cleared all offline data');
       }
       
       await this.saveOfflineData();
     } catch (error) {
-      console.error('Error clearing offline data:', error);
+      logger.error('Error clearing offline data:', error);
     }
   }
 
@@ -257,7 +258,7 @@ class OfflineModeService {
     let syncedCount = 0;
 
     try {
-      console.log('📱 Starting offline data sync');
+      logger.log('📱 Starting offline data sync');
 
       // Get current user's organization
       const { data: { user } } = await supabase.auth.getUser();
@@ -377,7 +378,7 @@ class OfflineModeService {
         await this.clearOfflineData();
       }
 
-      console.log(`📱 Offline data sync complete: ${syncedCount} items synced, ${errors.length} errors`);
+      logger.log(`📱 Offline data sync complete: ${syncedCount} items synced, ${errors.length} errors`);
       
       return {
         success: errors.length === 0,
@@ -385,7 +386,7 @@ class OfflineModeService {
         errors,
       };
     } catch (error) {
-      console.error('Error syncing offline data:', error);
+      logger.error('Error syncing offline data:', error);
       return {
         success: false,
         syncedCount,
@@ -408,7 +409,7 @@ class OfflineModeService {
 
       return { size: sizeInMB, needsCleanup };
     } catch (error) {
-      console.error('Error checking storage size:', error);
+      logger.error('Error checking storage size:', error);
       return { size: 0, needsCleanup: false };
     }
   }
@@ -421,7 +422,7 @@ class OfflineModeService {
       const { needsCleanup } = await this.checkStorageSize();
       if (!needsCleanup) return;
 
-      console.log('📱 Cleaning up old offline data');
+      logger.log('📱 Cleaning up old offline data');
 
       // Remove oldest 25% of data from each category
       for (const type of Object.keys(this.offlineData) as (keyof OfflineData)[]) {
@@ -433,9 +434,9 @@ class OfflineModeService {
       }
 
       await this.saveOfflineData();
-      console.log('📱 Old offline data cleaned up');
+      logger.log('📱 Old offline data cleaned up');
     } catch (error) {
-      console.error('Error cleaning up old data:', error);
+      logger.error('Error cleaning up old data:', error);
     }
   }
 
@@ -461,7 +462,7 @@ class OfflineModeService {
    */
   cleanup(): void {
     this.isInitialized = false;
-    console.log('📱 OfflineModeService cleaned up');
+    logger.log('📱 OfflineModeService cleaned up');
   }
 }
 

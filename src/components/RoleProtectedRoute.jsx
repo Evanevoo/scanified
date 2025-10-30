@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -32,7 +33,7 @@ const RoleProtectedRoute = ({ children, allowedRoles = [] }) => {
 
   // Debug logging (development only)
   if (process.env.NODE_ENV === 'development') {
-    console.log('RoleProtectedRoute Debug:', {
+    logger.log('RoleProtectedRoute Debug:', {
       userRole,
       allowedRoles,
       profileRole: profile.role,

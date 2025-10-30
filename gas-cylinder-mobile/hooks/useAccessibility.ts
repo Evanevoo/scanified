@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { useState, useEffect } from 'react';
 import { customizationService, AccessibilityOptions } from '../services/customizationService';
 
@@ -29,7 +30,7 @@ export function useAccessibility() {
         setAccessibilityOptions(settings.accessibility);
       }
     } catch (error) {
-      console.error('Failed to load accessibility settings:', error);
+      logger.error('Failed to load accessibility settings:', error);
     } finally {
       setIsLoading(false);
     }
@@ -83,7 +84,7 @@ export function useAccessibility() {
         setAccessibilityOptions(updatedSettings.accessibility);
       }
     } catch (error) {
-      console.error('Failed to update accessibility option:', error);
+      logger.error('Failed to update accessibility option:', error);
     }
   };
 

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box,
@@ -197,12 +198,12 @@ export default function WebScanning() {
 
       scanner.render(
         (decodedText) => handleScanSuccess(decodedText),
-        (error) => console.debug('Scan error:', error)
+        (error) => logger.debug('Scan error:', error)
       );
 
       scannerRef.current = scanner;
     } catch (error) {
-      console.error('Failed to initialize scanner:', error);
+      logger.error('Failed to initialize scanner:', error);
     }
   }, []);
 
@@ -352,7 +353,7 @@ export default function WebScanning() {
         });
 
       if (scanError) {
-        console.warn('Failed to create scan record:', scanError);
+        logger.warn('Failed to create scan record:', scanError);
       }
     } else {
       // Queue for offline sync
@@ -399,7 +400,7 @@ export default function WebScanning() {
           .eq('organization_id', profile.organization_id);
 
         if (updateError) {
-          console.error('Failed to sync scan:', updateError);
+          logger.error('Failed to sync scan:', updateError);
           continue;
         }
 
@@ -418,14 +419,14 @@ export default function WebScanning() {
           });
 
         if (scanError) {
-          console.error('Failed to create scan record:', scanError);
+          logger.error('Failed to create scan record:', scanError);
         }
       }
 
       // Clear offline queue
       setOfflineQueue([]);
     } catch (error) {
-      console.error('Sync error:', error);
+      logger.error('Sync error:', error);
     }
   }, [isOnline, offlineQueue, profile]);
 

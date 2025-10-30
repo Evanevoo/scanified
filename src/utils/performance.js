@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 /**
  * Performance monitoring utilities for the gas cylinder application
  */
@@ -96,7 +97,7 @@ class PerformanceMonitor {
     // Log to console in development
     if (import.meta.env.DEV) {
       const color = duration > 1000 ? '🔴' : duration > 500 ? '🟡' : '🟢';
-      console.log(`${color} ${name}: ${duration.toFixed(2)}ms`);
+      logger.log(`${color} ${name}: ${duration.toFixed(2)}ms`);
     }
     
     // Store for analytics
@@ -263,7 +264,7 @@ class PerformanceMonitor {
         try {
           callback(data);
         } catch (error) {
-          console.error('Performance observer error:', error);
+          logger.error('Performance observer error:', error);
         }
       });
     }

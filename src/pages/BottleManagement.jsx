@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
@@ -108,7 +109,7 @@ const BottleManagement = () => {
 
       setBottles(data || []);
     } catch (error) {
-      console.error('Error loading bottles:', error);
+      logger.error('Error loading bottles:', error);
       setSnackbar({ open: true, message: 'Failed to load bottles', severity: 'error' });
     } finally {
       setLoading(false);
@@ -126,7 +127,7 @@ const BottleManagement = () => {
       if (error) throw error;
       setCustomers(data || []);
     } catch (error) {
-      console.error('Error loading customers:', error);
+      logger.error('Error loading customers:', error);
     }
   };
 
@@ -173,7 +174,7 @@ const BottleManagement = () => {
         // Show first 5 rows as preview
         setUploadPreview(jsonData.slice(0, 5));
       } catch (error) {
-        console.error('Error reading file:', error);
+        logger.error('Error reading file:', error);
         setSnackbar({ open: true, message: 'Invalid file format', severity: 'error' });
       }
     };
@@ -223,8 +224,8 @@ const BottleManagement = () => {
 
           // Debug: Log available column names
           if (jsonData.length > 0) {
-            console.log('Available Excel columns:', Object.keys(jsonData[0]));
-            console.log('Sample row data:', jsonData[0]);
+            logger.log('Available Excel columns:', Object.keys(jsonData[0]));
+            logger.log('Sample row data:', jsonData[0]);
           }
 
           jsonData.forEach(row => {
@@ -286,7 +287,7 @@ const BottleManagement = () => {
 
           // Create customers first
           if (customersToCreate.length > 0) {
-            console.log(`Creating ${customersToCreate.length} customers...`);
+            logger.log(`Creating ${customersToCreate.length} customers...`);
             
             const { error: customerError } = await supabase
               .from('customers')
@@ -296,11 +297,11 @@ const BottleManagement = () => {
               });
 
             if (customerError) {
-              console.error('Customer creation error:', customerError);
+              logger.error('Customer creation error:', customerError);
               
               // Handle duplicate key errors by querying existing customers
               if (customerError.code === '23505') {
-                console.log('Handling duplicate customers - querying existing ones...');
+                logger.log('Handling duplicate customers - querying existing ones...');
                 
                 // Query for existing customers that might have caused the duplicate error
                 const existingCustomerIds = customersToCreate.map(c => c.CustomerListID);
@@ -314,7 +315,7 @@ const BottleManagement = () => {
                   existingCustomers.forEach(customer => {
                     customerMap.set(customer.CustomerListID, customer.name);
                   });
-                  console.log(`Added ${existingCustomers.length} existing customers to map`);
+                  logger.log(`Added ${existingCustomers.length} existing customers to map`);
                 }
               }
             } else {
@@ -322,7 +323,7 @@ const BottleManagement = () => {
               customersToCreate.forEach(customer => {
                 customerMap.set(customer.CustomerListID, customer.name);
               });
-              console.log(`Added ${customersToCreate.length} new customers to map`);
+              logger.log(`Added ${customersToCreate.length} new customers to map`);
             }
           }
 
@@ -351,7 +352,7 @@ const BottleManagement = () => {
           const bottleBarcodes = bottlesToInsert.map(b => b.barcode_number).filter(b => b && b.trim() !== '');
           const bottleSerials = bottlesToInsert.map(b => b.serial_number).filter(s => s && s.trim() !== '');
           
-          console.log(`Checking for duplicates: ${bottleBarcodes.length} barcodes, ${bottleSerials.length} serials`);
+          logger.log(`Checking for duplicates: ${bottleBarcodes.length} barcodes, ${bottleSerials.length} serials`);
           
           let existingBottles = [];
           if (bottleBarcodes.length > 0 || bottleSerials.length > 0) {
@@ -362,7 +363,7 @@ const BottleManagement = () => {
               .eq('organization_id', organization.id);
             
             existingBottles = allExisting || [];
-            console.log(`Found ${existingBottles.length} total existing bottles in database`);
+            logger.log(`Found ${existingBottles.length} total existing bottles in database`);
           }
           
           // Filter out bottles that already exist (check by barcode first, then serial)
@@ -389,13 +390,13 @@ const BottleManagement = () => {
                 serial: serial || 'N/A',
                 reason: hasExistingBarcode ? 'barcode' : 'serial'
               });
-              console.log(`Skipping duplicate bottle: ${barcode || serial} (${hasExistingBarcode ? 'barcode' : 'serial'} match)`);
+              logger.log(`Skipping duplicate bottle: ${barcode || serial} (${hasExistingBarcode ? 'barcode' : 'serial'} match)`);
             } else {
               newBottles.push(bottle);
             }
           });
           
-          console.log(`Found ${duplicates.length} duplicates, inserting ${newBottles.length} new bottles`);
+          logger.log(`Found ${duplicates.length} duplicates, inserting ${newBottles.length} new bottles`);
 
           // Insert only new bottles
           if (newBottles.length > 0) {
@@ -407,7 +408,7 @@ const BottleManagement = () => {
                 .insert(batch);
 
               if (error) {
-                console.error('Error inserting batch:', error);
+                logger.error('Error inserting batch:', error);
                 throw error;
               }
             }
@@ -426,7 +427,7 @@ const BottleManagement = () => {
           loadCustomers();
 
         } catch (error) {
-          console.error('Error processing file:', error);
+          logger.error('Error processing file:', error);
           setSnackbar({ open: true, message: 'Failed to upload bottles', severity: 'error' });
         } finally {
           setLoading(false);
@@ -434,7 +435,7 @@ const BottleManagement = () => {
       };
       reader.readAsArrayBuffer(uploadFile);
     } catch (error) {
-      console.error('Error uploading bottles:', error);
+      logger.error('Error uploading bottles:', error);
       setSnackbar({ open: true, message: 'Failed to upload bottles', severity: 'error' });
       setLoading(false);
     }
@@ -469,7 +470,7 @@ const BottleManagement = () => {
       setEditingBottle(null);
       loadBottles();
     } catch (error) {
-      console.error('Error updating bottle:', error);
+      logger.error('Error updating bottle:', error);
       setSnackbar({ open: true, message: 'Failed to update bottle', severity: 'error' });
     }
   };
@@ -477,8 +478,8 @@ const BottleManagement = () => {
   const handleDeleteBottles = async () => {
     try {
       const bottleIds = bottlesToDelete.map(b => b.id);
-      console.log('Deleting bottles:', bottlesToDelete.map(b => ({ id: b.id, barcode: b.barcode_number })));
-      console.log('Bottle IDs to delete:', bottleIds);
+      logger.log('Deleting bottles:', bottlesToDelete.map(b => ({ id: b.id, barcode: b.barcode_number })));
+      logger.log('Bottle IDs to delete:', bottleIds);
       
       // Check if we have valid IDs
       if (bottleIds.length === 0) {
@@ -488,7 +489,7 @@ const BottleManagement = () => {
       // Check for invalid IDs
       const invalidIds = bottleIds.filter(id => !id || typeof id !== 'string');
       if (invalidIds.length > 0) {
-        console.error('Invalid bottle IDs found:', invalidIds);
+        logger.error('Invalid bottle IDs found:', invalidIds);
         throw new Error('Some bottles have invalid IDs');
       }
 
@@ -497,11 +498,11 @@ const BottleManagement = () => {
       let successCount = 0;
       let errorCount = 0;
       
-      console.log(`Deleting ${bottleIds.length} bottles in batches of ${batchSize}...`);
+      logger.log(`Deleting ${bottleIds.length} bottles in batches of ${batchSize}...`);
       
       for (let i = 0; i < bottleIds.length; i += batchSize) {
         const batch = bottleIds.slice(i, i + batchSize);
-        console.log(`Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(bottleIds.length/batchSize)} (${batch.length} bottles)`);
+        logger.log(`Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(bottleIds.length/batchSize)} (${batch.length} bottles)`);
         
         try {
           const { error: batchError } = await supabase
@@ -510,7 +511,7 @@ const BottleManagement = () => {
             .in('id', batch);
           
           if (batchError) {
-            console.error(`Batch ${Math.floor(i/batchSize) + 1} failed:`, batchError);
+            logger.error(`Batch ${Math.floor(i/batchSize) + 1} failed:`, batchError);
             // If batch fails, try individual deletions
             for (const bottleId of batch) {
               try {
@@ -520,19 +521,19 @@ const BottleManagement = () => {
                   .eq('id', bottleId);
                 
                 if (individualError) {
-                  console.error(`Failed to delete bottle ${bottleId}:`, individualError);
+                  logger.error(`Failed to delete bottle ${bottleId}:`, individualError);
                   errorCount++;
                 } else {
                   successCount++;
                 }
               } catch (err) {
-                console.error(`Exception deleting bottle ${bottleId}:`, err);
+                logger.error(`Exception deleting bottle ${bottleId}:`, err);
                 errorCount++;
               }
             }
           } else {
             successCount += batch.length;
-            console.log(`Batch ${Math.floor(i/batchSize) + 1} successful: ${batch.length} bottles deleted`);
+            logger.log(`Batch ${Math.floor(i/batchSize) + 1} successful: ${batch.length} bottles deleted`);
           }
           
           // Small delay between batches to avoid overwhelming the database
@@ -540,7 +541,7 @@ const BottleManagement = () => {
             await new Promise(resolve => setTimeout(resolve, 100));
           }
         } catch (err) {
-          console.error(`Exception in batch ${Math.floor(i/batchSize) + 1}:`, err);
+          logger.error(`Exception in batch ${Math.floor(i/batchSize) + 1}:`, err);
           errorCount += batch.length;
         }
       }
@@ -558,7 +559,7 @@ const BottleManagement = () => {
       setBottlesToDelete([]);
       loadBottles();
     } catch (error) {
-      console.error('Error deleting bottles:', error);
+      logger.error('Error deleting bottles:', error);
       
       // Provide more specific error messages
       let errorMessage = 'Failed to delete bottles';
@@ -618,7 +619,7 @@ const BottleManagement = () => {
           });
         }
       } catch (error) {
-        console.error('Error finding customer:', error);
+        logger.error('Error finding customer:', error);
         setSnackbar({ open: true, message: 'Error finding customer', severity: 'error' });
       }
     } else {
@@ -676,7 +677,7 @@ const BottleManagement = () => {
       loadBottles();
       
     } catch (error) {
-      console.error('Error deleting all bottles:', error);
+      logger.error('Error deleting all bottles:', error);
       setSnackbar({ 
         open: true, 
         message: `Failed to delete all bottles: ${error.message}`, 
@@ -736,8 +737,8 @@ const BottleManagement = () => {
             return;
           }
 
-          console.log(`Creating ${missingCustomers.length} missing customers with original CustomerListID...`);
-          console.log('Missing customers:', missingCustomers);
+          logger.log(`Creating ${missingCustomers.length} missing customers with original CustomerListID...`);
+          logger.log('Missing customers:', missingCustomers);
 
           // Create customers
           const customersToCreate = missingCustomers.map(customer => ({
@@ -755,11 +756,11 @@ const BottleManagement = () => {
             });
 
           if (error) {
-            console.error('Error creating missing customers:', error);
+            logger.error('Error creating missing customers:', error);
             setSnackbar({ open: true, message: 'Failed to create missing customers', severity: 'error' });
           } else {
             // Now update bottles to assign them to the newly created customers
-            console.log('Updating bottles with customer assignments...');
+            logger.log('Updating bottles with customer assignments...');
             
             for (const customer of missingCustomers) {
               const { error: updateError } = await supabase
@@ -770,7 +771,7 @@ const BottleManagement = () => {
                 .is('assigned_customer', null);
 
               if (updateError) {
-                console.error(`Error updating bottles for customer ${customer.name}:`, updateError);
+                logger.error(`Error updating bottles for customer ${customer.name}:`, updateError);
               }
             }
 
@@ -782,14 +783,14 @@ const BottleManagement = () => {
             loadBottles(); // Reload to refresh the data
           }
         } catch (error) {
-          console.error('Error creating missing customers:', error);
+          logger.error('Error creating missing customers:', error);
           setSnackbar({ open: true, message: 'Failed to create missing customers', severity: 'error' });
         }
       };
 
       reader.readAsArrayBuffer(uploadFile);
     } catch (error) {
-      console.error('Error creating missing customers:', error);
+      logger.error('Error creating missing customers:', error);
       setSnackbar({ open: true, message: 'Failed to create missing customers', severity: 'error' });
     }
   };

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -110,7 +111,7 @@ export default function LeaseAgreements() {
       if (error) throw error;
       setAgreements(data || []);
     } catch (error) {
-      console.error('Error fetching agreements:', error);
+      logger.error('Error fetching agreements:', error);
       setSnackbar({ open: true, message: 'Error loading agreements', severity: 'error' });
     } finally {
       setLoading(false);
@@ -128,7 +129,7 @@ export default function LeaseAgreements() {
       if (error) throw error;
       setCustomers(data || []);
     } catch (error) {
-      console.error('Error fetching customers:', error);
+      logger.error('Error fetching customers:', error);
     }
   };
 
@@ -156,7 +157,7 @@ export default function LeaseAgreements() {
 
       setStats(stats);
     } catch (error) {
-      console.error('Error fetching stats:', error);
+      logger.error('Error fetching stats:', error);
     }
   };
 
@@ -171,7 +172,7 @@ export default function LeaseAgreements() {
       if (error) throw error;
       setBillingHistory(data || []);
     } catch (error) {
-      console.error('Error fetching billing history:', error);
+      logger.error('Error fetching billing history:', error);
     }
   };
 
@@ -267,7 +268,7 @@ export default function LeaseAgreements() {
       fetchAgreements();
       fetchStats();
     } catch (error) {
-      console.error('Error saving agreement:', error);
+      logger.error('Error saving agreement:', error);
       setSnackbar({ open: true, message: 'Error saving agreement', severity: 'error' });
     }
   };
@@ -286,7 +287,7 @@ export default function LeaseAgreements() {
       fetchAgreements();
       fetchStats();
     } catch (error) {
-      console.error('Error deleting agreement:', error);
+      logger.error('Error deleting agreement:', error);
       setSnackbar({ open: true, message: 'Error deleting agreement', severity: 'error' });
     }
   };

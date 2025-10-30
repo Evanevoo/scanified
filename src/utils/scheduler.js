@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { updateDaysAtLocation } from './daysAtLocationUpdater';
 
 /**
@@ -7,20 +8,20 @@ import { updateDaysAtLocation } from './daysAtLocationUpdater';
 
 // Function to be called by cron job (daily at midnight)
 export const dailyUpdateJob = async () => {
-  console.log('Daily update job started at:', new Date().toISOString());
+  logger.log('Daily update job started at:', new Date().toISOString());
   
   try {
     const result = await updateDaysAtLocation();
     
     if (result.success) {
-      console.log(`Daily update completed successfully. Updated ${result.updated} bottles out of ${result.total} total.`);
+      logger.log(`Daily update completed successfully. Updated ${result.updated} bottles out of ${result.total} total.`);
     } else {
-      console.error('Daily update failed:', result.error);
+      logger.error('Daily update failed:', result.error);
     }
     
     return result;
   } catch (error) {
-    console.error('Daily update job error:', error);
+    logger.error('Daily update job error:', error);
     return { success: false, error: error.message };
   }
 };
@@ -90,6 +91,6 @@ export const apiHandler = async (req, res) => {
  * For testing purposes - simulate a day passing
  */
 export const simulateDayPassing = async () => {
-  console.log('Simulating a day passing...');
+  logger.log('Simulating a day passing...');
   return await dailyUpdateJob();
 }; 

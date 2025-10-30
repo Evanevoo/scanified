@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { updateDaysAtLocation } from './daysAtLocationUpdater';
 import { fixBottleData } from './fixBottleData';
 
@@ -19,11 +20,11 @@ class BackgroundService {
    */
   start() {
     if (this.isRunning) {
-      console.log('Background service is already running');
+      logger.log('Background service is already running');
       return;
     }
 
-    console.log('Starting background service for daily updates...');
+    logger.log('Starting background service for daily updates...');
     this.isRunning = true;
 
     // Check if we need to run an update immediately
@@ -71,7 +72,7 @@ class BackgroundService {
       return;
     }
 
-    console.log('Stopping background service...');
+    logger.log('Stopping background service...');
     this.isRunning = false;
 
     if (this.checkInterval) {
@@ -101,7 +102,7 @@ class BackgroundService {
     
     // If we already updated today, skip (but allow manual override)
     if (this.lastUpdateDate === today) {
-      console.log('Already updated today, skipping... (lastUpdateDate:', this.lastUpdateDate, 'today:', today, ')');
+      logger.log('Already updated today, skipping... (lastUpdateDate:', this.lastUpdateDate, 'today:', today, ')');
       return;
     }
 
@@ -109,10 +110,10 @@ class BackgroundService {
     const isNewDay = this.lastUpdateDate && this.lastUpdateDate !== today;
     
     if (isNewDay || !this.lastUpdateDate) {
-      console.log('New day detected, running daily update... (lastUpdateDate:', this.lastUpdateDate, 'today:', today, ')');
+      logger.log('New day detected, running daily update... (lastUpdateDate:', this.lastUpdateDate, 'today:', today, ')');
       await this.runUpdate();
     } else {
-      console.log('No update needed (lastUpdateDate:', this.lastUpdateDate, 'today:', today, ')');
+      logger.log('No update needed (lastUpdateDate:', this.lastUpdateDate, 'today:', today, ')');
     }
   }
 
@@ -121,46 +122,46 @@ class BackgroundService {
    */
   async runUpdate() {
     try {
-      console.log('Running automatic daily update...');
+      logger.log('Running automatic daily update...');
       const result = await updateDaysAtLocation();
       
       if (result.success) {
         this.lastUpdateDate = new Date().toISOString().split('T')[0];
-        console.log(`Automatic update completed: ${result.updated} bottles updated`);
+        logger.log(`Automatic update completed: ${result.updated} bottles updated`);
         
         // Store the last update date in localStorage for persistence
         localStorage.setItem('lastDaysUpdate', this.lastUpdateDate);
-        console.log('Stored last update date:', this.lastUpdateDate);
+        logger.log('Stored last update date:', this.lastUpdateDate);
       } else {
-        console.error('Automatic update failed:', result.error);
+        logger.error('Automatic update failed:', result.error);
         
         // If the error is related to NULL constraints, try to fix the data
         if (result.error && result.error.includes('null value') && result.error.includes('serial_number')) {
-          console.log('Attempting to fix NULL constraint issues...');
+          logger.log('Attempting to fix NULL constraint issues...');
           const fixResult = await fixBottleData();
           
           if (fixResult.success) {
-            console.log('Data fix completed:', fixResult.message);
+            logger.log('Data fix completed:', fixResult.message);
             
             // Try the update again after fixing the data
-            console.log('Retrying automatic update after data fix...');
+            logger.log('Retrying automatic update after data fix...');
             const retryResult = await updateDaysAtLocation();
             
             if (retryResult.success) {
               this.lastUpdateDate = new Date().toISOString().split('T')[0];
-              console.log(`Automatic update completed after data fix: ${retryResult.updated} bottles updated`);
+              logger.log(`Automatic update completed after data fix: ${retryResult.updated} bottles updated`);
               localStorage.setItem('lastDaysUpdate', this.lastUpdateDate);
-              console.log('Stored last update date after retry:', this.lastUpdateDate);
+              logger.log('Stored last update date after retry:', this.lastUpdateDate);
             } else {
-              console.error('Automatic update still failed after data fix:', retryResult.error);
+              logger.error('Automatic update still failed after data fix:', retryResult.error);
             }
           } else {
-            console.error('Data fix failed:', fixResult.error);
+            logger.error('Data fix failed:', fixResult.error);
           }
         }
       }
     } catch (error) {
-      console.error('Error in automatic update:', error);
+      logger.error('Error in automatic update:', error);
     }
   }
 
@@ -168,7 +169,7 @@ class BackgroundService {
    * Force run update (manual trigger)
    */
   async forceUpdate() {
-    console.log('Force update triggered...');
+    logger.log('Force update triggered...');
     this.lastUpdateDate = null; // Reset last update date
     localStorage.removeItem('lastDaysUpdate'); // Clear stored date
     await this.runUpdate();
@@ -178,10 +179,10 @@ class BackgroundService {
    * Reset the service state (useful for debugging)
    */
   reset() {
-    console.log('Resetting background service state...');
+    logger.log('Resetting background service state...');
     this.lastUpdateDate = null;
     localStorage.removeItem('lastDaysUpdate');
-    console.log('Background service state reset complete');
+    logger.log('Background service state reset complete');
   }
 
   /**
@@ -192,7 +193,7 @@ class BackgroundService {
     const storedDate = localStorage.getItem('lastDaysUpdate');
     if (storedDate) {
       this.lastUpdateDate = storedDate;
-      console.log('Loaded last update date:', storedDate);
+      logger.log('Loaded last update date:', storedDate);
     }
 
     // Start the service

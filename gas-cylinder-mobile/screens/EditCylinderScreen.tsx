@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Linking } from 'react-native';
 import { supabase } from '../supabase';
@@ -45,10 +46,10 @@ export default function EditCylinderScreen() {
         .order('name')
         .then(({ data, error }) => {
           if (error) {
-            console.log('❌ Error loading customers:', error);
+            logger.log('❌ Error loading customers:', error);
             setCustomersError('Failed to load customers');
           } else {
-            console.log('✅ Loaded customers:', data?.length || 0);
+            logger.log('✅ Loaded customers:', data?.length || 0);
             setCustomers(data || []);
           }
           setCustomersLoading(false);
@@ -61,7 +62,7 @@ export default function EditCylinderScreen() {
         .order('name')
         .then(({ data, error }) => {
           if (error) {
-            console.log('❌ Error loading locations:', error);
+            logger.log('❌ Error loading locations:', error);
             setLocationsError('Failed to load locations');
             // Fallback to hardcoded locations
             setLocations([
@@ -71,7 +72,7 @@ export default function EditCylinderScreen() {
               { id: 'prince-george', name: 'Prince George', province: 'British Columbia' }
             ]);
           } else {
-            console.log('✅ Loaded locations:', data?.length || 0);
+            logger.log('✅ Loaded locations:', data?.length || 0);
             setLocations(data || []);
           }
           setLocationsLoading(false);

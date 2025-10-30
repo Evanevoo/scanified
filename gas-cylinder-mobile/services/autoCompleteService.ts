@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../supabase';
 
@@ -39,9 +40,9 @@ class AutoCompleteService {
     try {
       await this.loadFromStorage();
       this.isInitialized = true;
-      console.log('🧠 AutoCompleteService initialized successfully');
+      logger.log('🧠 AutoCompleteService initialized successfully');
     } catch (error) {
-      console.error('❌ Failed to initialize AutoCompleteService:', error);
+      logger.error('❌ Failed to initialize AutoCompleteService:', error);
     }
   }
 
@@ -62,7 +63,7 @@ class AutoCompleteService {
         }
       }
     } catch (error) {
-      console.error('Error loading auto-complete data:', error);
+      logger.error('Error loading auto-complete data:', error);
     }
   }
 
@@ -73,7 +74,7 @@ class AutoCompleteService {
     try {
       await AsyncStorage.setItem(`autocomplete_${type}`, JSON.stringify(items));
     } catch (error) {
-      console.error('Error saving auto-complete data:', error);
+      logger.error('Error saving auto-complete data:', error);
     }
   }
 
@@ -268,7 +269,7 @@ class AutoCompleteService {
 
       return suggestions;
     } catch (error) {
-      console.warn('Database suggestions failed:', error);
+      logger.warn('Database suggestions failed:', error);
       return [];
     }
   }
@@ -403,9 +404,9 @@ class AutoCompleteService {
         this.cache.set(key, []);
       }
       
-      console.log('🧠 Auto-complete data cleared');
+      logger.log('🧠 Auto-complete data cleared');
     } catch (error) {
-      console.error('Error clearing auto-complete data:', error);
+      logger.error('Error clearing auto-complete data:', error);
     }
   }
 

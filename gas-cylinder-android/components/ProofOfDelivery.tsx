@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -95,7 +96,7 @@ export default function ProofOfDelivery({
       const { status } = await Location.requestForegroundPermissionsAsync();
       setLocationPermission(status === 'granted');
     } catch (error) {
-      console.error('Location permission error:', error);
+      logger.error('Location permission error:', error);
     }
   };
 
@@ -113,7 +114,7 @@ export default function ProofOfDelivery({
         });
       }
     } catch (error) {
-      console.error('Location error:', error);
+      logger.error('Location error:', error);
     }
   };
 
@@ -130,7 +131,7 @@ export default function ProofOfDelivery({
       setPhoto(photo.uri);
       setShowCamera(false);
     } catch (error) {
-      console.error('Camera error:', error);
+      logger.error('Camera error:', error);
       Alert.alert('Error', 'Failed to take photo');
     }
   };
@@ -147,7 +148,7 @@ export default function ProofOfDelivery({
       setSignature(svg);
       setShowSignature(false);
     } catch (error) {
-      console.error('Signature error:', error);
+      logger.error('Signature error:', error);
       Alert.alert('Error', 'Failed to save signature');
     }
   };
@@ -251,7 +252,7 @@ export default function ProofOfDelivery({
       resetForm();
       onClose();
     } catch (error) {
-      console.error('Proof of delivery error:', error);
+      logger.error('Proof of delivery error:', error);
       Alert.alert('Error', 'Failed to save proof of delivery');
     } finally {
       setIsLoading(false);

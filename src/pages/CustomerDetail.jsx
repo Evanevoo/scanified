@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../supabase/client';
@@ -167,7 +168,7 @@ export default function CustomerDetail() {
       if (error) throw error;
       setRecentCustomers(data || []);
     } catch (error) {
-      console.error('Error loading recent customers:', error);
+      logger.error('Error loading recent customers:', error);
     }
   };
 
@@ -265,7 +266,7 @@ export default function CustomerDetail() {
 
       setTransferHistory(recentTransfers);
     } catch (error) {
-      console.error('Error loading transfer history:', error);
+      logger.error('Error loading transfer history:', error);
       setTransferHistory([]);
     }
   };

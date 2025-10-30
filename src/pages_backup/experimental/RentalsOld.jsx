@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate, Link } from 'react-router-dom';
@@ -168,9 +169,9 @@ function Rentals() {
         .order('created_at', { ascending: false });
       if (bottlesError) throw bottlesError;
       
-      console.log('Rentals: Sample rental data:', rentalsData?.slice(0, 3));
-      console.log('Rentals: Total rentals fetched:', rentalsData?.length || 0);
-      console.log('Rentals: Assigned bottles fetched:', assignedBottles?.length || 0);
+      logger.log('Rentals: Sample rental data:', rentalsData?.slice(0, 3));
+      logger.log('Rentals: Total rentals fetched:', rentalsData?.length || 0);
+      logger.log('Rentals: Assigned bottles fetched:', assignedBottles?.length || 0);
       
       // Combine explicit rentals with assigned bottles
       const allRentalData = [];
@@ -241,8 +242,8 @@ function Rentals() {
       const filteredRentals = rentalsWithCustomer.filter(r => r.customer_id && r.customer_id !== 'Not Set' && r.customer);
       setRentals(filteredRentals);
       
-      console.log('Rentals: Total combined rentals:', filteredRentals.length);
-      console.log('Rentals: Sample combined data:', filteredRentals.slice(0, 3));
+      logger.log('Rentals: Total combined rentals:', filteredRentals.length);
+      logger.log('Rentals: Sample combined data:', filteredRentals.slice(0, 3));
       
     } catch (err) {
       setError(err.message);
@@ -348,7 +349,7 @@ function Rentals() {
             taxCode = 'GST+PST'; // Use combined tax code for location-based rates
           }
         } catch (e) {
-          console.warn('Could not fetch tax rate for location:', edit.location);
+          logger.warn('Could not fetch tax rate for location:', edit.location);
         }
       }
 
@@ -445,7 +446,7 @@ function Rentals() {
       setRentals(data);
       
     } catch (error) {
-      console.error('Error creating rental records:', error);
+      logger.error('Error creating rental records:', error);
       alert('Error creating rental records: ' + error.message);
     }
     setLoading(false);
@@ -804,7 +805,7 @@ function Rentals() {
                                                           taxCode = 'GST+PST';
                                                         }
                                                       } catch (e) {
-                                                        console.warn('Could not fetch tax rate for location:', newLocation);
+                                                        logger.warn('Could not fetch tax rate for location:', newLocation);
                                                       }
                                                     }
                                                     

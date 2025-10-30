@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -52,7 +53,7 @@ export default function CustomizationScreen({ visible, onClose }: CustomizationS
         setCustomTheme(settings.customTheme);
       }
     } catch (error) {
-      console.error('Failed to load settings:', error);
+      logger.error('Failed to load settings:', error);
     }
   };
 
@@ -61,7 +62,7 @@ export default function CustomizationScreen({ visible, onClose }: CustomizationS
       await customizationService.updateCustomSound(soundId, { enabled });
       setSounds(prev => prev.map(s => s.id === soundId ? { ...s, enabled } : s));
     } catch (error) {
-      console.error('Failed to update sound:', error);
+      logger.error('Failed to update sound:', error);
     }
   };
 

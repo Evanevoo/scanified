@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
@@ -79,7 +80,7 @@ export default function AcceptInvite() {
       }
 
     } catch (err) {
-      console.error('Error:', err);
+      logger.error('Error:', err);
       setStatus('error');
       setMessage(err.message || 'Failed to load invite');
     }
@@ -115,7 +116,7 @@ export default function AcceptInvite() {
       await acceptInvite(signupData.user, invite);
 
     } catch (err) {
-      console.error('Error:', err);
+      logger.error('Error:', err);
       setStatus('error');
       setMessage(err.message || 'Failed to accept invite');
     }
@@ -160,7 +161,7 @@ export default function AcceptInvite() {
       }, 2000);
 
     } catch (err) {
-      console.error('Error accepting invite:', err);
+      logger.error('Error accepting invite:', err);
       setStatus('error');
       setMessage(err.message || 'Failed to accept invite');
     }

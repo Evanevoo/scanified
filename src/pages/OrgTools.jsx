@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Button, Grid, Card, CardContent, CardActions,
@@ -103,7 +104,7 @@ export default function OrgTools() {
         }
       });
     } catch (error) {
-      console.error('Error loading validation results:', error);
+      logger.error('Error loading validation results:', error);
     } finally {
       setLoading(false);
     }
@@ -115,9 +116,9 @@ export default function OrgTools() {
       await new Promise(resolve => setTimeout(resolve, 3000));
       setExportDialog(false);
       // In production, this would trigger a file download
-      console.log('Exporting organization data with params:', exportParams);
+      logger.log('Exporting organization data with params:', exportParams);
     } catch (error) {
-      console.error('Error exporting data:', error);
+      logger.error('Error exporting data:', error);
     } finally {
       setLoading(false);
     }
@@ -130,9 +131,9 @@ export default function OrgTools() {
       setValidationDialog(false);
       await loadValidationResults();
       // In production, this would run actual validation queries
-      console.log('Running validation with params:', validationParams);
+      logger.log('Running validation with params:', validationParams);
     } catch (error) {
-      console.error('Error running validation:', error);
+      logger.error('Error running validation:', error);
     } finally {
       setLoading(false);
     }
@@ -144,9 +145,9 @@ export default function OrgTools() {
       await new Promise(resolve => setTimeout(resolve, 5000));
       setCleanupDialog(false);
       // In production, this would run actual cleanup operations
-      console.log('Running cleanup with params:', cleanupParams);
+      logger.log('Running cleanup with params:', cleanupParams);
     } catch (error) {
-      console.error('Error running cleanup:', error);
+      logger.error('Error running cleanup:', error);
     } finally {
       setLoading(false);
     }

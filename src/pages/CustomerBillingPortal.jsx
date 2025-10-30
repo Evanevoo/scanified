@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Card, CardContent, Typography, Button, Grid, LinearProgress,
@@ -68,7 +69,7 @@ export default function CustomerBillingPortal() {
       setPlans(plansData);
 
     } catch (err) {
-      console.error('Error loading billing data:', err);
+      logger.error('Error loading billing data:', err);
       setError(err.message);
     } finally {
       setLoading(false);

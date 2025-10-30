@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, Text, TouchableOpacity, StyleSheet, Modal, 
@@ -66,13 +67,13 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
         .single();
       
       if (error) {
-        console.log('Item not found in bottles table:', error);
+        logger.log('Item not found in bottles table:', error);
         return null;
       }
       
       return data;
     } catch (error) {
-      console.error('Error looking up item details:', error);
+      logger.error('Error looking up item details:', error);
       return null;
     }
   };
@@ -101,7 +102,7 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
       setManualBarcode('');
       setManualEntryModal(false);
     } catch (error) {
-      console.error('Error validating barcode:', error);
+      logger.error('Error validating barcode:', error);
       Alert.alert('Error', 'Failed to validate barcode. Please try again.');
     }
   };
@@ -159,7 +160,7 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
       }
       
       // Save to offline storage
-      console.log('📱 Saving scan to offline queue:', {
+      logger.log('📱 Saving scan to offline queue:', {
         orderNumber,
         customerName,
         customerId,
@@ -183,7 +184,7 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
       });
       
     } catch (error) {
-      console.error('Error handling barcode scan:', error);
+      logger.error('Error handling barcode scan:', error);
       await feedbackService.playSound('scan_error');
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
@@ -214,7 +215,7 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
         ]
       );
     } catch (error) {
-      console.error('Error submitting order:', error);
+      logger.error('Error submitting order:', error);
       Alert.alert('Error', 'Failed to submit order. Please try again.');
     }
   };

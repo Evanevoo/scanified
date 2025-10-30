@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Platform } from '../utils/platform';
@@ -39,7 +40,7 @@ export default function StatusBar({ onSyncPress }: StatusBarProps) {
       await SyncService.syncOfflineData();
       await checkStatus();
     } catch (error) {
-      console.error('Manual sync failed:', error);
+      logger.error('Manual sync failed:', error);
     } finally {
       setIsSyncing(false);
     }

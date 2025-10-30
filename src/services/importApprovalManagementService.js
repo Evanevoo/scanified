@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 /**
@@ -614,7 +615,7 @@ export class ImportApprovalManagementService {
           timestamp: new Date().toISOString()
         }]);
     } catch (error) {
-      console.error('Failed to log audit entry:', error);
+      logger.error('Failed to log audit entry:', error);
     }
   }
 

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, Card, CardContent, Grid, Button, TextField, Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Chip, Dialog, DialogTitle, DialogContent, DialogActions, Switch, FormControlLabel, Accordion, AccordionSummary, AccordionDetails, Divider, IconButton, Tooltip } from '@mui/material';
 import { ExpandMore as ExpandMoreIcon, Email as EmailIcon, Settings as SettingsIcon, Support as SupportIcon, Analytics as AnalyticsIcon, Security as SecurityIcon, Backup as BackupIcon, Restore as RestoreIcon, Send as SendIcon, Warning as WarningIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon, Schedule as ScheduleIcon } from '@mui/icons-material';
@@ -42,7 +43,7 @@ export default function OwnerTools() {
       if (error) throw error;
       setOrganizations(data || []);
     } catch (err) {
-      console.error('Error loading organizations:', err);
+      logger.error('Error loading organizations:', err);
       addNotification({ type: 'error', title: 'Error loading organizations', message: err.message });
     }
   };
@@ -80,7 +81,7 @@ export default function OwnerTools() {
       setSelectedOrgs([]);
       addNotification({ type: 'success', title: 'Bulk emails sent successfully' });
     } catch (err) {
-      console.error('Error sending bulk emails:', err);
+      logger.error('Error sending bulk emails:', err);
       addNotification({ type: 'error', title: 'Error sending bulk emails', message: err.message });
     } finally {
       setLoading(false);
@@ -109,7 +110,7 @@ export default function OwnerTools() {
       loadOrganizations(); // Refresh the list
       addNotification({ type: 'success', title: 'Plans updated successfully' });
     } catch (err) {
-      console.error('Error updating plans:', err);
+      logger.error('Error updating plans:', err);
       addNotification({ type: 'error', title: 'Error updating plans', message: err.message });
     } finally {
       setLoading(false);
@@ -142,7 +143,7 @@ export default function OwnerTools() {
       loadOrganizations(); // Refresh the list
       addNotification({ type: 'success', title: 'Trial extensions applied successfully' });
     } catch (err) {
-      console.error('Error extending trials:', err);
+      logger.error('Error extending trials:', err);
       addNotification({ type: 'error', title: 'Error extending trials', message: err.message });
     } finally {
       setLoading(false);

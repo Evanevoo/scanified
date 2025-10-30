@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -135,7 +136,7 @@ export default function CustomerDeliveriesReport() {
       });
 
     } catch (err) {
-      console.error('Error fetching deliveries data:', err);
+      logger.error('Error fetching deliveries data:', err);
       setError('Failed to load deliveries data. Please try again.');
     } finally {
       setLoading(false);

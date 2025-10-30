@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Button, Grid, Card, CardContent, TextField,
@@ -243,7 +244,7 @@ export default function ContactManagement() {
       setContactChanged(false);
       setSnackbar({ open: true, message: 'Contact page configuration saved successfully!', severity: 'success' });
     } catch (error) {
-      console.error('Error saving contact config:', error);
+      logger.error('Error saving contact config:', error);
       setSnackbar({ open: true, message: 'Error saving contact configuration', severity: 'error' });
     } finally {
       setLoading(false);

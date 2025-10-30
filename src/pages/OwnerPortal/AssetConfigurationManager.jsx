@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -229,7 +230,7 @@ export default function AssetConfigurationManager() {
         featureToggles: data.feature_toggles || {}
       });
     } catch (error) {
-      console.error('Error loading configuration:', error);
+      logger.error('Error loading configuration:', error);
       toast.error('Failed to load configuration');
     } finally {
       setLoading(false);
@@ -264,7 +265,7 @@ export default function AssetConfigurationManager() {
         window.location.reload();
       }, 1000);
     } catch (error) {
-      console.error('Error saving configuration:', error);
+      logger.error('Error saving configuration:', error);
       toast.error('Failed to save configuration');
     } finally {
       setSaving(false);

@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/client';
@@ -13,7 +14,7 @@ function parseDataField(data) {
       const parsed = JSON.parse(data);
       return parsed;
     } catch {
-      console.log('JSON parse error for data:', data);
+      logger.log('JSON parse error for data:', data);
       return { _raw: data, _error: 'Malformed JSON' };
     }
   }
@@ -141,7 +142,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       if (data) {
         const splitRecords = splitImportIntoIndividualRecords(data);
         setIndividualRecords(splitRecords);
-        console.log(`Split import ${data.id} into ${splitRecords.length} individual records:`, splitRecords);
+        logger.log(`Split import ${data.id} into ${splitRecords.length} individual records:`, splitRecords);
       }
       
       setLoading(false);
@@ -189,7 +190,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         });
         
       } catch (error) {
-        console.error('Error fetching user info:', error);
+        logger.error('Error fetching user info:', error);
         setUploadedByUser({
           full_name: importRecord.uploaded_by,
           email: importRecord.uploaded_by
@@ -226,7 +227,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           .in('product_code', Array.from(productCodes));
         
         if (error) {
-          console.error('Error fetching asset info:', error);
+          logger.error('Error fetching asset info:', error);
           return;
         }
         
@@ -246,7 +247,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         
         setAssetInfoMap(map);
       } catch (error) {
-        console.error('Error fetching asset info:', error);
+        logger.error('Error fetching asset info:', error);
       }
     }
     
@@ -263,13 +264,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           .order('name');
         
         if (error) {
-          console.error('Error fetching customers:', error);
+          logger.error('Error fetching customers:', error);
           return;
         }
         
         setCustomers(customersData || []);
       } catch (error) {
-        console.error('Error fetching customers:', error);
+        logger.error('Error fetching customers:', error);
       }
     }
     
@@ -281,7 +282,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   // Handle record actions
   const handleRecordAction = async (action) => {
     setActionMessage(`Processing: ${action}`);
-    console.log('handleRecordAction: invoiceNumber =', invoiceNumber);
+    logger.log('handleRecordAction: invoiceNumber =', invoiceNumber);
     if (!invoiceNumber) {
       setActionMessage('Error: No invoice number found. Aborting action.');
       return;
@@ -457,7 +458,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setCustomerSearch('');
       
     } catch (error) {
-      console.error('Error changing customer:', error);
+      logger.error('Error changing customer:', error);
       setActionMessage(`Error: ${error.message}`);
     }
     
@@ -512,7 +513,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setNewDate('');
       
     } catch (error) {
-      console.error('Error updating date:', error);
+      logger.error('Error updating date:', error);
       setActionMessage(`Error: ${error.message}`);
     }
     
@@ -569,7 +570,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setNewSalesOrder('');
       
     } catch (error) {
-      console.error('Error updating sales order number:', error);
+      logger.error('Error updating sales order number:', error);
       setActionMessage(`Error: ${error.message}`);
     }
     
@@ -624,7 +625,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setNewPO('');
       
     } catch (error) {
-      console.error('Error updating PO number:', error);
+      logger.error('Error updating PO number:', error);
       setActionMessage(`Error: ${error.message}`);
     }
     
@@ -680,7 +681,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setNewLocation('');
       
     } catch (error) {
-      console.error('Error updating location:', error);
+      logger.error('Error updating location:', error);
       setActionMessage(`Error: ${error.message}`);
     }
     

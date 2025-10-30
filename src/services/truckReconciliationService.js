@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 /**
  * Truck Reconciliation Service
  * Handles delivery manifests, route management, and truck reconciliation
@@ -28,11 +29,11 @@ export class TruckReconciliationService {
 
       if (error) throw error;
 
-      console.log('✅ Delivery route created:', data.route_name);
+      logger.log('✅ Delivery route created:', data.route_name);
       return data;
 
     } catch (error) {
-      console.error('❌ Error creating delivery route:', error);
+      logger.error('❌ Error creating delivery route:', error);
       throw error;
     }
   }
@@ -66,7 +67,7 @@ export class TruckReconciliationService {
       return data || [];
 
     } catch (error) {
-      console.error('❌ Error fetching delivery routes:', error);
+      logger.error('❌ Error fetching delivery routes:', error);
       throw error;
     }
   }
@@ -89,11 +90,11 @@ export class TruckReconciliationService {
 
       if (error) throw error;
 
-      console.log('✅ Delivery manifest created:', data[0].manifest_number);
+      logger.log('✅ Delivery manifest created:', data[0].manifest_number);
       return data[0];
 
     } catch (error) {
-      console.error('❌ Error creating delivery manifest:', error);
+      logger.error('❌ Error creating delivery manifest:', error);
       throw error;
     }
   }
@@ -137,7 +138,7 @@ export class TruckReconciliationService {
       return data || [];
 
     } catch (error) {
-      console.error('❌ Error fetching delivery manifests:', error);
+      logger.error('❌ Error fetching delivery manifests:', error);
       throw error;
     }
   }
@@ -168,11 +169,11 @@ export class TruckReconciliationService {
       // Update manifest totals
       await this.updateManifestTotals(manifestId);
 
-      console.log(`✅ Added ${data.length} items to manifest`);
+      logger.log(`✅ Added ${data.length} items to manifest`);
       return data;
 
     } catch (error) {
-      console.error('❌ Error adding manifest items:', error);
+      logger.error('❌ Error adding manifest items:', error);
       throw error;
     }
   }
@@ -219,7 +220,7 @@ export class TruckReconciliationService {
       if (updateError) throw updateError;
 
     } catch (error) {
-      console.error('❌ Error updating manifest totals:', error);
+      logger.error('❌ Error updating manifest totals:', error);
       throw error;
     }
   }
@@ -237,11 +238,11 @@ export class TruckReconciliationService {
 
       if (error) throw error;
 
-      console.log('✅ Truck reconciliation started:', data);
+      logger.log('✅ Truck reconciliation started:', data);
       return data;
 
     } catch (error) {
-      console.error('❌ Error starting truck reconciliation:', error);
+      logger.error('❌ Error starting truck reconciliation:', error);
       throw error;
     }
   }
@@ -262,13 +263,13 @@ export class TruckReconciliationService {
 
       if (error) throw error;
 
-      console.log('✅ Truck reconciliation completed');
+      logger.log('✅ Truck reconciliation completed');
       
       // Return updated reconciliation data
       return await this.getTruckReconciliation(reconciliationId);
 
     } catch (error) {
-      console.error('❌ Error completing truck reconciliation:', error);
+      logger.error('❌ Error completing truck reconciliation:', error);
       throw error;
     }
   }
@@ -295,7 +296,7 @@ export class TruckReconciliationService {
       return data;
 
     } catch (error) {
-      console.error('❌ Error fetching truck reconciliation:', error);
+      logger.error('❌ Error fetching truck reconciliation:', error);
       throw error;
     }
   }
@@ -338,7 +339,7 @@ export class TruckReconciliationService {
       return data || [];
 
     } catch (error) {
-      console.error('❌ Error fetching truck reconciliations:', error);
+      logger.error('❌ Error fetching truck reconciliations:', error);
       throw error;
     }
   }
@@ -366,11 +367,11 @@ export class TruckReconciliationService {
 
       if (error) throw error;
 
-      console.log('✅ Reconciliation discrepancy added:', data.discrepancy_type);
+      logger.log('✅ Reconciliation discrepancy added:', data.discrepancy_type);
       return data;
 
     } catch (error) {
-      console.error('❌ Error adding reconciliation discrepancy:', error);
+      logger.error('❌ Error adding reconciliation discrepancy:', error);
       throw error;
     }
   }
@@ -406,11 +407,11 @@ export class TruckReconciliationService {
 
       if (error) throw error;
 
-      console.log('✅ Driver performance updated for:', performanceDate);
+      logger.log('✅ Driver performance updated for:', performanceDate);
       return data;
 
     } catch (error) {
-      console.error('❌ Error updating driver performance:', error);
+      logger.error('❌ Error updating driver performance:', error);
       throw error;
     }
   }
@@ -447,7 +448,7 @@ export class TruckReconciliationService {
       return data || [];
 
     } catch (error) {
-      console.error('❌ Error fetching driver performance:', error);
+      logger.error('❌ Error fetching driver performance:', error);
       throw error;
     }
   }
@@ -518,7 +519,7 @@ export class TruckReconciliationService {
       return analytics;
 
     } catch (error) {
-      console.error('❌ Error fetching reconciliation analytics:', error);
+      logger.error('❌ Error fetching reconciliation analytics:', error);
       throw error;
     }
   }
@@ -543,11 +544,11 @@ export class TruckReconciliationService {
 
       if (error) throw error;
 
-      console.log('✅ Manifest item scanned:', data.barcode_number);
+      logger.log('✅ Manifest item scanned:', data.barcode_number);
       return data;
 
     } catch (error) {
-      console.error('❌ Error scanning manifest item:', error);
+      logger.error('❌ Error scanning manifest item:', error);
       throw error;
     }
   }
@@ -602,7 +603,7 @@ export class TruckReconciliationService {
       return report;
 
     } catch (error) {
-      console.error('❌ Error generating reconciliation report:', error);
+      logger.error('❌ Error generating reconciliation report:', error);
       throw error;
     }
   }

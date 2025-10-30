@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Grid, Card, CardContent, CardActions,
@@ -133,7 +134,7 @@ export default function MaintenanceWorkflows() {
       setMaintenanceTasks(tasksResult.data || []);
 
     } catch (error) {
-      console.error('Error fetching maintenance data:', error);
+      logger.error('Error fetching maintenance data:', error);
       setError('Failed to load maintenance workflows');
     } finally {
       setLoading(false);
@@ -173,7 +174,7 @@ export default function MaintenanceWorkflows() {
       fetchData();
 
     } catch (error) {
-      console.error('Error creating workflow:', error);
+      logger.error('Error creating workflow:', error);
       setError('Failed to create workflow');
     }
   };
@@ -204,7 +205,7 @@ export default function MaintenanceWorkflows() {
       fetchData();
 
     } catch (error) {
-      console.error('Error creating template:', error);
+      logger.error('Error creating template:', error);
       setError('Failed to create template');
     }
   };
@@ -249,7 +250,7 @@ export default function MaintenanceWorkflows() {
       fetchData();
 
     } catch (error) {
-      console.error('Error starting workflow:', error);
+      logger.error('Error starting workflow:', error);
       setError('Failed to start workflow');
     }
   };
@@ -273,7 +274,7 @@ export default function MaintenanceWorkflows() {
       fetchData();
 
     } catch (error) {
-      console.error('Error completing task:', error);
+      logger.error('Error completing task:', error);
       setError('Failed to complete task');
     }
   };

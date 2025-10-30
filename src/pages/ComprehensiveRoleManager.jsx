@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -87,7 +88,7 @@ export default function ComprehensiveRoleManager() {
   }, []);
 
   const fetchRoles = async () => {
-    console.log('🔄 fetchRoles called - refreshing roles list');
+    logger.log('🔄 fetchRoles called - refreshing roles list');
     try {
       // Fetch from roles table (UUID-based)
       const { data: rolesData, error: rolesError } = await supabase
@@ -95,14 +96,14 @@ export default function ComprehensiveRoleManager() {
         .select('*')
         .order('name');
 
-      console.log('📊 Roles query result:', { rolesData, rolesError });
+      logger.log('📊 Roles query result:', { rolesData, rolesError });
 
       if (rolesError && rolesError.code !== 'PGRST116') {
-        console.error('Error fetching roles:', rolesError);
+        logger.error('Error fetching roles:', rolesError);
         throw rolesError;
       }
 
-      console.log(`📋 Found ${rolesData?.length || 0} roles in database`);
+      logger.log(`📋 Found ${rolesData?.length || 0} roles in database`);
 
       // Also fetch usage count for each role (filtered by organization)
       const rolesWithUsage = await Promise.all((rolesData || []).map(async (role) => {
@@ -115,11 +116,11 @@ export default function ComprehensiveRoleManager() {
         return { ...role, usage_count: count || 0 };
       }));
 
-      console.log('✅ Roles with usage counts:', rolesWithUsage);
+      logger.log('✅ Roles with usage counts:', rolesWithUsage);
       setRoles(rolesWithUsage);
-      console.log('✅ setRoles called - UI should update now');
+      logger.log('✅ setRoles called - UI should update now');
     } catch (err) {
-      console.error('❌ Error in fetchRoles:', err);
+      logger.error('❌ Error in fetchRoles:', err);
       showSnackbar('Error fetching roles', 'error');
     }
   };
@@ -134,7 +135,7 @@ export default function ComprehensiveRoleManager() {
         .order('role_name');
 
       if (error && error.code !== 'PGRST116') {
-        console.error('Error fetching role permissions:', error);
+        logger.error('Error fetching role permissions:', error);
       }
 
       // If no custom permissions exist, create default ones
@@ -144,7 +145,7 @@ export default function ComprehensiveRoleManager() {
         setRolePermissions(data);
       }
     } catch (err) {
-      console.error('Error in fetchRolePermissions:', err);
+      logger.error('Error in fetchRolePermissions:', err);
       await createDefaultRolePermissions();
     } finally {
       setLoading(false);
@@ -193,7 +194,7 @@ export default function ComprehensiveRoleManager() {
       if (error) throw error;
       setRolePermissions(data);
     } catch (err) {
-      console.error('Error creating default role permissions:', err);
+      logger.error('Error creating default role permissions:', err);
       setRolePermissions([]);
     }
   };
@@ -245,7 +246,7 @@ export default function ComprehensiveRoleManager() {
         });
 
       if (permError) {
-        console.warn('Could not create role_permissions entry:', permError);
+        logger.warn('Could not create role_permissions entry:', permError);
       }
 
       showSnackbar('Role created successfully', 'success');
@@ -255,7 +256,7 @@ export default function ComprehensiveRoleManager() {
       await fetchRolePermissions();
 
     } catch (err) {
-      console.error('Error creating role:', err);
+      logger.error('Error creating role:', err);
       showSnackbar('Failed to create role', 'error');
     } finally {
       setSaving(false);
@@ -313,7 +314,7 @@ export default function ComprehensiveRoleManager() {
         .eq('role_name', originalRole.name);
 
       if (permError) {
-        console.warn('Could not update role_permissions entry:', permError);
+        logger.warn('Could not update role_permissions entry:', permError);
       }
 
       showSnackbar('Role updated successfully', 'success');
@@ -322,7 +323,7 @@ export default function ComprehensiveRoleManager() {
       await fetchRolePermissions();
 
     } catch (err) {
-      console.error('Error updating role:', err);
+      logger.error('Error updating role:', err);
       showSnackbar('Failed to update role', 'error');
     } finally {
       setSaving(false);
@@ -331,11 +332,11 @@ export default function ComprehensiveRoleManager() {
 
   const handleDeleteRole = async () => {
     if (!deleteDialog.role) {
-      console.error('No role selected for deletion');
+      logger.error('No role selected for deletion');
       return;
     }
 
-    console.log('🗑️ Attempting to delete role:', deleteDialog.role);
+    logger.log('🗑️ Attempting to delete role:', deleteDialog.role);
 
     if (deleteDialog.role.usage_count > 0) {
       showSnackbar(`Cannot delete role "${deleteDialog.role.display_name || deleteDialog.role.name}" - it's assigned to ${deleteDialog.role.usage_count} users`, 'error');
@@ -344,7 +345,7 @@ export default function ComprehensiveRoleManager() {
 
     setSaving(true);
     try {
-      console.log('🗑️ Deleting role from roles table:', deleteDialog.role.id);
+      logger.log('🗑️ Deleting role from roles table:', deleteDialog.role.id);
       
       // Delete from roles table
       const { error: roleError, data: deletedData } = await supabase
@@ -353,48 +354,48 @@ export default function ComprehensiveRoleManager() {
         .eq('id', deleteDialog.role.id)
         .select(); // Get the deleted data to confirm
 
-      console.log('🗑️ Delete result:', { roleError, deletedData });
+      logger.log('🗑️ Delete result:', { roleError, deletedData });
 
       if (roleError) {
-        console.error('❌ Role deletion failed:', roleError);
+        logger.error('❌ Role deletion failed:', roleError);
         throw roleError;
       }
 
       if (!deletedData || deletedData.length === 0) {
-        console.warn('⚠️ No role was deleted - might not exist or no permission');
+        logger.warn('⚠️ No role was deleted - might not exist or no permission');
         throw new Error('Role not found or permission denied');
       }
 
-      console.log('✅ Role deleted successfully from roles table');
+      logger.log('✅ Role deleted successfully from roles table');
 
       // Delete from role_permissions table (if table exists)
       try {
-        console.log('🗑️ Attempting to delete from role_permissions table');
+        logger.log('🗑️ Attempting to delete from role_permissions table');
         const { error: permError } = await supabase
           .from('role_permissions')
           .delete()
           .eq('role_name', deleteDialog.role.name);
 
         if (permError && permError.code !== '42P01') { // 42P01 = table doesn't exist
-          console.warn('Could not delete role_permissions entry:', permError);
+          logger.warn('Could not delete role_permissions entry:', permError);
         } else if (!permError) {
-          console.log('✅ Role deleted from role_permissions table');
+          logger.log('✅ Role deleted from role_permissions table');
         }
       } catch (permErr) {
-        console.warn('role_permissions table may not exist:', permErr);
+        logger.warn('role_permissions table may not exist:', permErr);
       }
 
       showSnackbar(`Role "${deleteDialog.role.display_name || deleteDialog.role.name}" deleted successfully`, 'success');
       setDeleteDialog({ open: false, role: null });
       
-      console.log('🔄 Refreshing roles list...');
+      logger.log('🔄 Refreshing roles list...');
       await fetchRoles();
-      console.log('🔄 Refreshing role permissions...');
+      logger.log('🔄 Refreshing role permissions...');
       await fetchRolePermissions();
-      console.log('✅ UI refresh completed');
+      logger.log('✅ UI refresh completed');
 
     } catch (err) {
-      console.error('❌ Error deleting role:', err);
+      logger.error('❌ Error deleting role:', err);
       showSnackbar(`Failed to delete role: ${err.message}`, 'error');
     } finally {
       setSaving(false);
@@ -402,34 +403,34 @@ export default function ComprehensiveRoleManager() {
   };
 
   const handlePermissionChange = async (roleName, permissionId, enabled) => {
-    console.log('🔄 Permission change requested:', { roleName, permissionId, enabled });
+    logger.log('🔄 Permission change requested:', { roleName, permissionId, enabled });
     
     try {
       const rolePermission = rolePermissions.find(rp => rp.role_name === roleName);
-      console.log('🔍 Found role permission:', rolePermission);
+      logger.log('🔍 Found role permission:', rolePermission);
       
       if (!rolePermission) {
-        console.error('❌ Role permission not found for:', roleName);
+        logger.error('❌ Role permission not found for:', roleName);
         showSnackbar(`Role "${roleName}" not found`, 'error');
         return;
       }
 
       const currentPermissions = rolePermission.permissions || [];
-      console.log('📋 Current permissions:', currentPermissions);
+      logger.log('📋 Current permissions:', currentPermissions);
 
       const updatedPermissions = enabled
         ? [...currentPermissions, permissionId]
         : currentPermissions.filter(p => p !== permissionId);
       
-      console.log('📋 Updated permissions:', updatedPermissions);
+      logger.log('📋 Updated permissions:', updatedPermissions);
 
       const updateData = {
         permissions: updatedPermissions,
         organization_id: organization?.id || 'global'
       };
       
-      console.log('💾 Updating database with:', updateData);
-      console.log('🎯 Update conditions:', { role_name: roleName, organization_id: organization?.id || 'global' });
+      logger.log('💾 Updating database with:', updateData);
+      logger.log('🎯 Update conditions:', { role_name: roleName, organization_id: organization?.id || 'global' });
 
       const { data: updateResult, error } = await supabase
         .from('role_permissions')
@@ -438,15 +439,15 @@ export default function ComprehensiveRoleManager() {
         .eq('organization_id', organization?.id || 'global')
         .select(); // Add select to see what was updated
 
-      console.log('💾 Database update result:', { updateResult, error });
+      logger.log('💾 Database update result:', { updateResult, error });
 
       if (error) {
-        console.error('❌ Database update failed:', error);
+        logger.error('❌ Database update failed:', error);
         throw error;
       }
 
       if (!updateResult || updateResult.length === 0) {
-        console.warn('⚠️ No rows were updated - role_permissions entry may not exist');
+        logger.warn('⚠️ No rows were updated - role_permissions entry may not exist');
         showSnackbar(`No permission record found for role "${roleName}". Creating new record...`, 'warning');
         
         // Try to create a new record
@@ -461,16 +462,16 @@ export default function ComprehensiveRoleManager() {
           }])
           .select();
 
-        console.log('➕ Insert result:', { insertResult, insertError });
+        logger.log('➕ Insert result:', { insertResult, insertError });
 
         if (insertError) {
-          console.error('❌ Insert failed:', insertError);
+          logger.error('❌ Insert failed:', insertError);
           throw insertError;
         }
 
         showSnackbar(`Created new permission record for "${roleName}"`, 'success');
       } else {
-        console.log('✅ Database updated successfully');
+        logger.log('✅ Database updated successfully');
         showSnackbar('Permissions updated successfully', 'success');
       }
 
@@ -481,10 +482,10 @@ export default function ComprehensiveRoleManager() {
           : rp
       ));
 
-      console.log('✅ Local state updated');
+      logger.log('✅ Local state updated');
 
     } catch (err) {
-      console.error('❌ Error updating permissions:', err);
+      logger.error('❌ Error updating permissions:', err);
       showSnackbar(`Failed to update permissions: ${err.message}`, 'error');
     }
   };

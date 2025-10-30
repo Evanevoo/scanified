@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Box,
@@ -155,7 +156,7 @@ export default function IndustryAnalyticsDashboard() {
           overdueReturns: bottles.filter(b => b.location === 'overdue').length
         });
       } catch (error) {
-        console.error('Error fetching quick stats:', error);
+        logger.error('Error fetching quick stats:', error);
       }
     };
 

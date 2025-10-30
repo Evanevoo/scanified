@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabase/client';
@@ -78,17 +79,17 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
             .single();
           
           if (error) {
-            console.error('Error fetching role name:', error);
+            logger.error('Error fetching role name:', error);
             // Fallback to treating it as a role name
             setActualRole(profile.role);
             lastFetchedRole.current = profile.role;
           } else {
             setActualRole(roleData.name);
             lastFetchedRole.current = profile.role;
-            console.log('Resolved role UUID to name:', profile.role, '->', roleData.name);
+            logger.log('Resolved role UUID to name:', profile.role, '->', roleData.name);
           }
         } catch (err) {
-          console.error('Error in role lookup:', err);
+          logger.error('Error in role lookup:', err);
           setActualRole(profile.role);
           lastFetchedRole.current = profile.role;
         }
@@ -159,11 +160,11 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                   alt="Org Logo" 
                   style={{ height: 40, width: 40, objectFit: 'contain', borderRadius: 6, background: '#fff', border: '1px solid #eee' }}
                   onError={(e) => {
-                    console.error('Failed to load logo:', organization.logo_url);
+                    logger.error('Failed to load logo:', organization.logo_url);
                     e.target.style.display = 'none';
                   }}
                   onLoad={() => {
-                    console.log('Logo loaded successfully:', organization.logo_url);
+                    logger.log('Logo loaded successfully:', organization.logo_url);
                   }}
                 />
               ) : (
@@ -393,7 +394,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                   boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                 }}
                 onError={(e) => {
-                  console.error('Failed to load logo:', organization.logo_url);
+                  logger.error('Failed to load logo:', organization.logo_url);
                   e.target.style.display = 'none';
                 }}
               />

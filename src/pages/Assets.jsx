@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabase/client';
 import { 
@@ -84,7 +85,7 @@ async function exportAllBottlesToCSV() {
     
     exportBottlesToCSV(bottlesWithOrg);
   } catch (error) {
-    console.error('Error exporting bottles:', error);
+    logger.error('Error exporting bottles:', error);
     alert('Error exporting bottles: ' + error.message);
   }
 }
@@ -188,7 +189,7 @@ export default function Assets() {
         }
       }
     } catch (err) {
-      console.error('Error fetching organizations:', err);
+      logger.error('Error fetching organizations:', err);
       setError(err.message);
     }
   };
@@ -228,7 +229,7 @@ export default function Assets() {
       
       setBottles(bottlesWithOrg);
     } catch (err) {
-      console.error('Error fetching bottles:', err);
+      logger.error('Error fetching bottles:', err);
       setError(err.message);
     } finally {
       setLoading(false);

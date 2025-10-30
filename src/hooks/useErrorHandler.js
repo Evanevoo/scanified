@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 
@@ -35,7 +36,7 @@ export const useErrorHandler = () => {
 
     // Log to console if enabled
     if (logToConsole) {
-      console.error('Error handled by useErrorHandler:', errorObj);
+      logger.error('Error handled by useErrorHandler:', errorObj);
     }
 
     // Show toast notification if enabled
@@ -140,7 +141,7 @@ export const useErrorHandler = () => {
         }
 
         const delay = baseDelay * Math.pow(2, attempt - 1);
-        console.log(`Network error detected, retrying in ${delay}ms... (attempt ${attempt}/${maxRetries})`);
+        logger.log(`Network error detected, retrying in ${delay}ms... (attempt ${attempt}/${maxRetries})`);
         
         await new Promise(resolve => setTimeout(resolve, delay));
       }

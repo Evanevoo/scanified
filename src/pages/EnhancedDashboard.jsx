@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Container, Typography, Grid, Card, CardContent, Box, Button,
@@ -140,7 +141,7 @@ export default function EnhancedDashboard() {
       });
 
     } catch (error) {
-      console.error('Error loading dashboard data:', error);
+      logger.error('Error loading dashboard data:', error);
     } finally {
       setLoading(false);
     }
@@ -186,7 +187,7 @@ export default function EnhancedDashboard() {
 
       setNotifications(mockNotifications);
     } catch (error) {
-      console.error('Error loading notifications:', error);
+      logger.error('Error loading notifications:', error);
     }
   };
 

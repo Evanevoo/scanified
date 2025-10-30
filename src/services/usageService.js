@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 export const usageService = {
@@ -56,7 +57,7 @@ export const usageService = {
 
       return usage;
     } catch (error) {
-      console.error('Error getting organization usage:', error);
+      logger.error('Error getting organization usage:', error);
       throw error;
     }
   },
@@ -95,7 +96,7 @@ export const usageService = {
         }
       }
     } catch (error) {
-      console.error('Error checking usage alerts:', error);
+      logger.error('Error checking usage alerts:', error);
     }
   },
 
@@ -111,9 +112,9 @@ export const usageService = {
       const message = `Your ${resourceNames[resource]} usage is at ${usage.percentage}% (${usage.current}/${usage.max}). Consider upgrading your plan to avoid service interruption.`;
 
       // Log usage alert (notification service removed)
-      console.log(`Usage Alert: ${resourceNames[resource]} at ${usage.percentage}% for organization ${organization.name}`);
+      logger.log(`Usage Alert: ${resourceNames[resource]} at ${usage.percentage}% for organization ${organization.name}`);
     } catch (error) {
-      console.error('Error sending usage alert:', error);
+      logger.error('Error sending usage alert:', error);
     }
   },
 
@@ -131,7 +132,7 @@ export const usageService = {
         percentage: resourceUsage.percentage
       };
     } catch (error) {
-      console.error('Error checking resource limits:', error);
+      logger.error('Error checking resource limits:', error);
       return { canAdd: false, current: 0, max: 0, remaining: 0, percentage: 0 };
     }
   },
@@ -169,7 +170,7 @@ export const usageService = {
         bottles: bottleGrowth?.length || 0
       };
     } catch (error) {
-      console.error('Error getting usage trends:', error);
+      logger.error('Error getting usage trends:', error);
       return { users: 0, customers: 0, bottles: 0 };
     }
   },
@@ -189,7 +190,7 @@ export const usageService = {
 
       return predictions;
     } catch (error) {
-      console.error('Error predicting usage:', error);
+      logger.error('Error predicting usage:', error);
       return { users: 0, customers: 0, bottles: 0 };
     }
   }

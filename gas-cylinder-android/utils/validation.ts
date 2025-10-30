@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 export interface ValidationResult {
   isValid: boolean;
   errors: string[];
@@ -83,7 +84,7 @@ export class ValidationUtils {
         errors: isValid ? [] : [`Invalid barcode format. Expected: ${description}`],
       };
     } catch (error) {
-      console.warn('Invalid regex pattern in barcode config:', error);
+      logger.warn('Invalid regex pattern in barcode config:', error);
       return { isValid: false, errors: ['Invalid barcode format configuration'] };
     }
   }
@@ -110,7 +111,7 @@ export class ValidationUtils {
         errors: isValid ? [] : [`Invalid order number format. Expected: ${description}`],
       };
     } catch (error) {
-      console.warn('Invalid regex pattern in order number config:', error);
+      logger.warn('Invalid regex pattern in order number config:', error);
       return { isValid: false, errors: ['Invalid order number format configuration'] };
     }
   }
@@ -137,7 +138,7 @@ export class ValidationUtils {
         errors: isValid ? [] : [`Invalid customer ID format. Expected: ${description}`],
       };
     } catch (error) {
-      console.warn('Invalid regex pattern in customer ID config:', error);
+      logger.warn('Invalid regex pattern in customer ID config:', error);
       return { isValid: false, errors: ['Invalid customer ID format configuration'] };
     }
   }

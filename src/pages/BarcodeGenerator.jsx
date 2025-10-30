@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Card, CardContent, Typography, TextField, Button, Grid,
@@ -95,7 +96,7 @@ export default function BarcodeGenerator() {
         customersWithBarcodes: uniqueCustomers.size
       });
     } catch (error) {
-      console.error('Error loading stats:', error);
+      logger.error('Error loading stats:', error);
     }
   };
 
@@ -165,7 +166,7 @@ export default function BarcodeGenerator() {
       loadStats();
 
     } catch (error) {
-      console.error('Error generating barcodes:', error);
+      logger.error('Error generating barcodes:', error);
       setError(`Error generating barcodes: ${error.message}`);
     } finally {
       setLoading(false);
@@ -221,7 +222,7 @@ export default function BarcodeGenerator() {
       loadStats();
 
     } catch (error) {
-      console.error('Error generating bulk barcodes:', error);
+      logger.error('Error generating bulk barcodes:', error);
       setError(`Error generating bulk barcodes: ${error.message}`);
     } finally {
       setLoading(false);
@@ -409,7 +410,7 @@ export default function BarcodeGenerator() {
             
             processUploadedData(data);
           } catch (error) {
-            console.error('Error processing Excel file:', error);
+            logger.error('Error processing Excel file:', error);
             setError(`Error processing Excel file: ${error.message}`);
             setUploadProcessing(false);
           }
@@ -445,7 +446,7 @@ export default function BarcodeGenerator() {
       }
 
     } catch (error) {
-      console.error('Error processing file:', error);
+      logger.error('Error processing file:', error);
       setError(`Error processing file: ${error.message}`);
       setUploadProcessing(false);
     }
@@ -481,7 +482,7 @@ export default function BarcodeGenerator() {
       setUploadProcessing(false);
 
     } catch (error) {
-      console.error('Error processing uploaded data:', error);
+      logger.error('Error processing uploaded data:', error);
       setError(`Error processing data: ${error.message}`);
       setUploadProcessing(false);
     }
@@ -568,7 +569,7 @@ export default function BarcodeGenerator() {
       setCustomersWithoutBarcodes([]);
 
     } catch (error) {
-      console.error('Error generating barcodes from upload:', error);
+      logger.error('Error generating barcodes from upload:', error);
       setError(`Error generating barcodes: ${error.message}`);
     } finally {
       setLoading(false);

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -160,7 +161,7 @@ export default function DataHealthScreen() {
       });
 
     } catch (error) {
-      console.error('Error fetching data health:', error);
+      logger.error('Error fetching data health:', error);
       setError(error instanceof Error ? error.message : 'Failed to load data health');
     } finally {
       setLoading(false);
@@ -190,7 +191,7 @@ export default function DataHealthScreen() {
       
       Alert.alert('Success', 'Data synchronized successfully');
     } catch (error) {
-      console.error('Manual sync error:', error);
+      logger.error('Manual sync error:', error);
       Alert.alert('Sync Error', 'Failed to synchronize data. Please try again.');
     } finally {
       setSyncInProgress(false);

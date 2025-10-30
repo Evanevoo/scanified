@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
@@ -62,7 +63,7 @@ const safeJsonParse = (jsonString, defaultValue = []) => {
   
   // If it's a string that doesn't look like JSON, return default
   if (typeof jsonString === 'string' && !jsonString.trim().startsWith('[') && !jsonString.trim().startsWith('{')) {
-    console.warn('Features field contains non-JSON string:', jsonString);
+    logger.warn('Features field contains non-JSON string:', jsonString);
     return defaultValue;
   }
   
@@ -71,7 +72,7 @@ const safeJsonParse = (jsonString, defaultValue = []) => {
     // Ensure it's an array
     return Array.isArray(parsed) ? parsed : defaultValue;
   } catch (error) {
-    console.error('Error parsing JSON:', jsonString, error);
+    logger.error('Error parsing JSON:', jsonString, error);
     return defaultValue;
   }
 };
@@ -102,7 +103,7 @@ const hasFeature = (plan, featureName) => {
   }
   
   const features = safeJsonParse(plan.features, []);
-  console.log(`Checking feature "${featureName}" for plan "${plan.name}":`, features);
+  logger.log(`Checking feature "${featureName}" for plan "${plan.name}":`, features);
   
   // If features array is empty or invalid, use plan-based logic
   if (!features || features.length === 0) {
@@ -304,7 +305,7 @@ export default function Billing() {
         .order('price', { ascending: true });
 
       if (plansError) throw plansError;
-      console.log('Loaded subscription plans:', plansData);
+      logger.log('Loaded subscription plans:', plansData);
       setPlans(plansData);
 
       // Load current subscription
@@ -357,7 +358,7 @@ export default function Billing() {
       });
 
     } catch (error) {
-      console.error('Error loading billing data:', error);
+      logger.error('Error loading billing data:', error);
       setError(error.message);
     } finally {
       setLoading(false);
@@ -365,7 +366,7 @@ export default function Billing() {
   };
 
   const handlePlanSelection = (plan) => {
-    console.log('Plan selected:', plan);
+    logger.log('Plan selected:', plan);
     
     // For Enterprise plans, redirect to contact page
     if (plan.name.toLowerCase().includes('enterprise')) {
@@ -385,29 +386,29 @@ export default function Billing() {
   };
 
   const handleUpgrade = async () => {
-    console.log('=== UPGRADE FUNCTION CALLED ===');
+    logger.log('=== UPGRADE FUNCTION CALLED ===');
     alert('Upgrade process started! Check console for details.');
-    console.log('selectedPlan:', selectedPlan);
-    console.log('organization:', organization);
-    console.log('profile:', profile);
+    logger.log('selectedPlan:', selectedPlan);
+    logger.log('organization:', organization);
+    logger.log('profile:', profile);
     
     if (!selectedPlan) {
-      console.log('No plan selected');
+      logger.log('No plan selected');
       setError('No plan selected. Please select a plan first.');
       return;
     }
     
-    console.log('Upgrade started for plan:', selectedPlan);
-    console.log('Organization:', organization);
+    logger.log('Upgrade started for plan:', selectedPlan);
+    logger.log('Organization:', organization);
     
     // Don't allow upgrades for free plans without payment
     if (selectedPlan.price > 0) {
-      console.log('Plan has price > 0, proceeding with payment flow');
+      logger.log('Plan has price > 0, proceeding with payment flow');
       setUpgrading(true);
       setError(''); // Clear any previous errors
       
       try {
-        console.log('Creating payment intent for amount:', selectedPlan.price * 100);
+        logger.log('Creating payment intent for amount:', selectedPlan.price * 100);
 
         const requestBody = {
           amount: selectedPlan.price * 100, // Convert to cents
@@ -424,11 +425,11 @@ export default function Billing() {
           }
         };
 
-        console.log('Request body:', requestBody);
+        logger.log('Request body:', requestBody);
 
         // Check if we're in development mode
         const isDevelopment = import.meta.env.DEV;
-        console.log('Environment check:', {
+        logger.log('Environment check:', {
           isDevelopment,
           env: import.meta.env.MODE,
           dev: import.meta.env.DEV
@@ -437,19 +438,19 @@ export default function Billing() {
         let clientSecret;
         
         if (isDevelopment) {
-          console.log('Development mode detected, using development payment flow');
+          logger.log('Development mode detected, using development payment flow');
           
           // In development, use mock payment for testing
-          console.log('Development: Using mock payment for testing');
+          logger.log('Development: Using mock payment for testing');
           clientSecret = 'pi_mock_secret_' + Date.now();
           
           // Simulate network delay
           await new Promise(resolve => setTimeout(resolve, 1000));
           
-          console.log('Development: Mock payment intent created:', clientSecret);
+          logger.log('Development: Mock payment intent created:', clientSecret);
         } else {
           // Production mode - use actual Netlify function
-          console.log('Production mode, using Netlify function');
+          logger.log('Production mode, using Netlify function');
           
           const response = await fetch('/.netlify/functions/create-payment-intent', {
             method: 'POST',
@@ -459,21 +460,21 @@ export default function Billing() {
             body: JSON.stringify(requestBody),
           });
 
-          console.log('Payment intent response status:', response.status);
+          logger.log('Payment intent response status:', response.status);
           
           if (!response.ok) {
             const errorText = await response.text();
-            console.error('Response not ok:', errorText);
+            logger.error('Response not ok:', errorText);
             throw new Error(`Payment service unavailable (${response.status}). Please try again later.`);
           }
 
           const responseData = await response.json();
-          console.log('Payment intent response:', responseData);
+          logger.log('Payment intent response:', responseData);
 
           const { error } = responseData;
           
           if (error) {
-            console.error('Payment intent error:', error);
+            logger.error('Payment intent error:', error);
             throw new Error('Payment service unavailable. Please try again later.');
           }
 
@@ -484,7 +485,7 @@ export default function Billing() {
           }
         }
 
-        console.log('Loading Stripe...');
+        logger.log('Loading Stripe...');
         // Initialize Stripe
         let stripe = null;
         
@@ -495,10 +496,10 @@ export default function Billing() {
               const { loadStripe } = await import('@stripe/stripe-js');
               stripe = await loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
             } catch (error) {
-              console.log('Development: Stripe key not available, using mock payment');
+              logger.log('Development: Stripe key not available, using mock payment');
             }
           } else {
-            console.log('Development: No Stripe key, using mock payment');
+            logger.log('Development: No Stripe key, using mock payment');
           }
         } else {
           // Production mode - Stripe is required
@@ -510,13 +511,13 @@ export default function Billing() {
           }
         }
 
-        console.log('Confirming payment...');
+        logger.log('Confirming payment...');
         
         let paymentResult;
         
         if (isDevelopment) {
           // In development, simulate successful payment
-          console.log('Development: Simulating successful payment');
+          logger.log('Development: Simulating successful payment');
           paymentResult = {
             paymentIntent: {
               status: 'succeeded',
@@ -577,14 +578,14 @@ export default function Billing() {
         const { error: paymentError, paymentIntent } = paymentResult;
 
         if (paymentError) {
-          console.error('Payment error:', paymentError);
+          logger.error('Payment error:', paymentError);
           throw new Error(paymentError.message || 'Payment failed. Please check your card details and try again.');
         }
 
-        console.log('Payment result:', paymentIntent);
+        logger.log('Payment result:', paymentIntent);
 
         if (paymentIntent.status === 'succeeded') {
-          console.log('Payment successful, updating database...');
+          logger.log('Payment successful, updating database...');
           // Payment successful, now update the database
           const { error: updateError } = await supabase
             .from('organizations')
@@ -600,11 +601,11 @@ export default function Billing() {
             .eq('id', organization.id);
 
           if (updateError) {
-            console.error('Database update error:', updateError);
+            logger.error('Database update error:', updateError);
             throw new Error('Payment successful but failed to update subscription. Please contact support.');
           }
 
-          console.log('Database updated successfully');
+          logger.log('Database updated successfully');
           await loadBillingData(); // Refresh data
           setShowUpgradeDialog(false);
           setSelectedPlan(null);
@@ -619,13 +620,13 @@ export default function Billing() {
         }
 
       } catch (error) {
-        console.error('Upgrade error:', error);
+        logger.error('Upgrade error:', error);
         setError(error.message || 'Failed to upgrade plan. Please try again.');
       } finally {
         setUpgrading(false);
       }
     } else {
-      console.log('Plan is free, proceeding with direct upgrade');
+      logger.log('Plan is free, proceeding with direct upgrade');
       // Free plan - allow direct upgrade
       setUpgrading(true);
       try {
@@ -849,7 +850,7 @@ export default function Billing() {
         }, 2000);
       }
     } catch (error) {
-      console.error('Trial extension error:', error);
+      logger.error('Trial extension error:', error);
       setError(error.message || 'Failed to process payment. Please try again.');
     } finally {
       setProcessingPayment(false);
@@ -1285,7 +1286,7 @@ export default function Billing() {
                             </ListItem>
                           ));
                         } catch (error) {
-                          console.error('Error parsing plan features:', plan.features, error);
+                          logger.error('Error parsing plan features:', plan.features, error);
                           return <ListItem><ListItemText primary="Features not available" /></ListItem>;
                         }
                       })()}
@@ -1506,7 +1507,7 @@ export default function Billing() {
                         </ListItem>
                       ));
                     } catch (error) {
-                      console.error('Error parsing plan features:', selectedPlan.features, error);
+                      logger.error('Error parsing plan features:', selectedPlan.features, error);
                       return <ListItem><ListItemText primary="Features not available" /></ListItem>;
                     }
                   })()}
@@ -1523,11 +1524,11 @@ export default function Billing() {
             <Button onClick={() => setShowUpgradeDialog(false)}>Cancel</Button>
             <Button 
               onClick={() => {
-                console.log('=== BUTTON CLICKED - VERSION 2.0 ===');
-                console.log('Timestamp:', new Date().toISOString());
+                logger.log('=== BUTTON CLICKED - VERSION 2.0 ===');
+                logger.log('Timestamp:', new Date().toISOString());
                 alert('Button clicked! Testing... V2.0');
-                console.log('Button clicked!');
-                console.log('Button disabled state:', {
+                logger.log('Button clicked!');
+                logger.log('Button disabled state:', {
                   upgrading,
                   selectedPlan: !!selectedPlan,
                   isEnterprise: selectedPlan?.name.toLowerCase().includes('enterprise'),

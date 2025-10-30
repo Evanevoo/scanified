@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -70,7 +71,7 @@ export default function UserInvites() {
       if (error) throw error;
       setInvites(data || []);
     } catch (err) {
-      console.error('Error fetching invites:', err);
+      logger.error('Error fetching invites:', err);
       setError('Failed to load invites');
     } finally {
       setLoading(false);
@@ -87,7 +88,7 @@ export default function UserInvites() {
       if (error) throw error;
       setRoles(data || []);
     } catch (err) {
-      console.error('Error fetching roles:', err);
+      logger.error('Error fetching roles:', err);
     }
   };
 
@@ -140,7 +141,7 @@ export default function UserInvites() {
         
         setSuccess(`✅ Invite sent to ${inviteForm.email}!`);
       } catch (emailError) {
-        console.warn('Email failed:', emailError);
+        logger.warn('Email failed:', emailError);
         setSuccess(`✅ Invite created! Email service unavailable - copy the link from the table below.`);
       }
 
@@ -150,7 +151,7 @@ export default function UserInvites() {
       fetchInvites();
 
     } catch (err) {
-      console.error('Error sending invite:', err);
+      logger.error('Error sending invite:', err);
       setError(err.message || 'Failed to send invite');
     } finally {
       setSending(false);
@@ -171,7 +172,7 @@ export default function UserInvites() {
       setSuccess('Invite deleted');
       fetchInvites();
     } catch (err) {
-      console.error('Error deleting invite:', err);
+      logger.error('Error deleting invite:', err);
       setError('Failed to delete invite');
     }
   };

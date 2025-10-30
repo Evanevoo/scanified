@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 // Invoice Import Worker
 let currentBatch = [];
 let allRows = [];
@@ -12,7 +13,7 @@ function processBatch(startIndex) {
   const batch = allRows.slice(startIndex, endIndex);
   
   if (debug) {
-    console.log("Processing batch", startIndex, endIndex);
+    logger.log("Processing batch", startIndex, endIndex);
   }
   
   self.postMessage({

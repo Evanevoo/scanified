@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -48,7 +49,7 @@ export default function Impersonation() {
       if (error) throw error;
       setOrganizations(data || []);
     } catch (err) {
-      console.error('Error fetching organizations:', err);
+      logger.error('Error fetching organizations:', err);
       setSnackbar({ open: true, message: 'Error loading organizations', severity: 'error' });
     }
   };
@@ -73,7 +74,7 @@ export default function Impersonation() {
       if (error) throw error;
       setUsers(data || []);
     } catch (err) {
-      console.error('Error fetching users:', err);
+      logger.error('Error fetching users:', err);
       setSnackbar({ open: true, message: 'Error loading users', severity: 'error' });
     } finally {
       setLoading(false);
@@ -103,7 +104,7 @@ export default function Impersonation() {
 
       // For demo purposes, we'll simulate the impersonation
       // In production, you'd use a server-side function to generate impersonation links
-      console.log('Impersonation requested for:', selectedUser.email);
+      logger.log('Impersonation requested for:', selectedUser.email);
 
       // For demo purposes, we'll simulate the impersonation
       // In production, you'd use the generated link or a more secure method
@@ -119,7 +120,7 @@ export default function Impersonation() {
       }, 1000);
 
     } catch (err) {
-      console.error('Error during impersonation:', err);
+      logger.error('Error during impersonation:', err);
       setSnackbar({ open: true, message: 'Error during impersonation', severity: 'error' });
     } finally {
       setImpersonating(false);

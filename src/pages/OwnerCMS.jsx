@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -239,7 +240,7 @@ export default function OwnerCMS() {
         setWebsiteData(JSON.parse(data.website_content));
       }
     } catch (error) {
-      console.error('Error loading website data:', error);
+      logger.error('Error loading website data:', error);
     } finally {
       setLoading(false);
     }
@@ -262,7 +263,7 @@ export default function OwnerCMS() {
       // Show success message - you could add a toast notification here
       alert('Website content saved successfully!');
     } catch (error) {
-      console.error('Error saving:', error);
+      logger.error('Error saving:', error);
       alert('Error saving website content: ' + error.message);
     } finally {
       setLoading(false);

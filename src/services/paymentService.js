@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 // Stripe configuration (use Vite's import.meta.env for environment variables)
@@ -32,7 +33,7 @@ export const paymentService = {
       const result = await response.json();
       return result;
     } catch (error) {
-      console.error('Error creating payment intent:', error);
+      logger.error('Error creating payment intent:', error);
       throw error;
     }
   },
@@ -55,7 +56,7 @@ export const paymentService = {
       const result = await response.json();
       return result;
     } catch (error) {
-      console.error('Error creating subscription:', error);
+      logger.error('Error creating subscription:', error);
       throw error;
     }
   },
@@ -93,7 +94,7 @@ export const paymentService = {
 
       return paymentIntent;
     } catch (error) {
-      console.error('Error processing payment:', error);
+      logger.error('Error processing payment:', error);
       throw error;
     }
   },
@@ -139,7 +140,7 @@ export const paymentService = {
 
       return subscription;
     } catch (error) {
-      console.error('Error setting up subscription:', error);
+      logger.error('Error setting up subscription:', error);
       throw error;
     }
   },
@@ -165,7 +166,7 @@ export const paymentService = {
       const result = await response.json();
       return result;
     } catch (error) {
-      console.error('Error creating customer:', error);
+      logger.error('Error creating customer:', error);
       throw error;
     }
   },
@@ -187,7 +188,7 @@ export const paymentService = {
       const result = await response.json();
       return result.paymentMethods || [];
     } catch (error) {
-      console.error('Error getting payment methods:', error);
+      logger.error('Error getting payment methods:', error);
       return [];
     }
   },
@@ -230,7 +231,7 @@ export const paymentService = {
 
       return result;
     } catch (error) {
-      console.error('Error cancelling subscription:', error);
+      logger.error('Error cancelling subscription:', error);
       throw error;
     }
   },
@@ -252,7 +253,7 @@ export const paymentService = {
       const result = await response.json();
       return result.invoices || [];
     } catch (error) {
-      console.error('Error getting invoice history:', error);
+      logger.error('Error getting invoice history:', error);
       return [];
     }
   }

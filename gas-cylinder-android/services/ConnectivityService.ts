@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import NetInfo from '@react-native-community/netinfo';
 import { SyncService } from './SyncService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -28,7 +29,7 @@ class ConnectivityService {
     if (this.isMonitoring) return;
 
     this.isMonitoring = true;
-    console.log('🌐 Starting connectivity monitoring');
+    logger.log('🌐 Starting connectivity monitoring');
 
     // Subscribe to network state changes
     this.netInfoUnsubscribe = NetInfo.addEventListener((state) => {
@@ -56,7 +57,7 @@ class ConnectivityService {
     if (!this.isMonitoring) return;
 
     this.isMonitoring = false;
-    console.log('🌐 Stopping connectivity monitoring');
+    logger.log('🌐 Stopping connectivity monitoring');
 
     if (this.netInfoUnsubscribe) {
       this.netInfoUnsubscribe();
@@ -96,7 +97,7 @@ class ConnectivityService {
         strength: state.details?.strength,
       };
     } catch (error) {
-      console.error('Error getting connectivity status:', error);
+      logger.error('Error getting connectivity status:', error);
       return {
         isConnected: false,
         isInternetReachable: false,
@@ -127,10 +128,10 @@ class ConnectivityService {
 
     // Handle connection state changes
     if (!wasConnected && isNowConnected) {
-      console.log('🌐 Connection restored');
+      logger.log('🌐 Connection restored');
       this.handleConnectionRestored();
     } else if (wasConnected && !isNowConnected) {
-      console.log('🌐 Connection lost');
+      logger.log('🌐 Connection lost');
       this.handleConnectionLost();
     }
   }
@@ -144,7 +145,7 @@ class ConnectivityService {
       try {
         listener.onConnectionRestored();
       } catch (error) {
-        console.error('Error in connection restored callback:', error);
+        logger.error('Error in connection restored callback:', error);
       }
     });
 
@@ -154,14 +155,14 @@ class ConnectivityService {
       if (settings) {
         const parsedSettings = JSON.parse(settings);
         if (parsedSettings.autoSync) {
-          console.log('🔄 Auto-sync enabled, attempting background sync');
+          logger.log('🔄 Auto-sync enabled, attempting background sync');
           await this.attemptAutoSync();
         } else {
-          console.log('🔄 Auto-sync disabled, skipping background sync');
+          logger.log('🔄 Auto-sync disabled, skipping background sync');
         }
       }
     } catch (error) {
-      console.error('Error checking auto-sync setting:', error);
+      logger.error('Error checking auto-sync setting:', error);
     }
   }
 
@@ -174,7 +175,7 @@ class ConnectivityService {
       try {
         listener.onConnectionLost();
       } catch (error) {
-        console.error('Error in connection lost callback:', error);
+        logger.error('Error in connection lost callback:', error);
       }
     });
   }
@@ -187,22 +188,22 @@ class ConnectivityService {
       // Check if there's offline data to sync
       const offlineCount = await SyncService.getOfflineScanCount();
       if (offlineCount === 0) {
-        console.log('🔄 No offline data to sync');
+        logger.log('🔄 No offline data to sync');
         return;
       }
 
-      console.log(`🔄 Attempting to sync ${offlineCount} offline items`);
+      logger.log(`🔄 Attempting to sync ${offlineCount} offline items`);
       
       // Attempt sync
       const result = await SyncService.syncOfflineData();
       
       if (result.success) {
-        console.log('✅ Auto-sync successful:', result.message);
+        logger.log('✅ Auto-sync successful:', result.message);
       } else {
-        console.log('❌ Auto-sync failed:', result.message);
+        logger.log('❌ Auto-sync failed:', result.message);
       }
     } catch (error) {
-      console.error('Error during auto-sync:', error);
+      logger.error('Error during auto-sync:', error);
     }
   }
 
@@ -214,7 +215,7 @@ class ConnectivityService {
       try {
         listener.onConnectivityChange(status);
       } catch (error) {
-        console.error('Error in connectivity change callback:', error);
+        logger.error('Error in connectivity change callback:', error);
       }
     });
   }
@@ -238,7 +239,7 @@ class ConnectivityService {
       
       return response.ok;
     } catch (error) {
-      console.error('Connectivity test failed:', error);
+      logger.error('Connectivity test failed:', error);
       return false;
     }
   }

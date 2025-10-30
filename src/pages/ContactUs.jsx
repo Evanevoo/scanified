@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -176,7 +177,7 @@ export default function ContactUs() {
         const parsedConfig = JSON.parse(savedConfig);
         setContactConfig(parsedConfig);
       } catch (error) {
-        console.error('Error parsing contact config:', error);
+        logger.error('Error parsing contact config:', error);
       }
     }
   }, []);

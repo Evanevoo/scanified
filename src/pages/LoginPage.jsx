@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
@@ -65,7 +66,7 @@ function LoginPage() {
         const redirectAfterLogin = sessionStorage.getItem('redirect_after_login');
         if (redirectAfterLogin) {
           // Don't remove the flag yet, wait for profile to load
-          console.log('User authenticated, waiting for profile to load before redirecting to:', redirectAfterLogin);
+          logger.log('User authenticated, waiting for profile to load before redirecting to:', redirectAfterLogin);
         }
       } else if (user && profile === null) {
         // User is authenticated but has no profile (new user)
@@ -162,7 +163,7 @@ function LoginPage() {
 
       if (existingProfile && (existingProfile.deleted_at || existingProfile.disabled_at || existingProfile.is_active === false)) {
         // User exists but is deleted/disabled, allow them to reactivate
-        console.log('User exists but is deleted/disabled, allowing reactivation');
+        logger.log('User exists but is deleted/disabled, allowing reactivation');
       } else if (existingProfile && !existingProfile.deleted_at && !existingProfile.disabled_at && existingProfile.is_active !== false) {
         // User exists and is active
         throw new Error('An account with this email already exists. Please sign in instead.');
@@ -185,7 +186,7 @@ function LoginPage() {
         // If it's a "User already registered" error, check if we can reactivate
         if (error.message.includes('User already registered')) {
           if (existingProfile && (existingProfile.deleted_at || existingProfile.disabled_at || existingProfile.is_active === false)) {
-            console.log('User already registered but profile is deleted/disabled, proceeding with reactivation');
+            logger.log('User already registered but profile is deleted/disabled, proceeding with reactivation');
             // Continue with the flow - we'll reactivate the profile
           } else {
             // User exists and is active, they should sign in instead
@@ -210,7 +211,7 @@ function LoginPage() {
       setSignupData({ name: '', email: '', password: '', organizationName: '' });
       
     } catch (err) {
-      console.error('Signup error:', err);
+      logger.error('Signup error:', err);
       setSignupError(err.message || 'Failed to create account. Please try again.');
     } finally {
       setSignupLoading(false);
@@ -261,7 +262,7 @@ function LoginPage() {
 
   const createOrganizationForNewUser = async (orgName) => {
     try {
-      console.log('Creating organization for new user:', orgName);
+      logger.log('Creating organization for new user:', orgName);
       
       // Generate unique slug
       const slug = await generateUniqueSlug(orgName);
@@ -297,7 +298,7 @@ function LoginPage() {
         .single();
 
       if (roleError) {
-        console.error('Error creating admin role:', roleError);
+        logger.error('Error creating admin role:', roleError);
       }
 
       // Update user profile to link to new organization (reactivate if deleted)
@@ -316,7 +317,7 @@ function LoginPage() {
 
       if (profileError) throw profileError;
 
-      console.log('✅ Organization created successfully for new user');
+      logger.log('✅ Organization created successfully for new user');
       
       // Clear the flags
       sessionStorage.removeItem('create_org_after_login');
@@ -329,7 +330,7 @@ function LoginPage() {
       window.location.href = '/home';
 
     } catch (err) {
-      console.error('Error creating organization for new user:', err);
+      logger.error('Error creating organization for new user:', err);
       setError(`Failed to create organization: ${err.message}`);
       sessionStorage.removeItem('create_org_after_login');
       sessionStorage.removeItem('pending_org_name');

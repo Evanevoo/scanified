@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Paper, Typography, Button, Grid, Card, CardContent,
@@ -126,7 +127,7 @@ function WorkflowBuilder({ onWorkflowCreated }) {
       setCurrentStep(0);
 
     } catch (error) {
-      console.error('Error creating workflow:', error);
+      logger.error('Error creating workflow:', error);
       alert('Failed to create workflow');
     } finally {
       setLoading(false);
@@ -589,7 +590,7 @@ function WorkflowExecutionHistory({ workflows }) {
       if (error) throw error;
       setExecutions(data || []);
     } catch (error) {
-      console.error('Error fetching workflow executions:', error);
+      logger.error('Error fetching workflow executions:', error);
     } finally {
       setLoading(false);
     }
@@ -698,7 +699,7 @@ function WorkflowAutomation() {
       if (error) throw error;
       setWorkflows(data || []);
     } catch (error) {
-      console.error('Error fetching workflows:', error);
+      logger.error('Error fetching workflows:', error);
     } finally {
       setLoading(false);
     }
@@ -722,7 +723,7 @@ function WorkflowAutomation() {
         prev.map(w => w.id === workflowId ? { ...w, is_active: isActive } : w)
       );
     } catch (error) {
-      console.error('Error toggling workflow:', error);
+      logger.error('Error toggling workflow:', error);
     }
   };
 

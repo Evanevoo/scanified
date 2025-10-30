@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -44,7 +45,7 @@ export default function InventoryManagement() {
       if (error) throw error;
       setBottles(data || []);
     } catch (err) {
-      console.error('Error fetching bottles:', err);
+      logger.error('Error fetching bottles:', err);
       setError(err.message);
     } finally {
       setLoading(false);

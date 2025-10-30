@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Linking, ScrollView } from 'react-native';
 import { supabase } from '../supabase';
@@ -42,10 +43,10 @@ export default function EditCylinderScreen() {
         .order('name')
         .then(({ data, error }) => {
           if (error) {
-            console.log('❌ Error loading customers:', error);
+            logger.log('❌ Error loading customers:', error);
             setCustomersError('Failed to load customers');
           } else {
-            console.log('✅ Loaded customers:', data?.length || 0);
+            logger.log('✅ Loaded customers:', data?.length || 0);
             setCustomers(data || []);
           }
           setCustomersLoading(false);

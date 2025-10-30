@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, ActivityIndicator } from 'react-native';
@@ -76,16 +77,16 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const parsedSettings = JSON.parse(storedSettings);
         // Migrate settings to ensure all properties exist
         const migratedSettings = migrateSettings(parsedSettings);
-        console.log('🔧 Loading settings:', { stored: parsedSettings, migrated: migratedSettings });
+        logger.log('🔧 Loading settings:', { stored: parsedSettings, migrated: migratedSettings });
         setSettings(migratedSettings);
         // Save migrated settings back to storage
         await saveSettings(migratedSettings);
       } else {
-        console.log('🔧 No stored settings found, using defaults');
+        logger.log('🔧 No stored settings found, using defaults');
         setSettings(defaultSettings);
       }
     } catch (error) {
-      console.error('Error loading settings:', error);
+      logger.error('Error loading settings:', error);
       // Keep default settings if loading fails
       setSettings(defaultSettings);
     } finally {
@@ -97,17 +98,17 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       await AsyncStorage.setItem('app_settings', JSON.stringify(newSettings));
     } catch (error) {
-      console.error('Error saving settings:', error);
+      logger.error('Error saving settings:', error);
     }
   };
 
   const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
-    console.log('🔧 Updating setting:', { key, value, currentSettings: settings });
+    logger.log('🔧 Updating setting:', { key, value, currentSettings: settings });
     
     // Use functional update to ensure we get the latest state
     setSettings(prevSettings => {
       const newSettings = { ...prevSettings, [key]: value };
-      console.log('🔧 New settings:', newSettings);
+      logger.log('🔧 New settings:', newSettings);
       
       // Save to storage asynchronously
       saveSettings(newSettings);
@@ -128,7 +129,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       
       return true;
     } catch (error) {
-      console.error('Error clearing data:', error);
+      logger.error('Error clearing data:', error);
       return false;
     }
   };
@@ -139,7 +140,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       await saveSettings(defaultSettings);
       return true;
     } catch (error) {
-      console.error('Error resetting settings:', error);
+      logger.error('Error resetting settings:', error);
       return false;
     }
   };
