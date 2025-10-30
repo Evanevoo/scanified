@@ -1251,24 +1251,25 @@ export default function ImportApprovals() {
         // Create entry by product code
         if (bottle.product_code) {
           assetMap[bottle.product_code] = {
-            description: bottle.description || '',
-            type: bottle.gas_type || bottle.type || '',  // Use gas_type as type
+            description: bottle.description || (bottle.gas_type && bottle.size ? `${bottle.gas_type} BOTTLE - SIZE ${bottle.size}` : ''),
+            type: bottle.product_code || '', // Type should be like BAR300
             size: bottle.size || '',
-            group: bottle.gas_type || '',  // Use gas_type as group
-            category: bottle.size || '',    // Use size as category
+            group: bottle.gas_type || '', // Group is gas type
+            category: bottle.category || 'INDUSTRIAL CYLINDERS', // Category standardized
             barcode: bottle.barcode_number || '',
-            serial_number: bottle.serial_number || ''
+            serial_number: bottle.serial_number || '',
+            product_code: bottle.product_code || ''
           };
         }
         
         // Also create entry by barcode for direct lookup
         if (bottle.barcode_number) {
           assetMap[bottle.barcode_number] = {
-            description: bottle.description || '',
-            type: bottle.gas_type || bottle.type || '',
+            description: bottle.description || (bottle.gas_type && bottle.size ? `${bottle.gas_type} BOTTLE - SIZE ${bottle.size}` : ''),
+            type: bottle.product_code || '',
             size: bottle.size || '',
             group: bottle.gas_type || '',
-            category: bottle.size || '',
+            category: bottle.category || 'INDUSTRIAL CYLINDERS',
             barcode: bottle.barcode_number || '',
             serial_number: bottle.serial_number || '',
             product_code: bottle.product_code || ''
@@ -2023,9 +2024,9 @@ export default function ImportApprovals() {
     
     return {
       productCode: productCode || barcode,
-      category: assetInfo.category || lineItem.category || '',
+      category: assetInfo.category || lineItem.category || 'INDUSTRIAL CYLINDERS',
       group: assetInfo.group || lineItem.group || '',
-      type: assetInfo.type || lineItem.type || '',
+      type: assetInfo.type || lineItem.type || productCode,
       description: lineItem.description || assetInfo.description || productCode,
       billingCode: lineItem.billing_code || lineItem.BillingCode || productCode
     };
