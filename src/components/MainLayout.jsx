@@ -38,6 +38,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../hooks/useAssetConfig';
 import TextField from '@mui/material/TextField';
 import Sidebar from './Sidebar';
+import InputAdornment from '@mui/material/InputAdornment';
 
 
 const drawerWidth = 280;
@@ -391,6 +392,8 @@ export default function MainLayout({ children }) {
                   color: '#1976d2',
                   fontWeight: 500,
                   height: 40,
+                  display: 'flex',
+                  alignItems: 'center',
                   '& fieldset': {
                     borderColor: 'rgba(255,255,255,0.3)',
                   },
@@ -412,16 +415,23 @@ export default function MainLayout({ children }) {
                     color: '#1976d2',
                   },
                 },
+                '& .MuiOutlinedInput-input': {
+                  padding: '8px 12px',
+                  height: 40,
+                  display: 'flex',
+                  alignItems: 'center',
+                },
                 '& input': {
                   color: '#1976d2',
                   fontWeight: 500,
                   fontSize: '0.95rem',
-                  padding: '8px 12px',
                 },
               }}
               InputProps={{
                 startAdornment: (
-                  <SearchIcon style={{ color: '#1976d2', marginRight: 8 }} />
+                  <InputAdornment position="start">
+                    <SearchIcon sx={{ color: '#1976d2', mr: 1 }} />
+                  </InputAdornment>
                 ),
               }}
             />
