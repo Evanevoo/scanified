@@ -366,7 +366,7 @@ export default function MainLayout({ children }) {
           {/* Right Section: Search, Settings, Logout */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, height: 48 }}>
             {/* Search Bar */}
-            <Box sx={{ width: 400, position: 'relative', display: 'flex', alignItems: 'center' }} ref={searchRef}>
+            <Box sx={{ width: 400, position: 'relative', display: 'flex', alignItems: 'center', marginTop: '2px' }} ref={searchRef}>
             <TextField
               placeholder={
                 isOwner && location.pathname.startsWith('/owner-portal') 
