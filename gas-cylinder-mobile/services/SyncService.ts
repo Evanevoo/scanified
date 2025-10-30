@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
@@ -84,7 +85,7 @@ export class SyncService {
       await this.syncOfflineData();
       await this.updateLastSyncTime();
     } catch (error) {
-      console.error('Background sync failed:', error);
+      logger.error('Background sync failed:', error);
     } finally {
       this.syncInProgress = false;
     }
@@ -101,7 +102,7 @@ export class SyncService {
       // Get current user's organization
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        console.log('No user found, skipping sync');
+        logger.log('No user found, skipping sync');
         return {
           success: true,
           message: 'No user found, skipping sync',
@@ -116,7 +117,7 @@ export class SyncService {
         .single();
 
       if (!profile?.organization_id) {
-        console.log('No organization found, skipping sync');
+        logger.log('No organization found, skipping sync');
         return {
           success: true,
           message: 'No organization found, skipping sync',
@@ -147,14 +148,14 @@ export class SyncService {
       // Clear synced data
       await this.clearOfflineData();
       
-      console.log('Offline data synced successfully');
+      logger.log('Offline data synced successfully');
       return {
         success: true,
         message: 'Offline data synced successfully',
         syncedItems: 0,
       };
     } catch (error) {
-      console.error('Error syncing offline data:', error);
+      logger.error('Error syncing offline data:', error);
       return {
         success: false,
         message: `Sync failed: ${error}`,
@@ -177,7 +178,7 @@ export class SyncService {
 
       if (error) throw error;
     } catch (error) {
-      console.error('Error syncing customer:', error);
+      logger.error('Error syncing customer:', error);
     }
   }
 
@@ -193,7 +194,7 @@ export class SyncService {
 
       if (error) throw error;
     } catch (error) {
-      console.error('Error syncing cylinder:', error);
+      logger.error('Error syncing cylinder:', error);
     }
   }
 
@@ -209,7 +210,7 @@ export class SyncService {
 
       if (error) throw error;
     } catch (error) {
-      console.error('Error syncing rental:', error);
+      logger.error('Error syncing rental:', error);
     }
   }
 
@@ -225,7 +226,7 @@ export class SyncService {
 
       if (error) throw error;
     } catch (error) {
-      console.error('Error syncing fill:', error);
+      logger.error('Error syncing fill:', error);
     }
   }
 
@@ -240,7 +241,7 @@ export class SyncService {
       
       await AsyncStorage.setItem('offlineData', JSON.stringify(offlineData));
     } catch (error) {
-      console.error('Error saving offline data:', error);
+      logger.error('Error saving offline data:', error);
     }
   }
 
@@ -255,7 +256,7 @@ export class SyncService {
         fills: []
       };
     } catch (error) {
-      console.error('Error getting offline data:', error);
+      logger.error('Error getting offline data:', error);
       return {
         customers: [],
         cylinders: [],
@@ -270,7 +271,7 @@ export class SyncService {
     try {
       await AsyncStorage.removeItem('offlineData');
     } catch (error) {
-      console.error('Error clearing offline data:', error);
+      logger.error('Error clearing offline data:', error);
     }
   }
 
@@ -306,7 +307,7 @@ export class SyncService {
       if (error) throw error;
       return data || [];
     } catch (error) {
-      console.error(`Error fetching ${table}:`, error);
+      logger.error(`Error fetching ${table}:`, error);
       return [];
     }
   }
@@ -337,7 +338,7 @@ export class SyncService {
       if (error) throw error;
       return result;
     } catch (error) {
-      console.error(`Error inserting into ${table}:`, error);
+      logger.error(`Error inserting into ${table}:`, error);
       throw error;
     }
   }
@@ -370,7 +371,7 @@ export class SyncService {
       if (error) throw error;
       return result;
     } catch (error) {
-      console.error(`Error updating ${table}:`, error);
+      logger.error(`Error updating ${table}:`, error);
       throw error;
     }
   }
@@ -398,7 +399,7 @@ export class SyncService {
       if (error) throw error;
       return true;
     } catch (error) {
-      console.error(`Error deleting from ${table}:`, error);
+      logger.error(`Error deleting from ${table}:`, error);
       throw error;
     }
   }
@@ -410,7 +411,7 @@ export class SyncService {
       const scans = JSON.parse(offlineData);
       return scans.length;
     } catch (error) {
-      console.error('Error getting offline scan count:', error);
+      logger.error('Error getting offline scan count:', error);
       return 0;
     }
   }
@@ -421,7 +422,7 @@ export class SyncService {
       if (!offlineData) return [];
       return JSON.parse(offlineData);
     } catch (error) {
-      console.error('Error getting offline scans:', error);
+      logger.error('Error getting offline scans:', error);
       return [];
     }
   }
@@ -476,7 +477,7 @@ export class SyncService {
     try {
       await AsyncStorage.setItem('last_sync_time', new Date().toISOString());
     } catch (error) {
-      console.error('Error updating last sync time:', error);
+      logger.error('Error updating last sync time:', error);
     }
   }
 
@@ -576,7 +577,7 @@ export class SyncService {
                 .eq('organization_id', profile.organization_id);
               
               if (updateError) {
-                console.warn(`Could not update bottle status for ${scanData.bottle_barcode}:`, updateError);
+                logger.warn(`Could not update bottle status for ${scanData.bottle_barcode}:`, updateError);
               }
             }
           }
@@ -601,7 +602,7 @@ export class SyncService {
       };
 
     } catch (error) {
-      console.error('Error in static syncOfflineData:', error);
+      logger.error('Error in static syncOfflineData:', error);
       return {
         success: false,
         message: `Sync failed: ${error}`,

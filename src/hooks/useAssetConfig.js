@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabase/client';
 import { useAuth } from './useAuth';
@@ -63,7 +64,7 @@ export const useAssetConfig = () => {
         .single();
 
       if (orgError) {
-        console.warn('Error loading asset config, using defaults:', orgError);
+        logger.warn('Error loading asset config, using defaults:', orgError);
         setConfig(defaultConfig);
       } else {
         setConfig({
@@ -81,7 +82,7 @@ export const useAssetConfig = () => {
         });
       }
     } catch (err) {
-      console.error('Error loading asset config:', err);
+      logger.error('Error loading asset config:', err);
       setError(err instanceof Error ? err.message : 'Failed to load asset configuration');
       setConfig(defaultConfig);
     } finally {

@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -173,7 +174,7 @@ export default function AuditLog() {
 
       setAuditLogs(mockAuditLogs);
     } catch (err) {
-      console.error('Error fetching audit logs:', err);
+      logger.error('Error fetching audit logs:', err);
       setSnackbar({ open: true, message: 'Error loading audit logs', severity: 'error' });
     } finally {
       setLoading(false);
@@ -190,7 +191,7 @@ export default function AuditLog() {
       if (error) throw error;
       setOrganizations(data || []);
     } catch (err) {
-      console.error('Error fetching organizations:', err);
+      logger.error('Error fetching organizations:', err);
     }
   };
 
@@ -204,7 +205,7 @@ export default function AuditLog() {
       if (error) throw error;
       setUsers(data || []);
     } catch (err) {
-      console.error('Error fetching users:', err);
+      logger.error('Error fetching users:', err);
     }
   };
 
@@ -230,7 +231,7 @@ export default function AuditLog() {
       setLogToDelete(null);
       setSnackbar({ open: true, message: 'Audit log deleted successfully', severity: 'success' });
     } catch (error) {
-      console.error('Error deleting audit log:', error);
+      logger.error('Error deleting audit log:', error);
       setSnackbar({ open: true, message: 'Error deleting audit log', severity: 'error' });
     } finally {
       setLoading(false);

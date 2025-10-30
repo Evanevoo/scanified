@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -46,7 +47,7 @@ export default function DailySummaryCard({ onPress }: DailySummaryCardProps) {
       setRecentAchievements(achievements);
       setInsights(insightsList);
     } catch (error) {
-      console.error('Error loading stats:', error);
+      logger.error('Error loading stats:', error);
     } finally {
       setLoading(false);
     }

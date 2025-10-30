@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -26,9 +27,9 @@ class SoundService {
     try {
       await this.loadSettings();
       await this.preloadSounds();
-      console.log('🔊 SoundService initialized');
+      logger.log('🔊 SoundService initialized');
     } catch (error) {
-      console.error('❌ Failed to initialize SoundService:', error);
+      logger.error('❌ Failed to initialize SoundService:', error);
     }
   }
 
@@ -39,7 +40,7 @@ class SoundService {
         this.settings = JSON.parse(stored);
       }
     } catch (error) {
-      console.error('❌ Failed to load sound settings:', error);
+      logger.error('❌ Failed to load sound settings:', error);
     }
   }
 
@@ -47,7 +48,7 @@ class SoundService {
     try {
       await AsyncStorage.setItem('sound_settings', JSON.stringify(this.settings));
     } catch (error) {
-      console.error('❌ Failed to save sound settings:', error);
+      logger.error('❌ Failed to save sound settings:', error);
     }
   }
 
@@ -59,9 +60,9 @@ class SoundService {
       await this.createBeepSound('notification', 600, 0.15);
       await this.createBeepSound('action', 500, 0.1);
       
-      console.log('🔊 Sounds preloaded successfully');
+      logger.log('🔊 Sounds preloaded successfully');
     } catch (error) {
-      console.error('❌ Failed to preload sounds:', error);
+      logger.error('❌ Failed to preload sounds:', error);
     }
   }
 
@@ -81,7 +82,7 @@ class SoundService {
       
       this.soundCache.set(id, sound);
     } catch (error) {
-      console.log(`🔊 Could not create beep sound ${id}, will use haptic only`);
+      logger.log(`🔊 Could not create beep sound ${id}, will use haptic only`);
     }
   }
 
@@ -137,17 +138,17 @@ class SoundService {
         
         if (sound) {
           await sound.replayAsync();
-          console.log(`🔊 Played sound: ${type}`);
+          logger.log(`🔊 Played sound: ${type}`);
         } else {
-          console.log(`🔊 Sound not available, using haptic: ${type}`);
+          logger.log(`🔊 Sound not available, using haptic: ${type}`);
           await this.playHaptic(type);
         }
       } else {
-        console.log(`🔊 Sound disabled, using haptic: ${type}`);
+        logger.log(`🔊 Sound disabled, using haptic: ${type}`);
         await this.playHaptic(type);
       }
     } catch (error) {
-      console.log(`🔊 Sound failed, using haptic: ${type}`, error);
+      logger.log(`🔊 Sound failed, using haptic: ${type}`, error);
       await this.playHaptic(type);
     }
   }
@@ -172,9 +173,9 @@ class SoundService {
         default:
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
-      console.log(`📳 Played haptic: ${type}`);
+      logger.log(`📳 Played haptic: ${type}`);
     } catch (error) {
-      console.log('📳 Haptic feedback failed:', error);
+      logger.log('📳 Haptic feedback failed:', error);
     }
   }
 
@@ -191,7 +192,7 @@ class SoundService {
   async updateSettings(updates: Partial<SoundSettings>): Promise<void> {
     this.settings = { ...this.settings, ...updates };
     await this.saveSettings();
-    console.log('🔊 Sound settings updated:', this.settings);
+    logger.log('🔊 Sound settings updated:', this.settings);
   }
 
   getSettings(): SoundSettings {
@@ -203,7 +204,7 @@ class SoundService {
       try {
         await sound.unloadAsync();
       } catch (error) {
-        console.warn(`Failed to unload sound ${id}:`, error);
+        logger.warn(`Failed to unload sound ${id}:`, error);
       }
     }
     this.soundCache.clear();

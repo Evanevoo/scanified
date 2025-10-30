@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Button, Table, TableBody, TableCell, TableContainer, 
@@ -68,10 +69,10 @@ export default function TempCustomerManagement() {
         }
         
         setError(errorMessage);
-        console.error('Temp customer service error:', result);
+        logger.error('Temp customer service error:', result);
       }
     } catch (err) {
-      console.error('Failed to fetch temp customer items:', err);
+      logger.error('Failed to fetch temp customer items:', err);
       setError(`Failed to fetch temp customer items: ${err.message}. Check browser console for details.`);
     } finally {
       setLoading(false);
@@ -114,7 +115,7 @@ export default function TempCustomerManagement() {
         setCustomerOptions(result.customers);
       }
     } catch (err) {
-      console.error('Error searching customers:', err);
+      logger.error('Error searching customers:', err);
     }
   };
 

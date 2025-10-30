@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState } from 'react';
 import {
   Box,
@@ -35,7 +36,7 @@ const DirectEmailTest = () => {
     setResult(null);
 
     try {
-      console.log('Testing direct SMTP...');
+      logger.log('Testing direct SMTP...');
       
       const response = await fetch('/.netlify/functions/direct-email-test', {
         method: 'POST',
@@ -43,7 +44,7 @@ const DirectEmailTest = () => {
         body: JSON.stringify({ to: testEmail })
       });
 
-      console.log('Direct test response status:', response.status);
+      logger.log('Direct test response status:', response.status);
 
       if (!response.ok) {
         let errorMessage;
@@ -59,12 +60,12 @@ const DirectEmailTest = () => {
       }
 
       const data = await response.json();
-      console.log('Direct test response:', data);
+      logger.log('Direct test response:', data);
       
       setResult(data);
       
     } catch (err) {
-      console.error('Direct SMTP test error:', err);
+      logger.error('Direct SMTP test error:', err);
       setError(`Network error: ${err.message}`);
     } finally {
       setLoading(false);

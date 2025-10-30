@@ -1,10 +1,11 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 export const gdprService = {
   // Data export - Right to data portability
   async exportUserData(userId, organizationId) {
     try {
-      console.log('Starting GDPR data export for user:', userId);
+      logger.log('Starting GDPR data export for user:', userId);
       
       const exportData = {
         exportInfo: {
@@ -26,7 +27,7 @@ export const gdprService = {
         .single();
 
       if (profileError) {
-        console.error('Error exporting profile data:', profileError);
+        logger.error('Error exporting profile data:', profileError);
       } else {
         exportData.userData.profile = profileData;
       }
@@ -39,7 +40,7 @@ export const gdprService = {
         .order('created_at', { ascending: false });
 
       if (auditError) {
-        console.error('Error exporting audit data:', auditError);
+        logger.error('Error exporting audit data:', auditError);
       } else {
         exportData.userData.auditLogs = auditData;
       }
@@ -52,7 +53,7 @@ export const gdprService = {
         .order('created_at', { ascending: false });
 
       if (notificationError) {
-        console.error('Error exporting notification data:', notificationError);
+        logger.error('Error exporting notification data:', notificationError);
       } else {
         exportData.userData.notifications = notificationData;
       }
@@ -68,7 +69,7 @@ export const gdprService = {
         .order('created_at', { ascending: false });
 
       if (ticketError) {
-        console.error('Error exporting support ticket data:', ticketError);
+        logger.error('Error exporting support ticket data:', ticketError);
       } else {
         exportData.userData.supportTickets = ticketData;
       }
@@ -83,7 +84,7 @@ export const gdprService = {
           .order('created_at', { ascending: false });
 
         if (customersError) {
-          console.error('Error exporting customers data:', customersError);
+          logger.error('Error exporting customers data:', customersError);
         } else {
           exportData.businessData.customers = customersData;
         }
@@ -96,7 +97,7 @@ export const gdprService = {
           .order('created_at', { ascending: false });
 
         if (bottlesError) {
-          console.error('Error exporting bottles data:', bottlesError);
+          logger.error('Error exporting bottles data:', bottlesError);
         } else {
           exportData.businessData.bottles = bottlesData;
         }
@@ -109,7 +110,7 @@ export const gdprService = {
           .order('created_at', { ascending: false });
 
         if (rentalsError) {
-          console.error('Error exporting rentals data:', rentalsError);
+          logger.error('Error exporting rentals data:', rentalsError);
         } else {
           exportData.businessData.rentals = rentalsData;
         }
@@ -125,7 +126,7 @@ export const gdprService = {
           .order('created_at', { ascending: false });
 
         if (invoicesError) {
-          console.error('Error exporting invoices data:', invoicesError);
+          logger.error('Error exporting invoices data:', invoicesError);
         } else {
           exportData.businessData.invoices = invoicesData;
         }
@@ -138,7 +139,7 @@ export const gdprService = {
           .single();
 
         if (orgError) {
-          console.error('Error exporting organization data:', orgError);
+          logger.error('Error exporting organization data:', orgError);
         } else {
           exportData.businessData.organization = orgData;
         }
@@ -158,7 +159,7 @@ export const gdprService = {
       };
 
     } catch (error) {
-      console.error('GDPR data export failed:', error);
+      logger.error('GDPR data export failed:', error);
       return {
         success: false,
         error: error.message,
@@ -170,7 +171,7 @@ export const gdprService = {
   // Data deletion - Right to be forgotten
   async deleteUserData(userId, organizationId, deleteType = 'USER_ONLY') {
     try {
-      console.log('Starting GDPR data deletion for user:', userId, 'type:', deleteType);
+      logger.log('Starting GDPR data deletion for user:', userId, 'type:', deleteType);
 
       const deletionResults = {
         userId,
@@ -212,7 +213,7 @@ export const gdprService = {
       };
 
     } catch (error) {
-      console.error('GDPR data deletion failed:', error);
+      logger.error('GDPR data deletion failed:', error);
       return {
         success: false,
         error: error.message,
@@ -463,7 +464,7 @@ export const gdprService = {
           created_at: new Date().toISOString()
         });
     } catch (error) {
-      console.error('Failed to create audit log:', error);
+      logger.error('Failed to create audit log:', error);
     }
   },
 

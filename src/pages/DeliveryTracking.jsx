@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
@@ -225,7 +226,7 @@ export default function DeliveryTracking() {
       setDialogOpen(false);
       refetchDeliveries();
     } catch (error) {
-      console.error('Error saving delivery:', error);
+      logger.error('Error saving delivery:', error);
     }
   };
 
@@ -242,7 +243,7 @@ export default function DeliveryTracking() {
       if (error) throw error;
       refetchDeliveries();
     } catch (error) {
-      console.error('Error updating status:', error);
+      logger.error('Error updating status:', error);
     }
   };
 

@@ -1,8 +1,9 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 export async function fixImportStatus() {
   try {
-    console.log('Checking for imports without status...');
+    logger.log('Checking for imports without status...');
     
     // Check imported_invoices table
     const { data: invoices, error: invError } = await supabase
@@ -10,12 +11,12 @@ export async function fixImportStatus() {
       .select('*')
       .is('status', null);
     
-    console.log('Invoices without status:', { count: invoices?.length || 0, error: invError });
+    logger.log('Invoices without status:', { count: invoices?.length || 0, error: invError });
     
     if (invError) {
-      console.error('Error checking invoices:', invError);
+      logger.error('Error checking invoices:', invError);
     } else if (invoices && invoices.length > 0) {
-      console.log(`Found ${invoices.length} invoices without status, updating...`);
+      logger.log(`Found ${invoices.length} invoices without status, updating...`);
       
       const { error: updateInvError } = await supabase
         .from('imported_invoices')
@@ -23,9 +24,9 @@ export async function fixImportStatus() {
         .is('status', null);
       
       if (updateInvError) {
-        console.error('Error updating invoices:', updateInvError);
+        logger.error('Error updating invoices:', updateInvError);
       } else {
-        console.log('Successfully updated invoice statuses');
+        logger.log('Successfully updated invoice statuses');
       }
     }
     
@@ -35,12 +36,12 @@ export async function fixImportStatus() {
       .select('*')
       .is('status', null);
     
-    console.log('Receipts without status:', { count: receipts?.length || 0, error: recError });
+    logger.log('Receipts without status:', { count: receipts?.length || 0, error: recError });
     
     if (recError) {
-      console.error('Error checking receipts:', recError);
+      logger.error('Error checking receipts:', recError);
     } else if (receipts && receipts.length > 0) {
-      console.log(`Found ${receipts.length} receipts without status, updating...`);
+      logger.log(`Found ${receipts.length} receipts without status, updating...`);
       
       const { error: updateRecError } = await supabase
         .from('imported_sales_receipts')
@@ -48,15 +49,15 @@ export async function fixImportStatus() {
         .is('status', null);
       
       if (updateRecError) {
-        console.error('Error updating receipts:', updateRecError);
+        logger.error('Error updating receipts:', updateRecError);
       } else {
-        console.log('Successfully updated receipt statuses');
+        logger.log('Successfully updated receipt statuses');
       }
     }
     
-    console.log('Import status check complete');
+    logger.log('Import status check complete');
     
   } catch (error) {
-    console.error('Error in fixImportStatus:', error);
+    logger.error('Error in fixImportStatus:', error);
   }
 } 

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, AccessibilityInfo, Platform } from 'react-native';
 import { customizationService } from '../services/customizationService';
@@ -364,7 +365,7 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
           });
         }
       } catch (error) {
-        console.warn('Failed to initialize accessibility:', error);
+        logger.warn('Failed to initialize accessibility:', error);
       }
     };
 

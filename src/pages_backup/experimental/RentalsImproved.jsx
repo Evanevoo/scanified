@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
@@ -106,7 +107,7 @@ function RentalsImproved() {
       });
 
     } catch (error) {
-      console.error('Error fetching assets:', error);
+      logger.error('Error fetching assets:', error);
     }
     setLoading(false);
   };
@@ -122,7 +123,7 @@ function RentalsImproved() {
       if (error) throw error;
       setCustomers(data || []);
     } catch (error) {
-      console.error('Error fetching customers:', error);
+      logger.error('Error fetching customers:', error);
     }
   };
 
@@ -171,7 +172,7 @@ function RentalsImproved() {
       await fetchAssets();
       setEditDialog({ open: false, asset: null });
     } catch (error) {
-      console.error('Error updating asset:', error);
+      logger.error('Error updating asset:', error);
     }
   };
 

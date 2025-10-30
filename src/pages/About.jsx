@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React from 'react';
 import {
   Box,
@@ -229,7 +230,7 @@ export default function About() {
           }
         }
       } catch (error) {
-        console.error('Error loading about page data:', error);
+        logger.error('Error loading about page data:', error);
         // Use default data if loading fails
       }
     };

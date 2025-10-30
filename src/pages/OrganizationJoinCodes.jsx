@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Card, CardContent, Typography, Button, Alert, CircularProgress,
@@ -43,8 +44,8 @@ export default function OrganizationJoinCodes() {
 
   useEffect(() => {
     if (organization) {
-      console.log('🏢 Organization ID:', organization.id);
-      console.log('🏢 Organization Details:', organization);
+      logger.log('🏢 Organization ID:', organization.id);
+      logger.log('🏢 Organization Details:', organization);
       fetchJoinCodes();
     }
   }, [organization]);
@@ -52,7 +53,7 @@ export default function OrganizationJoinCodes() {
   const fetchJoinCodes = async () => {
     try {
       setLoading(true);
-      console.log('🔍 Fetching join codes for organization:', organization.id);
+      logger.log('🔍 Fetching join codes for organization:', organization.id);
       
       // Call the PostgreSQL function to get join codes
       const { data, error } = await supabase
@@ -60,11 +61,11 @@ export default function OrganizationJoinCodes() {
           p_organization_id: organization.id
         });
 
-      console.log('🔍 Fetch join codes response:', { data, error });
+      logger.log('🔍 Fetch join codes response:', { data, error });
       
       if (error) throw error;
       
-      console.log('✅ Found', data?.length || 0, 'join codes');
+      logger.log('✅ Found', data?.length || 0, 'join codes');
       setCodes(data || []);
       
       // Also check the raw table data for debugging
@@ -73,10 +74,10 @@ export default function OrganizationJoinCodes() {
         .select('*')
         .eq('organization_id', organization.id);
         
-      console.log('🔍 Raw table data check:', { rawData, rawError });
+      logger.log('🔍 Raw table data check:', { rawData, rawError });
       
     } catch (err) {
-      console.error('Error fetching join codes:', err);
+      logger.error('Error fetching join codes:', err);
       setError('Failed to load join codes');
     } finally {
       setLoading(false);
@@ -89,7 +90,7 @@ export default function OrganizationJoinCodes() {
     setSuccess('');
 
     try {
-      console.log('🎯 Creating join code with params:', {
+      logger.log('🎯 Creating join code with params:', {
         p_organization_id: organization.id,
         p_created_by: user.id,
         p_expires_hours: createDialog.expiresHours,
@@ -107,18 +108,18 @@ export default function OrganizationJoinCodes() {
           p_assigned_role: createDialog.assignedRole
         });
 
-      console.log('🎯 RPC Response:', { data, error });
+      logger.log('🎯 RPC Response:', { data, error });
 
       if (error) throw error;
 
-      console.log('✅ Code creation successful, raw data:', data);
+      logger.log('✅ Code creation successful, raw data:', data);
       
       if (!data || data.length === 0) {
         throw new Error('No data returned from code creation function');
       }
 
       const newCode = data[0];
-      console.log('✅ New code details:', newCode);
+      logger.log('✅ New code details:', newCode);
       
       if (!newCode.join_code) {
         throw new Error('Code creation function did not return a join_code field');
@@ -128,15 +129,15 @@ export default function OrganizationJoinCodes() {
       setCreateDialog({ open: false, expiresHours: 24, maxUses: 1, notes: '', assignedRole: 'user' });
       
       // Refresh the codes list
-      console.log('🔄 Refreshing codes list...');
+      logger.log('🔄 Refreshing codes list...');
       await fetchJoinCodes();
 
       // Copy code to clipboard automatically
       navigator.clipboard.writeText(newCode.join_code);
-      console.log('📋 Code copied to clipboard:', newCode.join_code);
+      logger.log('📋 Code copied to clipboard:', newCode.join_code);
 
     } catch (err) {
-      console.error('Error creating join code:', err);
+      logger.error('Error creating join code:', err);
       setError(err.message);
     } finally {
       setCreating(false);
@@ -164,7 +165,7 @@ export default function OrganizationJoinCodes() {
       setSuccess('Join code deactivated successfully');
       await fetchJoinCodes();
     } catch (err) {
-      console.error('Error deactivating code:', err);
+      logger.error('Error deactivating code:', err);
       setError('Failed to deactivate join code');
     }
   };
@@ -175,7 +176,7 @@ export default function OrganizationJoinCodes() {
     setSuccess('');
 
     try {
-      console.log('🧹 Cleaning up old join codes...');
+      logger.log('🧹 Cleaning up old join codes...');
       
       const { data, error } = await supabase
         .rpc('admin_cleanup_join_codes', {
@@ -194,7 +195,7 @@ export default function OrganizationJoinCodes() {
       
       await fetchJoinCodes();
     } catch (err) {
-      console.error('Error cleaning up codes:', err);
+      logger.error('Error cleaning up codes:', err);
       setError('Failed to cleanup old codes');
     } finally {
       setCleaning(false);

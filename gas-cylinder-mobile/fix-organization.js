@@ -1,3 +1,4 @@
+import logger from './utils/logger';
 // Fix script to resolve organization issues
 // This script will clean up orphaned profiles and create a default organization if needed
 
@@ -10,11 +11,11 @@ const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function fixOrganizationIssues() {
-  console.log('🔧 Fixing organization issues...\n');
+  logger.log('🔧 Fixing organization issues...\n');
 
   try {
     // 1. Check current state
-    console.log('1. Checking current state...');
+    logger.log('1. Checking current state...');
     const { data: profilesWithoutOrg } = await supabase
       .from('profiles')
       .select('id, email, full_name, created_at')
@@ -29,13 +30,13 @@ async function fixOrganizationIssues() {
       .from('organizations')
       .select('id, name, slug');
 
-    console.log(`   - Profiles without organization_id: ${profilesWithoutOrg?.length || 0}`);
-    console.log(`   - Profiles with invalid organization_id: ${profilesWithInvalidOrg?.length || 0}`);
-    console.log(`   - Total organizations: ${organizations?.length || 0}`);
+    logger.log(`   - Profiles without organization_id: ${profilesWithoutOrg?.length || 0}`);
+    logger.log(`   - Profiles with invalid organization_id: ${profilesWithInvalidOrg?.length || 0}`);
+    logger.log(`   - Total organizations: ${organizations?.length || 0}`);
 
     // 2. Create a default organization if none exist
     if (organizations.length === 0) {
-      console.log('\n2. Creating default organization...');
+      logger.log('\n2. Creating default organization...');
       
       const defaultOrg = {
         name: 'Default Organization',
@@ -65,16 +66,16 @@ async function fixOrganizationIssues() {
         .single();
 
       if (orgError) {
-        console.error('❌ Error creating default organization:', orgError);
+        logger.error('❌ Error creating default organization:', orgError);
         return;
       }
 
-      console.log(`✅ Created default organization: ${newOrg.name} (ID: ${newOrg.id})`);
+      logger.log(`✅ Created default organization: ${newOrg.name} (ID: ${newOrg.id})`);
       organizations.push(newOrg);
     }
 
     // 3. Fix profiles with invalid organization_id
-    console.log('\n3. Fixing profiles with invalid organization_id...');
+    logger.log('\n3. Fixing profiles with invalid organization_id...');
     let fixedCount = 0;
     
     for (const profile of profilesWithInvalidOrg) {
@@ -85,7 +86,7 @@ async function fixOrganizationIssues() {
         .single();
       
       if (!org) {
-        console.log(`   - Fixing ${profile.email} (invalid org_id: ${profile.organization_id})`);
+        logger.log(`   - Fixing ${profile.email} (invalid org_id: ${profile.organization_id})`);
         
         // Set to the first available organization
         const { error: updateError } = await supabase
@@ -94,19 +95,19 @@ async function fixOrganizationIssues() {
           .eq('id', profile.id);
 
         if (updateError) {
-          console.error(`   ❌ Error updating ${profile.email}:`, updateError);
+          logger.error(`   ❌ Error updating ${profile.email}:`, updateError);
         } else {
-          console.log(`   ✅ Fixed ${profile.email} -> ${organizations[0].name}`);
+          logger.log(`   ✅ Fixed ${profile.email} -> ${organizations[0].name}`);
           fixedCount++;
         }
       }
     }
 
     // 4. Fix profiles without organization_id
-    console.log('\n4. Fixing profiles without organization_id...');
+    logger.log('\n4. Fixing profiles without organization_id...');
     
     for (const profile of profilesWithoutOrg) {
-      console.log(`   - Fixing ${profile.email} (no organization_id)`);
+      logger.log(`   - Fixing ${profile.email} (no organization_id)`);
       
       const { error: updateError } = await supabase
         .from('profiles')
@@ -114,15 +115,15 @@ async function fixOrganizationIssues() {
         .eq('id', profile.id);
 
       if (updateError) {
-        console.error(`   ❌ Error updating ${profile.email}:`, updateError);
+        logger.error(`   ❌ Error updating ${profile.email}:`, updateError);
       } else {
-        console.log(`   ✅ Fixed ${profile.email} -> ${organizations[0].name}`);
+        logger.log(`   ✅ Fixed ${profile.email} -> ${organizations[0].name}`);
         fixedCount++;
       }
     }
 
     // 5. Final verification
-    console.log('\n5. Verifying fixes...');
+    logger.log('\n5. Verifying fixes...');
     const { data: finalProfilesWithoutOrg } = await supabase
       .from('profiles')
       .select('id, email, full_name')
@@ -146,20 +147,20 @@ async function fixOrganizationIssues() {
       }
     }
 
-    console.log(`   ✅ Final state:`);
-    console.log(`      - Profiles without organization_id: ${finalProfilesWithoutOrg?.length || 0}`);
-    console.log(`      - Profiles with invalid organization_id: ${finalInvalidCount}`);
-    console.log(`      - Total fixes applied: ${fixedCount}`);
+    logger.log(`   ✅ Final state:`);
+    logger.log(`      - Profiles without organization_id: ${finalProfilesWithoutOrg?.length || 0}`);
+    logger.log(`      - Profiles with invalid organization_id: ${finalInvalidCount}`);
+    logger.log(`      - Total fixes applied: ${fixedCount}`);
 
     if (finalProfilesWithoutOrg?.length === 0 && finalInvalidCount === 0) {
-      console.log('\n🎉 All organization issues have been resolved!');
-      console.log('   The mobile app should now work properly for all users.');
+      logger.log('\n🎉 All organization issues have been resolved!');
+      logger.log('   The mobile app should now work properly for all users.');
     } else {
-      console.log('\n⚠️  Some issues remain. Please check the database manually.');
+      logger.log('\n⚠️  Some issues remain. Please check the database manually.');
     }
 
   } catch (error) {
-    console.error('❌ Unexpected error:', error);
+    logger.error('❌ Unexpected error:', error);
   }
 }
 

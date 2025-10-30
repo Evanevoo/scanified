@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box, Typography, Paper, Grid, Button, Card, CardContent,
@@ -53,7 +54,7 @@ export default function BulkRentalPricingManager() {
       
       // Debug: Log organization info
       if (process.env.NODE_ENV === 'development') {
-        console.log('🔍 Organization Debug:', {
+        logger.log('🔍 Organization Debug:', {
           organizationId: organization?.id,
           organizationName: organization?.name,
           organizationData: organization
@@ -68,11 +69,11 @@ export default function BulkRentalPricingManager() {
         .order('name');
       
       if (customersError) {
-        console.error('Error loading customers:', customersError);
+        logger.error('Error loading customers:', customersError);
         throw new Error(`Failed to load customers: ${customersError.message || customersError.details || 'Unknown error'}`);
       }
       
-      console.log('📊 Customers loaded:', {
+      logger.log('📊 Customers loaded:', {
         count: customersData?.length || 0,
         organizationId: organization.id,
         organizationName: organization.name,
@@ -89,7 +90,7 @@ export default function BulkRentalPricingManager() {
         .order('min_quantity');
       
       if (tiersError) {
-        console.error('Error loading pricing tiers:', tiersError);
+        logger.error('Error loading pricing tiers:', tiersError);
         throw new Error(`Failed to load pricing tiers: ${tiersError.message || tiersError.details || 'Unknown error'}`);
       }
       
@@ -100,7 +101,7 @@ export default function BulkRentalPricingManager() {
         .eq('organization_id', organization.id);
       
       if (pricingError) {
-        console.error('Error loading customer pricing:', pricingError);
+        logger.error('Error loading customer pricing:', pricingError);
         throw new Error(`Failed to load customer pricing: ${pricingError.message || pricingError.details || 'Unknown error'}`);
       }
 
@@ -109,7 +110,7 @@ export default function BulkRentalPricingManager() {
       setCustomerPricing(pricingData || []);
       
     } catch (error) {
-      console.error('Error loading data:', error);
+      logger.error('Error loading data:', error);
       const errorMessage = error?.message || error?.details || error?.hint || 'Failed to load data';
       alert('Error loading pricing data: ' + errorMessage);
     } finally {
@@ -168,7 +169,7 @@ export default function BulkRentalPricingManager() {
       alert('Test pricing data created successfully!');
       loadData(); // Reload data to show the new pricing
     } catch (error) {
-      console.error('Error creating test pricing data:', error);
+      logger.error('Error creating test pricing data:', error);
       alert('Failed to create test pricing data: ' + error.message);
     }
   };
@@ -177,7 +178,7 @@ export default function BulkRentalPricingManager() {
   const filteredCustomers = useMemo(() => {
     let filtered = customers;
 
-    console.log('Filtering customers:', {
+    logger.log('Filtering customers:', {
       totalCustomers: customers.length,
       searchTerm,
       sortByPeriod,
@@ -195,7 +196,7 @@ export default function BulkRentalPricingManager() {
         customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         customer.CustomerListID.toLowerCase().includes(searchTerm.toLowerCase())
       );
-      console.log('After search filter:', filtered.length);
+      logger.log('After search filter:', filtered.length);
     }
 
     // Filter by rental period
@@ -205,21 +206,21 @@ export default function BulkRentalPricingManager() {
         
         if (sortByPeriod === 'no-pricing') {
           const hasNoPricing = !currentPricing;
-          console.log(`Customer ${customer.name}: no pricing = ${hasNoPricing}`);
+          logger.log(`Customer ${customer.name}: no pricing = ${hasNoPricing}`);
           return hasNoPricing;
         } else {
           // Check if customer has pricing with the specific rental period
           // Handle case where rental_period might be null/undefined (default to monthly)
           const customerPeriod = currentPricing?.rental_period || 'monthly';
           const hasCorrectPeriod = currentPricing && customerPeriod === sortByPeriod;
-          console.log(`Customer ${customer.name}: pricing = ${!!currentPricing}, period = ${customerPeriod}, matches ${sortByPeriod} = ${hasCorrectPeriod}`);
+          logger.log(`Customer ${customer.name}: pricing = ${!!currentPricing}, period = ${customerPeriod}, matches ${sortByPeriod} = ${hasCorrectPeriod}`);
           return hasCorrectPeriod;
         }
       });
-      console.log('After period filter:', filtered.length);
+      logger.log('After period filter:', filtered.length);
     }
 
-    console.log('Final filtered customers:', filtered.length);
+    logger.log('Final filtered customers:', filtered.length);
     return filtered;
   }, [customers, searchTerm, sortByPeriod, customerPricing]);
 
@@ -232,7 +233,7 @@ export default function BulkRentalPricingManager() {
     try {
       setSaving(true);
       
-      console.log('Applying bulk pricing with data:', {
+      logger.log('Applying bulk pricing with data:', {
         organizationId: organization.id,
         selectedCustomers,
         bulkPricing
@@ -251,10 +252,10 @@ export default function BulkRentalPricingManager() {
         notes: `Bulk pricing applied on ${new Date().toLocaleDateString()} (${bulkPricing.rentalPeriod})`
       }));
 
-      console.log('Pricing records to insert:', pricingRecords);
+      logger.log('Pricing records to insert:', pricingRecords);
 
       // Delete existing pricing for selected customers
-      console.log('Deleting existing pricing for customers:', selectedCustomers);
+      logger.log('Deleting existing pricing for customers:', selectedCustomers);
       const { error: deleteError } = await supabase
         .from('customer_pricing')
         .delete()
@@ -262,25 +263,25 @@ export default function BulkRentalPricingManager() {
         .in('customer_id', selectedCustomers);
 
       if (deleteError) {
-        console.error('Error deleting existing pricing:', deleteError);
+        logger.error('Error deleting existing pricing:', deleteError);
         throw new Error(`Failed to delete existing pricing: ${deleteError.message || deleteError.details || 'Unknown error'}`);
       }
 
       // Insert new pricing records
-      console.log('Inserting new pricing records...');
+      logger.log('Inserting new pricing records...');
       const { error } = await supabase
         .from('customer_pricing')
         .insert(pricingRecords);
 
       if (error) {
-        console.error('Error inserting pricing records:', error);
+        logger.error('Error inserting pricing records:', error);
         throw error;
       }
 
       // Reload data
       await loadData();
       
-      console.log('Bulk pricing applied successfully');
+      logger.log('Bulk pricing applied successfully');
       alert(`Successfully applied bulk pricing to ${selectedCustomers.length} customers`);
       setSelectedCustomers([]);
       setBulkPricing({
@@ -294,7 +295,7 @@ export default function BulkRentalPricingManager() {
       });
       
     } catch (error) {
-      console.error('Error applying bulk pricing:', error);
+      logger.error('Error applying bulk pricing:', error);
       const errorMessage = error?.message || error?.details || error?.hint || 'Unknown error occurred';
       alert('Error applying bulk pricing: ' + errorMessage);
     } finally {
@@ -322,7 +323,7 @@ export default function BulkRentalPricingManager() {
       alert('Customer pricing removed successfully');
       
     } catch (error) {
-      console.error('Error deleting customer pricing:', error);
+      logger.error('Error deleting customer pricing:', error);
       const errorMessage = error?.message || error?.details || error?.hint || 'Unknown error occurred';
       alert('Error removing customer pricing: ' + errorMessage);
     }

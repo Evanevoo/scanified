@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Card, CardContent, Typography, Grid, CircularProgress, Alert,
@@ -47,7 +48,7 @@ export default function OwnerAnalytics() {
       const analyticsData = await calculateAnalytics(organizations);
       setAnalytics(analyticsData);
     } catch (err) {
-      console.error('Error loading analytics:', err);
+      logger.error('Error loading analytics:', err);
       setError(err.message);
     } finally {
       setLoading(false);

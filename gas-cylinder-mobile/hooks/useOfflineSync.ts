@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { useState, useEffect, useCallback } from 'react';
 import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -106,7 +107,7 @@ export const useOfflineSync = () => {
                 .eq('barcode_number', scanData.bottle_barcode);
               
               if (updateError) {
-                console.warn(`Could not update bottle status for ${scanData.bottle_barcode}:`, updateError);
+                logger.warn(`Could not update bottle status for ${scanData.bottle_barcode}:`, updateError);
               }
             }
           }

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -53,7 +54,7 @@ export default function NotificationSettingsScreen() {
       // In a real app, you'd load from AsyncStorage or user profile
       
     } catch (error) {
-      console.error('Error loading notification settings:', error);
+      logger.error('Error loading notification settings:', error);
     } finally {
       setLoading(false);
     }
@@ -64,7 +65,7 @@ export default function NotificationSettingsScreen() {
       const enabled = await notificationService.areNotificationsEnabled();
       setPermissionsGranted(enabled);
     } catch (error) {
-      console.error('Error checking notification permissions:', error);
+      logger.error('Error checking notification permissions:', error);
     }
   };
 
@@ -79,7 +80,7 @@ export default function NotificationSettingsScreen() {
         Alert.alert('Permission Denied', 'Notification permissions are required for push notifications');
       }
     } catch (error) {
-      console.error('Error requesting permissions:', error);
+      logger.error('Error requesting permissions:', error);
       Alert.alert('Error', 'Failed to request notification permissions');
     }
   };
@@ -98,7 +99,7 @@ export default function NotificationSettingsScreen() {
       setTimeout(() => setSaving(false), 500);
       
     } catch (error) {
-      console.error('Error updating notification setting:', error);
+      logger.error('Error updating notification setting:', error);
       Alert.alert('Error', 'Failed to update notification setting');
       setSaving(false);
     }
@@ -120,7 +121,7 @@ export default function NotificationSettingsScreen() {
       
       Alert.alert('Success', 'Test notification sent');
     } catch (error) {
-      console.error('Error sending test notification:', error);
+      logger.error('Error sending test notification:', error);
       Alert.alert('Error', 'Failed to send test notification');
     }
   };

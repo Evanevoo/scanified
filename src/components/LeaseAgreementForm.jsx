@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -72,7 +73,7 @@ export default function LeaseAgreementForm({
       if (error) throw error;
       setCustomers(data || []);
     } catch (error) {
-      console.error('Error fetching customers:', error);
+      logger.error('Error fetching customers:', error);
     }
   };
 
@@ -89,7 +90,7 @@ export default function LeaseAgreementForm({
       const uniqueTypes = [...new Set(data.map(item => item.type))];
       setAssetTypes(uniqueTypes);
     } catch (error) {
-      console.error('Error fetching asset types:', error);
+      logger.error('Error fetching asset types:', error);
     }
   };
 
@@ -104,7 +105,7 @@ export default function LeaseAgreementForm({
       if (error) throw error;
       setLocations(data || []);
     } catch (error) {
-      console.error('Error fetching locations:', error);
+      logger.error('Error fetching locations:', error);
     }
   };
 

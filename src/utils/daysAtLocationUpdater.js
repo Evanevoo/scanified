@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 /**
@@ -6,7 +7,7 @@ import { supabase } from '../supabase/client';
  */
 export const updateDaysAtLocation = async () => {
   try {
-    console.log('Starting daily days_at_location update...');
+    logger.log('Starting daily days_at_location update...');
     
     // First, try to get bottles with last_location_update column
     let { data: bottles, error: fetchError } = await supabase
@@ -16,7 +17,7 @@ export const updateDaysAtLocation = async () => {
 
     // If the column doesn't exist, fall back to basic approach
     if (fetchError && fetchError.message.includes('last_location_update')) {
-      console.log('last_location_update column not found, using fallback approach...');
+      logger.log('last_location_update column not found, using fallback approach...');
       
       // Get bottles without the last_location_update column
       const { data: basicBottles, error: basicError } = await supabase
@@ -25,7 +26,7 @@ export const updateDaysAtLocation = async () => {
         .not('days_at_location', 'is', null);
 
       if (basicError) {
-        console.error('Error fetching bottles:', basicError);
+        logger.error('Error fetching bottles:', basicError);
         return { success: false, error: basicError.message };
       }
 
@@ -45,13 +46,13 @@ export const updateDaysAtLocation = async () => {
             .eq('id', bottle.id);
 
           if (updateError) {
-            console.error(`Error updating bottle ${bottle.id}:`, updateError);
+            logger.error(`Error updating bottle ${bottle.id}:`, updateError);
           } else {
             updatedCount++;
           }
         }
 
-        console.log(`Successfully updated ${updatedCount} bottles (fallback mode)`);
+        logger.log(`Successfully updated ${updatedCount} bottles (fallback mode)`);
         return { 
           success: true, 
           updated: updatedCount,
@@ -60,12 +61,12 @@ export const updateDaysAtLocation = async () => {
         };
       }
     } else if (fetchError) {
-      console.error('Error fetching bottles:', fetchError);
+      logger.error('Error fetching bottles:', fetchError);
       return { success: false, error: fetchError.message };
     }
 
     if (!bottles || bottles.length === 0) {
-      console.log('No bottles found to update');
+      logger.log('No bottles found to update');
       return { success: true, updated: 0 };
     }
 
@@ -89,14 +90,14 @@ export const updateDaysAtLocation = async () => {
           .eq('id', bottle.id);
 
         if (updateError) {
-          console.error(`Error updating bottle ${bottle.id}:`, updateError);
+          logger.error(`Error updating bottle ${bottle.id}:`, updateError);
         } else {
           updatedCount++;
         }
       }
     }
 
-    console.log(`Successfully updated ${updatedCount} bottles`);
+    logger.log(`Successfully updated ${updatedCount} bottles`);
     return { 
       success: true, 
       updated: updatedCount,
@@ -104,7 +105,7 @@ export const updateDaysAtLocation = async () => {
     };
 
   } catch (error) {
-    console.error('Error in updateDaysAtLocation:', error);
+    logger.error('Error in updateDaysAtLocation:', error);
     return { success: false, error: error.message };
   }
 };
@@ -126,7 +127,7 @@ export const resetDaysAtLocation = async (bottleId) => {
 
     // If last_location_update column doesn't exist, try without it
     if (error && error.message.includes('last_location_update')) {
-      console.log('last_location_update column not found, updating without it...');
+      logger.log('last_location_update column not found, updating without it...');
       const { error: basicError } = await supabase
         .from('bottles')
         .update({ 
@@ -135,17 +136,17 @@ export const resetDaysAtLocation = async (bottleId) => {
         .eq('id', bottleId);
       
       if (basicError) {
-        console.error('Error resetting days_at_location:', basicError);
+        logger.error('Error resetting days_at_location:', basicError);
         return { success: false, error: basicError.message };
       }
     } else if (error) {
-      console.error('Error resetting days_at_location:', error);
+      logger.error('Error resetting days_at_location:', error);
       return { success: false, error: error.message };
     }
 
     return { success: true };
   } catch (error) {
-    console.error('Error in resetDaysAtLocation:', error);
+    logger.error('Error in resetDaysAtLocation:', error);
     return { success: false, error: error.message };
   }
 };
@@ -169,7 +170,7 @@ export const initializeDaysAtLocation = async (bottleId) => {
 
     // If last_location_update column doesn't exist, try without it
     if (error && error.message.includes('last_location_update')) {
-      console.log('last_location_update column not found, updating without it...');
+      logger.log('last_location_update column not found, updating without it...');
       const { error: basicError } = await supabase
         .from('bottles')
         .update({ 
@@ -178,17 +179,17 @@ export const initializeDaysAtLocation = async (bottleId) => {
         .eq('id', bottleId);
       
       if (basicError) {
-        console.error('Error initializing days_at_location:', basicError);
+        logger.error('Error initializing days_at_location:', basicError);
         return { success: false, error: basicError.message };
       }
     } else if (error) {
-      console.error('Error initializing days_at_location:', error);
+      logger.error('Error initializing days_at_location:', error);
       return { success: false, error: error.message };
     }
 
     return { success: true };
   } catch (error) {
-    console.error('Error in initializeDaysAtLocation:', error);
+    logger.error('Error in initializeDaysAtLocation:', error);
     return { success: false, error: error.message };
   }
 };
@@ -198,6 +199,6 @@ export const initializeDaysAtLocation = async (bottleId) => {
  * This can be called from the admin interface for testing purposes
  */
 export const manualUpdateDaysAtLocation = async () => {
-  console.log('Manual update triggered...');
+  logger.log('Manual update triggered...');
   return await updateDaysAtLocation();
 }; 

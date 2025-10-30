@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -105,7 +106,7 @@ const DisasterRecoveryDashboard = () => {
         setRecoveryStatus(updatedStatus);
       }
     } catch (error) {
-      console.error('Failed to load recovery status:', error);
+      logger.error('Failed to load recovery status:', error);
     } finally {
       setLoading(false);
     }
@@ -125,7 +126,7 @@ const DisasterRecoveryDashboard = () => {
           systemHealth: status.healthCheck?.overall || 'unknown'
         });
       } catch (error) {
-        console.error('Health monitoring error:', error);
+        logger.error('Health monitoring error:', error);
       }
     }, 30000); // Every 30 seconds
     
@@ -142,7 +143,7 @@ const DisasterRecoveryDashboard = () => {
       
       alert(`✅ Backup created successfully!\n\nBackup ID: ${backup.id}\nTables: ${Object.keys(backup.tables).length}\nTotal Records: ${Object.values(backup.tables).reduce((sum, table) => sum + table.records, 0)}`);
     } catch (error) {
-      console.error('Backup failed:', error);
+      logger.error('Backup failed:', error);
       alert(`❌ Backup failed: ${error.message}`);
     } finally {
       setBackupInProgress(false);
@@ -167,7 +168,7 @@ const DisasterRecoveryDashboard = () => {
       // Refresh status
       await loadRecoveryStatus();
     } catch (error) {
-      console.error('Restore failed:', error);
+      logger.error('Restore failed:', error);
       alert(`❌ Restore failed: ${error.message}`);
     } finally {
       setLoading(false);

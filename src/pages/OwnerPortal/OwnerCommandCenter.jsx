@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Grid, Card, CardContent, Button, Chip, Alert,
@@ -156,7 +157,7 @@ export default function OwnerCommandCenter() {
       });
       
     } catch (error) {
-      console.error('Error loading business metrics:', error);
+      logger.error('Error loading business metrics:', error);
     } finally {
       setLoading(false);
     }

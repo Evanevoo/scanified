@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert, ScrollView } from 'react-native';
 import { supabase } from '../supabase';
@@ -40,7 +41,7 @@ export default function HistoryScreen() {
         .order('name');
       
       if (error) {
-        console.error('Error fetching customers:', error);
+        logger.error('Error fetching customers:', error);
       } else {
         setCustomers(data || []);
       }
@@ -63,7 +64,7 @@ export default function HistoryScreen() {
         .order('barcode_number');
       
       if (error) {
-        console.error('Error fetching bottles:', error);
+        logger.error('Error fetching bottles:', error);
       } else {
         setBottles(data || []);
       }
@@ -112,7 +113,7 @@ export default function HistoryScreen() {
     if (!barcode || !profile?.organization_id) return null;
     
     try {
-      console.log('🔍 Fetching item details for barcode:', barcode);
+      logger.log('🔍 Fetching item details for barcode:', barcode);
       
       const { data, error } = await supabase
         .from('bottles')
@@ -121,15 +122,15 @@ export default function HistoryScreen() {
         .eq('organization_id', profile.organization_id)
         .maybeSingle();
       
-      console.log('🔍 Item details result:', { data, error });
+      logger.log('🔍 Item details result:', { data, error });
       
       if (error) {
-        console.error('❌ Error fetching item details:', error);
+        logger.error('❌ Error fetching item details:', error);
         return null;
       }
       
       if (!data) {
-        console.log('⚠️ No item found for barcode:', barcode);
+        logger.log('⚠️ No item found for barcode:', barcode);
         return null;
       }
       
@@ -142,10 +143,10 @@ export default function HistoryScreen() {
         customerName: data.customer_name,
       };
       
-      console.log('✅ Item details fetched:', details);
+      logger.log('✅ Item details fetched:', details);
       return details;
     } catch (err) {
-      console.error('❌ Error in fetchItemDetails:', err);
+      logger.error('❌ Error in fetchItemDetails:', err);
       return null;
     }
   };
@@ -173,13 +174,13 @@ export default function HistoryScreen() {
     // Fetch details after a delay
     if (value.trim() && value.length >= 3) {
       setTimeout(async () => {
-        console.log('🔍 Fetching details after timeout for:', value);
+        logger.log('🔍 Fetching details after timeout for:', value);
         const details = await fetchItemDetails(value);
         if (details) {
-          console.log('✅ Setting item details:', value, details);
+          logger.log('✅ Setting item details:', value, details);
           setItemDetails(prev => ({ ...prev, [value]: details }));
         } else {
-          console.log('⚠️ No details found for:', value);
+          logger.log('⚠️ No details found for:', value);
         }
       }, 500);
     }
@@ -209,7 +210,7 @@ export default function HistoryScreen() {
         
         // If bottle_scans doesn't exist, try cylinder_scans table
         if (error && error.message?.includes('relation') && error.message?.includes('does not exist')) {
-          console.log('bottle_scans table not found, trying cylinder_scans table...');
+          logger.log('bottle_scans table not found, trying cylinder_scans table...');
           const fallback = await supabase
             .from('cylinder_scans')
             .select('*')
@@ -222,15 +223,15 @@ export default function HistoryScreen() {
         }
         
         if (error) {
-          console.error('Scan loading error:', error);
+          logger.error('Scan loading error:', error);
           setError(`Failed to load scans: ${error.message || 'Unknown error'}`);
         } else {
           setError('');
           setScans(data || []);
-          console.log(`Loaded ${data?.length || 0} scans`);
+          logger.log(`Loaded ${data?.length || 0} scans`);
         }
       } catch (err) {
-        console.error('Unexpected error loading scans:', err);
+        logger.error('Unexpected error loading scans:', err);
         setError(`Unexpected error: ${err.message}`);
       }
       

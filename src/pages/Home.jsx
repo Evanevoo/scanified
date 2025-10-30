@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
@@ -91,13 +92,13 @@ export default function Home() {
           setRecentActivity(activityRes.data);
         }
       } catch (error) {
-        console.log('Audit logs not available yet:', error);
+        logger.log('Audit logs not available yet:', error);
         setRecentActivity([]);
       }
 
       setStats(newStats);
     } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+      logger.error('Error fetching dashboard data:', error);
     } finally {
       setLoading(false);
     }
@@ -164,7 +165,7 @@ export default function Home() {
         icon: <People />, 
         color: currentTheme.primary.main,
         onClick: () => {
-          console.log('🔄 Navigating to /customers');
+          logger.log('🔄 Navigating to /customers');
           navigate('/customers');
         }
       },
@@ -174,7 +175,7 @@ export default function Home() {
         icon: <Inventory />, 
         color: currentTheme.secondary.main,
         onClick: () => {
-          console.log('🔄 Navigating to /inventory');
+          logger.log('🔄 Navigating to /inventory');
           navigate('/inventory');
         }
       },
@@ -184,7 +185,7 @@ export default function Home() {
         icon: <Schedule />, 
         color: currentTheme.success.main,
         onClick: () => {
-          console.log('🔄 Navigating to /rentals');
+          logger.log('🔄 Navigating to /rentals');
           navigate('/rentals');
         }
       },
@@ -194,7 +195,7 @@ export default function Home() {
         icon: <LocalShipping />, 
         color: currentTheme.warning.main,
         onClick: () => {
-          console.log('🔄 Navigating to /deliveries');
+          logger.log('🔄 Navigating to /deliveries');
           navigate('/deliveries');
         }
       }
@@ -208,7 +209,7 @@ export default function Home() {
           icon: <Warning />, 
           color: currentTheme.error.main,
           onClick: () => {
-            console.log('🔄 Navigating to /billing (invoices not available)');
+            logger.log('🔄 Navigating to /billing (invoices not available)');
             navigate('/billing');
           }
         },
@@ -218,7 +219,7 @@ export default function Home() {
           icon: <AdminPanelSettings />, 
           color: currentTheme.info.main,
           onClick: () => {
-            console.log('🔄 Navigating to /user-management');
+            logger.log('🔄 Navigating to /user-management');
             navigate('/user-management');
           }
         }

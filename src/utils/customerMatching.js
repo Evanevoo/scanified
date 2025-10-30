@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 /**
@@ -143,7 +144,7 @@ export async function getCustomerSuggestions(searchTerm, limit = 10) {
     .limit(limit);
   
   if (error) {
-    console.error('Error fetching customer suggestions:', error);
+    logger.error('Error fetching customer suggestions:', error);
     return [];
   }
   
@@ -200,7 +201,7 @@ export async function batchFindCustomers(customers, organizationId = null) {
   const { data: existingCustomers, error } = await query;
   
   if (error) {
-    console.error('Error in batch customer lookup:', error);
+    logger.error('Error in batch customer lookup:', error);
     return {};
   }
   

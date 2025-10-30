@@ -1,10 +1,11 @@
+import logger from '../utils/logger';
     // 2. Query all at once for existing customers (case-insensitive)
-    console.log('Checking existing customers...');
+    logger.log('Checking existing customers...');
     const { data: existingCustomers, error: fetchError } = await supabase
       .from('customers')
       .select('CustomerListID, name');
     if (fetchError) {
-      console.error('Error fetching existing customers:', fetchError);
+      logger.error('Error fetching existing customers:', fetchError);
       setLoading(false);
       toast.error('Error checking existing customers');
       return;
@@ -14,9 +15,9 @@
     const existingIdsExact = new Set((existingCustomers || []).map(c => c.CustomerListID));
     const existingIdsCaseInsensitive = new Set((existingCustomers || []).map(c => (c.CustomerListID || '').trim().toLowerCase()));
     
-    console.log('Existing customer IDs (exact):', Array.from(existingIdsExact));
-    console.log('Existing customer IDs (case-insensitive):', Array.from(existingIdsCaseInsensitive));
-    console.log('Raw existing customers data:', existingCustomers);
+    logger.log('Existing customer IDs (exact):', Array.from(existingIdsExact));
+    logger.log('Existing customer IDs (case-insensitive):', Array.from(existingIdsCaseInsensitive));
+    logger.log('Raw existing customers data:', existingCustomers);
 
     // 3. Build list of new customers to create (deduplicated)
     const customersToCreate = [];
@@ -24,29 +25,29 @@
     for (const row of preview) {
       const cid = (row.customer_id || '').trim().toLowerCase();
       const exactCid = row.customer_id;
-      console.log('Processing row:', row.customer_id, '-> cid:', cid, 'exact:', exactCid);
+      logger.log('Processing row:', row.customer_id, '-> cid:', cid, 'exact:', exactCid);
       if (!cid) {
-        console.log('Skipping row with empty customer_id');
+        logger.log('Skipping row with empty customer_id');
         continue;
       }
       
       // Check both exact and case-insensitive matches
       if (existingIdsExact.has(exactCid) || existingIdsCaseInsensitive.has(cid)) {
-        console.log('Customer already exists (exact or case-insensitive):', exactCid);
+        logger.log('Customer already exists (exact or case-insensitive):', exactCid);
         skippedCustomers.push({
           CustomerListID: row.customer_id,
           name: row.customer_name,
           reason: 'already exists'
         });
       } else if (seenInBatch.has(cid)) {
-        console.log('Customer duplicate in batch:', cid);
+        logger.log('Customer duplicate in batch:', cid);
         skippedCustomers.push({
           CustomerListID: row.customer_id,
           name: row.customer_name,
           reason: 'duplicate in file'
         });
       } else {
-        console.log('Adding customer to create list:', cid);
+        logger.log('Adding customer to create list:', cid);
         customersToCreate.push({
           CustomerListID: row.customer_id,
           name: row.customer_name,

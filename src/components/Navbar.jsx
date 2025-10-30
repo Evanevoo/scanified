@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState } from 'react';
 import {
   AppBar, Toolbar, Typography, IconButton, Menu, MenuItem,
@@ -29,7 +30,7 @@ export default function Navbar({ onMenuClick }) {
       await signOut();
       handleClose();
     } catch (error) {
-      console.error('Error signing out:', error);
+      logger.error('Error signing out:', error);
     }
   };
 

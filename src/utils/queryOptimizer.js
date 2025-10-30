@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { useState, useEffect, useCallback } from 'react';
 
 /**
@@ -69,7 +70,7 @@ export const executeBatchQueries = async (queries) => {
 
     return results.map(result => result.data);
   } catch (error) {
-    console.error('Batch query execution failed:', error);
+    logger.error('Batch query execution failed:', error);
     throw error;
   }
 };
@@ -199,7 +200,7 @@ export const useOptimizedQuery = (supabase, table, options = {}) => {
       setData(result);
     } catch (err) {
       setError(err.message);
-      console.error(`Error fetching ${table}:`, err);
+      logger.error(`Error fetching ${table}:`, err);
     } finally {
       setLoading(false);
     }
@@ -251,13 +252,13 @@ export const performanceMonitor = {
   
   start(label) {
     this.startTime = performance.now();
-    console.log(`🚀 Starting: ${label}`);
+    logger.log(`🚀 Starting: ${label}`);
   },
   
   end(label) {
     if (this.startTime) {
       const duration = performance.now() - this.startTime;
-      console.log(`⏱️ ${label}: ${duration.toFixed(2)}ms`);
+      logger.log(`⏱️ ${label}: ${duration.toFixed(2)}ms`);
       this.startTime = null;
     }
   },

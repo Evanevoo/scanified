@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Grid, Card, CardContent, CardActions,
@@ -142,7 +143,7 @@ export default function PalletManagement() {
       setPalletItems(itemsResult.data || []);
 
     } catch (error) {
-      console.error('Error fetching pallet data:', error);
+      logger.error('Error fetching pallet data:', error);
       setError('Failed to load pallet management data');
     } finally {
       setLoading(false);
@@ -177,7 +178,7 @@ export default function PalletManagement() {
       fetchData();
 
     } catch (error) {
-      console.error('Error creating pallet:', error);
+      logger.error('Error creating pallet:', error);
       setError('Failed to create pallet');
     }
   };
@@ -208,7 +209,7 @@ export default function PalletManagement() {
       fetchData();
 
     } catch (error) {
-      console.error('Error creating template:', error);
+      logger.error('Error creating template:', error);
       setError('Failed to create template');
     }
   };
@@ -249,7 +250,7 @@ export default function PalletManagement() {
       fetchData();
 
     } catch (error) {
-      console.error('Error in bulk scan:', error);
+      logger.error('Error in bulk scan:', error);
       setError('Failed to process bulk scan');
     }
   };

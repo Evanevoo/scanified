@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -74,7 +75,7 @@ export default function FixOrganizationLink() {
       });
 
     } catch (error) {
-      console.error('Error fetching diagnostic info:', error);
+      logger.error('Error fetching diagnostic info:', error);
     }
   };
 
@@ -88,7 +89,7 @@ export default function FixOrganizationLink() {
       if (error) throw error;
       setOrganizations(data || []);
     } catch (error) {
-      console.error('Error fetching organizations:', error);
+      logger.error('Error fetching organizations:', error);
     }
   };
 

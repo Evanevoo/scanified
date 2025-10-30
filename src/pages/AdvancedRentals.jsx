@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Grid, Card, CardContent, CardActions,
@@ -240,7 +241,7 @@ export default function AdvancedRentals() {
       setRentalHistory(historyResult.data || []);
 
     } catch (error) {
-      console.error('Error fetching rental data:', error);
+      logger.error('Error fetching rental data:', error);
       setError('Failed to load rental data');
     } finally {
       setLoading(false);
@@ -280,7 +281,7 @@ export default function AdvancedRentals() {
       fetchData();
 
     } catch (error) {
-      console.error('Error creating rental rate:', error);
+      logger.error('Error creating rental rate:', error);
       setError('Failed to create rental rate');
     }
   };
@@ -316,7 +317,7 @@ export default function AdvancedRentals() {
       fetchData();
 
     } catch (error) {
-      console.error('Error creating demurrage rate:', error);
+      logger.error('Error creating demurrage rate:', error);
       setError('Failed to create demurrage rate');
     }
   };
@@ -364,7 +365,7 @@ export default function AdvancedRentals() {
       fetchData();
 
     } catch (error) {
-      console.error('Error creating bracket rate:', error);
+      logger.error('Error creating bracket rate:', error);
       setError('Failed to create bracket rate');
     }
   };
@@ -428,7 +429,7 @@ export default function AdvancedRentals() {
       fetchData();
 
     } catch (error) {
-      console.error('Error calculating rental:', error);
+      logger.error('Error calculating rental:', error);
       setError('Failed to calculate rental');
     }
   };

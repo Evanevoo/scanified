@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -97,7 +98,7 @@ export default function AutomationRules() {
       const data = await automationService.getRules(organization.id);
       setRules(data || []);
     } catch (error) {
-      console.error('Error loading automation rules:', error);
+      logger.error('Error loading automation rules:', error);
       setError('Failed to load automation rules');
     } finally {
       setLoading(false);
@@ -109,7 +110,7 @@ export default function AutomationRules() {
       const triggers = automationService.getAllTriggers();
       setTriggers(triggers);
     } catch (error) {
-      console.error('Error loading triggers:', error);
+      logger.error('Error loading triggers:', error);
     }
   };
 
@@ -118,7 +119,7 @@ export default function AutomationRules() {
       const actions = automationService.getAllActions();
       setActions(actions);
     } catch (error) {
-      console.error('Error loading actions:', error);
+      logger.error('Error loading actions:', error);
     }
   };
 
@@ -134,7 +135,7 @@ export default function AutomationRules() {
       loadRules();
       resetForm();
     } catch (error) {
-      console.error('Error creating automation rule:', error);
+      logger.error('Error creating automation rule:', error);
       setError('Failed to create automation rule');
     } finally {
       setLoading(false);
@@ -153,7 +154,7 @@ export default function AutomationRules() {
       loadRules();
       resetForm();
     } catch (error) {
-      console.error('Error updating automation rule:', error);
+      logger.error('Error updating automation rule:', error);
       setError('Failed to update automation rule');
     } finally {
       setLoading(false);
@@ -172,7 +173,7 @@ export default function AutomationRules() {
       setSuccess('Automation rule deleted successfully');
       loadRules();
     } catch (error) {
-      console.error('Error deleting automation rule:', error);
+      logger.error('Error deleting automation rule:', error);
       setError('Failed to delete automation rule');
     } finally {
       setLoading(false);
@@ -187,7 +188,7 @@ export default function AutomationRules() {
       setSuccess(`Automation rule ${rule.is_active ? 'deactivated' : 'activated'}`);
       loadRules();
     } catch (error) {
-      console.error('Error toggling automation rule:', error);
+      logger.error('Error toggling automation rule:', error);
       setError('Failed to toggle automation rule');
     } finally {
       setLoading(false);
@@ -202,7 +203,7 @@ export default function AutomationRules() {
       setSuccess('Automation rule test completed');
       setTestDialogOpen(false);
     } catch (error) {
-      console.error('Error testing automation rule:', error);
+      logger.error('Error testing automation rule:', error);
       setError('Failed to test automation rule');
     } finally {
       setLoading(false);

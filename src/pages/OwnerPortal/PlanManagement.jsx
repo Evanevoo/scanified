@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../supabase/client';
 import {
@@ -35,7 +36,7 @@ const PlanManagement = () => {
 
     if (error) {
       toast.error('Failed to fetch plans.');
-      console.error(error);
+      logger.error(error);
     } else {
       setPlans(data);
     }

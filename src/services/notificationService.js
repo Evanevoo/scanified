@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 /**
  * Notification Service for Support Tickets
  * Handles sending email notifications when support tickets are created
@@ -15,7 +16,7 @@ const SITE_URL = import.meta.env.MODE === 'production'
  */
 export const sendSupportTicketNotification = async (ticketData, userData, organizationData) => {
   try {
-    console.log('Sending support ticket notification:', {
+    logger.log('Sending support ticket notification:', {
       ticketId: ticketData.id,
       subject: ticketData.subject,
       userEmail: userData.email,
@@ -58,11 +59,11 @@ export const sendSupportTicketNotification = async (ticketData, userData, organi
     }
 
     const result = await response.json();
-    console.log('Support ticket notification sent successfully:', result);
+    logger.log('Support ticket notification sent successfully:', result);
     return result;
 
   } catch (error) {
-    console.error('Error sending support ticket notification:', error);
+    logger.error('Error sending support ticket notification:', error);
     throw error;
   }
 };
@@ -75,7 +76,7 @@ export const sendSupportTicketNotification = async (ticketData, userData, organi
  */
 export const sendSupportTicketReplyNotification = async (ticketData, replyData, userData) => {
   try {
-    console.log('Sending support ticket reply notification:', {
+    logger.log('Sending support ticket reply notification:', {
       ticketId: ticketData.id,
       subject: ticketData.subject,
       userEmail: userData.email
@@ -112,11 +113,11 @@ export const sendSupportTicketReplyNotification = async (ticketData, replyData, 
     }
 
     const result = await response.json();
-    console.log('Support ticket reply notification sent successfully:', result);
+    logger.log('Support ticket reply notification sent successfully:', result);
     return result;
 
   } catch (error) {
-    console.error('Error sending support ticket reply notification:', error);
+    logger.error('Error sending support ticket reply notification:', error);
     throw error;
   }
 };

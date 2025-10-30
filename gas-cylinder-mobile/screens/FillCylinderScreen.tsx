@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView, FlatList, SafeAreaView, Linking } from 'react-native';
 import { supabase } from '../supabase';
@@ -158,7 +159,7 @@ export default function FillCylinderScreen() {
         .eq('id', asset.id);
           
           if (updateError) {
-            console.error(`Failed to update asset ${asset.barcode_number}:`, updateError);
+            logger.error(`Failed to update asset ${asset.barcode_number}:`, updateError);
             errorCount++;
             continue;
           }
@@ -175,13 +176,13 @@ export default function FillCylinderScreen() {
             });
           
           if (fillError) {
-            console.warn(`Could not create fill record for ${asset.barcode_number}:`, fillError);
+            logger.warn(`Could not create fill record for ${asset.barcode_number}:`, fillError);
             // Don't fail the operation if fill record creation fails
           }
           
           successCount++;
         } catch (err) {
-          console.error(`Error processing asset ${asset.barcode_number}:`, err);
+          logger.error(`Error processing asset ${asset.barcode_number}:`, err);
           errorCount++;
         }
       }
@@ -242,7 +243,7 @@ export default function FillCylinderScreen() {
         });
       
       if (fillError) {
-        console.warn('Could not create fill record:', fillError);
+        logger.warn('Could not create fill record:', fillError);
         // Don't fail the operation if fill record creation fails
       }
       
@@ -298,7 +299,7 @@ export default function FillCylinderScreen() {
         });
       
       if (fillError) {
-        console.warn('Could not create fill record:', fillError);
+        logger.warn('Could not create fill record:', fillError);
         // Don't fail the operation if fill record creation fails
       }
       
@@ -338,7 +339,7 @@ export default function FillCylinderScreen() {
           .maybeSingle();
 
         if (error) {
-          console.error('Error validating barcode:', error);
+          logger.error('Error validating barcode:', error);
           setError('Failed to validate barcode. Please try again.');
           return;
         }
@@ -351,7 +352,7 @@ export default function FillCylinderScreen() {
         // Barcode exists, proceed with fetch
         fetchAsset(barcode.trim(), 'barcode');
       } catch (error) {
-        console.error('Error validating barcode:', error);
+        logger.error('Error validating barcode:', error);
         setError('Failed to validate barcode. Please try again.');
       }
     } else if (serial.trim()) {

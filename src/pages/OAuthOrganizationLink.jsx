@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Card, CardContent, Typography, Button, Alert, CircularProgress,
@@ -76,7 +77,7 @@ export default function OAuthOrganizationLink() {
       // Organization exists and is active, redirect to dashboard
       navigate('/dashboard');
     } catch (error) {
-      console.error('Error checking organization status:', error);
+      logger.error('Error checking organization status:', error);
       // If we can't check, assume it's fine and redirect to dashboard
       navigate('/dashboard');
     }
@@ -128,7 +129,7 @@ export default function OAuthOrganizationLink() {
         .single();
 
       if (error) {
-        console.error('Error verifying invite token:', error);
+        logger.error('Error verifying invite token:', error);
         return;
       }
 
@@ -137,7 +138,7 @@ export default function OAuthOrganizationLink() {
         setSuccess(`You have a pending invitation to join ${inviteData.organization.name}!`);
       }
     } catch (err) {
-      console.error('Error in verifyInviteToken:', err);
+      logger.error('Error in verifyInviteToken:', err);
     }
   };
 
@@ -152,7 +153,7 @@ export default function OAuthOrganizationLink() {
       if (error) throw error;
       setOrganizations(data || []);
     } catch (err) {
-      console.error('Error fetching organizations:', err);
+      logger.error('Error fetching organizations:', err);
       setError('Failed to load organizations');
     }
   };
@@ -191,7 +192,7 @@ export default function OAuthOrganizationLink() {
       }, 2000);
 
     } catch (err) {
-      console.error('Error accepting invite:', err);
+      logger.error('Error accepting invite:', err);
       setError(err.message);
     } finally {
       setLinking(false);
@@ -214,12 +215,12 @@ export default function OAuthOrganizationLink() {
     setError('');
 
     try {
-      console.log('🔍 Attempting to use join code:', organizationCode.trim());
-      console.log('👤 User ID:', user.id);
-      console.log('👤 User Email:', user.email);
+      logger.log('🔍 Attempting to use join code:', organizationCode.trim());
+      logger.log('👤 User ID:', user.id);
+      logger.log('👤 User Email:', user.email);
       
       // First, let's check if the code exists in the database
-      console.log('🔍 Searching for code:', organizationCode.trim(), 'length:', organizationCode.trim().length);
+      logger.log('🔍 Searching for code:', organizationCode.trim(), 'length:', organizationCode.trim().length);
       
       const { data: codeCheck, error: codeCheckError } = await supabase
         .from('organization_join_codes')
@@ -232,22 +233,22 @@ export default function OAuthOrganizationLink() {
         .select('code, organization_id, is_active, expires_at')
         .limit(10);
         
-      console.log('🔍 All recent codes in database:', allCodes);
-      console.log('🔍 Looking for code:', organizationCode.trim());
-      console.log('🔍 Code matches:', allCodes?.filter(c => c.code === organizationCode.trim()));
+      logger.log('🔍 All recent codes in database:', allCodes);
+      logger.log('🔍 Looking for code:', organizationCode.trim());
+      logger.log('🔍 Code matches:', allCodes?.filter(c => c.code === organizationCode.trim()));
       
-      console.log('🔍 Code exists in database:', codeCheck);
-      console.log('🔍 Code check length:', codeCheck?.length);
-      if (codeCheckError) console.error('❌ Code check error:', codeCheckError);
+      logger.log('🔍 Code exists in database:', codeCheck);
+      logger.log('🔍 Code check length:', codeCheck?.length);
+      if (codeCheckError) logger.error('❌ Code check error:', codeCheckError);
       
       if (!codeCheck || codeCheck.length === 0) {
-        console.error('❌ CODE NOT FOUND IN DATABASE! Code:', organizationCode.trim());
+        logger.error('❌ CODE NOT FOUND IN DATABASE! Code:', organizationCode.trim());
         setError('This join code does not exist. Please check the code or ask your administrator for a new one.');
         return;
       }
       
       const codeInfo = codeCheck[0];
-      console.log('🔍 Code details:', {
+      logger.log('🔍 Code details:', {
         code: codeInfo.code,
         isActive: codeInfo.is_active,
         expires: codeInfo.expires_at,
@@ -261,24 +262,24 @@ export default function OAuthOrganizationLink() {
       const expiresAt = new Date(codeInfo.expires_at);
       
       if (!codeInfo.is_active) {
-        console.error('❌ CODE IS INACTIVE');
+        logger.error('❌ CODE IS INACTIVE');
         setError('This join code has been deactivated. Please ask your administrator for a new one.');
         return;
       }
       
       if (expiresAt < now) {
-        console.error('❌ CODE IS EXPIRED');
+        logger.error('❌ CODE IS EXPIRED');
         setError('This join code has expired. Please ask your administrator for a new one.');
         return;
       }
       
       if (codeInfo.current_uses >= codeInfo.max_uses) {
-        console.error('❌ CODE IS USED UP');
+        logger.error('❌ CODE IS USED UP');
         setError('This join code has already been used the maximum number of times. Please ask your administrator for a new one.');
         return;
       }
 
-      console.log('✅ Code pre-validation passed, attempting to use...');
+      logger.log('✅ Code pre-validation passed, attempting to use...');
       
       // Use the join code via PostgreSQL function
       const { data, error } = await supabase
@@ -287,11 +288,11 @@ export default function OAuthOrganizationLink() {
           p_used_by: user.id
         });
 
-      console.log('📊 RPC Response:', { data, error });
-      console.log('📊 RPC Data Details:', data);
+      logger.log('📊 RPC Response:', { data, error });
+      logger.log('📊 RPC Data Details:', data);
 
       if (error) {
-        console.error('❌ RPC Error:', error);
+        logger.error('❌ RPC Error:', error);
         
         // Handle specific database errors
         if (error.message.includes('foreign key constraint')) {
@@ -308,16 +309,16 @@ export default function OAuthOrganizationLink() {
       }
 
       if (!data || data.length === 0) {
-        console.error('❌ No data returned from RPC');
+        logger.error('❌ No data returned from RPC');
         setError('System error: No response from server. Please try again.');
         return;
       }
 
       const result = data[0];
-      console.log('✅ Join code result:', result);
+      logger.log('✅ Join code result:', result);
       
       if (!result.success) {
-        console.error('❌ Join code validation failed:', result.message);
+        logger.error('❌ Join code validation failed:', result.message);
         
         // Handle specific validation failures
         if (result.message.includes('expired')) {
@@ -334,7 +335,7 @@ export default function OAuthOrganizationLink() {
 
       // Create/update profile with organization using the role from the join code
       const assignedRole = result.assigned_role || 'user'; // Fallback to 'user' if no role specified
-      console.log('👤 Assigning role:', assignedRole);
+      logger.log('👤 Assigning role:', assignedRole);
       
       // Get the role_id for the assigned role
       const { data: roleData, error: roleError } = await supabase
@@ -344,7 +345,7 @@ export default function OAuthOrganizationLink() {
         .single();
       
       if (roleError) {
-        console.error('❌ Error fetching role ID:', roleError);
+        logger.error('❌ Error fetching role ID:', roleError);
         // Fallback to text role if roles table lookup fails
       }
       
@@ -359,7 +360,7 @@ export default function OAuthOrganizationLink() {
       // Add role_id if we found it
       if (roleData?.id) {
         profileData.role_id = roleData.id;
-        console.log('👤 Using role_id:', roleData.id);
+        logger.log('👤 Using role_id:', roleData.id);
       }
       
       const { error: profileError } = await supabase
@@ -381,8 +382,8 @@ export default function OAuthOrganizationLink() {
       }, 2000);
 
     } catch (err) {
-      console.error('❌ Error joining organization:', err);
-      console.error('Error details:', {
+      logger.error('❌ Error joining organization:', err);
+      logger.error('Error details:', {
         message: err.message,
         code: err.code,
         details: err.details,
@@ -437,7 +438,7 @@ export default function OAuthOrganizationLink() {
       }, 2000);
 
     } catch (err) {
-      console.error('Error joining organization:', err);
+      logger.error('Error joining organization:', err);
       setError(err.message);
     } finally {
       setLinking(false);
@@ -464,7 +465,7 @@ export default function OAuthOrganizationLink() {
       // Force full navigation to clear any state
       window.location.href = '/login';
     } catch (error) {
-      console.error('Error signing out:', error);
+      logger.error('Error signing out:', error);
       // Clear storage anyway
       localStorage.clear();
       sessionStorage.clear();
@@ -474,20 +475,20 @@ export default function OAuthOrganizationLink() {
   };
 
   const handleGoBack = () => {
-    console.log('🔙 Back button clicked');
-    console.log('History length:', window.history.length);
+    logger.log('🔙 Back button clicked');
+    logger.log('History length:', window.history.length);
     
     try {
       // Try multiple navigation options
       if (window.history.length > 1) {
-        console.log('Using history.back()');
+        logger.log('Using history.back()');
         window.history.back();
       } else {
-        console.log('Using navigate to login');
+        logger.log('Using navigate to login');
         navigate('/login');
       }
     } catch (error) {
-      console.error('Navigation error:', error);
+      logger.error('Navigation error:', error);
       navigate('/login');
     }
   };

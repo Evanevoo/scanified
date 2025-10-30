@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/client';
@@ -190,13 +191,13 @@ export default function ImportApprovalDetailEnhanced() {
       if (error) throw error;
       setCustomers(data || []);
     } catch (err) {
-      console.error('Error fetching customers:', err);
+      logger.error('Error fetching customers:', err);
     }
   };
 
   const fetchAssetClassificationOptions = async () => {
     try {
-      console.log('📋 Fetching asset classification options from bottles table...');
+      logger.log('📋 Fetching asset classification options from bottles table...');
       
       // Fetch asset classification data
       const { data: bottles, error: bottlesError } = await supabase
@@ -204,7 +205,7 @@ export default function ImportApprovalDetailEnhanced() {
         .select('type, category, group_name, location');
       
       if (bottlesError) {
-        console.error('Error fetching asset classification options:', bottlesError);
+        logger.error('Error fetching asset classification options:', bottlesError);
         return;
       }
 
@@ -214,10 +215,10 @@ export default function ImportApprovalDetailEnhanced() {
       const uniqueGroups = [...new Set(bottles.map(b => b.group_name).filter(Boolean))].sort();
       const uniqueLocations = [...new Set(bottles.map(b => b.location).filter(Boolean))].sort();
       
-      console.log('📋 Found asset types:', uniqueTypes);
-      console.log('📋 Found categories:', uniqueCategories);
-      console.log('📋 Found groups:', uniqueGroups);
-      console.log('📋 Found locations:', uniqueLocations);
+      logger.log('📋 Found asset types:', uniqueTypes);
+      logger.log('📋 Found categories:', uniqueCategories);
+      logger.log('📋 Found groups:', uniqueGroups);
+      logger.log('📋 Found locations:', uniqueLocations);
       
       setAssetTypes(uniqueTypes);
       setAssetCategories(uniqueCategories);
@@ -237,11 +238,11 @@ export default function ImportApprovalDetailEnhanced() {
           customer_name: order.data?.customer_name || 'Unknown Customer'
         }));
         setSalesOrders(ordersList);
-        console.log('📋 Found sales orders:', ordersList.length);
+        logger.log('📋 Found sales orders:', ordersList.length);
       }
       
     } catch (err) {
-      console.error('Error fetching asset classification options:', err);
+      logger.error('Error fetching asset classification options:', err);
     }
   };
 
@@ -263,15 +264,15 @@ export default function ImportApprovalDetailEnhanced() {
       ]);
       
     } catch (err) {
-      console.error('Error fetching audit data:', err);
+      logger.error('Error fetching audit data:', err);
     }
   };
 
   // Real-time bottle assignment validation 
   const validateBottleAssignments = async (importAssets) => {
     try {
-      console.log('🔍 Validating bottle assignments for exceptions...');
-      console.log('✅ Using automatic organization filtering via RLS policies');
+      logger.log('🔍 Validating bottle assignments for exceptions...');
+      logger.log('✅ Using automatic organization filtering via RLS policies');
       
       // Extract barcodes and serial numbers from import
       const identifiers = importAssets.map(asset => ({
@@ -282,7 +283,7 @@ export default function ImportApprovalDetailEnhanced() {
       })).filter(item => item.barcode || item.serial);
 
       if (identifiers.length === 0) {
-        console.log('⚠️ No bottle identifiers found for validation');
+        logger.log('⚠️ No bottle identifiers found for validation');
         return importAssets;
       }
 
@@ -311,11 +312,11 @@ export default function ImportApprovalDetailEnhanced() {
       const { data: currentAssignments, error } = await query;
       
       if (error) {
-        console.error('❌ Error validating assignments:', error);
+        logger.error('❌ Error validating assignments:', error);
         return importAssets; // Return original data if validation fails
       }
 
-      console.log('✅ Found', currentAssignments?.length || 0, 'current bottle assignments');
+      logger.log('✅ Found', currentAssignments?.length || 0, 'current bottle assignments');
 
       // Create enhanced asset data with exception validation
       const validatedAssets = importAssets.map(asset => {
@@ -339,7 +340,7 @@ export default function ImportApprovalDetailEnhanced() {
 
         // Debug logging for exception detection
         if (hasForcedReturnException) {
-          console.log('🚨 FORCED RETURN EXCEPTION DETECTED:', {
+          logger.log('🚨 FORCED RETURN EXCEPTION DETECTED:', {
             barcode,
             serial,
             currentCustomer,
@@ -370,7 +371,7 @@ export default function ImportApprovalDetailEnhanced() {
         };
       });
 
-      console.log('🎯 Assignment validation complete:', {
+      logger.log('🎯 Assignment validation complete:', {
         totalAssets: importAssets.length,
         checkedAssignments: currentAssignments?.length || 0,
         conflictsFound: validatedAssets.filter(a => a.hasAssignmentConflict).length
@@ -379,7 +380,7 @@ export default function ImportApprovalDetailEnhanced() {
       return validatedAssets;
       
     } catch (err) {
-      console.error('❌ Error in bottle assignment validation:', err);
+      logger.error('❌ Error in bottle assignment validation:', err);
       return importAssets; // Return original data if validation fails
     }
   };
@@ -505,7 +506,7 @@ export default function ImportApprovalDetailEnhanced() {
       if (newAssetCategory) reclassificationData.category = newAssetCategory;
       if (newAssetGroup) reclassificationData.group = newAssetGroup;
 
-      console.log('🔄 Reclassifying assets:', selectedAssetIds, 'with data:', reclassificationData);
+      logger.log('🔄 Reclassifying assets:', selectedAssetIds, 'with data:', reclassificationData);
       
       const result = await ImportApprovalManagementService.reclassifyAssets(
         invoiceNumber,
@@ -594,7 +595,7 @@ export default function ImportApprovalDetailEnhanced() {
     }
 
     try {
-      console.log('🔍 Searching for asset:', searchQuery);
+      logger.log('🔍 Searching for asset:', searchQuery);
       
       const { data: assets, error } = await supabase
         .from('bottles')
@@ -605,7 +606,7 @@ export default function ImportApprovalDetailEnhanced() {
       if (error) throw error;
 
       setSearchResults(assets || []);
-      console.log('🔍 Found assets:', assets?.length || 0);
+      logger.log('🔍 Found assets:', assets?.length || 0);
       
       if (!assets || assets.length === 0) {
         setActionMessage('No assets found with that barcode or serial number');
@@ -727,36 +728,36 @@ export default function ImportApprovalDetailEnhanced() {
 
     // MUST compute these values before any early returns to avoid hooks rule violation
   const importData = importRecord?.data || {};
-  console.log('📦 IMPORT DATA STRUCTURE:', importData);
-  console.log('📦 IMPORT DATA KEYS:', Object.keys(importData));
+  logger.log('📦 IMPORT DATA STRUCTURE:', importData);
+  logger.log('📦 IMPORT DATA KEYS:', Object.keys(importData));
   
   const allDelivered = importData.delivered || importData.rows || [];
-  console.log('📦 ALL DELIVERED:', allDelivered.length, 'assets');
+  logger.log('📦 ALL DELIVERED:', allDelivered.length, 'assets');
   
   const summary = importData.summary || {};
-  console.log('📦 SUMMARY:', summary);
+  logger.log('📦 SUMMARY:', summary);
 
   // Filter delivered assets to specific customer/order if URL parameters are provided
   const delivered = useMemo(() => {
     if (!allDelivered) return []; // Safety check
     
-    console.log('🔍 DEBUGGING INDIVIDUAL INVOICE FILTERING:');
-    console.log('Current URL:', window.location.href);
-    console.log('filterCustomer from URL:', filterCustomer);
-    console.log('filterOrder from URL:', filterOrder);
-    console.log('allDelivered count:', allDelivered.length);
+    logger.log('🔍 DEBUGGING INDIVIDUAL INVOICE FILTERING:');
+    logger.log('Current URL:', window.location.href);
+    logger.log('filterCustomer from URL:', filterCustomer);
+    logger.log('filterOrder from URL:', filterOrder);
+    logger.log('allDelivered count:', allDelivered.length);
     
     if (allDelivered.length > 0) {
-      console.log('Sample asset data structure:', allDelivered[0]);
-      console.log('All keys in first asset:', Object.keys(allDelivered[0]));
+      logger.log('Sample asset data structure:', allDelivered[0]);
+      logger.log('All keys in first asset:', Object.keys(allDelivered[0]));
     }
     
     if (!filterCustomer && !filterOrder) {
-      console.log('❌ NO FILTERING - showing all assets because no URL parameters');
+      logger.log('❌ NO FILTERING - showing all assets because no URL parameters');
       return allDelivered; // No filtering, return all
     }
     
-    console.log('🎯 ATTEMPTING TO FILTER ASSETS...');
+    logger.log('🎯 ATTEMPTING TO FILTER ASSETS...');
     const filteredAssets = allDelivered.filter(item => {
       // Try multiple possible field names for customer
       const itemCustomer = item.customer_name || item.Customer || item['Customer Name'] || 
@@ -767,7 +768,7 @@ export default function ImportApprovalDetailEnhanced() {
                        item['Order Number'] || item['Reference Number'] || item['Invoice Number'] || 
                        item.order || item.reference || item.invoice || item.OrderNumber || '';
       
-      console.log('Checking asset:', {
+      logger.log('Checking asset:', {
         itemCustomer,
         itemOrder,
         filterCustomer,
@@ -778,25 +779,25 @@ export default function ImportApprovalDetailEnhanced() {
       let matches = true;
       if (filterCustomer && filterCustomer.trim()) {
         const customerMatch = itemCustomer.toString().toLowerCase().includes(filterCustomer.toLowerCase().trim());
-        console.log('Customer match:', customerMatch, `"${itemCustomer}" includes "${filterCustomer}"`);
+        logger.log('Customer match:', customerMatch, `"${itemCustomer}" includes "${filterCustomer}"`);
         matches = matches && customerMatch;
       }
       if (filterOrder && filterOrder.trim()) {
         const orderMatch = itemOrder.toString().toLowerCase().includes(filterOrder.toLowerCase().trim());
-        console.log('Order match:', orderMatch, `"${itemOrder}" includes "${filterOrder}"`);
+        logger.log('Order match:', orderMatch, `"${itemOrder}" includes "${filterOrder}"`);
         matches = matches && orderMatch;
       }
       
       if (matches) {
-        console.log('✅ ASSET MATCHES FILTER:', item);
+        logger.log('✅ ASSET MATCHES FILTER:', item);
       }
       
       return matches;
     });
     
-    console.log('✅ FINAL FILTERED ASSETS:', filteredAssets.length, 'out of', allDelivered.length);
+    logger.log('✅ FINAL FILTERED ASSETS:', filteredAssets.length, 'out of', allDelivered.length);
     if (filteredAssets.length === 0) {
-      console.log('🚨 NO ASSETS MATCHED THE FILTER! This is why you see all assets.');
+      logger.log('🚨 NO ASSETS MATCHED THE FILTER! This is why you see all assets.');
     }
     return filteredAssets;
   }, [allDelivered, filterCustomer, filterOrder]);
@@ -865,14 +866,14 @@ export default function ImportApprovalDetailEnhanced() {
   // Perform real-time validation when delivered assets change
   useEffect(() => {
     if (delivered && delivered.length > 0) {
-      console.log('🔍 Starting bottle assignment validation...');
+      logger.log('🔍 Starting bottle assignment validation...');
       validateBottleAssignments(delivered)
         .then(validated => {
-          console.log('✅ Validation complete, updating assets...');
+          logger.log('✅ Validation complete, updating assets...');
           setValidatedAssets(validated);
         })
         .catch(err => {
-          console.error('❌ Validation failed:', err);
+          logger.error('❌ Validation failed:', err);
           setValidatedAssets(delivered); // Fallback to unvalidated data
         });
     } else {

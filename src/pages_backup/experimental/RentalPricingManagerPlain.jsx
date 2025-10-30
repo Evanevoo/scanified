@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
@@ -21,7 +22,7 @@ export default function RentalPricingManagerPlain() {
       setLoading(true);
       setError(null);
       
-      console.log('Loading pricing data for organization:', organization.id);
+      logger.log('Loading pricing data for organization:', organization.id);
       
       // Load pricing tiers
       const { data: tiers, error: tiersError } = await supabase
@@ -30,7 +31,7 @@ export default function RentalPricingManagerPlain() {
         .eq('organization_id', organization.id)
         .order('min_quantity');
       
-      console.log('Pricing tiers result:', { tiers, tiersError });
+      logger.log('Pricing tiers result:', { tiers, tiersError });
       
       // Load customer rates
       const { data: rates, error: ratesError } = await supabase
@@ -38,7 +39,7 @@ export default function RentalPricingManagerPlain() {
         .select('*')
         .eq('organization_id', organization.id);
       
-      console.log('Customer rates result:', { rates, ratesError });
+      logger.log('Customer rates result:', { rates, ratesError });
       
       // Load demurrage rules
       const { data: demurrage, error: demurrageError } = await supabase
@@ -47,7 +48,7 @@ export default function RentalPricingManagerPlain() {
         .eq('organization_id', organization.id)
         .order('grace_period_days');
 
-      console.log('Demurrage rules result:', { demurrage, demurrageError });
+      logger.log('Demurrage rules result:', { demurrage, demurrageError });
 
       setPricingTiers(tiers || []);
       setCustomerRates(rates || []);
@@ -57,7 +58,7 @@ export default function RentalPricingManagerPlain() {
         setError('Some data could not be loaded. Check console for details.');
       }
     } catch (error) {
-      console.error('Error loading pricing data:', error);
+      logger.error('Error loading pricing data:', error);
       setError(error.message);
       setPricingTiers([]);
       setCustomerRates([]);

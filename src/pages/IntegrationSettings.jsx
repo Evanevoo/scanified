@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -142,7 +143,7 @@ export default function IntegrationSettings() {
       if (error) throw error;
       setIntegrations(data || []);
     } catch (error) {
-      console.error('Error loading integrations:', error);
+      logger.error('Error loading integrations:', error);
       setError('Failed to load integrations');
     } finally {
       setLoading(false);
@@ -160,7 +161,7 @@ export default function IntegrationSettings() {
       if (error) throw error;
       setWebhooks(data || []);
     } catch (error) {
-      console.error('Error loading webhooks:', error);
+      logger.error('Error loading webhooks:', error);
       setError('Failed to load webhooks');
     }
   };
@@ -176,7 +177,7 @@ export default function IntegrationSettings() {
       if (error) throw error;
       setAutomationRules(data || []);
     } catch (error) {
-      console.error('Error loading automation rules:', error);
+      logger.error('Error loading automation rules:', error);
       setError('Failed to load automation rules');
     }
   };
@@ -223,7 +224,7 @@ export default function IntegrationSettings() {
         setError(result.error);
       }
     } catch (error) {
-      console.error('ERP integration error:', error);
+      logger.error('ERP integration error:', error);
       setError('Failed to create ERP integration');
     } finally {
       setLoading(false);
@@ -246,7 +247,7 @@ export default function IntegrationSettings() {
         setError(result.error);
       }
     } catch (error) {
-      console.error('SMS integration error:', error);
+      logger.error('SMS integration error:', error);
       setError('Failed to create SMS integration');
     } finally {
       setLoading(false);
@@ -269,7 +270,7 @@ export default function IntegrationSettings() {
         setError(result.error);
       }
     } catch (error) {
-      console.error('Webhook creation error:', error);
+      logger.error('Webhook creation error:', error);
       setError('Failed to create webhook');
     } finally {
       setLoading(false);
@@ -292,7 +293,7 @@ export default function IntegrationSettings() {
         setError(result.error);
       }
     } catch (error) {
-      console.error('Automation rule creation error:', error);
+      logger.error('Automation rule creation error:', error);
       setError('Failed to create automation rule');
     } finally {
       setLoading(false);
@@ -305,7 +306,7 @@ export default function IntegrationSettings() {
       // Implement integration testing
       setSuccess('Integration test completed successfully');
     } catch (error) {
-      console.error('Integration test error:', error);
+      logger.error('Integration test error:', error);
       setError('Integration test failed');
     } finally {
       setLoading(false);
@@ -318,7 +319,7 @@ export default function IntegrationSettings() {
       // Implement integration sync
       setSuccess('Integration sync completed successfully');
     } catch (error) {
-      console.error('Integration sync error:', error);
+      logger.error('Integration sync error:', error);
       setError('Integration sync failed');
     } finally {
       setLoading(false);
@@ -338,7 +339,7 @@ export default function IntegrationSettings() {
       setSuccess('Integration deleted successfully');
       loadIntegrations();
     } catch (error) {
-      console.error('Delete integration error:', error);
+      logger.error('Delete integration error:', error);
       setError('Failed to delete integration');
     } finally {
       setLoading(false);

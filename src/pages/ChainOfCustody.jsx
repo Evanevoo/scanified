@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Grid, Card, CardContent, CardActions,
@@ -211,7 +212,7 @@ export default function ChainOfCustody() {
       setCustodyAudit(auditResult.data || []);
 
     } catch (error) {
-      console.error('Error fetching chain of custody data:', error);
+      logger.error('Error fetching chain of custody data:', error);
       setError('Failed to load chain of custody data');
     } finally {
       setLoading(false);
@@ -254,7 +255,7 @@ export default function ChainOfCustody() {
       fetchData();
 
     } catch (error) {
-      console.error('Error creating custody record:', error);
+      logger.error('Error creating custody record:', error);
       setError('Failed to create chain of custody record');
     }
   };
@@ -292,7 +293,7 @@ export default function ChainOfCustody() {
       fetchData();
 
     } catch (error) {
-      console.error('Error adding custody event:', error);
+      logger.error('Error adding custody event:', error);
       setError('Failed to add custody event');
     }
   };
@@ -377,7 +378,7 @@ export default function ChainOfCustody() {
 
   const generateCustodyReport = (custody) => {
     // In a real implementation, this would generate a comprehensive report
-    console.log('Generating custody report for:', custody.id);
+    logger.log('Generating custody report for:', custody.id);
     setSuccess('Custody report generated successfully');
   };
 

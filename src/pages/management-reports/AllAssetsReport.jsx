@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -56,7 +57,7 @@ export default function AllAssetsReport() {
   });
 
   useEffect(() => {
-    console.log('AllAssetsReport useEffect triggered:', {
+    logger.log('AllAssetsReport useEffect triggered:', {
       authLoading,
       organization: organization ? { id: organization.id, name: organization.name } : null,
       hasOrganizationId: organization?.id ? true : false
@@ -65,7 +66,7 @@ export default function AllAssetsReport() {
     if (!authLoading && organization && organization.id) {
       fetchAssetsData();
     } else if (!authLoading && !organization) {
-      console.warn('No organization found after auth loading completed');
+      logger.warn('No organization found after auth loading completed');
       setError('No organization found. Please contact your administrator.');
       setLoading(false);
     }
@@ -76,7 +77,7 @@ export default function AllAssetsReport() {
       setLoading(true);
       setError(null);
 
-      console.log('Fetching assets data for organization:', organization);
+      logger.log('Fetching assets data for organization:', organization);
 
       // Fetch all assets/bottles with customer info
       const { data: assetsData, error: assetsError } = await supabase
@@ -93,11 +94,11 @@ export default function AllAssetsReport() {
         .order('created_at', { ascending: false });
 
       if (assetsError) {
-        console.error('Supabase error:', assetsError);
+        logger.error('Supabase error:', assetsError);
         throw assetsError;
       }
 
-      console.log('Assets data fetched successfully:', assetsData?.length || 0, 'assets');
+      logger.log('Assets data fetched successfully:', assetsData?.length || 0, 'assets');
 
       setAssets(assetsData || []);
 
@@ -115,7 +116,7 @@ export default function AllAssetsReport() {
       });
 
     } catch (err) {
-      console.error('Error fetching assets data:', err);
+      logger.error('Error fetching assets data:', err);
       setError(`Failed to load assets data: ${err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState } from 'react';
 import {
   Box,
@@ -70,7 +71,7 @@ export default function CreateOrganization() {
           } else {
             // User exists but no organization - this might be from a failed verification
             // Allow them to continue with organization creation
-            console.log('User exists but has no organization, allowing organization creation');
+            logger.log('User exists but has no organization, allowing organization creation');
             // Continue with the organization creation process
           }
         }
@@ -80,7 +81,7 @@ export default function CreateOrganization() {
           throw err;
         }
         // If it's a database error (like missing columns), just log it and continue
-        console.warn('Could not check existing user:', err.message);
+        logger.warn('Could not check existing user:', err.message);
         // Continue with organization creation
       }
 
@@ -110,7 +111,7 @@ export default function CreateOrganization() {
       localStorage.setItem('verification_token', tokenData);
       localStorage.setItem('verification_expires', expirationTime.toString());
       
-      console.log('💾 Stored in sessionStorage and localStorage:', {
+      logger.log('💾 Stored in sessionStorage and localStorage:', {
         email: formData.email,
         hasPassword: !!formData.password,
         token: tokenData,
@@ -136,9 +137,9 @@ export default function CreateOrganization() {
           })
         });
         
-        console.log('✅ Verification email sent');
+        logger.log('✅ Verification email sent');
       } catch (emailError) {
-        console.warn('⚠️ Email service unavailable:', emailError);
+        logger.warn('⚠️ Email service unavailable:', emailError);
         // Continue anyway - user can manually verify
       }
 
@@ -146,7 +147,7 @@ export default function CreateOrganization() {
       setStep(1);
 
     } catch (err) {
-      console.error('Error:', err);
+      logger.error('Error:', err);
       setError(err.message || 'Failed to create organization. Please try again.');
     } finally {
       setLoading(false);

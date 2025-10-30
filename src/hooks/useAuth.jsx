@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { useEffect, useState, createContext, useContext, useMemo, useRef } from 'react';
 import { supabase } from '../supabase/client';
 
@@ -8,7 +9,7 @@ export const useAuth = () => {
   
   // Track hook usage in development
   if (import.meta.env.DEV) {
-    console.log('useAuth hook called from:', new Error().stack?.split('\n')[2]?.trim() || 'unknown location');
+    logger.log('useAuth hook called from:', new Error().stack?.split('\n')[2]?.trim() || 'unknown location');
   }
   
   return context;
@@ -35,7 +36,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (!isInitialized) {
       if (import.meta.env.DEV) {
-        console.log('useAuth hook initialized');
+        logger.log('useAuth hook initialized');
       }
       setIsInitialized(true);
     }
@@ -52,7 +53,7 @@ export const AuthProvider = ({ children }) => {
       // Prevent multiple auth flows from running simultaneously
       if (authFlowInProgressRef.current) {
         if (import.meta.env.DEV) {
-          console.log('Auth: Auth flow already in progress, skipping...');
+          logger.log('Auth: Auth flow already in progress, skipping...');
         }
         return;
       }
@@ -61,7 +62,7 @@ export const AuthProvider = ({ children }) => {
       const currentAuthState = sessionUser?.id;
       if (lastAuthStateRef.current === currentAuthState && user && profile && organization) {
         if (import.meta.env.DEV) {
-          console.log('Auth: Auth state unchanged, skipping flow...');
+          logger.log('Auth: Auth state unchanged, skipping flow...');
         }
         return;
       }
@@ -69,7 +70,7 @@ export const AuthProvider = ({ children }) => {
       // Additional check: if we have a valid session and user, don't restart
       if (sessionUser && user && sessionUser.id === user.id && profile && organization) {
         if (import.meta.env.DEV) {
-          console.log('Auth: Valid session already exists, skipping restart...');
+          logger.log('Auth: Valid session already exists, skipping restart...');
         }
         return;
       }
@@ -78,7 +79,7 @@ export const AuthProvider = ({ children }) => {
       lastAuthStateRef.current = currentAuthState;
 
       if (import.meta.env.DEV) {
-        console.log('Auth: Starting auth flow for user:', sessionUser?.id);
+        logger.log('Auth: Starting auth flow for user:', sessionUser?.id);
       }
       
       // If no user, reset everything
@@ -87,7 +88,7 @@ export const AuthProvider = ({ children }) => {
         setProfile(null);
         setOrganization(null);
         setLoading(false);
-        console.log('Auth: No user, session cleared.');
+        logger.log('Auth: No user, session cleared.');
         authFlowInProgressRef.current = false;
         return;
       }
@@ -105,7 +106,7 @@ export const AuthProvider = ({ children }) => {
         if (profileError) {
           // If profile not found, auto-create it
           if (profileError.code === 'PGRST116') {
-            console.log('Auth: Creating profile for new user...');
+            logger.log('Auth: Creating profile for new user...');
             
             // Determine default role
             const defaultRole = sessionUser.email?.endsWith('@yourcompany.com') ? 'admin' : 'user';
@@ -123,7 +124,7 @@ export const AuthProvider = ({ children }) => {
               .single();
               
             if (insertError) {
-              console.error('Auth: Failed to create profile:', insertError);
+              logger.error('Auth: Failed to create profile:', insertError);
               setProfile(null);
               setOrganization(null);
               setLoading(false);
@@ -134,7 +135,7 @@ export const AuthProvider = ({ children }) => {
             profileData = newProfile;
           } else {
             // Other errors: log and clear state
-            console.error('Auth: Error loading profile:', profileError);
+            logger.error('Auth: Error loading profile:', profileError);
             setProfile(null);
             setOrganization(null);
             setLoading(false);
@@ -145,8 +146,8 @@ export const AuthProvider = ({ children }) => {
 
         // Check if account is disabled
         if (profileData.is_active === false || profileData.disabled_at) {
-          console.error('Auth: User account is disabled');
-          console.log('Disabled reason:', profileData.disabled_reason);
+          logger.error('Auth: User account is disabled');
+          logger.log('Disabled reason:', profileData.disabled_reason);
           setProfile(null);
           setOrganization(null);
           setUser(null);
@@ -163,7 +164,7 @@ export const AuthProvider = ({ children }) => {
         }
 
         setProfile(profileData);
-        console.log('Auth: Profile loaded successfully');
+        logger.log('Auth: Profile loaded successfully');
 
         // Step 2: If profile has an organization_id, fetch the organization
         if (profileData?.organization_id) {
@@ -176,7 +177,7 @@ export const AuthProvider = ({ children }) => {
 
           if (orgCheck && orgCheck.deleted_at) {
             // Organization has been deleted
-            console.error('Auth: Organization has been deleted');
+            logger.error('Auth: Organization has been deleted');
             setProfile(null);
             setOrganization(null);
             setUser(null);
@@ -202,12 +203,12 @@ export const AuthProvider = ({ children }) => {
             .single();
 
           if (orgError) {
-            console.error('Auth: Error fetching organization:', orgError);
+            logger.error('Auth: Error fetching organization:', orgError);
             setOrganization(null);
           } else {
             setOrganization(orgData);
-            console.log('Auth: Organization loaded:', orgData);
-            console.log('Auth: Organization logo_url:', orgData.logo_url);
+            logger.log('Auth: Organization loaded:', orgData);
+            logger.log('Auth: Organization logo_url:', orgData.logo_url);
 
             // Block access if trial expired
             if (orgData.subscription_status === 'trial' && orgData.trial_end_date) {
@@ -226,17 +227,17 @@ export const AuthProvider = ({ children }) => {
           // No organization associated with this profile
           setOrganization(null);
           setTrialExpired(false);
-          console.log('Auth: No organization linked to profile.');
+          logger.log('Auth: No organization linked to profile.');
         }
       } catch (e) {
-        console.error("Auth: A critical error occurred during data fetching:", e);
+        logger.error("Auth: A critical error occurred during data fetching:", e);
         setProfile(null);
         setOrganization(null);
       } finally {
         // IMPORTANT: Ensure loading is set to false after all operations
         setLoading(false);
         authFlowInProgressRef.current = false;
-        console.log('Auth: Auth flow finished.');
+        logger.log('Auth: Auth flow finished.');
       }
     };
 
@@ -254,15 +255,15 @@ export const AuthProvider = ({ children }) => {
       (_event, session) => {
         // Check if auth listeners are disabled during tab switch
         if (window.__authListenerDisabled) {
-          console.log('Auth: Auth listener disabled during tab switch, ignoring event:', _event);
+          logger.log('Auth: Auth listener disabled during tab switch, ignoring event:', _event);
           return;
         }
         
-        console.log(`Auth: Auth state changed, event: ${_event}`);
+        logger.log(`Auth: Auth state changed, event: ${_event}`);
         
         // Skip if this is the initial load
         if (isInitialLoadRef.current) {
-          console.log('Auth: Initial load, skipping auth state change');
+          logger.log('Auth: Initial load, skipping auth state change');
           return;
         }
         
@@ -271,7 +272,7 @@ export const AuthProvider = ({ children }) => {
         const previousSessionId = previousSessionRef.current?.user?.id;
         
         if (_event === 'SIGNED_IN' && currentSessionId === previousSessionId) {
-          console.log('Auth: Session refresh detected, not a genuine sign-in event');
+          logger.log('Auth: Session refresh detected, not a genuine sign-in event');
           return;
         }
         
@@ -306,7 +307,7 @@ export const AuthProvider = ({ children }) => {
         // Fire and forget
         supabase.auth.signOut();
       } catch (e) {
-        console.warn('Auto sign-out error (ignored):', e);
+        logger.warn('Auto sign-out error (ignored):', e);
       }
     };
 
@@ -468,7 +469,7 @@ export const AuthProvider = ({ children }) => {
     },
     signOut: async () => {
       try {
-        console.log('Auth: Starting sign out process...');
+        logger.log('Auth: Starting sign out process...');
         
         // Clear local state immediately to prevent confusion
         setUser(null);
@@ -481,17 +482,17 @@ export const AuthProvider = ({ children }) => {
         const { error } = await supabase.auth.signOut();
         
         if (error) {
-          console.error('Supabase signOut error:', error);
+          logger.error('Supabase signOut error:', error);
           throw error;
         }
         
-        console.log('Auth: Successfully signed out');
+        logger.log('Auth: Successfully signed out');
         
         // Navigate to login page
         window.location.href = '/login';
         
       } catch (error) {
-        console.error('Error signing out:', error);
+        logger.error('Error signing out:', error);
         // Even if logout fails, clear local state and redirect
         setUser(null);
         setProfile(null);
@@ -542,11 +543,11 @@ export const AuthProvider = ({ children }) => {
     },
     reloadOrganization: async () => {
       if (!profile?.organization_id) {
-        console.log('reloadOrganization: No organization_id in profile');
+        logger.log('reloadOrganization: No organization_id in profile');
         return;
       }
       try {
-        console.log('reloadOrganization: Fetching organization with ID:', profile.organization_id);
+        logger.log('reloadOrganization: Fetching organization with ID:', profile.organization_id);
         const { data: orgData, error: orgError } = await supabase
           .from('organizations')
           .select('*')
@@ -555,30 +556,30 @@ export const AuthProvider = ({ children }) => {
           .single();
         
         if (orgError) {
-          console.error('reloadOrganization: Error fetching organization:', orgError);
+          logger.error('reloadOrganization: Error fetching organization:', orgError);
           return;
         }
         
-        console.log('reloadOrganization: Organization data fetched:', orgData);
-        console.log('reloadOrganization: Logo URL:', orgData.logo_url);
+        logger.log('reloadOrganization: Organization data fetched:', orgData);
+        logger.log('reloadOrganization: Logo URL:', orgData.logo_url);
         setOrganization(orgData);
       } catch (e) {
-        console.error('reloadOrganization: Exception:', e);
+        logger.error('reloadOrganization: Exception:', e);
       }
     },
     reloadUserData: async () => {
       try {
-        console.log('reloadUserData: Starting to reload user data...');
+        logger.log('reloadUserData: Starting to reload user data...');
         
         // Get current user
         const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
         
         if (userError || !currentUser) {
-          console.error('reloadUserData: Error getting user:', userError);
+          logger.error('reloadUserData: Error getting user:', userError);
           return;
         }
         
-        console.log('reloadUserData: User found:', currentUser.email);
+        logger.log('reloadUserData: User found:', currentUser.email);
         
         // Reload profile
         const { data: profileData, error: profileError } = await supabase
@@ -588,16 +589,16 @@ export const AuthProvider = ({ children }) => {
           .single();
         
         if (profileError) {
-          console.error('reloadUserData: Error loading profile:', profileError);
+          logger.error('reloadUserData: Error loading profile:', profileError);
           return;
         }
         
-        console.log('reloadUserData: Profile loaded:', profileData);
+        logger.log('reloadUserData: Profile loaded:', profileData);
         setProfile(profileData);
         
         // If profile has organization, reload it
         if (profileData?.organization_id) {
-          console.log('reloadUserData: Loading organization:', profileData.organization_id);
+          logger.log('reloadUserData: Loading organization:', profileData.organization_id);
           
           const { data: orgData, error: orgError } = await supabase
             .from('organizations')
@@ -607,27 +608,27 @@ export const AuthProvider = ({ children }) => {
             .single();
           
           if (orgError) {
-            console.error('reloadUserData: Error loading organization:', orgError);
+            logger.error('reloadUserData: Error loading organization:', orgError);
             setOrganization(null);
           } else {
-            console.log('reloadUserData: Organization loaded:', orgData.name);
+            logger.log('reloadUserData: Organization loaded:', orgData.name);
             setOrganization(orgData);
           }
         } else {
-          console.log('reloadUserData: No organization linked to profile');
+          logger.log('reloadUserData: No organization linked to profile');
           setOrganization(null);
         }
         
-        console.log('✅ reloadUserData: Complete');
+        logger.log('✅ reloadUserData: Complete');
       } catch (e) {
-        console.error('reloadUserData: Exception:', e);
+        logger.error('reloadUserData: Exception:', e);
       }
     },
   }), [user, profile, organization, loading, trialExpired]);
 
   // Only log state changes when they actually change
   useEffect(() => {
-    console.log('useAuth: Current state:', { user: user?.id, profile: !!profile, organization: !!organization, loading });
+    logger.log('useAuth: Current state:', { user: user?.id, profile: !!profile, organization: !!organization, loading });
   }, [user?.id, profile, organization, loading]);
 
   return (

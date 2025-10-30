@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 // Disaster Recovery and Multi-Layer Backup System
 import { supabase } from '../supabase/client';
 
@@ -44,7 +45,7 @@ class DisasterRecoveryManager {
   }
 
   async initialize() {
-    console.log('🛡️ Initializing Disaster Recovery System...');
+    logger.log('🛡️ Initializing Disaster Recovery System...');
     
     try {
       // Check system health
@@ -60,16 +61,16 @@ class DisasterRecoveryManager {
       await this.initializeReplication();
       
       this.isInitialized = true;
-      console.log('✅ Disaster Recovery System initialized successfully');
+      logger.log('✅ Disaster Recovery System initialized successfully');
       
     } catch (error) {
-      console.error('❌ Failed to initialize Disaster Recovery System:', error);
+      logger.error('❌ Failed to initialize Disaster Recovery System:', error);
       throw error;
     }
   }
 
   async performHealthCheck() {
-    console.log('🔍 Performing system health check...');
+    logger.log('🔍 Performing system health check...');
     
     const healthStatus = {
       timestamp: new Date().toISOString(),
@@ -102,18 +103,18 @@ class DisasterRecoveryManager {
       
       this.backupStatus.healthCheck = healthStatus;
       
-      console.log('📊 Health Check Results:', healthStatus);
+      logger.log('📊 Health Check Results:', healthStatus);
       return healthStatus;
       
     } catch (error) {
-      console.error('❌ Health check failed:', error);
+      logger.error('❌ Health check failed:', error);
       healthStatus.overall = 'error';
       return healthStatus;
     }
   }
 
   async createEmergencyBackup() {
-    console.log('🚨 Creating emergency backup...');
+    logger.log('🚨 Creating emergency backup...');
     
     const backupId = `emergency_${Date.now()}`;
     const backupData = {
@@ -132,14 +133,14 @@ class DisasterRecoveryManager {
     try {
       // Backup critical data first
       for (const table of DISASTER_RECOVERY_CONFIG.dataPriorities.critical) {
-        console.log(`📋 Backing up critical table: ${table}`);
+        logger.log(`📋 Backing up critical table: ${table}`);
         
         const { data, error, count } = await supabase
           .from(table)
           .select('*', { count: 'exact' });
 
         if (error) {
-          console.error(`❌ Failed to backup ${table}:`, error);
+          logger.error(`❌ Failed to backup ${table}:`, error);
           continue;
         }
 
@@ -156,14 +157,14 @@ class DisasterRecoveryManager {
 
       // Backup important data
       for (const table of DISASTER_RECOVERY_CONFIG.dataPriorities.important) {
-        console.log(`📋 Backing up important table: ${table}`);
+        logger.log(`📋 Backing up important table: ${table}`);
         
         const { data, error, count } = await supabase
           .from(table)
           .select('*', { count: 'exact' });
 
         if (error) {
-          console.warn(`⚠️ Warning: Could not backup ${table}:`, error);
+          logger.warn(`⚠️ Warning: Could not backup ${table}:`, error);
           continue;
         }
 
@@ -183,13 +184,13 @@ class DisasterRecoveryManager {
       // Store backup metadata
       await this.storeBackupMetadata(backupData);
       
-      console.log('✅ Emergency backup completed successfully');
-      console.log(`📦 Backup ID: ${backupId}`);
+      logger.log('✅ Emergency backup completed successfully');
+      logger.log(`📦 Backup ID: ${backupId}`);
       
       return backupData;
       
     } catch (error) {
-      console.error('❌ Emergency backup failed:', error);
+      logger.error('❌ Emergency backup failed:', error);
       backupData.status = 'failed';
       backupData.error = error.message;
       throw error;
@@ -216,10 +217,10 @@ class DisasterRecoveryManager {
       // TODO: Store in cloud storage (AWS S3, Google Cloud, etc.)
       // await this.storeInCloudStorage(backupId, table, data);
       
-      console.log(`💾 Stored backup for ${table}: ${data?.length || 0} records`);
+      logger.log(`💾 Stored backup for ${table}: ${data?.length || 0} records`);
       
     } catch (error) {
-      console.error(`❌ Failed to store backup for ${table}:`, error);
+      logger.error(`❌ Failed to store backup for ${table}:`, error);
       throw error;
     }
   }
@@ -282,11 +283,11 @@ class DisasterRecoveryManager {
     // Store in IndexedDB
     await this.storeInIndexedDB('metadata', backupData.id, metadata);
     
-    console.log(`📋 Stored backup metadata for ${backupData.id}`);
+    logger.log(`📋 Stored backup metadata for ${backupData.id}`);
   }
 
   async listAvailableBackups() {
-    console.log('📋 Listing available backups...');
+    logger.log('📋 Listing available backups...');
     
     const backups = [];
     
@@ -303,17 +304,17 @@ class DisasterRecoveryManager {
       // Sort by timestamp (newest first)
       backups.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       
-      console.log(`📦 Found ${backups.length} available backups`);
+      logger.log(`📦 Found ${backups.length} available backups`);
       return backups;
       
     } catch (error) {
-      console.error('❌ Failed to list backups:', error);
+      logger.error('❌ Failed to list backups:', error);
       return [];
     }
   }
 
   async restoreFromBackup(backupId, options = {}) {
-    console.log(`🔄 Starting restore from backup: ${backupId}`);
+    logger.log(`🔄 Starting restore from backup: ${backupId}`);
     
     const restoreOptions = {
       dryRun: false,
@@ -329,10 +330,10 @@ class DisasterRecoveryManager {
         throw new Error(`Backup ${backupId} not found`);
       }
 
-      console.log(`📋 Backup found: ${metadata.type} backup from ${metadata.timestamp}`);
+      logger.log(`📋 Backup found: ${metadata.type} backup from ${metadata.timestamp}`);
       
       if (restoreOptions.dryRun) {
-        console.log('🧪 DRY RUN MODE - No actual data will be restored');
+        logger.log('🧪 DRY RUN MODE - No actual data will be restored');
         return this.simulateRestore(metadata);
       }
 
@@ -347,7 +348,7 @@ class DisasterRecoveryManager {
         );
         
         if (!confirmed) {
-          console.log('❌ Restore cancelled by user');
+          logger.log('❌ Restore cancelled by user');
           return { status: 'cancelled' };
         }
       }
@@ -355,11 +356,11 @@ class DisasterRecoveryManager {
       // Perform actual restore
       const restoreResult = await this.performRestore(backupId, metadata, restoreOptions);
       
-      console.log('✅ Restore completed successfully');
+      logger.log('✅ Restore completed successfully');
       return restoreResult;
       
     } catch (error) {
-      console.error('❌ Restore failed:', error);
+      logger.error('❌ Restore failed:', error);
       throw error;
     }
   }
@@ -379,7 +380,7 @@ class DisasterRecoveryManager {
         : options.tables;
 
       for (const table of tablesToRestore) {
-        console.log(`🔄 Restoring table: ${table}`);
+        logger.log(`🔄 Restoring table: ${table}`);
         
         try {
           // Get backup data
@@ -398,7 +399,7 @@ class DisasterRecoveryManager {
               .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
             
             if (deleteError) {
-              console.warn(`⚠️ Warning: Could not clear ${table}:`, deleteError);
+              logger.warn(`⚠️ Warning: Could not clear ${table}:`, deleteError);
             }
           }
 
@@ -417,10 +418,10 @@ class DisasterRecoveryManager {
             timestamp: new Date().toISOString()
           };
           
-          console.log(`✅ Restored ${table}: ${data.length} records`);
+          logger.log(`✅ Restored ${table}: ${data.length} records`);
           
         } catch (error) {
-          console.error(`❌ Failed to restore ${table}:`, error);
+          logger.error(`❌ Failed to restore ${table}:`, error);
           restoreResult.errors.push({
             table,
             error: error.message,
@@ -449,7 +450,7 @@ class DisasterRecoveryManager {
   }
 
   async simulateRestore(metadata) {
-    console.log('🧪 Simulating restore operation...');
+    logger.log('🧪 Simulating restore operation...');
     
     const simulation = {
       backupId: metadata.id,
@@ -471,7 +472,7 @@ class DisasterRecoveryManager {
       }
     }
 
-    console.log('📊 Restore Simulation Results:', simulation);
+    logger.log('📊 Restore Simulation Results:', simulation);
     return simulation;
   }
 
@@ -509,7 +510,7 @@ class DisasterRecoveryManager {
       return status;
       
     } catch (error) {
-      console.error('❌ Failed to check backup status:', error);
+      logger.error('❌ Failed to check backup status:', error);
       status.isHealthy = false;
       status.issues.push(`Error checking backups: ${error.message}`);
       return status;
@@ -540,13 +541,13 @@ class DisasterRecoveryManager {
       });
       
     } catch (error) {
-      console.error('❌ Storage health check failed:', error);
+      logger.error('❌ Storage health check failed:', error);
       return 'error';
     }
   }
 
   async initializeBackupMonitoring() {
-    console.log('📊 Initializing backup monitoring...');
+    logger.log('📊 Initializing backup monitoring...');
     
     // Set up periodic health checks
     setInterval(async () => {
@@ -560,7 +561,7 @@ class DisasterRecoveryManager {
   }
 
   async setupAutomatedBackups() {
-    console.log('⚙️ Setting up automated backups...');
+    logger.log('⚙️ Setting up automated backups...');
     
     // Schedule daily backups
     const scheduleBackup = () => {
@@ -581,7 +582,7 @@ class DisasterRecoveryManager {
   }
 
   async initializeReplication() {
-    console.log('🔄 Initializing real-time replication...');
+    logger.log('🔄 Initializing real-time replication...');
     
     // Set up real-time listeners for critical tables
     const criticalTables = DISASTER_RECOVERY_CONFIG.dataPriorities.critical;
@@ -592,7 +593,7 @@ class DisasterRecoveryManager {
         .on('postgres_changes', 
           { event: '*', schema: 'public', table: table },
           (payload) => {
-            console.log(`📡 Replication event for ${table}:`, payload);
+            logger.log(`📡 Replication event for ${table}:`, payload);
             // TODO: Implement real-time backup of changes
           }
         )
@@ -601,7 +602,7 @@ class DisasterRecoveryManager {
   }
 
   async clearOldBackups(cutoffDate = new Date('2024-07-01')) {
-    console.log(`🧹 Clearing backups from before ${cutoffDate.toISOString()}...`);
+    logger.log(`🧹 Clearing backups from before ${cutoffDate.toISOString()}...`);
     
     const clearedBackups = [];
     const errors = [];
@@ -650,7 +651,7 @@ class DisasterRecoveryManager {
       keysToRemove.forEach(key => {
         try {
           localStorage.removeItem(key);
-          console.log(`🗑️ Removed old backup: ${key}`);
+          logger.log(`🗑️ Removed old backup: ${key}`);
         } catch (error) {
           errors.push(`Failed to remove ${key}: ${error.message}`);
         }
@@ -663,7 +664,7 @@ class DisasterRecoveryManager {
         errors.push(`IndexedDB cleanup failed: ${indexedDBError.message}`);
       }
       
-      console.log(`✅ Cleanup complete: ${clearedBackups.length} old backups cleared`);
+      logger.log(`✅ Cleanup complete: ${clearedBackups.length} old backups cleared`);
       
       return {
         success: true,
@@ -673,7 +674,7 @@ class DisasterRecoveryManager {
       };
       
     } catch (error) {
-      console.error('❌ Failed to clear old backups:', error);
+      logger.error('❌ Failed to clear old backups:', error);
       return {
         success: false,
         clearedCount: clearedBackups.length,
@@ -707,7 +708,7 @@ class DisasterRecoveryManager {
             clearedCount++;
             cursor.continue();
           } else {
-            console.log(`🗑️ Removed ${clearedCount} old backups from IndexedDB`);
+            logger.log(`🗑️ Removed ${clearedCount} old backups from IndexedDB`);
             resolve(clearedCount);
           }
         };
@@ -728,20 +729,20 @@ class DisasterRecoveryManager {
   }
 
   async createBackupWithCleanup() {
-    console.log('🔄 Creating backup and clearing old backups...');
+    logger.log('🔄 Creating backup and clearing old backups...');
     
     try {
       // First, create a new backup
       const backup = await this.createEmergencyBackup();
-      console.log(`✅ New backup created: ${backup.id}`);
+      logger.log(`✅ New backup created: ${backup.id}`);
       
       // Then, clear old backups from before July 2024
       const cleanupResult = await this.clearOldBackups(new Date('2024-07-01'));
       
       if (cleanupResult.success) {
-        console.log(`✅ Cleanup completed: ${cleanupResult.clearedCount} old backups removed`);
+        logger.log(`✅ Cleanup completed: ${cleanupResult.clearedCount} old backups removed`);
       } else {
-        console.warn(`⚠️ Cleanup had issues: ${cleanupResult.errors?.join(', ')}`);
+        logger.warn(`⚠️ Cleanup had issues: ${cleanupResult.errors?.join(', ')}`);
       }
       
       return {
@@ -755,7 +756,7 @@ class DisasterRecoveryManager {
       };
       
     } catch (error) {
-      console.error('❌ Backup and cleanup failed:', error);
+      logger.error('❌ Backup and cleanup failed:', error);
       throw error;
     }
   }
@@ -786,9 +787,9 @@ export const disasterRecovery = new DisasterRecoveryManager();
 export const initializeDisasterRecovery = async () => {
   try {
     await disasterRecovery.initialize();
-    console.log('✅ Disaster Recovery System ready');
+    logger.log('✅ Disaster Recovery System ready');
   } catch (error) {
-    console.error('❌ Failed to initialize Disaster Recovery:', error);
+    logger.error('❌ Failed to initialize Disaster Recovery:', error);
   }
 };
 

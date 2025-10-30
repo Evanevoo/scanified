@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
@@ -58,9 +59,9 @@ class FeedbackService {
       await this.preloadSounds();
       
       this.isInitialized = true;
-      console.log('🔊 FeedbackService initialized with customization support');
+      logger.log('🔊 FeedbackService initialized with customization support');
     } catch (error) {
-      console.error('❌ Failed to initialize FeedbackService:', error);
+      logger.error('❌ Failed to initialize FeedbackService:', error);
     }
   }
 
@@ -68,7 +69,7 @@ class FeedbackService {
    * Preload sound effects for better performance
    */
   private async preloadSounds() {
-    console.log('🔊 Preloading sound files...');
+    logger.log('🔊 Preloading sound files...');
     
     const soundFiles = {
       success: require('../assets/sounds/scan_success.mp3'),
@@ -89,15 +90,15 @@ class FeedbackService {
             volume: this.settings.volume,
           });
           this.sounds[key] = sound;
-          console.log(`🔊 Loaded sound: ${key}`);
+          logger.log(`🔊 Loaded sound: ${key}`);
         } catch (error) {
           this.sounds[key] = null;
-          console.log(`🔊 Could not load sound for ${key}:`, error);
+          logger.log(`🔊 Could not load sound for ${key}:`, error);
         }
       }
-      console.log('🔊 Sound preloading completed');
+      logger.log('🔊 Sound preloading completed');
     } catch (error) {
-      console.warn('⚠️ Could not preload sounds:', error);
+      logger.warn('⚠️ Could not preload sounds:', error);
     }
   }
 
@@ -148,7 +149,7 @@ class FeedbackService {
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
     } catch (error) {
-      console.warn('Haptic feedback failed:', error);
+      logger.warn('Haptic feedback failed:', error);
     }
   }
 
@@ -163,7 +164,7 @@ class FeedbackService {
       const sound = this.sounds[type];
       if (sound) {
         await sound.replayAsync();
-        console.log(`🔊 Played sound: ${type}`);
+        logger.log(`🔊 Played sound: ${type}`);
         return;
       }
 
@@ -191,7 +192,7 @@ class FeedbackService {
 
       await customizationService.playCustomSound(category);
     } catch (error) {
-      console.log('🔊 Sound not available, using haptic feedback only');
+      logger.log('🔊 Sound not available, using haptic feedback only');
       // Don't call playSystemSound to avoid double haptic feedback
     }
   }
@@ -215,7 +216,7 @@ class FeedbackService {
       // Use customization service for text-to-speech
       await customizationService.speakText(text, priority);
     } catch (error) {
-      console.warn('⚠️ Could not speak text:', error);
+      logger.warn('⚠️ Could not speak text:', error);
     }
   }
 
@@ -320,9 +321,9 @@ class FeedbackService {
       }
       this.sounds = {};
       this.isInitialized = false;
-      console.log('🔊 FeedbackService cleaned up');
+      logger.log('🔊 FeedbackService cleaned up');
     } catch (error) {
-      console.error('❌ Error cleaning up FeedbackService:', error);
+      logger.error('❌ Error cleaning up FeedbackService:', error);
     }
   }
 }

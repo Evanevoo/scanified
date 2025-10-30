@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -49,7 +50,7 @@ export default function DailyUpdateAdmin() {
         setLastUpdate(data[0].last_location_update);
       }
     } catch (error) {
-      console.error('Error fetching last update info:', error);
+      logger.error('Error fetching last update info:', error);
     }
   };
 
@@ -77,7 +78,7 @@ export default function DailyUpdateAdmin() {
         setBottleStats(stats);
       }
     } catch (error) {
-      console.error('Error fetching bottle stats:', error);
+      logger.error('Error fetching bottle stats:', error);
     }
   };
 
@@ -128,7 +129,7 @@ export default function DailyUpdateAdmin() {
             .eq('id', bottle.id);
 
           if (updateError) {
-            console.error(`Error updating bottle ${bottle.id}:`, updateError);
+            logger.error(`Error updating bottle ${bottle.id}:`, updateError);
           } else {
             updatedCount++;
           }
@@ -150,7 +151,7 @@ export default function DailyUpdateAdmin() {
       fetchBottleStats();
 
     } catch (error) {
-      console.error('Error running daily update:', error);
+      logger.error('Error running daily update:', error);
       setError(error.message);
     } finally {
       setLoading(false);

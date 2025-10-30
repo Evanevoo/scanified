@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -65,7 +66,7 @@ export default function UserManagementAllOrgs() {
   const fetchAllUsers = async () => {
     setLoading(true);
     try {
-      console.log('Fetching all users...');
+      logger.log('Fetching all users...');
       
       // First, try with role_id join
       let { data, error } = await supabase
@@ -83,7 +84,7 @@ export default function UserManagementAllOrgs() {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Error fetching users with joins:', error);
+        logger.error('Error fetching users with joins:', error);
         
         // Fallback: fetch without joins
         const { data: basicData, error: basicError } = await supabase
@@ -96,9 +97,9 @@ export default function UserManagementAllOrgs() {
         }
         
         data = basicData;
-        console.log('Fetched users without joins:', data?.length || 0);
+        logger.log('Fetched users without joins:', data?.length || 0);
       } else {
-        console.log('Fetched users with joins:', data?.length || 0);
+        logger.log('Fetched users with joins:', data?.length || 0);
       }
 
       // Enrich data with organization names if not joined
@@ -123,10 +124,10 @@ export default function UserManagementAllOrgs() {
       }
 
       setUsers(data || []);
-      console.log('Final users data:', data);
+      logger.log('Final users data:', data);
       
     } catch (err) {
-      console.error('Error in fetchAllUsers:', err);
+      logger.error('Error in fetchAllUsers:', err);
       setSnackbar({ open: true, message: `Error loading users: ${err.message}`, severity: 'error' });
     } finally {
       setLoading(false);
@@ -141,9 +142,9 @@ export default function UserManagementAllOrgs() {
         .order('name');
       if (error) throw error;
       setOrganizations(data || []);
-      console.log('Fetched organizations:', data?.length || 0);
+      logger.log('Fetched organizations:', data?.length || 0);
     } catch (err) {
-      console.error('Error fetching organizations:', err);
+      logger.error('Error fetching organizations:', err);
     }
   };
 
@@ -154,7 +155,7 @@ export default function UserManagementAllOrgs() {
         .select('id, name')
         .order('name');
       if (error) {
-        console.log('Roles table not available, using default roles');
+        logger.log('Roles table not available, using default roles');
         setRoles([
           { id: 'admin', name: 'Admin' },
           { id: 'user', name: 'User' },
@@ -162,10 +163,10 @@ export default function UserManagementAllOrgs() {
         ]);
       } else {
         setRoles(data || []);
-        console.log('Fetched roles:', data?.length || 0);
+        logger.log('Fetched roles:', data?.length || 0);
       }
     } catch (err) {
-      console.error('Error fetching roles:', err);
+      logger.error('Error fetching roles:', err);
       // Set default roles if table doesn't exist
       setRoles([
         { id: 'admin', name: 'Admin' },
@@ -187,7 +188,7 @@ export default function UserManagementAllOrgs() {
       
       return matchesSearch && matchesOrg && matchesRole;
     } catch (err) {
-      console.error('Error filtering user:', user, err);
+      logger.error('Error filtering user:', user, err);
       return false;
     }
   });
@@ -239,7 +240,7 @@ export default function UserManagementAllOrgs() {
       setEditDialog(false);
       fetchAllUsers();
     } catch (err) {
-      console.error('Error updating user:', err);
+      logger.error('Error updating user:', err);
       setSnackbar({ open: true, message: `Error updating user: ${err.message}`, severity: 'error' });
     } finally {
       setSaving(false);
@@ -260,7 +261,7 @@ export default function UserManagementAllOrgs() {
       setDeleteDialog({ open: false, user: null });
       fetchAllUsers();
     } catch (err) {
-      console.error('Error deleting user:', err);
+      logger.error('Error deleting user:', err);
       setSnackbar({ open: true, message: `Error deleting user: ${err.message}`, severity: 'error' });
     } finally {
       setDeleting(false);
@@ -286,7 +287,7 @@ export default function UserManagementAllOrgs() {
       });
       setResetDialog({ open: false, user: null });
     } catch (err) {
-      console.error('Error sending password reset:', err);
+      logger.error('Error sending password reset:', err);
       setSnackbar({ 
         open: true, 
         message: `Error sending password reset: ${err.message}`, 

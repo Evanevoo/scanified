@@ -1,8 +1,9 @@
+import logger from '../../utils/logger';
 import React from 'react';
 import { Box, Typography, Alert } from '@mui/material';
 
 export default function TestSimpleComponent() {
-  console.log('🧪 TestSimpleComponent: Rendering...');
+  logger.log('🧪 TestSimpleComponent: Rendering...');
   
   return (
     <Box sx={{ p: 3, bgcolor: 'red', minHeight: '100vh' }}>

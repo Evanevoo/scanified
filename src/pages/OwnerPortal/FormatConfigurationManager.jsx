@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -192,7 +193,7 @@ export default function FormatConfigurationManager() {
         }
       });
     } catch (error) {
-      console.error('Error loading configuration:', error);
+      logger.error('Error loading configuration:', error);
       toast.error('Failed to load configuration');
     } finally {
       setLoading(false);
@@ -217,7 +218,7 @@ export default function FormatConfigurationManager() {
 
       toast.success('Format configuration saved successfully!');
     } catch (error) {
-      console.error('Error saving configuration:', error);
+      logger.error('Error saving configuration:', error);
       toast.error('Failed to save configuration');
     } finally {
       setSaving(false);

@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -76,7 +77,7 @@ export default function AssetsByCustomerReport() {
         .order('name');
 
       if (customersError) {
-        console.error('Customers error:', customersError);
+        logger.error('Customers error:', customersError);
         throw customersError;
       }
 
@@ -91,29 +92,29 @@ export default function AssetsByCustomerReport() {
         .order('created_at', { ascending: false });
 
       if (bottlesError) {
-        console.error('Bottles error:', bottlesError);
+        logger.error('Bottles error:', bottlesError);
         throw bottlesError;
       }
 
-      console.log('Fetched customers:', customers?.length || 0);
-      console.log('Fetched bottles:', bottles?.length || 0);
+      logger.log('Fetched customers:', customers?.length || 0);
+      logger.log('Fetched bottles:', bottles?.length || 0);
       
       // Log comprehensive bottle data to understand structure
       if (bottles && bottles.length > 0) {
-        console.log('Sample bottles:', bottles.slice(0, 5));
-        console.log('All bottle statuses:', [...new Set(bottles.map(b => b.status))]);
-        console.log('Bottles with barcode:', bottles.filter(b => b.barcode_number && b.barcode_number.trim()).length);
-        console.log('Bottles with serial:', bottles.filter(b => b.serial_number && b.serial_number.trim()).length);
-        console.log('Bottles with assigned_customer:', bottles.filter(b => b.assigned_customer).length);
-        console.log('Bottles with customer_id:', bottles.filter(b => b.customer_id).length);
-        console.log('Sample assigned bottles:', bottles.filter(b => b.assigned_customer || b.customer_id).slice(0, 3));
+        logger.log('Sample bottles:', bottles.slice(0, 5));
+        logger.log('All bottle statuses:', [...new Set(bottles.map(b => b.status))]);
+        logger.log('Bottles with barcode:', bottles.filter(b => b.barcode_number && b.barcode_number.trim()).length);
+        logger.log('Bottles with serial:', bottles.filter(b => b.serial_number && b.serial_number.trim()).length);
+        logger.log('Bottles with assigned_customer:', bottles.filter(b => b.assigned_customer).length);
+        logger.log('Bottles with customer_id:', bottles.filter(b => b.customer_id).length);
+        logger.log('Sample assigned bottles:', bottles.filter(b => b.assigned_customer || b.customer_id).slice(0, 3));
         
         // Check what makes a bottle vs asset type
         const withProductCode = bottles.filter(b => b.product_code);
         const withDescription = bottles.filter(b => b.description);
-        console.log('Bottles with product_code:', withProductCode.length);
-        console.log('Bottles with description:', withDescription.length);
-        console.log('Sample product codes:', [...new Set(bottles.map(b => b.product_code).filter(Boolean))].slice(0, 10));
+        logger.log('Bottles with product_code:', withProductCode.length);
+        logger.log('Bottles with description:', withDescription.length);
+        logger.log('Sample product codes:', [...new Set(bottles.map(b => b.product_code).filter(Boolean))].slice(0, 10));
       }
 
       // Create a map of customers for easy lookup
@@ -190,7 +191,7 @@ export default function AssetsByCustomerReport() {
       });
 
     } catch (err) {
-      console.error('Error fetching bottles data:', err);
+      logger.error('Error fetching bottles data:', err);
       setError(`Failed to load bottles data: ${err.message}. Please try again.`);
     } finally {
       setLoading(false);

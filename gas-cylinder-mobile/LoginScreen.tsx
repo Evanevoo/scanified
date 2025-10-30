@@ -1,3 +1,4 @@
+import logger from './utils/logger';
 import React, { useState, useEffect } from 'react';
 import { 
   View, 
@@ -79,7 +80,7 @@ export default function LoginScreen() {
           setPassword(savedPassword);
         }
       } catch (error) {
-        console.warn('Error loading saved credentials:', error);
+        logger.warn('Error loading saved credentials:', error);
       }
 
       try {
@@ -104,7 +105,7 @@ export default function LoginScreen() {
           }
         }
       } catch (error) {
-        console.warn('Error checking biometric support:', error);
+        logger.warn('Error checking biometric support:', error);
         setBiometricSupported(false);
         setBiometricAvailable(false);
         setBiometricType('unknown');
@@ -139,11 +140,11 @@ export default function LoginScreen() {
           await SecureStore.deleteItemAsync('rememberedPassword');
         } catch (error) {
           // SecureStore.deleteItemAsync can throw if key doesn't exist, which is fine
-          console.warn('Could not delete remembered password:', error);
+          logger.warn('Could not delete remembered password:', error);
         }
       }
     } catch (error) {
-      console.warn('Error managing saved credentials:', error);
+      logger.warn('Error managing saved credentials:', error);
       // Continue with login even if saving credentials fails
     }
     
@@ -191,16 +192,16 @@ export default function LoginScreen() {
   };
 
   const handleBiometricLogin = async () => {
-    console.log('🔐 Biometric login button pressed');
+    logger.log('🔐 Biometric login button pressed');
     try {
       const savedEmail = await AsyncStorage.getItem('rememberedEmail');
       const savedPassword = await SecureStore.getItemAsync('rememberedPassword');
       
-      console.log('🔐 Saved email exists:', !!savedEmail);
-      console.log('🔐 Saved password exists:', !!savedPassword);
+      logger.log('🔐 Saved email exists:', !!savedEmail);
+      logger.log('🔐 Saved password exists:', !!savedPassword);
       
       if (!savedEmail || !savedPassword) {
-        console.log('🔐 No saved credentials, showing alert');
+        logger.log('🔐 No saved credentials, showing alert');
         Alert.alert('No saved login', 'Please login with email and password first and enable Remember Me.');
         return;
       }
@@ -210,9 +211,9 @@ export default function LoginScreen() {
       const hasFaceID = availableTypes.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
       const hasTouchID = availableTypes.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
       
-      console.log('🔐 Available biometric types:', availableTypes);
-      console.log('🔐 Has Face ID:', hasFaceID);
-      console.log('🔐 Has Touch ID:', hasTouchID);
+      logger.log('🔐 Available biometric types:', availableTypes);
+      logger.log('🔐 Has Face ID:', hasFaceID);
+      logger.log('🔐 Has Touch ID:', hasTouchID);
       
       let promptMessage = 'Login with Biometric Authentication';
       if (hasFaceID) {
@@ -221,8 +222,8 @@ export default function LoginScreen() {
         promptMessage = 'Login with Touch ID';
       }
       
-      console.log('🔐 Prompt message:', promptMessage);
-      console.log('🔐 Starting biometric authentication...');
+      logger.log('🔐 Prompt message:', promptMessage);
+      logger.log('🔐 Starting biometric authentication...');
       
       const biometricResult = await LocalAuthentication.authenticateAsync({
         promptMessage: promptMessage,
@@ -231,7 +232,7 @@ export default function LoginScreen() {
         requireConfirmation: false,
       });
       
-      console.log('🔐 Biometric result:', biometricResult);
+      logger.log('🔐 Biometric result:', biometricResult);
       
       if (biometricResult.success) {
         // Set the saved credentials
@@ -251,7 +252,7 @@ export default function LoginScreen() {
         }, 'Biometric Login Failed');
       }
     } catch (err) {
-      console.log('🔐 Biometric login error:', err);
+      logger.log('🔐 Biometric login error:', err);
       Alert.alert('Biometric Login Failed', err.message);
     }
   };
@@ -285,7 +286,7 @@ export default function LoginScreen() {
                   (!rememberMe || !email) && styles.biometricButtonDisabled
                 ]} 
                 onPress={() => {
-                  console.log('🔐 Button pressed - rememberMe:', rememberMe, 'email:', email);
+                  logger.log('🔐 Button pressed - rememberMe:', rememberMe, 'email:', email);
                   handleBiometricLogin();
                 }}
                 disabled={!rememberMe || !email}

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert } from 'react-native';
 import { supabase } from '../supabase';
@@ -44,7 +45,7 @@ export default function HistoryScreen() {
         
         // If bottle_scans doesn't exist, try cylinder_scans table
         if (error && error.message?.includes('relation') && error.message?.includes('does not exist')) {
-          console.log('bottle_scans table not found, trying cylinder_scans table...');
+          logger.log('bottle_scans table not found, trying cylinder_scans table...');
           const fallback = await supabase
             .from('cylinder_scans')
             .select('*')
@@ -57,15 +58,15 @@ export default function HistoryScreen() {
         }
         
         if (error) {
-          console.error('Scan loading error:', error);
+          logger.error('Scan loading error:', error);
           setError(`Failed to load scans: ${error.message || 'Unknown error'}`);
         } else {
           setError('');
           setScans(data || []);
-          console.log(`Loaded ${data?.length || 0} scans`);
+          logger.log(`Loaded ${data?.length || 0} scans`);
         }
       } catch (err) {
-        console.error('Unexpected error loading scans:', err);
+        logger.error('Unexpected error loading scans:', err);
         setError(`Unexpected error: ${err.message}`);
       }
       

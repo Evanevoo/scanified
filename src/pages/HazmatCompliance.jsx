@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Grid, Card, CardContent, CardActions,
@@ -194,7 +195,7 @@ export default function HazmatCompliance() {
       setViolations(violationsResult.data || []);
 
     } catch (error) {
-      console.error('Error fetching hazmat compliance data:', error);
+      logger.error('Error fetching hazmat compliance data:', error);
       setError('Failed to load hazmat compliance data');
     } finally {
       setLoading(false);
@@ -247,7 +248,7 @@ export default function HazmatCompliance() {
       fetchData();
 
     } catch (error) {
-      console.error('Error creating manifest:', error);
+      logger.error('Error creating manifest:', error);
       setError('Failed to create hazmat manifest');
     }
   };
@@ -284,7 +285,7 @@ export default function HazmatCompliance() {
       fetchData();
 
     } catch (error) {
-      console.error('Error creating report:', error);
+      logger.error('Error creating report:', error);
       setError('Failed to create compliance report');
     }
   };
@@ -377,7 +378,7 @@ export default function HazmatCompliance() {
 
   const generateManifestPDF = (manifest) => {
     // In a real implementation, this would generate a PDF
-    console.log('Generating PDF for manifest:', manifest.manifest_number);
+    logger.log('Generating PDF for manifest:', manifest.manifest_number);
     setSuccess('PDF generated successfully');
   };
 

@@ -1,3 +1,4 @@
+import logger from './utils/logger';
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, Alert, StyleSheet } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -32,7 +33,7 @@ export default function SimpleCameraTest() {
             style={styles.camera}
             facing="back"
             onBarcodeScanned={({ data }) => {
-              console.log('🎯 SIMPLE TEST - Barcode detected:', data);
+              logger.log('🎯 SIMPLE TEST - Barcode detected:', data);
               setScannedData(data);
               Alert.alert('Barcode Detected!', `Data: ${data}`);
               setShowCamera(false);

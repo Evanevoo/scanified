@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
@@ -88,7 +89,7 @@ export default function BackupDashboard() {
       }
 
     } catch (error) {
-      console.error('Error loading backup data:', error);
+      logger.error('Error loading backup data:', error);
       setMessage({ type: 'error', text: `Error loading backup data: ${error.message}` });
     } finally {
       setLoading(false);
@@ -121,7 +122,7 @@ export default function BackupDashboard() {
       }
 
     } catch (error) {
-      console.error('Backup error:', error);
+      logger.error('Backup error:', error);
       setMessage({ 
         type: 'error', 
         text: `Backup failed: ${error.message}` 
@@ -162,7 +163,7 @@ export default function BackupDashboard() {
       }
 
     } catch (error) {
-      console.error('Download error:', error);
+      logger.error('Download error:', error);
       setMessage({ type: 'error', text: `Download failed: ${error.message}` });
     }
   };
@@ -189,7 +190,7 @@ export default function BackupDashboard() {
       });
 
     } catch (error) {
-      console.error('Schedule error:', error);
+      logger.error('Schedule error:', error);
       setMessage({ type: 'error', text: `Schedule update failed: ${error.message}` });
     }
   };

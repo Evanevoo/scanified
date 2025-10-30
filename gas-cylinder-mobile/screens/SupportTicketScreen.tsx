@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { 
   View, 
@@ -53,7 +54,7 @@ export default function SupportTicketScreen() {
       if (error) throw error;
       setTickets(data || []);
     } catch (error) {
-      console.error('Error loading tickets:', error);
+      logger.error('Error loading tickets:', error);
       Alert.alert('Error', 'Failed to load support tickets');
     } finally {
       setLoading(false);

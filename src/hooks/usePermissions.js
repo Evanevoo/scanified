@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { useEffect, useState } from 'react';
 import { useAuth } from './useAuth.jsx';
 import { supabase } from '../supabase/client';
@@ -71,7 +72,7 @@ export function usePermissions() {
         .single()
         .then(({ data, error }) => {
           if (error) {
-            console.error('Error fetching role permissions:', error);
+            logger.error('Error fetching role permissions:', error);
             setPermissions([]);
             setIsOrgAdmin(false);
           } else {

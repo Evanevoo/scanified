@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState } from 'react';
 import {
   Box,
@@ -37,7 +38,7 @@ const SMTP2GOTest = () => {
     setResult(null);
 
     try {
-      console.log('Testing SMTP2GO...');
+      logger.log('Testing SMTP2GO...');
       
       const response = await fetch('/.netlify/functions/smtp2go-test', {
         method: 'POST',
@@ -45,7 +46,7 @@ const SMTP2GOTest = () => {
         body: JSON.stringify({ to: testEmail })
       });
 
-      console.log('SMTP2GO test response status:', response.status);
+      logger.log('SMTP2GO test response status:', response.status);
 
       if (!response.ok) {
         let errorMessage;
@@ -61,12 +62,12 @@ const SMTP2GOTest = () => {
       }
 
       const data = await response.json();
-      console.log('SMTP2GO test response:', data);
+      logger.log('SMTP2GO test response:', data);
       
       setResult(data);
       
     } catch (err) {
-      console.error('SMTP2GO test error:', err);
+      logger.error('SMTP2GO test error:', err);
       setError(`Network error: ${err.message}`);
     } finally {
       setLoading(false);

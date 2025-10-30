@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Paper, Typography, Grid, Card, CardContent, Button, Chip, 
@@ -204,7 +205,7 @@ function CylinderTracking({ customerId }) {
       if (error) throw error;
       setCylinders(data || []);
     } catch (error) {
-      console.error('Error fetching cylinders:', error);
+      logger.error('Error fetching cylinders:', error);
     } finally {
       setLoading(false);
     }
@@ -374,7 +375,7 @@ function DeliveryScheduling({ customerId }) {
       if (error) throw error;
       setUpcomingDeliveries(data || []);
     } catch (error) {
-      console.error('Error fetching deliveries:', error);
+      logger.error('Error fetching deliveries:', error);
     }
   };
 
@@ -413,7 +414,7 @@ function DeliveryScheduling({ customerId }) {
       });
       fetchUpcomingDeliveries();
     } catch (error) {
-      console.error('Error submitting delivery request:', error);
+      logger.error('Error submitting delivery request:', error);
       alert('Failed to submit delivery request');
     } finally {
       setLoading(false);
@@ -586,7 +587,7 @@ function ServiceRequests({ customerId }) {
       if (error) throw error;
       setServiceRequests(data || []);
     } catch (error) {
-      console.error('Error fetching service requests:', error);
+      logger.error('Error fetching service requests:', error);
     } finally {
       setLoading(false);
     }
@@ -622,7 +623,7 @@ function ServiceRequests({ customerId }) {
       });
       fetchServiceRequests();
     } catch (error) {
-      console.error('Error submitting service request:', error);
+      logger.error('Error submitting service request:', error);
       alert('Failed to submit service request');
     }
   };
@@ -802,7 +803,7 @@ export default function CustomerSelfService() {
       });
 
     } catch (error) {
-      console.error('Error fetching customer data:', error);
+      logger.error('Error fetching customer data:', error);
     } finally {
       setLoading(false);
     }

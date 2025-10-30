@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -34,7 +35,7 @@ export default function DriverDashboard() {
       const data = await deliveryService.getDriverDeliveries(profile.id);
       setDeliveries(data);
     } catch (error) {
-      console.error('Error fetching deliveries:', error);
+      logger.error('Error fetching deliveries:', error);
       Alert.alert('Error', 'Failed to load deliveries');
     } finally {
       setLoading(false);
@@ -64,7 +65,7 @@ export default function DriverDashboard() {
       // Update location in database
       await updateDriverLocation(location.coords.latitude, location.coords.longitude);
     } catch (error) {
-      console.error('Error getting location:', error);
+      logger.error('Error getting location:', error);
     }
   };
 
@@ -79,7 +80,7 @@ export default function DriverDashboard() {
           updated_at: new Date().toISOString()
         });
     } catch (error) {
-      console.error('Error updating location:', error);
+      logger.error('Error updating location:', error);
     }
   };
 
@@ -96,7 +97,7 @@ export default function DriverDashboard() {
       fetchDeliveries();
       Alert.alert('Success', `Delivery status updated to ${status}`);
     } catch (error) {
-      console.error('Error updating status:', error);
+      logger.error('Error updating status:', error);
       Alert.alert('Error', 'Failed to update delivery status');
     }
   };

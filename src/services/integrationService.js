@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 /**
  * Integration Service
  * Handles external system integrations including ERP, SMS, webhooks, and automation
@@ -56,7 +57,7 @@ class IntegrationService {
 
       return { success: true, integrationId: data.id };
     } catch (error) {
-      console.error('SAP integration error:', error);
+      logger.error('SAP integration error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -100,7 +101,7 @@ class IntegrationService {
 
       return { success: true, integrationId: data.id };
     } catch (error) {
-      console.error('Oracle integration error:', error);
+      logger.error('Oracle integration error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -144,7 +145,7 @@ class IntegrationService {
 
       return { success: true, integrationId: data.id };
     } catch (error) {
-      console.error('Dynamics integration error:', error);
+      logger.error('Dynamics integration error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -188,7 +189,7 @@ class IntegrationService {
 
       return { success: true, integrationId: data.id };
     } catch (error) {
-      console.error('Twilio integration error:', error);
+      logger.error('Twilio integration error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -249,7 +250,7 @@ class IntegrationService {
 
       return { success: true, messageId: result.sid };
     } catch (error) {
-      console.error('SMS send error:', error);
+      logger.error('SMS send error:', error);
       
       // Log failed SMS
       await supabase
@@ -302,7 +303,7 @@ class IntegrationService {
 
       return { success: true, webhookId: data.id };
     } catch (error) {
-      console.error('Webhook creation error:', error);
+      logger.error('Webhook creation error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -371,7 +372,7 @@ class IntegrationService {
             status: response.status
           });
         } catch (webhookError) {
-          console.error(`Webhook ${webhook.id} failed:`, webhookError);
+          logger.error(`Webhook ${webhook.id} failed:`, webhookError);
           
           // Log failed webhook
           await supabase
@@ -394,7 +395,7 @@ class IntegrationService {
 
       return { success: true, results };
     } catch (error) {
-      console.error('Webhook trigger error:', error);
+      logger.error('Webhook trigger error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -434,7 +435,7 @@ class IntegrationService {
 
       return { success: true, ruleId: data.id };
     } catch (error) {
-      console.error('Automation rule creation error:', error);
+      logger.error('Automation rule creation error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -469,7 +470,7 @@ class IntegrationService {
           const result = await this.executeAction(action, context);
           results.push({ action: action.type, success: true, result });
         } catch (actionError) {
-          console.error(`Action ${action.type} failed:`, actionError);
+          logger.error(`Action ${action.type} failed:`, actionError);
           results.push({ action: action.type, success: false, error: actionError.message });
         }
       }
@@ -486,7 +487,7 @@ class IntegrationService {
 
       return { success: true, executed: true, results };
     } catch (error) {
-      console.error('Automation execution error:', error);
+      logger.error('Automation execution error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -741,7 +742,7 @@ class IntegrationService {
    */
   async scheduleERPSync(organizationId, erpType, integrationId) {
     // Implement ERP sync scheduling
-    console.log(`Scheduling ${erpType} sync for organization ${organizationId}`);
+    logger.log(`Scheduling ${erpType} sync for organization ${organizationId}`);
   }
 
   /**
@@ -749,7 +750,7 @@ class IntegrationService {
    */
   async sendEmail(config, context) {
     // Implement email sending
-    console.log('Sending email:', config, context);
+    logger.log('Sending email:', config, context);
     return { success: true };
   }
 
@@ -758,7 +759,7 @@ class IntegrationService {
    */
   async createTask(config, context) {
     // Implement task creation
-    console.log('Creating task:', config, context);
+    logger.log('Creating task:', config, context);
     return { success: true };
   }
 
@@ -767,7 +768,7 @@ class IntegrationService {
    */
   async updateRecord(config, context) {
     // Implement record update
-    console.log('Updating record:', config, context);
+    logger.log('Updating record:', config, context);
     return { success: true };
   }
 }

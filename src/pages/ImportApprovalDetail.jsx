@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/client';
@@ -14,7 +15,7 @@ function parseDataField(data) {
       const parsed = JSON.parse(data);
       return parsed;
     } catch {
-      console.log('JSON parse error for data:', data);
+      logger.log('JSON parse error for data:', data);
       return { _raw: data, _error: 'Malformed JSON' };
     }
   }
@@ -120,12 +121,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setLoading(true);
       setError(null);
       
-      console.log('fetchImport: invoiceNumber =', invoiceNumber);
-      console.log('fetchImport: params =', params);
+      logger.log('fetchImport: invoiceNumber =', invoiceNumber);
+      logger.log('fetchImport: params =', params);
       
       // Extract the original database ID
       const originalId = getOriginalId(invoiceNumber);
-      console.log('fetchImport: originalId =', originalId);
+      logger.log('fetchImport: originalId =', originalId);
       
       // Handle scanned-only records
       if (invoiceNumber && invoiceNumber.startsWith('scanned_')) {
@@ -219,7 +220,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       if (data) {
         const splitRecords = splitImportIntoIndividualRecords(data);
         setIndividualRecords(splitRecords);
-        console.log(`Split import ${data.id} into ${splitRecords.length} individual records:`, splitRecords);
+        logger.log(`Split import ${data.id} into ${splitRecords.length} individual records:`, splitRecords);
       }
       
       setLoading(false);
@@ -267,7 +268,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         });
         
       } catch (error) {
-        console.error('Error fetching user info:', error);
+        logger.error('Error fetching user info:', error);
         setUploadedByUser({
           full_name: importRecord.uploaded_by,
           email: importRecord.uploaded_by
@@ -287,7 +288,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       const allDelivered = importData.delivered || importData.rows || importData.line_items || [];
       const allReturned = importData.returned || [];
       
-      console.log('🔍 Import data structure:', { allDelivered, allReturned });
+      logger.log('🔍 Import data structure:', { allDelivered, allReturned });
       
       // Get all unique barcodes AND product codes from imported data
       const barcodes = new Set();
@@ -297,23 +298,23 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         // Check for barcode first (this is what we really want to match)
         const barcode = item.barcode || item.barcode_number || item.Barcode || item.BarcodeNumber;
         if (barcode) {
-          console.log('📦 Found barcode in import:', barcode);
+          logger.log('📦 Found barcode in import:', barcode);
           barcodes.add(String(barcode).trim());
         }
         
         // Also get product code as fallback
         const prodCode = item.product_code || item.ProductCode || item.productCode;
         if (prodCode) {
-          console.log('📦 Found product code in import:', prodCode);
+          logger.log('📦 Found product code in import:', prodCode);
           productCodes.add(String(prodCode).trim());
         }
       });
       
-      console.log('📋 Barcodes to search:', Array.from(barcodes));
-      console.log('📋 Product codes to search:', Array.from(productCodes));
+      logger.log('📋 Barcodes to search:', Array.from(barcodes));
+      logger.log('📋 Product codes to search:', Array.from(productCodes));
       
       if (barcodes.size === 0 && productCodes.size === 0) {
-        console.warn('⚠️ No barcodes or product codes found in import data');
+        logger.warn('⚠️ No barcodes or product codes found in import data');
         return;
       }
       
@@ -329,10 +330,10 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             .eq('organization_id', organization.id);
           
           if (error) {
-            console.error('❌ Error fetching bottles by barcode:', error);
+            logger.error('❌ Error fetching bottles by barcode:', error);
           } else {
             bottles = data || [];
-            console.log('✅ Found bottles by barcode_number:', bottles);
+            logger.log('✅ Found bottles by barcode_number:', bottles);
           }
         }
         
@@ -345,10 +346,10 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             .eq('organization_id', organization.id);
           
           if (error) {
-            console.error('❌ Error fetching bottles by product_code:', error);
+            logger.error('❌ Error fetching bottles by product_code:', error);
           } else {
             bottles = data || [];
-            console.log('✅ Found bottles by product_code:', bottles);
+            logger.log('✅ Found bottles by product_code:', bottles);
           }
         }
         
@@ -358,7 +359,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           const barcode = bottle.barcode_number?.trim();
           const prodCode = bottle.product_code?.trim();
           
-          console.log(`📊 Bottle - Barcode: ${barcode}, ProductCode: ${prodCode}:`, {
+          logger.log(`📊 Bottle - Barcode: ${barcode}, ProductCode: ${prodCode}:`, {
             category: bottle.category,
             group: bottle.group_name,
             type: bottle.type
@@ -366,7 +367,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           
           // Map by barcode if available (most accurate)
           if (barcode) {
-            console.log(`✅ Mapping bottle data for barcode: ${barcode}`, {
+            logger.log(`✅ Mapping bottle data for barcode: ${barcode}`, {
               category: bottle.category || 'EMPTY',
               group: bottle.group_name || 'EMPTY',
               type: bottle.type || 'EMPTY',
@@ -384,7 +385,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           
           // Also map by product_code if available
           if (prodCode) {
-            console.log(`✅ Mapping bottle data for product_code: ${prodCode}`, {
+            logger.log(`✅ Mapping bottle data for product_code: ${prodCode}`, {
               category: bottle.category || 'EMPTY',
               group: bottle.group_name || 'EMPTY',
               type: bottle.type || 'EMPTY',
@@ -401,17 +402,17 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           }
         });
         
-        console.log('🗺️ Final asset info map:', map);
+        logger.log('🗺️ Final asset info map:', map);
         setAssetInfoMap(map);
         
         // Show warning if bottles not found
         if (bottles.length === 0) {
-          console.warn('⚠️ No matching bottles found in database');
-          console.warn('   Looked for barcodes:', Array.from(barcodes));
-          console.warn('   Looked for product_codes:', Array.from(productCodes));
+          logger.warn('⚠️ No matching bottles found in database');
+          logger.warn('   Looked for barcodes:', Array.from(barcodes));
+          logger.warn('   Looked for product_codes:', Array.from(productCodes));
         }
       } catch (error) {
-        console.error('❌ Error fetching asset info:', error);
+        logger.error('❌ Error fetching asset info:', error);
       }
     }
     
@@ -431,13 +432,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           .order('name');
         
         if (error) {
-          console.error('Error fetching customers:', error);
+          logger.error('Error fetching customers:', error);
           return;
         }
         
         setCustomers(customersData || []);
       } catch (error) {
-        console.error('Error fetching customers:', error);
+        logger.error('Error fetching customers:', error);
       }
     }
     
@@ -449,8 +450,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   // Handle record actions
   const handleRecordAction = async (action) => {
     setActionMessage(`Processing: ${action}`);
-    console.log('handleRecordAction: invoiceNumber =', invoiceNumber);
-    console.log('handleRecordAction: organization =', organization);
+    logger.log('handleRecordAction: invoiceNumber =', invoiceNumber);
+    logger.log('handleRecordAction: organization =', organization);
     
     if (!invoiceNumber) {
       setActionMessage('Error: No invoice number found. Aborting action.');
@@ -639,7 +640,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setCustomerSearch('');
       
     } catch (error) {
-      console.error('Error changing customer:', error);
+      logger.error('Error changing customer:', error);
       setActionMessage(`Error: ${error.message}`);
     }
     
@@ -694,7 +695,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setNewDate('');
       
     } catch (error) {
-      console.error('Error updating date:', error);
+      logger.error('Error updating date:', error);
       setActionMessage(`Error: ${error.message}`);
     }
     
@@ -751,7 +752,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setNewSalesOrder('');
       
     } catch (error) {
-      console.error('Error updating sales order number:', error);
+      logger.error('Error updating sales order number:', error);
       setActionMessage(`Error: ${error.message}`);
     }
     
@@ -806,7 +807,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setNewPO('');
       
     } catch (error) {
-      console.error('Error updating PO number:', error);
+      logger.error('Error updating PO number:', error);
       setActionMessage(`Error: ${error.message}`);
     }
     
@@ -862,7 +863,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setNewLocation('');
       
     } catch (error) {
-      console.error('Error updating location:', error);
+      logger.error('Error updating location:', error);
       setActionMessage(`Error: ${error.message}`);
     }
     
@@ -902,13 +903,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
   // Filter line items based on invoice number and customer
   const filterLineItems = (items) => {
-    console.log('filterLineItems: filterInvoiceNumber =', filterInvoiceNumber);
-    console.log('filterLineItems: filterCustomerName =', filterCustomerName);
-    console.log('filterLineItems: filterCustomerId =', filterCustomerId);
-    console.log('filterLineItems: total items before filter =', items.length);
+    logger.log('filterLineItems: filterInvoiceNumber =', filterInvoiceNumber);
+    logger.log('filterLineItems: filterCustomerName =', filterCustomerName);
+    logger.log('filterLineItems: filterCustomerId =', filterCustomerId);
+    logger.log('filterLineItems: total items before filter =', items.length);
     
     if (!filterInvoiceNumber && !filterCustomerName && !filterCustomerId) {
-      console.log('filterLineItems: No filters applied, returning all items');
+      logger.log('filterLineItems: No filters applied, returning all items');
       return items; // No filters, return all
     }
     
@@ -924,13 +925,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       const matches = invoiceMatch && (customerNameMatch || customerIdMatch);
       
       if (matches) {
-        console.log('filterLineItems: MATCH - Invoice:', itemInvoiceNumber, 'Customer:', itemCustomerName, 'Product:', item.product_code);
+        logger.log('filterLineItems: MATCH - Invoice:', itemInvoiceNumber, 'Customer:', itemCustomerName, 'Product:', item.product_code);
       }
       
       return matches;
     });
     
-    console.log('filterLineItems: filtered items count =', filteredItems.length);
+    logger.log('filterLineItems: filtered items count =', filteredItems.length);
     return filteredItems;
   };
 
@@ -940,13 +941,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   // Helper function to get asset info for a barcode or product code
   const getAssetInfo = (identifier) => {
     if (!identifier) {
-      console.warn('⚠️ No identifier provided to getAssetInfo');
+      logger.warn('⚠️ No identifier provided to getAssetInfo');
       return {};
     }
     const trimmed = String(identifier).trim();
-    console.log('🔍 Looking up asset info for:', trimmed, 'Map keys:', Object.keys(assetInfoMap));
+    logger.log('🔍 Looking up asset info for:', trimmed, 'Map keys:', Object.keys(assetInfoMap));
     const info = assetInfoMap[trimmed] || {};
-    console.log('🔍 Found asset info:', info);
+    logger.log('🔍 Found asset info:', info);
     return info;
   };
 
@@ -1147,7 +1148,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                       const identifier = barcode || prodCode;
                       
                       const assetInfo = getAssetInfo(identifier);
-                      console.log(`🎯 Row ${i}:`, {
+                      logger.log(`🎯 Row ${i}:`, {
                         barcode: barcode,
                         productCode: prodCode,
                         identifier: identifier,

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase';
 
 export interface Delivery {
@@ -42,7 +43,7 @@ class DeliveryService {
         customer_phone: delivery.customers?.phone || 'No Phone'
       })) || [];
     } catch (error) {
-      console.error('Error fetching driver deliveries:', error);
+      logger.error('Error fetching driver deliveries:', error);
       throw error;
     }
   }
@@ -65,7 +66,7 @@ class DeliveryService {
 
       if (error) throw error;
     } catch (error) {
-      console.error('Error updating delivery status:', error);
+      logger.error('Error updating delivery status:', error);
       throw error;
     }
   }
@@ -94,7 +95,7 @@ class DeliveryService {
         customer_phone: data.customers?.phone || 'No Phone'
       };
     } catch (error) {
-      console.error('Error fetching delivery by ID:', error);
+      logger.error('Error fetching delivery by ID:', error);
       return null;
     }
   }
@@ -110,7 +111,7 @@ class DeliveryService {
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error creating delivery:', error);
+      logger.error('Error creating delivery:', error);
       throw error;
     }
   }
@@ -139,7 +140,7 @@ class DeliveryService {
         customer_phone: delivery.customers?.phone || 'No Phone'
       })) || [];
     } catch (error) {
-      console.error('Error fetching deliveries by status:', error);
+      logger.error('Error fetching deliveries by status:', error);
       throw error;
     }
   }

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ThemeProvider as MuiThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, GlobalStyles } from '@mui/material';
@@ -11,10 +12,10 @@ export const useTheme = () => {
   const context = useContext(ThemeContext);
   if (!context) {
     // More detailed error for debugging
-    console.error('useTheme: Context is null or undefined. This usually means:');
-    console.error('1. Component is not wrapped with ThemeProvider');
-    console.error('2. Hot module replacement issue - try refreshing the page');
-    console.error('3. React context system is in an inconsistent state');
+    logger.error('useTheme: Context is null or undefined. This usually means:');
+    logger.error('1. Component is not wrapped with ThemeProvider');
+    logger.error('2. Hot module replacement issue - try refreshing the page');
+    logger.error('3. React context system is in an inconsistent state');
     
     // Return a fallback theme instead of throwing
     return {
@@ -241,7 +242,7 @@ export const ThemeProvider = ({ children }) => {
             setAccent('#1976d2');
           }
         } catch (error) {
-          console.error('Error loading user accent color:', error);
+          logger.error('Error loading user accent color:', error);
           setAccent('#1976d2');
         }
       } else {
@@ -290,7 +291,7 @@ export const ThemeProvider = ({ children }) => {
   };
 
   const toggleDarkMode = () => {
-    console.log('Toggling dark mode:', { from: isDarkMode, to: !isDarkMode });
+    logger.log('Toggling dark mode:', { from: isDarkMode, to: !isDarkMode });
     setIsDarkMode(!isDarkMode);
   };
 

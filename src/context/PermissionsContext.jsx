@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
@@ -40,7 +41,7 @@ export function PermissionsProvider({ children }) {
             .single();
           
           if (error) {
-            console.error('Error fetching role from UUID:', error);
+            logger.error('Error fetching role from UUID:', error);
             // Fallback to default admin permissions if we can't resolve the role
             setActualRole('admin');
             setPermissions(['*']);
@@ -60,7 +61,7 @@ export function PermissionsProvider({ children }) {
             }
           }
         } catch (err) {
-          console.error('Error in role resolution:', err);
+          logger.error('Error in role resolution:', err);
           // Fallback to admin
           setActualRole('admin');
           setPermissions(['*']);

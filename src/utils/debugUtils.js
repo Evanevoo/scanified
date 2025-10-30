@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 import backgroundService from './backgroundService';
 
@@ -10,7 +11,7 @@ import backgroundService from './backgroundService';
  */
 export const checkImportStatus = async () => {
   try {
-    console.log('=== IMPORT STATUS CHECK ===');
+    logger.log('=== IMPORT STATUS CHECK ===');
     
     // Check imported_invoices table
     const { data: allInvoices, error: invErr } = await supabase
@@ -18,9 +19,9 @@ export const checkImportStatus = async () => {
       .select('*')
       .order('uploaded_at', { ascending: false });
     
-    console.log('All imported invoices:', allInvoices?.length || 0);
+    logger.log('All imported invoices:', allInvoices?.length || 0);
     if (allInvoices && allInvoices.length > 0) {
-      console.log('Most recent invoice:', allInvoices[0]);
+      logger.log('Most recent invoice:', allInvoices[0]);
     }
     
     // Check imported_sales_receipts table
@@ -29,9 +30,9 @@ export const checkImportStatus = async () => {
       .select('*')
       .order('uploaded_at', { ascending: false });
     
-    console.log('All imported receipts:', allReceipts?.length || 0);
+    logger.log('All imported receipts:', allReceipts?.length || 0);
     if (allReceipts && allReceipts.length > 0) {
-      console.log('Most recent receipt:', allReceipts[0]);
+      logger.log('Most recent receipt:', allReceipts[0]);
     }
     
     // Check pending imports
@@ -45,12 +46,12 @@ export const checkImportStatus = async () => {
       .select('*')
       .eq('status', 'pending');
     
-    console.log('Pending invoices:', pendingInvoices?.length || 0);
-    console.log('Pending receipts:', pendingReceipts?.length || 0);
+    logger.log('Pending invoices:', pendingInvoices?.length || 0);
+    logger.log('Pending receipts:', pendingReceipts?.length || 0);
     
     // Check background service status
     const serviceStatus = backgroundService.getStatus();
-    console.log('Background service status:', serviceStatus);
+    logger.log('Background service status:', serviceStatus);
     
     return {
       success: true,
@@ -64,7 +65,7 @@ export const checkImportStatus = async () => {
     };
     
   } catch (error) {
-    console.error('Error checking import status:', error);
+    logger.error('Error checking import status:', error);
     return { success: false, error: error.message };
   }
 };
@@ -73,9 +74,9 @@ export const checkImportStatus = async () => {
  * Reset background service and clear localStorage
  */
 export const resetBackgroundService = () => {
-  console.log('=== RESETTING BACKGROUND SERVICE ===');
+  logger.log('=== RESETTING BACKGROUND SERVICE ===');
   backgroundService.reset();
-  console.log('Background service reset complete');
+  logger.log('Background service reset complete');
   return { success: true, message: 'Background service reset complete' };
 };
 
@@ -83,7 +84,7 @@ export const resetBackgroundService = () => {
  * Force run background service update
  */
 export const forceBackgroundUpdate = async () => {
-  console.log('=== FORCING BACKGROUND UPDATE ===');
+  logger.log('=== FORCING BACKGROUND UPDATE ===');
   await backgroundService.forceUpdate();
   return { success: true, message: 'Background update forced' };
 };
@@ -92,9 +93,9 @@ export const forceBackgroundUpdate = async () => {
  * Clear all localStorage data related to the app
  */
 export const clearAppStorage = () => {
-  console.log('=== CLEARING APP STORAGE ===');
+  logger.log('=== CLEARING APP STORAGE ===');
   localStorage.removeItem('lastDaysUpdate');
   localStorage.removeItem('importFieldMapping');
-  console.log('App storage cleared');
+  logger.log('App storage cleared');
   return { success: true, message: 'App storage cleared' };
 }; 

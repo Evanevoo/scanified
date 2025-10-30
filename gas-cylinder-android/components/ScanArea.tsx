@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Vibration, TouchableOpacity, ActivityIndicator, Dimensions } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -47,7 +48,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
         Vibration.vibrate(100);
       }
     } catch (e) {
-      console.log('Vibration failed:', e);
+      logger.log('Vibration failed:', e);
     }
   };
 

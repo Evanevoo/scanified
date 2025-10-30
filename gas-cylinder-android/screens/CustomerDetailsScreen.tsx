@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
 import { supabase } from '../supabase';
@@ -21,8 +22,8 @@ export default function CustomerDetailsScreen() {
         return;
       }
 
-      console.log('🔍 Fetching customer details for ID:', customerId);
-      console.log('🔍 Organization ID:', profile.organization_id);
+      logger.log('🔍 Fetching customer details for ID:', customerId);
+      logger.log('🔍 Organization ID:', profile.organization_id);
 
       setLoading(true);
       setError('');
@@ -35,16 +36,16 @@ export default function CustomerDetailsScreen() {
         .eq('organization_id', profile.organization_id)
         .single();
       
-      console.log('🔍 Customer query result:', { data: cust, error: custErr });
+      logger.log('🔍 Customer query result:', { data: cust, error: custErr });
       
       if (custErr || !cust) {
-        console.log('❌ Customer not found:', custErr);
+        logger.log('❌ Customer not found:', custErr);
         setError('Customer not found.');
         setLoading(false);
         return;
       }
       
-      console.log('✅ Customer found:', cust.name);
+      logger.log('✅ Customer found:', cust.name);
       setCustomer(cust);
       
       // Fetch cylinders rented by this customer for the current organization
@@ -54,16 +55,16 @@ export default function CustomerDetailsScreen() {
         .eq('organization_id', profile.organization_id)
         .eq('assigned_customer', customerId);
         
-      console.log('🔍 Cylinders query result:', { data, error });
+      logger.log('🔍 Cylinders query result:', { data, error });
       
       if (error) {
-        console.log('❌ Error fetching cylinders:', error);
+        logger.log('❌ Error fetching cylinders:', error);
         setError('Error fetching cylinders.');
         setLoading(false);
         return;
       }
       
-      console.log('✅ Found cylinders:', data?.length || 0);
+      logger.log('✅ Found cylinders:', data?.length || 0);
       setCylinders(data || []);
       setLoading(false);
     };

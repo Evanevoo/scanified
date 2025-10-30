@@ -1,3 +1,4 @@
+import logger from './utils/logger';
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, Alert, StyleSheet } from 'react-native';
 import { BarCodeScanner } from 'expo-barcode-scanner';
@@ -19,7 +20,7 @@ export default function BarcodeScannerTest() {
   const handleBarCodeScanned = ({ type, data }) => {
     setScanned(true);
     setScannedData(data);
-    console.log('🎯 BARCODE SCANNER TEST - Barcode detected:', { type, data });
+    logger.log('🎯 BARCODE SCANNER TEST - Barcode detected:', { type, data });
     Alert.alert('Barcode Detected!', `Type: ${type}\nData: ${data}`);
   };
 

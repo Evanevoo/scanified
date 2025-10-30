@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Card, CardContent, Typography, Grid, 
@@ -134,7 +135,7 @@ export default function AnalyticsDashboard() {
         }
       });
     } catch (err) {
-      console.error('Error fetching analytics:', err);
+      logger.error('Error fetching analytics:', err);
       setError(err.message);
     } finally {
       setLoading(false);

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, TextInput, ActivityIndicator } from 'react-native';
 import { supabase } from '../supabase';
@@ -98,7 +99,7 @@ export default function HomeScreen() {
   const testDataAccess = async () => {
     if (!profile?.organization_id) return;
     
-    console.log('🧪 Testing basic data access...');
+    logger.log('🧪 Testing basic data access...');
     
     // Test customers table
     const { data: customers, error: customerError } = await supabase
@@ -107,7 +108,7 @@ export default function HomeScreen() {
       .eq('organization_id', profile.organization_id)
       .limit(3);
     
-    console.log('🧪 Customers test:', { data: customers, error: customerError });
+    logger.log('🧪 Customers test:', { data: customers, error: customerError });
     
     // Test bottles table
     const { data: bottles, error: bottleError } = await supabase
@@ -116,7 +117,7 @@ export default function HomeScreen() {
       .eq('organization_id', profile.organization_id)
       .limit(3);
     
-    console.log('🧪 Bottles test:', { data: bottles, error: bottleError });
+    logger.log('🧪 Bottles test:', { data: bottles, error: bottleError });
   };
 
   useEffect(() => {
@@ -129,7 +130,7 @@ export default function HomeScreen() {
   useFocusEffect(
     React.useCallback(() => {
       if (profile?.organization_id) {
-        console.log('🔄 Screen focused, refreshing stats...');
+        logger.log('🔄 Screen focused, refreshing stats...');
         fetchDashboardStats();
         fetchUnreadCount();
       }
@@ -138,14 +139,14 @@ export default function HomeScreen() {
 
   const searchCustomers = async () => {
     if (!profile?.organization_id) {
-      console.log('No organization found, skipping customer search');
-      console.log('Profile data:', profile);
-      console.log('User authenticated:', !!profile);
+      logger.log('No organization found, skipping customer search');
+      logger.log('Profile data:', profile);
+      logger.log('User authenticated:', !!profile);
       return;
     }
 
-    console.log('🔍 Starting customer search for:', search.trim());
-    console.log('🔍 Organization ID:', profile.organization_id);
+    logger.log('🔍 Starting customer search for:', search.trim());
+    logger.log('🔍 Organization ID:', profile.organization_id);
 
     setLoadingCustomers(true);
     try {
@@ -161,9 +162,9 @@ export default function HomeScreen() {
         nameQuery = nameQuery.ilike('name', `%${search.trim()}%`);
       }
       
-      console.log('🔍 Executing name query...');
+      logger.log('🔍 Executing name query...');
       const nameResult = await nameQuery.limit(10);
-      console.log('🔍 Name query result:', nameResult);
+      logger.log('🔍 Name query result:', nameResult);
       
       let allCustomers = nameResult.data || [];
       
@@ -175,15 +176,15 @@ export default function HomeScreen() {
           .eq('organization_id', profile.organization_id)
           .ilike('barcode', `%${search.trim()}%`);
         
-        console.log('🔍 Executing barcode query...');
+        logger.log('🔍 Executing barcode query...');
         const barcodeResult = await barcodeQuery.limit(10);
-        console.log('🔍 Barcode query result:', barcodeResult);
+        logger.log('🔍 Barcode query result:', barcodeResult);
         
         if (barcodeResult.data) {
           allCustomers = [...allCustomers, ...barcodeResult.data];
         }
       } catch (barcodeError) {
-        console.log('⚠️ Barcode search failed (column may not exist):', barcodeError);
+        logger.log('⚠️ Barcode search failed (column may not exist):', barcodeError);
       }
       
       // Remove duplicates
@@ -191,7 +192,7 @@ export default function HomeScreen() {
         index === self.findIndex((c) => c.CustomerListID === customer.CustomerListID)
       );
       
-      console.log('🔍 Combined customers:', uniqueCustomers.length);
+      logger.log('🔍 Combined customers:', uniqueCustomers.length);
       
       if (uniqueCustomers.length > 0) {
         const results = await Promise.all(uniqueCustomers.map(async (customer) => {
@@ -206,21 +207,21 @@ export default function HomeScreen() {
               gases: Array.from(new Set((assets || []).map(c => c.group_name))).filter(Boolean),
             };
           } catch (error) {
-            console.log('⚠️ Error fetching customer assets:', error);
+            logger.log('⚠️ Error fetching customer assets:', error);
             return {
               ...customer,
               gases: [],
             };
           }
         }));
-        console.log('🔍 Final results:', results.length);
+        logger.log('🔍 Final results:', results.length);
         setCustomerResults(results);
       } else {
-        console.log('🔍 No customers found, setting empty results');
+        logger.log('🔍 No customers found, setting empty results');
         setCustomerResults([]);
       }
     } catch (error) {
-      console.error('❌ Error searching customers:', error);
+      logger.error('❌ Error searching customers:', error);
     } finally {
       setLoadingCustomers(false);
     }
@@ -228,14 +229,14 @@ export default function HomeScreen() {
 
   const searchBottles = async () => {
     if (!profile?.organization_id) {
-      console.log('No organization found, skipping bottle search');
-      console.log('Profile data:', profile);
-      console.log('User authenticated:', !!profile);
+      logger.log('No organization found, skipping bottle search');
+      logger.log('Profile data:', profile);
+      logger.log('User authenticated:', !!profile);
       return;
     }
 
-    console.log('🔍 Starting bottle search for:', search.trim());
-    console.log('🔍 Organization ID:', profile.organization_id);
+    logger.log('🔍 Starting bottle search for:', search.trim());
+    logger.log('🔍 Organization ID:', profile.organization_id);
 
     setLoadingBottles(true);
     try {
@@ -246,17 +247,17 @@ export default function HomeScreen() {
         .ilike('barcode_number', `%${search.trim()}%`)
         .limit(5);
       
-      console.log('🔍 Bottle query result:', { data: assets, error });
+      logger.log('🔍 Bottle query result:', { data: assets, error });
       
       if (!error && assets) {
-        console.log('🔍 Found bottles:', assets.length);
+        logger.log('🔍 Found bottles:', assets.length);
         setBottleResults(assets);
       } else {
-        console.log('🔍 No bottles found or error:', error);
+        logger.log('🔍 No bottles found or error:', error);
         setBottleResults([]);
       }
     } catch (error) {
-      console.error('❌ Error searching bottles:', error);
+      logger.error('❌ Error searching bottles:', error);
     } finally {
       setLoadingBottles(false);
     }
@@ -271,7 +272,7 @@ export default function HomeScreen() {
 
   const fetchDashboardStats = async () => {
     if (!profile?.organization_id) {
-      console.log('No organization found, skipping stats fetch');
+      logger.log('No organization found, skipping stats fetch');
       return;
     }
 
@@ -296,15 +297,15 @@ export default function HomeScreen() {
         unreadScans: 0
       });
     } catch (error) {
-      console.error('Error fetching stats:', error);
+      logger.error('Error fetching stats:', error);
     }
   };
 
   const fetchUnreadCount = async () => {
     if (!profile?.organization_id) {
-      console.log('No organization found, skipping unread count fetch');
-      console.log('Profile data:', profile);
-      console.log('User authenticated:', !!profile);
+      logger.log('No organization found, skipping unread count fetch');
+      logger.log('Profile data:', profile);
+      logger.log('User authenticated:', !!profile);
       return;
     }
 
@@ -317,7 +318,7 @@ export default function HomeScreen() {
       
       setStats(prev => ({ ...prev, unreadScans: count || 0 }));
     } catch (error) {
-      console.error('Error fetching unread count:', error);
+      logger.error('Error fetching unread count:', error);
     }
   };
 
@@ -351,7 +352,7 @@ export default function HomeScreen() {
         navigation.navigate('DataHealth');
         break;
       default:
-        console.log('Unknown action:', action);
+        logger.log('Unknown action:', action);
         break;
     }
   };

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Grid, Card, CardContent, CardActions,
@@ -165,7 +166,7 @@ export default function RouteOptimization() {
       setVehicles(vehiclesResult.data || []);
 
     } catch (error) {
-      console.error('Error fetching route data:', error);
+      logger.error('Error fetching route data:', error);
       setError('Failed to load route optimization data');
     } finally {
       setLoading(false);
@@ -185,7 +186,7 @@ export default function RouteOptimization() {
       setOptimizeDialog(false);
 
     } catch (error) {
-      console.error('Error optimizing routes:', error);
+      logger.error('Error optimizing routes:', error);
       setError('Failed to optimize routes');
     } finally {
       setOptimizing(false);
@@ -258,7 +259,7 @@ export default function RouteOptimization() {
       fetchData();
 
     } catch (error) {
-      console.error('Error creating route:', error);
+      logger.error('Error creating route:', error);
       setError('Failed to create route');
     }
   };

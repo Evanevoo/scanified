@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 export const deliveryService = {
@@ -17,7 +18,7 @@ export const deliveryService = {
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error creating delivery:', error);
+      logger.error('Error creating delivery:', error);
       throw error;
     }
   },
@@ -53,7 +54,7 @@ export const deliveryService = {
       if (error) throw error;
       return data || [];
     } catch (error) {
-      console.error('Error getting deliveries:', error);
+      logger.error('Error getting deliveries:', error);
       throw error;
     }
   },
@@ -86,7 +87,7 @@ export const deliveryService = {
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error updating delivery status:', error);
+      logger.error('Error updating delivery status:', error);
       throw error;
     }
   },
@@ -107,7 +108,7 @@ export const deliveryService = {
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error assigning driver:', error);
+      logger.error('Error assigning driver:', error);
       throw error;
     }
   },
@@ -136,7 +137,7 @@ export const deliveryService = {
       if (error) throw error;
       return data || [];
     } catch (error) {
-      console.error('Error getting driver deliveries:', error);
+      logger.error('Error getting driver deliveries:', error);
       throw error;
     }
   },
@@ -162,7 +163,7 @@ export const deliveryService = {
 
       return optimizedDeliveries;
     } catch (error) {
-      console.error('Error optimizing route:', error);
+      logger.error('Error optimizing route:', error);
       return deliveries;
     }
   },
@@ -213,7 +214,7 @@ export const deliveryService = {
 
       return stats;
     } catch (error) {
-      console.error('Error getting delivery stats:', error);
+      logger.error('Error getting delivery stats:', error);
       throw error;
     }
   },
@@ -235,7 +236,7 @@ export const deliveryService = {
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error updating delivery location:', error);
+      logger.error('Error updating delivery location:', error);
       throw error;
     }
   },
@@ -251,7 +252,7 @@ export const deliveryService = {
       if (error) throw error;
       return data || [];
     } catch (error) {
-      console.error('Error getting delivery zones:', error);
+      logger.error('Error getting delivery zones:', error);
       throw error;
     }
   },
@@ -271,7 +272,7 @@ export const deliveryService = {
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error creating delivery zone:', error);
+      logger.error('Error creating delivery zone:', error);
       throw error;
     }
   },
@@ -288,7 +289,7 @@ export const deliveryService = {
       if (error) throw error;
       return data || [];
     } catch (error) {
-      console.error('Error getting drivers:', error);
+      logger.error('Error getting drivers:', error);
       throw error;
     }
   },
@@ -312,7 +313,7 @@ export const deliveryService = {
       const delivery = await this.createDelivery(deliveryData);
       return delivery;
     } catch (error) {
-      console.error('Error scheduling delivery:', error);
+      logger.error('Error scheduling delivery:', error);
       throw error;
     }
   },
@@ -329,7 +330,7 @@ export const deliveryService = {
       if (error) throw error;
       return data || [];
     } catch (error) {
-      console.error('Error getting delivery route:', error);
+      logger.error('Error getting delivery route:', error);
       throw error;
     }
   },
@@ -349,7 +350,7 @@ export const deliveryService = {
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error creating delivery route:', error);
+      logger.error('Error creating delivery route:', error);
       throw error;
     }
   }

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { User } from '@supabase/supabase-js';
@@ -42,7 +43,7 @@ export function useAuth() {
       try {
         // Add timeout protection to prevent infinite loading
         timeoutId = setTimeout(() => {
-          console.warn('⚠️ Auth loading timeout - forcing completion');
+          logger.warn('⚠️ Auth loading timeout - forcing completion');
           setLoading(false);
           setAuthError('Authentication timeout - please restart the app');
         }, 10000); // 10 second timeout
@@ -51,7 +52,7 @@ export function useAuth() {
         setUser(session?.user || null);
         setAuthError(null);
       } catch (error) {
-        console.error('❌ Error getting session:', error);
+        logger.error('❌ Error getting session:', error);
         setUser(null);
         setAuthError('Authentication failed - please restart the app');
       } finally {
@@ -67,7 +68,7 @@ export function useAuth() {
         setUser(session?.user || null);
         setAuthError(null);
       } catch (error) {
-        console.error('❌ Error in auth state change:', error);
+        logger.error('❌ Error in auth state change:', error);
         setUser(null);
         setAuthError('Authentication state change failed');
       }
@@ -91,13 +92,13 @@ export function useAuth() {
         .then(({ data: profileData, error: profileError }) => {
           try {
             if (profileError) {
-              console.error('Error fetching profile:', profileError);
-              console.log('User ID:', user.id);
+              logger.error('Error fetching profile:', profileError);
+              logger.log('User ID:', user.id);
               setProfile(null);
               setOrganization(null);
               setOrganizationLoading(false);
             } else if (profileData) {
-              console.log('Profile loaded successfully:', {
+              logger.log('Profile loaded successfully:', {
                 id: profileData.id,
                 email: profileData.email,
                 organization_id: profileData.organization_id,
@@ -115,11 +116,11 @@ export function useAuth() {
                   .then(({ data: orgData, error: orgError }) => {
                     try {
                       if (orgError) {
-                        console.error('Error fetching organization:', orgError);
-                        console.log('Organization ID:', profileData.organization_id);
+                        logger.error('Error fetching organization:', orgError);
+                        logger.log('Organization ID:', profileData.organization_id);
                         setOrganization(null);
                       } else {
-                        console.log('Organization loaded successfully:', {
+                        logger.log('Organization loaded successfully:', {
                           id: orgData?.id,
                           name: orgData?.name,
                           slug: orgData?.slug,
@@ -131,32 +132,32 @@ export function useAuth() {
                         setOrganization(orgData);
                       }
                     } catch (error) {
-                      console.error('❌ Error processing organization data:', error);
+                      logger.error('❌ Error processing organization data:', error);
                       setOrganization(null);
                     } finally {
                       setOrganizationLoading(false);
                     }
                   })
                   .catch(error => {
-                    console.error('❌ Error in organization query:', error);
+                    logger.error('❌ Error in organization query:', error);
                     setOrganization(null);
                     setOrganizationLoading(false);
                   });
               } else {
-                console.log('Profile has no organization_id');
+                logger.log('Profile has no organization_id');
                 setOrganization(null);
                 setOrganizationLoading(false);
               }
             }
           } catch (error) {
-            console.error('❌ Error processing profile data:', error);
+            logger.error('❌ Error processing profile data:', error);
             setProfile(null);
             setOrganization(null);
             setOrganizationLoading(false);
           }
         })
         .catch(error => {
-          console.error('❌ Error in profile query:', error);
+          logger.error('❌ Error in profile query:', error);
           setProfile(null);
           setOrganization(null);
           setOrganizationLoading(false);

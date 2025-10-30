@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Modal, Dimensions, Alert, Linking } from 'react-native';
 import { supabase } from '../supabase';
@@ -55,7 +56,7 @@ const normalizeBarcode = (value: string): string => {
 // Check if barcode is within scan rectangle bounds - More lenient
 const isBarcodeInScanArea = (bounds: any): boolean => {
   if (!bounds) {
-    console.log('📍 No bounds provided, allowing scan');
+    logger.log('📍 No bounds provided, allowing scan');
     return true; // Allow scan if no bounds available
   }
   
@@ -82,7 +83,7 @@ const isBarcodeInScanArea = (bounds: any): boolean => {
     barcodeY <= scanAreaBottom
   );
   
-  console.log('📍 Barcode position check:', {
+  logger.log('📍 Barcode position check:', {
     barcodeX,
     barcodeY,
     scanAreaLeft,
@@ -129,66 +130,66 @@ const validateGasCylinderBarcode = (barcode: string): { isValid: boolean; error?
 
 // Barcode validation utility
 const validateBarcode = async (barcode: string, organizationId: string): Promise<{ isValid: boolean; error?: string }> => {
-  console.log('🔍 Validating barcode:', { barcode, organizationId });
+  logger.log('🔍 Validating barcode:', { barcode, organizationId });
   
   if (!barcode || !barcode.trim()) {
-    console.log('❌ Empty barcode');
+    logger.log('❌ Empty barcode');
     return { isValid: false, error: 'Barcode cannot be empty' };
   }
 
   const trimmedBarcode = barcode.trim();
-  console.log('🔍 Trimmed barcode:', trimmedBarcode);
+  logger.log('🔍 Trimmed barcode:', trimmedBarcode);
 
   if (!organizationId) {
-    console.log('🔍 No organization ID, using basic validation');
+    logger.log('🔍 No organization ID, using basic validation');
     // More lenient basic validation
     const basicPattern = /^[A-Za-z0-9\-_*%\.\s]+$/;
     if (!basicPattern.test(trimmedBarcode)) {
-      console.log('❌ Basic pattern validation failed');
+      logger.log('❌ Basic pattern validation failed');
       return { 
         isValid: false, 
         error: 'Barcode contains invalid characters. Only letters, numbers, and basic symbols are allowed.' 
       };
     }
     if (trimmedBarcode.length < 1) {
-      console.log('❌ Barcode too short');
+      logger.log('❌ Barcode too short');
       return { isValid: false, error: 'Barcode too short (minimum 1 character)' };
     }
     if (trimmedBarcode.length > 100) {
-      console.log('❌ Barcode too long');
+      logger.log('❌ Barcode too long');
       return { isValid: false, error: 'Barcode too long (maximum 100 characters)' };
     }
-    console.log('✅ Basic validation passed');
+    logger.log('✅ Basic validation passed');
     return { isValid: true };
   }
 
   try {
     // FormatValidationService is disabled - using basic validation only
-    console.log('🔍 Using basic validation (FormatValidationService disabled)');
+    logger.log('🔍 Using basic validation (FormatValidationService disabled)');
     
     // Basic validation fallback
     const basicPattern = /^[A-Za-z0-9\-_*%\.\s]+$/;
     if (!basicPattern.test(trimmedBarcode)) {
-      console.log('❌ Basic pattern validation failed');
+      logger.log('❌ Basic pattern validation failed');
       return { 
         isValid: false, 
         error: 'Barcode contains invalid characters. Only letters, numbers, and basic symbols are allowed.' 
       };
     }
-    console.log('✅ Basic validation passed');
+    logger.log('✅ Basic validation passed');
     return { isValid: true };
   } catch (error) {
-    console.error('❌ Error validating barcode:', error);
+    logger.error('❌ Error validating barcode:', error);
     // Fallback to basic validation
     const basicPattern = /^[A-Za-z0-9\-_*%\.\s]+$/;
     if (!basicPattern.test(trimmedBarcode)) {
-      console.log('❌ Fallback pattern validation failed');
+      logger.log('❌ Fallback pattern validation failed');
       return { 
         isValid: false, 
         error: 'Barcode contains invalid characters. Only letters, numbers, and basic symbols are allowed.' 
       };
     }
-    console.log('✅ Fallback validation passed');
+    logger.log('✅ Fallback validation passed');
     return { isValid: true };
   }
 };
@@ -215,7 +216,7 @@ const validateOrderNumber = async (orderNumber: string, organizationId: string):
 
   try {
     // FormatValidationService is disabled - using basic validation only
-    console.log('🔍 Using basic order number validation (FormatValidationService disabled)');
+    logger.log('🔍 Using basic order number validation (FormatValidationService disabled)');
     
     // Basic validation fallback
     const basicPattern = /^[A-Za-z0-9\-_]+$/;
@@ -227,7 +228,7 @@ const validateOrderNumber = async (orderNumber: string, organizationId: string):
     }
     return { isValid: true };
   } catch (error) {
-    console.error('Error validating order number:', error);
+    logger.error('Error validating order number:', error);
     // Fallback to basic validation
     const basicPattern = /^[A-Za-z0-9\-_]+$/;
     if (!basicPattern.test(trimmedOrder)) {
@@ -269,16 +270,16 @@ export default function ScanCylindersScreen() {
     const fetchCustomers = async () => {
       // Don't fetch customers if auth is still loading
       if (authLoading) {
-        console.log('Auth still loading, waiting...');
+        logger.log('Auth still loading, waiting...');
         return;
       }
 
       if (!profile?.organization_id) {
         // Only log if we have a profile but no organization_id (actual error case)
         if (profile && !profile.organization_id) {
-          console.log('No organization found, skipping customer fetch');
-          console.log('Profile data:', profile);
-          console.log('User authenticated:', !!profile);
+          logger.log('No organization found, skipping customer fetch');
+          logger.log('Profile data:', profile);
+          logger.log('User authenticated:', !!profile);
         }
         setLoading(false);
         // Don't set error immediately - let the UI handle the empty state gracefully
@@ -297,7 +298,7 @@ export default function ScanCylindersScreen() {
           .eq('organization_id', profile.organization_id);
           
         if (error) {
-          console.error('Error fetching customers:', error);
+          logger.error('Error fetching customers:', error);
           setError('Failed to load customers: ' + error.message);
           setCustomers([]);
         } else {
@@ -305,7 +306,7 @@ export default function ScanCylindersScreen() {
           setError(null);
         }
       } catch (err) {
-        console.error('Unexpected error fetching customers:', err);
+        logger.error('Unexpected error fetching customers:', err);
         setError('Failed to load customers: ' + err.message);
         setCustomers([]);
       }
@@ -395,21 +396,21 @@ export default function ScanCylindersScreen() {
     const data = event?.data || event;
     const type = event?.type || 'unknown';
     
-    console.log('🔍 Barcode scanned:', { type, data, scanned, scannerTarget });
-    console.log('🔍 Full event object:', event);
+    logger.log('🔍 Barcode scanned:', { type, data, scanned, scannerTarget });
+    logger.log('🔍 Full event object:', event);
     
     if (!data || typeof data !== 'string') {
-      console.log('❌ Invalid barcode data:', data);
+      logger.log('❌ Invalid barcode data:', data);
       return;
     }
     
     if (scanned) {
-      console.log('⚠️ Already scanned, ignoring');
+      logger.log('⚠️ Already scanned, ignoring');
       return;
     }
     
     if (!scannerTarget) {
-      console.log('❌ No scanner target set');
+      logger.log('❌ No scanner target set');
       return;
     }
     
@@ -428,11 +429,11 @@ export default function ScanCylindersScreen() {
     
     try {
       // Skip validation for now - accept any barcode format
-      console.log('✅ Skipping validation - accepting barcode:', data);
+      logger.log('✅ Skipping validation - accepting barcode:', data);
 
       // Apply the scanned data based on target
       if (scannerTarget === 'customer') {
-        console.log('👤 Setting customer search:', data);
+        logger.log('👤 Setting customer search:', data);
         
         // Check if the scanned barcode matches any existing customer
         const scannedBarcode = normalizeBarcode(data);
@@ -463,30 +464,30 @@ export default function ScanCylindersScreen() {
         const scannedWithDashes = normalizeWithDashes(scannedBarcode);
         const scannedLoose = normalizeLoose(scannedBarcode);
         
-        console.log('═══════════════════════════════════════════════════════');
-        console.log('🔍 CUSTOMER BARCODE SCAN DEBUG');
-        console.log('═══════════════════════════════════════════════════════');
-        console.log('📱 Raw scanned data:', data);
-        console.log('🧹 After normalization:', scannedBarcode);
-        console.log('🔢 Fully normalized (no special chars):', scannedNormalized);
-        console.log('➖ With dashes preserved:', scannedWithDashes);
-        console.log('🧩 Loose normalized:', scannedLoose);
-        console.log('👥 Total customers to search:', customers.length);
-        console.log('🏢 Current organization:', customers[0]?.organization_id || 'N/A');
-        console.log('═══════════════════════════════════════════════════════');
+        logger.log('═══════════════════════════════════════════════════════');
+        logger.log('🔍 CUSTOMER BARCODE SCAN DEBUG');
+        logger.log('═══════════════════════════════════════════════════════');
+        logger.log('📱 Raw scanned data:', data);
+        logger.log('🧹 After normalization:', scannedBarcode);
+        logger.log('🔢 Fully normalized (no special chars):', scannedNormalized);
+        logger.log('➖ With dashes preserved:', scannedWithDashes);
+        logger.log('🧩 Loose normalized:', scannedLoose);
+        logger.log('👥 Total customers to search:', customers.length);
+        logger.log('🏢 Current organization:', customers[0]?.organization_id || 'N/A');
+        logger.log('═══════════════════════════════════════════════════════');
         
         // First, log ALL customer barcodes for reference
-        console.log('📋 ALL CUSTOMER BARCODES IN SYSTEM:');
+        logger.log('📋 ALL CUSTOMER BARCODES IN SYSTEM:');
         customers.forEach((customer, index) => {
           if (customer.CustomerListID) {
-            console.log(`  ${index + 1}. "${customer.name}": "${customer.CustomerListID}" → Normalized: "${normalizeForMatching(customer.CustomerListID)}"`);
+            logger.log(`  ${index + 1}. "${customer.name}": "${customer.CustomerListID}" → Normalized: "${normalizeForMatching(customer.CustomerListID)}"`);
           }
         });
-        console.log('═══════════════════════════════════════════════════════');
+        logger.log('═══════════════════════════════════════════════════════');
         
         const matchingCustomer = customers.find(customer => {
           if (!customer.CustomerListID) {
-            console.log(`⏭️ Skipping customer "${customer.name}" - no CustomerListID`);
+            logger.log(`⏭️ Skipping customer "${customer.name}" - no CustomerListID`);
             return false;
           }
           
@@ -496,41 +497,41 @@ export default function ScanCylindersScreen() {
           const customerLoose = normalizeLoose(customerBarcode);
           
           // Log each customer barcode for debugging
-          console.log(`\n🔍 Checking customer "${customer.name}"`);
-          console.log(`   📱 Stored CustomerListID: "${customer.CustomerListID}"`);
-          console.log(`   🧹 After normalization: "${customerBarcode}"`);
-          console.log(`   🔢 Fully normalized: "${customerNormalized}"`);
-          console.log(`   ➖ With dashes: "${customerWithDashes}"`);
-          console.log(`   🧩 Loose: "${customerLoose}"`);
-          console.log(`   📊 Comparing to scanned: "${scannedNormalized}"`);
+          logger.log(`\n🔍 Checking customer "${customer.name}"`);
+          logger.log(`   📱 Stored CustomerListID: "${customer.CustomerListID}"`);
+          logger.log(`   🧹 After normalization: "${customerBarcode}"`);
+          logger.log(`   🔢 Fully normalized: "${customerNormalized}"`);
+          logger.log(`   ➖ With dashes: "${customerWithDashes}"`);
+          logger.log(`   🧩 Loose: "${customerLoose}"`);
+          logger.log(`   📊 Comparing to scanned: "${scannedNormalized}"`);
           
           // Strategy 1: Exact match (case insensitive)
           if (customerBarcode.toLowerCase() === scannedBarcode.toLowerCase()) {
-            console.log('✅ Match found: Exact match');
+            logger.log('✅ Match found: Exact match');
             return true;
           }
           
           // Strategy 2: Fully normalized match (removes ALL special characters)
           if (customerNormalized === scannedNormalized) {
-            console.log('✅ Match found: Normalized match');
+            logger.log('✅ Match found: Normalized match');
             return true;
           }
           
           // Strategy 3: Match with dashes preserved
           if (customerWithDashes === scannedWithDashes) {
-            console.log('✅ Match found: Dashes match');
+            logger.log('✅ Match found: Dashes match');
             return true;
           }
           
           // Strategy 4: Loose match (removes spaces, dashes, underscores)
           if (customerLoose === scannedLoose) {
-            console.log('✅ Match found: Loose match');
+            logger.log('✅ Match found: Loose match');
             return true;
           }
           
           // Strategy 5: Partial match (contains)
           if (customerNormalized.includes(scannedNormalized) || scannedNormalized.includes(customerNormalized)) {
-            console.log('✅ Match found: Partial match');
+            logger.log('✅ Match found: Partial match');
             return true;
           }
           
@@ -540,7 +541,7 @@ export default function ScanCylindersScreen() {
             const baseCustomer = customerBarcode.slice(0, -1);
             
             if (baseScanned.toLowerCase() === baseCustomer.toLowerCase()) {
-              console.log('✅ Match found: Base match (without last character)');
+              logger.log('✅ Match found: Base match (without last character)');
               return true;
             }
           }
@@ -549,7 +550,7 @@ export default function ScanCylindersScreen() {
         });
         
         if (!matchingCustomer) {
-          console.log('⚠️ Scanned barcode does not match any existing customer');
+          logger.log('⚠️ Scanned barcode does not match any existing customer');
           
           // Find similar barcodes for helpful suggestions
           const similarBarcodes = customers
@@ -588,7 +589,7 @@ export default function ScanCylindersScreen() {
         }
         
         // Customer found, proceed normally
-        console.log('✅ Customer found:', matchingCustomer.name);
+        logger.log('✅ Customer found:', matchingCustomer.name);
         setSearch(normalizeBarcode(matchingCustomer.CustomerListID || data));
         setSelectedCustomer(matchingCustomer);
         setShowCustomerScan(false);
@@ -602,7 +603,7 @@ export default function ScanCylindersScreen() {
           [{ text: 'OK' }]
         );
       } else if (scannerTarget === 'order') {
-        console.log('📦 Setting order number:', data);
+        logger.log('📦 Setting order number:', data);
         setOrderNumber(data);
         setShowOrderScan(false);
         setScannerVisible(false);
@@ -613,7 +614,7 @@ export default function ScanCylindersScreen() {
       setTimeout(() => setScanned(false), 2000);
       
     } catch (error) {
-      console.error('❌ Error processing barcode scan:', error);
+      logger.error('❌ Error processing barcode scan:', error);
       setScanned(false);
       
       const errorMessage = 'Failed to process barcode. Please try again.';
@@ -632,13 +633,13 @@ export default function ScanCylindersScreen() {
   };
 
   const openScanner = async (target: 'customer' | 'order') => {
-    console.log('📷 Opening scanner for target:', target);
-    console.log('📷 Current permission status:', permission?.granted);
+    logger.log('📷 Opening scanner for target:', target);
+    logger.log('📷 Current permission status:', permission?.granted);
     
     try {
       // Check if permission is still loading
       if (!permission) {
-        console.log('📷 Permission still loading, waiting...');
+        logger.log('📷 Permission still loading, waiting...');
         Alert.alert(
           'Camera Loading',
           'Camera permissions are still loading. Please wait a moment and try again.',
@@ -648,9 +649,9 @@ export default function ScanCylindersScreen() {
       }
       
       if (!permission.granted) {
-        console.log('📷 Requesting camera permission...');
+        logger.log('📷 Requesting camera permission...');
         const result = await requestPermission();
-        console.log('📷 Permission request result:', result);
+        logger.log('📷 Permission request result:', result);
         if (!result.granted) {
           Alert.alert(
             'Camera Permission Required',
@@ -661,7 +662,7 @@ export default function ScanCylindersScreen() {
         }
       }
       
-      console.log('📷 Setting up scanner for target:', target);
+      logger.log('📷 Setting up scanner for target:', target);
       
       // Clear any existing errors
       setCustomerBarcodeError('');
@@ -671,25 +672,25 @@ export default function ScanCylindersScreen() {
       setScanned(false);
       setScannerTarget(target);
       
-      console.log('🎯 Scanner target set to:', target);
+      logger.log('🎯 Scanner target set to:', target);
       
       // Open the appropriate scanner modal
       if (target === 'customer') {
-        console.log('📷 Opening customer scanner modal');
-        console.log('📷 Customers loaded:', customers.length);
-        console.log('📷 Customer barcodes:', customers.map(c => c.barcode).filter(Boolean));
+        logger.log('📷 Opening customer scanner modal');
+        logger.log('📷 Customers loaded:', customers.length);
+        logger.log('📷 Customer barcodes:', customers.map(c => c.barcode).filter(Boolean));
         setShowCustomerScan(true);
       } else {
-        console.log('📷 Opening order scanner modal');
+        logger.log('📷 Opening order scanner modal');
         setShowOrderScan(true);
       }
       
       setScannerVisible(true);
-      console.log('📷 Scanner setup complete');
-      console.log('📷 showCustomerScan will be:', target === 'customer');
+      logger.log('📷 Scanner setup complete');
+      logger.log('📷 showCustomerScan will be:', target === 'customer');
       
     } catch (error) {
-      console.error('❌ Error opening scanner:', error);
+      logger.error('❌ Error opening scanner:', error);
       Alert.alert(
         'Scanner Error',
         'Failed to open camera scanner. Please try again.',
@@ -803,9 +804,9 @@ export default function ScanCylindersScreen() {
                   }
                 ]}
                 onPress={() => {
-                  console.log('📷 Customer scan button pressed');
-                  console.log('📷 Permission granted:', permission?.granted);
-                  console.log('📷 Scanner target:', scannerTarget);
+                  logger.log('📷 Customer scan button pressed');
+                  logger.log('📷 Permission granted:', permission?.granted);
+                  logger.log('📷 Scanner target:', scannerTarget);
                   openScanner('customer');
                 }}
                 disabled={!permission?.granted}
@@ -916,7 +917,7 @@ export default function ScanCylindersScreen() {
       {/* Camera Scanner - Customer */}
       {showCustomerScan && (
         <View style={styles.fullscreenWrapper}>
-          {console.log('📷 RENDERING CAMERA VIEW - showCustomerScan is true')}
+          {logger.log('📷 RENDERING CAMERA VIEW - showCustomerScan is true')}
           <CameraView
             style={styles.fullscreenCamera}
             facing="back"
@@ -925,9 +926,9 @@ export default function ScanCylindersScreen() {
               barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "codabar", "itf14"],
             }}
             onBarcodeScanned={({ data }) => {
-              console.log('📷 BARCODE DETECTED:', data);
-              console.log('📷 Available customers:', customers.length);
-              console.log('📷 Customer barcodes:', customers.map(c => c.barcode).filter(Boolean));
+              logger.log('📷 BARCODE DETECTED:', data);
+              logger.log('📷 Available customers:', customers.length);
+              logger.log('📷 Customer barcodes:', customers.map(c => c.barcode).filter(Boolean));
               
               const barcode = data.trim();
               if (barcode) {
@@ -970,17 +971,17 @@ export default function ScanCylindersScreen() {
               barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "codabar", "itf14"],
             }}
             onBarcodeScanned={({ data, bounds }) => {
-              console.log('📷 Raw order barcode event:', data, 'bounds:', bounds);
+              logger.log('📷 Raw order barcode event:', data, 'bounds:', bounds);
               
               // Check if barcode is within scan area (if bounds are available)
               if (bounds && !isBarcodeInScanArea(bounds)) {
-                console.log('📷 Order barcode outside scan area, ignoring');
+                logger.log('📷 Order barcode outside scan area, ignoring');
                 return;
               }
               
               const barcode = data.trim();
               if (barcode) {
-                console.log('📷 Order barcode detected:', barcode);
+                logger.log('📷 Order barcode detected:', barcode);
                 setOrderNumber(barcode);
                 setShowOrderScan(false);
               }

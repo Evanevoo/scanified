@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -97,7 +98,7 @@ export default function FieldToolsPanel({
         }
       }
     } catch (error) {
-      console.error('Error refreshing location:', error);
+      logger.error('Error refreshing location:', error);
       Alert.alert('Location Error', 'Could not get current location.');
     } finally {
       setIsLoadingLocation(false);
@@ -110,7 +111,7 @@ export default function FieldToolsPanel({
       setIsFlashlightOn(newState);
       await feedbackService.quickAction(newState ? 'flashlight on' : 'flashlight off');
     } catch (error) {
-      console.error('Error toggling flashlight:', error);
+      logger.error('Error toggling flashlight:', error);
     }
   };
 
@@ -154,7 +155,7 @@ export default function FieldToolsPanel({
 
       await feedbackService.quickAction('route optimized');
     } catch (error) {
-      console.error('Error optimizing route:', error);
+      logger.error('Error optimizing route:', error);
       Alert.alert('Optimization Error', 'Could not optimize route.');
     }
   };
@@ -164,7 +165,7 @@ export default function FieldToolsPanel({
       await fieldToolsService.openNavigation(destination);
       await feedbackService.quickAction('navigation started');
     } catch (error) {
-      console.error('Error starting navigation:', error);
+      logger.error('Error starting navigation:', error);
     }
   };
 

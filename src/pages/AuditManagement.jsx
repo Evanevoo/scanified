@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
@@ -281,7 +282,7 @@ export default function AuditManagement() {
       setAuditDialog(false);
       refetchAudits();
     } catch (error) {
-      console.error('Error creating audit:', error);
+      logger.error('Error creating audit:', error);
     }
   };
 
@@ -320,7 +321,7 @@ export default function AuditManagement() {
 
       if (itemsError) throw itemsError;
     } catch (error) {
-      console.error('Error generating expected items:', error);
+      logger.error('Error generating expected items:', error);
     }
   };
 
@@ -337,7 +338,7 @@ export default function AuditManagement() {
       if (error) throw error;
       refetchAudits();
     } catch (error) {
-      console.error('Error starting audit:', error);
+      logger.error('Error starting audit:', error);
     }
   };
 
@@ -354,7 +355,7 @@ export default function AuditManagement() {
       if (error) throw error;
       refetchAudits();
     } catch (error) {
-      console.error('Error completing audit:', error);
+      logger.error('Error completing audit:', error);
     }
   };
 
@@ -423,7 +424,7 @@ export default function AuditManagement() {
       }
 
     } catch (error) {
-      console.error('Error scanning item:', error);
+      logger.error('Error scanning item:', error);
     }
   };
 
@@ -447,7 +448,7 @@ export default function AuditManagement() {
         completion_percentage: total > 0 ? (scanned / total) * 100 : 0
       });
     } catch (error) {
-      console.error('Error updating progress:', error);
+      logger.error('Error updating progress:', error);
     }
   };
 

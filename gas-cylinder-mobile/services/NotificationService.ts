@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
@@ -44,7 +45,7 @@ export class NotificationService {
     try {
       // Check if device supports push notifications
       if (!Device.isDevice) {
-        console.log('Must use physical device for Push Notifications');
+        logger.log('Must use physical device for Push Notifications');
         return;
       }
 
@@ -58,7 +59,7 @@ export class NotificationService {
       }
 
       if (finalStatus !== 'granted') {
-        console.log('Failed to get push token for push notification!');
+        logger.log('Failed to get push token for push notification!');
         return;
       }
 
@@ -68,7 +69,7 @@ export class NotificationService {
       });
 
       this.expoPushToken = token.data;
-      console.log('Expo push token:', this.expoPushToken);
+      logger.log('Expo push token:', this.expoPushToken);
 
       // Configure notification categories
       await this.setupNotificationCategories();
@@ -78,7 +79,7 @@ export class NotificationService {
 
       this.isInitialized = true;
     } catch (error) {
-      console.error('Error initializing notification service:', error);
+      logger.error('Error initializing notification service:', error);
     }
   }
 
@@ -144,13 +145,13 @@ export class NotificationService {
   private setupNotificationListeners(): void {
     // Handle notification received while app is foregrounded
     Notifications.addNotificationReceivedListener(notification => {
-      console.log('Notification received:', notification);
+      logger.log('Notification received:', notification);
       // You can handle the notification here, e.g., show an in-app banner
     });
 
     // Handle notification response (when user taps on notification)
     Notifications.addNotificationResponseReceivedListener(response => {
-      console.log('Notification response:', response);
+      logger.log('Notification response:', response);
       this.handleNotificationResponse(response);
     });
   }
@@ -167,27 +168,27 @@ export class NotificationService {
         if (actionIdentifier === 'view_details') {
           // Navigate to scan details
           // You would typically use navigation here
-          console.log('Navigate to scan details:', data);
+          logger.log('Navigate to scan details:', data);
         }
         break;
 
       case 'sync_status':
         if (actionIdentifier === 'retry_sync') {
           // Trigger sync retry
-          console.log('Retry sync requested');
+          logger.log('Retry sync requested');
         }
         break;
 
       case 'maintenance_reminder':
         if (actionIdentifier === 'schedule_maintenance') {
           // Navigate to maintenance scheduling
-          console.log('Navigate to maintenance scheduling:', data);
+          logger.log('Navigate to maintenance scheduling:', data);
         }
         break;
 
       default:
         // Default action - just open the app
-        console.log('Default notification action');
+        logger.log('Default notification action');
         break;
     }
   }
@@ -207,7 +208,7 @@ export class NotificationService {
         trigger: null, // Show immediately
       });
     } catch (error) {
-      console.error('Error sending local notification:', error);
+      logger.error('Error sending local notification:', error);
     }
   }
 
@@ -231,7 +232,7 @@ export class NotificationService {
 
       return notificationId;
     } catch (error) {
-      console.error('Error scheduling notification:', error);
+      logger.error('Error scheduling notification:', error);
       throw error;
     }
   }
@@ -243,7 +244,7 @@ export class NotificationService {
     try {
       await Notifications.cancelScheduledNotificationAsync(notificationId);
     } catch (error) {
-      console.error('Error canceling notification:', error);
+      logger.error('Error canceling notification:', error);
     }
   }
 
@@ -254,7 +255,7 @@ export class NotificationService {
     try {
       await Notifications.cancelAllScheduledNotificationsAsync();
     } catch (error) {
-      console.error('Error canceling all notifications:', error);
+      logger.error('Error canceling all notifications:', error);
     }
   }
 
@@ -270,7 +271,7 @@ export class NotificationService {
    */
   public async registerDevice(userId: string, organizationId: string): Promise<void> {
     if (!this.expoPushToken) {
-      console.log('No push token available');
+      logger.log('No push token available');
       return;
     }
 
@@ -292,16 +293,16 @@ export class NotificationService {
         });
 
       if (error) {
-        console.error('Error registering device:', error);
+        logger.error('Error registering device:', error);
         // Don't throw error - just log it so the app doesn't crash
-        console.log('Device registration failed, but app will continue to work');
+        logger.log('Device registration failed, but app will continue to work');
       } else {
-        console.log('Device registered successfully');
+        logger.log('Device registered successfully');
       }
     } catch (error) {
-      console.error('Error registering device:', error);
+      logger.error('Error registering device:', error);
       // Don't throw error - just log it so the app doesn't crash
-      console.log('Device registration failed, but app will continue to work');
+      logger.log('Device registration failed, but app will continue to work');
     }
   }
 
@@ -316,12 +317,12 @@ export class NotificationService {
         .eq('user_id', userId);
 
       if (error) {
-        console.error('Error unregistering device:', error);
+        logger.error('Error unregistering device:', error);
       } else {
-        console.log('Device unregistered successfully');
+        logger.log('Device unregistered successfully');
       }
     } catch (error) {
-      console.error('Error unregistering device:', error);
+      logger.error('Error unregistering device:', error);
     }
   }
 
@@ -341,12 +342,12 @@ export class NotificationService {
         .eq('is_active', true);
 
       if (error) {
-        console.error('Error fetching user devices:', error);
+        logger.error('Error fetching user devices:', error);
         return;
       }
 
       if (!devices || devices.length === 0) {
-        console.log('No active devices found for user');
+        logger.log('No active devices found for user');
         return;
       }
 
@@ -375,9 +376,9 @@ export class NotificationService {
         throw new Error(`Push notification failed: ${response.status}`);
       }
 
-      console.log('Push notification sent successfully');
+      logger.log('Push notification sent successfully');
     } catch (error) {
-      console.error('Error sending push notification:', error);
+      logger.error('Error sending push notification:', error);
     }
   }
 
@@ -397,12 +398,12 @@ export class NotificationService {
         .eq('is_active', true);
 
       if (error) {
-        console.error('Error fetching organization devices:', error);
+        logger.error('Error fetching organization devices:', error);
         return;
       }
 
       if (!devices || devices.length === 0) {
-        console.log('No active devices found for organization');
+        logger.log('No active devices found for organization');
         return;
       }
 
@@ -430,9 +431,9 @@ export class NotificationService {
         throw new Error(`Organization notification failed: ${response.status}`);
       }
 
-      console.log('Organization notification sent successfully');
+      logger.log('Organization notification sent successfully');
     } catch (error) {
-      console.error('Error sending organization notification:', error);
+      logger.error('Error sending organization notification:', error);
     }
   }
 

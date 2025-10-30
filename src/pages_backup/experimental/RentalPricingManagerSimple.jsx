@@ -1,3 +1,4 @@
+import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, Button, Alert } from '@mui/material';
 import { useAuth } from '../hooks/useAuth';
@@ -20,7 +21,7 @@ export default function RentalPricingManagerSimple() {
       setLoading(true);
       setError(null);
       
-      console.log('Loading data for organization:', organization.id);
+      logger.log('Loading data for organization:', organization.id);
       
       // Simple data loading
       const [tiersResult, ratesResult, rulesResult] = await Promise.all([
@@ -36,7 +37,7 @@ export default function RentalPricingManagerSimple() {
       });
       
     } catch (error) {
-      console.error('Error loading data:', error);
+      logger.error('Error loading data:', error);
       setError(error.message);
     } finally {
       setLoading(false);

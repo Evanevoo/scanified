@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 /**
@@ -6,7 +7,7 @@ import { supabase } from '../supabase/client';
  */
 export const fixBottleData = async () => {
   try {
-    console.log('Checking for bottles with NULL values in required fields...');
+    logger.log('Checking for bottles with NULL values in required fields...');
     
     // Get bottles with NULL serial_number
     const { data: nullSerialBottles, error: nullSerialError } = await supabase
@@ -15,11 +16,11 @@ export const fixBottleData = async () => {
       .is('serial_number', null);
 
     if (nullSerialError) {
-      console.error('Error fetching bottles with NULL serial_number:', nullSerialError);
+      logger.error('Error fetching bottles with NULL serial_number:', nullSerialError);
       return { success: false, error: nullSerialError.message };
     }
 
-    console.log(`Found ${nullSerialBottles?.length || 0} bottles with NULL serial_number`);
+    logger.log(`Found ${nullSerialBottles?.length || 0} bottles with NULL serial_number`);
 
     // Fix bottles with NULL serial_number by setting a default value
     if (nullSerialBottles && nullSerialBottles.length > 0) {
@@ -37,13 +38,13 @@ export const fixBottleData = async () => {
           .eq('id', bottle.id);
 
         if (updateError) {
-          console.error(`Error fixing bottle ${bottle.id}:`, updateError);
+          logger.error(`Error fixing bottle ${bottle.id}:`, updateError);
         } else {
           fixedCount++;
         }
       }
 
-      console.log(`Fixed ${fixedCount} bottles with NULL serial_number`);
+      logger.log(`Fixed ${fixedCount} bottles with NULL serial_number`);
     }
 
     // Check for other potential NULL constraint issues
@@ -53,9 +54,9 @@ export const fixBottleData = async () => {
       .limit(10);
 
     if (allBottlesError) {
-      console.error('Error fetching sample bottles:', allBottlesError);
+      logger.error('Error fetching sample bottles:', allBottlesError);
     } else {
-      console.log('Sample bottles structure:', allBottles);
+      logger.log('Sample bottles structure:', allBottles);
     }
 
     return { 
@@ -65,7 +66,7 @@ export const fixBottleData = async () => {
     };
 
   } catch (error) {
-    console.error('Error in fixBottleData:', error);
+    logger.error('Error in fixBottleData:', error);
     return { success: false, error: error.message };
   }
 };
@@ -76,7 +77,7 @@ export const fixBottleData = async () => {
  */
 export const initializeBottlesTable = async () => {
   try {
-    console.log('Initializing bottles table structure...');
+    logger.log('Initializing bottles table structure...');
     
     // Check if bottles table exists and has required columns
     const { data: sampleBottles, error: sampleError } = await supabase
@@ -85,15 +86,15 @@ export const initializeBottlesTable = async () => {
       .limit(1);
 
     if (sampleError) {
-      console.error('Error checking bottles table:', sampleError);
+      logger.error('Error checking bottles table:', sampleError);
       return { success: false, error: sampleError.message };
     }
 
-    console.log('Bottles table structure check completed');
+    logger.log('Bottles table structure check completed');
     return { success: true, message: 'Bottles table structure verified' };
 
   } catch (error) {
-    console.error('Error in initializeBottlesTable:', error);
+    logger.error('Error in initializeBottlesTable:', error);
     return { success: false, error: error.message };
   }
 }; 

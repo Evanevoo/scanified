@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity } from 'react-native';
 import { supabase } from '../supabase';
@@ -26,8 +27,8 @@ export default function CylinderDetailsScreen() {
         return;
       }
 
-      console.log('🔍 Fetching cylinder details for barcode:', barcode);
-      console.log('🔍 Organization ID:', profile.organization_id);
+      logger.log('🔍 Fetching cylinder details for barcode:', barcode);
+      logger.log('🔍 Organization ID:', profile.organization_id);
 
       setLoading(true);
       setError('');
@@ -40,16 +41,16 @@ export default function CylinderDetailsScreen() {
         .eq('organization_id', profile.organization_id)
         .single();
       
-      console.log('🔍 Cylinder query result:', { data: cyl, error: cylErr });
+      logger.log('🔍 Cylinder query result:', { data: cyl, error: cylErr });
       
       if (cylErr || !cyl) {
-        console.log('❌ Cylinder not found:', cylErr);
+        logger.log('❌ Cylinder not found:', cylErr);
         setError(`${assetConfig?.assetDisplayName || 'Cylinder'} not found.`);
         setLoading(false);
         return;
       }
       
-      console.log('✅ Cylinder found:', cyl.barcode_number);
+      logger.log('✅ Cylinder found:', cyl.barcode_number);
       setCylinder(cyl);
       
       // Fetch customer info if cylinder is assigned to a customer
@@ -61,10 +62,10 @@ export default function CylinderDetailsScreen() {
           .eq('organization_id', profile.organization_id)
           .single();
           
-        console.log('🔍 Customer query result:', { data: cust, error: custErr });
+        logger.log('🔍 Customer query result:', { data: cust, error: custErr });
         
         if (!custErr && cust) {
-          console.log('✅ Customer found:', cust.name);
+          logger.log('✅ Customer found:', cust.name);
           setCustomer(cust);
         }
       }

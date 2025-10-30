@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
 export class LeaseBillingService {
@@ -31,7 +32,7 @@ export class LeaseBillingService {
 
       return results;
     } catch (error) {
-      console.error('Error processing due billing:', error);
+      logger.error('Error processing due billing:', error);
       throw error;
     }
   }
@@ -103,7 +104,7 @@ export class LeaseBillingService {
         nextBillingDate
       };
     } catch (error) {
-      console.error('Error creating billing record:', error);
+      logger.error('Error creating billing record:', error);
       throw error;
     }
   }
@@ -235,7 +236,7 @@ export class LeaseBillingService {
 
       return `INV-${year}${month}-${String(nextNumber).padStart(4, '0')}`;
     } catch (error) {
-      console.error('Error generating invoice number:', error);
+      logger.error('Error generating invoice number:', error);
       // Fallback to timestamp-based number
       return `INV-${Date.now()}`;
     }
@@ -261,7 +262,7 @@ export class LeaseBillingService {
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error marking billing as paid:', error);
+      logger.error('Error marking billing as paid:', error);
       throw error;
     }
   }
@@ -289,7 +290,7 @@ export class LeaseBillingService {
       if (error) throw error;
       return data || [];
     } catch (error) {
-      console.error('Error getting overdue billing:', error);
+      logger.error('Error getting overdue billing:', error);
       throw error;
     }
   }
@@ -334,7 +335,7 @@ export class LeaseBillingService {
 
       return summary;
     } catch (error) {
-      console.error('Error getting billing summary:', error);
+      logger.error('Error getting billing summary:', error);
       throw error;
     }
   }
@@ -369,7 +370,7 @@ export class LeaseBillingService {
 
       return updated;
     } catch (error) {
-      console.error('Error renewing agreement:', error);
+      logger.error('Error renewing agreement:', error);
       throw error;
     }
   }
@@ -392,7 +393,7 @@ export class LeaseBillingService {
       if (error) throw error;
       return data || [];
     } catch (error) {
-      console.error('Error getting expiring agreements:', error);
+      logger.error('Error getting expiring agreements:', error);
       throw error;
     }
   }

@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import AppBar from '@mui/material/AppBar';
@@ -74,7 +75,7 @@ export default function MainLayout({ children }) {
   }, [location.pathname]);
 
   useEffect(() => {
-    console.log('Search term changed:', searchTerm);
+    logger.log('Search term changed:', searchTerm);
     if (!searchTerm.trim()) {
       setSuggestions([]);
       return;
@@ -93,7 +94,7 @@ export default function MainLayout({ children }) {
           .limit(5);
         
         if (orgError) {
-          console.error('Error fetching organizations for search:', orgError);
+          logger.error('Error fetching organizations for search:', orgError);
         }
         
         const orgResults = (organizations || []).map(org => ({
@@ -104,7 +105,7 @@ export default function MainLayout({ children }) {
         }));
         
         if (active) {
-          console.log('Setting owner portal suggestions:', orgResults);
+          logger.log('Setting owner portal suggestions:', orgResults);
           setSuggestions(orgResults);
         }
       } else if (organization?.id) {
@@ -118,7 +119,7 @@ export default function MainLayout({ children }) {
           .limit(5);
         
         if (customerError) {
-          console.error('Error fetching customers for search:', customerError);
+          logger.error('Error fetching customers for search:', customerError);
         }
         
         // Bottles: by serial number or barcode (filtered by organization)
@@ -130,7 +131,7 @@ export default function MainLayout({ children }) {
           .limit(5);
         
         if (bottleError) {
-          console.error('Error fetching bottles for search:', bottleError);
+          logger.error('Error fetching bottles for search:', bottleError);
         }
         
         const customerResults = (customers || []).map(c => ({
@@ -147,7 +148,7 @@ export default function MainLayout({ children }) {
         }));
         
         if (active) {
-          console.log('Setting organization suggestions:', [...customerResults, ...bottleResults]);
+          logger.log('Setting organization suggestions:', [...customerResults, ...bottleResults]);
           setSuggestions([...customerResults, ...bottleResults]);
         }
       } else {
@@ -172,7 +173,7 @@ export default function MainLayout({ children }) {
   }, []);
 
   const handleSelectSuggestion = (item) => {
-    console.log('Selected suggestion:', item);
+    logger.log('Selected suggestion:', item);
     setShowSuggestions(false);
     setSearchTerm('');
     if (item.type === 'customer') {
@@ -189,7 +190,7 @@ export default function MainLayout({ children }) {
   };
 
   const handleLogout = async () => {
-    console.log('MainLayout: Logout button clicked');
+    logger.log('MainLayout: Logout button clicked');
     setLogoutLoading(true);
     
     try {
@@ -205,20 +206,20 @@ export default function MainLayout({ children }) {
             window.indexedDB.deleteDatabase(db.name);
           });
         } catch (indexedDBError) {
-          console.warn('Could not clear IndexedDB:', indexedDBError);
+          logger.warn('Could not clear IndexedDB:', indexedDBError);
         }
       }
       
       // Sign out from Supabase directly
       const { error } = await supabase.auth.signOut();
       if (error) {
-        console.error('Supabase signOut error:', error);
+        logger.error('Supabase signOut error:', error);
       }
       
-      console.log('MainLayout: Logout completed, redirecting...');
+      logger.log('MainLayout: Logout completed, redirecting...');
       
     } catch (error) {
-      console.error('Logout error:', error);
+      logger.error('Logout error:', error);
     } finally {
       // Always redirect to login page
       window.location.href = '/login';
@@ -311,11 +312,11 @@ export default function MainLayout({ children }) {
                     marginRight: 12
                   }} 
                   onError={(e) => {
-                    console.error('Failed to load logo in header:', organization.logo_url);
+                    logger.error('Failed to load logo in header:', organization.logo_url);
                     e.target.style.display = 'none';
                   }}
                   onLoad={() => {
-                    console.log('Logo loaded successfully in header:', organization.logo_url);
+                    logger.log('Logo loaded successfully in header:', organization.logo_url);
                   }}
                 />
               )}
