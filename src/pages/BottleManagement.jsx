@@ -78,35 +78,45 @@ const BottleManagement = () => {
       loadBottles();
       loadCustomers();
     }
-  }, [organization, page, rowsPerPage]);
+  }, [organization, page, rowsPerPage, searchTerm, statusFilter]); // Re-load when search/filter changes
 
   const loadBottles = async () => {
     try {
       setLoading(true);
       
-      // Get total count for pagination
-      const { count } = await supabase
+      // Build query with search filter
+      let query = supabase
         .from('bottles')
-        .select('*', { count: 'exact', head: true })
-        .eq('organization_id', organization.id);
-      
-      setTotalCount(count || 0);
-
-      // Use optimized query with pagination
-      const data = await executeCachedQuery(supabase, 'bottles', {
-        select: `
+        .select(`
           *,
           customers:assigned_customer (
             "CustomerListID",
             name
           )
-        `,
-        filters: { organization_id: organization.id },
-        orderBy: { column: 'customer_name', ascending: true },
-        pagination: { page, pageSize: rowsPerPage },
-        cache: true
-      });
+        `, { count: 'exact' })
+        .eq('organization_id', organization.id);
+      
+      // Apply search filter at database level for better performance
+      if (searchTerm) {
+        query = query.or(`serial_number.ilike.%${searchTerm}%,barcode_number.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
+      }
+      
+      // Apply status filter
+      if (statusFilter !== 'all') {
+        query = query.eq('status', statusFilter);
+      }
+      
+      // Get total count with filters
+      const { count } = await query;
+      setTotalCount(count || 0);
+      
+      // Apply pagination and ordering
+      const { data, error } = await query
+        .order('customer_name', { ascending: true, nullsFirst: false })
+        .range(page * rowsPerPage, (page + 1) * rowsPerPage - 1);
 
+      if (error) throw error;
+      
       setBottles(data || []);
     } catch (error) {
       logger.error('Error loading bottles:', error);
@@ -131,27 +141,9 @@ const BottleManagement = () => {
     }
   };
 
-  // Filter bottles (client-side filtering for search)
-  const filteredBottles = useMemo(() => {
-    let filtered = bottles;
-
-    // Search filter
-    if (searchTerm) {
-      filtered = filtered.filter(bottle =>
-        bottle.serial_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        bottle.barcode_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        bottle.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        bottle.description?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    // Status filter
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(bottle => bottle.status === statusFilter);
-    }
-
-    return filtered;
-  }, [bottles, searchTerm, statusFilter]);
+  // No need for client-side filtering - now done at database level for better performance
+  // This allows searching across all 2000+ bottles instantly
+  const filteredBottles = bottles;
 
   // File upload handling
   const handleFileSelect = (event) => {
@@ -840,10 +832,14 @@ const BottleManagement = () => {
       <Box display="flex" gap={2} mb={3}>
         <TextField
           label="Search bottles"
+          placeholder="Search by barcode, serial, customer, or description"
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(e) => {
+            setSearchTerm(e.target.value);
+            handleChangePage(null, 0); // Reset to first page when searching
+          }}
           size="small"
-          sx={{ minWidth: 200 }}
+          sx={{ minWidth: 300 }}
         />
         <FormControl size="small" sx={{ minWidth: 120 }}>
           <InputLabel>Status</InputLabel>
