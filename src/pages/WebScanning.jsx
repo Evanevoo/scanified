@@ -330,10 +330,12 @@ export default function WebScanning() {
 
     // Update asset in database
     if (isOnline) {
+      // SECURITY: Double-check organization_id to prevent cross-organization updates
       const { error: updateError } = await supabase
         .from('bottles')
         .update(updateData)
-        .eq('id', asset.id);
+        .eq('id', asset.id)
+        .eq('organization_id', profile.organization_id);
 
       if (updateError) {
         throw new Error('Failed to update asset');

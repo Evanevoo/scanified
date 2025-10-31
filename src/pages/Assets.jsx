@@ -47,11 +47,17 @@ function exportBottlesToCSV(bottles) {
   URL.revokeObjectURL(url);
 }
 
-async function exportAllBottlesToCSV() {
+async function exportAllBottlesToCSV(organizationId) {
   try {
+    // SECURITY: Only export bottles from specified organization
+    if (!organizationId) {
+      alert('Organization not found. Cannot export bottles.');
+      return;
+    }
     const { data: allBottles, error } = await supabase
       .from('bottles')
       .select('*')
+      .eq('organization_id', organizationId)
       .order('barcode_number');
     
     if (error) throw error;
