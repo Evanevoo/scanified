@@ -994,7 +994,15 @@ export default function ImportApprovals() {
 
   // Fetch all cylinders for group lookup
   async function fetchCylinders() {
-    const { data: cylinders } = await supabase.from('bottles').select('product_code, gas_type, size');
+    // SECURITY: Only fetch bottles from user's organization
+    if (!organization?.id) {
+      logger.error('Organization ID not found for fetchCylinders');
+      return;
+    }
+    const { data: cylinders } = await supabase
+      .from('bottles')
+      .select('product_code, gas_type, size')
+      .eq('organization_id', organization.id);
     const map = {};
     (cylinders || []).forEach(c => {
       if (c.product_code) {
@@ -1244,7 +1252,15 @@ export default function ImportApprovals() {
   // Fetch all bottles for product code lookup
   async function fetchBottles() {
     try {
-      const { data: bottles, error } = await supabase.from('bottles').select('*');
+      // SECURITY: Only fetch bottles from user's organization
+      if (!organization?.id) {
+        logger.error('Organization ID not found for fetchBottles');
+        return;
+      }
+      const { data: bottles, error } = await supabase
+        .from('bottles')
+        .select('*')
+        .eq('organization_id', organization.id);
       if (error) throw error;
       const assetMap = {};
       (bottles || []).forEach(bottle => {

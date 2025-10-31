@@ -116,10 +116,17 @@ export default function AssetDetail() {
   const handleSave = async () => {
     try {
       setSaving(true);
+      
+      // SECURITY: Verify user has permission to update this asset
+      if (!profile?.organization_id) {
+        throw new Error('Organization not found');
+      }
+      
       const { error } = await supabase
         .from('bottles') // Keep using bottles table for now
         .update(editData)
-        .eq('id', id);
+        .eq('id', id)
+        .eq('organization_id', profile.organization_id); // SECURITY: Only update assets in user's organization
 
       if (error) throw error;
 
@@ -128,7 +135,7 @@ export default function AssetDetail() {
       setSuccess('Asset updated successfully');
     } catch (error) {
       logger.error('Error updating asset:', error);
-      setError('Failed to update asset');
+      setError(error.message || 'Failed to update asset');
     } finally {
       setSaving(false);
     }
@@ -138,17 +145,23 @@ export default function AssetDetail() {
     if (!confirm('Are you sure you want to delete this asset?')) return;
 
     try {
+      // SECURITY: Verify user has permission to delete this asset
+      if (!profile?.organization_id) {
+        throw new Error('Organization not found');
+      }
+      
       const { error } = await supabase
         .from('bottles') // Keep using bottles table for now
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('organization_id', profile.organization_id); // SECURITY: Only delete assets from user's organization
 
       if (error) throw error;
 
       navigate('/inventory-management');
     } catch (error) {
       logger.error('Error deleting asset:', error);
-      setError('Failed to delete asset');
+      setError(error.message || 'Failed to delete asset');
     }
   };
 
