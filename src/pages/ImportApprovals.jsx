@@ -4795,14 +4795,12 @@ export default function ImportApprovals() {
     
     const matches = allScannedRows.filter(row => {
       const orderMatch = row.order_number === orderNum || row.invoice_number === orderNum;
+      if (!orderMatch) return false;
       
-      // For the same order, match ANY scanned barcode to ANY invoice product code
-      // This handles the case where barcode 677777777 should match product BCS68-300
+      // Match by barcode or product code
       const productMatch = row.product_code === productCode || 
                           row.bottle_barcode === productCode || 
-                          row.barcode_number === productCode ||
-                          // If we're looking for a product code from invoice, match any barcode from scans for same order
-                          (orderMatch && (row.bottle_barcode || row.barcode_number));
+                          row.barcode_number === productCode;
       
       // Updated to match the mobile app's mode values
       const typeMatch = (type === 'out' && (
@@ -4830,7 +4828,25 @@ export default function ImportApprovals() {
       return orderMatch && productMatch && typeMatch;
     });
     
-    logger.log(`📊 Found ${matches.length} scans for ${orderNum}/${productCode}/${type}`);
-    return matches.length;
+    // Deduplicate by barcode and timestamp (scans within 1 second are considered duplicates)
+    const uniqueMatches = [];
+    const seen = new Set();
+    
+    matches.forEach(match => {
+      const barcode = match.bottle_barcode || match.barcode_number || match.product_code;
+      const timestamp = new Date(match.created_at || match.timestamp).getTime();
+      
+      // Create a unique key: barcode + rounded timestamp (to nearest second)
+      const roundedTime = Math.floor(timestamp / 1000);
+      const key = `${barcode}_${roundedTime}`;
+      
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueMatches.push(match);
+      }
+    });
+    
+    logger.log(`📊 Found ${uniqueMatches.length} unique scans (${matches.length} total) for ${orderNum}/${productCode}/${type}`);
+    return uniqueMatches.length;
   }
 } 
