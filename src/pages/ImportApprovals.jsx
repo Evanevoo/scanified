@@ -819,12 +819,18 @@ export default function ImportApprovals() {
       importedInvoices.forEach(invoice => {
         const data = parseDataField(invoice.data);
         const rows = data.rows || data.line_items || [];
+        logger.log('📋 Processing invoice import:', invoice.id, 'Rows:', rows.length, 'Raw data:', invoice.data);
         rows.forEach(row => {
-          if (row.order_number || row.invoice_number || row.reference_number) {
-            importedOrderNumbers.add((row.order_number || row.invoice_number || row.reference_number).toString().trim());
+          const orderNum = (row.order_number || row.invoice_number || row.reference_number)?.toString().trim();
+          if (orderNum) {
+            importedOrderNumbers.add(orderNum);
+            logger.log('📋 Found order number in import:', orderNum);
+          } else {
+            logger.log('⚠️ Row missing order number. Row keys:', Object.keys(row), 'Row:', row);
           }
         });
       });
+      logger.log('📋 All imported order numbers:', Array.from(importedOrderNumbers));
 
       // Group scanned rows by order number - include ALL scanned records
       const orderGroups = {};
@@ -839,7 +845,8 @@ export default function ImportApprovals() {
       });
       
       logger.log('🔍 Order groups created:', Object.keys(orderGroups).length);
-      logger.log('🔍 Order numbers:', Object.keys(orderGroups));
+      logger.log('🔍 Scanned order numbers:', Object.keys(orderGroups));
+      logger.log('🔍 Matching check - Import has:', Array.from(importedOrderNumbers), 'Scanned has:', Object.keys(orderGroups));
 
       // Convert to the same format as imported invoices for consistency
       logger.log('⏱️ Processing scanned records...');
