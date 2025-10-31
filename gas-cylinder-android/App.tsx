@@ -41,6 +41,10 @@ if (__DEV__) {
     // Expo Go push notifications informational message (SDK 53+)
     'expo-notifications: Android Push notifications (remote notifications) functionality provided by expo-notifications was removed from Expo Go',
     '`expo-notifications` functionality is not fully supported in Expo Go',
+    // Expo AV deprecation warning
+    '[expo-av]: Expo AV has been deprecated and will be removed in SDK 54',
+    // SafeAreaView deprecation
+    'SafeAreaView has been deprecated',
     // Optional: sound placeholders during dev
     'Sound Scan Success configured but not preloaded (placeholder file)',
     'Sound Scan Error configured but not preloaded (placeholder file)',

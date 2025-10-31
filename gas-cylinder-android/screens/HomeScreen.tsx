@@ -95,36 +95,6 @@ export default function HomeScreen() {
     }
   }, [search, profile]);
 
-  // Debug function to test basic data access
-  const testDataAccess = async () => {
-    if (!profile?.organization_id) return;
-    
-    logger.log('🧪 Testing basic data access...');
-    
-    // Test customers table
-    const { data: customers, error: customerError } = await supabase
-      .from('customers')
-      .select('CustomerListID, name, barcode')
-      .eq('organization_id', profile.organization_id)
-      .limit(3);
-    
-    logger.log('🧪 Customers test:', { data: customers, error: customerError });
-    
-    // Test bottles table
-    const { data: bottles, error: bottleError } = await supabase
-      .from('bottles')
-      .select('barcode_number, customer_name')
-      .eq('organization_id', profile.organization_id)
-      .limit(3);
-    
-    logger.log('🧪 Bottles test:', { data: bottles, error: bottleError });
-  };
-
-  useEffect(() => {
-    if (profile?.organization_id) {
-      testDataAccess();
-    }
-  }, [profile]);
 
   // Refresh stats when screen comes into focus (e.g., after returning from scan)
   useFocusEffect(
