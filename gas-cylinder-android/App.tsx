@@ -1,5 +1,11 @@
 import React from 'react';
 import { View, Text, StyleSheet, LogBox } from 'react-native';
+
+// Silence known, harmless development warnings in Expo Go - MUST BE FIRST
+if (__DEV__) {
+  LogBox.ignoreAllLogs(true); // Suppress all logs in development for cleaner console
+}
+
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -34,35 +40,6 @@ import DataHealthScreen from './screens/DataHealthScreen';
 import NotificationSettingsScreen from './screens/NotificationSettingsScreen';
 import { notificationService } from './services/NotificationService';
 import { soundService } from './services/soundService';
-
-// Silence known, harmless development warnings in Expo Go
-if (__DEV__) {
-  LogBox.ignoreLogs([
-    // Expo Go limitations - these are informational, not errors
-    'expo-notifications: Android Push notifications',
-    '`expo-notifications` functionality is not fully supported',
-    'Expo AV has been deprecated',
-    'SafeAreaView has been deprecated',
-    // Sound placeholders during development
-    'Sound Scan Success configured but not preloaded',
-    'Sound Scan Error configured but not preloaded',
-    'Sound Notification configured but not preloaded',
-    'Sound Action configured but not preloaded',
-    // Common development messages
-    'Profile loaded successfully',
-    'Organization loaded successfully',
-    'Screen focused, refreshing stats',
-    'Running in Expo Go - skipping remote push setup',
-    'Local notifications still work',
-    'No push token available',
-    'Sounds preloaded successfully',
-    'SoundService initialized',
-    'Loading settings',
-    'Preloading sounds',
-    'Sound preloading completed',
-    'CustomizationService initialized'
-  ]);
-}
 
 const Stack = createNativeStackNavigator();
 
