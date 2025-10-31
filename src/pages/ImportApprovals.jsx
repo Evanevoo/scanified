@@ -1429,10 +1429,12 @@ export default function ImportApprovals() {
   const processScannedBarcode = async (barcode) => {
     try {
       // Look up bottle information
+      // SECURITY: Only access bottles from user's organization
       const { data: bottles, error } = await supabase
         .from('bottles')
         .select('*')
-        .eq('bottle_barcode', barcode);
+        .eq('barcode_number', barcode)
+        .eq('organization_id', organization.id);
 
       if (error) throw error;
 
@@ -1677,7 +1679,8 @@ export default function ImportApprovals() {
               assigned_customer: customer.CustomerListID,
               last_location_update: new Date().toISOString()
             })
-            .eq('barcode_number', scan.cylinder_barcode);
+            .eq('barcode_number', scan.cylinder_barcode)
+            .eq('organization_id', organization.id); // SECURITY: Only update bottles from user's organization
           
           if (bottleError) {
             logger.error('Error assigning bottle to customer:', bottleError);
@@ -1745,7 +1748,8 @@ export default function ImportApprovals() {
                 status: 'empty',
                 last_location_update: new Date().toISOString()
               })
-              .eq('barcode_number', scan.cylinder_barcode);
+              .eq('barcode_number', scan.cylinder_barcode)
+            .eq('organization_id', organization.id); // SECURITY: Only update bottles from user's organization
             
             if (bottleUnassignError) {
               logger.error('Error unassigning bottle from customer:', bottleUnassignError);
@@ -1921,7 +1925,8 @@ export default function ImportApprovals() {
               assigned_customer: customer.CustomerListID,
               last_location_update: new Date().toISOString()
             })
-            .eq('barcode_number', scan.cylinder_barcode);
+            .eq('barcode_number', scan.cylinder_barcode)
+            .eq('organization_id', organization.id); // SECURITY: Only update bottles from user's organization
           
           if (bottleError) {
             logger.error('Error assigning bottle to customer:', bottleError);
@@ -1989,7 +1994,8 @@ export default function ImportApprovals() {
                 status: 'empty',
                 last_location_update: new Date().toISOString()
               })
-              .eq('barcode_number', scan.cylinder_barcode);
+              .eq('barcode_number', scan.cylinder_barcode)
+            .eq('organization_id', organization.id); // SECURITY: Only update bottles from user's organization
             
             if (bottleUnassignError) {
               logger.error('Error unassigning bottle from customer:', bottleUnassignError);

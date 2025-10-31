@@ -116,10 +116,12 @@ export default function CustomerDetail() {
         setCustomer(customerData);
         setEditForm(customerData);
         
+        // SECURITY: Only fetch bottles from user's organization
         const { data: customerAssetsData, error: customerAssetsError } = await supabase
           .from('bottles')
           .select('*')
-          .eq('assigned_customer', id);
+          .eq('assigned_customer', id)
+          .eq('organization_id', customerData.organization_id);
         if (customerAssetsError) throw customerAssetsError;
         setCustomerAssets(customerAssetsData || []);
         
@@ -206,10 +208,12 @@ export default function CustomerDetail() {
       });
 
       // Refresh data
+      // SECURITY: Only fetch bottles from user's organization
       const { data: customerAssetsData, error: customerAssetsError } = await supabase
         .from('bottles')
         .select('*')
-        .eq('assigned_customer', id);
+        .eq('assigned_customer', id)
+        .eq('organization_id', organization?.id || customer?.organization_id);
 
       if (!customerAssetsError) {
         setCustomerAssets(customerAssetsData || []);
@@ -358,10 +362,12 @@ export default function CustomerDetail() {
         });
         
         // Refresh data and reset state
-        const { data: customerAssetsData, error: customerAssetsError } = await supabase
+        // SECURITY: Only fetch bottles from user's organization
+        const { data: customerAssetsData, error: customerAssetsError} = await supabase
           .from('bottles')
           .select('*')
-          .eq('assigned_customer', id);
+          .eq('assigned_customer', id)
+          .eq('organization_id', organization?.id || customer?.organization_id);
         
         if (!customerAssetsError) {
           setCustomerAssets(customerAssetsData || []);

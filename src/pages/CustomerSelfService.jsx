@@ -192,10 +192,15 @@ function CylinderTracking({ customerId }) {
   const fetchCylinders = async () => {
     setLoading(true);
     try {
+      // SECURITY: Only fetch bottles from user's organization and assigned to this customer
+      if (!organization?.id) {
+        throw new Error('Organization not found');
+      }
       let query = supabase
         .from('bottles')
         .select('*')
-        .eq('assigned_customer', customerId);
+        .eq('assigned_customer', customerId)
+        .eq('organization_id', organization.id);
 
       if (trackingFilter !== 'all') {
         query = query.eq('status', trackingFilter);
@@ -1088,8 +1093,9 @@ export default function CustomerSelfService() {
       setLoading(true);
       
       // Fetch customer statistics
+      // SECURITY: Only count bottles from user's organization
       const [cylindersRes, deliveriesRes, invoicesRes] = await Promise.all([
-        supabase.from('bottles').select('id', { count: 'exact' }).eq('status', 'active'),
+        supabase.from('bottles').select('id', { count: 'exact' }).eq('status', 'active').eq('organization_id', organization.id),
         supabase.from('deliveries').select('id', { count: 'exact' }).eq('status', 'pending'),
         supabase.from('invoices').select('id', { count: 'exact' }).eq('status', 'overdue')
       ]);
