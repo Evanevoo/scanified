@@ -4797,10 +4797,21 @@ export default function ImportApprovals() {
       const orderMatch = row.order_number === orderNum || row.invoice_number === orderNum;
       if (!orderMatch) return false;
       
-      // Match by barcode or product code
-      const productMatch = row.product_code === productCode || 
-                          row.bottle_barcode === productCode || 
-                          row.barcode_number === productCode;
+      // Get the barcode from the scan
+      const scannedBarcode = row.bottle_barcode || row.barcode_number || row.product_code;
+      
+      // Match by direct product code match OR by looking up the barcode in productCodeToAssetInfo
+      let productMatch = row.product_code === productCode || 
+                        row.bottle_barcode === productCode || 
+                        row.barcode_number === productCode;
+      
+      // If not matched yet, try to find the bottle's product code from the barcode
+      if (!productMatch && scannedBarcode) {
+        const bottleInfo = productCodeToAssetInfo[scannedBarcode];
+        if (bottleInfo && bottleInfo.product_code === productCode) {
+          productMatch = true;
+        }
+      }
       
       // Updated to match the mobile app's mode values
       const typeMatch = (type === 'out' && (
