@@ -2023,7 +2023,7 @@ export default function ImportApprovals() {
       lineItem.BottleBarcode ||
       lineItem.Barcode ||
       '';
-    const productCode = lineItem.product_code || lineItem.ProductCode || lineItem.Item || barcode || '';
+    const productCode = lineItem.product_code || lineItem.ProductCode || lineItem.Item || '';
     
     // Try to find asset info by barcode first, then by product code
     let assetInfo = {};
@@ -2044,13 +2044,16 @@ export default function ImportApprovals() {
       assetInfo = productCodeToAssetInfo[productCode] || {};
     }
     
+    // IMPORTANT: Use actual product_code from bottle info if available, not barcode
+    const finalProductCode = assetInfo.product_code || productCode || barcode;
+    
     return {
-      productCode: productCode || barcode,
+      productCode: finalProductCode,
       category: assetInfo.category || lineItem.category || 'INDUSTRIAL CYLINDERS',
       group: assetInfo.group || lineItem.group || '',
-      type: assetInfo.type || lineItem.type || productCode,
-      description: lineItem.description || assetInfo.description || productCode,
-      billingCode: lineItem.billing_code || lineItem.BillingCode || productCode
+      type: assetInfo.type || lineItem.type || finalProductCode,
+      description: lineItem.description || assetInfo.description || finalProductCode,
+      billingCode: lineItem.billing_code || lineItem.BillingCode || finalProductCode
     };
   }
 
