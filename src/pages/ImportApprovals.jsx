@@ -4815,6 +4815,17 @@ export default function ImportApprovals() {
     
     logger.log('🔍 getScannedQty:', { orderNum, productCode, type, totalScans: allScannedRows.length });
     
+    // CRITICAL: If productCode looks like a barcode (all numbers), resolve it to actual product code
+    let resolvedProductCode = productCode;
+    if (/^\d+$/.test(productCode)) {
+      // This might be a barcode, look it up
+      const bottleInfo = productCodeToAssetInfo[productCode];
+      if (bottleInfo && bottleInfo.product_code) {
+        resolvedProductCode = bottleInfo.product_code;
+        logger.log('📦 Resolved barcode to product code:', productCode, '->', resolvedProductCode);
+      }
+    }
+    
     const matches = allScannedRows.filter(row => {
       const orderMatch = row.order_number === orderNum || row.invoice_number === orderNum;
       if (!orderMatch) return false;
@@ -4823,14 +4834,14 @@ export default function ImportApprovals() {
       const scannedBarcode = row.bottle_barcode || row.barcode_number || row.product_code;
       
       // Match by direct product code match OR by looking up the barcode in productCodeToAssetInfo
-      let productMatch = row.product_code === productCode || 
-                        row.bottle_barcode === productCode || 
-                        row.barcode_number === productCode;
+      let productMatch = row.product_code === resolvedProductCode || 
+                        row.bottle_barcode === resolvedProductCode || 
+                        row.barcode_number === resolvedProductCode;
       
       // If not matched yet, try to find the bottle's product code from the barcode
       if (!productMatch && scannedBarcode) {
         const bottleInfo = productCodeToAssetInfo[scannedBarcode];
-        if (bottleInfo && bottleInfo.product_code === productCode) {
+        if (bottleInfo && bottleInfo.product_code === resolvedProductCode) {
           productMatch = true;
         }
       }

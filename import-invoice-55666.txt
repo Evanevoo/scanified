@@ -1,0 +1,3 @@
+Customer ID	Customer Name	Date	Product Code	Reference Number	Qty Out	Qty In
+80000661-1603379105A	Chase 14 LTD	31/10/2025	BAR300	55666	1	0
+
