@@ -857,7 +857,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       logger.log('Scan synced successfully:', data);
 
       // Also update bottle status and location
-      await updateBottleStatus(scanResult.barcode, scanResult.action, scanResult.itemDetails);
+      await updateBottleStatus(scanResult.barcode, scanResult.action);
     } catch (error) {
       logger.error('Failed to sync scan to server:', error);
       logger.error('Error type:', typeof error);
@@ -871,43 +871,14 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
 
   // Update bottle status
   const updateBottleStatus = async (barcode: string, action: 'in' | 'out' | 'locate' | 'fill', itemDetails?: any) => {
-    // First, check if bottle exists
+    // First, check current bottle status
     const { data: currentBottle, error: fetchError } = await supabase
       .from('bottles')
-      .select('*')
+      .select('status')
       .eq('barcode_number', barcode)
       .eq('organization_id', organization?.id)
-      .maybeSingle();
+      .single();
 
-    // If bottle doesn't exist, create it
-    if (!currentBottle) {
-      logger.log('🆕 Bottle not found in database, creating new entry for:', barcode);
-      
-      const { data: newBottle, error: createError } = await supabase
-        .from('bottles')
-        .insert({
-          barcode_number: barcode,
-          serial_number: barcode, // Use barcode as serial if no serial provided
-          product_code: itemDetails?.productCode || 'UNKNOWN',
-          description: itemDetails?.description || 'Auto-created from scan',
-          gas_type: itemDetails?.gasType || 'UNKNOWN',
-          category: 'INDUSTRIAL CYLINDERS',
-          status: action === 'in' ? 'full' : action === 'out' ? 'in_use' : 'available',
-          organization_id: organization?.id,
-          created_at: new Date().toISOString()
-        })
-        .select()
-        .single();
-      
-      if (createError) {
-        logger.error('❌ Error creating bottle:', createError);
-        return;
-      }
-      
-      logger.log('✅ Bottle created successfully:', newBottle.barcode_number);
-      return;
-    }
-    
     if (fetchError) {
       logger.error('Error fetching current bottle status:', fetchError);
       return;
