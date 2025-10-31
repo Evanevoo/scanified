@@ -913,7 +913,12 @@ export default function ImportApprovals() {
       const importOrderNumbers = new Set();
       [...individualInvoices, ...individualReceipts].forEach(record => {
         const data = parseDataField(record.data);
-        const orderNum = record.data?.order_number || record.data?.reference_number || data.order_number || data.reference_number;
+        // Try multiple ways to get order number from imported records
+        const orderNum = record.data?.order_number 
+          || record.data?.reference_number 
+          || data.order_number 
+          || data.reference_number
+          || (data.rows && data.rows[0] && (data.rows[0].order_number || data.rows[0].reference_number));
         if (orderNum) {
           importOrderNumbers.add(orderNum.toString().trim());
         }
@@ -922,11 +927,39 @@ export default function ImportApprovals() {
       logger.log('📋 Deduplication - Import order numbers:', Array.from(importOrderNumbers));
       
       const deduplicatedScannedOnly = scannedOnlyRecords.filter(record => {
-        const orderNum = record.data?.order_number || record.data?.reference_number;
-        const hasMatchingImport = orderNum && importOrderNumbers.has(orderNum.toString().trim());
-        if (hasMatchingImport) {
-          logger.log('🗑️ Removing duplicate scanned-only record for order:', orderNum);
+        const data = parseDataField(record.data);
+        // Try multiple ways to get order number from scanned-only records
+        // Also check the ID format: scanned_${orderNumber}
+        let orderNum = record.data?.order_number 
+          || record.data?.reference_number
+          || data.order_number
+          || data.reference_number
+          || (data.rows && data.rows[0] && (data.rows[0].order_number || data.rows[0].reference_number));
+        
+        // Fallback: Extract from ID if it follows pattern "scanned_${orderNumber}"
+        if (!orderNum && record.id && record.id.startsWith('scanned_')) {
+          orderNum = record.id.replace('scanned_', '');
         }
+        
+        if (!orderNum) {
+          logger.log('⚠️ Scanned-only record has no order number:', record.id);
+          return true; // Keep records without order numbers (shouldn't happen)
+        }
+        
+        const orderNumStr = orderNum.toString().trim();
+        const hasMatchingImport = importOrderNumbers.has(orderNumStr);
+        
+        logger.log('🔍 Deduplication check:', {
+          recordId: record.id,
+          orderNum: orderNumStr,
+          hasMatchingImport,
+          importOrderNumbers: Array.from(importOrderNumbers)
+        });
+        
+        if (hasMatchingImport) {
+          logger.log('🗑️ Removing duplicate scanned-only record for order:', orderNumStr, 'Record ID:', record.id);
+        }
+        
         return !hasMatchingImport;
       });
       
