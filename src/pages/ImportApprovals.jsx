@@ -690,6 +690,14 @@ export default function ImportApprovals() {
       
       const startTime = Date.now();
       
+      // First, check ALL imports regardless of status to debug
+      const { data: allImports, error: allImportsError } = await supabase
+        .from('imported_invoices')
+        .select('id, status, organization_id, created_at')
+        .eq('organization_id', organization.id);
+      
+      logger.log('🔍 All imports for organization (including rejected):', allImports?.length || 0, allImports);
+      
       const { data: invoices, error: invoiceError } = await supabase
         .from('imported_invoices')
         .select('*')
@@ -715,8 +723,11 @@ export default function ImportApprovals() {
       
       logger.log('🔍 Organization filter:', {
         organizationId: organization.id,
+        allImportsCount: allImports?.length || 0,
         invoicesFound: invoices?.length || 0,
-        receiptsFound: receipts?.length || 0
+        receiptsFound: receipts?.length || 0,
+        invoiceIds: invoices?.map(i => i.id) || [],
+        invoiceStatuses: invoices?.map(i => i.status) || []
       });
       
       // Split grouped imports into individual records (same as in fetchPendingInvoices/fetchPendingReceipts)
