@@ -57,19 +57,36 @@ export default function AssetDetail() {
   const fetchAssetDetail = async () => {
     try {
       setLoading(true);
+      
+      // CRITICAL SECURITY: Must filter by organization_id to prevent cross-organization data access
+      if (!profile?.organization_id) {
+        throw new Error('Organization not found. Please log in again.');
+      }
+      
       const { data, error } = await supabase
         .from('bottles') // Keep using bottles table for now
         .select('*')
         .eq('id', id)
+        .eq('organization_id', profile.organization_id) // SECURITY: Only show assets from user's organization
         .single();
 
-      if (error) throw error;
+      if (error) {
+        if (error.code === 'PGRST116') {
+          throw new Error('Asset not found or you do not have permission to view it');
+        }
+        throw error;
+      }
+      
+      // SECURITY CHECK: Double-verify the asset belongs to the user's organization
+      if (data && data.organization_id !== profile.organization_id) {
+        throw new Error('Unauthorized: This asset belongs to a different organization');
+      }
       
       setAsset(data);
       setEditData(data);
     } catch (error) {
       logger.error('Error fetching asset:', error);
-      setError('Failed to load asset details');
+      setError(error.message || 'Failed to load asset details');
     } finally {
       setLoading(false);
     }

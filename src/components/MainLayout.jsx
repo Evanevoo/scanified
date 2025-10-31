@@ -124,9 +124,10 @@ export default function MainLayout({ children }) {
         }
         
         // Bottles: by serial number or barcode (filtered by organization)
+        // CRITICAL SECURITY: Must always filter by organization_id
         const { data: bottles, error: bottleError } = await supabase
           .from('bottles')
-          .select('id, serial_number, barcode_number, assigned_customer, product_code')
+          .select('id, serial_number, barcode_number, assigned_customer, product_code, organization_id')
           .eq('organization_id', organization.id)
           .or(`serial_number.ilike.%${searchTerm}%,barcode_number.ilike.%${searchTerm}%,product_code.ilike.%${searchTerm}%`)
           .limit(5);
@@ -135,13 +136,16 @@ export default function MainLayout({ children }) {
           logger.error('Error fetching bottles for search:', bottleError);
         }
         
+        // SECURITY CHECK: Double-verify all bottles belong to current organization
+        const verifiedBottles = (bottles || []).filter(b => b.organization_id === organization.id);
+        
         const customerResults = (customers || []).map(c => ({
           type: 'customer',
           id: c.CustomerListID,
           label: c.name,
           sub: c.CustomerListID,
         }));
-        const bottleResults = (bottles || []).map(b => ({
+        const bottleResults = verifiedBottles.map(b => ({
           type: 'bottle',
           id: b.id,
           label: b.barcode_number || b.serial_number || b.product_code,
