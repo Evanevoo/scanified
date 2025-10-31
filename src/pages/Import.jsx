@@ -409,7 +409,7 @@ export default function Import() {
   }
 
   // Check for existing imports and update them
-  async function checkAndUpdateExistingImport(type, preview, mapping, user) {
+  async function checkAndUpdateExistingImport(type, preview, mapping, user, organizationId) {
     try {
       // Create a unique key based on the data
       const dataHash = JSON.stringify(preview).length + '_' + preview.length;
@@ -417,11 +417,12 @@ export default function Import() {
       
       logger.log('Checking for existing import with key:', importKey);
       
-      // Check if an import with similar data already exists
+      // Check if an import with similar data already exists (filter by organization)
       const { data: existingImports, error: checkError } = await supabase
         .from(type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts')
-        .select('id, status, uploaded_at')
+        .select('id, status, uploaded_at, organization_id')
         .eq('status', 'pending')
+        .eq('organization_id', organizationId)
         .order('uploaded_at', { ascending: false })
         .limit(5);
       
@@ -451,7 +452,8 @@ export default function Import() {
                 updated_from_existing: true
               }
             },
-            uploaded_at: new Date().toISOString()
+            uploaded_at: new Date().toISOString(),
+            organization_id: organizationId
           })
           .eq('id', mostRecent.id)
           .select()
@@ -552,14 +554,26 @@ export default function Import() {
       const user = await getCurrentUser();
       if (!user) throw new Error('User not authenticated');
       
+      // Get user's organization_id
+      const { data: userProfile, error: profileError } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single();
+      
+      if (profileError || !userProfile?.organization_id) {
+        throw new Error('User not assigned to an organization');
+      }
+      
       logger.log('Creating invoice import with data:', {
         previewLength: preview.length,
         userId: user.id,
+        organizationId: userProfile.organization_id,
         status: 'pending'
       });
       
       // Check for existing imports first
-      const existingImport = await checkAndUpdateExistingImport('invoice', preview, mapping, user);
+      const existingImport = await checkAndUpdateExistingImport('invoice', preview, mapping, user, userProfile.organization_id);
       if (existingImport) {
         setResult({
           message: 'Import updated and submitted for approval',
@@ -585,6 +599,7 @@ export default function Import() {
             }
           },
           uploaded_by: user.id,
+          organization_id: userProfile.organization_id,
           status: 'pending'
         })
         .select()
@@ -650,11 +665,36 @@ export default function Import() {
       const user = await getCurrentUser();
       if (!user) throw new Error('User not authenticated');
       
+      // Get user's organization_id
+      const { data: userProfile, error: profileError } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single();
+      
+      if (profileError || !userProfile?.organization_id) {
+        throw new Error('User not assigned to an organization');
+      }
+      
       logger.log('Creating sales receipt import with data:', {
         previewLength: preview.length,
         userId: user.id,
+        organizationId: userProfile.organization_id,
         status: 'pending'
       });
+      
+      // Check for existing imports first  
+      const existingImport = await checkAndUpdateExistingImport('sales_receipt', preview, mapping, user, userProfile.organization_id);
+      if (existingImport) {
+        setResult({
+          message: 'Import updated and submitted for approval',
+          total_rows: preview.length,
+          status: 'pending_approval'
+        });
+        setLoading(false);
+        setImporting(false);
+        return;
+      }
       
       // Store in temporary table for approval instead of direct insertion
       const { data: importedReceipt, error: importError } = await supabase
@@ -670,6 +710,7 @@ export default function Import() {
             }
           },
           uploaded_by: user.id,
+          organization_id: userProfile.organization_id,
           status: 'pending'
         })
         .select()
