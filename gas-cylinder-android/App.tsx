@@ -38,18 +38,29 @@ import { soundService } from './services/soundService';
 // Silence known, harmless development warnings in Expo Go
 if (__DEV__) {
   LogBox.ignoreLogs([
-    // Expo Go push notifications informational message (SDK 53+)
-    'expo-notifications: Android Push notifications (remote notifications) functionality provided by expo-notifications was removed from Expo Go',
-    '`expo-notifications` functionality is not fully supported in Expo Go',
-    // Expo AV deprecation warning
-    '[expo-av]: Expo AV has been deprecated and will be removed in SDK 54',
-    // SafeAreaView deprecation
+    // Expo Go limitations - these are informational, not errors
+    'expo-notifications: Android Push notifications',
+    '`expo-notifications` functionality is not fully supported',
+    'Expo AV has been deprecated',
     'SafeAreaView has been deprecated',
-    // Optional: sound placeholders during dev
-    'Sound Scan Success configured but not preloaded (placeholder file)',
-    'Sound Scan Error configured but not preloaded (placeholder file)',
-    'Sound Notification configured but not preloaded (placeholder file)',
-    'Sound Action configured but not preloaded (placeholder file)'
+    // Sound placeholders during development
+    'Sound Scan Success configured but not preloaded',
+    'Sound Scan Error configured but not preloaded',
+    'Sound Notification configured but not preloaded',
+    'Sound Action configured but not preloaded',
+    // Common development messages
+    'Profile loaded successfully',
+    'Organization loaded successfully',
+    'Screen focused, refreshing stats',
+    'Running in Expo Go - skipping remote push setup',
+    'Local notifications still work',
+    'No push token available',
+    'Sounds preloaded successfully',
+    'SoundService initialized',
+    'Loading settings',
+    'Preloading sounds',
+    'Sound preloading completed',
+    'CustomizationService initialized'
   ]);
 }
 
