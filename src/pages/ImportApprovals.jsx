@@ -909,13 +909,37 @@ export default function ImportApprovals() {
       logger.log('⏱️ Scanned records processing completed in:', Date.now() - processStartTime, 'ms');
       logger.log('📊 Final scanned records count:', scannedOnlyRecords.length);
       
-      const allRecords = [...individualInvoices, ...individualReceipts, ...scannedOnlyRecords];
-      logger.log('📊 All records count:', allRecords.length);
+      // Deduplicate: Remove scanned-only records if we have an import for the same order number
+      const importOrderNumbers = new Set();
+      [...individualInvoices, ...individualReceipts].forEach(record => {
+        const data = parseDataField(record.data);
+        const orderNum = record.data?.order_number || record.data?.reference_number || data.order_number || data.reference_number;
+        if (orderNum) {
+          importOrderNumbers.add(orderNum.toString().trim());
+        }
+      });
+      
+      logger.log('📋 Deduplication - Import order numbers:', Array.from(importOrderNumbers));
+      
+      const deduplicatedScannedOnly = scannedOnlyRecords.filter(record => {
+        const orderNum = record.data?.order_number || record.data?.reference_number;
+        const hasMatchingImport = orderNum && importOrderNumbers.has(orderNum.toString().trim());
+        if (hasMatchingImport) {
+          logger.log('🗑️ Removing duplicate scanned-only record for order:', orderNum);
+        }
+        return !hasMatchingImport;
+      });
+      
+      logger.log('📊 After deduplication - scanned-only records:', deduplicatedScannedOnly.length);
+      
+      const allRecords = [...individualInvoices, ...individualReceipts, ...deduplicatedScannedOnly];
+      logger.log('📊 All records count (after deduplication):', allRecords.length);
       
       logger.log('🔍 Final allRecords:', {
         individualInvoices: individualInvoices.length,
         individualReceipts: individualReceipts.length,
         scannedOnlyRecords: scannedOnlyRecords.length,
+        deduplicatedScannedOnly: deduplicatedScannedOnly.length,
         total: allRecords.length
       });
       
