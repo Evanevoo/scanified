@@ -4223,18 +4223,170 @@ export default function ImportApprovals() {
     try {
       const data = parseDataField(record.data);
       const rows = data.rows || data.line_items || [];
+      const newCustomerName = data.customer_name || rows[0]?.customer_name;
+      const orderNumber = data.order_number || data.reference_number || data.invoice_number;
       
+      // Get customer ID from customer name if possible
+      let newCustomerId = null;
+      if (newCustomerName) {
+        const { data: customer } = await supabase
+          .from('customers')
+          .select('id, CustomerListID')
+          .eq('name', newCustomerName)
+          .eq('organization_id', organization?.id)
+          .limit(1)
+          .single();
+        
+        if (customer) {
+          newCustomerId = customer.id || customer.CustomerListID;
+        }
+      }
+      
+      // Get all scanned barcodes for this order (shipped items only)
+      const scannedBarcodes = new Set();
+      if (orderNumber) {
+        // Get scans from scans table (shipped items only)
+        const { data: scans } = await supabase
+          .from('scans')
+          .select('barcode_number, bottle_barcode, product_code')
+          .eq('order_number', orderNumber)
+          .or('mode.eq.SHIP,mode.eq.delivery,action.eq.out');
+        
+        if (scans && scans.length > 0) {
+          scans.forEach(scan => {
+            if (scan.barcode_number) scannedBarcodes.add(scan.barcode_number);
+            if (scan.bottle_barcode) scannedBarcodes.add(scan.bottle_barcode);
+          });
+        }
+        
+        // Also check bottle_scans table
+        const { data: bottleScans } = await supabase
+          .from('bottle_scans')
+          .select('barcode_number, cylinder_barcode')
+          .eq('order_number', orderNumber);
+        
+        if (bottleScans && bottleScans.length > 0) {
+          bottleScans.forEach(scan => {
+            if (scan.barcode_number) scannedBarcodes.add(scan.barcode_number);
+            if (scan.cylinder_barcode) scannedBarcodes.add(scan.cylinder_barcode);
+          });
+        }
+      }
+      
+      const assignmentWarnings = [];
+      const assignmentSuccesses = [];
+      const processedBarcodes = new Set();
+      
+      // First, process scanned barcodes (most reliable)
+      for (const barcode of scannedBarcodes) {
+        if (processedBarcodes.has(barcode)) continue;
+        processedBarcodes.add(barcode);
+        
+        const { data: bottles, error: bottleError } = await supabase
+          .from('bottles')
+          .select('*')
+          .eq('barcode_number', barcode)
+          .eq('organization_id', organization?.id)
+          .limit(1);
+          
+          if (bottleError) {
+            logger.error('Error finding bottle:', bottleError);
+            continue;
+          }
+          
+          if (bottles && bottles.length > 0) {
+            const bottle = bottles[0];
+            const currentCustomerName = bottle.assigned_customer || bottle.customer_name;
+            
+            // Check if bottle is at home (no customer assigned)
+            const isAtHome = !currentCustomerName || currentCustomerName === '' || currentCustomerName === null;
+            
+            // Check if bottle is at a different customer
+            const isAtDifferentCustomer = !isAtHome && currentCustomerName !== newCustomerName;
+            
+            if (isAtHome) {
+              // Bottle is at home - assign normally
+              const updateData = {
+                assigned_customer: newCustomerId || newCustomerName,
+                customer_name: newCustomerName,
+                status: 'RENTED',
+                rental_start_date: new Date().toISOString().split('T')[0],
+                updated_at: new Date().toISOString()
+              };
+              
+              // Preserve existing notes
+              if (bottle.notes) {
+                updateData.notes = bottle.notes;
+              }
+              
+              const { error: updateError } = await supabase
+                .from('bottles')
+                .update(updateData)
+                .eq('id', bottle.id)
+                .eq('organization_id', organization?.id);
+              
+              if (updateError) {
+                logger.error('Error updating bottle:', updateError);
+                assignmentWarnings.push(`Failed to assign bottle ${bottle.barcode_number}: ${updateError.message}`);
+              } else {
+                logger.log(`✅ Assigned bottle ${bottle.barcode_number} to customer ${newCustomerName}`);
+                assignmentSuccesses.push(`Bottle ${bottle.barcode_number} assigned to ${newCustomerName}`);
+                
+                // Create rental record if it doesn't exist
+                await createRentalRecord(bottle, newCustomerName, null);
+              }
+            } else if (isAtDifferentCustomer) {
+              // Bottle is at a different customer - add warning note instead of reassigning
+              const warningNote = `[${new Date().toISOString().split('T')[0]}] WARNING: Bottle was expected to be assigned to ${newCustomerName} but is currently at ${currentCustomerName}. Bottle has not been returned home yet.`;
+              
+              const existingNotes = bottle.notes || '';
+              const updatedNotes = existingNotes 
+                ? `${existingNotes}\n${warningNote}`
+                : warningNote;
+              
+              const { error: updateError } = await supabase
+                .from('bottles')
+                .update({
+                  notes: updatedNotes,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', bottle.id)
+                .eq('organization_id', organization?.id);
+              
+              if (updateError) {
+                logger.error('Error updating bottle notes:', updateError);
+                assignmentWarnings.push(`Failed to add warning note to bottle ${bottle.barcode_number}: ${updateError.message}`);
+              } else {
+                logger.warn(`⚠️ Bottle ${bottle.barcode_number} is at ${currentCustomerName}, added warning note for ${newCustomerName}`);
+                assignmentWarnings.push(`Bottle ${bottle.barcode_number} is at ${currentCustomerName} (not returned home yet). Warning note added.`);
+              }
+            } else {
+              // Already assigned to this customer - just log
+              logger.log(`ℹ️ Bottle ${bottle.barcode_number} is already assigned to ${newCustomerName}`);
+            }
+          } else {
+            logger.warn(`⚠️ Bottle not found for scanned barcode: ${barcode}`);
+            assignmentWarnings.push(`Bottle not found: ${barcode}`);
+          }
+      }
+      
+      // Fallback: Process import rows if we didn't get barcodes from scans (for older imports)
       for (const row of rows) {
-        if (row.product_code || row.bottle_barcode || row.barcode) {
+        // For shipped items (qty_out > 0), assign bottles to customer
+        if (row.qty_out > 0 && (row.product_code || row.bottle_barcode || row.barcode)) {
+          const barcode = row.bottle_barcode || row.barcode;
+          if (barcode && processedBarcodes.has(barcode)) continue; // Already processed
+          
           // Find the bottle by barcode or product code
-          const bottleQuery = row.bottle_barcode || row.barcode
-            ? { barcode_number: row.bottle_barcode || row.barcode }
+          const bottleQuery = barcode
+            ? { barcode_number: barcode }
             : { product_code: row.product_code };
           
           const { data: bottles, error: bottleError } = await supabase
             .from('bottles')
             .select('*')
             .match(bottleQuery)
+            .eq('organization_id', organization?.id)
             .limit(1);
           
           if (bottleError) {
@@ -4244,35 +4396,101 @@ export default function ImportApprovals() {
           
           if (bottles && bottles.length > 0) {
             const bottle = bottles[0];
-            const customerName = row.customer_name || data.customer_name;
+            if (barcode) processedBarcodes.add(barcode);
             
-            // Update bottle with customer assignment
-            const { error: updateError } = await supabase
-              .from('bottles')
-              .update({
-                assigned_customer: customerName,
-                customer_name: customerName,
+            const currentCustomerName = bottle.assigned_customer || bottle.customer_name;
+            
+            // Check if bottle is at home (no customer assigned)
+            const isAtHome = !currentCustomerName || currentCustomerName === '' || currentCustomerName === null;
+            
+            // Check if bottle is at a different customer
+            const isAtDifferentCustomer = !isAtHome && currentCustomerName !== newCustomerName;
+            
+            if (isAtHome) {
+              // Bottle is at home - assign normally
+              const updateData = {
+                assigned_customer: newCustomerId || newCustomerName,
+                customer_name: newCustomerName,
                 status: 'RENTED',
-                rental_start_date: new Date().toISOString().split('T')[0], // DATE format
+                rental_start_date: new Date().toISOString().split('T')[0],
                 updated_at: new Date().toISOString()
-              })
-              .eq('id', bottle.id);
-            
-            if (updateError) {
-              logger.error('Error updating bottle:', updateError);
-            } else {
-              logger.log(`✅ Assigned bottle ${bottle.barcode_number} to customer ${customerName}`);
+              };
               
-              // Create rental record if it doesn't exist
-              await createRentalRecord(bottle, customerName, row);
+              // Preserve existing notes
+              if (bottle.notes) {
+                updateData.notes = bottle.notes;
+              }
+              
+              const { error: updateError } = await supabase
+                .from('bottles')
+                .update(updateData)
+                .eq('id', bottle.id)
+                .eq('organization_id', organization?.id);
+              
+              if (updateError) {
+                logger.error('Error updating bottle:', updateError);
+                assignmentWarnings.push(`Failed to assign bottle ${bottle.barcode_number}: ${updateError.message}`);
+              } else {
+                logger.log(`✅ Assigned bottle ${bottle.barcode_number} to customer ${newCustomerName}`);
+                assignmentSuccesses.push(`Bottle ${bottle.barcode_number} assigned to ${newCustomerName}`);
+                
+                // Create rental record if it doesn't exist
+                await createRentalRecord(bottle, newCustomerName, row);
+              }
+            } else if (isAtDifferentCustomer) {
+              // Bottle is at a different customer - add warning note instead of reassigning
+              const warningNote = `[${new Date().toISOString().split('T')[0]}] WARNING: Bottle was expected to be assigned to ${newCustomerName} but is currently at ${currentCustomerName}. Bottle has not been returned home yet.`;
+              
+              const existingNotes = bottle.notes || '';
+              const updatedNotes = existingNotes 
+                ? `${existingNotes}\n${warningNote}`
+                : warningNote;
+              
+              const { error: updateError } = await supabase
+                .from('bottles')
+                .update({
+                  notes: updatedNotes,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', bottle.id)
+                .eq('organization_id', organization?.id);
+              
+              if (updateError) {
+                logger.error('Error updating bottle notes:', updateError);
+                assignmentWarnings.push(`Failed to add warning note to bottle ${bottle.barcode_number}: ${updateError.message}`);
+              } else {
+                logger.warn(`⚠️ Bottle ${bottle.barcode_number} is at ${currentCustomerName}, added warning note for ${newCustomerName}`);
+                assignmentWarnings.push(`Bottle ${bottle.barcode_number} is at ${currentCustomerName} (not returned home yet). Warning note added.`);
+              }
+            } else {
+              // Already assigned to this customer - just log
+              logger.log(`ℹ️ Bottle ${bottle.barcode_number} is already assigned to ${newCustomerName}`);
             }
           } else {
             logger.warn(`⚠️ Bottle not found for barcode: ${row.bottle_barcode || row.barcode || row.product_code}`);
+            assignmentWarnings.push(`Bottle not found: ${row.bottle_barcode || row.barcode || row.product_code}`);
           }
+        }
+      }
+      
+      // Show summary messages
+      if (assignmentSuccesses.length > 0) {
+        logger.log(`✅ Successfully assigned ${assignmentSuccesses.length} bottle(s)`);
+      }
+      
+      if (assignmentWarnings.length > 0) {
+        const warningMessage = `⚠️ ${assignmentWarnings.length} warning(s):\n${assignmentWarnings.join('\n')}`;
+        logger.warn(warningMessage);
+        // Optionally show warnings to user via snackbar
+        if (assignmentWarnings.length > 0 && assignmentSuccesses.length === 0) {
+          setError(warningMessage);
+        } else if (assignmentWarnings.length > 0) {
+          setSnackbar(`Assigned ${assignmentSuccesses.length} bottle(s). ${assignmentWarnings.length} warning(s) - see logs.`);
         }
       }
     } catch (error) {
       logger.error('Error assigning bottles to customer:', error);
+      setError('Failed to assign bottles: ' + error.message);
     }
   }
 
