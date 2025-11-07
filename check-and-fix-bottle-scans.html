@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Check and Fix Bottle Scans</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1200px;
+      margin: 50px auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      border-bottom: 3px solid #4CAF50;
+      padding-bottom: 10px;
+    }
+    .input-group {
+      margin: 20px 0;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+      color: #555;
+    }
+    input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    button {
+      background-color: #4CAF50;
+      color: white;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin-right: 10px;
+      margin-top: 10px;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    .warning {
+      background-color: #fff3cd;
+      border: 1px solid #ffc107;
+      color: #856404;
+      padding: 12px;
+      border-radius: 4px;
+      margin: 20px 0;
+    }
+    .success {
+      background-color: #d4edda;
+      border: 1px solid #28a745;
+      color: #155724;
+      padding: 12px;
+      border-radius: 4px;
+      margin: 20px 0;
+    }
+    .error {
+      background-color: #f8d7da;
+      border: 1px solid #dc3545;
+      color: #721c24;
+      padding: 12px;
+      border-radius: 4px;
+      margin: 20px 0;
+    }
+    .info {
+      background-color: #d1ecf1;
+      border: 1px solid #17a2b8;
+      color: #0c5460;
+      padding: 12px;
+      border-radius: 4px;
+      margin: 20px 0;
+    }
+    #results {
+      margin-top: 30px;
+    }
+    .bottle-list {
+      background-color: #f8f9fa;
+      padding: 15px;
+      border-radius: 4px;
+      margin: 10px 0;
+    }
+    .bottle-item {
+      padding: 8px;
+      border-bottom: 1px solid #dee2e6;
+    }
+    .bottle-item:last-child {
+      border-bottom: none;
+    }
+    pre {
+      background-color: #f8f9fa;
+      padding: 15px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Check and Fix Bottle Scans for Order</h1>
+    
+    <div class="warning">
+      <strong>⚠️ Purpose:</strong> This tool helps diagnose and fix missing bottle_scans for orders.
+      It checks if scans exist in the scans table and recreates bottle_scans if they were deleted.
+    </div>
+
+    <div class="input-group">
+      <label for="supabaseUrl">Supabase URL:</label>
+      <input type="text" id="supabaseUrl" placeholder="https://your-project.supabase.co" value="https://jtfucttzaswmqqhmmhfb.supabase.co">
+    </div>
+
+    <div class="input-group">
+      <label for="supabaseKey">Supabase Anon Key:</label>
+      <input type="password" id="supabaseKey" placeholder="Your anon key" value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5NDQ4NzMsImV4cCI6MjA2MTUyMDg3M30.6-CAPYefAektlh3dLRVFZbPKYSnhIAzp3knohc3NDEg">
+      <small style="color: #666; margin-top: 5px; display: block;">(Pre-filled from your config - you can change if needed)</small>
+    </div>
+
+    <div class="input-group">
+      <label for="organizationId">Organization ID:</label>
+      <input type="text" id="organizationId" placeholder="Your organization UUID">
+      <small style="color: #666; margin-top: 5px; display: block;">
+        💡 <strong>How to find it:</strong> 
+        <button type="button" onclick="getOrgIdFromStorage()" style="background: #17a2b8; padding: 6px 12px; font-size: 13px; margin-left: 5px; border-radius: 4px; cursor: pointer;">🔍 Auto-Detect (if logged in)</button>
+        <br><br>
+        <strong>Manual methods:</strong><br>
+        1. <strong>Browser Console:</strong> Open your app, press F12, then in console type:<br>
+        <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">localStorage.getItem('supabase.auth.token')</code><br>
+        2. <strong>Supabase Dashboard:</strong> Go to Table Editor → profiles table → Find your user → Check organization_id column<br>
+        3. <strong>Your App Settings:</strong> The organization ID might be visible in the Settings page
+      </small>
+    </div>
+
+    <div class="input-group">
+      <label for="orderNumber">Order Number:</label>
+      <input type="text" id="orderNumber" placeholder="Enter the order number (e.g., 12345)">
+    </div>
+
+    <button onclick="checkOrder()">🔍 Check Order</button>
+    <button onclick="searchAllScans()" id="searchAllBtn">🔎 Search All Recent Scans (500 records)</button>
+    <button onclick="verifyOrganization()" id="verifyOrgBtn" style="background: #9c27b0;">🔍 Verify Organization ID</button>
+    <button onclick="checkMobileAppUser()" id="checkMobileUserBtn" style="background: #e91e63;">📱 Check Mobile App User</button>
+    <button onclick="listAllOrganizations()" id="listOrgsBtn" style="background: #607d8b;">📋 List All Organizations</button>
+    <button onclick="checkSalesOrder()" id="checkSalesOrderBtn" style="background: #2196f3;">📋 Check Sales Order</button>
+    <button onclick="updateOrderNumbers()" id="updateOrderBtn" style="background: #ff9800; display: none;">✏️ Update Order Numbers</button>
+    <button onclick="recreateBottleScans()" id="recreateBtn" disabled>🔄 Recreate Bottle Scans</button>
+
+    <div id="results"></div>
+  </div>
+
+  <script>
+    let supabase;
+    let foundScans = [];
+
+    // Try to get organization ID from browser storage or database
+    async function getOrgIdFromStorage() {
+      try {
+        const url = document.getElementById('supabaseUrl').value;
+        const key = document.getElementById('supabaseKey').value;
+        
+        if (!url || !key) {
+          alert('⚠️ Please fill in Supabase URL and Key first, then try again.');
+          return;
+        }
+
+        const tempSupabase = window.supabase.createClient(url, key);
+        
+        // Method 1: Try to get from active session
+        const { data: { session }, error: sessionError } = await tempSupabase.auth.getSession();
+        
+        if (session?.user) {
+          // Method 2: Get from user profile
+          const { data: profile, error: profileError } = await tempSupabase
+            .from('profiles')
+            .select('organization_id')
+            .eq('id', session.user.id)
+            .single();
+          
+          if (profile?.organization_id) {
+            document.getElementById('organizationId').value = profile.organization_id;
+            alert('✅ Found Organization ID: ' + profile.organization_id);
+            return;
+          }
+        }
+
+        // Method 3: Try localStorage/sessionStorage
+        const authToken = localStorage.getItem('supabase.auth.token') || sessionStorage.getItem('supabase.auth.token');
+        if (authToken) {
+          try {
+            const tokenData = JSON.parse(authToken);
+            // Check various possible locations
+            const orgId = tokenData.currentSession?.user?.user_metadata?.organization_id ||
+                         tokenData.currentSession?.user?.app_metadata?.organization_id ||
+                         tokenData.user?.user_metadata?.organization_id;
+            
+            if (orgId) {
+              document.getElementById('organizationId').value = orgId;
+              alert('✅ Found Organization ID from storage: ' + orgId);
+              return;
+            }
+          } catch (e) {
+            // Continue to manual entry
+          }
+        }
+
+        // If we have a session but no org ID in profile, try to list organizations
+        if (session?.user) {
+          const { data: orgs, error: orgsError } = await tempSupabase
+            .from('organizations')
+            .select('id, name')
+            .limit(10);
+          
+          if (orgs && orgs.length > 0) {
+            if (orgs.length === 1) {
+              document.getElementById('organizationId').value = orgs[0].id;
+              alert('✅ Found Organization ID: ' + orgs[0].id + '\nOrganization: ' + orgs[0].name);
+              return;
+            } else {
+              const orgList = orgs.map((o, i) => `${i + 1}. ${o.name} (${o.id})`).join('\n');
+              alert('⚠️ Found multiple organizations. Please select one:\n\n' + orgList);
+              return;
+            }
+          }
+        }
+
+        alert('⚠️ Could not find Organization ID automatically.\n\n' +
+              'To find it manually:\n' +
+              '1. Open your app and go to Settings page\n' +
+              '2. Open browser console (F12) and type: localStorage.getItem("supabase.auth.token")\n' +
+              '3. Check your Supabase dashboard → Table Editor → profiles table → Find your user → Check organization_id column\n' +
+              '4. Or check organizations table to see all organizations');
+      } catch (error) {
+        alert('⚠️ Error retrieving Organization ID: ' + error.message + '\n\nPlease enter it manually.');
+        console.error('Error:', error);
+      }
+    }
+
+    async function checkOrder() {
+      const url = document.getElementById('supabaseUrl').value;
+      const key = document.getElementById('supabaseKey').value;
+      const orgId = document.getElementById('organizationId').value;
+      const orderNumber = document.getElementById('orderNumber').value.trim();
+      const results = document.getElementById('results');
+
+      if (!url || !key || !orgId || !orderNumber) {
+        results.innerHTML = '<div class="error">❌ Please fill in all fields</div>';
+        return;
+      }
+
+      // Initialize Supabase
+      supabase = window.supabase.createClient(url, key);
+
+      results.innerHTML = '<div class="info">🔍 Checking order...</div>';
+
+      try {
+        // Normalize order number (remove leading zeros for matching)
+        const normalizeOrderNum = (num) => {
+          if (!num) return '';
+          return String(num).trim().replace(/^0+/, '');
+        };
+        const normalizedOrderNum = normalizeOrderNum(orderNumber);
+
+        console.log('Checking order:', orderNumber, 'normalized:', normalizedOrderNum);
+
+        // Check bottle_scans table
+        const { data: allBottleScans, error: bottleScansError } = await supabase
+          .from('bottle_scans')
+          .select('*')
+          .eq('organization_id', orgId);
+
+        if (bottleScansError) {
+          results.innerHTML = `<div class="error">❌ Error fetching bottle_scans: ${bottleScansError.message}</div>`;
+          return;
+        }
+
+        // Filter by normalized order number
+        const bottleScans = (allBottleScans || []).filter(scan => {
+          const scanOrderNum = normalizeOrderNum(scan.order_number);
+          return scanOrderNum === normalizedOrderNum || 
+                 String(scan.order_number || '').trim() === String(orderNumber || '').trim();
+        });
+
+        console.log('Found bottle_scans:', bottleScans);
+
+        // Check scans table
+        const { data: allScans, error: scansError } = await supabase
+          .from('scans')
+          .select('*')
+          .eq('organization_id', orgId);
+
+        if (scansError) {
+          results.innerHTML = `<div class="error">❌ Error fetching scans: ${scansError.message}</div>`;
+          return;
+        }
+
+        // Filter by normalized order number
+        const scans = (allScans || []).filter(scan => {
+          const scanOrderNum = normalizeOrderNum(scan.order_number);
+          return scanOrderNum === normalizedOrderNum || 
+                 String(scan.order_number || '').trim() === String(orderNumber || '').trim();
+        });
+
+        console.log('Found scans:', scans);
+
+        foundScans = scans; // Store for later use
+
+        // Display results
+        let html = '<h2>📊 Results</h2>';
+
+        html += `<div class="info">
+          <strong>Order Number:</strong> ${orderNumber} (normalized: ${normalizedOrderNum})<br>
+          <strong>Bottle Scans Found:</strong> ${bottleScans.length}<br>
+          <strong>Scans Found:</strong> ${scans.length}
+        </div>`;
+
+        if (bottleScans.length === 0 && scans.length === 0) {
+          html += '<div class="error">❌ No scans found for this order. The bottles may not have been scanned, or the order number doesn\'t match.</div>';
+          document.getElementById('recreateBtn').disabled = true;
+        } else if (bottleScans.length > 0) {
+          html += '<div class="success">✅ Bottle scans exist! The bottles should be visible on the order detail page.</div>';
+          html += '<div class="bottle-list"><strong>Bottle Scans:</strong>';
+          bottleScans.forEach((scan, i) => {
+            html += `<div class="bottle-item">${i + 1}. ${scan.bottle_barcode} - ${scan.mode} (${new Date(scan.created_at).toLocaleString()})</div>`;
+          });
+          html += '</div>';
+          document.getElementById('recreateBtn').disabled = true;
+        } else if (scans.length > 0) {
+          html += '<div class="warning">⚠️ Bottle scans are missing, but scans exist in the scans table. Click "Recreate Bottle Scans" to fix this.</div>';
+          html += '<div class="bottle-list"><strong>Scans Found (can be used to recreate bottle_scans):</strong>';
+          scans.forEach((scan, i) => {
+            html += `<div class="bottle-item">${i + 1}. ${scan.barcode_number} - ${scan.mode || scan.action} - Status: ${scan.status || 'pending'} (${new Date(scan.created_at).toLocaleString()})</div>`;
+          });
+          html += '</div>';
+          document.getElementById('recreateBtn').disabled = false;
+        }
+
+        results.innerHTML = html;
+      } catch (error) {
+        results.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+        console.error('Error:', error);
+      }
+    }
+
+    async function searchAllScans() {
+      const url = document.getElementById('supabaseUrl').value;
+      const key = document.getElementById('supabaseKey').value;
+      const orgId = document.getElementById('organizationId').value;
+      const results = document.getElementById('results');
+
+      if (!url || !key || !orgId) {
+        results.innerHTML = '<div class="error">❌ Please fill in all fields</div>';
+        return;
+      }
+
+      supabase = window.supabase.createClient(url, key);
+      results.innerHTML = '<div class="info">🔍 Searching for all recent scans (checking last 500 records)...</div>';
+
+      try {
+        // Get all recent scans (last 500 to catch more records)
+        const { data: allScans, error: scansError } = await supabase
+          .from('scans')
+          .select('*')
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: false })
+          .limit(500);
+
+        if (scansError) {
+          results.innerHTML = `<div class="error">❌ Error fetching scans: ${scansError.message}</div>`;
+          return;
+        }
+
+        // Get all recent bottle_scans (last 500)
+        const { data: allBottleScans, error: bottleScansError } = await supabase
+          .from('bottle_scans')
+          .select('*')
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: false })
+          .limit(500);
+
+        if (bottleScansError) {
+          results.innerHTML = `<div class="error">❌ Error fetching bottle_scans: ${bottleScansError.message}</div>`;
+          return;
+        }
+
+        // Group by order number
+        const scansByOrder = {};
+        (allScans || []).forEach(scan => {
+          const orderNum = scan.order_number;
+          if (orderNum) {
+            if (!scansByOrder[orderNum]) {
+              scansByOrder[orderNum] = { scans: [], bottleScans: [] };
+            }
+            scansByOrder[orderNum].scans.push(scan);
+          }
+        });
+
+        (allBottleScans || []).forEach(scan => {
+          const orderNum = scan.order_number;
+          if (orderNum) {
+            if (!scansByOrder[orderNum]) {
+              scansByOrder[orderNum] = { scans: [], bottleScans: [] };
+            }
+            scansByOrder[orderNum].bottleScans.push(scan);
+          }
+        });
+
+        let html = '<h2>📊 Recent Scans Analysis</h2>';
+        
+        // Show summary first
+        html += `<div class="info">
+          <strong>Total Scans Found:</strong> ${(allScans || []).length} in scans table<br>
+          <strong>Total Bottle Scans Found:</strong> ${(allBottleScans || []).length} in bottle_scans table<br>
+          <strong>Scans with Order Numbers:</strong> ${Object.keys(scansByOrder).length} unique order numbers
+        </div>`;
+
+        // Check for scans without order numbers FIRST (most likely issue)
+        const scansWithoutOrder = (allScans || []).filter(s => !s.order_number || s.order_number === null || s.order_number === '');
+        const bottleScansWithoutOrder = (allBottleScans || []).filter(s => !s.order_number || s.order_number === null || s.order_number === '');
+        
+        if (scansWithoutOrder.length > 0 || bottleScansWithoutOrder.length > 0) {
+          html += `<div class="warning" style="margin-top: 20px; border-left: 4px solid #ffc107;">`;
+          html += `<strong>⚠️ FOUND ${scansWithoutOrder.length + bottleScansWithoutOrder.length} SCANS WITHOUT ORDER NUMBERS!</strong><br>`;
+          html += `These are likely your missing scans!<br><br>`;
+          html += `<strong>Scans table:</strong> ${scansWithoutOrder.length} scans without order_number<br>`;
+          html += `<strong>Bottle_scans table:</strong> ${bottleScansWithoutOrder.length} scans without order_number<br><br>`;
+          
+          if (scansWithoutOrder.length > 0) {
+            html += `<div class="bottle-list" style="margin-top: 10px;">`;
+            html += `<strong>Recent Scans Without Order Numbers (from scans table):</strong><br>`;
+            const recentScans = scansWithoutOrder.slice(0, 20).sort((a, b) => 
+              new Date(b.created_at) - new Date(a.created_at)
+            );
+            recentScans.forEach((scan, i) => {
+              const date = new Date(scan.created_at).toLocaleString();
+              html += `<div class="bottle-item">${i + 1}. <strong>${scan.barcode_number || 'N/A'}</strong> - ${scan.mode || scan.action || 'N/A'} - ${date}<br>`;
+              html += `<small style="color: #666;">Customer: ${scan.customer_name || 'N/A'} | Status: ${scan.status || 'pending'}</small></div>`;
+            });
+            if (scansWithoutOrder.length > 20) {
+              html += `<div style="padding: 10px; color: #666;">... and ${scansWithoutOrder.length - 20} more</div>`;
+            }
+            html += `</div>`;
+          }
+          
+          html += `<div style="margin-top: 15px; padding: 15px; background: #e7f3ff; border-radius: 4px;">`;
+          html += `<strong>💡 To Fix:</strong><br>`;
+          html += `1. Note the barcodes above that match your scanned bottles<br>`;
+          html += `2. Enter order number "66666" in the field above<br>`;
+          html += `3. We can update these scans to have the correct order number<br>`;
+          html += `4. Or recreate bottle_scans from these scans with order number 66666`;
+          html += `</div>`;
+          html += `</div>`;
+        }
+        
+        if (Object.keys(scansByOrder).length === 0) {
+          if (scansWithoutOrder.length === 0 && bottleScansWithoutOrder.length === 0) {
+            html += '<div class="error" style="margin-top: 20px;">❌ No scans found at all in the last 500 records.</div>';
+            html += '<div class="info">This means:<br>';
+            html += '1. The scans were never saved to the database (network error, app crash, etc.)<br>';
+            html += '2. The scans are older than the last 500 records<br>';
+            html += '3. The organization_id might be incorrect<br><br>';
+            html += '<strong>Next Steps:</strong><br>';
+            html += '• Check your mobile app logs for any errors during scanning<br>';
+            html += '• Verify you were connected to the internet when scanning<br>';
+            html += '• Try scanning a test bottle again to see if it saves</div>';
+          }
+        } else {
+          html += `<div class="info">Found ${Object.keys(scansByOrder).length} unique order numbers in recent scans:</div>`;
+          
+          // Sort by most recent
+          const sortedOrders = Object.entries(scansByOrder).sort((a, b) => {
+            const aLatest = Math.max(
+              ...a[1].scans.map(s => new Date(s.created_at).getTime()),
+              ...a[1].bottleScans.map(s => new Date(s.created_at).getTime())
+            );
+            const bLatest = Math.max(
+              ...b[1].scans.map(s => new Date(s.created_at).getTime()),
+              ...b[1].bottleScans.map(s => new Date(s.created_at).getTime())
+            );
+            return bLatest - aLatest;
+          });
+
+          sortedOrders.forEach(([orderNum, data]) => {
+            const totalScans = data.scans.length + data.bottleScans.length;
+            const latestDate = Math.max(
+              ...data.scans.map(s => new Date(s.created_at).getTime()),
+              ...data.bottleScans.map(s => new Date(s.created_at).getTime()),
+              0
+            );
+            const dateStr = latestDate > 0 ? new Date(latestDate).toLocaleString() : 'Unknown';
+            
+            html += `<div class="bottle-list" style="margin: 15px 0; border-left: 4px solid #4CAF50;">`;
+            html += `<strong>Order: ${orderNum}</strong> `;
+            html += `<span style="color: #666;">(${totalScans} scans - ${dateStr})</span><br>`;
+            html += `<small>Scans table: ${data.scans.length} | Bottle_scans table: ${data.bottleScans.length}</small>`;
+            
+            if (data.scans.length > 0) {
+              html += `<div style="margin-top: 10px;"><strong>Barcodes:</strong> `;
+              const barcodes = [...new Set(data.scans.map(s => s.barcode_number).filter(Boolean))];
+              html += barcodes.slice(0, 5).join(', ');
+              if (barcodes.length > 5) html += ` ... (+${barcodes.length - 5} more)`;
+              html += `</div>`;
+            }
+            
+            html += `</div>`;
+          });
+
+          html += `<div style="margin-top: 20px;"><h3>Scans Grouped by Order Number:</h3></div>`;
+        }
+
+        // Store scans without order for potential fixing
+        window.scansWithoutOrder = scansWithoutOrder;
+        window.bottleScansWithoutOrder = bottleScansWithoutOrder;
+        
+        // Show update button if there are scans without order numbers
+        if (scansWithoutOrder.length > 0 || bottleScansWithoutOrder.length > 0) {
+          document.getElementById('updateOrderBtn').style.display = 'inline-block';
+        } else {
+          document.getElementById('updateOrderBtn').style.display = 'none';
+        }
+
+        results.innerHTML = html;
+      } catch (error) {
+        results.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+        console.error('Error:', error);
+      }
+    }
+
+    async function verifyOrganization() {
+      const url = document.getElementById('supabaseUrl').value;
+      const key = document.getElementById('supabaseKey').value;
+      const orgId = document.getElementById('organizationId').value;
+      const results = document.getElementById('results');
+
+      if (!url || !key) {
+        results.innerHTML = '<div class="error">❌ Please fill in Supabase URL and Key</div>';
+        return;
+      }
+
+      if (!orgId || orgId.trim() === '') {
+        results.innerHTML = '<div class="error">❌ Please enter an Organization ID</div>';
+        return;
+      }
+
+      const trimmedOrgId = orgId.trim();
+
+      supabase = window.supabase.createClient(url, key);
+      results.innerHTML = '<div class="info">🔍 Verifying organization and checking for any scans...</div>';
+
+      try {
+        // First, verify the organization exists
+        const { data: org, error: orgError } = await supabase
+          .from('organizations')
+          .select('id, name, app_name')
+          .eq('id', trimmedOrgId)
+          .single();
+
+        if (orgError || !org) {
+          results.innerHTML = `<div class="error">❌ Organization ID "${trimmedOrgId}" not found!<br>Error: ${orgError?.message || 'Organization does not exist'}</div>`;
+          return;
+        }
+
+        let html = `<div class="success">✅ Organization Found!</div>`;
+        html += `<div class="info">`;
+        html += `<strong>Organization ID:</strong> ${org.id}<br>`;
+        html += `<strong>Name:</strong> ${org.name || 'N/A'}<br>`;
+        html += `<strong>App Name:</strong> ${org.app_name || 'N/A'}<br>`;
+        html += `</div>`;
+
+        // Check total scans in database (without org filter) to see if it's an org issue
+        const { data: allScansNoFilter, error: allScansError } = await supabase
+          .from('scans')
+          .select('id, organization_id, created_at')
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (allScansError) {
+          html += `<div class="warning">⚠️ Error checking all scans: ${allScansError.message}</div>`;
+        } else if (allScansNoFilter && allScansNoFilter.length > 0) {
+          const orgScans = allScansNoFilter.filter(s => s.organization_id === trimmedOrgId);
+          const otherOrgs = [...new Set(allScansNoFilter.map(s => s.organization_id).filter(id => id != null))].filter(id => id !== trimmedOrgId);
+          
+          html += `<div class="info" style="margin-top: 15px;">`;
+          html += `<strong>Database Scan Summary:</strong><br>`;
+          html += `• Total recent scans in database: ${allScansNoFilter.length}<br>`;
+          html += `• Scans for YOUR organization (${trimmedOrgId ? trimmedOrgId.substring(0, 8) + '...' : 'N/A'}): ${orgScans.length}<br>`;
+          if (otherOrgs.length > 0) {
+            html += `• Other organizations found: ${otherOrgs.length}<br>`;
+            html += `<small style="color: #666;">This suggests scans exist but for different organizations</small>`;
+          }
+          html += `</div>`;
+
+          if (orgScans.length === 0 && otherOrgs.length > 0) {
+            html += `<div class="warning" style="margin-top: 15px; border-left: 4px solid #ff9800;">`;
+            html += `<strong>⚠️ WARNING: No scans found for your organization, but scans exist for other organizations!</strong><br>`;
+            html += `This suggests you may have scanned bottles while logged into a different organization.<br><br>`;
+            html += `<strong>Other organization IDs found:</strong><br>`;
+            html += `<div style="margin-top: 10px;">`;
+            
+            // Fetch organization names for the other orgs
+            const { data: otherOrgDetails } = await supabase
+              .from('organizations')
+              .select('id, name, app_name')
+              .in('id', otherOrgs.slice(0, 5));
+            
+            const orgMap = {};
+            if (otherOrgDetails) {
+              otherOrgDetails.forEach(org => {
+                orgMap[org.id] = org;
+              });
+            }
+            
+            otherOrgs.slice(0, 5).forEach((id, i) => {
+              const orgDetail = orgMap[id];
+              const orgName = orgDetail ? (orgDetail.app_name || orgDetail.name || 'Unknown') : 'Unknown';
+              html += `<div style="margin: 8px 0; padding: 8px; background: #fff3cd; border-radius: 4px;">`;
+              html += `${i + 1}. <strong>${orgName}</strong><br>`;
+              html += `<code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${id || 'N/A'}</code> `;
+              html += `<button onclick="document.getElementById('organizationId').value='${id}'; alert('Organization ID updated to ${orgName}!\\n\\nNow click:\\n1. Verify Organization (to confirm)\\n2. Search All Recent Scans (to find your scans)');" style="background: #4CAF50; color: white; border: none; padding: 6px 12px; border-radius: 3px; cursor: pointer; font-size: 12px; margin-left: 8px; margin-top: 5px;">Use This Organization</button>`;
+              html += `</div>`;
+            });
+            
+            html += `</div>`;
+            html += `<br><strong>💡 Solution:</strong> Click "Use This Organization" next to the organization that has your scans, then:<br>`;
+            html += `1. Click "Verify Organization" to confirm<br>`;
+            html += `2. Click "Search All Recent Scans" to find your scans<br>`;
+            html += `3. If scans are found, you can then check order 66666 or recreate bottle_scans`;
+            html += `</div>`;
+          }
+        } else {
+          html += `<div class="info" style="margin-top: 15px;">No scans found in the entire database (last 10 records).</div>`;
+        }
+
+        // Check bottle_scans too
+        const { data: allBottleScansNoFilter, error: allBottleScansError } = await supabase
+          .from('bottle_scans')
+          .select('id, organization_id, created_at')
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (!allBottleScansError && allBottleScansNoFilter && allBottleScansNoFilter.length > 0) {
+          const orgBottleScans = allBottleScansNoFilter.filter(s => s.organization_id === trimmedOrgId);
+          html += `<div class="info" style="margin-top: 15px;">`;
+          html += `<strong>Bottle Scans Summary:</strong><br>`;
+          html += `• Total recent bottle_scans in database: ${allBottleScansNoFilter.length}<br>`;
+          html += `• Bottle scans for YOUR organization: ${orgBottleScans.length}<br>`;
+          html += `</div>`;
+        }
+
+        results.innerHTML = html;
+      } catch (error) {
+        results.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+        console.error('Error:', error);
+      }
+    }
+
+    async function checkMobileAppUser() {
+      const url = document.getElementById('supabaseUrl').value;
+      const key = document.getElementById('supabaseKey').value;
+      const results = document.getElementById('results');
+
+      if (!url || !key) {
+        results.innerHTML = '<div class="error">❌ Please fill in Supabase URL and Key</div>';
+        return;
+      }
+
+      supabase = window.supabase.createClient(url, key);
+      results.innerHTML = '<div class="info">🔍 Checking mobile app user session...</div>';
+
+      try {
+        // Get current session (if user is logged in via browser)
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+        if (sessionError) {
+          results.innerHTML = `<div class="error">❌ Error getting session: ${sessionError.message}</div>`;
+          return;
+        }
+
+        if (!session || !session.user) {
+          results.innerHTML = `<div class="warning">⚠️ No active session found in this browser.<br><br>
+            <strong>To check which organization the mobile app is using:</strong><br>
+            1. Open the mobile app<br>
+            2. Check the app logs for "Organization loaded successfully"<br>
+            3. Or check the Settings page in the mobile app<br>
+            4. Or log in to the web app in this browser to check your profile<br><br>
+            <strong>Alternative:</strong> Check the profiles table in Supabase to see which organization_id your user account has.</div>`;
+          return;
+        }
+
+        // Get user profile
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, email, full_name, organization_id, role')
+          .eq('id', session.user.id)
+          .single();
+
+        if (profileError) {
+          results.innerHTML = `<div class="error">❌ Error fetching profile: ${profileError.message}</div>`;
+          return;
+        }
+
+        let html = '<h2>📱 Mobile App User Information</h2>';
+        html += `<div class="info">`;
+        html += `<strong>User Email:</strong> ${profile.email || session.user.email || 'N/A'}<br>`;
+        html += `<strong>User Name:</strong> ${profile.full_name || 'N/A'}<br>`;
+        html += `<strong>User ID:</strong> <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${profile.id}</code><br>`;
+        html += `<strong>Role:</strong> ${profile.role || 'N/A'}<br>`;
+        html += `</div>`;
+
+        if (!profile.organization_id) {
+          html += `<div class="warning" style="margin-top: 15px;">`;
+          html += `<strong>⚠️ This user has NO organization_id!</strong><br>`;
+          html += `The mobile app will not be able to save scans because there's no organization associated with this account.<br><br>`;
+          html += `<strong>Solution:</strong> Update the user's profile to assign them to an organization.`;
+          html += `</div>`;
+        } else {
+          // Get organization details
+          const { data: org, error: orgError } = await supabase
+            .from('organizations')
+            .select('id, name, app_name, deleted_at, created_at')
+            .eq('id', profile.organization_id)
+            .single();
+
+          if (orgError || !org) {
+            html += `<div class="error" style="margin-top: 15px;">`;
+            html += `<strong>❌ Organization not found!</strong><br>`;
+            html += `The user's profile references organization_id: <code>${profile.organization_id}</code><br>`;
+            html += `But this organization doesn't exist in the database.<br>`;
+            html += `Error: ${orgError?.message || 'Organization not found'}`;
+            html += `</div>`;
+          } else {
+            const isDeleted = org.deleted_at ? ' (DELETED)' : '';
+            const isCurrent = org.id === document.getElementById('organizationId').value ? ' ← MATCHES CURRENT' : '';
+            
+            html += `<div class="${isDeleted ? 'warning' : 'success'}" style="margin-top: 15px;">`;
+            html += `<strong>${isDeleted ? '⚠️' : '✅'} Organization Found${isDeleted}${isCurrent}:</strong><br>`;
+            html += `<strong>Name:</strong> ${org.app_name || org.name || 'N/A'}<br>`;
+            html += `<strong>Organization ID:</strong> <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${org.id}</code><br>`;
+            html += `<strong>Created:</strong> ${new Date(org.created_at).toLocaleDateString()}<br>`;
+            html += `</div>`;
+
+            if (isDeleted) {
+              html += `<div class="warning" style="margin-top: 15px;">`;
+              html += `<strong>⚠️ WARNING: The mobile app is using a DELETED organization!</strong><br>`;
+              html += `This explains why scans might not be showing up correctly.<br><br>`;
+              html += `<strong>Solution:</strong> Update the user's profile to use the active organization instead.`;
+              html += `</div>`;
+            }
+
+            if (!isCurrent) {
+              html += `<div class="info" style="margin-top: 15px;">`;
+              html += `<strong>💡 This organization is different from the one you're currently checking.</strong><br>`;
+              html += `The mobile app will save scans to organization: <code>${org.id}</code><br>`;
+              html += `But you're currently checking organization: <code>${document.getElementById('organizationId').value || 'N/A'}</code><br><br>`;
+              html += `<button onclick="document.getElementById('organizationId').value='${org.id}'; alert('Organization ID updated to match mobile app!');" style="background: #4CAF50; color: white; border: none; padding: 6px 12px; border-radius: 3px; cursor: pointer; margin-top: 5px;">Use Mobile App's Organization</button>`;
+              html += `</div>`;
+            }
+          }
+        }
+
+        results.innerHTML = html;
+      } catch (error) {
+        results.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+        console.error('Error:', error);
+      }
+    }
+
+    async function listAllOrganizations() {
+      const url = document.getElementById('supabaseUrl').value;
+      const key = document.getElementById('supabaseKey').value;
+      const results = document.getElementById('results');
+
+      if (!url || !key) {
+        results.innerHTML = '<div class="error">❌ Please fill in Supabase URL and Key</div>';
+        return;
+      }
+
+      supabase = window.supabase.createClient(url, key);
+      results.innerHTML = '<div class="info">🔍 Fetching all organizations...</div>';
+
+      try {
+        // Get all organizations
+        const { data: orgs, error: orgsError } = await supabase
+          .from('organizations')
+          .select('id, name, app_name, created_at, deleted_at')
+          .order('created_at', { ascending: false });
+
+        if (orgsError) {
+          results.innerHTML = `<div class="error">❌ Error fetching organizations: ${orgsError.message}</div>`;
+          return;
+        }
+
+        let html = '<h2>📋 All Organizations</h2>';
+
+        if (!orgs || orgs.length === 0) {
+          html += '<div class="warning">No organizations found in the database.</div>';
+        } else {
+          html += `<div class="info">Found ${orgs.length} organization(s) in the database:</div>`;
+
+          // Group by name to find duplicates
+          const orgsByName = {};
+          orgs.forEach(org => {
+            const key = (org.app_name || org.name || 'Unnamed').toLowerCase();
+            if (!orgsByName[key]) {
+              orgsByName[key] = [];
+            }
+            orgsByName[key].push(org);
+          });
+
+          // Check for duplicates
+          const duplicates = Object.entries(orgsByName).filter(([name, orgList]) => orgList.length > 1);
+
+          if (duplicates.length > 0) {
+            html += `<div class="warning" style="margin-top: 15px; border-left: 4px solid #ff9800;">`;
+            html += `<strong>⚠️ Found ${duplicates.length} organization name(s) with duplicates:</strong><br><br>`;
+            duplicates.forEach(([name, orgList]) => {
+              html += `<strong>"${orgList[0].app_name || orgList[0].name}" appears ${orgList.length} times:</strong><br>`;
+              orgList.forEach((org, i) => {
+                const isDeleted = org.deleted_at ? ' (DELETED)' : '';
+                const isCurrent = org.id === document.getElementById('organizationId').value ? ' ← CURRENT' : '';
+                html += `${i + 1}. <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">${org.id}</code>`;
+                html += ` - Created: ${new Date(org.created_at).toLocaleDateString()}${isDeleted}${isCurrent}<br>`;
+              });
+              html += `<br>`;
+            });
+            html += `</div>`;
+          }
+
+          html += `<div style="margin-top: 20px;">`;
+          orgs.forEach((org, i) => {
+            const isDeleted = org.deleted_at ? ' (DELETED)' : '';
+            const isCurrent = org.id === document.getElementById('organizationId').value ? ' ← CURRENT' : '';
+            const orgName = org.app_name || org.name || 'Unnamed';
+            
+            html += `<div class="bottle-list" style="margin: 10px 0; border-left: 4px solid ${isCurrent ? '#4CAF50' : '#2196f3'};">`;
+            html += `<strong>${i + 1}. ${orgName}${isDeleted}${isCurrent}</strong><br>`;
+            html += `<code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${org.id}</code><br>`;
+            html += `<small style="color: #666;">Created: ${new Date(org.created_at).toLocaleString()}</small><br>`;
+            
+            if (!isCurrent) {
+              html += `<button onclick="document.getElementById('organizationId').value='${org.id}'; alert('Organization ID updated to ${orgName}!');" style="background: #4CAF50; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px; margin-top: 5px;">Use This Organization</button>`;
+            }
+            html += `</div>`;
+          });
+          html += `</div>`;
+
+          html += `<div class="info" style="margin-top: 20px;">`;
+          html += `<strong>💡 Why duplicates might exist:</strong><br>`;
+          html += `1. Organization was recreated after being deleted<br>`;
+          html += `2. Test/production organizations were created separately<br>`;
+          html += `3. Multiple accounts were set up for the same business<br>`;
+          html += `4. Organization was imported/created multiple times<br><br>`;
+          html += `<strong>Recommendation:</strong> Use the organization that has your active data (scans, orders, etc.).`;
+          html += `</div>`;
+        }
+
+        results.innerHTML = html;
+      } catch (error) {
+        results.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+        console.error('Error:', error);
+      }
+    }
+
+    async function checkSalesOrder() {
+      const url = document.getElementById('supabaseUrl').value;
+      const key = document.getElementById('supabaseKey').value;
+      const orgId = document.getElementById('organizationId').value;
+      const orderNumber = document.getElementById('orderNumber').value.trim();
+      const results = document.getElementById('results');
+
+      if (!url || !key || !orgId) {
+        results.innerHTML = '<div class="error">❌ Please fill in all fields</div>';
+        return;
+      }
+
+      if (!orderNumber) {
+        results.innerHTML = '<div class="error">❌ Please enter an order number</div>';
+        return;
+      }
+
+      supabase = window.supabase.createClient(url, key);
+      results.innerHTML = '<div class="info">🔍 Checking for sales order...</div>';
+
+      try {
+        // Normalize order number
+        const normalizeOrderNum = (num) => {
+          if (!num) return '';
+          return String(num).trim().replace(/^0+/, '');
+        };
+        const normalizedOrderNum = normalizeOrderNum(orderNumber);
+
+        // Check sales_orders table
+        const { data: allOrders, error: ordersError } = await supabase
+          .from('sales_orders')
+          .select('*')
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (ordersError) {
+          results.innerHTML = `<div class="error">❌ Error fetching sales orders: ${ordersError.message}</div>`;
+          return;
+        }
+
+        // Find matching order
+        const matchingOrders = (allOrders || []).filter(order => {
+          const orderNum = normalizeOrderNum(order.sales_order_number || order.order_number || '');
+          return orderNum === normalizedOrderNum || 
+                 String(order.sales_order_number || '').trim() === String(orderNumber || '').trim();
+        });
+
+        let html = '<h2>📋 Sales Order Check</h2>';
+
+        if (matchingOrders.length > 0) {
+          const order = matchingOrders[0];
+          html += `<div class="success">✅ Sales Order Found!</div>`;
+          html += `<div class="info">`;
+          html += `<strong>Order Number:</strong> ${order.sales_order_number || order.order_number || 'N/A'}<br>`;
+          html += `<strong>Customer Name:</strong> ${order.customer_name || 'N/A'}<br>`;
+          html += `<strong>Created:</strong> ${new Date(order.created_at).toLocaleString()}<br>`;
+          html += `<strong>Notes:</strong> ${order.notes || 'N/A'}<br>`;
+          html += `</div>`;
+
+          html += `<div class="warning" style="margin-top: 15px;">`;
+          html += `<strong>⚠️ The order exists, but no scans were found!</strong><br>`;
+          html += `This confirms that the scans were never saved to the database.<br><br>`;
+          html += `<strong>Possible causes:</strong><br>`;
+          html += `1. Network error during scanning<br>`;
+          html += `2. App crashed or was closed before scans synced<br>`;
+          html += `3. Database connection issue during scanning<br>`;
+          html += `4. The order was created manually without scanning<br><br>`;
+          html += `<strong>Solution:</strong> You'll need to rescan the bottles for this order.`;
+          html += `</div>`;
+        } else {
+          html += `<div class="warning">⚠️ No sales order found with number "${orderNumber}"</div>`;
+          if (allOrders && allOrders.length > 0) {
+            html += `<div class="info" style="margin-top: 15px;">`;
+            html += `<strong>Recent sales orders found:</strong><br>`;
+            allOrders.slice(0, 10).forEach((order, i) => {
+              const orderNum = order.sales_order_number || order.order_number || 'N/A';
+              const date = new Date(order.created_at).toLocaleString();
+              html += `${i + 1}. ${orderNum} - ${order.customer_name || 'N/A'} (${date})<br>`;
+            });
+            html += `</div>`;
+          }
+        }
+
+        results.innerHTML = html;
+      } catch (error) {
+        results.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+        console.error('Error:', error);
+      }
+    }
+
+    async function updateOrderNumbers() {
+      const orderNumber = document.getElementById('orderNumber').value.trim();
+      const orgId = document.getElementById('organizationId').value;
+      const results = document.getElementById('results');
+
+      if (!orderNumber) {
+        alert('⚠️ Please enter an order number first');
+        return;
+      }
+
+      if (!window.scansWithoutOrder || window.scansWithoutOrder.length === 0) {
+        alert('⚠️ No scans without order numbers found. Please run "Search All Recent Scans" first.');
+        return;
+      }
+
+      if (!confirm(`This will update ${window.scansWithoutOrder.length} scans to have order number "${orderNumber}". Continue?`)) {
+        return;
+      }
+
+      results.innerHTML += '<div class="info">🔄 Updating order numbers...</div>';
+
+      try {
+        const scanIds = window.scansWithoutOrder.map(s => s.id);
+        
+        const { data, error } = await supabase
+          .from('scans')
+          .update({ order_number: orderNumber })
+          .in('id', scanIds)
+          .select();
+
+        if (error) {
+          results.innerHTML += `<div class="error">❌ Error updating scans: ${error.message}</div>`;
+          return;
+        }
+
+        results.innerHTML += `<div class="success">✅ Successfully updated ${data.length} scans to have order number "${orderNumber}"!</div>`;
+        results.innerHTML += `<div class="info">Now recreating bottle_scans from these scans...</div>`;
+        
+        // Automatically recreate bottle_scans after updating
+        // Store the updated scans for recreation
+        window.foundScans = data;
+        
+        // Clear the stored scans without order
+        window.scansWithoutOrder = [];
+        document.getElementById('updateOrderBtn').style.display = 'none';
+        
+        // Automatically trigger bottle_scans recreation
+        setTimeout(async () => {
+          await recreateBottleScans();
+        }, 1000);
+
+      } catch (error) {
+        results.innerHTML += `<div class="error">❌ Error: ${error.message}</div>`;
+        console.error('Error:', error);
+      }
+    }
+
+    async function recreateBottleScans() {
+      const results = document.getElementById('results');
+      const orderNumber = document.getElementById('orderNumber').value.trim();
+      const orgId = document.getElementById('organizationId').value;
+
+      // Use window.foundScans if available (from updateOrderNumbers), otherwise use foundScans
+      const scansToUse = window.foundScans || foundScans;
+
+      if (scansToUse.length === 0) {
+        results.innerHTML += '<div class="error">❌ No scans found to recreate from. Please run "Check Order" or "Search All Recent Scans" first.</div>';
+        return;
+      }
+
+      results.innerHTML += '<div class="info">🔄 Recreating bottle_scans...</div>';
+
+      try {
+        const bottleScansToInsert = scansToUse.map(scan => ({
+          organization_id: orgId,
+          bottle_barcode: scan.barcode_number || scan.bottle_barcode || scan.cylinder_barcode,
+          product_code: scan.product_code || null,
+          mode: scan.mode || (scan.action === 'out' ? 'SHIP' : scan.action === 'in' ? 'RETURN' : scan.action?.toUpperCase() || 'SHIP'),
+          location: scan.location || null,
+          user_id: scan.user_id || scan.scanned_by || null,
+          order_number: orderNumber,
+          customer_name: scan.customer_name || null,
+          customer_id: scan.customer_id || null,
+          timestamp: scan.created_at || scan.timestamp || new Date().toISOString(),
+          created_at: scan.created_at || new Date().toISOString()
+        }));
+
+        console.log('Inserting bottle_scans:', bottleScansToInsert);
+
+        const { data, error } = await supabase
+          .from('bottle_scans')
+          .insert(bottleScansToInsert)
+          .select();
+
+        if (error) {
+          results.innerHTML += `<div class="error">❌ Error recreating bottle_scans: ${error.message}</div>`;
+          console.error('Error:', error);
+          return;
+        }
+
+        results.innerHTML += `<div class="success">✅ Successfully recreated ${data.length} bottle_scans!<br>
+          The bottles should now be visible on the order detail page.</div>`;
+        results.innerHTML += `<div class="info" style="margin-top: 10px;">
+          <strong>✅ Done!</strong><br>
+          • Updated ${scansToUse.length} scans to have order number "${orderNumber}"<br>
+          • Created ${data.length} bottle_scans entries<br><br>
+          <strong>Next Steps:</strong><br>
+          1. Refresh the order detail page in your browser<br>
+          2. The bottles should now be visible<br>
+          3. You can approve the order and assign bottles to customers
+        </div>`;
+        
+        document.getElementById('recreateBtn').disabled = true;
+        
+        // Clear the stored scans
+        window.foundScans = null;
+
+        // Show created bottle_scans
+        let html = '<div class="bottle-list"><strong>Created Bottle Scans:</strong>';
+        data.forEach((scan, i) => {
+          html += `<div class="bottle-item">${i + 1}. ${scan.bottle_barcode} - ${scan.mode}</div>`;
+        });
+        html += '</div>';
+        results.innerHTML += html;
+
+      } catch (error) {
+        results.innerHTML += `<div class="error">❌ Error: ${error.message}</div>`;
+        console.error('Error:', error);
+      }
+    }
+  </script>
+</body>
+</html>
+

@@ -234,7 +234,7 @@ export default function LoginScreen() {
           {biometricSupported && biometricAvailable && rememberMe && email && (
             <View style={styles.biometricSection}>
               <TouchableOpacity style={styles.biometricButton} onPress={handleBiometricLogin}>
-                <Ionicons name="finger-print" size={20} color="#3B82F6" style={{ marginRight: 8 }} />
+                <Ionicons name="finger-print" size={20} color="#40B5AD" style={{ marginRight: 8 }} />
                 <Text style={styles.biometricButtonText}>Use Biometric Login</Text>
               </TouchableOpacity>
             </View>
@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
   appTitle: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#3B82F6',
+    color: '#40B5AD',
     marginBottom: 4,
   },
   appSubtitle: {
@@ -407,13 +407,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#3B82F6',
+    borderColor: '#40B5AD',
     borderRadius: 12,
     padding: 16,
-    backgroundColor: '#EFF6FF',
+    backgroundColor: '#E8F7F5',
   },
   biometricButtonText: {
-    color: '#3B82F6',
+    color: '#40B5AD',
     fontWeight: '600',
     fontSize: 16,
   },
@@ -492,27 +492,27 @@ const styles = StyleSheet.create({
     height: 18,
     borderRadius: 4,
     borderWidth: 2,
-    borderColor: '#3B82F6',
+    borderColor: '#40B5AD',
     marginRight: 8,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#fff',
   },
   checkboxChecked: {
-    backgroundColor: '#3B82F6',
-    borderColor: '#3B82F6',
+    backgroundColor: '#40B5AD',
+    borderColor: '#40B5AD',
   },
   rememberMeText: {
     fontSize: 14,
     color: '#374151',
   },
   forgotText: {
-    color: '#3B82F6',
+    color: '#40B5AD',
     fontWeight: '600',
     fontSize: 14,
   },
   signInButton: {
-    backgroundColor: '#3B82F6',
+    backgroundColor: '#40B5AD',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -542,7 +542,7 @@ const styles = StyleSheet.create({
   },
   legalLink: {
     fontSize: 12,
-    color: '#3B82F6',
+    color: '#40B5AD',
   },
   legalSeparator: {
     marginHorizontal: 8,
@@ -556,7 +556,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   websiteLink: {
-    color: '#3B82F6',
+    color: '#40B5AD',
     fontWeight: '600',
   },
 });

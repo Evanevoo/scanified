@@ -43,7 +43,8 @@ import {
   FilterList as FilterIcon,
   AttachMoney as MoneyIcon,
   DateRange as DateIcon,
-  Business as BusinessIcon
+  Business as BusinessIcon,
+  Autorenew as RenewIcon
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
@@ -62,6 +63,7 @@ export default function LeaseAgreements() {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [customers, setCustomers] = useState([]);
   const [billingHistory, setBillingHistory] = useState([]);
+  const [retroactiveBilling, setRetroactiveBilling] = useState({ isRetroactive: false, proRatedAmount: 0, message: '' });
   const [stats, setStats] = useState({
     totalAgreements: 0,
     activeAgreements: 0,
@@ -98,6 +100,21 @@ export default function LeaseAgreements() {
       fetchStats();
     }
   }, [profile]);
+
+  // Calculate retroactive billing when form dates/amounts change
+  useEffect(() => {
+    if (formData.start_date && formData.annual_amount && formData.billing_frequency && dialogMode !== 'view') {
+      const result = calculateProRatedAmount(
+        formData.start_date,
+        formData.end_date,
+        parseFloat(formData.annual_amount) || 0,
+        formData.billing_frequency
+      );
+      setRetroactiveBilling(result);
+    } else {
+      setRetroactiveBilling({ isRetroactive: false, proRatedAmount: 0, message: '' });
+    }
+  }, [formData.start_date, formData.end_date, formData.annual_amount, formData.billing_frequency, dialogMode]);
 
   const fetchAgreements = async () => {
     setLoading(true);
@@ -290,6 +307,129 @@ export default function LeaseAgreements() {
       logger.error('Error deleting agreement:', error);
       setSnackbar({ open: true, message: 'Error deleting agreement', severity: 'error' });
     }
+  };
+
+  const handleRenewAgreement = async (agreement) => {
+    if (!window.confirm('Are you sure you want to renew this lease agreement? This will create a new agreement starting from the end date of the current one.')) return;
+
+    try {
+      // Calculate new dates
+      const oldEndDate = new Date(agreement.end_date);
+      const newStartDate = new Date(oldEndDate);
+      newStartDate.setDate(newStartDate.getDate() + 1); // Start day after old agreement ends
+      
+      const newEndDate = new Date(newStartDate);
+      newEndDate.setFullYear(newEndDate.getFullYear() + 1); // One year lease
+
+      // Generate new agreement number
+      const { data: numberData, error: numberError } = await supabase
+        .rpc('generate_agreement_number', { org_id: profile.organization_id });
+
+      if (numberError) throw numberError;
+
+      // Calculate next billing date
+      const nextBillingDate = calculateNextBillingDate(
+        newStartDate,
+        agreement.billing_frequency
+      );
+
+      // Create new agreement
+      const renewedAgreement = {
+        organization_id: profile.organization_id,
+        customer_id: agreement.customer_id,
+        customer_name: agreement.customer_name,
+        agreement_number: numberData,
+        title: agreement.title,
+        start_date: newStartDate.toISOString().split('T')[0],
+        end_date: newEndDate.toISOString().split('T')[0],
+        annual_amount: agreement.annual_amount,
+        billing_frequency: agreement.billing_frequency,
+        payment_terms: agreement.payment_terms,
+        tax_rate: agreement.tax_rate,
+        terms_and_conditions: agreement.terms_and_conditions,
+        special_provisions: agreement.special_provisions,
+        auto_renewal: agreement.auto_renewal,
+        renewal_notice_days: agreement.renewal_notice_days,
+        asset_types: agreement.asset_types,
+        asset_locations: agreement.asset_locations,
+        max_asset_count: agreement.max_asset_count,
+        billing_contact_email: agreement.billing_contact_email,
+        billing_address: agreement.billing_address,
+        status: 'active',
+        next_billing_date: nextBillingDate.toISOString().split('T')[0],
+        created_by: profile.id,
+        updated_by: profile.id,
+        renewed_from_id: agreement.id
+      };
+
+      const { error } = await supabase
+        .from('lease_agreements')
+        .insert([renewedAgreement]);
+
+      if (error) throw error;
+
+      // Update old agreement status
+      await supabase
+        .from('lease_agreements')
+        .update({ status: 'renewed' })
+        .eq('id', agreement.id);
+
+      setSnackbar({ open: true, message: 'Agreement renewed successfully', severity: 'success' });
+      fetchAgreements();
+      fetchStats();
+    } catch (error) {
+      logger.error('Error renewing agreement:', error);
+      setSnackbar({ open: true, message: 'Error renewing agreement', severity: 'error' });
+    }
+  };
+
+  const calculateProRatedAmount = (startDate, endDate, annualAmount, billingFrequency) => {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const now = new Date();
+
+    // If start date is in the past (retroactive)
+    if (start < now) {
+      // Calculate how many billing periods have passed
+      const daysPassed = Math.floor((now - start) / (1000 * 60 * 60 * 24));
+      const daysInYear = 365;
+      
+      let periodAmount = annualAmount;
+      let periodDays = daysInYear;
+
+      switch (billingFrequency) {
+        case 'monthly':
+          periodAmount = annualAmount / 12;
+          periodDays = 30;
+          break;
+        case 'quarterly':
+          periodAmount = annualAmount / 4;
+          periodDays = 91;
+          break;
+        case 'semi-annual':
+          periodAmount = annualAmount / 2;
+          periodDays = 182;
+          break;
+        case 'annual':
+          periodAmount = annualAmount;
+          periodDays = 365;
+          break;
+      }
+
+      // Calculate number of periods passed and remaining amount
+      const periodsPassed = Math.floor(daysPassed / periodDays);
+      const remainingDaysInPeriod = daysPassed % periodDays;
+      const proRatedAmount = (periodsPassed * periodAmount) + ((remainingDaysInPeriod / periodDays) * periodAmount);
+
+      return {
+        isRetroactive: true,
+        proRatedAmount: Math.round(proRatedAmount * 100) / 100,
+        periodsPassed: periodsPassed,
+        message: `This is a retroactive agreement. The customer should be billed ${formatCurrency(proRatedAmount)} for the period from ${start.toLocaleDateString()} to ${now.toLocaleDateString()}.`
+      };
+    }
+
+    return { isRetroactive: false, proRatedAmount: 0, message: '' };
   };
 
   const calculateNextBillingDate = (startDate, frequency) => {
@@ -514,6 +654,17 @@ export default function LeaseAgreements() {
                         <ViewIcon />
                       </IconButton>
                     </Tooltip>
+                    {(agreement.status === 'expired' || agreement.status === 'active') && (
+                      <Tooltip title={agreement.status === 'expired' ? 'Renew Agreement' : 'Renew Agreement Early'}>
+                        <IconButton
+                          size="small"
+                          color="success"
+                          onClick={() => handleRenewAgreement(agreement)}
+                        >
+                          <RenewIcon />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                     <Tooltip title="Edit">
                       <IconButton
                         size="small"
@@ -630,6 +781,13 @@ export default function LeaseAgreements() {
             </Box>
           ) : (
             <Box pt={2}>
+              {retroactiveBilling.isRetroactive && (
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  <strong>Retroactive Agreement Detected</strong><br/>
+                  {retroactiveBilling.message}<br/>
+                  <strong>Next regular billing will occur on: {formData.start_date ? calculateNextBillingDate(new Date(formData.start_date), formData.billing_frequency).toLocaleDateString() : 'N/A'}</strong>
+                </Alert>
+              )}
               <Grid container spacing={2}>
                 <Grid item xs={12} md={6}>
                   <FormControl fullWidth>
@@ -727,6 +885,19 @@ export default function LeaseAgreements() {
           <Button onClick={() => setDialogOpen(false)}>
             {dialogMode === 'view' ? 'Close' : 'Cancel'}
           </Button>
+          {dialogMode === 'view' && selectedAgreement && (selectedAgreement.status === 'expired' || selectedAgreement.status === 'active') && (
+            <Button 
+              onClick={() => {
+                setDialogOpen(false);
+                handleRenewAgreement(selectedAgreement);
+              }} 
+              variant="contained" 
+              color="success"
+              startIcon={<RenewIcon />}
+            >
+              Renew Agreement
+            </Button>
+          )}
           {dialogMode !== 'view' && (
             <Button onClick={handleSaveAgreement} variant="contained">
               Save

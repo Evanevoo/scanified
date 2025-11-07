@@ -154,29 +154,9 @@ class CustomizationService {
   private async preloadSounds(): Promise<void> {
     if (!this.settings) return;
 
-    logger.log('🔊 Preloading sounds...');
-    
-    for (const sound of this.settings.sounds) {
-      if (sound.enabled) {
-        try {
-          // Skip preloading for now since we don't have actual sound files
-          // In production, you would uncomment the code below and add real MP3 files
-          logger.log(`🔊 Sound ${sound.name} configured but not preloaded (placeholder file)`);
-          
-          /*
-          const { sound: audioSound } = await Audio.Sound.createAsync(
-            { uri: `asset:///sounds/${sound.file}` },
-            { shouldPlay: false, isLooping: false }
-          );
-          this.soundCache.set(sound.id, audioSound);
-          */
-        } catch (error) {
-          logger.log(`🔊 Sound file ${sound.file} not found, skipping...`);
-        }
-      }
-    }
-    
-    logger.log('🔊 Sound preloading completed (using haptic feedback)');
+    // Sounds are handled by feedbackService, so we skip preloading here
+    // This service focuses on customization settings, not sound file management
+    // The feedbackService handles all sound loading and playback
   }
 
   async playCustomSound(category: CustomSound['category'], customSoundId?: string): Promise<void> {

@@ -242,6 +242,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         { title: 'File Format Manager', path: '/file-format-manager', icon: <Settings />, roles: ['admin', 'manager'] },
         { title: 'Import Asset Balance', path: '/import-asset-balance', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
         { title: 'Import Approvals', path: '/import-approvals', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Verified Orders', path: '/verified-orders', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
         { title: 'Import History', path: '/import-approvals-history', icon: <History />, roles: ['admin', 'user', 'manager'] },
         { title: 'Organization Tools', path: '/organization-tools', icon: <BuildIcon />, roles: ['admin', 'manager'] },
               { title: 'User Management', path: '/user-management', icon: <AdminPanelSettings />, roles: ['admin', 'manager'] },

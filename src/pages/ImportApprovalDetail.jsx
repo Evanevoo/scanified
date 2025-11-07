@@ -92,6 +92,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const [newPO, setNewPO] = useState('');
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [newLocation, setNewLocation] = useState('');
+  const [scannedBottles, setScannedBottles] = useState([]);
 
   // Get filter parameters from URL
   const filterInvoiceNumber = searchParams.get('order') || searchParams.get('invoiceNumber');
@@ -419,6 +420,332 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     fetchAssetInfo();
   }, [importRecord, organization]);
 
+  // Fetch scanned bottles for this order
+  useEffect(() => {
+    async function fetchScannedBottles() {
+      if (!importRecord || !organization?.id) {
+        logger.log('⚠️ Missing importRecord or organization for fetching scanned bottles');
+        return;
+      }
+      
+      const data = parseDataField(importRecord.data);
+      
+      // Try multiple ways to get the order number
+      let orderNumber = null;
+      
+      // 1. From URL parameter
+      if (filterInvoiceNumber && filterInvoiceNumber !== 'N/A') {
+        orderNumber = filterInvoiceNumber;
+        logger.log('🔍 Order number from URL parameter:', orderNumber);
+      }
+      
+      // 2. From helper function
+      if (!orderNumber) {
+        orderNumber = getOrderNumber(data);
+        if (orderNumber && orderNumber !== 'N/A') {
+          logger.log('🔍 Order number from getOrderNumber:', orderNumber);
+        }
+      }
+      
+      // 3. From data.rows array
+      if ((!orderNumber || orderNumber === 'N/A') && data.rows && data.rows.length > 0) {
+        // Check all rows, not just the first one
+        for (const row of data.rows) {
+          const rowOrderNum = row.order_number || row.invoice_number || row.reference_number || row.sales_receipt_number;
+          if (rowOrderNum && rowOrderNum !== 'N/A') {
+            orderNumber = rowOrderNum;
+            logger.log('🔍 Order number from rows array:', orderNumber);
+            break;
+          }
+        }
+      }
+      
+      // 4. From record ID (for scanned-only records)
+      if ((!orderNumber || orderNumber === 'N/A') && typeof importRecord.id === 'string' && importRecord.id.startsWith('scanned_')) {
+        orderNumber = importRecord.id.replace('scanned_', '');
+        logger.log('🔍 Order number from scanned ID:', orderNumber);
+      }
+      
+      // 5. Try to get from the import record's data directly
+      if ((!orderNumber || orderNumber === 'N/A') && data) {
+        // Check all possible fields in data
+        orderNumber = data.order_number || data.reference_number || data.invoice_number || data.sales_receipt_number;
+        if (orderNumber && orderNumber !== 'N/A') {
+          logger.log('🔍 Order number from data fields:', orderNumber);
+        }
+      }
+      
+      if (!orderNumber || orderNumber === 'N/A') {
+        logger.log('⚠️ No order number found for fetching scanned bottles. Full data:', {
+          filterInvoiceNumber,
+          importRecordId: importRecord.id,
+          dataKeys: Object.keys(data || {}),
+          hasRows: !!data.rows,
+          rowsLength: data.rows?.length || 0,
+          firstRowKeys: data.rows?.[0] ? Object.keys(data.rows[0]) : []
+        });
+        setScannedBottles([]);
+        return;
+      }
+      
+      logger.log('🔍 Fetching scanned bottles for order:', orderNumber, 'from data:', {
+        filterInvoiceNumber,
+        dataOrderNumber: data.order_number,
+        dataReferenceNumber: data.reference_number,
+        dataInvoiceNumber: data.invoice_number,
+        hasRows: !!data.rows,
+        rowsLength: data.rows?.length || 0,
+        firstRowOrderNumber: data.rows?.[0]?.order_number,
+        firstRowReferenceNumber: data.rows?.[0]?.reference_number,
+        firstRowInvoiceNumber: data.rows?.[0]?.invoice_number,
+        importRecordId: importRecord?.id,
+        importRecordStatus: importRecord?.status
+      });
+      
+      // Normalize order number for matching
+      const normalizeOrderNum = (num) => {
+        if (!num) return '';
+        return String(num).trim().replace(/^0+/, '');
+      };
+      const normalizedOrderNum = normalizeOrderNum(orderNumber);
+      
+      try {
+        const allBarcodes = new Set();
+        
+        // Fetch from bottle_scans table (NOTE: product_code doesn't exist in bottle_scans)
+        // First try exact match, then normalized match
+        const { data: exactBottleScans, error: exactBottleScansError } = await supabase
+          .from('bottle_scans')
+          .select('bottle_barcode, order_number, mode, created_at')
+          .eq('order_number', orderNumber)
+          .eq('organization_id', organization.id);
+        
+        if (exactBottleScansError) {
+          logger.error('Error fetching bottle_scans (exact match):', exactBottleScansError);
+        } else {
+          logger.log(`📊 Found ${exactBottleScans?.length || 0} bottle_scans with exact order number match: ${orderNumber}`);
+          if (exactBottleScans && exactBottleScans.length > 0) {
+            exactBottleScans.forEach(scan => {
+              if (scan.bottle_barcode) {
+                allBarcodes.add(scan.bottle_barcode);
+                logger.log(`✅ Added barcode from bottle_scans: ${scan.bottle_barcode}`);
+              }
+            });
+          }
+        }
+        
+        // Also try fetching all and filtering (in case order number format differs)
+        const { data: allBottleScans, error: bottleScansError } = await supabase
+          .from('bottle_scans')
+          .select('bottle_barcode, order_number, mode, created_at')
+          .eq('organization_id', organization.id);
+        
+        if (bottleScansError) {
+          logger.error('Error fetching all bottle_scans:', bottleScansError);
+        } else {
+          logger.log(`📊 Total bottle_scans in database: ${allBottleScans?.length || 0}`);
+          
+          // Filter by normalized order number
+          const matchingBottleScans = (allBottleScans || []).filter(scan => {
+            const scanOrderNum = normalizeOrderNum(scan.order_number);
+            const matches = scanOrderNum === normalizedOrderNum || String(scan.order_number || '').trim() === String(orderNumber || '').trim();
+            if (matches) {
+              logger.log(`✅ Match found: scan.order_number="${scan.order_number}" (normalized: ${scanOrderNum}) matches orderNumber="${orderNumber}" (normalized: ${normalizedOrderNum})`);
+            }
+            return matches;
+          });
+          
+          logger.log(`✅ Found ${matchingBottleScans.length} bottle_scans for order ${orderNumber} (normalized: ${normalizedOrderNum})`);
+          logger.log('📋 Matching bottle_scans:', matchingBottleScans.map(s => ({
+            order_number: s.order_number,
+            bottle_barcode: s.bottle_barcode,
+            mode: s.mode
+          })));
+          
+          matchingBottleScans.forEach(scan => {
+            if (scan.bottle_barcode) allBarcodes.add(scan.bottle_barcode);
+          });
+        }
+        
+        // Also check scans table - try exact match first
+        // NOTE: scans table doesn't have product_code column
+        const { data: exactScans, error: exactScansError } = await supabase
+          .from('scans')
+          .select('barcode_number, order_number, mode, action')
+          .eq('order_number', orderNumber)
+          .eq('organization_id', organization.id);
+        
+        if (exactScansError) {
+          logger.error('Error fetching scans (exact match):', exactScansError);
+        } else {
+          logger.log(`📊 Found ${exactScans?.length || 0} scans with exact order number match: ${orderNumber}`);
+          if (exactScans && exactScans.length > 0) {
+            exactScans.forEach(scan => {
+              if (scan.barcode_number) {
+                allBarcodes.add(scan.barcode_number);
+                logger.log(`✅ Added barcode from scans: ${scan.barcode_number}`);
+              }
+            });
+          }
+        }
+        
+        // Also fetch all and filter (in case order number format differs)
+        const { data: allScans, error: scansError } = await supabase
+          .from('scans')
+          .select('barcode_number, order_number, mode, action')
+          .eq('organization_id', organization.id);
+        
+        if (scansError) {
+          logger.error('Error fetching all scans:', scansError);
+        } else {
+          logger.log(`📊 Total scans in database: ${allScans?.length || 0}`);
+          
+          // Filter by normalized order number
+          const matchingScans = (allScans || []).filter(scan => {
+            const scanOrderNum = normalizeOrderNum(scan.order_number);
+            const matches = scanOrderNum === normalizedOrderNum || String(scan.order_number || '').trim() === String(orderNumber || '').trim();
+            if (matches) {
+              logger.log(`✅ Match found: scan.order_number="${scan.order_number}" (normalized: ${scanOrderNum}) matches orderNumber="${orderNumber}" (normalized: ${normalizedOrderNum})`);
+            }
+            return matches;
+          });
+          
+          logger.log(`✅ Found ${matchingScans.length} scans for order ${orderNumber}`);
+          logger.log('📋 Matching scans:', matchingScans.map(s => ({
+            order_number: s.order_number,
+            barcode_number: s.barcode_number,
+            mode: s.mode,
+            action: s.action
+          })));
+          
+          matchingScans.forEach(scan => {
+            if (scan.barcode_number) allBarcodes.add(scan.barcode_number);
+          });
+        }
+        
+        logger.log(`📦 Total unique barcodes found from scans: ${allBarcodes.size}`, Array.from(allBarcodes));
+        
+        // ALSO check rentals table for verified orders - bottles assigned to customers
+        // This is important for verified orders where bottles were assigned during verification
+        // NOTE: rentals table might not have order_number column, so we'll fetch all active rentals
+        // and match by customer instead
+        const { data: allRentals, error: rentalsError } = await supabase
+          .from('rentals')
+          .select('bottle_barcode, rental_order_number, order_number, customer_name, customer_id')
+          .eq('organization_id', organization.id)
+          .is('rental_end_date', null); // Only active rentals
+        
+        if (!rentalsError && allRentals) {
+          logger.log(`📊 Found ${allRentals.length} total active rentals`);
+          
+          // Filter rentals by order number (try both order_number and rental_order_number)
+          const matchingRentals = allRentals.filter(rental => {
+            const rentalOrderNum = rental.order_number || rental.rental_order_number;
+            if (!rentalOrderNum) return false;
+            
+            const normalizedRentalOrderNum = normalizeOrderNum(rentalOrderNum);
+            const matches = normalizedRentalOrderNum === normalizedOrderNum || String(rentalOrderNum || '').trim() === String(orderNumber || '').trim();
+            if (matches) {
+              logger.log(`✅ Match found: rental.order_number="${rentalOrderNum}" (normalized: ${normalizedRentalOrderNum}) matches orderNumber="${orderNumber}" (normalized: ${normalizedOrderNum})`);
+            }
+            return matches;
+          });
+          
+          logger.log(`✅ Found ${matchingRentals.length} rentals for order ${orderNumber}`);
+          
+          matchingRentals.forEach(rental => {
+            if (rental.bottle_barcode) {
+              allBarcodes.add(rental.bottle_barcode);
+              logger.log(`✅ Added barcode from rentals: ${rental.bottle_barcode}`);
+            }
+          });
+        } else if (rentalsError) {
+          logger.warn('⚠️ Error fetching rentals (table might not have order_number column):', rentalsError);
+        }
+        
+        // ALSO check bottles table directly for bottles assigned to customer with this order number
+        // Get customer info from the import record
+        const customerName = getCustomerInfo(data);
+        const customerId = getCustomerId(data);
+        
+        if (customerName || customerId) {
+          logger.log(`🔍 Checking bottles assigned to customer: ${customerName || customerId}`);
+          
+          let customerBottlesQuery = supabase
+            .from('bottles')
+            .select('barcode_number')
+            .eq('organization_id', organization.id);
+          
+          if (customerId) {
+            customerBottlesQuery = customerBottlesQuery.eq('assigned_customer', customerId);
+          } else if (customerName) {
+            customerBottlesQuery = customerBottlesQuery.eq('customer_name', customerName);
+          }
+          
+          const { data: customerBottles, error: customerBottlesError } = await customerBottlesQuery;
+          
+          if (!customerBottlesError && customerBottles) {
+            logger.log(`📊 Found ${customerBottles.length} bottles assigned to customer`);
+            
+            // Filter by checking if they have a rental with this order number
+            const customerBarcodes = new Set(customerBottles.map(b => b.barcode_number));
+            const { data: customerRentals } = await supabase
+              .from('rentals')
+              .select('bottle_barcode, order_number')
+              .in('bottle_barcode', Array.from(customerBarcodes))
+              .eq('organization_id', organization.id);
+            
+            if (customerRentals) {
+              customerRentals.forEach(rental => {
+                const rentalOrderNum = normalizeOrderNum(rental.order_number);
+                if (rentalOrderNum === normalizedOrderNum || String(rental.order_number || '').trim() === String(orderNumber || '').trim()) {
+                  allBarcodes.add(rental.bottle_barcode);
+                  logger.log(`✅ Added bottle ${rental.bottle_barcode} from customer rental`);
+                }
+              });
+            }
+          }
+        }
+        
+        logger.log(`📦 Total unique barcodes found (after all checks): ${allBarcodes.size}`, Array.from(allBarcodes));
+        
+        if (allBarcodes.size === 0) {
+          logger.log('⚠️ No barcodes found in bottle_scans, scans, rentals, or customer-assigned bottles');
+          setScannedBottles([]);
+          return;
+        }
+        
+        // Fetch bottle details from bottles table
+        // NOTE: bottles table doesn't have addendum column
+        const { data: bottles, error: bottlesError } = await supabase
+          .from('bottles')
+          .select('barcode_number, product_code, category, group_name, type, description, gas_type, ownership, serial_number')
+          .in('barcode_number', Array.from(allBarcodes))
+          .eq('organization_id', organization.id);
+        
+        if (bottlesError) {
+          logger.error('Error fetching bottles:', bottlesError);
+          setScannedBottles([]);
+          return;
+        }
+        
+        logger.log(`✅ Found ${bottles?.length || 0} bottles for scanned barcodes`);
+        logger.log('📋 Bottles found:', bottles?.map(b => ({
+          barcode_number: b.barcode_number,
+          product_code: b.product_code,
+          category: b.category,
+          type: b.type
+        })));
+        setScannedBottles(bottles || []);
+      } catch (error) {
+        logger.error('Error fetching scanned bottles:', error);
+        setScannedBottles([]);
+      }
+    }
+    
+    fetchScannedBottles();
+  }, [importRecord, organization, filterInvoiceNumber]);
+
   // Fetch customers for the change customer modal
   useEffect(() => {
     async function fetchCustomers() {
@@ -446,6 +773,326 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       fetchCustomers();
     }
   }, [showCustomerModal, organization]);
+
+  // Helper function to get order number from data
+  const getOrderNumber = (data) => {
+    if (!data) return '';
+    
+    // Try direct properties first
+    if (data.order_number || data.reference_number || data.invoice_number) {
+      return data.order_number || data.reference_number || data.invoice_number;
+    }
+    
+    // Try to get from rows array
+    if (data.rows && data.rows.length > 0) {
+      const firstRow = data.rows[0];
+      if (firstRow.order_number || firstRow.invoice_number || firstRow.reference_number || firstRow.sales_receipt_number) {
+        return firstRow.order_number || firstRow.invoice_number || firstRow.reference_number || firstRow.sales_receipt_number;
+      }
+    }
+    
+    return '';
+  };
+
+  // Helper function to get customer info from data
+  const getCustomerInfo = (data) => {
+    if (!data) return 'Unknown';
+    
+    // Try direct properties first
+    if (data.customer_name || data.CustomerName || data.Customer) {
+      return data.customer_name || data.CustomerName || data.Customer;
+    }
+    
+    // Try to get from rows array
+    if (data.rows && data.rows.length > 0) {
+      const firstRow = data.rows[0];
+      if (firstRow.customer_name || firstRow.CustomerName || firstRow.Customer) {
+        return firstRow.customer_name || firstRow.CustomerName || firstRow.Customer;
+      }
+    }
+    
+    // Try to get from line_items array
+    if (data.line_items && data.line_items.length > 0) {
+      const firstItem = data.line_items[0];
+      if (firstItem.customer_name || firstItem.CustomerName || firstItem.Customer) {
+        return firstItem.customer_name || firstItem.CustomerName || firstItem.Customer;
+      }
+    }
+    
+    // Try to get from summary
+    if (data.summary && data.summary.customer_name) {
+      return data.summary.customer_name;
+    }
+    
+    return 'Unknown';
+  };
+
+  const getCustomerId = (data) => {
+    if (!data) return null;
+    
+    // Try direct properties first
+    if (data.customer_id || data.CustomerListID || data.CustomerID) {
+      return data.customer_id || data.CustomerListID || data.CustomerID;
+    }
+    
+    // Try to get from rows array
+    if (data.rows && data.rows.length > 0) {
+      const firstRow = data.rows[0];
+      if (firstRow.customer_id || firstRow.CustomerListID || firstRow.CustomerID) {
+        return firstRow.customer_id || firstRow.CustomerListID || firstRow.CustomerID;
+      }
+    }
+    
+    // Try to get from line_items array
+    if (data.line_items && data.line_items.length > 0) {
+      const firstItem = data.line_items[0];
+      if (firstItem.customer_id || firstItem.CustomerListID || firstItem.CustomerID) {
+        return firstItem.customer_id || firstItem.CustomerListID || firstItem.CustomerID;
+      }
+    }
+    
+    return null;
+  };
+
+  // Assign bottles to customers after verification (similar to ImportApprovals.jsx)
+  const assignBottlesToCustomer = async (record) => {
+    try {
+      logger.log('🔍 assignBottlesToCustomer called with record:', {
+        id: record.id,
+        data: record.data
+      });
+      
+      const data = parseDataField(record.data);
+      const rows = data.rows || data.line_items || [];
+      const newCustomerName = getCustomerInfo(data);
+      
+      logger.log('🔍 Customer name extracted:', newCustomerName, 'Rows:', rows.length);
+      
+      // Extract order number
+      let orderNumber = getOrderNumber(data);
+      if (!orderNumber && typeof record.id === 'string' && record.id.startsWith('scanned_')) {
+        orderNumber = record.id.replace('scanned_', '');
+        logger.log('🔍 Extracted order number from scanned ID:', orderNumber);
+      }
+      
+      if (!orderNumber) {
+        logger.error('❌ No order number found for bottle assignment');
+        throw new Error('No order number found in record');
+      }
+      
+      // Get customer ID from customer name
+      let newCustomerId = null;
+      if (newCustomerName) {
+        logger.log('🔍 Looking up customer:', newCustomerName, 'org:', organization?.id);
+        const { data: customer, error: customerError } = await supabase
+          .from('customers')
+          .select('id, CustomerListID')
+          .eq('name', newCustomerName)
+          .eq('organization_id', organization?.id)
+          .limit(1)
+          .single();
+        
+        if (customerError) {
+          logger.error('❌ Error looking up customer:', customerError);
+        } else if (customer) {
+          newCustomerId = customer.id || customer.CustomerListID;
+          logger.log('✅ Found customer ID:', newCustomerId);
+        } else {
+          logger.warn('⚠️ Customer not found:', newCustomerName);
+        }
+      } else {
+        logger.warn('⚠️ No customer name found in record');
+      }
+      
+      // Get all scanned barcodes for this order (shipped items only)
+      const scannedBarcodes = new Set();
+      if (orderNumber) {
+        logger.log('🔍 Looking for scans for order:', orderNumber, 'org:', organization?.id);
+        
+        // Normalize order number for matching
+        const normalizeOrderNum = (num) => {
+          if (!num) return '';
+          return String(num).trim().replace(/^0+/, '');
+        };
+        const normalizedOrderNum = normalizeOrderNum(orderNumber);
+        
+        // Get scans from scans table (shipped items only)
+        // Note: scans table uses 'barcode_number', not 'bottle_barcode'
+        // Fetch all scans first, then filter by normalized order number
+        let scansQuery = supabase
+          .from('scans')
+          .select('barcode_number, product_code, order_number')
+          .or('mode.eq.SHIP,mode.eq.delivery,action.eq.out');
+        
+        // Add organization filter if available
+        if (organization?.id) {
+          scansQuery = scansQuery.eq('organization_id', organization.id);
+        }
+        
+        const { data: allScans, error: scansError } = await scansQuery;
+        
+        if (scansError) {
+          logger.error('Error fetching scans:', scansError);
+        }
+        
+        // Filter by normalized order number
+        const scans = (allScans || []).filter(scan => {
+          const scanOrderNum = normalizeOrderNum(scan.order_number);
+          return scanOrderNum === normalizedOrderNum || String(scan.order_number || '').trim() === String(orderNumber || '').trim();
+        });
+        
+        if (scans && scans.length > 0) {
+          logger.log(`✅ Found ${scans.length} scans for order ${orderNumber} (normalized: ${normalizedOrderNum})`);
+          scans.forEach(scan => {
+            if (scan.barcode_number) scannedBarcodes.add(scan.barcode_number);
+          });
+        } else {
+          logger.warn(`⚠️ No scans found for order ${orderNumber} (normalized: ${normalizedOrderNum})`);
+          logger.log('🔍 All order numbers in scans table:', [...new Set((allScans || []).map(s => s.order_number).filter(Boolean))].slice(0, 10));
+        }
+        
+        // Also check bottle_scans table
+        // Note: bottle_scans uses 'bottle_barcode' and 'cylinder_barcode', not 'barcode_number'
+        let bottleScansQuery = supabase
+          .from('bottle_scans')
+          .select('bottle_barcode, cylinder_barcode, order_number');
+        
+        if (organization?.id) {
+          bottleScansQuery = bottleScansQuery.eq('organization_id', organization.id);
+        }
+        
+        const { data: allBottleScans, error: bottleScansError } = await bottleScansQuery;
+        
+        if (bottleScansError) {
+          logger.error('Error fetching bottle_scans:', bottleScansError);
+        }
+        
+        // Filter by normalized order number
+        const bottleScans = (allBottleScans || []).filter(scan => {
+          const scanOrderNum = normalizeOrderNum(scan.order_number);
+          return scanOrderNum === normalizedOrderNum || String(scan.order_number || '').trim() === String(orderNumber || '').trim();
+        });
+        
+        if (bottleScans && bottleScans.length > 0) {
+          logger.log(`✅ Found ${bottleScans.length} bottle_scans for order ${orderNumber}`);
+          bottleScans.forEach(scan => {
+            if (scan.bottle_barcode) scannedBarcodes.add(scan.bottle_barcode);
+            if (scan.cylinder_barcode) scannedBarcodes.add(scan.cylinder_barcode);
+          });
+        } else {
+          logger.warn(`⚠️ No bottle_scans found for order ${orderNumber}`);
+          logger.log('🔍 All order numbers in bottle_scans table:', [...new Set((allBottleScans || []).map(s => s.order_number).filter(Boolean))].slice(0, 10));
+        }
+      }
+      
+      logger.log(`📦 Total unique barcodes found: ${scannedBarcodes.size}`);
+      
+      const assignmentWarnings = [];
+      const assignmentSuccesses = [];
+      const processedBarcodes = new Set();
+      
+      // Process scanned barcodes (most reliable)
+      for (const barcode of scannedBarcodes) {
+        if (processedBarcodes.has(barcode)) continue;
+        processedBarcodes.add(barcode);
+        
+        const { data: bottles, error: bottleError } = await supabase
+          .from('bottles')
+          .select('*')
+          .eq('barcode_number', barcode)
+          .eq('organization_id', organization?.id)
+          .limit(1);
+          
+        if (bottleError) {
+          logger.error('Error finding bottle:', bottleError);
+          continue;
+        }
+        
+        if (bottles && bottles.length > 0) {
+          const bottle = bottles[0];
+          const currentCustomerName = bottle.assigned_customer || bottle.customer_name;
+          
+          // Check if bottle is at home (no customer assigned)
+          const isAtHome = !currentCustomerName || currentCustomerName === '' || currentCustomerName === null;
+          
+          if (isAtHome) {
+            // Bottle is at home - assign normally
+            const updateData = {
+              assigned_customer: newCustomerId || newCustomerName,
+              customer_name: newCustomerName,
+              status: 'RENTED',
+              rental_start_date: new Date().toISOString().split('T')[0],
+              rental_order_number: orderNumber,
+              updated_at: new Date().toISOString()
+            };
+            
+            const { error: updateError } = await supabase
+              .from('bottles')
+              .update(updateData)
+              .eq('id', bottle.id)
+              .eq('organization_id', organization?.id);
+            
+            if (updateError) {
+              logger.error('Error updating bottle:', updateError);
+              assignmentWarnings.push(`Failed to assign bottle ${bottle.barcode_number}: ${updateError.message}`);
+            } else {
+              logger.log(`✅ Assigned bottle ${bottle.barcode_number} to customer ${newCustomerName}`);
+              assignmentSuccesses.push(`Bottle ${bottle.barcode_number} assigned to ${newCustomerName}`);
+              
+              // Create rental record if it doesn't exist
+              const { data: existingRental } = await supabase
+                .from('rentals')
+                .select('id')
+                .eq('bottle_barcode', bottle.barcode_number)
+                .is('rental_end_date', null)
+                .limit(1);
+              
+              if (!existingRental || existingRental.length === 0) {
+                await supabase
+                  .from('rentals')
+                  .insert({
+                    bottle_id: bottle.id,
+                    bottle_barcode: bottle.barcode_number,
+                    customer_id: newCustomerId || newCustomerName,
+                    customer_name: newCustomerName,
+                    rental_start_date: new Date().toISOString().split('T')[0],
+                    rental_end_date: null,
+                    organization_id: organization?.id,
+                    rental_amount: 10,
+                    rental_type: 'monthly',
+                    tax_code: 'GST+PST',
+                    tax_rate: 0.11,
+                    location: bottle.location || 'SASKATOON',
+                    status: 'active',
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                  });
+              }
+            }
+          } else {
+            logger.log(`ℹ️ Bottle ${bottle.barcode_number} is already assigned to ${currentCustomerName}`);
+          }
+        } else {
+          logger.warn(`⚠️ Bottle not found for scanned barcode: ${barcode}`);
+          assignmentWarnings.push(`Bottle not found: ${barcode}`);
+        }
+      }
+      
+      // Show summary messages
+      if (assignmentSuccesses.length > 0) {
+        logger.log(`✅ Successfully assigned ${assignmentSuccesses.length} bottle(s)`);
+      }
+      
+      if (assignmentWarnings.length > 0) {
+        logger.warn(`⚠️ ${assignmentWarnings.length} warning(s):\n${assignmentWarnings.join('\n')}`);
+      }
+      
+      return { successes: assignmentSuccesses, warnings: assignmentWarnings };
+    } catch (error) {
+      logger.error('Error assigning bottles to customer:', error);
+      throw error;
+    }
+  };
 
   // Handle record actions
   const handleRecordAction = async (action) => {
@@ -478,67 +1125,53 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     try {
       switch (action) {
         case 'Verify This Record': {
+          // Get the original database ID (handle split records)
+          const originalId = getOriginalId(invoiceNumber);
+          
           // Skip database update for scanned-only records
-          if (!isScannedOnly) {
-            // 1. Update imported_invoices status
-            await supabase
-              .from('imported_invoices')
-              .update({ status: 'approved', approved_at: new Date().toISOString() })
-              .eq('id', invoiceNumber);
-          }
-
-          // 2. Assign delivered bottles to customer and add to rentals
-          const importData = importRecord?.data || {};
-          const delivered = (importData.delivered || importData.rows || importData.line_items || []).filter(item => item.barcode_number && item.customer_id);
-          for (const item of delivered) {
-            // Assign bottle to customer
-            await supabase
-              .from('bottles')
-              .update({ assigned_customer: item.customer_id })
-              .eq('barcode_number', item.barcode_number)
-              .eq('organization_id', organization.id);
-            // Add to rentals if not already active
-            const { data: existingRental } = await supabase
-              .from('rentals')
-              .select('*')
-              .eq('bottle_barcode', item.barcode_number)
-              .eq('organization_id', organization.id)
-              .is('rental_end_date', null)
-              .single();
-            if (!existingRental) {
-              await supabase
-                .from('rentals')
-                .insert({
-                  bottle_barcode: item.barcode_number,
-                  customer_id: item.customer_id,
-                  organization_id: organization.id,
-                  rental_start_date: new Date().toISOString(),
-                  rental_end_date: null
-                });
+          if (!isScannedOnly && originalId) {
+            // Convert to numeric ID if it's a string
+            let recordId = originalId;
+            if (typeof originalId === 'string') {
+              const numericPart = originalId.match(/\d+/);
+              recordId = numericPart ? parseInt(numericPart[0], 10) : originalId;
             }
+            
+            // 1. Update imported_invoices status
+            const { error: updateError } = await supabase
+              .from('imported_invoices')
+              .update({ 
+                status: 'approved', 
+                approved_at: new Date().toISOString() 
+              })
+              .eq('id', recordId);
+            
+            if (updateError) {
+              logger.error('Error updating record status:', updateError);
+              setActionMessage(`Error updating record: ${updateError.message}`);
+              return;
+            }
+            
+            logger.log(`✅ Updated record ${recordId} status to approved`);
           }
 
-          // 3. Remove returned bottles from customer and end rental
-          const returned = (importData.returned || []);
-          for (const item of returned) {
-            // Remove customer assignment
-            await supabase
-              .from('bottles')
-              .update({ assigned_customer: null })
-              .eq('barcode_number', item.barcode_number)
-              .eq('organization_id', organization.id);
-            // End rental
-            await supabase
-              .from('rentals')
-              .update({ rental_end_date: new Date().toISOString() })
-              .eq('bottle_barcode', item.barcode_number)
-              .eq('organization_id', organization.id)
-              .is('rental_end_date', null);
+          // 2. Assign bottles to customers using the proper function
+          try {
+            const result = await assignBottlesToCustomer(importRecord);
+            if (result.warnings.length > 0 && result.successes.length === 0) {
+              setActionMessage(`Warning: ${result.warnings.join('; ')}`);
+            } else if (result.successes.length > 0) {
+              setActionMessage(`Record verified successfully! ${result.successes.length} bottle(s) assigned.`);
+            } else {
+              setActionMessage('Record verified successfully!');
+            }
+          } catch (assignError) {
+            logger.error('Error assigning bottles:', assignError);
+            setActionMessage(`Record verified but bottle assignment failed: ${assignError.message}`);
           }
 
-          setActionMessage('Record verified successfully!');
           // Navigate back to approvals list after successful verification
-          setTimeout(() => navigate('/import-approvals'), 1500);
+          setTimeout(() => navigate('/import-approvals'), 2000);
           break;
         }
         case 'Delete This Record':
@@ -941,19 +1574,35 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const allReturned = importData.returned || [];
   const summary = importData.summary || {};
 
-  // Filter line items based on invoice number and customer
+  // Filter line items based on invoice number and customer, with deduplication
   const filterLineItems = (items) => {
     logger.log('filterLineItems: filterInvoiceNumber =', filterInvoiceNumber);
     logger.log('filterLineItems: filterCustomerName =', filterCustomerName);
     logger.log('filterLineItems: filterCustomerId =', filterCustomerId);
     logger.log('filterLineItems: total items before filter =', items.length);
     
+    // First, deduplicate by barcode to prevent duplicate entries
+    const seenBarcodes = new Set();
+    const deduplicatedItems = items.filter(item => {
+      const barcode = item.barcode || item.barcode_number || item.Barcode || item.BarcodeNumber;
+      if (!barcode) return true; // Keep items without barcodes
+      
+      if (seenBarcodes.has(barcode)) {
+        logger.log('⚠️ Skipping duplicate item with barcode:', barcode);
+        return false;
+      }
+      seenBarcodes.add(barcode);
+      return true;
+    });
+    
+    logger.log(`📊 Deduplicated items: ${items.length} -> ${deduplicatedItems.length}`);
+    
     if (!filterInvoiceNumber && !filterCustomerName && !filterCustomerId) {
-      logger.log('filterLineItems: No filters applied, returning all items');
-      return items; // No filters, return all
+      logger.log('filterLineItems: No filters applied, returning deduplicated items');
+      return deduplicatedItems; // No filters, return deduplicated items
     }
     
-    const filteredItems = items.filter(item => {
+    const filteredItems = deduplicatedItems.filter(item => {
       const itemInvoiceNumber = item.invoice_number || item.order_number || item.InvoiceNumber || item.ReferenceNumber || item.reference_number;
       const itemCustomerName = item.customer_name || item.customerName;
       const itemCustomerId = item.customer_id || item.customerId;
@@ -1138,12 +1787,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 </Alert>
               )}
 
-              {/* Delivered Assets */}
+              {/* Delivered Assets - Show Scanned Bottles */}
               <Typography variant="h6" fontWeight={700} mb={2} color="var(--text-main)" sx={{ 
                 borderBottom: '1px solid var(--divider)', 
                 pb: 1
               }}>
-                Delivered Assets ({delivered.length})
+                Delivered Assets ({scannedBottles.length})
               </Typography>
               <Paper sx={{ 
                 mb: 4, 
@@ -1165,14 +1814,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Description</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Ownership</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Barcode</TableCell>
-                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Serial Number</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Addendum</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Serial Number</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {delivered.length === 0 ? (
+                    {scannedBottles.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={9} align="center" sx={{ 
+                        <TableCell colSpan={8} align="center" sx={{ 
                           py: 4, 
                           color: 'text.secondary',
                           border: '2px dashed #e0e6ed',
@@ -1181,41 +1829,29 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                           No delivered assets found.
                         </TableCell>
                       </TableRow>
-                    ) : delivered.map((row, i) => {
-                      // Try barcode first, then product_code
-                      const barcode = row.barcode || row.barcode_number || row.Barcode || row.BarcodeNumber;
-                      const prodCode = row.product_code || row.ProductCode || row.productCode;
-                      const identifier = barcode || prodCode;
-                      
-                      const assetInfo = getAssetInfo(identifier);
-                      logger.log(`🎯 Row ${i}:`, {
-                        barcode: barcode,
-                        productCode: prodCode,
-                        identifier: identifier,
-                        assetInfo: assetInfo,
-                      });
+                    ) : scannedBottles.map((bottle, i) => {
+                      const rowKey = bottle.barcode_number || `bottle_${i}`;
                       return (
-                        <TableRow key={i} sx={{ 
+                        <TableRow key={rowKey} sx={{ 
                           backgroundColor: i % 2 === 0 ? '#ffffff' : '#f8f9fa',
                           '&:hover': { backgroundColor: '#f0f0f0' },
                           borderBottom: '1px solid #e0e6ed'
                         }}>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.category || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.group || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.type || ''}</TableCell>
+                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.category || ''}</TableCell>
+                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.group_name || ''}</TableCell>
+                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.type || ''}</TableCell>
                           <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
-                            <Chip label={row.product_code} size="small" variant="outlined" sx={{ 
+                            <Chip label={bottle.product_code || ''} size="small" variant="outlined" sx={{ 
                               border: '2px solid #333',
                               fontWeight: 600,
                               bgcolor: 'white',
                               color: 'black'
                             }} />
                           </TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.description || row.description || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.ownership || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.barcode || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.serial_number || ''}</TableCell>
-                          <TableCell>{row.addendum || ''}</TableCell>
+                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.description || ''}</TableCell>
+                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.ownership || ''}</TableCell>
+                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.barcode_number || ''}</TableCell>
+                          <TableCell>{bottle.serial_number || ''}</TableCell>
                         </TableRow>
                       );
                     })}
@@ -1249,14 +1885,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Description</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Ownership</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Barcode</TableCell>
-                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Serial Number</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Addendum</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Serial Number</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {returned.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={9} align="center" sx={{ 
+                        <TableCell colSpan={8} align="center" sx={{ 
                           py: 4, 
                           color: 'text.secondary',
                           border: '2px dashed #e0e6ed',
@@ -1287,8 +1922,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                           <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.description || row.description || ''}</TableCell>
                           <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.ownership || ''}</TableCell>
                           <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.barcode || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.serial_number || ''}</TableCell>
-                          <TableCell>{row.addendum || ''}</TableCell>
+                          <TableCell>{row.serial_number || ''}</TableCell>
                         </TableRow>
                       );
                     })}

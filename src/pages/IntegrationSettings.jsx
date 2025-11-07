@@ -40,7 +40,7 @@ import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  TestTube as TestIcon,
+  Science as TestIcon,
   Sync as SyncIcon,
   Webhook as WebhookIcon,
   Sms as SmsIcon,

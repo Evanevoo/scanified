@@ -1,17 +1,28 @@
 import logger from '../utils/logger';
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Linking } from 'react-native';
+import React, { useState, useLayoutEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Linking, ScrollView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Picker } from '@react-native-picker/picker';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { useTheme } from '../context/ThemeContext';
 
 export default function EditCylinderScreen() {
   const { config: assetConfig } = useAssetConfig();
   const { profile } = useAuth();
   const navigation = useNavigation();
+  const route = useRoute();
+  const { colors } = useTheme();
+
+  // Hide the default navigation header - must be done in useLayoutEffect
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerShown: false,
+    });
+  }, [navigation]);
   const [step, setStep] = useState(1);
   const [barcode, setBarcode] = useState('');
   const [serial, setSerial] = useState('');
@@ -80,9 +91,21 @@ export default function EditCylinderScreen() {
     }
   }, [step, profile]);
 
+  // Initialize barcode from route params if provided
+  React.useEffect(() => {
+    const routeBarcode = (route.params as any)?.barcode;
+    if (routeBarcode) {
+      setBarcode(routeBarcode);
+      fetchCylinder(routeBarcode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Set initial owner fields and location when cylinder is loaded
   React.useEffect(() => {
     if (cylinder) {
+      setBarcode(cylinder.barcode_number || barcode);
+      setSerial(cylinder.serial_number || serial);
       setOwnerType(cylinder?.owner_type || 'organization');
       setOwnerCustomerId(cylinder?.owner_id || '');
       setOwnerName(cylinder?.owner_name || '');
@@ -203,148 +226,208 @@ export default function EditCylinderScreen() {
     }
   };
 
+  // Get current ownership display text
+  const getCurrentOwnershipText = () => {
+    if (!cylinder) return 'Not set';
+    if (cylinder.owner_type === 'organization') return 'Organization';
+    if (cylinder.owner_type === 'customer') {
+      const customerName = cylinder.owner_name || 
+        (cylinder.assigned_customer && customers.find(c => c.CustomerListID === cylinder.assigned_customer)?.name) ||
+        cylinder.assigned_customer;
+      return customerName ? `Customer: ${customerName}` : 'Customer (not specified)';
+    }
+    if (cylinder.owner_type === 'external') {
+      return cylinder.owner_name ? `External: ${cylinder.owner_name}` : 'External (not specified)';
+    }
+    return cylinder.ownership || 'Not set';
+  };
+
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       {/* Header with Return Button */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: colors.background }]}>
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Edit Cylinder</Text>
+        <Text style={[styles.title, { color: colors.primary }]}>Edit Cylinder</Text>
         <View style={styles.headerSpacer} />
       </View>
       
       {step === 1 && (
-        <>
-          <Text style={styles.stepTitle}>Scan or Enter Cylinder Barcode</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <Text style={[styles.stepTitle, { color: colors.primary }]}>Scan or Enter Cylinder Barcode</Text>
+          <View style={styles.inputRow}>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
               placeholder="Enter barcode"
+              placeholderTextColor={colors.textSecondary}
               value={barcode}
               onChangeText={setBarcode}
               autoCapitalize="none"
             />
-            <TouchableOpacity style={styles.scanButton} onPress={() => setScannerVisible(true)}>
+            <TouchableOpacity 
+              style={[styles.scanButton, { backgroundColor: colors.primary }]} 
+              onPress={() => setScannerVisible(true)}
+            >
               <Text style={{ fontSize: 22 }}>📷</Text>
             </TouchableOpacity>
           </View>
           <TouchableOpacity
-            style={styles.nextButton}
+            style={[styles.nextButton, { backgroundColor: colors.primary }]}
             onPress={() => fetchCylinder(barcode)}
             disabled={!barcode || loading}
           >
             <Text style={styles.nextButtonText}>Next</Text>
           </TouchableOpacity>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-        </>
+          {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
+        </ScrollView>
       )}
       {step === 2 && cylinder && (
-        <>
-          <Text style={styles.title}>Edit Cylinder Info</Text>
-          <Text style={styles.label}>Barcode</Text>
-          <TextInput
-            style={styles.input}
-            value={barcode}
-            onChangeText={setBarcode}
-            autoCapitalize="none"
-          />
-          <Text style={styles.label}>Serial Number</Text>
-          <TextInput
-            style={styles.input}
-            value={serial}
-            onChangeText={setSerial}
-            autoCapitalize="none"
-          />
-          
-          {/* Location Picker */}
-          <Text style={styles.label}>Location</Text>
-          {locationsLoading ? (
-            <Text>Loading locations...</Text>
-          ) : locationsError ? (
-            <Text style={styles.error}>{locationsError}</Text>
-          ) : (
-            <Picker
-              selectedValue={selectedLocation}
-              onValueChange={setSelectedLocation}
-              style={{ marginBottom: 12 }}
-            >
-              <Picker.Item label="Select a location..." value="" />
-              {locations.map(location => (
-                <Picker.Item 
-                  key={location.id} 
-                  label={`${location.name} (${location.province})`} 
-                  value={location.name.toUpperCase()} 
-                />
-              ))}
-            </Picker>
-          )}
-          
-          {/* Ownership Management UI */}
-          <Text style={styles.label}>Owner Type</Text>
-          <Picker
-            selectedValue={ownerType}
-            onValueChange={setOwnerType}
-            style={{ marginBottom: 12 }}
-          >
-            <Picker.Item label="Organization" value="organization" />
-            <Picker.Item label="Customer" value="customer" />
-            <Picker.Item label="External Company" value="external" />
-          </Picker>
-          {ownerType === 'customer' && (
-            <>
-              <Text style={styles.label}>Assign to Customer</Text>
-              {customersLoading ? (
-                <Text>Loading customers...</Text>
-              ) : customersError ? (
-                <Text style={styles.error}>{customersError}</Text>
-              ) : (
-                <Picker
-                  selectedValue={ownerCustomerId}
-                  onValueChange={setOwnerCustomerId}
-                  style={{ marginBottom: 12 }}
-                >
-                  <Picker.Item label="Select a customer..." value="" />
-                  {customers.map(c => (
-                    <Picker.Item key={c.CustomerListID} label={c.name} value={c.CustomerListID} />
-                  ))}
-                </Picker>
-              )}
-            </>
-          )}
-          {ownerType === 'external' && (
-            <>
-              <Text style={styles.label}>External Company Name</Text>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.primary }]}>Basic Information</Text>
+            
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Barcode</Text>
               <TextInput
-                style={styles.input}
-                value={ownerName}
-                onChangeText={setOwnerName}
-                placeholder="Enter company name"
-                autoCapitalize="words"
+                style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                value={barcode}
+                onChangeText={setBarcode}
+                autoCapitalize="none"
               />
-            </>
-          )}
-          {/* Show current ownership info */}
-          <Text style={styles.label}>Current Ownership</Text>
-          <Text style={{ marginBottom: 8 }}>
-            {cylinder?.owner_type === 'organization' && 'Organization'}
-            {cylinder?.owner_type === 'customer' && `Customer: ${cylinder?.owner_name || cylinder?.assigned_customer}`}
-            {cylinder?.owner_type === 'external' && `External: ${cylinder?.owner_name}`}
-          </Text>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Serial Number</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                value={serial}
+                onChangeText={setSerial}
+                autoCapitalize="none"
+              />
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.primary }]}>Location</Text>
+            
+            <View style={styles.inputGroup}>
+              {locationsLoading ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={[styles.loadingText, { color: colors.text }]}>Loading locations...</Text>
+                </View>
+              ) : locationsError ? (
+                <Text style={[styles.error, { color: colors.error }]}>{locationsError}</Text>
+              ) : (
+                <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <Picker
+                    selectedValue={selectedLocation}
+                    onValueChange={setSelectedLocation}
+                    style={[styles.picker, { color: colors.text }]}
+                  >
+                    <Picker.Item label="Select a location..." value="" color={colors.textSecondary} />
+                    {locations.map(location => (
+                      <Picker.Item 
+                        key={location.id} 
+                        label={`${location.name} (${location.province})`} 
+                        value={location.name.toUpperCase()}
+                        color={colors.text}
+                      />
+                    ))}
+                  </Picker>
+                </View>
+              )}
+            </View>
+          </View>
+          
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.primary }]}>Ownership</Text>
+            
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Owner Type</Text>
+              <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Picker
+                  selectedValue={ownerType}
+                  onValueChange={setOwnerType}
+                  style={[styles.picker, { color: colors.text }]}
+                >
+                  <Picker.Item label="Organization" value="organization" color={colors.text} />
+                  <Picker.Item label="Customer" value="customer" color={colors.text} />
+                  <Picker.Item label="External Company" value="external" color={colors.text} />
+                </Picker>
+              </View>
+            </View>
+
+            {ownerType === 'customer' && (
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>Assign to Customer</Text>
+                {customersLoading ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="small" color={colors.primary} />
+                    <Text style={[styles.loadingText, { color: colors.text }]}>Loading customers...</Text>
+                  </View>
+                ) : customersError ? (
+                  <Text style={[styles.error, { color: colors.error }]}>{customersError}</Text>
+                ) : (
+                  <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <Picker
+                      selectedValue={ownerCustomerId}
+                      onValueChange={setOwnerCustomerId}
+                      style={[styles.picker, { color: colors.text }]}
+                    >
+                      <Picker.Item label="Select a customer..." value="" color={colors.textSecondary} />
+                      {customers.map(c => (
+                        <Picker.Item key={c.CustomerListID} label={c.name} value={c.CustomerListID} color={colors.text} />
+                      ))}
+                    </Picker>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {ownerType === 'external' && (
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>External Company Name</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                  value={ownerName}
+                  onChangeText={setOwnerName}
+                  placeholder="Enter company name"
+                  placeholderTextColor={colors.textSecondary}
+                  autoCapitalize="words"
+                />
+              </View>
+            )}
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Current Ownership</Text>
+              <View style={[styles.currentOwnershipDisplay, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.currentOwnershipText, { color: colors.textSecondary }]}>
+                  {getCurrentOwnershipText()}
+                </Text>
+              </View>
+            </View>
+          </View>
+
           <TouchableOpacity
-            style={styles.nextButton}
+            style={[styles.nextButton, { backgroundColor: colors.primary }]}
             onPress={handleSave}
             disabled={loading}
           >
-            <Text style={styles.nextButtonText}>Save</Text>
+            {loading ? (
+              <ActivityIndicator color={colors.surface} />
+            ) : (
+              <Text style={styles.nextButtonText}>Save</Text>
+            )}
           </TouchableOpacity>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-        </>
+          {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
+        </ScrollView>
       )}
-      {loading && <ActivityIndicator size="large" color="#2563eb" style={{ marginTop: 20 }} />}
+      {loading && step === 1 && <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 20 }} />}
       {/* Scanner Modal */}
       {scannerVisible && (
         <View style={styles.scannerModal}>
@@ -373,8 +456,8 @@ export default function EditCylinderScreen() {
                     ]
                   );
                 }
-              }} style={{ backgroundColor: '#2563eb', padding: 16, borderRadius: 10 }}>
-                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Continue</Text>
+              }} style={{ backgroundColor: colors.primary, padding: 16, borderRadius: 10 }}>
+                <Text style={{ color: colors.surface, fontWeight: 'bold' }}>Continue</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -406,7 +489,7 @@ export default function EditCylinderScreen() {
                 width: '90%',
                 height: '18%',
                 borderWidth: 3,
-                borderColor: '#2563eb',
+                borderColor: colors.primary,
                 borderRadius: 18,
                 backgroundColor: 'rgba(0,0,0,0.0)',
                 zIndex: 10,
@@ -418,31 +501,31 @@ export default function EditCylinderScreen() {
               <View style={{ position: 'absolute', top: '25%', right: 0, width: '10%', height: '50%', backgroundColor: 'rgba(0,0,0,0.35)' }} />
             </View>
           )}
-          <TouchableOpacity onPress={() => setScannerVisible(false)} style={{ marginTop: 24, backgroundColor: '#2563eb', padding: 16, borderRadius: 10 }}>
-            <Text style={{ color: '#fff', fontWeight: 'bold' }}>Close</Text>
+          <TouchableOpacity onPress={() => setScannerVisible(false)} style={{ marginTop: 24, backgroundColor: colors.primary, padding: 16, borderRadius: 10 }}>
+            <Text style={{ color: colors.surface, fontWeight: 'bold' }}>Close</Text>
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
-    padding: 24,
-    justifyContent: 'center',
+  },
+  scrollContent: {
+    padding: 20,
+    paddingTop: 20,
+    paddingBottom: 40,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 24,
-    position: 'absolute',
-    top: 50,
-    left: 24,
-    right: 24,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 16,
     zIndex: 10,
   },
   backButton: {
@@ -462,39 +545,78 @@ const styles = StyleSheet.create({
     width: 40,
   },
   title: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: 'bold',
-    color: '#2563eb',
     textAlign: 'center',
     flex: 1,
   },
   stepTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#2563eb',
-    marginBottom: 16,
+    marginBottom: 24,
     textAlign: 'center',
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#2563eb',
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 16,
-    marginBottom: 12,
-    backgroundColor: '#fff',
-    flex: 1,
+  section: {
+    marginBottom: 32,
   },
-  label: {
+  sectionTitle: {
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#222',
-    marginBottom: 4,
-    marginTop: 8,
+    marginBottom: 16,
+  },
+  inputGroup: {
+    marginBottom: 20,
+  },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  input: {
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    borderWidth: 1,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 12,
+  },
+  pickerWrapper: {
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  picker: {
+    height: 56,
+    width: '100%',
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    borderRadius: 12,
+  },
+  loadingText: {
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  currentOwnershipDisplay: {
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    minHeight: 56,
+    justifyContent: 'center',
+  },
+  currentOwnershipText: {
+    fontSize: 16,
   },
   nextButton: {
-    backgroundColor: '#2563eb',
-    paddingVertical: 14,
-    borderRadius: 16,
+    paddingVertical: 18,
+    borderRadius: 12,
     alignItems: 'center',
     marginTop: 12,
   },
@@ -502,18 +624,21 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 18,
-    letterSpacing: 1,
   },
   scanButton: {
-    backgroundColor: '#e0e7ff',
-    borderRadius: 10,
-    padding: 10,
-    marginLeft: 8,
+    borderRadius: 12,
+    padding: 12,
+    width: 56,
+    height: 56,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   error: {
-    color: '#ff5a1f',
     marginTop: 10,
     textAlign: 'center',
+    fontSize: 14,
+    padding: 12,
+    borderRadius: 8,
   },
   scannerModal: {
     ...StyleSheet.absoluteFillObject,

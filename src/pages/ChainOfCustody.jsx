@@ -12,8 +12,11 @@ import {
   Divider, Switch, FormControlLabel, FormGroup,
   Stepper, Step, StepLabel, StepContent,
   Tabs, Tab, Slider, FormControlLabel as MuiFormControlLabel,
-  Checkbox, RadioGroup, Radio, Autocomplete, Timeline, TimelineItem, TimelineSeparator, TimelineConnector, TimelineContent, TimelineDot
+  Checkbox, RadioGroup, Radio, Autocomplete
 } from '@mui/material';
+import {
+  Timeline, TimelineItem, TimelineSeparator, TimelineConnector, TimelineContent, TimelineDot
+} from '@mui/lab';
 import {
   Assignment as AssignmentIcon,
   Add as AddIcon,

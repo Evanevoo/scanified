@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet, TouchableOpacity, Image } from 'react-native';
 
 interface LoadingScreenProps {
   timeout?: number;
@@ -27,7 +27,11 @@ export default function LoadingScreen({ timeout = 10000, onTimeout }: LoadingScr
   if (showTimeoutMessage) {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Scanified</Text>
+        <Image 
+          source={require('../assets/splash-icon.png')} 
+          style={styles.logo}
+          resizeMode="contain"
+        />
         <Text style={styles.timeoutText}>Loading is taking longer than expected</Text>
         <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
           <Text style={styles.retryButtonText}>Retry</Text>
@@ -38,10 +42,14 @@ export default function LoadingScreen({ timeout = 10000, onTimeout }: LoadingScr
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Scanified</Text>
-      <ActivityIndicator size="large" color="#2563eb" style={styles.loader} />
-      <Text style={styles.text}>Initializing...</Text>
+      <View style={styles.container}>
+        <Image 
+          source={require('../assets/splash-icon.png')} 
+          style={styles.logo}
+          resizeMode="contain"
+        />
+        <ActivityIndicator size="large" color="#40B5AD" style={styles.loader} />
+        <Text style={styles.text}>Loading your app...</Text>
     </View>
   );
 }
@@ -51,26 +59,32 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#000000',
     padding: 20,
+  },
+  logo: {
+    width: 200,
+    height: 200,
+    marginBottom: 20,
   },
   title: {
     fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2563eb',
-    marginBottom: 20,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginBottom: 10,
+    letterSpacing: 0.5,
   },
   loader: {
     marginVertical: 20,
   },
   text: {
     fontSize: 16,
-    color: '#6b7280',
+    color: '#9CA3AF',
     fontWeight: '500',
   },
   timeoutText: {
     fontSize: 16,
-    color: '#dc2626',
+    color: '#EF4444',
     fontWeight: '500',
     textAlign: 'center',
     marginBottom: 20,
@@ -89,7 +103,7 @@ const styles = StyleSheet.create({
   },
   subtext: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#9CA3AF',
     textAlign: 'center',
   },
 }); 
