@@ -50,8 +50,8 @@ import {
   Webhook as WebhookIcon,
   Task as TaskIcon,
   Update as UpdateIcon,
-  Conditional as ConditionalIcon,
-  Delay as DelayIcon
+  Code as ConditionalIcon,
+  Schedule as DelayIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';

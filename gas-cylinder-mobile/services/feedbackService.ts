@@ -1,8 +1,9 @@
 import logger from '../utils/logger';
-import { Audio } from 'expo-av';
+import { AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
 import { customizationService } from './customizationService';
+import { soundService } from './soundService';
 
 /**
  * Feedback Service - Provides audio and haptic feedback for user interactions
@@ -34,7 +35,7 @@ class FeedbackService {
     volume: 0.8,
   };
 
-  private sounds: { [key: string]: Audio.Sound | null } = {};
+  private sounds: { [key: string]: AudioPlayer | null } = {};
   private isInitialized = false;
 
   /**
@@ -47,13 +48,8 @@ class FeedbackService {
       // Initialize customization service
       await customizationService.initialize();
       
-      // Configure audio session for mixing with other audio
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        staysActiveInBackground: false,
-        playsInSilentModeIOS: true,
-        // iOS-specific audio configuration
-      });
+      // Note: expo-audio handles audio session configuration automatically
+      // No need to manually configure audio mode
 
       // Preload sound effects
       await this.preloadSounds();
@@ -72,9 +68,9 @@ class FeedbackService {
     logger.log('🔊 Preloading sound files...');
     
     const soundFiles = {
-      success: require('../assets/sounds/scan_success.mp3'),
+      success: require('../assets/sounds/scan_success.mp3'), // Store scanner beep sound
       error: require('../assets/sounds/scan_error.mp3'),
-      duplicate: require('../assets/sounds/scan_success.mp3'), // Use success sound for duplicates
+      duplicate: require('../assets/sounds/scan_duplicate.mp3'), // Duplicate scan sound
       batch_complete: require('../assets/sounds/sync_success.mp3'),
       warning: require('../assets/sounds/scan_error.mp3'), // Use error sound for warnings
       info: require('../assets/sounds/button_press.mp3'),
@@ -82,23 +78,48 @@ class FeedbackService {
       quick_action: require('../assets/sounds/button_press.mp3'),
     };
 
+    let loadedCount = 0;
     try {
       for (const [key, source] of Object.entries(soundFiles)) {
         try {
-          const { sound } = await Audio.Sound.createAsync(source, {
-            shouldPlay: false,
-            volume: this.settings.volume,
-          });
-          this.sounds[key] = sound;
-          logger.log(`🔊 Loaded sound: ${key}`);
+          const player = new AudioPlayer(source);
+          player.volume = this.settings.volume;
+          this.sounds[key] = player;
+          loadedCount++;
+          if (key === 'success') {
+            logger.log('🔊 Scanner beep sound loaded successfully');
+          }
+          if (key === 'duplicate') {
+            logger.log('🔊 Duplicate scan sound loaded successfully');
+          }
+          if (key === 'batch_complete') {
+            logger.log('🔊 Sync completion sound loaded successfully');
+          }
         } catch (error) {
+          // Silently fail - we'll use fallback sounds
           this.sounds[key] = null;
-          logger.log(`🔊 Could not load sound for ${key}:`, error);
         }
       }
-      logger.log('🔊 Sound preloading completed');
+      
+      if (loadedCount > 0) {
+        logger.log(`🔊 Loaded ${loadedCount} sound file(s) including scanner beep`);
+      } else {
+        logger.log('🔊 No MP3 files loaded, will use programmatic sounds');
+        // Initialize soundService as fallback
+        try {
+          await soundService.initialize();
+        } catch (error) {
+          logger.warn('⚠️ Could not initialize soundService fallback:', error);
+        }
+      }
     } catch (error) {
-      logger.warn('⚠️ Could not preload sounds:', error);
+      logger.warn('⚠️ Could not preload sounds, using fallback:', error);
+      // Initialize soundService as fallback
+      try {
+        await soundService.initialize();
+      } catch (fallbackError) {
+        logger.warn('⚠️ Could not initialize soundService fallback:', fallbackError);
+      }
     }
   }
 
@@ -157,43 +178,89 @@ class FeedbackService {
    * Play sound effect with customization support
    */
   private async playSound(type: FeedbackType) {
-    if (!this.settings.soundEnabled) return;
+    if (!this.settings.soundEnabled) {
+      logger.log('🔇 Sound disabled in settings');
+      return;
+    }
 
     try {
-      // Try to play preloaded sound first
-      const sound = this.sounds[type];
-      if (sound) {
-        await sound.replayAsync();
-        logger.log(`🔊 Played sound: ${type}`);
-        return;
+      // Get the sound file source
+      const soundFiles: { [key: string]: any } = {
+        success: require('../assets/sounds/scan_success.mp3'),
+        error: require('../assets/sounds/scan_error.mp3'),
+        duplicate: require('../assets/sounds/scan_duplicate.mp3'),
+        batch_complete: require('../assets/sounds/sync_success.mp3'),
+        warning: require('../assets/sounds/scan_error.mp3'),
+        info: require('../assets/sounds/button_press.mp3'),
+        start_batch: require('../assets/sounds/button_press.mp3'),
+        quick_action: require('../assets/sounds/button_press.mp3'),
+      };
+
+      const soundSource = soundFiles[type];
+      if (!soundSource) {
+        logger.log(`⚠️ No sound file found for type: ${type}`);
+      } else {
+        try {
+          // Create a new player instance for each play to ensure it works
+          const player = new AudioPlayer(soundSource);
+          player.volume = this.settings.volume;
+          player.play();
+          logger.log(`🔊 Playing sound for type: ${type}`);
+          
+          // Clean up after sound finishes (approximately)
+          setTimeout(() => {
+            try {
+              player.remove();
+            } catch (e) {
+              // Ignore cleanup errors
+            }
+          }, 5000);
+          
+          return;
+        } catch (playError) {
+          logger.warn(`⚠️ Error creating/playing sound ${type}:`, playError);
+          // Continue to fallback
+        }
       }
 
-      // Fallback to customization service
-      let category: 'scan' | 'notification' | 'action' | 'error' = 'action';
+      // Fallback 1: Try soundService (has programmatic beep sounds)
+      let soundServiceType: 'scan' | 'error' | 'notification' | 'action' = 'action';
       
       switch (type) {
         case 'success':
         case 'duplicate':
-          category = 'scan';
+          soundServiceType = 'scan';
           break;
         case 'error':
-          category = 'error';
+          soundServiceType = 'error';
           break;
         case 'batch_complete':
         case 'warning':
         case 'info':
-          category = 'notification';
+          soundServiceType = 'notification';
           break;
         case 'start_batch':
         case 'quick_action':
-          category = 'action';
+          soundServiceType = 'action';
           break;
       }
 
-      await customizationService.playCustomSound(category);
+      try {
+        await soundService.playSound(soundServiceType);
+        return;
+      } catch (soundServiceError) {
+        // Continue to next fallback
+      }
+
+      // Fallback 2: Try customization service
+      try {
+        await customizationService.playCustomSound(soundServiceType);
+        return;
+      } catch (customError) {
+        // Continue to haptic-only fallback
+      }
     } catch (error) {
-      logger.log('🔊 Sound not available, using haptic feedback only');
-      // Don't call playSystemSound to avoid double haptic feedback
+      // Silently fail - haptic feedback will still work
     }
   }
 
@@ -316,7 +383,7 @@ class FeedbackService {
     try {
       for (const sound of Object.values(this.sounds)) {
         if (sound) {
-          await sound.unloadAsync();
+          sound.remove();
         }
       }
       this.sounds = {};

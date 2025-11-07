@@ -38,6 +38,7 @@ import CustomPageViewer from './pages/CustomPageViewer';
 import ImportApprovals from './pages/ImportApprovals';
 import ImportApprovalDetail from './pages/ImportApprovalDetail';
 import ImportApprovalsHistory from './pages/ImportApprovalsHistory';
+import VerifiedOrders from './pages/VerifiedOrders';
 import Home from './pages/Home';
 import DataUtilities from './pages/OwnerPortal/DataUtilities';
 import OwnerPortalLanding from './pages/OwnerPortalLanding';
@@ -323,6 +324,7 @@ function AppContent() {
                     <Route path="/customer/:id" element={<CustomerDetail />} />
                     <Route path="/asset-history" element={<AssetHistory />} />
                     <Route path="/asset-history-lookup" element={<AssetHistoryLookup />} />
+                    <Route path="/assets/:id/history" element={<AssetHistory />} />
                     <Route path="/all-asset-movements" element={<AllAssetMovements />} />
                     <Route path="/import" element={<Import />} />
                     <Route path="/settings" element={<Settings />} />
@@ -342,6 +344,7 @@ function AppContent() {
                     <Route path="/import-approvals-history" element={<ImportApprovalsHistory />} />
                     <Route path="/import-approvals/history" element={<ImportApprovalsHistory />} />
                     <Route path="/import-history" element={<ImportApprovalsHistory />} />
+                    <Route path="/verified-orders" element={<VerifiedOrders />} />
                     <Route path="/orders-report" element={<ScannedOrders />} />
                     {/* Generate ID route removed per App Store guidelines */}
                     <Route path="/barcode-generator" element={<BarcodeGenerator />} />

@@ -85,6 +85,7 @@ export default function CustomerDetail() {
   const [locationFilter, setLocationFilter] = useState('all');
   const [quickTransferDialogOpen, setQuickTransferDialogOpen] = useState(false);
   const [recentCustomers, setRecentCustomers] = useState([]);
+  const [warehouseConfirmDialogOpen, setWarehouseConfirmDialogOpen] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -159,23 +160,70 @@ export default function CustomerDetail() {
   // Load recent customers for quick transfer
   const loadRecentCustomers = async () => {
     try {
-      const { data, error } = await supabase
+      // First, get bottles with assigned customers, ordered by last_location_update or created_at
+      // This ensures we get customers based on recent transfer activity, not just customer creation date
+      const { data: bottlesData, error: bottlesError } = await supabase
+        .from('bottles')
+        .select('assigned_customer, last_location_update, created_at')
+        .eq('organization_id', organization?.id || customer?.organization_id)
+        .not('assigned_customer', 'is', null)
+        .neq('assigned_customer', customer?.CustomerListID)
+        .limit(100); // Get more bottles to ensure we have enough unique customers
+
+      if (bottlesError) throw bottlesError;
+
+      // Group bottles by customer and find the most recent timestamp for each customer
+      // Use last_location_update if available, otherwise fall back to created_at
+      const customerTimestamps = {};
+      (bottlesData || []).forEach(bottle => {
+        const customerId = bottle.assigned_customer;
+        if (!customerId) return;
+        
+        // Use last_location_update if available, otherwise created_at
+        const timestamp = bottle.last_location_update || bottle.created_at;
+        if (!timestamp) return;
+        
+        // Keep the most recent timestamp for each customer
+        if (!customerTimestamps[customerId] || 
+            new Date(timestamp) > new Date(customerTimestamps[customerId])) {
+          customerTimestamps[customerId] = timestamp;
+        }
+      });
+
+      // Sort customers by their most recent timestamp (most recent first)
+      const sortedCustomerIds = Object.keys(customerTimestamps).sort((a, b) => {
+        const timestampA = new Date(customerTimestamps[a]);
+        const timestampB = new Date(customerTimestamps[b]);
+        return timestampB - timestampA; // Descending order (most recent first)
+      }).slice(0, 5); // Take top 5
+
+      if (sortedCustomerIds.length === 0) {
+        setRecentCustomers([]);
+        return;
+      }
+
+      // Fetch customer details for the sorted customer IDs
+      const { data: customersData, error: customersError } = await supabase
         .from('customers')
         .select('CustomerListID, name, customer_type, contact_details')
         .eq('organization_id', organization?.id || customer?.organization_id)
-        .neq('CustomerListID', customer?.CustomerListID)
-        .order('updated_at', { ascending: false })
-        .limit(5);
+        .in('CustomerListID', sortedCustomerIds);
 
-      if (error) throw error;
-      setRecentCustomers(data || []);
+      if (customersError) throw customersError;
+
+      // Sort the customers data to match the order we determined
+      const sortedCustomers = sortedCustomerIds
+        .map(id => customersData?.find(c => c.CustomerListID === id))
+        .filter(Boolean);
+
+      setRecentCustomers(sortedCustomers || []);
     } catch (error) {
       logger.error('Error loading recent customers:', error);
     }
   };
 
-  // Transfer assets to warehouse (remove assignment)
-  const handleTransferToWarehouse = async () => {
+  // Open confirmation dialog for warehouse transfer
+  const handleTransferToWarehouse = () => {
     if (selectedAssets.length === 0) {
       setTransferMessage({
         open: true,
@@ -184,7 +232,12 @@ export default function CustomerDetail() {
       });
       return;
     }
+    setWarehouseConfirmDialogOpen(true);
+  };
 
+  // Confirm and execute warehouse transfer (remove assignment)
+  const confirmTransferToWarehouse = async () => {
+    setWarehouseConfirmDialogOpen(false);
     setTransferLoading(true);
     try {
       const { data: updatedAssets, error: updateError } = await supabase
@@ -192,8 +245,8 @@ export default function CustomerDetail() {
         .update({
           assigned_customer: null,
           customer_name: null,
-          status: 'available',
-          updated_at: new Date().toISOString()
+          location: null,
+          status: 'available'
         })
         .in('id', selectedAssets)
         .eq('organization_id', organization?.id || customer?.organization_id)
@@ -244,12 +297,14 @@ export default function CustomerDetail() {
     try {
       // For now, we'll create a simple audit trail from bottle updates
       // In a real implementation, you'd have a dedicated transfers table
+      // Order by last_location_update (or created_at if null) to match the timestamp used in display
       const { data, error } = await supabase
         .from('bottles')
         .select('*')
         .eq('organization_id', organization?.id || customer?.organization_id)
         .not('assigned_customer', 'is', null)
-        .order('updated_at', { ascending: false })
+        .order('last_location_update', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
         .limit(20);
 
       if (error) throw error;
@@ -258,7 +313,7 @@ export default function CustomerDetail() {
       const recentTransfers = (data || []).map(bottle => ({
         id: bottle.id,
         type: 'asset_assignment',
-        timestamp: bottle.updated_at,
+        timestamp: bottle.last_location_update || bottle.created_at,
         description: `Asset ${bottle.barcode_number || bottle.serial_number} assigned to ${bottle.customer_name}`,
         details: {
           assetId: bottle.id,
@@ -267,6 +322,11 @@ export default function CustomerDetail() {
           status: bottle.status
         }
       }));
+
+      // Sort by timestamp in case the database ordering didn't work as expected
+      recentTransfers.sort((a, b) => {
+        return new Date(b.timestamp) - new Date(a.timestamp);
+      });
 
       setTransferHistory(recentTransfers);
     } catch (error) {
@@ -775,23 +835,6 @@ export default function CustomerDetail() {
         {Object.keys(bottleSummary).length === 0 ? (
           <Box>
             <Typography color="text.secondary" mb={2}>No bottles currently assigned to this customer.</Typography>
-            
-            {/* Billing Information - show even when no bottles */}
-            <Box mt={2}>
-              {customer.customer_type === 'VENDOR' ? (
-                <Alert severity="info">
-                  <Typography variant="body2">
-                    <strong>Billing Status:</strong> This vendor account is NOT charged rental fees for assigned bottles.
-                  </Typography>
-                </Alert>
-              ) : (
-                <Alert severity="success">
-                  <Typography variant="body2">
-                    <strong>Billing Status:</strong> This customer account IS charged rental fees for assigned bottles.
-                  </Typography>
-                </Alert>
-              )}
-            </Box>
           </Box>
         ) : (
           <Box>
@@ -818,23 +861,6 @@ export default function CustomerDetail() {
             <Typography variant="body2" color="text.secondary" mt={2}>
               Total bottles: {customerAssets.length}
             </Typography>
-            
-            {/* Billing Information */}
-            <Box mt={2}>
-              {customer.customer_type === 'VENDOR' ? (
-                <Alert severity="info">
-                  <Typography variant="body2">
-                    <strong>Billing Status:</strong> This vendor account is NOT charged rental fees for assigned bottles.
-                  </Typography>
-                </Alert>
-              ) : (
-                <Alert severity="success">
-                  <Typography variant="body2">
-                    <strong>Billing Status:</strong> This customer account IS charged rental fees for assigned bottles.
-                  </Typography>
-                </Alert>
-              )}
-            </Box>
           </Box>
         )}
       </Paper>
@@ -991,7 +1017,7 @@ export default function CustomerDetail() {
                     <TableCell>{asset.type || asset.description || 'Unknown'}</TableCell>
                     <TableCell>
                       <Chip 
-                        label={asset.location || 'Unknown'} 
+                        label={asset.location || customer?.city || customer?.name || 'Unknown'} 
                         color="primary" 
                         size="small"
                         variant="outlined"
@@ -1326,6 +1352,92 @@ export default function CustomerDetail() {
         <DialogActions>
           <Button onClick={() => setShowTransferHistory(false)}>
             Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Warehouse Transfer Confirmation Dialog */}
+      <Dialog 
+        open={warehouseConfirmDialogOpen} 
+        onClose={() => setWarehouseConfirmDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <WarehouseIcon color="warning" />
+            Confirm Transfer to Warehouse
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              <Typography variant="body2" fontWeight={600}>
+                You are about to transfer {selectedAssets.length} asset(s) from <strong>{customer?.name}</strong> to the warehouse.
+              </Typography>
+            </Alert>
+            
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              This action will:
+            </Typography>
+            <Box component="ul" sx={{ mt: 1, mb: 2, pl: 2 }}>
+              <li>
+                <Typography variant="body2">Remove customer assignment</Typography>
+              </li>
+              <li>
+                <Typography variant="body2">Set status to 'available'</Typography>
+              </li>
+              <li>
+                <Typography variant="body2">Clear location information</Typography>
+              </li>
+              <li>
+                <Typography variant="body2">Make assets available for reassignment</Typography>
+              </li>
+            </Box>
+
+            <Typography variant="body2" fontWeight={600} gutterBottom>
+              Selected assets ({selectedAssets.length}):
+            </Typography>
+            <Box 
+              sx={{ 
+                maxHeight: 200, 
+                overflowY: 'auto', 
+                border: '1px solid #e0e0e0', 
+                borderRadius: 1, 
+                p: 1.5,
+                backgroundColor: '#f9f9f9'
+              }}
+            >
+              {customerAssets
+                .filter(asset => selectedAssets.includes(asset.id))
+                .map(asset => (
+                  <Box key={asset.id} sx={{ mb: 0.5 }}>
+                    <Typography variant="body2" fontFamily="monospace">
+                      • {asset.serial_number || asset.barcode_number} 
+                      <span style={{ color: '#666', marginLeft: '8px' }}>
+                        ({asset.type || asset.description || 'Unknown'})
+                      </span>
+                    </Typography>
+                  </Box>
+                ))}
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setWarehouseConfirmDialogOpen(false)}
+            disabled={transferLoading}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={confirmTransferToWarehouse}
+            variant="contained"
+            color="warning"
+            disabled={transferLoading}
+            startIcon={transferLoading ? <CircularProgress size={16} /> : <WarehouseIcon />}
+          >
+            {transferLoading ? 'Transferring...' : 'Confirm Transfer to Warehouse'}
           </Button>
         </DialogActions>
       </Dialog>

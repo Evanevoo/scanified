@@ -141,7 +141,12 @@ function AppContent() {
 
   return (
     <NavigationContainer>
-      <Stack.Navigator>
+      <Stack.Navigator
+        screenOptions={{
+          headerShown: true, // Default to showing headers, but individual screens can override
+        }}
+        initialRouteName={user ? "Home" : "Login"}
+      >
         {!user ? (
           <Stack.Screen 
             name="Login" 
@@ -168,7 +173,9 @@ function AppContent() {
             <Stack.Screen 
               name="EditCylinder" 
               component={EditCylinderScreen}
-              options={{ title: 'Edit Cylinder' }}
+              options={{ 
+                headerShown: false,
+              }}
             />
             <Stack.Screen 
               name="CylinderDetails" 

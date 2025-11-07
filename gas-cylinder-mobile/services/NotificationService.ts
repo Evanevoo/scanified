@@ -4,14 +4,20 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import { supabase } from '../supabase';
 
-// Configure notification behavior
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// Configure notification behavior (skip in Expo Go for Android SDK 53+)
+try {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+} catch (error) {
+  // Expo Go limitation - remote push not supported in SDK 53+
+  // Local notifications still work, but this prevents startup error
+  logger.log('ℹ️  Notification handler setup skipped (likely Expo Go limitation)');
+}
 
 export interface NotificationData {
   title: string;

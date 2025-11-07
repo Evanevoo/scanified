@@ -3,7 +3,8 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination, Chip, IconButton
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination, Chip, IconButton,
+  Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -107,10 +108,12 @@ function Customers({ profile }) {
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [totalCount, setTotalCount] = useState(0);
   const [assetCounts, setAssetCounts] = useState({});
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
 
-  const canEdit = profile?.role === 'admin' || profile?.role === 'manager';
   const navigate = useNavigate();
-  const { organization } = useAuth();
+  const { organization, profile: authProfile } = useAuth();
+  const effectiveProfile = profile || authProfile;
+  const canEdit = effectiveProfile?.role === 'admin' || effectiveProfile?.role === 'manager';
 
 
   // Create a stable fetch function
@@ -245,7 +248,16 @@ function Customers({ profile }) {
       return;
     }
     try {
-      const { error } = await supabase.from('customers').insert([{ ...form, organization_id: organization.id }]);
+      // Only include columns that exist in the customers table
+      const payload = {
+        CustomerListID: form.CustomerListID,
+        name: form.name,
+        contact_details: form.contact_details,
+        phone: form.phone,
+        customer_type: form.customer_type,
+        organization_id: organization.id
+      };
+      const { error } = await supabase.from('customers').insert([payload]);
       if (error) throw error;
       
       setForm({ CustomerListID: '', name: '', email: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
@@ -281,7 +293,19 @@ function Customers({ profile }) {
       return;
     }
     try {
-      const { error } = await supabase.from('customers').update(form).eq('CustomerListID', editingId).eq('organization_id', organization.id);
+      // Only include columns that exist in the customers table
+      const payload = {
+        CustomerListID: form.CustomerListID,
+        name: form.name,
+        contact_details: form.contact_details,
+        phone: form.phone,
+        customer_type: form.customer_type
+      };
+      const { error } = await supabase
+        .from('customers')
+        .update(payload)
+        .eq('CustomerListID', editingId)
+        .eq('organization_id', organization.id);
       if (error) throw error;
       
       setEditingId(null);
@@ -486,21 +510,33 @@ function Customers({ profile }) {
               Delete Selected ({selected.length})
             </Button>
           </Box>
-          <Button 
-            variant="contained" 
-            sx={{ 
-              fontWeight: 700, 
-              borderRadius: 8, 
-              px: 3, 
-              bgcolor: '#111', 
-              color: '#fff', 
-              boxShadow: 'none', 
-              ':hover': { bgcolor: '#222' } 
-            }} 
-            onClick={() => navigate('/')}
-          >
-            Back to Dashboard
-          </Button>
+          <Box display="flex" gap={2}>
+            {canEdit && (
+              <Button
+                variant="contained"
+                color="primary"
+                sx={{ fontWeight: 700, borderRadius: 8, px: 3 }}
+                onClick={() => setAddDialogOpen(true)}
+              >
+                + Add Customer
+              </Button>
+            )}
+            <Button 
+              variant="contained" 
+              sx={{ 
+                fontWeight: 700, 
+                borderRadius: 8, 
+                px: 3, 
+                bgcolor: '#111', 
+                color: '#fff', 
+                boxShadow: 'none', 
+                ':hover': { bgcolor: '#222' } 
+              }} 
+              onClick={() => navigate('/')}
+            >
+              Back to Dashboard
+            </Button>
+          </Box>
         </Box>
 
         {/* Search and Controls */}
@@ -761,6 +797,74 @@ function Customers({ profile }) {
             {error}
           </Alert>
         </Snackbar>
+
+        {/* Add Customer Dialog */}
+        <Dialog open={addDialogOpen} onClose={() => setAddDialogOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>Add New Customer</DialogTitle>
+          <DialogContent sx={{ pt: 2 }}>
+            <Box component="form" id="add-customer-form" onSubmit={(e) => { handleAdd(e); setAddDialogOpen(false); }}>
+              <TextField
+                label="Name"
+                name="name"
+                value={form.name}
+                onChange={handleChange}
+                fullWidth
+                margin="normal"
+              />
+              <TextField
+                label="Customer number (required)"
+                name="CustomerListID"
+                value={form.CustomerListID}
+                onChange={handleChange}
+                fullWidth
+                margin="normal"
+                required
+              />
+              <TextField
+                label="Email"
+                name="email"
+                value={form.email}
+                onChange={handleChange}
+                fullWidth
+                margin="normal"
+              />
+              <TextField
+                label="Phone"
+                name="phone"
+                value={form.phone}
+                onChange={handleChange}
+                fullWidth
+                margin="normal"
+              />
+              <TextField
+                label="Address / Contact details"
+                name="contact_details"
+                value={form.contact_details}
+                onChange={handleChange}
+                fullWidth
+                margin="normal"
+                multiline
+                minRows={2}
+              />
+              <FormControl fullWidth margin="normal" size="small">
+                <InputLabel>Type</InputLabel>
+                <Select
+                  label="Type"
+                  name="customer_type"
+                  value={form.customer_type}
+                  onChange={handleChange}
+                >
+                  <MenuItem value="CUSTOMER">CUSTOMER</MenuItem>
+                  <MenuItem value="VENDOR">VENDOR</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setAddDialogOpen(false)}>Cancel</Button>
+            <Button type="submit" form="add-customer-form" variant="contained">Save</Button>
+          </DialogActions>
+        </Dialog>
       </Paper>
     </Box>
   );

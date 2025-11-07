@@ -33,7 +33,7 @@ import {
   Error as ErrorIcon,
   QrCode as QrCodeIcon,
   Scanner as ScannerIcon,
-  Package as PackageIcon,
+  Inventory2 as PackageIcon,
   LocalShipping as ShippingIcon,
   Storage as StorageIcon,
   Assignment as AssignmentIcon,
@@ -41,8 +41,8 @@ import {
   Person as PersonIcon,
   LocationOn as LocationIcon,
   AccessTime as TimeIcon,
-  Distance as DistanceIcon,
-  GasStation as FuelIcon
+  Straighten as DistanceIcon,
+  LocalGasStation as FuelIcon
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';

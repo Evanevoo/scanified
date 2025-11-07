@@ -6,7 +6,8 @@ import {
   TextField, FormControl, InputLabel, Select, MenuItem, Alert,
   CircularProgress, Tabs, Tab, Avatar, List, ListItem, ListItemText,
   ListItemIcon, ListItemSecondaryAction, Divider,
-  Badge, Accordion, AccordionSummary, AccordionDetails
+  Badge, Accordion, AccordionSummary, AccordionDetails,
+  Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
 import {
   Inventory as InventoryIcon, Schedule as ScheduleIcon,
@@ -17,7 +18,7 @@ import {
   Chat as ChatIcon, Phone as PhoneIcon, Email as EmailIcon,
   Download as DownloadIcon, Print as PrintIcon, Star as StarIcon,
   ExpandMore as ExpandMoreIcon, QrCode as QrCodeIcon,
-  Visibility as TrackIcon, CalendarToday as CalendarIcon,
+  Visibility as TrackIcon, Visibility as ViewIcon, CalendarToday as CalendarIcon,
   LocalShipping as DeliveryIcon, Build as ServiceIcon,
   Timeline as TimelineIcon
 } from '@mui/icons-material';

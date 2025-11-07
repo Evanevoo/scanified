@@ -428,7 +428,6 @@ export default function TransferFromCustomers() {
                     </TableRow>
                   ))}
                 </TableBody>
->
               </Table>
             </TableContainer>
 

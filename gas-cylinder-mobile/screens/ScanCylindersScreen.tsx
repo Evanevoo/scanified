@@ -12,6 +12,7 @@ import ScanOverlay from '../components/ScanOverlay';
 import { Customer } from '../types';
 import { FormatValidationService } from '../services/FormatValidationService';
 import { Platform } from '../utils/platform';
+import { feedbackService } from '../services/feedbackService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -338,6 +339,15 @@ export default function ScanCylindersScreen() {
     validateCustomer();
   }, [search, selectedCustomer, profile?.organization_id]);
 
+  // Initialize feedback service for sound/haptic feedback
+  useEffect(() => {
+    feedbackService.initialize();
+    
+    return () => {
+      feedbackService.cleanup();
+    };
+  }, []);
+
   const filteredCustomers = (() => {
     if (!search.trim()) return customers;
     const lower = search.toLowerCase();
@@ -540,38 +550,75 @@ export default function ScanCylindersScreen() {
         if (!matchingCustomer) {
           logger.log('⚠️ Scanned barcode does not match any existing customer');
           
-          // Find similar barcodes for helpful suggestions
-          const similarBarcodes = customers
+          // Find similar customers with their full info for selection
+          const similarCustomers = customers
             .filter(customer => customer.CustomerListID)
-            .map(customer => normalizeBarcode(customer.CustomerListID))
-            .filter(barcode => {
-              const similarity = calculateSimilarity(scannedBarcode.toLowerCase(), barcode.toLowerCase());
-              return similarity > 0.7; // 70% similarity threshold
-            })
+            .map(customer => ({
+              customer,
+              barcode: normalizeBarcode(customer.CustomerListID),
+              similarity: calculateSimilarity(
+                scannedBarcode.toLowerCase(), 
+                normalizeBarcode(customer.CustomerListID).toLowerCase()
+              )
+            }))
+            .filter(item => item.similarity > 0.7) // 70% similarity threshold
+            .sort((a, b) => b.similarity - a.similarity) // Sort by similarity
             .slice(0, 3); // Show max 3 suggestions
-          
-          let message = `The scanned barcode "${normalizeBarcode(data)}" does not match any existing customer in your organization.`;
-          
-          if (similarBarcodes.length > 0) {
-            message += `\n\nSimilar barcodes found:\n• ${similarBarcodes.join('\n• ')}`;
-          }
-          
-          message += '\n\nPlease verify the barcode or add this customer to your system.';
           
           // Close the camera scanner immediately to prevent repeated scans
           setShowCustomerScan(false);
           setScannerVisible(false);
           setScannerTarget(null);
           
-          Alert.alert(
-            'Customer Not Found',
-            message,
-            [
-              { text: 'OK', onPress: () => {
+          if (similarCustomers.length > 0) {
+            // Show alert with options to select similar customers
+            const buttons = similarCustomers.map(item => ({
+              text: `${item.customer.name} (${item.barcode})`,
+              onPress: async () => {
+                logger.log('✅ User selected similar customer:', item.customer.name);
+                setSearch(item.barcode);
+                setSelectedCustomer(item.customer);
+                
+                // Play success sound when customer is manually selected
+                await feedbackService.scanSuccess(item.barcode);
+                
+                Alert.alert(
+                  'Customer Selected',
+                  `Selected: ${item.customer.name}`,
+                  [{ text: 'OK' }]
+                );
+              }
+            }));
+            
+            buttons.push({
+              text: 'Cancel',
+              onPress: () => {
                 setSearch(scannedBarcode);
-              }}
-            ]
-          );
+              },
+              style: 'cancel'
+            });
+            
+            Alert.alert(
+              'Customer Not Found',
+              `The scanned barcode "${normalizeBarcode(data)}" does not match exactly.\n\nDid you mean one of these?`,
+              buttons
+            );
+          } else {
+            // No similar customers found
+            // Play error sound
+            await feedbackService.scanError('Customer not found');
+            
+            Alert.alert(
+              'Customer Not Found',
+              `The scanned barcode "${normalizeBarcode(data)}" does not match any existing customer in your organization.\n\nPlease verify the barcode or add this customer to your system.`,
+              [
+                { text: 'OK', onPress: () => {
+                  setSearch(scannedBarcode);
+                }}
+              ]
+            );
+          }
+          
           setScanned(false);
           return;
         }
@@ -583,6 +630,9 @@ export default function ScanCylindersScreen() {
         setShowCustomerScan(false);
         setScannerVisible(false);
         setScannerTarget(null);
+        
+        // Play success sound and haptic feedback
+        await feedbackService.scanSuccess(data);
         
         // Show success feedback
         Alert.alert(
@@ -892,8 +942,9 @@ export default function ScanCylindersScreen() {
                 navigation.navigate('EnhancedScan', {
                   customer: selectedCustomer,
                   customerName: selectedCustomer?.name || selectedCustomer?.customer_name,
-                  customerId: selectedCustomer?.id,
-                  orderNumber: orderNumber.trim()
+                  customerId: selectedCustomer?.CustomerListID || selectedCustomer?.id,
+                  orderNumber: orderNumber.trim(),
+                  autoStartScanning: true
                 });
               }
             }}

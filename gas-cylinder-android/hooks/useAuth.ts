@@ -26,6 +26,7 @@ interface Organization {
   app_name?: string;
   primary_color?: string;
   secondary_color?: string;
+  deleted_at?: string | null; // Add deleted_at to check if organization is deleted
 }
 
 export function useAuth() {
@@ -119,17 +120,31 @@ export function useAuth() {
                         logger.error('Error fetching organization:', orgError);
                         logger.log('Organization ID:', profileData.organization_id);
                         setOrganization(null);
+                      } else if (orgData) {
+                        // CRITICAL: Check if organization is deleted
+                        if (orgData.deleted_at) {
+                          logger.error('❌ Organization is DELETED!', {
+                            id: orgData.id,
+                            name: orgData.name,
+                            deleted_at: orgData.deleted_at
+                          });
+                          setOrganization(null);
+                          setAuthError('Your organization has been deleted. Please contact your administrator.');
+                        } else {
+                          logger.log('Organization loaded successfully:', {
+                            id: orgData.id,
+                            name: orgData.name,
+                            slug: orgData.slug,
+                            app_name: orgData.app_name,
+                            subscription_status: orgData.subscription_status,
+                            primary_color: orgData.primary_color,
+                            secondary_color: orgData.secondary_color
+                          });
+                          setOrganization(orgData);
+                        }
                       } else {
-                        logger.log('Organization loaded successfully:', {
-                          id: orgData?.id,
-                          name: orgData?.name,
-                          slug: orgData?.slug,
-                          app_name: orgData?.app_name,
-                          subscription_status: orgData?.subscription_status,
-                          primary_color: orgData?.primary_color,
-                          secondary_color: orgData?.secondary_color
-                        });
-                        setOrganization(orgData);
+                        logger.error('Organization not found for ID:', profileData.organization_id);
+                        setOrganization(null);
                       }
                     } catch (error) {
                       logger.error('❌ Error processing organization data:', error);

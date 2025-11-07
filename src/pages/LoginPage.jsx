@@ -374,17 +374,29 @@ function LoginPage() {
             <Box sx={{ display: 'flex', gap: 2, flexDirection: 'column' }}>
               <Button 
                 variant="contained" 
-                color="primary" 
                 fullWidth
                 onClick={() => navigate('/register')}
+                sx={{
+                  backgroundColor: '#40B5AD',
+                  '&:hover': {
+                    backgroundColor: '#2D8B85',
+                  }
+                }}
               >
                 Create New Organization
               </Button>
               <Button 
                 variant="outlined" 
-                color="secondary" 
                 fullWidth
                 onClick={() => navigate('/contact')}
+                sx={{
+                  borderColor: '#48C9B0',
+                  color: '#48C9B0',
+                  '&:hover': {
+                    borderColor: '#40B5AD',
+                    backgroundColor: 'rgba(64, 181, 173, 0.1)'
+                  }
+                }}
               >
                 Contact Support
               </Button>
@@ -392,6 +404,12 @@ function LoginPage() {
                 variant="text" 
                 startIcon={<LogoutIcon />}
                 onClick={handleLogout}
+                sx={{
+                  color: '#40B5AD',
+                  '&:hover': {
+                    backgroundColor: 'rgba(64, 181, 173, 0.1)'
+                  }
+                }}
               >
                 Sign Out
               </Button>
@@ -408,7 +426,7 @@ function LoginPage() {
       display: 'flex', 
       alignItems: 'center', 
       justifyContent: 'center',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      background: 'linear-gradient(135deg, #40B5AD 0%, #48C9B0 50%, #5FCDC5 100%)',
       p: 3
     }}>
       <Card sx={{ maxWidth: 400, width: '100%' }}>
@@ -455,9 +473,10 @@ function LoginPage() {
                 onClick={() => setForgotPasswordOpen(true)}
                 sx={{ 
                   cursor: 'pointer',
-                  color: 'primary.main',
+                  color: '#40B5AD',
                   '&:hover': {
-                    textDecoration: 'underline'
+                    textDecoration: 'underline',
+                    color: '#2D8B85'
                   }
                 }}
               >
@@ -471,7 +490,16 @@ function LoginPage() {
               variant="contained"
               size="large"
               disabled={loadingLocal}
-              sx={{ mb: 2 }}
+              sx={{ 
+                mb: 2,
+                backgroundColor: '#40B5AD',
+                '&:hover': {
+                  backgroundColor: '#2D8B85',
+                },
+                '&:disabled': {
+                  backgroundColor: '#9CA3AF',
+                }
+              }}
             >
               {loadingLocal ? <CircularProgress size={24} /> : 'Sign In'}
             </Button>
@@ -492,7 +520,13 @@ function LoginPage() {
                   sessionStorage.setItem('redirect_after_login', '/connect-organization');
                   setSignupDialog(true);
                 }}
-                sx={{ mb: 1 }}
+                sx={{ 
+                  mb: 1,
+                  backgroundColor: '#40B5AD',
+                  '&:hover': {
+                    backgroundColor: '#2D8B85',
+                  }
+                }}
               >
                 Create Free Account
               </Button>
@@ -516,13 +550,24 @@ function LoginPage() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 1,
-                color: 'primary.main',
+                color: '#40B5AD',
                 '&:hover': {
-                  textDecoration: 'underline'
+                  textDecoration: 'underline',
+                  color: '#2D8B85'
                 }
               }}
             >
-              <IconButton size="small" sx={{ padding: 0 }}>
+              <IconButton 
+                size="small" 
+                sx={{ 
+                  padding: 0,
+                  color: '#40B5AD',
+                  '&:hover': {
+                    color: '#2D8B85',
+                    backgroundColor: 'rgba(64, 181, 173, 0.1)'
+                  }
+                }}
+              >
                 <ArrowBackIcon />
               </IconButton>
               <Typography variant="body2">
@@ -558,7 +603,20 @@ function LoginPage() {
           </DialogContent>
           <DialogActions>
             <Button onClick={handleCloseForgotPassword}>Cancel</Button>
-            <Button type="submit" variant="contained" disabled={resetLoading}>
+            <Button 
+              type="submit" 
+              variant="contained" 
+              disabled={resetLoading}
+              sx={{
+                backgroundColor: '#40B5AD',
+                '&:hover': {
+                  backgroundColor: '#2D8B85',
+                },
+                '&:disabled': {
+                  backgroundColor: '#9CA3AF',
+                }
+              }}
+            >
               {resetLoading ? <CircularProgress size={20} /> : 'Send Reset Link'}
             </Button>
           </DialogActions>
@@ -641,6 +699,15 @@ function LoginPage() {
               type="submit" 
               variant="contained" 
               disabled={signupLoading || !signupData.name || !signupData.email || !signupData.password || signupData.password.length < 6}
+              sx={{
+                backgroundColor: '#40B5AD',
+                '&:hover': {
+                  backgroundColor: '#2D8B85',
+                },
+                '&:disabled': {
+                  backgroundColor: '#9CA3AF',
+                }
+              }}
             >
               {signupLoading ? <CircularProgress size={20} /> : 'Create Account'}
             </Button>
