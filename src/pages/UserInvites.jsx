@@ -61,15 +61,38 @@ export default function UserInvites() {
 
   const fetchInvites = async () => {
     try {
-      const { data, error } = await supabase
+      // Fetch invites
+      const { data: invitesData, error: invitesError } = await supabase
         .from('organization_invites')
         .select('*')
         .eq('organization_id', organization.id)
         .is('accepted_at', null)
         .order('invited_at', { ascending: false });
 
-      if (error) throw error;
-      setInvites(data || []);
+      if (invitesError) throw invitesError;
+
+      // Fetch join codes and match them to invites by email and role
+      const { data: codesData } = await supabase
+        .from('organization_join_codes')
+        .select('code, assigned_role, notes, expires_at')
+        .eq('organization_id', organization.id)
+        .eq('is_active', true)
+        .is('used_at', null)
+        .gt('expires_at', new Date().toISOString());
+
+      // Match codes to invites (codes with notes containing the email)
+      const invitesWithCodes = (invitesData || []).map(invite => {
+        const matchingCode = (codesData || []).find(code => 
+          code.notes && code.notes.includes(invite.email) &&
+          code.assigned_role === invite.role
+        );
+        return {
+          ...invite,
+          join_code: matchingCode?.code || null
+        };
+      });
+
+      setInvites(invitesWithCodes);
     } catch (err) {
       logger.error('Error fetching invites:', err);
       setError('Failed to load invites');
@@ -120,29 +143,60 @@ export default function UserInvites() {
         throw inviteError;
       }
 
+      // Also create a join code for this invite
+      let joinCode = null;
+      try {
+        const { data: codeData, error: codeError } = await supabase.rpc(
+          'create_organization_join_code',
+          {
+            p_organization_id: organization.id,
+            p_created_by: user.user?.id,
+            p_expires_hours: 168, // 7 days (same as invite)
+            p_max_uses: 1,
+            p_assigned_role: inviteForm.role,
+            p_notes: `Invite for ${inviteForm.email}`
+          }
+        );
+
+        if (!codeError && codeData && codeData.length > 0) {
+          joinCode = codeData[0].join_code;
+          logger.log('✅ Join code created:', joinCode);
+        }
+      } catch (codeErr) {
+        logger.warn('Failed to create join code (optional):', codeErr);
+        // Don't fail the invite if code creation fails
+      }
+
       // Try to send email
       const inviteLink = `${window.location.origin}/accept-invite?token=${token}`;
       
       try {
-        await fetch('/.netlify/functions/send-email', {
+        await fetch('/.netlify/functions/send-invite-email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             to: inviteForm.email,
-            subject: `You're invited to join ${organization.name}`,
-            template: 'invite',
-            data: {
-              inviteLink,
-              organizationName: organization.name,
-              inviterName: profile.name || profile.email
-            }
+            inviteLink,
+            organizationName: organization.name,
+            inviter: profile.name || profile.email,
+            joinCode: joinCode // Include code in email if available
           })
         });
         
-        setSuccess(`✅ Invite sent to ${inviteForm.email}!`);
+        if (joinCode) {
+          setSuccess(`✅ Invite sent to ${inviteForm.email}! Code: ${joinCode} (also copied to clipboard)`);
+          navigator.clipboard.writeText(joinCode);
+        } else {
+          setSuccess(`✅ Invite sent to ${inviteForm.email}!`);
+        }
       } catch (emailError) {
         logger.warn('Email failed:', emailError);
-        setSuccess(`✅ Invite created! Email service unavailable - copy the link from the table below.`);
+        if (joinCode) {
+          setSuccess(`✅ Invite created! Code: ${joinCode} (copied to clipboard). Email service unavailable - share the code or link manually.`);
+          navigator.clipboard.writeText(joinCode);
+        } else {
+          setSuccess(`✅ Invite created! Email service unavailable - copy the link from the table below.`);
+        }
       }
 
       // Reset form and refresh
@@ -224,6 +278,7 @@ export default function UserInvites() {
             <TableRow>
               <TableCell>Email</TableCell>
               <TableCell>Role</TableCell>
+              <TableCell>Code</TableCell>
               <TableCell>Invited</TableCell>
               <TableCell>Expires</TableCell>
               <TableCell>Status</TableCell>
@@ -233,7 +288,7 @@ export default function UserInvites() {
           <TableBody>
             {invites.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} align="center">
+                <TableCell colSpan={7} align="center">
                   <Typography color="text.secondary" sx={{ py: 4 }}>
                     No pending invites
                   </Typography>
@@ -245,6 +300,30 @@ export default function UserInvites() {
                   <TableCell>{invite.email}</TableCell>
                   <TableCell>
                     <Chip label={invite.role} size="small" />
+                  </TableCell>
+                  <TableCell>
+                    {invite.join_code ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 'bold' }}>
+                          {invite.join_code}
+                        </Typography>
+                        <Tooltip title="Copy code">
+                          <IconButton
+                            size="small"
+                            onClick={() => {
+                              navigator.clipboard.writeText(invite.join_code);
+                              setSuccess(`Code ${invite.join_code} copied!`);
+                            }}
+                          >
+                            <CopyIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">
+                        Link only
+                      </Typography>
+                    )}
                   </TableCell>
                   <TableCell>
                     {new Date(invite.invited_at).toLocaleDateString()}

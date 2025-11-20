@@ -29,8 +29,8 @@ export const AuthProvider = ({ children }) => {
   const isInitialLoadRef = useRef(true);
   const inactivityTimerRef = useRef(null);
 
-  // 15 minutes inactivity auto-logout
-  const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
+  // 2 hours inactivity auto-logout (increased from 15 minutes)
+  const INACTIVITY_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
   // Initialize hook once
   useEffect(() => {
@@ -260,7 +260,7 @@ export const AuthProvider = ({ children }) => {
 
     // Listen for changes in auth state (login/logout)
     const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
+      async (_event, session) => {
         // Check if auth listeners are disabled during tab switch
         if (window.__authListenerDisabled) {
           logger.log('Auth: Auth listener disabled during tab switch, ignoring event:', _event);
@@ -275,20 +275,72 @@ export const AuthProvider = ({ children }) => {
           return;
         }
         
+        // Handle token refresh errors gracefully
+        if (_event === 'TOKEN_REFRESHED') {
+          logger.log('Auth: Token refreshed successfully');
+          // Don't reload everything on token refresh - just update session reference
+          previousSessionRef.current = session;
+          return;
+        }
+        
+        // Handle token refresh failures - try to recover
+        if (_event === 'SIGNED_OUT' && session === null && user) {
+          // Token refresh might have failed - try to get current session
+          logger.warn('Auth: Signed out event but user exists, checking session...');
+          try {
+            const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+            if (currentSession && !error) {
+              logger.log('Auth: Session still valid, ignoring sign out event');
+              return;
+            }
+          } catch (e) {
+            logger.error('Auth: Error checking session:', e);
+          }
+        }
+        
         // Check if this is a genuine auth state change or just a session refresh
         const currentSessionId = session?.user?.id;
         const previousSessionId = previousSessionRef.current?.user?.id;
         
-        if (_event === 'SIGNED_IN' && currentSessionId === previousSessionId) {
-          logger.log('Auth: Session refresh detected, not a genuine sign-in event');
+        // Handle different auth events
+        if (_event === 'SIGNED_OUT') {
+          // User was signed out - clear state
+          logger.log('Auth: User signed out');
+          setUser(null);
+          setProfile(null);
+          setOrganization(null);
+          setLoading(false);
+          previousSessionRef.current = null;
           return;
         }
         
-        // Update the previous session reference
-        previousSessionRef.current = session;
+        if (_event === 'SIGNED_IN' && currentSessionId === previousSessionId) {
+          logger.log('Auth: Session refresh detected, not a genuine sign-in event');
+          // Don't reload if we already have valid data
+          if (user && profile && organization && user.id === currentSessionId) {
+            logger.log('Auth: Already have valid session data, skipping reload');
+            return;
+          }
+        }
         
-        setLoading(true);
-        loadUserAndProfile(session?.user);
+        // Only reload if session actually changed
+        if (currentSessionId && currentSessionId !== previousSessionId) {
+          logger.log('Auth: Session changed, reloading user data');
+          previousSessionRef.current = session;
+          setLoading(true);
+          loadUserAndProfile(session?.user);
+        } else if (!session && previousSessionId) {
+          // Session was lost
+          logger.log('Auth: Session lost');
+          setUser(null);
+          setProfile(null);
+          setOrganization(null);
+          setLoading(false);
+          previousSessionRef.current = null;
+        } else {
+          // Session refresh with same user - just update reference
+          previousSessionRef.current = session;
+        }
       }
     );
 
@@ -335,6 +387,8 @@ export const AuthProvider = ({ children }) => {
     const onActivity = () => resetInactivityTimer();
 
     const onUnload = () => {
+      // Only sign out on actual window close, not tab switches
+      // pagehide can fire when switching tabs, so we only use beforeunload
       if (user) {
         safeSignOut();
       }
@@ -343,8 +397,8 @@ export const AuthProvider = ({ children }) => {
     // Attach listeners only if user is logged in
     if (user) {
       activityEvents.forEach((evt) => window.addEventListener(evt, onActivity, { passive: true }));
+      // Only use beforeunload - pagehide fires too often (tab switches, etc.)
       window.addEventListener('beforeunload', onUnload);
-      window.addEventListener('pagehide', onUnload);
       resetInactivityTimer();
     }
 
@@ -355,7 +409,6 @@ export const AuthProvider = ({ children }) => {
       }
       activityEvents.forEach((evt) => window.removeEventListener(evt, onActivity));
       window.removeEventListener('beforeunload', onUnload);
-      window.removeEventListener('pagehide', onUnload);
     };
   }, [user]);
 

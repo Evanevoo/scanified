@@ -53,7 +53,7 @@ Write-Host "📱 Building iOS app with fixes..." -ForegroundColor Cyan
 # Build for iOS
 try {
     Write-Host "Building iOS app with EAS (Platform runtime fix)..." -ForegroundColor Yellow
-    eas build --platform ios --profile production --config eas-ios.json
+    eas build --platform ios --profile production
     
     Write-Host ""
     Write-Host "✅ Build completed successfully!" -ForegroundColor Green

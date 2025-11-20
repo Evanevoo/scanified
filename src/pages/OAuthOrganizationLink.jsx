@@ -28,8 +28,6 @@ export default function OAuthOrganizationLink() {
   const { user, profile } = useAuth();
   
   const [loading, setLoading] = useState(true);
-  const [organizations, setOrganizations] = useState([]);
-  const [selectedOrgId, setSelectedOrgId] = useState('');
   const [organizationCode, setOrganizationCode] = useState('');
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState('');
@@ -53,7 +51,6 @@ export default function OAuthOrganizationLink() {
       return;
     }
 
-    fetchOrganizations();
     checkForInviteToken();
     checkEmailDomainMatch();
   }, [user, profile, navigate]);
@@ -101,11 +98,12 @@ export default function OAuthOrganizationLink() {
     if (!domain) return;
 
     try {
-      // Check if any organization has this email domain
+      // Check if any organization has this email domain (exclude soft-deleted)
       const { data: matchingOrg, error } = await supabase
         .from('organizations')
         .select('id, name, domain')
         .eq('domain', domain)
+        .is('deleted_at', null) // Exclude soft-deleted organizations
         .single();
 
       if (matchingOrg) {
@@ -125,7 +123,7 @@ export default function OAuthOrganizationLink() {
           *,
           organization:organizations(name, slug)
         `)
-        .eq('token', token)
+        .eq('invite_token', token)
         .single();
 
       if (error) {
@@ -139,22 +137,6 @@ export default function OAuthOrganizationLink() {
       }
     } catch (err) {
       logger.error('Error in verifyInviteToken:', err);
-    }
-  };
-
-  const fetchOrganizations = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('organizations')
-        .select('id, name, slug, domain, subscription_status, join_code')
-        .eq('is_active', true)
-        .order('name');
-
-      if (error) throw error;
-      setOrganizations(data || []);
-    } catch (err) {
-      logger.error('Error fetching organizations:', err);
-      setError('Failed to load organizations');
     }
   };
 
@@ -182,7 +164,7 @@ export default function OAuthOrganizationLink() {
       const { error: acceptError } = await supabase
         .from('organization_invites')
         .update({ accepted_at: new Date().toISOString() })
-        .eq('token', inviteToken);
+        .eq('invite_token', inviteToken);
 
       if (acceptError) throw acceptError;
 
@@ -407,44 +389,6 @@ export default function OAuthOrganizationLink() {
     }
   };
 
-  const handleJoinExisting = async () => {
-    if (!selectedOrgId) {
-      setError('Please select an organization');
-      return;
-    }
-
-    setLinking(true);
-    setError('');
-
-    try {
-      const selectedOrg = organizations.find(org => org.id === selectedOrgId);
-      
-      // Create/update profile with organization
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .upsert({
-          id: user.id,
-          email: user.email,
-          full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
-          role: 'user', // Default role - admin can change later
-          organization_id: selectedOrgId
-        });
-
-      if (profileError) throw profileError;
-
-      setSuccess(`Successfully joined ${selectedOrg.name}! Redirecting to dashboard...`);
-      setTimeout(() => {
-        window.location.href = '/dashboard'; // Force full reload
-      }, 2000);
-
-    } catch (err) {
-      logger.error('Error joining organization:', err);
-      setError(err.message);
-    } finally {
-      setLinking(false);
-    }
-  };
-
   const handleCreateOrganization = () => {
     // Redirect to the new create organization page
     window.location.href = '/create-organization';
@@ -657,50 +601,7 @@ export default function OAuthOrganizationLink() {
             </Card>
           </Grid>
 
-          {/* Option 3: Select from Available Organizations */}
-          <Grid item xs={12} md={6}>
-            <Card sx={{ height: '100%' }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <BusinessIcon sx={{ mr: 1, color: 'primary.main' }} />
-                  <Typography variant="h6">Browse Organizations</Typography>
-                </Box>
-                <Typography variant="body2" color="text.secondary" gutterBottom>
-                  Select from available organizations (admin approval may be required).
-                </Typography>
-                <FormControl fullWidth sx={{ mt: 2, mb: 2 }}>
-                  <InputLabel>Select Organization</InputLabel>
-                  <Select
-                    value={selectedOrgId}
-                    onChange={(e) => setSelectedOrgId(e.target.value)}
-                    label="Select Organization"
-                  >
-                    {organizations.map(org => (
-                      <MenuItem key={org.id} value={org.id}>
-                        <Box>
-                          <Typography variant="body1">{org.name}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {org.subscription_status}
-                          </Typography>
-                        </Box>
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <Button
-                  variant="outlined"
-                  onClick={handleJoinExisting}
-                  disabled={linking || !selectedOrgId}
-                  startIcon={linking ? <CircularProgress size={20} /> : <BusinessIcon />}
-                  fullWidth
-                >
-                  {linking ? 'Joining...' : 'Request to Join'}
-                </Button>
-              </CardContent>
-            </Card>
-          </Grid>
-
-          {/* Option 4: Create New Organization */}
+          {/* Option 3: Create New Organization */}
           <Grid item xs={12}>
             <Card sx={{ bgcolor: 'primary.light' }}>
               <CardContent>

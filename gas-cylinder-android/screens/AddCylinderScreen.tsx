@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView, FlatList } from 'react-native';
 import { supabase } from '../supabase';
 import { Picker } from '@react-native-picker/picker';
 import { useTheme } from '../context/ThemeContext';
@@ -103,15 +103,18 @@ export default function AddCylinderScreen() {
   }, [profile]);
 
   useEffect(() => {
-    // Fetch owners for the current organization
+    // Fetch ownership values for the current organization
     const fetchOwners = async () => {
       if (!profile?.organization_id) return;
       const { data, error } = await supabase
-        .from('owners')
-        .select('id, name')
+        .from('ownership_values')
+        .select('id, value')
         .eq('organization_id', profile.organization_id)
-        .order('name', { ascending: true });
-      if (!error && data) setOwners(data);
+        .order('value', { ascending: true });
+      if (!error && data) {
+        // Map the data to match the expected format (name -> value)
+        setOwners(data.map(item => ({ id: item.id, name: item.value })));
+      }
     };
     fetchOwners();
   }, [profile]);
@@ -217,16 +220,16 @@ export default function AddCylinderScreen() {
     }
   };
 
-  // Add new owner
+  // Add new ownership value
   const handleAddOwner = async () => {
     if (!newOwnerName.trim() || !profile?.organization_id) return;
     const { data, error } = await supabase
-      .from('owners')
-      .insert({ name: newOwnerName.trim(), organization_id: profile.organization_id })
+      .from('ownership_values')
+      .insert({ value: newOwnerName.trim(), organization_id: profile.organization_id })
       .select();
     if (!error && data && data[0]) {
-      setOwners([...owners, data[0]]);
-      setSelectedOwner(data[0].name);
+      setOwners([...owners, { id: data[0].id, name: data[0].value }]);
+      setSelectedOwner(data[0].value);
       setAddingOwner(false);
       setNewOwnerName('');
     }
@@ -234,18 +237,6 @@ export default function AddCylinderScreen() {
 
   return (
     <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header with Return Button */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.primary }]}>Add New Cylinder</Text>
-        <View style={styles.headerSpacer} />
-      </View>
-      
       {/* Scanner Section */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.primary }]}>Scan Barcode</Text>
@@ -310,14 +301,15 @@ export default function AddCylinderScreen() {
                 selectedValue={selectedGasType}
                 onValueChange={setSelectedGasType}
                 style={[styles.picker, { color: colors.text }]}
+                enabled={true}
+                dropdownIconColor={colors.text}
               >
-                <Picker.Item label="Select Gas Type" value="" color={colors.textSecondary} />
+                <Picker.Item label="Select Gas Type" value="" />
                 {gasTypes.map(gasType => (
                   <Picker.Item 
                     key={gasType.id} 
                     label={`${gasType.category} - ${gasType.type}`} 
                     value={gasType.id.toString()} 
-                    color={colors.text} 
                   />
                 ))}
               </Picker>
@@ -338,14 +330,15 @@ export default function AddCylinderScreen() {
                 selectedValue={selectedLocation}
                 onValueChange={setSelectedLocation}
                 style={[styles.picker, { color: colors.text }]}
+                enabled={true}
+                dropdownIconColor={colors.text}
               >
-                <Picker.Item label="Select Location" value="" color={colors.textSecondary} />
+                <Picker.Item label="Select Location" value="" />
                 {locations.map(location => (
                   <Picker.Item 
                     key={location.id} 
                     label={location.name} 
                     value={location.id} 
-                    color={colors.text} 
                   />
                 ))}
               </Picker>
@@ -363,12 +356,14 @@ export default function AddCylinderScreen() {
                 else setSelectedOwner(value);
               }}
               style={[styles.picker, { color: colors.text }]}
+              enabled={true}
+              dropdownIconColor={colors.text}
             >
-              <Picker.Item label="Select Owner" value="" color={colors.textSecondary} />
+              <Picker.Item label="Select Owner" value="" />
               {owners.map(owner => (
-                <Picker.Item key={owner.id} label={owner.name} value={owner.name} color={colors.text} />
+                <Picker.Item key={owner.id} label={owner.name} value={owner.name} />
               ))}
-              <Picker.Item label="Add new owner..." value="__add_new__" color={colors.textSecondary} />
+              <Picker.Item label="Add new owner..." value="__add_new__" />
             </Picker>
           </View>
         </View>
@@ -441,34 +436,6 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 40,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backIcon: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#374151',
-  },
-  headerSpacer: {
-    width: 40,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    flex: 1,
-  },
   section: {
     marginBottom: 32,
   },
@@ -494,11 +461,12 @@ const styles = StyleSheet.create({
   pickerWrapper: {
     borderRadius: 12,
     borderWidth: 1,
-    overflow: 'hidden',
+    backgroundColor: '#fff',
+    height: 56,
   },
   picker: {
-    height: 56,
     width: '100%',
+    height: 56,
   },
   loadingContainer: {
     flexDirection: 'row',

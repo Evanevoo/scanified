@@ -135,9 +135,20 @@ export default function VerifiedOrders() {
         ...groupScansByOrder(scans || [])
       ];
       
-      // For orders without customer names, try to get from bottle_scans or rentals
+      // For orders without customer names, try to get from invoice data first, then fallback to bottle_scans or rentals
       for (const order of allOrders) {
-        if (!order.customer_name && !order.data_parsed?.customer_name) {
+        // First, try to extract customer name from invoice data using getCustomerName function
+        // This properly checks all possible locations in the invoice data
+        const customerNameFromInvoice = getCustomerName(order);
+        
+        if (customerNameFromInvoice && customerNameFromInvoice !== 'N/A' && customerNameFromInvoice !== 'Unknown') {
+          // Invoice has customer name - use it (this is the source of truth)
+          order.customer_name = customerNameFromInvoice;
+          if (!order.data_parsed) order.data_parsed = {};
+          order.data_parsed.customer_name = customerNameFromInvoice;
+          logger.log(`✅ Found customer name from invoice data for order: ${customerNameFromInvoice}`);
+        } else {
+          // Invoice doesn't have customer name - fallback to bottle_scans or rentals
           // Extract order number manually (getOrderNumber is defined later)
           let orderNum = order.order_number || order.data_parsed?.order_number || order.data_parsed?.reference_number || order.data_parsed?.invoice_number;
           if (!orderNum && order.data_parsed?.rows && order.data_parsed.rows.length > 0) {
@@ -145,33 +156,33 @@ export default function VerifiedOrders() {
             orderNum = firstRow.order_number || firstRow.invoice_number || firstRow.reference_number || firstRow.sales_receipt_number;
           }
           if (orderNum && orderNum !== 'N/A') {
-            // Try to get customer name from bottle_scans
-            const { data: bottleScans } = await supabase
-              .from('bottle_scans')
+            // Try to get customer name from rentals table first (more reliable than bottle_scans)
+            const { data: rentals } = await supabase
+              .from('rentals')
               .select('customer_name')
               .eq('order_number', orderNum)
               .eq('organization_id', organization.id)
               .limit(1);
             
-            if (bottleScans && bottleScans.length > 0 && bottleScans[0].customer_name) {
-              order.customer_name = bottleScans[0].customer_name;
+            if (rentals && rentals.length > 0 && rentals[0].customer_name) {
+              order.customer_name = rentals[0].customer_name;
               if (!order.data_parsed) order.data_parsed = {};
-              order.data_parsed.customer_name = bottleScans[0].customer_name;
-              logger.log(`✅ Found customer name from bottle_scans for order ${orderNum}: ${bottleScans[0].customer_name}`);
+              order.data_parsed.customer_name = rentals[0].customer_name;
+              logger.log(`✅ Found customer name from rentals for order ${orderNum}: ${rentals[0].customer_name}`);
             } else {
-              // Try to get from rentals table
-              const { data: rentals } = await supabase
-                .from('rentals')
+              // Last resort: try to get customer name from bottle_scans (may be incorrect)
+              const { data: bottleScans } = await supabase
+                .from('bottle_scans')
                 .select('customer_name')
                 .eq('order_number', orderNum)
                 .eq('organization_id', organization.id)
                 .limit(1);
               
-              if (rentals && rentals.length > 0 && rentals[0].customer_name) {
-                order.customer_name = rentals[0].customer_name;
+              if (bottleScans && bottleScans.length > 0 && bottleScans[0].customer_name) {
+                order.customer_name = bottleScans[0].customer_name;
                 if (!order.data_parsed) order.data_parsed = {};
-                order.data_parsed.customer_name = rentals[0].customer_name;
-                logger.log(`✅ Found customer name from rentals for order ${orderNum}: ${rentals[0].customer_name}`);
+                order.data_parsed.customer_name = bottleScans[0].customer_name;
+                logger.log(`⚠️ Found customer name from bottle_scans for order ${orderNum} (fallback): ${bottleScans[0].customer_name}`);
               }
             }
           }

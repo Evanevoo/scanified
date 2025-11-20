@@ -173,6 +173,17 @@ const ProtectedRoute = ({ children }) => {
     return <LoadingSpinner />;
   }
 
+  // Check if organization needs setup (missing asset_type - the main required field)
+  const needsSetup = organization && !organization.asset_type;
+  const setupRoutes = ['/organization-setup', '/create-organization', '/verify-organization'];
+  const isSetupRoute = setupRoutes.includes(location.pathname);
+
+  // Redirect to setup if organization exists but needs configuration
+  if (user && profile && organization && needsSetup && !isSetupRoute && !loading) {
+    logger.log('🛡️ ProtectedRoute: Organization needs setup, redirecting to setup wizard');
+    return <Navigate to="/organization-setup" replace />;
+  }
+
   if (user && profile && !organization) {
     // Platform owners don't need an organization
     if (profile.role === 'owner') {
@@ -189,7 +200,8 @@ const ProtectedRoute = ({ children }) => {
     const publicRoutes = [
       '/', '/landing', '/login', '/register', '/setup', '/contact', '/pricing', 
       '/faq', '/reviews', '/privacy-policy', '/terms-of-service', '/documentation',
-      '/create-organization', '/verify-organization', '/accept-invite', '/organization-deleted'
+      '/create-organization', '/verify-organization', '/accept-invite', '/organization-deleted',
+      '/organization-setup'
     ];
     const isPublicRoute = publicRoutes.some(route => location.pathname.startsWith(route));
     const isAuthRoute = ['/login', '/register', '/setup', '/create-organization'].includes(location.pathname);

@@ -22,7 +22,6 @@ import Billing from './pages/Billing';
 import OwnerDashboard from './pages/OwnerDashboard';
 import CustomerPortal from './pages/CustomerPortal';
 import BarcodeGenerator from './pages/BarcodeGenerator';
-import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import LandingPage from './pages/LandingPage';
 import FixOrganizationLink from './pages/FixOrganizationLink';
 import OAuthOrganizationLink from './pages/OAuthOrganizationLink';
@@ -37,7 +36,6 @@ import Documentation from './pages/Documentation';
 import CustomPageViewer from './pages/CustomPageViewer';
 import ImportApprovals from './pages/ImportApprovals';
 import ImportApprovalDetail from './pages/ImportApprovalDetail';
-import ImportApprovalsHistory from './pages/ImportApprovalsHistory';
 import VerifiedOrders from './pages/VerifiedOrders';
 import Home from './pages/Home';
 import DataUtilities from './pages/OwnerPortal/DataUtilities';
@@ -54,7 +52,6 @@ import Impersonation from './pages/OwnerPortal/Impersonation';
 import PlanManagement from './pages/OwnerPortal/PlanManagement';
 import AssetTypeDemo from './components/AssetTypeDemo';
 import AssetConfigurationManager from './pages/OwnerPortal/AssetConfigurationManager';
-import FileFormatManager from './pages/OwnerPortal/FileFormatManager';
 import FormatConfigurationManager from './pages/OwnerPortal/FormatConfigurationManager';
 import RoleManagement from './pages/OwnerPortal/RoleManagement';
 import ComprehensiveRoleManager from './pages/ComprehensiveRoleManager';
@@ -92,12 +89,14 @@ import CustomerPayments from './pages/CustomerPayments';
 import CompetitorAnalysis from './pages/CompetitorAnalysis';
 import Blog from './pages/Blog';
 import Security from './pages/Security';
+import OwnershipManagement from './pages/OwnershipManagement';
 
 // Lazy load all page components
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const CreateOrganization = lazy(() => import('./pages/CreateOrganization'));
 const VerifyOrganization = lazy(() => import('./pages/VerifyOrganization'));
 const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
+const OrganizationSetupWizard = lazy(() => import('./pages/OrganizationSetupWizard'));
 const UserInvites = lazy(() => import('./pages/UserInvites'));
 // Debug routes - only available in development
 const DebugSession = lazy(() => import('./pages/DebugSession'));
@@ -132,11 +131,9 @@ const Rental = lazy(() => import('./pages/Rental'));
 const CustomerDetail = lazy(() => import('./pages/CustomerDetail'));
 const AssetHistory = lazy(() => import('./pages/AssetHistory'));
 const AssetHistoryLookup = lazy(() => import('./pages/AssetHistoryLookup'));
-const AllAssetMovements = lazy(() => import('./pages/AllAssetMovements'));
 const Import = lazy(() => import('./pages/Import'));
 const Settings = lazy(() => import('./pages/Settings'));
 const ImportCustomerInfo = lazy(() => import('./pages/ImportCustomerInfo'));
-const ScannedOrders = lazy(() => import('./pages/ScannedOrders'));
 const SupabaseOrders = lazy(() => import('./pages/management-reports/SupabaseOrders'));
 const UserManagement = lazy(() => import('./pages/UserManagement'));
 const ImportAssetBalance = lazy(() => import('./pages/ImportAssetBalance'));
@@ -144,7 +141,6 @@ const IntegrationsPage = lazy(() => import('./pages/Integrations'));
 const BottleManagement = lazy(() => import('./pages/BottleManagement'));
 const AssetDetail = lazy(() => import('./pages/AssetDetail'));
 const Assets = lazy(() => import('./pages/Assets'));
-const SmartInventory = lazy(() => import('./pages/SmartInventory'));
 const SupportCenter = lazy(() => import('./pages/SupportCenter'));
 const OrganizationAnalytics = lazy(() => import('./pages/OrganizationAnalytics'));
 const OrganizationTools = lazy(() => import('./pages/OrganizationTools'));
@@ -157,7 +153,6 @@ const AdvancedRentals = lazy(() => import('./pages/AdvancedRentals'));
 const IntegrationSettings = lazy(() => import('./pages/IntegrationSettings'));
 const AutomationRules = lazy(() => import('./pages/AutomationRules'));
 const Locations = lazy(() => import('./pages/Locations'));
-const TempCustomerManagement = lazy(() => import('./pages/TempCustomerManagement'));
 const TransferFromCustomers = lazy(() => import('./pages/TransferFromCustomers.jsx'));
 const DailyUpdateAdmin = lazy(() => import('./pages/DailyUpdateAdmin'));
 
@@ -227,6 +222,11 @@ function AppContent() {
                   <Route path="/create-organization" element={<CreateOrganization />} />
                   <Route path="/verify-organization" element={<VerifyOrganization />} />
                   <Route path="/accept-invite" element={<AcceptInvite />} />
+                  <Route path="/organization-setup" element={
+                    <Suspense fallback={<LoadingSpinner />}>
+                      <OrganizationSetupWizard />
+                    </Suspense>
+                  } />
                   {/* Debug routes - only available in development */}
                   {import.meta.env.DEV && (
                     <Route path="/debug-session" element={<DebugSession />} />
@@ -277,7 +277,6 @@ function AppContent() {
                   <Route element={<ProtectedRoute />}>
                     <Route path="/home" element={<Home />} />
                     <Route path="/customers" element={<Customers />} />
-                    <Route path="/temp-customer-management" element={<TempCustomerManagement />} />
                     <Route path="/transfer-from-customers" element={<TransferFromCustomers />} />
                     <Route path="/customer/:id/transfer-to" element={<TransferFromCustomers />} />
                     <Route path="/locations" element={<Locations />} />
@@ -293,7 +292,6 @@ function AppContent() {
                     <Route path="/audit-management" element={<AuditManagement />} />
                     <Route path="/favorites" element={<Favorites />} />
                     <Route path="/custom-reports" element={<CustomReports />} />
-                    <Route path="/analytics" element={<AnalyticsDashboard />} />
                     <Route path="/delivery-management" element={<DeliveryTracking />} />
                     <Route path="/truck-reconciliation" element={<TruckReconciliation />} />
                     <Route path="/workflow-automation" element={<WorkflowAutomation />} />
@@ -325,12 +323,10 @@ function AppContent() {
                     <Route path="/asset-history" element={<AssetHistory />} />
                     <Route path="/asset-history-lookup" element={<AssetHistoryLookup />} />
                     <Route path="/assets/:id/history" element={<AssetHistory />} />
-                    <Route path="/all-asset-movements" element={<AllAssetMovements />} />
                     <Route path="/import" element={<Import />} />
                     <Route path="/settings" element={<Settings />} />
                     <Route path="/import-customer-info" element={<ImportCustomerInfo />} />
-                    <Route path="/scanned-orders" element={<ScannedOrders />} />
-                    <Route path="/user-management" element={<UserManagement />} />
+                    <Route path="/user-management" element={<Navigate to="/settings?tab=team" replace />} />
                     <Route path="/user-invites" element={<UserInvites />} />
                     <Route path="/role-management" element={<ComprehensiveRoleManager />} />
                     <Route path="/organization-join-codes" element={<OrganizationJoinCodes />} />
@@ -339,30 +335,24 @@ function AppContent() {
                     <Route path="/role-permission-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/unified-role-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/import-asset-balance" element={<ImportAssetBalance />} />
-                    <Route path="/import-approvals" element={<ImportApprovals />} />
+                    <Route path="/verification-center" element={<ImportApprovals />} />
                     <Route path="/import-approval/:id/detail" element={<ImportApprovalDetail />} />
-                    <Route path="/import-approvals-history" element={<ImportApprovalsHistory />} />
-                    <Route path="/import-approvals/history" element={<ImportApprovalsHistory />} />
-                    <Route path="/import-history" element={<ImportApprovalsHistory />} />
                     <Route path="/verified-orders" element={<VerifiedOrders />} />
-                    <Route path="/orders-report" element={<ScannedOrders />} />
                     {/* Generate ID route removed per App Store guidelines */}
                     <Route path="/barcode-generator" element={<BarcodeGenerator />} />
                     {/* Organization-level routes - accessible to all organization users */}
                     <Route path="/bottle/:id" element={<AssetDetail />} />
                     <Route path="/bottle-management" element={<BottleManagement />} />
+                    <Route path="/ownership-management" element={<OwnershipManagement />} />
                     <Route path="/daily-update-admin" element={<DailyUpdateAdmin />} />
                     <Route path="/assets/:id" element={<AssetDetail />} />
                     <Route path="/asset/:id" element={<AssetDetail />} />
-                    <Route path="/orders" element={<ScannedOrders />} />
                     <Route path="/billing" element={
                       <RoleProtectedRoute allowedRoles={['admin', 'manager', 'user']}>
                         <Billing />
                       </RoleProtectedRoute>
                     } />
                     <Route path="/payments" element={<CustomerPayments />} />
-                    <Route path="/smart-inventory" element={<SmartInventory />} />
-                    <Route path="/customer-portal" element={<CustomerSelfService />} />
                     <Route path="/support" element={<SupportCenter />} />
                     <Route path="/organization-analytics" element={<OrganizationAnalytics />} />
                     <Route path="/organization-tools" element={
@@ -425,7 +415,6 @@ function AppContent() {
                     <Route path="/asset-demo" element={<AssetTypeDemo />} />
                                       <Route path="/asset-configuration" element={<AssetConfigurationManager />} />
                       <Route path="/owner-portal/asset-configuration" element={<AssetConfigurationManager />} />
-                      <Route path="/owner-portal/file-format-manager" element={<FileFormatManager />} />
                       <Route path="/owner-portal/format-configuration" element={<FormatConfigurationManager />} />
                       <Route path="/owner-portal/roles" element={<RoleManagement />} />
                       <Route path="/owner-portal/page-builder" element={<PageBuilder />} />
@@ -437,7 +426,6 @@ function AppContent() {
                       <Route path="/owner-portal/command-center" element={<OwnerCommandCenter />} />
                       <Route path="/owner-portal/cms" element={<OwnerCMS />} />
                     </Route>
-                    <Route path="/file-format-manager" element={<FileFormatManager />} />
                   </Route>
                   
                   {/* NEW ADVANCED FEATURES ROUTES */}

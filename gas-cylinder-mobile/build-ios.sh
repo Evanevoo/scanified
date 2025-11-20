@@ -21,7 +21,7 @@ npm install
 
 # Build for iOS
 echo "🔨 Building iOS app..."
-eas build --platform ios --profile production --config eas-ios.json --clear-cache
+eas build --platform ios --profile production --clear-cache
 
 echo "✅ iOS build completed!"
 echo "🍎 You can now submit to App Store using: npm run submit:ios"

@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { ThemeProvider as MuiThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, GlobalStyles } from '@mui/material';
 import { themes, modernTheme } from '../theme/themes';
@@ -195,10 +195,11 @@ export const ThemeProvider = ({ children }) => {
   });
   
   const [accent, setAccent] = useState('#1976d2');
-  const [organizationColors, setOrganizationColors] = useState({
+  const [baseOrganizationColors, setBaseOrganizationColors] = useState({
     primary: '#40B5AD',
     secondary: '#48C9B0'
   });
+  const [personalColors, setPersonalColors] = useState(null);
 
   // Load user-specific accent color and organization colors when user changes
   useEffect(() => {
@@ -257,17 +258,62 @@ export const ThemeProvider = ({ children }) => {
   // Load organization colors when organization changes
   useEffect(() => {
     if (organization) {
-      setOrganizationColors({
+      setBaseOrganizationColors({
         primary: organization.primary_color || '#40B5AD',
         secondary: organization.secondary_color || '#48C9B0'
       });
     } else {
-      setOrganizationColors({
+      setBaseOrganizationColors({
         primary: '#40B5AD',
         secondary: '#48C9B0'
       });
     }
   }, [organization]);
+
+  const loadPersonalColors = useCallback(() => {
+    if (!user?.id) {
+      setPersonalColors(null);
+      return;
+    }
+
+    const storageKey = `appearancePrefs_${user.id}`;
+
+    try {
+      const stored = localStorage.getItem(storageKey);
+      if (!stored) {
+        setPersonalColors(null);
+        return;
+      }
+
+      const parsed = JSON.parse(stored);
+      if (parsed?.primaryColor && parsed?.secondaryColor) {
+        setPersonalColors({
+          primary: parsed.primaryColor,
+          secondary: parsed.secondaryColor
+        });
+      } else {
+        setPersonalColors(null);
+      }
+    } catch (error) {
+      logger.error('Error reading personal appearance settings:', error);
+      setPersonalColors(null);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    loadPersonalColors();
+  }, [loadPersonalColors, organization?.primary_color, organization?.secondary_color]);
+
+  useEffect(() => {
+    const handleAppearanceUpdate = () => {
+      loadPersonalColors();
+    };
+
+    window.addEventListener('appearancePrefsUpdated', handleAppearanceUpdate);
+    return () => window.removeEventListener('appearancePrefsUpdated', handleAppearanceUpdate);
+  }, [loadPersonalColors]);
+
+  const resolvedColors = personalColors || baseOrganizationColors;
 
   useEffect(() => {
     localStorage.setItem('theme', currentTheme);
@@ -360,11 +406,11 @@ export const ThemeProvider = ({ children }) => {
           mode: 'dark',
           primary: {
             ...baseTheme.palette.primary,
-            main: organizationColors.primary,
+            main: resolvedColors.primary,
           },
           secondary: {
             ...baseTheme.palette.secondary,
-            main: organizationColors.secondary,
+            main: resolvedColors.secondary,
           },
           background: {
             default: '#0a0a0a',
@@ -386,11 +432,11 @@ export const ThemeProvider = ({ children }) => {
         ...baseTheme.palette,
         primary: {
           ...baseTheme.palette.primary,
-          main: organizationColors.primary,
+          main: resolvedColors.primary,
         },
         secondary: {
           ...baseTheme.palette.secondary,
-          main: organizationColors.secondary,
+          main: resolvedColors.secondary,
         },
       },
     });
@@ -403,7 +449,9 @@ export const ThemeProvider = ({ children }) => {
     setMode,
     accent,
     setAccent: setAccentColor,
-    organizationColors,
+    organizationColors: resolvedColors,
+    personalColors,
+    refreshAppearanceColors: loadPersonalColors,
     changeTheme,
     toggleDarkMode,
     availableThemes: themes,

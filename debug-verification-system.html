@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Verification System</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; }
+        h2 { color: #555; margin-top: 0; }
+        .status { 
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .warning { background: #fff3cd; color: #856404; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #0056b3; }
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th { background: #f8f9fa; }
+        .code { 
+            font-family: 'Courier New', monospace; 
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Verification System Debugger</h1>
+    
+    <div class="card">
+        <h2>System Status</h2>
+        <div id="systemStatus">Checking...</div>
+    </div>
+
+    <div class="card">
+        <h2>Database Tables</h2>
+        <button onclick="checkTables()">Check Tables</button>
+        <div id="tablesResult"></div>
+    </div>
+
+    <div class="card">
+        <h2>Database Functions</h2>
+        <button onclick="checkFunctions()">Check Functions</button>
+        <div id="functionsResult"></div>
+    </div>
+
+    <div class="card">
+        <h2>Recent Verifications</h2>
+        <button onclick="listVerifications()">List Verifications</button>
+        <div id="verificationsResult"></div>
+    </div>
+
+    <div class="card">
+        <h2>Test Verification Flow</h2>
+        <input type="email" id="testEmail" placeholder="test@example.com" style="padding: 8px; width: 300px;">
+        <button onclick="testVerification()">Test Create Verification</button>
+        <div id="testResult"></div>
+    </div>
+
+    <script>
+        // Initialize Supabase
+        const SUPABASE_URL = 'https://jtfucttzaswmqqhmmhfb.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjU1NTExOTYsImV4cCI6MjA0MTEyNzE5Nn0.h_kOy6OhTXfq3R__JLbPJb3WvqcmhC3NtCGbxTZs2p4';
+        
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        document.getElementById('systemStatus').innerHTML = `
+            <div class="status info">
+                <strong>Supabase URL:</strong> ${SUPABASE_URL}<br>
+                <strong>Connection:</strong> Initialized
+            </div>
+        `;
+
+        async function checkTables() {
+            const result = document.getElementById('tablesResult');
+            result.innerHTML = '<p>Checking with multiple methods...</p>';
+
+            let results = [];
+
+            // Method 1: Try direct SELECT
+            try {
+                const { data, error, count } = await supabase
+                    .from('organization_verifications')
+                    .select('*', { count: 'exact', head: true });
+
+                if (error) {
+                    results.push({
+                        method: 'Direct SELECT',
+                        success: false,
+                        error: error,
+                        errorStr: JSON.stringify(error, null, 2)
+                    });
+                } else {
+                    results.push({
+                        method: 'Direct SELECT',
+                        success: true,
+                        count: count
+                    });
+                }
+            } catch (err) {
+                results.push({
+                    method: 'Direct SELECT',
+                    success: false,
+                    error: { message: err.message, stack: err.stack }
+                });
+            }
+
+            // Method 2: Try SELECT with limit 1
+            try {
+                const { data, error } = await supabase
+                    .from('organization_verifications')
+                    .select('id')
+                    .limit(1);
+
+                if (error) {
+                    results.push({
+                        method: 'SELECT with limit',
+                        success: false,
+                        error: error
+                    });
+                } else {
+                    results.push({
+                        method: 'SELECT with limit',
+                        success: true,
+                        dataLength: data?.length || 0
+                    });
+                }
+            } catch (err) {
+                results.push({
+                    method: 'SELECT with limit',
+                    success: false,
+                    error: { message: err.message }
+                });
+            }
+
+            // Method 3: Try via RPC function (indirect test)
+            try {
+                const testEmail = 'debug-test-' + Date.now() + '@example.com';
+                const { data, error } = await supabase.rpc('request_organization_verification', {
+                    p_email: testEmail,
+                    p_organization_name: 'Debug Test',
+                    p_user_name: 'Debug User'
+                });
+
+                if (error) {
+                    results.push({
+                        method: 'RPC Function Test',
+                        success: false,
+                        error: error
+                    });
+                } else if (data) {
+                    // If RPC works, try to read it back
+                    const { data: verifyData, error: verifyError } = await supabase
+                        .from('organization_verifications')
+                        .select('*')
+                        .eq('verification_token', data)
+                        .single();
+
+                    if (verifyError) {
+                        results.push({
+                            method: 'RPC + Read Back',
+                            success: false,
+                            note: 'RPC created token but can\'t read it back',
+                            token: data,
+                            error: verifyError
+                        });
+                    } else {
+                        results.push({
+                            method: 'RPC + Read Back',
+                            success: true,
+                            note: 'RPC works and can read back!',
+                            token: data
+                        });
+                    }
+                }
+            } catch (err) {
+                results.push({
+                    method: 'RPC Function Test',
+                    success: false,
+                    error: { message: err.message }
+                });
+            }
+
+            // Display results
+            let html = '<h3>Test Results:</h3>';
+            let hasSuccess = false;
+            let hasRLSIssue = false;
+
+            results.forEach(r => {
+                if (r.success) {
+                    hasSuccess = true;
+                    html += `<div class="status success">✅ ${r.method}: Success${r.count ? ` (${r.count} rows)` : ''}${r.note ? ` - ${r.note}` : ''}</div>`;
+                } else {
+                    const errorMsg = r.error?.message || JSON.stringify(r.error);
+                    const errorCode = r.error?.code;
+                    
+                    if (errorCode === '42501' || errorMsg?.includes('permission') || errorMsg?.includes('RLS') || errorMsg?.includes('policy')) {
+                        hasRLSIssue = true;
+                    }
+
+                    html += `<div class="status error">
+                        ❌ ${r.method}: Failed<br>
+                        <strong>Error:</strong> ${errorMsg || 'Unknown'}<br>
+                        <strong>Code:</strong> ${errorCode || 'N/A'}<br>
+                        ${r.token ? `<strong>Token created:</strong> ${r.token}<br>` : ''}
+                        ${r.errorStr ? `<pre>${r.errorStr}</pre>` : ''}
+                    </div>`;
+                }
+            });
+
+            if (hasSuccess) {
+                html += `<div class="status success"><strong>✅ Table is accessible!</strong> The issue might be intermittent or specific to certain queries.</div>`;
+            } else if (hasRLSIssue) {
+                html += `<div class="status warning">
+                    <strong>⚠️ RLS Policy Issue Detected</strong><br>
+                    The table likely exists but RLS policies are blocking access.<br>
+                    <br>
+                    <strong>Solution:</strong> Run <span class="code">fix-verification-rls-policies.sql</span> in Supabase SQL Editor.
+                </div>`;
+            } else {
+                html += `<div class="status error">
+                    <strong>❌ Table Access Failed</strong><br>
+                    All access methods failed. This could mean:<br>
+                    1. Table doesn't exist - Run <span class="code">setup-organization-verification.sql</span><br>
+                    2. RLS policies blocking - Run <span class="code">fix-verification-rls-policies.sql</span><br>
+                    3. Network/connection issue - Check Supabase status
+                </div>`;
+            }
+
+            result.innerHTML = html;
+        }
+
+        async function checkFunctions() {
+            const result = document.getElementById('functionsResult');
+            result.innerHTML = '<p>Checking...</p>';
+
+            const functions = [
+                'request_organization_verification',
+                'create_verified_organization'
+            ];
+
+            let html = '<table><tr><th>Function</th><th>Status</th></tr>';
+
+            for (const func of functions) {
+                try {
+                    const { data, error } = await supabase.rpc(func, {});
+                    
+                    if (error) {
+                        if (error.code === '42883') {
+                            html += `<tr><td>${func}</td><td><span class="status error">❌ Missing</span></td></tr>`;
+                        } else {
+                            // Function exists but failed (expected - we didn't pass correct params)
+                            html += `<tr><td>${func}</td><td><span class="status success">✅ Exists</span></td></tr>`;
+                        }
+                    } else {
+                        html += `<tr><td>${func}</td><td><span class="status success">✅ Exists</span></td></tr>`;
+                    }
+                } catch (err) {
+                    html += `<tr><td>${func}</td><td><span class="status error">❌ Error</span></td></tr>`;
+                }
+            }
+
+            html += '</table>';
+            result.innerHTML = html;
+        }
+
+        async function listVerifications() {
+            const result = document.getElementById('verificationsResult');
+            result.innerHTML = '<p>Loading...</p>';
+
+            try {
+                const { data, error } = await supabase
+                    .from('organization_verifications')
+                    .select('*')
+                    .order('created_at', { ascending: false })
+                    .limit(10);
+
+                if (error) {
+                    result.innerHTML = `
+                        <div class="status error">
+                            <strong>Error:</strong> ${error.message}
+                        </div>
+                    `;
+                    return;
+                }
+
+                if (!data || data.length === 0) {
+                    result.innerHTML = `
+                        <div class="status info">
+                            No verifications found.
+                        </div>
+                    `;
+                    return;
+                }
+
+                let html = '<table><tr><th>Email</th><th>Organization</th><th>Verified</th><th>Created</th><th>Token (first 8)</th></tr>';
+                data.forEach(v => {
+                    const createdAt = new Date(v.created_at).toLocaleString();
+                    const token = v.verification_token ? v.verification_token.substring(0, 8) : 'N/A';
+                    html += `<tr>
+                        <td>${v.email}</td>
+                        <td>${v.organization_name}</td>
+                        <td>${v.verified ? '✅' : '⏳'}</td>
+                        <td>${createdAt}</td>
+                        <td class="code">${token}...</td>
+                    </tr>`;
+                });
+                html += '</table>';
+                result.innerHTML = html;
+            } catch (err) {
+                result.innerHTML = `
+                    <div class="status error">
+                        <strong>Error:</strong> ${err.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function testVerification() {
+            const result = document.getElementById('testResult');
+            const email = document.getElementById('testEmail').value;
+
+            if (!email) {
+                alert('Please enter an email');
+                return;
+            }
+
+            result.innerHTML = '<p>Testing...</p>';
+
+            try {
+                console.log('Testing verification with:', email);
+                const { data, error } = await supabase.rpc('request_organization_verification', {
+                    p_email: email,
+                    p_organization_name: 'Test Organization',
+                    p_user_name: 'Test User'
+                });
+
+                console.log('RPC Result:', { data, error });
+
+                if (error) {
+                    result.innerHTML = `
+                        <div class="status error">
+                            <strong>❌ Function Failed</strong><br>
+                            <strong>Error:</strong> ${error.message || 'Unknown error'}<br>
+                            <strong>Code:</strong> ${error.code || 'undefined'}<br>
+                            <strong>Details:</strong> ${error.details || 'N/A'}<br>
+                            <strong>Hint:</strong> ${error.hint || 'N/A'}<br>
+                            <br>
+                            <strong>Full Error:</strong>
+                            <pre>${JSON.stringify(error, null, 2)}</pre>
+                        </div>
+                    `;
+                } else {
+                    // After creating, try to verify it exists in the table
+                    const { data: verification, error: verifyError } = await supabase
+                        .from('organization_verifications')
+                        .select('*')
+                        .eq('verification_token', data)
+                        .single();
+
+                    if (verifyError) {
+                        result.innerHTML = `
+                            <div class="status warning">
+                                <strong>⚠️ Token Created But Can't Verify</strong><br>
+                                Token created: <span class="code">${data}</span><br>
+                                <br>
+                                <strong>But can't read from table:</strong> ${verifyError.message}<br>
+                                <strong>This suggests an RLS policy issue.</strong><br>
+                                <br>
+                                Verification link would be:<br>
+                                <span class="code">${window.location.origin}/verify-organization?token=${data}</span>
+                            </div>
+                        `;
+                    } else {
+                        result.innerHTML = `
+                            <div class="status success">
+                                <strong>✅ Success!</strong><br>
+                                Token created: <span class="code">${data}</span><br>
+                                <br>
+                                <strong>Verification record found:</strong><br>
+                                Email: ${verification.email}<br>
+                                Organization: ${verification.organization_name}<br>
+                                Verified: ${verification.verified ? 'Yes' : 'No'}<br>
+                                <br>
+                                Verification link:<br>
+                                <span class="code">${window.location.origin}/verify-organization?token=${data}</span>
+                            </div>
+                        `;
+                    }
+                }
+            } catch (err) {
+                result.innerHTML = `
+                    <div class="status error">
+                        <strong>❌ Exception Caught</strong><br>
+                        <strong>Error:</strong> ${err.message}<br>
+                        <pre>${JSON.stringify(err, null, 2)}</pre>
+                    </div>
+                `;
+            }
+        }
+
+        // Auto-check on load
+        window.onload = () => {
+            checkTables();
+            checkFunctions();
+        };
+    </script>
+</body>
+</html>
+

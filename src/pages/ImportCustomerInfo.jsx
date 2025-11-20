@@ -395,6 +395,12 @@ const ImportCustomerInfo = () => {
       const invalidCustomers = [];
       const customersToUpdate = [];
       
+      // Helper to normalize CustomerListID (lowercase, remove trailing letters)
+      const normalizeId = (id) => {
+        if (!id) return '';
+        return id.toLowerCase().trim().replace(/[a-z]+$/, '');
+      };
+      
       // Filter out invalid entries and detect duplicates within import data
       const seenCustomers = new Set();
       const validCustomers = [];
@@ -408,9 +414,9 @@ const ImportCustomerInfo = () => {
           continue;
         }
         
-        // Check for duplicates within the import data itself
+        // Check for duplicates within the import data itself using normalized IDs
         const normalizedName = customerName.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-        const normalizedId = customerId.toLowerCase().trim().replace(/[a-z]+$/, ''); // Remove trailing letters
+        const normalizedId = normalizeId(customerId);
         const duplicateKey = `${normalizedName}_${normalizedId}`;
         
         if (seenCustomers.has(duplicateKey)) {
@@ -434,45 +440,81 @@ const ImportCustomerInfo = () => {
         const existingCustomer = existingCustomerMap[key];
         
         if (existingCustomer) {
-          // Update existing customer with missing info instead of skipping
+          // Update existing customer with new info (merge/update fields when new data is provided)
           const updateData = {};
           let hasUpdates = false;
           
-          // Check each field and update if missing in existing customer
-          if (customer.contact_details && !existingCustomer.contact_details) {
-            updateData.contact_details = customer.contact_details;
-            hasUpdates = true;
+          // Helper to check if new value is "more complete" than existing
+          const isMoreComplete = (newVal, existingVal) => {
+            if (!newVal) return false;
+            if (!existingVal) return true;
+            // If new value is longer or has more content, consider it more complete
+            const newTrimmed = String(newVal).trim();
+            const existingTrimmed = String(existingVal).trim();
+            return newTrimmed.length > existingTrimmed.length && newTrimmed.length > 0;
+          };
+          
+          // Update fields if new data is provided (not just when missing)
+          // Prefer new data if it's more complete, otherwise keep existing
+          if (customer.contact_details) {
+            if (isMoreComplete(customer.contact_details, existingCustomer.contact_details) || !existingCustomer.contact_details) {
+              updateData.contact_details = customer.contact_details.trim();
+              hasUpdates = true;
+            }
           }
-          if (customer.address2 && !existingCustomer.address2) {
-            updateData.address2 = customer.address2;
-            hasUpdates = true;
+          if (customer.address2) {
+            if (isMoreComplete(customer.address2, existingCustomer.address2) || !existingCustomer.address2) {
+              updateData.address2 = customer.address2.trim();
+              hasUpdates = true;
+            }
           }
-          if (customer.address3 && !existingCustomer.address3) {
-            updateData.address3 = customer.address3;
-            hasUpdates = true;
+          if (customer.address3) {
+            if (isMoreComplete(customer.address3, existingCustomer.address3) || !existingCustomer.address3) {
+              updateData.address3 = customer.address3.trim();
+              hasUpdates = true;
+            }
           }
-          if (customer.address4 && !existingCustomer.address4) {
-            updateData.address4 = customer.address4;
-            hasUpdates = true;
+          if (customer.address4) {
+            if (isMoreComplete(customer.address4, existingCustomer.address4) || !existingCustomer.address4) {
+              updateData.address4 = customer.address4.trim();
+              hasUpdates = true;
+            }
           }
-          if (customer.address5 && !existingCustomer.address5) {
-            updateData.address5 = customer.address5;
-            hasUpdates = true;
+          if (customer.address5) {
+            if (isMoreComplete(customer.address5, existingCustomer.address5) || !existingCustomer.address5) {
+              updateData.address5 = customer.address5.trim();
+              hasUpdates = true;
+            }
           }
-          if (customer.city && !existingCustomer.city) {
-            updateData.city = customer.city;
-            hasUpdates = true;
+          if (customer.city) {
+            if (isMoreComplete(customer.city, existingCustomer.city) || !existingCustomer.city) {
+              updateData.city = customer.city.trim();
+              hasUpdates = true;
+            }
           }
-          if (customer.postal_code && !existingCustomer.postal_code) {
-            updateData.postal_code = customer.postal_code;
-            hasUpdates = true;
+          if (customer.postal_code) {
+            if (isMoreComplete(customer.postal_code, existingCustomer.postal_code) || !existingCustomer.postal_code) {
+              updateData.postal_code = customer.postal_code.trim();
+              hasUpdates = true;
+            }
           }
-          if (customer.phone && !existingCustomer.phone) {
-            updateData.phone = customer.phone;
-            hasUpdates = true;
+          if (customer.phone) {
+            if (isMoreComplete(customer.phone, existingCustomer.phone) || !existingCustomer.phone) {
+              updateData.phone = customer.phone.trim();
+              hasUpdates = true;
+            }
           }
-          if (customer.barcode && customer.barcode !== existingCustomer.barcode) {
-            updateData.barcode = (customer.barcode || '').toString().trim();
+          if (customer.barcode) {
+            const newBarcode = (customer.barcode || '').toString().trim();
+            if (newBarcode && newBarcode !== existingCustomer.barcode) {
+              updateData.barcode = newBarcode;
+              hasUpdates = true;
+            }
+          }
+          
+          // Always update name if provided (in case of slight variations)
+          if (customer.name && customer.name.trim() !== existingCustomer.name) {
+            updateData.name = customer.name.trim();
             hasUpdates = true;
           }
           
@@ -489,17 +531,19 @@ const ImportCustomerInfo = () => {
         }
         
         // Prepare customer data for new customers
+        // Normalize CustomerListID to lowercase (remove trailing letters for consistency)
+        const normalizedId = normalizeId(customerId) || generateCustomerId();
         const customerData = {
-          CustomerListID: customerId.trim() || generateCustomerId(),
+          CustomerListID: normalizedId,
           name: customerName.trim(),
-          contact_details: customer.contact_details || '',
-          address2: customer.address2 || '',
-          address3: customer.address3 || '',
-          address4: customer.address4 || '',
-          address5: customer.address5 || '',
-          city: customer.city || '',
-          postal_code: customer.postal_code || '',
-          phone: customer.phone || '',
+          contact_details: (customer.contact_details || '').trim() || null,
+          address2: (customer.address2 || '').trim() || null,
+          address3: (customer.address3 || '').trim() || null,
+          address4: (customer.address4 || '').trim() || null,
+          address5: (customer.address5 || '').trim() || null,
+          city: (customer.city || '').trim() || null,
+          postal_code: (customer.postal_code || '').trim() || null,
+          phone: (customer.phone || '').trim() || null,
           barcode: (customer.barcode || '').toString().trim() || null,
           organization_id: profile.organization_id
         };
@@ -510,16 +554,23 @@ const ImportCustomerInfo = () => {
       // Batch update existing customers
       if (customersToUpdate.length > 0) {
         logger.log(`Updating ${customersToUpdate.length} existing customers...`);
-        for (const { CustomerListID, updateData, displayName } of customersToUpdate) {
-          const { error: updateError } = await supabase
-            .from('customers')
-            .update(updateData)
-            .eq('CustomerListID', CustomerListID);
-          
-          if (!updateError) {
-            duplicateCustomers.push(`${displayName} - updated existing customer with missing info`);
-          } else {
-            duplicateCustomers.push(`${displayName} - failed to update existing customer`);
+        const UPDATE_BATCH_SIZE = 50;
+        for (let i = 0; i < customersToUpdate.length; i += UPDATE_BATCH_SIZE) {
+          const batch = customersToUpdate.slice(i, i + UPDATE_BATCH_SIZE);
+          for (const { CustomerListID, updateData, displayName } of batch) {
+            const { error: updateError } = await supabase
+              .from('customers')
+              .update(updateData)
+              .eq('CustomerListID', CustomerListID)
+              .eq('organization_id', profile.organization_id);
+            
+            if (!updateError) {
+              importedCount++; // Count updates as successful imports
+              logger.log(`Updated customer: ${displayName}`);
+            } else {
+              logger.error(`Failed to update customer ${displayName}:`, updateError);
+              duplicateCustomers.push(`${displayName} - failed to update: ${updateError.message}`);
+            }
           }
         }
       }

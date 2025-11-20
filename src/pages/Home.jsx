@@ -108,7 +108,7 @@ export default function Home() {
     if (isAdmin()) {
       return [
         { title: 'Add New Customer', path: '/customers', icon: <AddIcon />, color: 'primary' },
-        { title: 'User Management', path: '/user-management', icon: <AdminPanelSettings />, color: 'secondary' },
+        { title: 'User Management', path: '/settings?tab=team', icon: <AdminPanelSettings />, color: 'secondary' },
         { title: 'View Analytics', path: '/analytics', icon: <Analytics />, color: 'info' },
         { title: 'Organization Settings', path: '/settings', icon: <Settings />, color: 'warning' },
         { title: 'Billing Management', path: '/billing', icon: <Receipt />, color: 'success' },
@@ -219,8 +219,8 @@ export default function Home() {
           icon: <AdminPanelSettings />, 
           color: currentTheme.info.main,
           onClick: () => {
-            logger.log('🔄 Navigating to /user-management');
-            navigate('/user-management');
+            logger.log('🔄 Navigating to Settings Team tab');
+            navigate('/settings?tab=team');
           }
         }
       );

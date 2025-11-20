@@ -100,6 +100,7 @@ function Customers({ profile }) {
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState([]);
   const [searchInput, setSearchInput] = useState(''); // Input value
+  const [activeSearchTerm, setActiveSearchTerm] = useState(''); // Active search term being used
   const [sortField, setSortField] = useState('name'); // Field to sort by
   const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
   const [locationFilter, setLocationFilter] = useState('All');
@@ -144,16 +145,16 @@ function Customers({ profile }) {
       const orderDirection = sortDirection === 'asc' ? 'asc' : 'desc';
       query = query.order(sortField, { ascending: sortDirection === 'asc' });
 
-      // If searching, get all results; otherwise use pagination
+      // If searching or location filtering, get all results; otherwise use pagination
       let data, error, count;
-      if (searchTerm.trim()) {
-        // When searching, get all matching results
+      if (searchTerm.trim() || locationFilter !== 'All') {
+        // When searching or filtering by location, get all matching results
         const result = await query;
         data = result.data;
         error = result.error;
         count = result.count;
       } else {
-        // When not searching, use pagination
+        // When not searching or filtering, use pagination
         const from = (page - 1) * rowsPerPage;
         const to = from + rowsPerPage - 1;
         const result = await query.range(from, to);
@@ -197,15 +198,15 @@ function Customers({ profile }) {
     setLoading(false);
   };
 
-  // Initial load and pagination changes
+  // Initial load and pagination changes - use activeSearchTerm
   useEffect(() => {
-    fetchCustomers('');
-  }, [organization, locationFilter, page, rowsPerPage, sortField, sortDirection]);
+    fetchCustomers(activeSearchTerm);
+  }, [organization, locationFilter, page, rowsPerPage, sortField, sortDirection, activeSearchTerm]);
 
   // Search on Enter key press only
   const handleSearch = (searchTerm) => {
     setPage(1); // Reset to first page when searching
-    fetchCustomers(searchTerm);
+    setActiveSearchTerm(searchTerm); // Update active search term, which will trigger useEffect
   };
 
   const handleSearchChange = (e) => {
@@ -220,8 +221,8 @@ function Customers({ profile }) {
 
   const handleClearSearch = () => {
     setSearchInput('');
+    setActiveSearchTerm(''); // Clear active search term, which will trigger useEffect
     setPage(1);
-    fetchCustomers(''); // Fetch all customers
   };
 
   const handleSort = (field) => {
@@ -454,7 +455,7 @@ function Customers({ profile }) {
   // No need for client-side filtering since we search at database level
   const filteredCustomers = customers;
 
-  const pageCount = searchInput.trim() ? 1 : Math.ceil(totalCount / rowsPerPage);
+  const pageCount = (activeSearchTerm.trim() || locationFilter !== 'All') ? 1 : Math.ceil(totalCount / rowsPerPage);
 
   if (!organization?.id) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
   if (loading) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
@@ -543,20 +544,26 @@ function Customers({ profile }) {
         <Box sx={{ mb: 3 }}>
           <Typography variant="h4" fontWeight={800} color="#1976d2" sx={{ mb: 2 }}>Customer Management</Typography>
           
-          <Box display="flex" gap={2} alignItems="center" mb={3}>
-            <Box display="flex" alignItems="center" sx={{ maxWidth: 450 }}>
+          <Box display="flex" gap={2} alignItems="flex-start" mb={3}>
+            <Box display="flex" alignItems="center" sx={{ maxWidth: 450, pt: '1px' }}>
               <TextField
                 placeholder="Search customers by name, ID, or contact..."
                 value={searchInput}
                 onChange={handleSearchChange}
                 onKeyPress={handleSearchKeyPress}
                 fullWidth
-                size="medium"
+                size="small"
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    height: '40px', // Match Select height
+                  }
+                }}
               />
               <IconButton 
                 onClick={() => handleSearch(searchInput)}
                 color="primary"
-                sx={{ ml: 1 }}
+                size="small"
+                sx={{ ml: 2, height: '40px', width: '40px' }}
                 title="Search (or press Enter)"
               >
                 <SearchIcon />
@@ -565,7 +572,8 @@ function Customers({ profile }) {
                 <IconButton 
                   onClick={handleClearSearch}
                   color="secondary"
-                  sx={{ ml: 0.5 }}
+                  size="small"
+                  sx={{ ml: 1, height: '40px', width: '40px' }}
                   title="Clear search"
                 >
                   <ClearIcon />
@@ -601,8 +609,8 @@ function Customers({ profile }) {
           </Box>
           
           <Typography variant="body2" color="text.secondary" mb={2}>
-            {searchInput.trim() 
-              ? `Found ${customers.length} customers matching "${searchInput}"`
+            {activeSearchTerm.trim() 
+              ? `Found ${customers.length} customers matching "${activeSearchTerm}"`
               : `Showing ${customers.length} of ${totalCount} customers`
             }
             {locationFilter !== 'All' && ` (location: ${locationFilter})`}
@@ -769,8 +777,8 @@ function Customers({ profile }) {
           </Table>
         </TableContainer>
 
-        {/* Pagination - hide when searching */}
-        {!searchInput.trim() && pageCount > 1 && (
+        {/* Pagination - hide when searching or filtering by location */}
+        {!activeSearchTerm.trim() && locationFilter === 'All' && pageCount > 1 && (
           <Box display="flex" justifyContent="center" alignItems="center" my={2}>
             <Pagination
               count={pageCount}
@@ -877,4 +885,4 @@ export default function CustomersWithBoundary(props) {
       <Customers {...props} />
     </ErrorBoundary>
   );
-} 
+}

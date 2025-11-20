@@ -4,7 +4,9 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
+import { useTheme } from '../context/ThemeContext';
 import { ListItem, ListItemButton, ListItemIcon, ListItemText, TextField, InputAdornment } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import {
   List, Divider, Box, Typography, Collapse, Chip, IconButton, Tooltip
 } from '@mui/material';
@@ -31,6 +33,11 @@ const collapsedWidth = 72;
 
 const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   const { profile, organization } = useAuth();
+  const { organizationColors } = useTheme();
+  const accentColor = organizationColors?.primary || '#667eea';
+  const accentSelectedBg = alpha(accentColor, 0.15);
+  const accentHoverBg = alpha(accentColor, 0.08);
+  const accentShadow = alpha(accentColor, 0.25);
   
   // CRITICAL: Check profile BEFORE calling any other hooks to avoid hook inconsistency
   if (!profile) return null;
@@ -173,13 +180,14 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                     height: 40, 
                     width: 40, 
                     borderRadius: 6, 
-                    background: '#f0f0f0', 
+                    background: `linear-gradient(135deg, ${organizationColors?.primary || '#40B5AD'} 0%, ${organizationColors?.secondary || '#48C9B0'} 100%)`,
                     border: '1px solid #eee',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: '#999',
-                    fontSize: '12px'
+                    color: '#fff',
+                    fontSize: '12px',
+                    fontWeight: 'bold'
                   }}
                 >
                   {organization.name?.charAt(0)?.toUpperCase() || '?'}
@@ -239,16 +247,13 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       items: [
         { title: 'Import Data', path: '/import', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
         { title: 'Import Customers', path: '/import-customer-info', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
-        { title: 'File Format Manager', path: '/file-format-manager', icon: <Settings />, roles: ['admin', 'manager'] },
         { title: 'Import Asset Balance', path: '/import-asset-balance', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Import Approvals', path: '/import-approvals', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Verification Center', path: '/verification-center', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
         { title: 'Verified Orders', path: '/verified-orders', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Import History', path: '/import-approvals-history', icon: <History />, roles: ['admin', 'user', 'manager'] },
         { title: 'Organization Tools', path: '/organization-tools', icon: <BuildIcon />, roles: ['admin', 'manager'] },
-              { title: 'User Management', path: '/user-management', icon: <AdminPanelSettings />, roles: ['admin', 'manager'] },
-      { title: 'Join Codes', path: '/organization-join-codes', icon: <QrCodeIcon />, roles: ['admin', 'manager'] },
-      { title: 'Role & Permission Management', path: '/role-management', icon: <ShieldIcon />, roles: ['admin'] },
-        { title: 'Customer Portal', path: '/customer-portal', icon: <PersonIcon />, roles: ['admin', 'user', 'manager'] },
+              { title: 'User Management', path: '/settings?tab=team', icon: <AdminPanelSettings />, roles: ['admin', 'manager'] },
+        { title: 'Join Codes', path: '/organization-join-codes', icon: <QrCodeIcon />, roles: ['admin', 'manager'] },
+        { title: 'Role & Permission Management', path: '/role-management', icon: <ShieldIcon />, roles: ['admin'] },
         { title: 'Bulk Rental Pricing', path: '/bulk-rental-pricing', icon: <CalculatorIcon />, roles: ['admin', 'manager'] },
         { title: 'Billing', path: '/billing', icon: <Payment />, roles: ['admin'] },
         { title: 'Settings', path: '/settings', icon: <Settings />, roles: ['admin'] },
@@ -262,7 +267,6 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         { title: 'Dashboard', path: '/dashboard', icon: <Dashboard />, roles: ['admin', 'user', 'manager'] },
         { title: 'Industry Analytics', path: '/industry-analytics', icon: <Analytics />, roles: ['admin', 'user', 'manager'] },
         { title: 'Customers', path: '/customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Temp Customer Management', path: '/temp-customer-management', icon: <SwapIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Locations', path: '/locations', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] }
       ]
     },
@@ -272,11 +276,10 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       items: [
         { title: 'Deliveries', path: '/deliveries', icon: <LocalShipping />, roles: ['admin', 'user', 'manager'] },
         { title: 'Rentals', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Scanned Orders', path: '/scanned-orders', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Lease Agreements', path: '/lease-agreements', icon: <WorkIcon />, roles: ['admin', 'manager'] },
         { title: 'Generate Customer ID', path: '/generateid', icon: <IntegrationIcon />, roles: ['owner'] },
         { title: 'Barcode Generator', path: '/barcode-generator', icon: <QrCodeIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Accounting Integration', path: '/owner-portal/integration-settings', icon: <IntegrationIcon />, roles: ['owner', 'admin'] }
+        { title: 'Accounting Integration', path: '/owner-portal/integration-settings', icon: <IntegrationIcon />, roles: ['owner'] }
       ]
     },
     inventory: {
@@ -284,17 +287,15 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       icon: <Inventory />,
       items: [
         { title: 'Bottle Management', path: '/bottle-management', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Ownership Management', path: '/ownership-management', icon: <BusinessIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Assets', path: '/assets', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Smart Inventory', path: '/smart-inventory', icon: <InventoryIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Asset History Lookup', path: '/asset-history-lookup', icon: <SearchIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'All Asset Movements', path: '/all-asset-movements', icon: <TrendingUp />, roles: ['admin', 'user', 'manager'] }
+        { title: 'Asset History Lookup', path: '/asset-history-lookup', icon: <SearchIcon />, roles: ['admin', 'user', 'manager'] }
       ]
     },
     analytics: {
       title: 'Analytics & Reports',
       icon: <Analytics />,
       items: [
-        { title: 'Analytics', path: '/analytics', icon: <Analytics />, roles: ['admin', 'manager'] },
         { title: 'Organization Analytics', path: '/organization-analytics', icon: <Analytics />, roles: ['admin', 'user', 'manager'] },
         { title: 'Custom Reports', path: '/custom-reports', icon: <ReportIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Audit Management', path: '/audit-management', icon: <Assessment />, roles: ['admin', 'manager'] }
@@ -405,7 +406,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                   height: isCollapsed ? 28 : 36, 
                   width: isCollapsed ? 28 : 36, 
                   borderRadius: 8, 
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 
+                  background: `linear-gradient(135deg, ${organizationColors?.primary || '#40B5AD'} 0%, ${organizationColors?.secondary || '#48C9B0'} 100%)`,
+                  background: `linear-gradient(135deg, ${organizationColors?.primary || '#40B5AD'} 0%, ${organizationColors?.secondary || '#48C9B0'} 100%)`,
                   border: '2px solid #e1e5e9',
                   display: 'flex',
                   alignItems: 'center',
@@ -452,13 +454,13 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                   backgroundColor: '#f8f9fa',
                   border: '1px solid #e1e5e9',
                   '&:hover': {
-                    borderColor: '#667eea',
+                    borderColor: accentColor,
                     backgroundColor: '#ffffff'
                   },
                   '&.Mui-focused': {
-                    borderColor: '#667eea',
+                    borderColor: accentColor,
                     backgroundColor: '#ffffff',
-                    boxShadow: '0 0 0 3px rgba(102, 126, 234, 0.1)'
+                    boxShadow: `0 0 0 3px ${alpha(accentColor, 0.15)}`
                   }
                 }
               }}
@@ -500,7 +502,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                   <ListItemIcon sx={{ minWidth: isCollapsed ? 'auto' : 40 }}>
                     <Tooltip title={isCollapsed ? section.title : ''} placement="right">
                       <Box sx={{ 
-                        color: '#667eea',
+                        color: accentColor,
                         fontSize: '20px',
                         display: 'flex',
                         alignItems: 'center',
@@ -550,20 +552,20 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                             px: 2,
                             borderBottom: index < section.items.length - 1 ? '1px solid #e9ecef' : 'none',
                             borderRadius: 0,
-                            backgroundColor: isActive(item.path) ? '#e3f2fd' : 'transparent',
-                            borderLeft: isActive(item.path) ? '4px solid #667eea' : '4px solid transparent',
+                            backgroundColor: isActive(item.path) ? accentSelectedBg : 'transparent',
+                            borderLeft: isActive(item.path) ? `4px solid ${accentColor}` : '4px solid transparent',
                             transition: 'all 0.2s ease',
                             '&:hover': {
-                              backgroundColor: isActive(item.path) ? '#e3f2fd' : '#f8f9fa',
+                              backgroundColor: isActive(item.path) ? accentSelectedBg : accentHoverBg,
                               transform: 'translateX(4px)',
-                              borderLeft: '4px solid #667eea',
-                              boxShadow: '0 2px 8px rgba(102, 126, 234, 0.15)'
+                              borderLeft: `4px solid ${accentColor}`,
+                              boxShadow: `0 2px 8px ${accentShadow}`
                             },
                             '&.Mui-selected': {
-                              backgroundColor: '#e3f2fd',
-                              borderLeft: '4px solid #667eea',
+                              backgroundColor: accentSelectedBg,
+                              borderLeft: `4px solid ${accentColor}`,
                               '&:hover': {
-                                backgroundColor: '#e3f2fd',
+                                backgroundColor: accentSelectedBg,
                                 transform: 'translateX(4px)',
                               },
                             },
@@ -572,7 +574,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                           <ListItemIcon sx={{ minWidth: isCollapsed ? 'auto' : 40 }}>
                             <Tooltip title={isCollapsed ? item.title : ''} placement="right">
                               <Box sx={{ 
-                                color: isActive(item.path) ? '#667eea' : '#6c757d',
+                                color: isActive(item.path) ? accentColor : '#6c757d',
                                 fontSize: '18px',
                                 display: 'flex',
                                 alignItems: 'center',

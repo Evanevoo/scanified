@@ -6,7 +6,7 @@ import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, 
   Card, CardContent, Grid, Chip, IconButton, TextField, FormControl, InputLabel, Select, MenuItem,
   Alert, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions, Tabs, Tab,
-  Tooltip, Badge
+  Tooltip, Badge, Collapse
 } from '@mui/material';
 import {
   Business as BusinessIcon,
@@ -17,8 +17,9 @@ import {
   Visibility as ViewIcon,
   MonetizationOn as MoneyIcon,
   Assignment as AssignmentIcon,
-  Notifications as NotificationsIcon,
-  Receipt as InvoiceIcon
+  Receipt as InvoiceIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 
@@ -77,6 +78,7 @@ function RentalsImproved() {
     search: ''
   });
   const [locations, setLocations] = useState([]);
+  const [expandedCustomers, setExpandedCustomers] = useState(new Set());
 
   // Statistics
   const [stats, setStats] = useState({
@@ -107,10 +109,11 @@ function RentalsImproved() {
       logger.log('Fetching rentals for organization:', organization.id);
 
       // Simplified approach - get all data separately to debug
-      // 1. Get all active rentals (from rentals table)
+      // 1. Get all active rentals (from rentals table) for this organization
       const { data: rentalsData, error: rentalsError } = await supabase
         .from('rentals')
         .select('*')
+        .eq('organization_id', organization.id)
         .is('rental_end_date', null);
 
       if (rentalsError) {
@@ -265,34 +268,94 @@ function RentalsImproved() {
 
       logger.log('Combined rental data:', deduplicatedData.length);
 
-      // 5. Get customers with their types (with fallback)
-      const customerIds = Array.from(new Set(deduplicatedData.map(r => r.customer_id).filter(Boolean)));
+      // 5. Fetch active lease agreements first to get their customer IDs
+      const { data: leaseAgreements, error: leaseError } = await supabase
+        .from('lease_agreements')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .eq('status', 'active');
+
+      if (leaseError) {
+        logger.error('Error fetching lease agreements:', leaseError);
+      }
+
+      // 6. Get customers with their types (with fallback) - include lease agreement customers
+      const customerIds = Array.from(new Set([
+        ...deduplicatedData.map(r => r.customer_id).filter(Boolean),
+        ...(leaseAgreements || []).map(a => a.customer_id).filter(Boolean)
+      ]));
       let customersMap = {};
 
+      logger.log('Looking up customers for IDs:', customerIds.length);
+
       if (customerIds.length > 0) {
+        // Batch customer lookups to avoid URL length limits (max ~100 IDs per batch)
+        const BATCH_SIZE = 100;
+        const batches = [];
+        for (let i = 0; i < customerIds.length; i += BATCH_SIZE) {
+          batches.push(customerIds.slice(i, i + BATCH_SIZE));
+        }
+        
+        logger.log(`Splitting ${customerIds.length} customer IDs into ${batches.length} batches`);
+
         try {
-          const { data: customersData, error: customersError } = await supabase
-            .from('customers')
-            .select('*')
-            .eq('organization_id', organization.id)
-            .in('CustomerListID', customerIds);
+          // Fetch all batches in parallel
+          const batchPromises = batches.map(async (batch) => {
+            const { data: customersData, error: customersError } = await supabase
+              .from('customers')
+              .select('*')
+              .eq('organization_id', organization.id)
+              .in('CustomerListID', batch);
+            
+            if (customersError) {
+              logger.error(`Error fetching customer batch:`, customersError);
+              return [];
+            }
+            
+            return customersData || [];
+          });
+
+          const allCustomersData = (await Promise.all(batchPromises)).flat();
           
-          if (!customersError && customersData) {
-            customersMap = customersData.reduce((map, c) => {
-              map[c.CustomerListID] = c;
-              return map;
-            }, {});
+          logger.log('Customers fetched from database:', allCustomersData.length);
+          customersMap = allCustomersData.reduce((map, c) => {
+            map[c.CustomerListID] = c;
+            return map;
+          }, {});
+          
+          // Log which customer IDs were found vs not found
+          const foundIds = Object.keys(customersMap);
+          const notFoundIds = customerIds.filter(id => !foundIds.includes(id));
+          if (notFoundIds.length > 0) {
+            logger.warn(`Customer IDs not found in database: ${notFoundIds.length} out of ${customerIds.length}`);
+            if (notFoundIds.length <= 10) {
+              logger.warn('Missing customer IDs:', notFoundIds);
+            }
           }
         } catch (error) {
-          logger.log('Customer_type column not found, using fallback');
-          const { data: customersData } = await supabase
-            .from('customers')
-            .select('CustomerListID, name, contact_details, phone')
-            .eq('organization_id', organization.id)
-            .in('CustomerListID', customerIds);
+          logger.log('Customer_type column not found, using fallback:', error);
+          
+          // Try fallback with batching
+          const batchPromises = batches.map(async (batch) => {
+            const { data: customersData, error: fallbackError } = await supabase
+              .from('customers')
+              .select('CustomerListID, name, contact_details, phone')
+              .eq('organization_id', organization.id)
+              .in('CustomerListID', batch);
 
-          if (customersData) {
-            customersMap = customersData.reduce((map, c) => {
+            if (fallbackError) {
+              logger.error(`Error in fallback customer batch query:`, fallbackError);
+              return [];
+            }
+
+            return customersData || [];
+          });
+
+          const allCustomersData = (await Promise.all(batchPromises)).flat();
+
+          if (allCustomersData.length > 0) {
+            logger.log('Customers fetched (fallback):', allCustomersData.length);
+            customersMap = allCustomersData.reduce((map, c) => {
               map[c.CustomerListID] = { ...c, customer_type: 'CUSTOMER' };
               return map;
             }, {});
@@ -300,13 +363,103 @@ function RentalsImproved() {
         }
       }
 
-      logger.log('Customers found:', Object.keys(customersMap).length);
+      logger.log('Total customers found in map:', Object.keys(customersMap).length);
+      logger.log('Customer IDs in map:', Object.keys(customersMap));
 
-      // 6. Attach customer info to each rental
+      // 7. Process lease agreements and include them as yearly rentals
+      if (leaseAgreements && leaseAgreements.length > 0) {
+        logger.log('Found lease agreements:', leaseAgreements.length);
+        
+        // Convert lease agreements to rental format for yearly billing
+        for (const agreement of leaseAgreements) {
+          // Check if billing_frequency indicates yearly (could be 'annual', 'yearly', 'annually', or 'semi-annual')
+          // Note: 'semi-annual' is also considered yearly for rental purposes
+          const billingFreq = (agreement.billing_frequency || '').toLowerCase();
+          const isYearly = billingFreq === 'annual' || 
+                          billingFreq === 'yearly' || 
+                          billingFreq === 'annually' ||
+                          billingFreq === 'semi-annual';
+          
+          if (isYearly) {
+            // Get customer for this agreement - try both customer_id and customer_name as keys
+            let customer = customersMap[agreement.customer_id];
+            
+            // If not found by customer_id, try to find by customer_name
+            if (!customer && agreement.customer_name) {
+              customer = Object.values(customersMap).find(c => 
+                c.name === agreement.customer_name || 
+                c.CustomerListID === agreement.customer_name
+              );
+            }
+            
+            // If still not found, create a placeholder customer object
+            if (!customer && agreement.customer_id) {
+              customer = { 
+                CustomerListID: agreement.customer_id, 
+                name: agreement.customer_name || agreement.customer_id,
+                customer_type: 'CUSTOMER'
+              };
+              // Add to customersMap so it's available later
+              customersMap[agreement.customer_id] = customer;
+            }
+            
+            if (customer) {
+              // Calculate monthly equivalent from annual amount
+              const monthlyAmount = (agreement.annual_amount || 0) / 12;
+              
+              // Create a virtual rental entry for the lease agreement
+              // Use a special ID format to distinguish from regular rentals
+              const leaseRentalId = `lease_${agreement.id}`;
+              
+              // Check if we already have rentals for this customer
+              const existingCustomerRentals = deduplicatedData.filter(r => r.customer_id === agreement.customer_id);
+              
+              // If customer has no existing rentals, create a placeholder
+              // Otherwise, we'll mark existing rentals as yearly
+              if (existingCustomerRentals.length === 0) {
+                deduplicatedData.push({
+                  id: leaseRentalId,
+                  source: 'lease_agreement',
+                  customer_id: agreement.customer_id,
+                  bottle_barcode: null, // Lease agreements don't have specific bottles
+                  bottle_id: null,
+                  bottles: null,
+                  rental_start_date: agreement.start_date?.split('T')[0] || new Date().toISOString().split('T')[0],
+                  rental_end_date: agreement.end_date?.split('T')[0] || null,
+                  rental_amount: monthlyAmount,
+                  rental_type: 'yearly', // Mark as yearly
+                  tax_code: 'GST+PST',
+                  tax_rate: agreement.tax_rate || 0.11,
+                  location: agreement.asset_locations?.[0] || 'SASKATOON',
+                  lease_agreement_id: agreement.id,
+                  lease_agreement: agreement
+                });
+              } else {
+                // Update existing rentals for this customer to be yearly
+                existingCustomerRentals.forEach(rental => {
+                  rental.rental_type = 'yearly';
+                  rental.lease_agreement_id = agreement.id;
+                  rental.lease_agreement = agreement;
+                  // Update rental amount if needed
+                  if (monthlyAmount > 0) {
+                    rental.rental_amount = monthlyAmount;
+                  }
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // 7. Attach customer info to each rental
       const rentalsWithCustomer = deduplicatedData.map(r => ({
         ...r,
         customer: customersMap[r.customer_id] || null
       }));
+
+      logger.log('Rentals with customer info:', rentalsWithCustomer.length);
+      logger.log('Unique customer IDs:', [...new Set(rentalsWithCustomer.map(r => r.customer_id).filter(Boolean))]);
+      logger.log('Customers map keys:', Object.keys(customersMap));
 
       // Filter out vendors from rental page (they should only appear in inventory/in-house)
       const filteredRentals = rentalsWithCustomer.filter(r => 
@@ -314,6 +467,21 @@ function RentalsImproved() {
         r.customer &&
         r.customer.customer_type !== 'VENDOR'  // Exclude vendors from rentals view
       );
+      
+      logger.log('Filtered rentals (vendors excluded):', filteredRentals.length);
+      const uniqueCustomerIds = [...new Set(filteredRentals.map(r => r.customer?.CustomerListID).filter(Boolean))];
+      logger.log('Unique customers in filtered rentals:', uniqueCustomerIds.length, uniqueCustomerIds);
+      
+      // Log distribution of rentals by customer
+      const customerDistribution = {};
+      filteredRentals.forEach(r => {
+        const custId = r.customer?.CustomerListID;
+        if (custId) {
+          customerDistribution[custId] = (customerDistribution[custId] || 0) + 1;
+        }
+      });
+      logger.log('Rentals per customer:', customerDistribution);
+      
       setAssets(filteredRentals);
 
       // 7. Calculate statistics (proper separation of IN-HOUSE vs RENTED)
@@ -411,9 +579,18 @@ function RentalsImproved() {
   const customersWithRentals = [];
   const customerMap = {};
 
+  logger.log('Grouping rentals - total assets:', assets.length);
+  
   for (const rental of assets) {
-    if (!rental.customer) continue;
+    if (!rental.customer) {
+      logger.warn('Rental missing customer:', rental.customer_id, rental.bottle_barcode);
+      continue;
+    }
     const custId = rental.customer.CustomerListID;
+    if (!custId) {
+      logger.warn('Rental customer missing CustomerListID:', rental.customer);
+      continue;
+    }
     if (!customerMap[custId]) {
       customerMap[custId] = {
         customer: rental.customer,
@@ -423,6 +600,9 @@ function RentalsImproved() {
     }
     customerMap[custId].rentals.push(rental);
   }
+  
+  logger.log('Customers with rentals:', customersWithRentals.length);
+  logger.log('Customer IDs:', customersWithRentals.map(c => c.customer.CustomerListID));
 
   // Filter customers based on search
   const filteredCustomers = customersWithRentals.filter(({ customer, rentals }) => {
@@ -579,55 +759,6 @@ function RentalsImproved() {
     URL.revokeObjectURL(url);
   };
 
-  // Generate yearly invoice notifications for January billing
-  const generateYearlyInvoiceNotifications = async () => {
-    try {
-      if (!organization?.id) {
-        alert('Organization ID not found');
-        return;
-      }
-
-      // Get yearly rental customers
-      const yearlyCustomers = filteredCustomers.filter(c => 
-        c.rentals.some(r => r.rental_type === 'yearly')
-      );
-
-      if (yearlyCustomers.length === 0) {
-        alert('No yearly rental customers found');
-        return;
-      }
-
-      const currentYear = new Date().getFullYear();
-      let notificationsCreated = 0;
-
-      // Create notification for each yearly customer
-      for (const { customer, rentals } of yearlyCustomers) {
-        const yearlyRentals = rentals.filter(r => r.rental_type === 'yearly');
-        const totalAmount = yearlyRentals.reduce((sum, r) => sum + (r.rental_amount || 0), 0);
-        
-        // Log yearly rental notification (notification service removed)
-        logger.log(`Yearly rental notification for ${customer.name}: ${yearlyRentals.length} bottles, $${totalAmount}`);
-        notificationsCreated++;
-      }
-
-      // Also create a general summary notification
-      const totalRevenue = yearlyCustomers.reduce((sum, { rentals }) => {
-        return sum + rentals
-          .filter(r => r.rental_type === 'yearly')
-          .reduce((rSum, r) => rSum + (r.rental_amount || 0), 0);
-      }, 0);
-
-      // Log yearly invoice summary (notification service removed)
-      logger.log(`Yearly invoices ready for ${yearlyCustomers.length} customers, total revenue: $${totalRevenue}`);
-
-      alert(`Successfully created ${notificationsCreated + 1} notifications for yearly rental invoices!`);
-
-    } catch (error) {
-      logger.error('Error generating yearly invoice notifications:', error);
-      alert('Error generating notifications: ' + error.message);
-    }
-  };
-
   const currentCustomers = activeTab === 0 ? filteredCustomers : 
     activeTab === 1 ? filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'monthly')) :
     filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly'));
@@ -663,14 +794,6 @@ function RentalsImproved() {
             disabled={filteredCustomers.length === 0}
           >
             Export QuickBooks Invoices
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<NotificationsIcon />}
-            onClick={generateYearlyInvoiceNotifications}
-            color="secondary"
-          >
-            Generate Yearly Invoice Notifications
           </Button>
         </Box>
       </Box>
@@ -762,12 +885,12 @@ function RentalsImproved() {
       </Grid>
 
       {/* Filters */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>Filters</Typography>
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} sm={4}>
-              <TextField
+      <Card sx={{ mb: 4 }}>
+        <CardContent sx={{ pt: 3  }}>
+          <Typography variant="h6" gutterBottom sx={{ mb: 2 }}>Filters</Typography>
+          <Grid container spacing={2} alignItems="flex-end">
+            <Grid item xs={12} sm={6} md={8.2}>
+              <TextField  
                 fullWidth
                 label="Search by barcode or customer"
                 value={filters.search}
@@ -775,7 +898,7 @@ function RentalsImproved() {
                 size="small"
               />
             </Grid>
-            <Grid item xs={12} sm={4}>
+            <Grid item xs={12} sm={6} md={4}>
               <FormControl fullWidth size="small">
                 <InputLabel>Asset Status</InputLabel>
                 <Select
@@ -789,7 +912,7 @@ function RentalsImproved() {
                 </Select>
               </FormControl>
             </Grid>
-            <Grid item xs={12} sm={4}>
+            <Grid item xs={12} sm={6} md={4}>
               <FormControl fullWidth size="small">
                 <InputLabel>Account Type</InputLabel>
                 <Select
@@ -809,14 +932,43 @@ function RentalsImproved() {
 
       {/* Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-        <Tabs value={activeTab} onChange={handleTabChange}>
+        <Tabs 
+          value={activeTab} 
+          onChange={handleTabChange}
+          sx={{
+            '& .MuiTab-root': {
+              textTransform: 'none',
+              fontSize: '0.95rem',
+              fontWeight: 500,
+              minHeight: 48,
+              px: 3,
+              py: 1.5,
+              '&.Mui-selected': {
+                fontWeight: 600,
+              }
+            }
+          }}
+        >
           {tabs.map((tab, index) => (
             <Tab
               key={index}
               label={
-                <Badge badgeContent={tab.count} color="primary">
-                  {tab.label}
-                </Badge>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <span>{tab.label}</span>
+                  <Chip 
+                    label={tab.count} 
+                    size="small" 
+                    sx={{ 
+                      height: 20,
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      minWidth: 24,
+                      '& .MuiChip-label': {
+                        px: 1
+                      }
+                    }}
+                  />
+                </Box>
               }
             />
           ))}
@@ -848,10 +1000,18 @@ function RentalsImproved() {
                 </TableCell>
               </TableRow>
             ) : (
-              currentCustomers.map(({ customer, rentals }) => (
+              currentCustomers.map(({ customer, rentals }, index) => (
                 <React.Fragment key={customer.CustomerListID}>
-                  <TableRow hover>
-                    <TableCell>
+                  <TableRow 
+                    hover
+                    sx={{ 
+                      borderBottom: index < currentCustomers.length - 1 ? '3px solid #e0e0e0' : 'none',
+                      '&:hover': {
+                        bgcolor: '#fafafa'
+                      }
+                    }}
+                  >
+                    <TableCell sx={{ py: 2.5 }}>
                       <Typography variant="body2" fontWeight="bold">
                         {customer.name}
                       </Typography>
@@ -868,7 +1028,7 @@ function RentalsImproved() {
                         />
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={{ py: 2.5 }}>
                       <Chip
                         label={customer.customer_type || 'CUSTOMER'}
                         color={customer.customer_type === 'VENDOR' ? 'secondary' : 'primary'}
@@ -876,22 +1036,22 @@ function RentalsImproved() {
                         variant="outlined"
                       />
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={{ py: 2.5 }}>
                       <Typography variant="h6" fontWeight="bold" color="primary">
                         {rentals.length}
                       </Typography>
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={{ py: 2.5 }}>
                       <Typography variant="body2">
                         {rentals[0]?.rental_type || 'monthly'}
                       </Typography>
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={{ py: 2.5 }}>
                       <Typography variant="body2" fontWeight="bold">
                         ${rentals[0]?.rental_amount || '10.00'}
                       </Typography>
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={{ py: 2.5 }}>
                       <Typography variant="body2">
                         {rentals[0]?.tax_code || 'GST+PST'}
                       </Typography>
@@ -899,12 +1059,12 @@ function RentalsImproved() {
                         ({(rentals[0]?.tax_rate || 0.11) * 100}% tax)
                       </Typography>
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={{ py: 2.5 }}>
                       <Typography variant="body2">
                         {rentals[0]?.location || 'SASKATOON'}
                       </Typography>
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={{ py: 2.5 }}>
                       <Button
                         variant="outlined"
                         size="small"
@@ -929,29 +1089,78 @@ function RentalsImproved() {
                   </TableRow>
                   {/* Expandable section for individual rentals */}
                   <TableRow>
-                    <TableCell colSpan={8} sx={{ p: 1, bgcolor: '#f9f9f9' }}>
-                      <Typography variant="caption" color="text.secondary">
-                        Individual Assets ({rentals.length}):
-                      </Typography>
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
-                        {rentals.slice(0, 10).map((rental, idx) => (
-                          <Chip
-                            key={idx}
-                            label={rental.bottles?.barcode_number || rental.bottles?.barcode || `Asset ${idx + 1}`}
-                            size="small"
-                            variant="outlined"
-                            sx={{ fontSize: 11 }}
-                          />
-                        ))}
-                        {rentals.length > 10 && (
-                          <Chip
-                            label={`+${rentals.length - 10} more`}
-                            size="small"
-                            variant="filled"
-                            color="default"
-                            sx={{ fontSize: 11 }}
-                          />
-                        )}
+                    <TableCell 
+                      colSpan={8} 
+                      sx={{ 
+                        p: 0,
+                        borderBottom: index < currentCustomers.length - 1 ? '3px solid #e0e0e0' : 'none'
+                      }}
+                    >
+                      <Box>
+                        <Box
+                          onClick={() => {
+                            const newExpanded = new Set(expandedCustomers);
+                            if (newExpanded.has(customer.CustomerListID)) {
+                              newExpanded.delete(customer.CustomerListID);
+                            } else {
+                              newExpanded.add(customer.CustomerListID);
+                            }
+                            setExpandedCustomers(newExpanded);
+                          }}
+                          sx={{
+                            p: 1.5,
+                            bgcolor: '#f5f5f5',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1,
+                            '&:hover': {
+                              bgcolor: '#eeeeee'
+                            }
+                          }}
+                        >
+                          {expandedCustomers.has(customer.CustomerListID) ? (
+                            <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                          ) : (
+                            <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                          )}
+                          <Typography variant="caption" color="text.secondary" fontWeight="medium">
+                            Individual Assets ({rentals.length})
+                          </Typography>
+                        </Box>
+                        <Collapse in={expandedCustomers.has(customer.CustomerListID)}>
+                          <Box sx={{ p: 1.5, bgcolor: '#fafafa' }}>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                              {rentals.map((rental, idx) => {
+                                const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || `Asset ${idx + 1}`;
+                                return (
+                                  <Chip
+                                    key={idx}
+                                    label={barcode}
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => {
+                                      // Navigate to bottle details page
+                                      const bottleId = rental.bottles?.id || rental.bottle_id;
+                                      if (bottleId) {
+                                        navigate(`/bottle/${bottleId}`);
+                                      }
+                                    }}
+                                    sx={{ 
+                                      fontSize: 11,
+                                      cursor: 'pointer',
+                                      '&:hover': {
+                                        bgcolor: 'primary.light',
+                                        color: 'primary.contrastText',
+                                        borderColor: 'primary.main'
+                                      }
+                                    }}
+                                  />
+                                );
+                              })}
+                            </Box>
+                          </Box>
+                        </Collapse>
                       </Box>
                     </TableCell>
                   </TableRow>

@@ -41,6 +41,7 @@ export default function AssetDetail() {
   const { terms, isReady } = useDynamicAssetTerms();
 
   const [asset, setAsset] = useState(null);
+  const [customer, setCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editDialog, setEditDialog] = useState(false);
   const [editData, setEditData] = useState({});
@@ -48,11 +49,15 @@ export default function AssetDetail() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [locations, setLocations] = useState([]);
+  const [ownershipValues, setOwnershipValues] = useState([]);
 
   useEffect(() => {
     fetchAssetDetail();
     fetchLocations();
-  }, [id]);
+    if (profile?.organization_id) {
+      fetchOwnershipValues();
+    }
+  }, [id, profile?.organization_id]);
 
   const fetchAssetDetail = async () => {
     try {
@@ -84,6 +89,36 @@ export default function AssetDetail() {
       
       setAsset(data);
       setEditData(data);
+      
+      // Fetch customer information if bottle is assigned to a customer
+      if (data.assigned_customer) {
+        const { data: customerData, error: customerError } = await supabase
+          .from('customers')
+          .select('CustomerListID, name, location')
+          .eq('CustomerListID', data.assigned_customer)
+          .eq('organization_id', profile.organization_id)
+          .single();
+        
+        if (!customerError && customerData) {
+          setCustomer(customerData);
+          // If customer has a location and bottle location doesn't match, update it
+          if (customerData.location && data.location !== customerData.location) {
+            // Update the bottle location to match customer location
+            const { error: updateError } = await supabase
+              .from('bottles')
+              .update({ location: customerData.location })
+              .eq('id', id)
+              .eq('organization_id', profile.organization_id);
+            
+            if (!updateError) {
+              // Update local state to reflect the change
+              const updatedAsset = { ...data, location: customerData.location };
+              setAsset(updatedAsset);
+              setEditData(updatedAsset);
+            }
+          }
+        }
+      }
     } catch (error) {
       logger.error('Error fetching asset:', error);
       setError(error.message || 'Failed to load asset details');
@@ -110,6 +145,41 @@ export default function AssetDetail() {
         { id: 'chilliwack', name: 'Chilliwack', province: 'British Columbia' },
         { id: 'prince-george', name: 'Prince George', province: 'British Columbia' }
       ]);
+    }
+  };
+
+  const fetchOwnershipValues = async () => {
+    try {
+      if (!profile?.organization_id) return;
+      
+      // Try to fetch from ownership_values table
+      const { data, error } = await supabase
+        .from('ownership_values')
+        .select('value')
+        .eq('organization_id', profile.organization_id)
+        .order('value');
+      
+      if (error && error.code !== 'PGRST116') {
+        // If error is not "table doesn't exist", log it
+        logger.error('Error fetching ownership values:', error);
+      }
+      
+      if (data && data.length > 0) {
+        setOwnershipValues(data.map(item => item.value));
+      } else {
+        // Fallback: Extract unique ownership values from bottles
+        const { data: bottlesData } = await supabase
+          .from('bottles')
+          .select('ownership')
+          .eq('organization_id', profile.organization_id)
+          .not('ownership', 'is', null)
+          .not('ownership', 'eq', '');
+        
+        const uniqueValues = [...new Set(bottlesData?.map(b => b.ownership).filter(Boolean))];
+        setOwnershipValues(uniqueValues.sort());
+      }
+    } catch (error) {
+      logger.error('Error fetching ownership values:', error);
     }
   };
 
@@ -259,8 +329,13 @@ export default function AssetDetail() {
               Location
             </Typography>
             <Typography variant="body1" fontWeight="bold">
-              {asset.location || '-'}
+              {customer?.location || asset.location || '-'}
             </Typography>
+            {customer?.location && customer.location !== asset.location && (
+              <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', display: 'block', mt: 0.5 }}>
+                (Synced from customer location)
+              </Typography>
+            )}
           </Grid>
 
           <Grid item xs={12}>
@@ -350,7 +425,7 @@ export default function AssetDetail() {
               <FormControl fullWidth>
                 <InputLabel>Location</InputLabel>
                 <Select
-                  value={editData.location || ''}
+                  value={editData.location || customer?.location || ''}
                   onChange={(e) => setEditData({ ...editData, location: e.target.value })}
                   label="Location"
                 >
@@ -361,14 +436,30 @@ export default function AssetDetail() {
                   ))}
                 </Select>
               </FormControl>
+              {customer?.location && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  Customer location: {customer.location}
+                </Typography>
+              )}
             </Grid>
             <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Ownership"
-                value={editData.ownership || ''}
-                onChange={(e) => setEditData({ ...editData, ownership: e.target.value })}
-              />
+              <FormControl fullWidth>
+                <InputLabel>Ownership</InputLabel>
+                <Select
+                  value={editData.ownership || ''}
+                  label="Ownership"
+                  onChange={(e) => setEditData({ ...editData, ownership: e.target.value })}
+                >
+                  <MenuItem value="">
+                    <em>None</em>
+                  </MenuItem>
+                  {ownershipValues.map((value) => (
+                    <MenuItem key={value} value={value}>
+                      {value}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Grid>
 
             <Grid item xs={12}>

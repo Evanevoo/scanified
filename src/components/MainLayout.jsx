@@ -67,8 +67,8 @@ export default function MainLayout({ children }) {
     : [
         { label: 'Home', to: '/home' },
         { label: 'Inventory', to: '/inventory' },
-        { label: 'Orders', to: '/import-approvals' },
-        { label: 'Billing', to: '/billing' },
+        { label: 'Orders', to: '/verification-center' },
+        { label: 'Rentals', to: '/rentals' },
       ];
 
   useEffect(() => {

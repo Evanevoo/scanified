@@ -239,6 +239,7 @@ export default function ScanCylindersScreen() {
   const [error, setError] = useState(null);
   const [orderError, setOrderError] = useState('');
   const [customerBarcodeError, setCustomerBarcodeError] = useState('');
+  const [orderNumberMaxLength, setOrderNumberMaxLength] = useState<number>(20);
   const navigation = useNavigation();
   const { colors } = useTheme();
   const { config: assetConfig } = useAssetConfig();
@@ -312,6 +313,56 @@ export default function ScanCylindersScreen() {
       setScanned(false);
     }
   }, [scannerVisible]);
+
+  // Load order number format and set max length
+  useEffect(() => {
+    const loadOrderFormat = async () => {
+      if (profile?.organization_id) {
+        try {
+          const formats = await FormatValidationService.getOrganizationFormats(profile.organization_id);
+          const orderFormat = formats.order_number_format;
+          
+          // Extract max length from pattern
+          const pattern = orderFormat.pattern;
+          
+          // Handle patterns like ^[A-Z]?[0-9]{5}[A-Z]?$ (flexible 5-digit)
+          // This pattern allows: 5 digits, or letter+5 digits, or 5 digits+letter, or letter+5 digits+letter = max 7 chars
+          if (pattern.includes('[A-Z]?[0-9]{5}[A-Z]?') || pattern.match(/\[A-Z\]\?\[0-9\]\{5\}\[A-Z\]\?/)) {
+            // Check if it's exactly {5} (5 digits) with optional letters
+            const digitMatch = pattern.match(/\{(\d+)\}/);
+            if (digitMatch) {
+              const digitCount = parseInt(digitMatch[1], 10);
+              // Count optional letters: [A-Z]? appears before and/or after digits
+              // Pattern allows: 5 digits (5), letter+5 (6), 5+letter (6), or letter+5+letter (7)
+              const hasOptionalLetterBefore = pattern.includes('^[A-Z]?') || pattern.match(/\^\\?\[A-Z\]\?/);
+              const hasOptionalLetterAfter = pattern.includes('[A-Z]?$') || pattern.match(/\\?\[A-Z\]\?\$/);
+              const maxLength = digitCount + (hasOptionalLetterBefore ? 1 : 0) + (hasOptionalLetterAfter ? 1 : 0);
+              setOrderNumberMaxLength(maxLength);
+              return;
+            }
+          }
+          
+          // Handle range patterns like {6,12} -> 12
+          const maxMatch = pattern.match(/\{(\d+)(?:,(\d+))?\}/);
+          if (maxMatch) {
+            const max = maxMatch[2] ? parseInt(maxMatch[2], 10) : parseInt(maxMatch[1], 10);
+            // Add buffer for optional prefixes/suffixes if pattern has them
+            const hasOptionalPrefix = pattern.includes('^[A-Z]?') || pattern.includes('^[A-Z]{');
+            const hasOptionalSuffix = pattern.includes('[A-Z]?$') || pattern.includes('[A-Z]{');
+            const extraLength = (hasOptionalPrefix ? 4 : 0) + (hasOptionalSuffix ? 4 : 0);
+            setOrderNumberMaxLength(max + extraLength);
+          } else {
+            // Default to 20 if pattern doesn't specify
+            setOrderNumberMaxLength(20);
+          }
+        } catch (error) {
+          logger.error('Error loading order format:', error);
+          setOrderNumberMaxLength(20);
+        }
+      }
+    };
+    loadOrderFormat();
+  }, [profile?.organization_id]);
 
   // Validate order number when it changes
   useEffect(() => {
@@ -782,6 +833,7 @@ export default function ScanCylindersScreen() {
                 value={orderNumber}
                 onChangeText={setOrderNumber}
                 autoCapitalize="characters"
+                maxLength={orderNumberMaxLength}
               />
               <TouchableOpacity
                 style={[
@@ -792,7 +844,6 @@ export default function ScanCylindersScreen() {
                   }
                 ]}
                 onPress={() => openScanner('order')}
-                disabled={!permission?.granted}
               >
                 <Text style={styles.scanButtonText}>📷</Text>
               </TouchableOpacity>
@@ -806,7 +857,7 @@ export default function ScanCylindersScreen() {
             ) : null}
             {!permission?.granted && (
               <Text style={[styles.helperText, { color: colors.warning || '#F59E0B' }]}>
-                Camera permission required for scanning
+                Tap the camera button to grant permission
               </Text>
             )}
           </View>
@@ -847,7 +898,6 @@ export default function ScanCylindersScreen() {
                   logger.log('📷 Scanner target:', scannerTarget);
                   openScanner('customer');
                 }}
-                disabled={!permission?.granted}
               >
                 <Text style={styles.scanButtonText}>📷</Text>
               </TouchableOpacity>
@@ -865,7 +915,7 @@ export default function ScanCylindersScreen() {
             ) : null}
             {!permission?.granted && (
               <Text style={[styles.helperText, { color: colors.warning || '#F59E0B' }]}>
-                Camera permission required for scanning
+                Tap the camera button to grant permission
               </Text>
             )}
           </View>

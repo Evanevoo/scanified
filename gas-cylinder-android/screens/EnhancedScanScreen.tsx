@@ -1,7 +1,7 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
-  View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, 
+  View, Text, TextInput, TouchableOpacity, Pressable, StyleSheet, FlatList, 
   ActivityIndicator, Modal, Dimensions, Alert, SafeAreaView, ScrollView, Linking 
 } from 'react-native';
 import { supabase } from '../supabase';
@@ -137,6 +137,18 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   const [customizationSettings, setCustomizationSettings] = useState<any>(null);
   const [lastScannedItemDetails, setLastScannedItemDetails] = useState<any>(null);
   const lastScanRef = useRef<number>(0);
+  const cameraContainerRef = useRef<any>(null);
+  const scanFrameRef = useRef<any>(null);
+  const [scanFrameRect, setScanFrameRect] = useState<{
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+    width: number;
+    height: number;
+    cameraWidth: number;
+    cameraHeight: number;
+  } | null>(null);
   // Debounce refs to prevent repeated scans of the same barcode
   const lastScannedBarcodeRef = useRef<string>('');
   const lastScannedTimeRef = useRef<number>(0);
@@ -144,6 +156,45 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   
   // Camera permissions
   const [permission, requestPermission] = useCameraPermissions();
+
+  const updateScanFrameRect = useCallback(() => {
+    const cameraNode = cameraContainerRef.current;
+    const frameNode = scanFrameRef.current;
+
+    if (!cameraNode || !frameNode || !cameraNode.measureInWindow || !frameNode.measureInWindow) {
+      return;
+    }
+
+    cameraNode.measureInWindow((cameraX, cameraY, cameraWidth, cameraHeight) => {
+      frameNode.measureInWindow((frameX, frameY, frameWidth, frameHeight) => {
+        const rect = {
+          left: frameX - cameraX,
+          top: frameY - cameraY,
+          right: frameX - cameraX + frameWidth,
+          bottom: frameY - cameraY + frameHeight,
+          width: frameWidth,
+          height: frameHeight,
+          cameraWidth,
+          cameraHeight,
+        };
+
+        setScanFrameRect(prev => {
+          if (
+            prev &&
+            Math.abs(prev.left - rect.left) < 0.5 &&
+            Math.abs(prev.top - rect.top) < 0.5 &&
+            Math.abs(prev.width - rect.width) < 0.5 &&
+            Math.abs(prev.height - rect.height) < 0.5 &&
+            Math.abs(prev.cameraWidth - rect.cameraWidth) < 0.5 &&
+            Math.abs(prev.cameraHeight - rect.cameraHeight) < 0.5
+          ) {
+            return prev;
+          }
+          return rect;
+        });
+      });
+    });
+  }, []);
 
   // Handle organization loading and errors
   useEffect(() => {
@@ -381,6 +432,33 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     }
   }, [isScanning, scanningReady]);
 
+  // Update scan frame rectangle when scanning starts
+  useEffect(() => {
+    if (!isScanning) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      updateScanFrameRect();
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [isScanning, updateScanFrameRect]);
+
+  // Update scan frame rectangle when dimensions change
+  useEffect(() => {
+    const handler = () => updateScanFrameRect();
+    const subscription = Dimensions.addEventListener('change', handler);
+
+    return () => {
+      if (subscription && typeof subscription.remove === 'function') {
+        subscription.remove();
+      } else if (typeof (Dimensions as any).removeEventListener === 'function') {
+        (Dimensions as any).removeEventListener('change', handler);
+      }
+    };
+  }, [updateScanFrameRect]);
+
   const loadSyncStatus = async () => {
     const stats = await OfflineStorageService.getQueueStats();
     setSyncStatus({ pending: stats.pending, synced: stats.synced });
@@ -389,41 +467,85 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   // Check if barcode is within scan rectangle bounds
   const isBarcodeInScanArea = (bounds: any): boolean => {
     if (!bounds) return false;
-    
-    // Get screen dimensions
-    const screenWidth = Dimensions.get('window').width;
-    const screenHeight = Dimensions.get('window').height;
-    
-    // Define scan rectangle bounds (center area)
-    const scanAreaWidth = screenWidth * 0.7;
-    const scanAreaHeight = screenHeight * 0.3;
-    const scanAreaLeft = (screenWidth - scanAreaWidth) / 2;
-    const scanAreaTop = (screenHeight - scanAreaHeight) / 2;
-    const scanAreaRight = scanAreaLeft + scanAreaWidth;
-    const scanAreaBottom = scanAreaTop + scanAreaHeight;
-    
-    // Check if barcode center is within scan area
+
     const barcodeX = bounds.origin?.x + (bounds.size?.width / 2) || 0;
     const barcodeY = bounds.origin?.y + (bounds.size?.height / 2) || 0;
-    
-    const isInArea = (
-      barcodeX >= scanAreaLeft &&
-      barcodeX <= scanAreaRight &&
-      barcodeY >= scanAreaTop &&
-      barcodeY <= scanAreaBottom
+
+    if (scanFrameRect) {
+      const toleranceX = scanFrameRect.width * 0.2;
+      const toleranceY = scanFrameRect.height * 0.2;
+
+      const left = scanFrameRect.left - toleranceX;
+      const right = scanFrameRect.right + toleranceX;
+      const top = scanFrameRect.top - toleranceY;
+      const bottom = scanFrameRect.bottom + toleranceY;
+
+      const isInMeasuredArea = (
+        barcodeX >= left &&
+        barcodeX <= right &&
+        barcodeY >= top &&
+        barcodeY <= bottom
+      );
+
+      logger.log('📍 Enhanced scan barcode position check:', {
+        source: 'measured',
+        barcodeX,
+        barcodeY,
+        left,
+        top,
+        right,
+        bottom,
+        toleranceX,
+        toleranceY,
+        cameraWidth: scanFrameRect.cameraWidth,
+        cameraHeight: scanFrameRect.cameraHeight,
+        isInArea: isInMeasuredArea
+      });
+
+      return isInMeasuredArea;
+    }
+
+    // Fallback: approximate based on screen dimensions if layout not ready yet
+    const screenWidth = Dimensions.get('window').width;
+    const screenHeight = Dimensions.get('window').height;
+
+    const scanFrameWidth = 320;
+    const scanFrameHeight = 150;
+    const overlayBottomOffset = 120;
+    const overlayHeight = screenHeight - overlayBottomOffset;
+
+    const scanAreaLeft = (screenWidth - scanFrameWidth) / 2;
+    const scanAreaRight = scanAreaLeft + scanFrameWidth;
+    const scanAreaTop = (overlayHeight - scanFrameHeight) / 2;
+    const scanAreaBottom = scanAreaTop + scanFrameHeight;
+
+    const toleranceX = scanFrameWidth * 0.2;
+    const toleranceY = scanFrameHeight * 0.2;
+
+    const isInFallbackArea = (
+      barcodeX >= (scanAreaLeft - toleranceX) &&
+      barcodeX <= (scanAreaRight + toleranceX) &&
+      barcodeY >= (scanAreaTop - toleranceY) &&
+      barcodeY <= (scanAreaBottom + toleranceY)
     );
-    
+
     logger.log('📍 Enhanced scan barcode position check:', {
+      source: 'fallback',
       barcodeX,
       barcodeY,
-      scanAreaLeft,
-      scanAreaTop,
-      scanAreaRight,
-      scanAreaBottom,
-      isInArea
+      scanAreaLeft: scanAreaLeft - toleranceX,
+      scanAreaTop: scanAreaTop - toleranceY,
+      scanAreaRight: scanAreaRight + toleranceX,
+      scanAreaBottom: scanAreaBottom + toleranceY,
+      toleranceX,
+      toleranceY,
+      screenWidth,
+      screenHeight,
+      overlayHeight,
+      isInArea: isInFallbackArea
     });
-    
-    return isInArea;
+
+    return isInFallbackArea;
   };
 
   // Validate cylinder serial number format - ONLY 9 digits
@@ -731,7 +853,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     }
     
     // Note: Removed duplicate SHIP check - allow re-shipping even if previously shipped
-    // The import approvals page on the website will show warnings about bottle location/status
+    // The Verification Center page on the website will show warnings about bottle location/status
     
     // Batch mode rapid scanning protection
     if (batchMode) {
@@ -1232,7 +1354,8 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         });
         break;
       case 'in':
-        updateData.status = 'returned';
+        // Mark as empty when returned - user will mark as filled via mobile app when refilled
+        updateData.status = 'empty';
         updateData.location = 'Warehouse';
         updateData.assigned_customer = null;
         updateData.customer_name = null;
@@ -1612,7 +1735,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         // Show success message
         Alert.alert(
           'Order Submitted Successfully!',
-          `Order ${orderNumber} has been submitted for processing with ${scannedItems.length} items.\n\nYou can find it on the website under Sales Orders or Import Approvals.`,
+          `Order ${orderNumber} has been submitted for processing with ${scannedItems.length} items.\n\nYou can find it on the website under Sales Orders or Verification Center.`,
           [
             {
               text: 'OK',
@@ -1916,7 +2039,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     switch (action) {
       case 'in': return '#10B981';
       case 'out': return '#EF4444';
-      case 'locate': return '#8B5CF6';
+      case 'locate': return '#40B5AD';
       case 'fill': return '#F59E0B';
       default: return '#6B7280';
     }
@@ -2148,81 +2271,96 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       </View>
 
       {/* Camera Modal */}
-      <Modal visible={isScanning} animationType="slide">
+      <Modal visible={isScanning} animationType="slide" transparent={true}>
         <View style={styles.cameraModal}>
-          <CameraView
-            style={styles.camera}
-            barcodeScannerEnabled={true}
-            onBarcodeScanned={({ data, bounds }: BarcodeScanningResult) => {
-              const now = Date.now();
-              
-              if (!data || typeof data !== 'string') {
-                return;
-              }
-              
-              // Debounce: Ignore if same barcode scanned within last 2 seconds
-              if (data === lastScannedBarcodeRef.current && (now - lastScannedTimeRef.current) < 2000) {
-                logger.log('📷 Ignoring duplicate scan (debounce):', data);
-                return;
-              }
-              
-              // Check if barcode is within scan area (if bounds are available)
-              if (bounds && !isBarcodeInScanArea(bounds)) {
-                logger.log('📷 Enhanced scan barcode outside scan area, ignoring');
-                return;
-              }
-              
-              // Update last scanned info immediately to prevent rapid re-scans
-              // This prevents the camera from triggering multiple times
-              lastScannedBarcodeRef.current = data;
-              lastScannedTimeRef.current = now;
-              
-              // Clear any existing cooldown timer
-              if (scanCooldownRef.current) {
-                clearTimeout(scanCooldownRef.current);
-              }
-              
-              // Set cooldown to prevent re-scanning for 2 seconds
-              scanCooldownRef.current = setTimeout(() => {
-                lastScannedBarcodeRef.current = '';
-                lastScannedTimeRef.current = 0;
-              }, 2000);
-              
-              logger.log('📷 Processing barcode scan:', data);
-              // Call handleBarcodeScan - it will check processingBarcodesRef to prevent duplicates
-              handleBarcodeScan(data);
-            }}
-            onCameraReady={() => {
-              logger.log('📷 Camera is ready and active');
-              logger.log('📷 Camera ready - should be detecting barcodes now');
-            }}
-            onMountError={(error) => {
-              logger.error('❌ Camera mount error:', error);
-              Alert.alert('Camera Error', 'Failed to start camera: ' + error.message);
-            }}
-          />
-          
-          <View style={styles.cameraOverlay}>
-            <View style={styles.scanFrame} pointerEvents="none" />
-            {(
-              <>
-                <Text style={styles.scanInstructions} pointerEvents="none">
-                  Point camera at gas cylinder barcode
-                </Text>
+          <View
+            style={styles.cameraWrapper}
+            ref={cameraContainerRef}
+            onLayout={updateScanFrameRect}
+          >
+            <CameraView
+              style={[StyleSheet.absoluteFill, styles.camera]}
+              onBarcodeScanned={({ data, bounds }: BarcodeScanningResult) => {
+                const now = Date.now();
                 
-                {/* Scan Feedback */}
-                {scanFeedback && (
-                  <View style={styles.scanFeedbackContainer}>
-                    <Text style={styles.scanFeedbackText}>{scanFeedback}</Text>
-                    {lastScanAttempt && (
-                      <Text style={styles.lastScanText}>
-                        Scanned: {lastScanAttempt}
-                      </Text>
-                    )}
-                  </View>
-                )}
-              </>
-            )}
+                if (!data || typeof data !== 'string') {
+                  return;
+                }
+                
+                // Debounce: Ignore if same barcode scanned within last 2 seconds
+                if (data === lastScannedBarcodeRef.current && (now - lastScannedTimeRef.current) < 2000) {
+                  logger.log('📷 Ignoring duplicate scan (debounce):', data);
+                  return;
+                }
+                
+                // Check if barcode is within scan area (if bounds are available)
+                if (bounds && !isBarcodeInScanArea(bounds)) {
+                  logger.log('📷 Enhanced scan barcode outside scan area, ignoring');
+                  return;
+                }
+                
+                // Update last scanned info immediately to prevent rapid re-scans
+                // This prevents the camera from triggering multiple times
+                lastScannedBarcodeRef.current = data;
+                lastScannedTimeRef.current = now;
+                
+                // Clear any existing cooldown timer
+                if (scanCooldownRef.current) {
+                  clearTimeout(scanCooldownRef.current);
+                }
+                
+                // Set cooldown to prevent re-scanning for 2 seconds
+                scanCooldownRef.current = setTimeout(() => {
+                  lastScannedBarcodeRef.current = '';
+                  lastScannedTimeRef.current = 0;
+                }, 2000);
+                
+                logger.log('📷 Processing barcode scan:', data);
+                // Call handleBarcodeScan - it will check processingBarcodesRef to prevent duplicates
+                handleBarcodeScan(data);
+              }}
+              onCameraReady={() => {
+                logger.log('📷 Camera is ready and active');
+                logger.log('📷 Camera ready - should be detecting barcodes now');
+                updateScanFrameRect();
+              }}
+              onMountError={(error) => {
+                logger.error('❌ Camera mount error:', error);
+                Alert.alert('Camera Error', 'Failed to start camera: ' + error.message);
+              }}
+            />
+            
+            <View
+              style={styles.cameraOverlay}
+              pointerEvents="none"
+              onLayout={updateScanFrameRect}
+            >
+              <View
+                ref={scanFrameRef}
+                style={styles.scanFrame}
+                pointerEvents="none"
+                onLayout={updateScanFrameRect}
+              />
+              {(
+                <>
+                  <Text style={styles.scanInstructions} pointerEvents="none">
+                    Point camera at gas cylinder barcode
+                  </Text>
+                  
+                  {/* Scan Feedback */}
+                  {scanFeedback && (
+                    <View style={styles.scanFeedbackContainer}>
+                      <Text style={styles.scanFeedbackText}>{scanFeedback}</Text>
+                      {lastScanAttempt && (
+                        <Text style={styles.lastScanText}>
+                          Scanned: {lastScanAttempt}
+                        </Text>
+                      )}
+                    </View>
+                  )}
+                </>
+              )}
+            </View>
           </View>
           
           {/* Close Button - Separate from overlay to ensure it works */}
@@ -2245,10 +2383,12 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
               </Text>
             </View>
             
-            <TouchableOpacity 
-              style={[
+            <Pressable 
+              style={({ pressed }) => [
                 styles.cameraActionButton,
-                selectedAction === 'in' && styles.cameraActionButtonSelected
+                selectedAction === 'in' && styles.cameraActionButtonSelected,
+                { backgroundColor: 'transparent' },
+                pressed && { opacity: 0.8 }
               ]}
               onPress={() => {
                 logger.log('RETURN button pressed');
@@ -2256,7 +2396,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 // Provide haptic feedback
                 feedbackService.quickAction('return selected');
               }}
-              activeOpacity={0.7}
+              android_ripple={{ color: 'transparent' }}
             >
               <View style={styles.cameraActionButtonContent}>
                 <Text style={[
@@ -2268,13 +2408,15 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                   selectedAction === 'in' && styles.cameraActionButtonCountSelected
                 ]}>{scannedItems.filter(item => item.action === 'in').length}</Text>
               </View>
-            </TouchableOpacity>
+            </Pressable>
             
-            <TouchableOpacity 
-              style={[
+            <Pressable 
+              style={({ pressed }) => [
                 styles.cameraActionButton, 
                 styles.cameraShipButton,
-                selectedAction === 'out' && styles.cameraActionButtonSelected
+                selectedAction === 'out' && styles.cameraActionButtonSelected,
+                { backgroundColor: 'transparent' },
+                pressed && { opacity: 0.8 }
               ]}
               onPress={() => {
                 logger.log('SHIP button pressed');
@@ -2282,7 +2424,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 // Provide haptic feedback
                 feedbackService.quickAction('ship selected');
               }}
-              activeOpacity={0.7}
+              android_ripple={{ color: 'transparent' }}
             >
               <View style={styles.cameraActionButtonContent}>
                 <Text style={[
@@ -2295,7 +2437,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 ]}>{scannedItems.filter(item => item.action === 'out').length}</Text>
                 <Text style={styles.cameraActionButtonIcon}>📦</Text>
               </View>
-            </TouchableOpacity>
+            </Pressable>
           </View>
 
         </View>
@@ -2435,15 +2577,15 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                   <TouchableOpacity
                     style={[
                       styles.manualActionButton,
-                      { backgroundColor: theme.surface, borderColor: theme.border },
-                      selectedAction === 'in' && { backgroundColor: theme.primary }
+                      { backgroundColor: 'transparent', borderColor: theme.border },
+                      selectedAction === 'in' && { backgroundColor: 'transparent', borderColor: theme.primary }
                     ]}
                     onPress={() => setSelectedAction('in')}
                   >
                     <Text style={[
                       styles.manualActionButtonText,
                       { color: theme.text },
-                      selectedAction === 'in' && { color: theme.surface }
+                      selectedAction === 'in' && { color: theme.primary }
                     ]}>
                       🔄 RETURN
                     </Text>
@@ -2452,15 +2594,15 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                   <TouchableOpacity
                     style={[
                       styles.manualActionButton,
-                      { backgroundColor: theme.surface, borderColor: theme.border },
-                      selectedAction === 'out' && { backgroundColor: theme.primary }
+                      { backgroundColor: 'transparent', borderColor: theme.border },
+                      selectedAction === 'out' && { backgroundColor: 'transparent', borderColor: theme.primary }
                     ]}
                     onPress={() => setSelectedAction('out')}
                   >
                     <Text style={[
                       styles.manualActionButtonText,
                       { color: theme.text },
-                      selectedAction === 'out' && { color: theme.surface }
+                      selectedAction === 'out' && { color: theme.primary }
                     ]}>
                       📦 SHIP
                     </Text>
@@ -2556,7 +2698,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       {/* Loading Overlay */}
       {loading && (
         <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#2563eb" />
+          <ActivityIndicator size="large" color="#40B5AD" />
           <Text style={styles.loadingText}>Processing...</Text>
         </View>
       )}
@@ -2692,14 +2834,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 16,
     paddingVertical: 20,
-    backgroundColor: '#fff',
+    backgroundColor: 'transparent',
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
     gap: 16,
   },
   actionButton: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: 'transparent',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -2707,8 +2849,8 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   shipButton: {
-    backgroundColor: '#E8F7F5',
-    borderColor: '#8B5CF6',
+    backgroundColor: 'transparent',
+    borderColor: '#40B5AD',
   },
   actionButtonContent: {
     alignItems: 'center',
@@ -2896,6 +3038,7 @@ const styles = StyleSheet.create({
   },
   cameraModal: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   camera: {
     flex: 1,
@@ -2910,8 +3053,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   scanFrame: {
-    width: 250,
-    height: 250,
+    width: 320,
+    height: 150,
     borderWidth: 2,
     borderColor: '#fff',
     borderRadius: 8,
@@ -3775,12 +3918,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8F7F5',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#8B5CF6',
+    borderColor: '#40B5AD',
   },
   customizationIndicatorText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#8B5CF6',
+    color: '#40B5AD',
     textAlign: 'center',
   },
   continueButton: {
@@ -3816,6 +3959,7 @@ const styles = StyleSheet.create({
   
   // Camera Bottom Actions
   cameraBottomActions: {
+    backgroundColor: 'transparent',
     position: 'absolute',
     bottom: 0,
     left: 0,
@@ -3838,17 +3982,17 @@ const styles = StyleSheet.create({
   actionIndicatorText: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#8B5CF6',
-    backgroundColor: '#E8F7F5',
+    color: '#40B5AD',
+    backgroundColor: 'transparent',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#8B5CF6',
+    borderColor: '#40B5AD',
   },
   cameraActionButton: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: 'transparent',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -3856,13 +4000,13 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   cameraActionButtonSelected: {
-    backgroundColor: '#E8F7F5',
-    borderColor: '#8B5CF6',
+    backgroundColor: 'transparent',
+    borderColor: '#40B5AD',
     borderWidth: 3,
   },
   cameraShipButton: {
-    backgroundColor: '#E8F7F5',
-    borderColor: '#8B5CF6',
+    backgroundColor: 'transparent',
+    borderColor: '#40B5AD',
   },
   cameraActionButtonContent: {
     alignItems: 'center',
@@ -3874,7 +4018,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   cameraActionButtonLabelSelected: {
-    color: '#8B5CF6',
+    color: '#40B5AD',
     fontWeight: '900',
   },
   cameraActionButtonCount: {
@@ -3883,7 +4027,7 @@ const styles = StyleSheet.create({
     color: '#1F2937',
   },
   cameraActionButtonCountSelected: {
-    color: '#8B5CF6',
+    color: '#40B5AD',
     fontWeight: '900',
   },
   cameraActionButtonIcon: {
@@ -3950,5 +4094,9 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  cameraWrapper: {
+    flex: 1,
+    position: 'relative',
   },
 });

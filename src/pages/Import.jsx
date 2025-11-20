@@ -1739,8 +1739,8 @@ export default function Import() {
                   You can check the status of your import in the <strong>Import Approvals</strong> page.
                 </div>
                 <div className="mt-3">
-                  <a href="/import-approvals" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
-                    Go to Import Approvals
+                  <a href="/verification-center" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
+                    Go to Verification Center
                   </a>
                 </div>
               </>

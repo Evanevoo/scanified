@@ -10,7 +10,7 @@ import { Delete as DeleteIcon, Edit as EditIcon, Add as AddIcon, ContentCopy as 
 import { usePermissions } from '../context/PermissionsContext';
 
 // Helper function to get role display name
-const getRoleDisplayName = (user) => {
+const getRoleDisplayName = (user, rolesList = []) => {
   // Try role from JOIN first (roles.name)
   if (user.roles?.name) return user.roles.name;
   
@@ -19,9 +19,13 @@ const getRoleDisplayName = (user) => {
   
   // Handle common role IDs/names
   if (user.role_id) {
-    // If role_id looks like a UUID but we don't have the joined name, show a fallback
+    const matchedRole = rolesList.find(r => r.id === user.role_id);
+    if (matchedRole?.name) {
+      return matchedRole.name;
+    }
+    // If role_id looks like a UUID but we don't have the joined name, show a placeholder
     if (user.role_id.includes('-')) {
-      return 'Loading...';
+      return 'Role';
     }
     return user.role_id;
   }
@@ -149,13 +153,54 @@ export default function UserManagement() {
   }
 
   async function fetchPendingInvites() {
-    const { data, error } = await supabase
-      .from('organization_invites')
-      .select('*')
-      .eq('organization_id', organization.id)
-      .is('accepted_at', null)
-      .order('created_at', { ascending: false });
-    if (!error) setPendingInvites(data || []);
+    try {
+      // Try RPC function first (bypasses RLS)
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_pending_invites', {
+        p_organization_id: organization.id
+      });
+
+      if (!rpcError && rpcData) {
+        // RPC function returns array directly
+        setPendingInvites(rpcData || []);
+        logger.log('Fetched pending invites via RPC:', rpcData.length);
+        return;
+      }
+
+      // If RPC function doesn't exist or has error, fallback to direct query
+      if (rpcError) {
+        logger.warn('RPC function error, trying direct query:', rpcError);
+      }
+
+      const { data, error } = await supabase
+        .from('organization_invites')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .is('accepted_at', null)
+        .order('invited_at', { ascending: false });
+      
+      if (error) {
+        // Handle RLS permission errors gracefully
+        if (error.code === '42501' || error.code === 'PGRST301' || error.message?.includes('permission denied')) {
+          logger.warn('Cannot fetch pending invites due to RLS permissions. Please run the SQL function: get_pending_invites');
+          setPendingInvites([]);
+          return;
+        }
+        logger.error('Error fetching pending invites:', error);
+        setPendingInvites([]);
+        return;
+      }
+      
+      setPendingInvites(data || []);
+    } catch (err) {
+      // Handle RLS permission errors gracefully
+      if (err.code === '42501' || err.code === 'PGRST301' || err.message?.includes('permission denied')) {
+        logger.warn('Cannot fetch pending invites due to RLS permissions. Please run the SQL function: get_pending_invites');
+        setPendingInvites([]);
+        return;
+      }
+      logger.error('Error in fetchPendingInvites:', err);
+      setPendingInvites([]);
+    }
   }
 
   async function handleAddUser(e) {
@@ -171,7 +216,7 @@ export default function UserManagement() {
         .select('id')
         .eq('organization_id', organization.id)
         .eq('email', newEmail)
-        .single();
+        .maybeSingle();
 
       if (existingUser) {
         throw new Error('This email is already registered in your organization');
@@ -180,46 +225,64 @@ export default function UserManagement() {
       // Check if email is already registered with ANY organization (global check)
       const { data: existingProfile, error: profileCheckError } = await supabase
         .from('profiles')
-        .select('email, organization_id, is_active, deleted_at, disabled_at, organizations(name)')
+        .select('email, organization_id, is_active, disabled_at')
         .eq('email', newEmail)
         .maybeSingle();
+      
+      if (profileCheckError) {
+        logger.warn('Error checking existing profile:', profileCheckError);
+        // Continue anyway - the RPC function will handle duplicate checks
+      }
 
       if (existingProfile) {
         // Check if profile is active and has an organization
-        if (existingProfile.organization_id && existingProfile.is_active !== false && !existingProfile.deleted_at && !existingProfile.disabled_at) {
+        if (existingProfile.organization_id && existingProfile.is_active !== false && !existingProfile.disabled_at) {
           if (existingProfile.organization_id === organization.id) {
             throw new Error(`This email (${newEmail}) is already registered in your organization.`);
           } else {
-            throw new Error(`This email (${newEmail}) is already registered with another organization "${existingProfile.organizations?.name}". Each email can only be associated with one organization globally. Please use a different email address.`);
+            throw new Error(`This email (${newEmail}) is already registered with another organization. Each email can only be associated with one organization globally. Please use a different email address.`);
           }
         }
         // If profile exists but is deleted/disabled, we'll allow the invite
         // The user can reactivate their account when they accept the invite
       }
 
-      // Check if there's already a pending invite for this email in ANY organization
-      const { data: existingGlobalInvite } = await supabase
-        .from('organization_invites')
-        .select('id, organization_id, organizations(name)')
-        .eq('email', newEmail)
-        .is('accepted_at', null)
-        .single();
-
-      if (existingGlobalInvite) {
-        if (existingGlobalInvite.organization_id === organization.id) {
+      // Check if there's already a pending invite for this email in the current organization
+      // Note: This may fail due to RLS, but we'll handle it gracefully
+      try {
+        const { data: existingOrgInvite } = await supabase
+          .from('organization_invites')
+          .select('id, organization_id')
+          .eq('organization_id', organization.id)
+          .eq('email', newEmail)
+          .is('accepted_at', null)
+          .maybeSingle();
+        
+        if (existingOrgInvite) {
           throw new Error('An invite has already been sent to this email from your organization');
+        }
+      } catch (checkError) {
+        // If RLS blocks the check, log it but continue - the RPC function will handle duplicates
+        if (checkError.code === '42501' || checkError.code === 'PGRST301') {
+          logger.warn('Could not check for existing invite due to RLS, continuing anyway:', checkError);
+        } else if (checkError.message.includes('already been sent')) {
+          // Re-throw the user-friendly error
+          throw checkError;
         } else {
-          throw new Error(`This email already has a pending invite from organization "${existingGlobalInvite.organizations?.name}". Each email can only have one pending invite globally.`);
+          logger.warn('Error checking for existing invite, continuing anyway:', checkError);
         }
       }
 
       // Create the invite using the database function
-      const { data, error } = await supabase.rpc('create_organization_invite', {
+      // The RPC function should return the invite_token directly
+      const { data: inviteToken, error } = await supabase.rpc('create_organization_invite', {
         p_organization_id: organization.id,
         p_email: newEmail,
         p_role: newRoleId,
         p_expires_in_days: 7
       });
+
+      logger.log('RPC create_organization_invite response:', { inviteToken, error });
 
       if (error) {
         // Check if it's a constraint violation and provide user-friendly message
@@ -232,55 +295,76 @@ export default function UserManagement() {
         throw error;
       }
 
-      // Fetch the invite row to get the token
-      const { data: inviteRow } = await supabase
-        .from('organization_invites')
-        .select('token')
-        .eq('organization_id', organization.id)
-        .eq('email', newEmail)
-        .is('accepted_at', null)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+      // The RPC function should return the invite_token directly
+      // Handle both string return and object return formats
+      const token = typeof inviteToken === 'string' 
+        ? inviteToken 
+        : (inviteToken?.invite_token || inviteToken?.[0]?.invite_token || (Array.isArray(inviteToken) && inviteToken[0]) || inviteToken);
+      
+      logger.log('Extracted token:', token);
 
-      if (inviteRow && inviteRow.token) {
-        const inviteLink = `${window.location.origin}/accept-invite?token=${inviteRow.token}`;
-        
-        try {
-          const emailResponse = await fetch('/.netlify/functions/send-email', {
+      if (!token) {
+        logger.error('RPC function did not return invite token. Response:', inviteToken);
+        throw new Error('Failed to create invite token. Please try again.');
+      }
+
+      const inviteLink = `${window.location.origin}/accept-invite?token=${token}`;
+      
+      try {
+          logger.log('Sending invitation email to:', newEmail);
+          logger.log('Invite link:', inviteLink);
+          
+          // Check if we're in local development
+          const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+          if (isLocalDev) {
+            logger.warn('Local development detected - Netlify functions may not be available. Use "netlify dev" to test email functionality.');
+          }
+          
+          const emailResponse = await fetch('/.netlify/functions/send-invite-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               to: newEmail,
-              subject: `You're invited to join ${organization.name}`,
-              template: 'invite',
-              data: {
-                inviteLink,
-                organizationName: organization.name,
-                inviter: profile.full_name || profile.email,
-              }
+              inviteLink,
+              organizationName: organization.name,
+              inviter: profile.full_name || profile.email,
             })
           });
 
+          logger.log('Email response status:', emailResponse.status);
+          logger.log('Email response ok:', emailResponse.ok);
+
+          // Parse response body
+          let responseData;
+          try {
+            const responseText = await emailResponse.text();
+            logger.log('Email response text:', responseText);
+            responseData = responseText ? JSON.parse(responseText) : {};
+          } catch (parseError) {
+            logger.error('Error parsing email response:', parseError);
+            responseData = {};
+          }
+
           if (!emailResponse.ok) {
-            // Try to parse error response, but handle empty responses
-            let errorMessage = 'Unknown error';
-            try {
-              const errorData = await emailResponse.json();
-              errorMessage = errorData.error || errorData.message || 'Email service unavailable';
-            } catch (parseError) {
-              errorMessage = `Email service returned status ${emailResponse.status}`;
-            }
-            logger.error('Email sending failed:', errorMessage);
+            const errorMessage = responseData.error || responseData.details || `Email service returned status ${emailResponse.status}`;
+            logger.error('Email sending failed:', errorMessage, responseData);
             throw new Error(errorMessage);
           }
 
-          logger.log('Invitation email sent successfully to:', newEmail);
+          // Check if response indicates success
+          if (responseData.success) {
+            logger.log('Invitation email sent successfully to:', newEmail, 'via', responseData.service);
+          } else if (responseData.error) {
+            logger.error('Email service returned error:', responseData.error);
+            throw new Error(responseData.error);
+          } else {
+            logger.warn('Email response unclear, assuming success');
+          }
         } catch (emailError) {
           logger.error('Error sending invitation email:', emailError);
           // Don't throw here - the invite was created successfully, just email failed
           const errorMsg = emailError.message || 'Unknown error';
-          setError(`✅ Invite created successfully! However, email sending failed: ${errorMsg}\n\n📋 Copy the invite link from the "Pending Invites" section below and send it manually.`);
+          setError(`✅ Invite created successfully! However, email sending failed: ${errorMsg}\n\n📋 Copy the invite link from the "Pending Invites" section below and send it manually.\n\n🔗 Link: ${inviteLink}`);
           // Still fetch updated data even though email failed
           fetchUsers();
           fetchPendingInvites();
@@ -289,14 +373,13 @@ export default function UserManagement() {
           setShowAddDialog(false);
           return; // Exit early to avoid showing success message
         }
-      }
 
-      setSuccess(`Invite sent to ${newEmail}. The user will receive an email with instructions to join your organization.`);
-      setNewEmail('');
-      setNewRoleId(roles.length > 0 ? roles[0].id : '');
-      setShowAddDialog(false);
-      fetchUsers();
-      fetchPendingInvites();
+        setSuccess(`Invite sent to ${newEmail}. The user will receive an email with instructions to join your organization.`);
+        setNewEmail('');
+        setNewRoleId(roles.length > 0 ? roles[0].id : '');
+        setShowAddDialog(false);
+        fetchUsers();
+        fetchPendingInvites();
     } catch (err) {
       logger.error('Error adding user:', err);
       setError(err.message);
@@ -330,24 +413,19 @@ export default function UserManagement() {
     }
 
     try {
-      // Step 1: Delete from Supabase Auth (permanent deletion)
-      const { error: authError } = await supabase.auth.admin.deleteUser(userId);
-      
-      if (authError) {
-        logger.warn('Could not delete from auth (may not have admin privileges):', authError);
-        // Continue with profile deletion even if auth deletion fails
-      } else {
-        logger.log('✅ User deleted from Supabase Auth');
+      const response = await fetch('/.netlify/functions/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          organizationId: organization.id
+        })
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Unknown error removing user');
       }
-
-      // Step 2: Delete from profiles table
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', userId)
-        .eq('organization_id', organization.id);
-
-      if (profileError) throw profileError;
 
       setSuccess(`User ${userEmail} has been PERMANENTLY DELETED from Supabase. They will need to create a new account to rejoin.`);
       fetchUsers();
@@ -523,49 +601,52 @@ export default function UserManagement() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {users.map((user) => (
-              <TableRow key={user.id}>
-                <TableCell>{user.full_name || 'N/A'}</TableCell>
-                <TableCell>{user.email}</TableCell>
-                <TableCell>
-                  <Chip 
-                    label={getRoleDisplayName(user)}
-                    color={getRoleColor(getRoleDisplayName(user))}
-                    size="small"
-                  />
-                </TableCell>
-                <TableCell>
-                  {new Date(user.created_at).toLocaleDateString()}
-                </TableCell>
-                <TableCell>
-                  <Stack direction="row" spacing={1}>
-                    <Tooltip title="Edit User">
-                      <span>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleEditUser(user)}
-                          disabled={user.id === profile.id && !isOrgAdmin}
-                        >
-                          <EditIcon />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title="Remove User">
-                      <span>
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => handleDeleteUser(user.id, user.email)}
-                          disabled={user.id === profile.id}
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                  </Stack>
-                </TableCell>
-              </TableRow>
-            ))}
+            {users.map((user) => {
+              const roleLabel = getRoleDisplayName(user, roles);
+              return (
+                <TableRow key={user.id}>
+                  <TableCell>{user.full_name || 'N/A'}</TableCell>
+                  <TableCell>{user.email}</TableCell>
+                  <TableCell>
+                    <Chip 
+                      label={roleLabel}
+                      color={getRoleColor(roleLabel)}
+                      size="small"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    {new Date(user.created_at).toLocaleDateString()}
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={1}>
+                      <Tooltip title="Edit User">
+                        <span>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleEditUser(user)}
+                            disabled={user.id === profile.id && !isOrgAdmin}
+                          >
+                            <EditIcon />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title="Remove User">
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleDeleteUser(user.id, user.email)}
+                            disabled={user.id === profile.id}
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </Stack>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </TableContainer>
@@ -590,13 +671,13 @@ export default function UserManagement() {
                   <TableRow key={invite.id}>
                     <TableCell>{invite.email}</TableCell>
                     <TableCell>{getRoleName(invite.role)}</TableCell>
-                    <TableCell>{new Date(invite.created_at).toLocaleDateString()}</TableCell>
+                    <TableCell>{new Date(invite.invited_at || invite.created_at).toLocaleDateString()}</TableCell>
                     <TableCell>{new Date(invite.expires_at).toLocaleDateString()}</TableCell>
                     <TableCell>
                       <Stack direction="row" spacing={1}>
                         <Tooltip title="Copy Invite Link">
                           <span>
-                            <IconButton size="small" onClick={() => handleCopyInviteLink(invite.token)}>
+                            <IconButton size="small" onClick={() => handleCopyInviteLink(invite.invite_token)}>
                               <CopyIcon />
                             </IconButton>
                           </span>

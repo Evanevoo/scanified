@@ -189,7 +189,8 @@ export default function QuantityDiscrepancyDetector({ orderNumber, customerId, o
       }
       
       if (!foundRecord) {
-        setError(`No invoice or receipt found for order ${orderNumber} in organization ${organizationId}`);
+        // Silently return if no record found - don't show error message
+        setLoading(false);
         return;
       }
       
@@ -279,11 +280,36 @@ export default function QuantityDiscrepancyDetector({ orderNumber, customerId, o
               });
               
               if (scanProductCode === productCode) {
-                // Count based on mode
-                if (scan.mode === 'SHIP' || scan.mode === 'out' || scan.scan_type === 'delivery') {
+                // Count based on mode - STRICT matching: mode takes precedence
+                const mode = (scan.mode || '').toString().toUpperCase();
+                const scanType = (scan.scan_type || '').toString().toLowerCase();
+                const action = (scan.action || '').toString().toLowerCase();
+                
+                // If mode is explicitly RETURN, it can ONLY be a return (never a ship)
+                if (mode === 'RETURN') {
+                  scannedReturn++;
+                  logger.log('📦 Scanned RETURN count:', scannedReturn);
+                }
+                // If mode is explicitly SHIP, it can ONLY be a ship (never a return)
+                else if (mode === 'SHIP') {
                   scannedShip++;
                   logger.log('📦 Scanned SHIP count:', scannedShip);
-                } else if (scan.mode === 'RETURN' || scan.mode === 'in' || scan.scan_type === 'pickup') {
+                }
+                // If mode is 'pickup' or scan_type is 'pickup', it's a return
+                else if (mode === 'PICKUP' || scanType === 'pickup') {
+                  scannedReturn++;
+                  logger.log('📦 Scanned RETURN count:', scannedReturn);
+                }
+                // If mode is 'delivery' or scan_type is 'delivery', it's a ship
+                else if (mode === 'DELIVERY' || scanType === 'delivery') {
+                  scannedShip++;
+                  logger.log('📦 Scanned SHIP count:', scannedShip);
+                }
+                // Fallback to action field if mode is not set
+                else if (action === 'out') {
+                  scannedShip++;
+                  logger.log('📦 Scanned SHIP count:', scannedShip);
+                } else if (action === 'in') {
                   scannedReturn++;
                   logger.log('📦 Scanned RETURN count:', scannedReturn);
                 }

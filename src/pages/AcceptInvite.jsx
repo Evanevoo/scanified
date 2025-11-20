@@ -48,17 +48,140 @@ export default function AcceptInvite() {
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
 
-      // Get invite details
-      const { data: inviteData, error: inviteError } = await supabase
-        .from('organization_invites')
-        .select('*, organizations(name)')
-        .eq('invite_token', token)
-        .is('accepted_at', null)
-        .single();
+      let inviteData = null;
+      let inviteError = null;
 
-      if (inviteError || !inviteData) {
+      // First, try Netlify function which uses service role (bypasses RLS)
+      try {
+        const response = await fetch('/.netlify/functions/fetch-invite-details', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token })
+        });
+
+        if (response.ok) {
+          const payload = await response.json();
+          if (payload?.invite) {
+            inviteData = payload.invite;
+            logger.log('Invite fetched via Netlify function');
+          }
+        } else {
+          const errorPayload = await response.json().catch(() => ({}));
+          logger.warn('Netlify function invite fetch failed:', response.status, errorPayload);
+
+          if (response.status === 404) {
+            setStatus('error');
+            setMessage('Invalid or expired invite link. The invite may have already been used or expired.');
+            return;
+          }
+
+          if (response.status === 409) {
+            setStatus('error');
+            setMessage('This invite has already been accepted.');
+            return;
+          }
+
+          if (response.status === 410) {
+            setStatus('error');
+            setMessage('This invite has expired');
+            return;
+          }
+          // For other statuses, fall back to Supabase RPC below
+        }
+      } catch (netlifyError) {
+        logger.warn('Netlify function not available, falling back to Supabase RPC:', netlifyError);
+      }
+
+      // If Netlify function did not return data, fall back to Supabase RPC / direct query
+      if (!inviteData) {
+        try {
+          const { data: rpcData, error: rpcError } = await supabase.rpc('get_invite_by_token', {
+            p_token: token
+          });
+
+          logger.log('RPC function response:', { rpcData, rpcError, token });
+
+          if (rpcError) {
+            // Check if it's a "function does not exist" error
+            if (rpcError.message?.includes('function') && rpcError.message?.includes('does not exist')) {
+              logger.warn('RPC function does not exist yet. Please run the SQL function in Supabase.');
+              setStatus('error');
+              setMessage('The invite validation function is not set up yet. Please contact the administrator to run the SQL function: get_invite_by_token. The SQL file is available in the project root as validate-invite-token-function.sql');
+              return;
+            }
+            
+            logger.warn('RPC function error, trying direct query:', rpcError);
+            // Fallback to direct query if RPC has other errors
+            const { data: directData, error: directError } = await supabase
+              .from('organization_invites')
+              .select('*, organizations(name)')
+              .eq('invite_token', token)
+              .is('accepted_at', null)
+              .maybeSingle();
+            
+            inviteData = directData;
+            inviteError = directError;
+          } else if (rpcData && rpcData.length > 0) {
+            // RPC function returns array, get first result
+            const invite = rpcData[0];
+            inviteData = {
+              id: invite.id,
+              organization_id: invite.organization_id,
+              email: invite.email,
+              role: invite.role,
+              invite_token: invite.invite_token,
+              expires_at: invite.expires_at,
+              accepted_at: invite.accepted_at,
+              created_at: invite.created_at,
+              invited_at: invite.invited_at,
+              organizations: {
+                name: invite.organization_name
+              }
+            };
+            logger.log('Invite found via RPC:', inviteData);
+          } else {
+            // RPC function returned empty array - invite doesn't exist or is expired
+            logger.warn('RPC function returned empty result - invite not found or expired');
+            inviteData = null;
+            inviteError = null; // Not an error, just no results
+          }
+        } catch (rpcException) {
+          logger.warn('Exception calling RPC function, trying direct query:', rpcException);
+          // Fallback to direct query
+          const { data: directData, error: directError } = await supabase
+            .from('organization_invites')
+            .select('*, organizations(name)')
+            .eq('invite_token', token)
+            .is('accepted_at', null)
+            .maybeSingle();
+          
+          inviteData = directData;
+          inviteError = directError;
+        }
+      }
+
+      logger.log('Invite query result:', { inviteData, inviteError, token });
+
+      if (inviteError) {
+        logger.error('Error fetching invite:', inviteError);
+        
+        // Handle RLS permission errors - these are expected for unauthenticated users
+        if (inviteError.code === '42501' || inviteError.code === 'PGRST301' || inviteError.message?.includes('permission denied')) {
+          setStatus('error');
+          setMessage('Unable to verify invite link due to permissions. Please contact the person who sent you the invite, or ask them to run the SQL function: get_invite_by_token');
+          return;
+        }
+        
+        // For other errors, show generic message
         setStatus('error');
-        setMessage('Invalid or expired invite link');
+        setMessage(`Invalid or expired invite link: ${inviteError.message}`);
+        return;
+      }
+
+      if (!inviteData) {
+        logger.warn('No invite found for token:', token);
+        setStatus('error');
+        setMessage('Invalid or expired invite link. The invite may have already been used or expired.');
         return;
       }
 
@@ -109,7 +232,21 @@ export default function AcceptInvite() {
         }
       });
 
-      if (signupError) throw signupError;
+      if (signupError) {
+        const alreadyRegistered = signupError.message?.toLowerCase().includes('already registered');
+        if (alreadyRegistered) {
+          setStatus('needsAuth');
+          setMessage('This email already has an account. Please sign in to continue your invite.');
+          const token = searchParams.get('token');
+          if (token) {
+            navigate(`/login?redirect=/accept-invite?token=${token}`);
+          } else {
+            navigate('/login');
+          }
+          return;
+        }
+        throw signupError;
+      }
       if (!signupData.user) throw new Error('Failed to create account');
 
       // Accept invite
@@ -127,30 +264,25 @@ export default function AcceptInvite() {
       setStatus('accepting');
 
       // Create/update profile
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .upsert({
-          id: user.id,
-          email: inviteData.email,
-          name: authForm.name || user.user_metadata?.name,
-          organization_id: inviteData.organization_id,
-          role: inviteData.role,
-          is_active: true,
-          deleted_at: null,
-          disabled_at: null
-        }, {
-          onConflict: 'id'
-        });
+      const profilePayload = {
+        id: user.id,
+        email: inviteData.email,
+        name: authForm.name || user.user_metadata?.name,
+        organization_id: inviteData.organization_id,
+        role: inviteData.role,
+        is_active: true
+      };
 
-      if (profileError) throw profileError;
+      const acceptResponse = await fetch('/.netlify/functions/fetch-invite-details', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: searchParams.get('token'), accept: true, profile: profilePayload })
+      });
 
-      // Mark invite as accepted
-      const { error: acceptError } = await supabase
-        .from('organization_invites')
-        .update({ accepted_at: new Date().toISOString() })
-        .eq('invite_token', searchParams.get('token'));
-
-      if (acceptError) throw acceptError;
+      if (!acceptResponse.ok) {
+        const payload = await acceptResponse.json().catch(() => ({}));
+        throw new Error(payload.error || payload.message || 'Failed to accept invite');
+      }
 
       setStatus('success');
       setMessage('Successfully joined the organization!');
@@ -193,6 +325,7 @@ export default function AcceptInvite() {
                   label="Your Name"
                   value={authForm.name}
                   onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })}
+                  autoComplete="off"
                   required
                 />
 
@@ -203,6 +336,7 @@ export default function AcceptInvite() {
                   value={authForm.email}
                   disabled
                   helperText="This email was invited"
+                  autoComplete="email"
                 />
 
                 <TextField
@@ -211,6 +345,7 @@ export default function AcceptInvite() {
                   type="password"
                   value={authForm.password}
                   onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                  autoComplete="new-password"
                   required
                   helperText="At least 6 characters"
                 />

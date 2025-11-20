@@ -11,10 +11,10 @@
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "type-check": "tsc --noEmit",
-    "build:ios": "eas build --platform ios --profile production --config eas-ios.json",
-    "build:ios-dev": "eas build --platform ios --profile development --config eas-ios.json",
-    "build:ios-preview": "eas build --platform ios --profile preview --config eas-ios.json",
-    "submit:ios": "eas submit --platform ios --config eas-ios.json"
+    "build:ios": "eas build --platform ios --profile production",
+    "build:ios-dev": "eas build --platform ios --profile development",
+    "build:ios-preview": "eas build --platform ios --profile preview",
+    "submit:ios": "eas submit --platform ios"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.0.0",
