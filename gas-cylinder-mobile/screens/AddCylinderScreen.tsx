@@ -55,6 +55,9 @@ export default function AddCylinderScreen() {
   const [addingOwner, setAddingOwner] = useState(false);
   const [newOwnerName, setNewOwnerName] = useState('');
   const [scannerVisible, setScannerVisible] = useState(false);
+  const [gasTypePickerVisible, setGasTypePickerVisible] = useState(false);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
+  const [ownerPickerVisible, setOwnerPickerVisible] = useState(false);
 
   useEffect(() => {
     const fetchGasTypes = async () => {
@@ -103,15 +106,18 @@ export default function AddCylinderScreen() {
   }, [profile]);
 
   useEffect(() => {
-    // Fetch owners for the current organization
+    // Fetch ownership values for the current organization
     const fetchOwners = async () => {
       if (!profile?.organization_id) return;
       const { data, error } = await supabase
-        .from('owners')
-        .select('id, name')
+        .from('ownership_values')
+        .select('id, value')
         .eq('organization_id', profile.organization_id)
-        .order('name', { ascending: true });
-      if (!error && data) setOwners(data);
+        .order('value', { ascending: true });
+      if (!error && data) {
+        // Map the data to match the expected format (name -> value)
+        setOwners(data.map(item => ({ id: item.id, name: item.value })));
+      }
     };
     fetchOwners();
   }, [profile]);
@@ -217,16 +223,16 @@ export default function AddCylinderScreen() {
     }
   };
 
-  // Add new owner
+  // Add new ownership value
   const handleAddOwner = async () => {
     if (!newOwnerName.trim() || !profile?.organization_id) return;
     const { data, error } = await supabase
-      .from('owners')
-      .insert({ name: newOwnerName.trim(), organization_id: profile.organization_id })
+      .from('ownership_values')
+      .insert({ value: newOwnerName.trim(), organization_id: profile.organization_id })
       .select();
     if (!error && data && data[0]) {
-      setOwners([...owners, data[0]]);
-      setSelectedOwner(data[0].name);
+      setOwners([...owners, { id: data[0].id, name: data[0].value }]);
+      setSelectedOwner(data[0].value);
       setAddingOwner(false);
       setNewOwnerName('');
     }
@@ -234,17 +240,6 @@ export default function AddCylinderScreen() {
 
   return (
     <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header with Return Button */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.primary }]}>Add New Cylinder</Text>
-        <View style={styles.headerSpacer} />
-      </View>
       
       {/* Scanner Section */}
       <View style={styles.section}>
@@ -305,23 +300,20 @@ export default function AddCylinderScreen() {
               <Text style={[styles.loadingText, { color: colors.text }]}>Loading gas types...</Text>
             </View>
           ) : (
-            <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Picker
-                selectedValue={selectedGasType}
-                onValueChange={setSelectedGasType}
-                style={[styles.picker, { color: colors.text }]}
-              >
-                <Picker.Item label="Select Gas Type" value="" color={colors.textSecondary} />
-                {gasTypes.map(gasType => (
-                  <Picker.Item 
-                    key={gasType.id} 
-                    label={`${gasType.category} - ${gasType.type}`} 
-                    value={gasType.id.toString()} 
-                    color={colors.text} 
-                  />
-                ))}
-              </Picker>
-            </View>
+            <TouchableOpacity 
+              style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => setGasTypePickerVisible(true)}
+            >
+              <Text style={[styles.pickerButtonText, { color: selectedGasType ? colors.text : colors.textSecondary }]}>
+                {selectedGasType 
+                  ? gasTypes.find(gt => gt.id.toString() === selectedGasType)
+                    ? `${gasTypes.find(gt => gt.id.toString() === selectedGasType)!.category} - ${gasTypes.find(gt => gt.id.toString() === selectedGasType)!.type}`
+                    : 'Select Gas Type'
+                  : 'Select Gas Type'
+                }
+              </Text>
+              <Text style={[styles.pickerArrow, { color: colors.text }]}>▼</Text>
+            </TouchableOpacity>
           )}
         </View>
 
@@ -333,44 +325,32 @@ export default function AddCylinderScreen() {
               <Text style={[styles.loadingText, { color: colors.text }]}>Loading locations...</Text>
             </View>
           ) : (
-            <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Picker
-                selectedValue={selectedLocation}
-                onValueChange={setSelectedLocation}
-                style={[styles.picker, { color: colors.text }]}
-              >
-                <Picker.Item label="Select Location" value="" color={colors.textSecondary} />
-                {locations.map(location => (
-                  <Picker.Item 
-                    key={location.id} 
-                    label={location.name} 
-                    value={location.id} 
-                    color={colors.text} 
-                  />
-                ))}
-              </Picker>
-            </View>
+            <TouchableOpacity 
+              style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => setLocationPickerVisible(true)}
+            >
+              <Text style={[styles.pickerButtonText, { color: selectedLocation ? colors.text : colors.textSecondary }]}>
+                {selectedLocation 
+                  ? locations.find(loc => loc.id === selectedLocation)?.name || 'Select Location'
+                  : 'Select Location'
+                }
+              </Text>
+              <Text style={[styles.pickerArrow, { color: colors.text }]}>▼</Text>
+            </TouchableOpacity>
           )}
         </View>
 
         <View style={styles.inputGroup}>
           <Text style={[styles.inputLabel, { color: colors.text }]}>Ownership</Text>
-          <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Picker
-              selectedValue={selectedOwner}
-              onValueChange={value => {
-                if (value === '__add_new__') setAddingOwner(true);
-                else setSelectedOwner(value);
-              }}
-              style={[styles.picker, { color: colors.text }]}
-            >
-              <Picker.Item label="Select Owner" value="" color={colors.textSecondary} />
-              {owners.map(owner => (
-                <Picker.Item key={owner.id} label={owner.name} value={owner.name} color={colors.text} />
-              ))}
-              <Picker.Item label="Add new owner..." value="__add_new__" color={colors.textSecondary} />
-            </Picker>
-          </View>
+          <TouchableOpacity 
+            style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setOwnerPickerVisible(true)}
+          >
+            <Text style={[styles.pickerButtonText, { color: selectedOwner ? colors.text : colors.textSecondary }]}>
+              {selectedOwner || 'Select Owner'}
+            </Text>
+            <Text style={[styles.pickerArrow, { color: colors.text }]}>▼</Text>
+          </TouchableOpacity>
         </View>
 
         {addingOwner && (
@@ -431,6 +411,143 @@ export default function AddCylinderScreen() {
           />
         </View>
       </Modal>
+
+      {/* Gas Type Picker Modal */}
+      <Modal
+        visible={gasTypePickerVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setGasTypePickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.pickerModal, { backgroundColor: colors.surface }]}>
+            <View style={[styles.pickerModalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Gas Type</Text>
+              <TouchableOpacity onPress={() => setGasTypePickerVisible(false)}>
+                <Text style={[styles.pickerModalClose, { color: colors.primary }]}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.pickerModalScroll}>
+              {gasTypes.map(gasType => (
+                <TouchableOpacity
+                  key={gasType.id}
+                  style={[
+                    styles.pickerModalItem,
+                    { borderBottomColor: colors.border },
+                    selectedGasType === gasType.id.toString() && { backgroundColor: colors.primary + '20' }
+                  ]}
+                  onPress={() => {
+                    setSelectedGasType(gasType.id.toString());
+                    setGasTypePickerVisible(false);
+                  }}
+                >
+                  <Text style={[styles.pickerModalItemText, { color: colors.text }]}>
+                    {gasType.category} - {gasType.type}
+                  </Text>
+                  {selectedGasType === gasType.id.toString() && (
+                    <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Location Picker Modal */}
+      <Modal
+        visible={locationPickerVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setLocationPickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.pickerModal, { backgroundColor: colors.surface }]}>
+            <View style={[styles.pickerModalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Location</Text>
+              <TouchableOpacity onPress={() => setLocationPickerVisible(false)}>
+                <Text style={[styles.pickerModalClose, { color: colors.primary }]}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.pickerModalScroll}>
+              {locations.map(location => (
+                <TouchableOpacity
+                  key={location.id}
+                  style={[
+                    styles.pickerModalItem,
+                    { borderBottomColor: colors.border },
+                    selectedLocation === location.id && { backgroundColor: colors.primary + '20' }
+                  ]}
+                  onPress={() => {
+                    setSelectedLocation(location.id);
+                    setLocationPickerVisible(false);
+                  }}
+                >
+                  <Text style={[styles.pickerModalItemText, { color: colors.text }]}>
+                    {location.name}
+                  </Text>
+                  {selectedLocation === location.id && (
+                    <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Owner Picker Modal */}
+      <Modal
+        visible={ownerPickerVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setOwnerPickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.pickerModal, { backgroundColor: colors.surface }]}>
+            <View style={[styles.pickerModalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Owner</Text>
+              <TouchableOpacity onPress={() => setOwnerPickerVisible(false)}>
+                <Text style={[styles.pickerModalClose, { color: colors.primary }]}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.pickerModalScroll}>
+              {owners.map(owner => (
+                <TouchableOpacity
+                  key={owner.id}
+                  style={[
+                    styles.pickerModalItem,
+                    { borderBottomColor: colors.border },
+                    selectedOwner === owner.name && { backgroundColor: colors.primary + '20' }
+                  ]}
+                  onPress={() => {
+                    setSelectedOwner(owner.name);
+                    setOwnerPickerVisible(false);
+                  }}
+                >
+                  <Text style={[styles.pickerModalItemText, { color: colors.text }]}>
+                    {owner.name}
+                  </Text>
+                  {selectedOwner === owner.name && (
+                    <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity
+                style={[styles.pickerModalItem, { borderBottomColor: colors.border, borderTopWidth: 2, borderTopColor: colors.border }]}
+                onPress={() => {
+                  setOwnerPickerVisible(false);
+                  setAddingOwner(true);
+                }}
+              >
+                <Text style={[styles.pickerModalItemText, { color: colors.primary, fontWeight: 'bold' }]}>
+                  + Add new owner...
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -440,34 +557,6 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 20,
     paddingBottom: 40,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backIcon: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#374151',
-  },
-  headerSpacer: {
-    width: 40,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    flex: 1,
   },
   section: {
     marginBottom: 32,
@@ -494,11 +583,72 @@ const styles = StyleSheet.create({
   pickerWrapper: {
     borderRadius: 12,
     borderWidth: 1,
-    overflow: 'hidden',
+    backgroundColor: '#fff',
+    height: 56,
   },
   picker: {
-    height: 56,
     width: '100%',
+    height: 56,
+  },
+  pickerButton: {
+    borderRadius: 12,
+    borderWidth: 1,
+    height: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+  },
+  pickerButtonText: {
+    fontSize: 16,
+    flex: 1,
+  },
+  pickerArrow: {
+    fontSize: 12,
+    marginLeft: 8,
+  },
+  pickerModal: {
+    width: '100%',
+    maxHeight: '70%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    overflow: 'hidden',
+  },
+  pickerModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+  },
+  pickerModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  pickerModalClose: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  pickerModalScroll: {
+    maxHeight: '100%',
+  },
+  pickerModalItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+  },
+  pickerModalItemText: {
+    fontSize: 16,
+    flex: 1,
+  },
+  pickerModalCheck: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
   loadingContainer: {
     flexDirection: 'row',
@@ -588,7 +738,8 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
   },
   modalContent: {
     backgroundColor: '#fff',

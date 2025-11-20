@@ -1,8 +1,8 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -246,16 +246,17 @@ const serialNumberTypes = {
   }
 };
 
-function TabPanel({ children, value, index, ...other }) {
+function TabPanel({ children, value, tabId, ...other }) {
+  const isActive = value === tabId;
   return (
     <div
       role="tabpanel"
-      hidden={value !== index}
-      id={`settings-tabpanel-${index}`}
-      aria-labelledby={`settings-tab-${index}`}
+      hidden={!isActive}
+      id={`settings-tabpanel-${tabId}`}
+      aria-labelledby={`settings-tab-${tabId}`}
       {...other}
     >
-      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
+      {isActive && <Box sx={{ p: 3 }}>{children}</Box>}
     </div>
   );
 }
@@ -264,7 +265,8 @@ export default function Settings() {
   const { user, profile, organization, reloadOrganization, reloadUserData } = useAuth();
   const { isOrgAdmin } = usePermissions();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTabId, setActiveTabId] = useState('profile');
 
   // Loading states
   const [profileLoading, setProfileLoading] = useState(false);
@@ -322,6 +324,15 @@ export default function Settings() {
   });
   const [assetConfigChanged, setAssetConfigChanged] = useState(false);
 
+  // Appearance preferences (per user)
+  const [appearanceSettings, setAppearanceSettings] = useState({
+    primaryColor: '#2563eb',
+    secondaryColor: '#1e40af'
+  });
+  const [appearanceBaseline, setAppearanceBaseline] = useState(null);
+  const [appearanceChanged, setAppearanceChanged] = useState(false);
+  const [appearanceMsg, setAppearanceMsg] = useState('');
+
   // Barcode Format Configuration
   const [barcodeConfig, setBarcodeConfig] = useState({
     barcodeType: 'custom',
@@ -352,7 +363,7 @@ export default function Settings() {
   const [supportSnackbar, setSupportSnackbar] = useState(false);
 
   // Tab configuration based on user role
-  const getTabsConfig = () => {
+  const tabsConfig = useMemo(() => {
     const baseTabs = [
       { label: 'Profile', icon: <AccountCircleIcon />, id: 'profile' },
       { label: 'Security', icon: <SecurityIcon />, id: 'security' },
@@ -361,19 +372,26 @@ export default function Settings() {
       { label: 'Help & Support', icon: <SupportIcon />, id: 'support' },
     ];
 
-    const adminTabs = [];
     if (profile?.role === 'admin' || profile?.role === 'owner') {
-      adminTabs.push(
+      return [
+        ...baseTabs,
         { label: 'Team', icon: <PeopleIcon />, id: 'team' },
         { label: 'Assets', icon: <DataUsageIcon />, id: 'assets' },
         { label: 'Barcodes', icon: <QrCodeIcon />, id: 'barcodes' }
-      );
+      ];
     }
 
-    return [...baseTabs, ...adminTabs];
-  };
+    return baseTabs;
+  }, [profile?.role]);
 
-  const tabsConfig = getTabsConfig();
+  useEffect(() => {
+    if (!tabsConfig.some(tab => tab.id === activeTabId)) {
+      const fallbackId = tabsConfig[0]?.id || 'profile';
+      if (activeTabId !== fallbackId) {
+        setActiveTabId(fallbackId);
+      }
+    }
+  }, [tabsConfig, activeTabId]);
 
   // Initialize data
   useEffect(() => {
@@ -457,6 +475,39 @@ export default function Settings() {
     }
   }, [profile, organization]);
 
+  // Load personal appearance prefs
+  useEffect(() => {
+    if (!user) return;
+
+    const storageKey = `appearancePrefs_${user.id}`;
+    let storedPrefs = null;
+
+    try {
+      storedPrefs = JSON.parse(localStorage.getItem(storageKey));
+    } catch (err) {
+      logger.warn('Failed to parse appearance settings', err);
+    }
+
+    const defaults = storedPrefs || {
+      primaryColor: organization?.primary_color || '#2563eb',
+      secondaryColor: organization?.secondary_color || '#1e40af'
+    };
+
+    setAppearanceSettings(defaults);
+    setAppearanceBaseline(defaults);
+    setAppearanceChanged(false);
+    setAppearanceMsg('');
+  }, [user, organization?.primary_color, organization?.secondary_color]);
+
+  useEffect(() => {
+    if (!appearanceBaseline) return;
+    const changed =
+      appearanceSettings.primaryColor !== appearanceBaseline.primaryColor ||
+      appearanceSettings.secondaryColor !== appearanceBaseline.secondaryColor;
+
+    setAppearanceChanged(changed);
+  }, [appearanceSettings, appearanceBaseline]);
+
 
   // Track changes
   useEffect(() => {
@@ -470,9 +521,7 @@ export default function Settings() {
       assetConfig.assetType !== (organization?.asset_type || 'cylinder') ||
       assetConfig.assetDisplayName !== (organization?.asset_display_name || '') ||
       assetConfig.assetDisplayNamePlural !== (organization?.asset_display_name_plural || '') ||
-      assetConfig.appName !== (organization?.app_name || '') ||
-      assetConfig.primaryColor !== (organization?.primary_color || '#40B5AD') ||
-      assetConfig.secondaryColor !== (organization?.secondary_color || '#48C9B0')
+      assetConfig.appName !== (organization?.app_name || '')
     );
   }, [assetConfig, organization]);
 
@@ -712,6 +761,44 @@ export default function Settings() {
     }
   };
 
+  const handleSaveAppearance = () => {
+    if (!user) return;
+    const storageKey = `appearancePrefs_${user.id}`;
+    const orgDefaults = {
+      primaryColor: organization?.primary_color || '#2563eb',
+      secondaryColor: organization?.secondary_color || '#1e40af'
+    };
+
+    try {
+      if (
+        appearanceSettings.primaryColor === orgDefaults.primaryColor &&
+        appearanceSettings.secondaryColor === orgDefaults.secondaryColor
+      ) {
+        localStorage.removeItem(storageKey);
+      } else {
+        localStorage.setItem(storageKey, JSON.stringify(appearanceSettings));
+      }
+
+      const updatedBaseline = { ...appearanceSettings };
+      setAppearanceBaseline(updatedBaseline);
+      setAppearanceChanged(false);
+      setAppearanceMsg('Saved! Only you will see these colors on this device.');
+      window.dispatchEvent(new Event('appearancePrefsUpdated'));
+    } catch (err) {
+      logger.error('Failed to store appearance preferences', err);
+      setAppearanceMsg('Unable to save appearance preferences. Please try again.');
+    }
+  };
+
+  const handleResetAppearance = () => {
+    const defaults = {
+      primaryColor: organization?.primary_color || '#2563eb',
+      secondaryColor: organization?.secondary_color || '#1e40af'
+    };
+    setAppearanceSettings(defaults);
+    setAppearanceMsg('Reverted to organization colors. Click save to confirm.');
+  };
+
   // Barcode type change handlers
   const handleBarcodeTypeChange = (type) => {
     const selectedType = barcodeTypes[type];
@@ -805,9 +892,29 @@ export default function Settings() {
     }
   };
 
-  const handleTabChange = (event, newValue) => {
-    setActiveTab(newValue);
+  const handleTabChange = (_event, newTabId) => {
+    setActiveTabId(newTabId);
+    if (newTabId) {
+      setSearchParams({ tab: newTabId });
+    } else {
+      setSearchParams({});
+    }
   };
+
+  // Sync the active tab with the ?tab=... query parameter
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (!tabParam) return;
+
+    const exists = tabsConfig.some(tab => tab.id === tabParam);
+
+    if (exists) {
+      setActiveTabId(tabParam);
+    } else {
+      // Strip invalid tabs from the URL so the page doesn't "bounce" back to another tab
+      setSearchParams({});
+    }
+  }, [searchParams, tabsConfig, setSearchParams]);
 
 
   const handleLogoUpload = async (e) => {
@@ -869,7 +976,7 @@ export default function Settings() {
 
         <Card sx={{ border: '1px solid #e2e8f0', borderRadius: 3 }}>
           <Tabs 
-            value={activeTab} 
+            value={activeTabId} 
             onChange={handleTabChange} 
             sx={{ 
               borderBottom: '1px solid #e2e8f0',
@@ -919,12 +1026,15 @@ export default function Settings() {
             variant="scrollable" 
             scrollButtons="auto"
           >
-            {tabsConfig.map((tab, index) => (
+            {tabsConfig.map((tab) => (
               <Tab 
                 key={tab.id} 
                 label={tab.label} 
                 icon={tab.icon} 
                 iconPosition="start"
+                value={tab.id}
+                id={`settings-tab-${tab.id}`}
+                aria-controls={`settings-tabpanel-${tab.id}`}
                 disableRipple={true}
                 disableTouchRipple={true}
                 disableFocusRipple={true}
@@ -950,7 +1060,7 @@ export default function Settings() {
           </Tabs>
           
           {/* Profile Tab */}
-          <TabPanel value={activeTab} index={0}>
+          <TabPanel value={activeTabId} tabId="profile">
             <Typography variant="h4" gutterBottom>
               Profile Settings
             </Typography>
@@ -1000,7 +1110,7 @@ export default function Settings() {
           </TabPanel>
 
           {/* Security Tab */}
-          <TabPanel value={activeTab} index={1}>
+          <TabPanel value={activeTabId} tabId="security">
             <Stack spacing={3}>
               <Paper sx={{ p: 3, backgroundColor: '#fff3cd', border: '1px solid #ffeaa7' }}>
                 <Typography variant="h5" gutterBottom sx={{ color: '#856404' }}>
@@ -1275,54 +1385,118 @@ export default function Settings() {
           </TabPanel>
 
           {/* Appearance Tab */}
-          <TabPanel value={activeTab} index={2}>
+          <TabPanel value={activeTabId} tabId="appearance">
             <Stack spacing={3}>
-              <Typography variant="h5" gutterBottom>Organization Settings</Typography>
-              
-              
+              <Typography variant="h5" gutterBottom>Appearance & Branding</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Update your personal theme colors without affecting anyone else. Organization branding (logo, app name) remains admin-controlled.
+              </Typography>
 
-              {isOrgAdmin && (
-                <Box>
-                  <Typography variant="h6" sx={{ mb: 2 }}>Organization Logo</Typography>
-                  {logoUrl && (
-                    <Box sx={{ mb: 2 }}>
-                      <img 
-                        src={logoUrl} 
-                        alt="Organization Logo" 
-                        style={{ 
-                          maxHeight: 64, 
-                          maxWidth: 128, 
-                          borderRadius: 8, 
-                          border: '1px solid #eee' 
-                        }} 
+              <Grid container spacing={3}>
+                {isOrgAdmin && (
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="h6" sx={{ mb: 2 }}>Organization Logo</Typography>
+                        {logoUrl && (
+                          <Box sx={{ mb: 2 }}>
+                            <img 
+                              src={logoUrl} 
+                              alt="Organization Logo" 
+                              style={{ 
+                                maxHeight: 64, 
+                                maxWidth: 128, 
+                                borderRadius: 8, 
+                                border: '1px solid #eee' 
+                              }} 
+                            />
+                          </Box>
+                        )}
+                        <Button
+                          variant="contained"
+                          component="label"
+                          disabled={logoUploading}
+                          sx={{ mb: 1 }}
+                        >
+                          {logoUploading ? 'Uploading...' : 'Upload Logo'}
+                          <input type="file" accept="image/*" hidden onChange={handleLogoUpload} />
+                        </Button>
+                        {logoMsg && (
+                          <Alert severity={logoMsg.includes('Error') ? 'error' : 'success'} sx={{ mt: 1 }}>
+                            {logoMsg}
+                          </Alert>
+                        )}
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                          Recommended: PNG, JPG, or SVG. Max 1MB.
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                )}
+
+                <Grid item xs={12} md={isOrgAdmin ? 6 : 12}>
+                  <Card>
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        Personal Theme Colors
+                      </Typography>
+                      <Alert severity="info" sx={{ mb: 3 }}>
+                        These colors only change the experience for your account on this device.
+                      </Alert>
+
+                      <TextField
+                        fullWidth
+                        label="Primary Accent Color"
+                        type="color"
+                        value={appearanceSettings.primaryColor}
+                        onChange={(e) => setAppearanceSettings(prev => ({ ...prev, primaryColor: e.target.value }))}
+                        sx={{ mb: 2 }}
                       />
-                    </Box>
-                  )}
-                  <Button
-                    variant="contained"
-                    component="label"
-                    disabled={logoUploading}
-                    sx={{ mb: 1 }}
-                  >
-                    {logoUploading ? 'Uploading...' : 'Upload Logo'}
-                    <input type="file" accept="image/*" hidden onChange={handleLogoUpload} />
-                  </Button>
-                  {logoMsg && (
-                    <Alert severity={logoMsg.includes('Error') ? 'error' : 'success'} sx={{ mt: 1 }}>
-                      {logoMsg}
-                    </Alert>
-                  )}
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    Recommended: PNG, JPG, or SVG. Max 1MB.
-                  </Typography>
-                </Box>
-              )}
+
+                      <TextField
+                        fullWidth
+                        label="Secondary Accent Color"
+                        type="color"
+                        value={appearanceSettings.secondaryColor}
+                        onChange={(e) => setAppearanceSettings(prev => ({ ...prev, secondaryColor: e.target.value }))}
+                        sx={{ mb: 3 }}
+                      />
+
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                        <Button
+                          variant="contained"
+                          onClick={handleSaveAppearance}
+                          startIcon={<SaveIcon />}
+                          disabled={!appearanceChanged}
+                        >
+                          Save Appearance
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          onClick={handleResetAppearance}
+                        >
+                          Reset to Organization Colors
+                        </Button>
+                      </Stack>
+
+                      {appearanceMsg && (
+                        <Alert
+                          severity={appearanceMsg.includes('Unable') ? 'error' : 'success'}
+                          sx={{ mt: 2 }}
+                        >
+                          {appearanceMsg}
+                        </Alert>
+                      )}
+                    </CardContent>
+                  </Card>
+                </Grid>
+              </Grid>
             </Stack>
           </TabPanel>
 
 
           {/* Billing Tab */}
-            <TabPanel value={activeTab} index={3}>
+            <TabPanel value={activeTabId} tabId="billing">
             {profile?.role === 'owner' ? (
               <Box sx={{ p: 3, textAlign: 'center' }}>
                 <Alert severity="info" sx={{ mb: 3 }}>
@@ -1368,7 +1542,7 @@ export default function Settings() {
 
           {/* Team Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
-            <TabPanel value={activeTab} index={4}>
+            <TabPanel value={activeTabId} tabId="team">
               <UserManagement />
             </TabPanel>
           )}
@@ -1376,13 +1550,13 @@ export default function Settings() {
 
           {/* Assets Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
-            <TabPanel value={activeTab} index={5}>
+            <TabPanel value={activeTabId} tabId="assets">
               <Box sx={{ maxWidth: 800 }}>
                 <Typography variant="h4" gutterBottom>
                   Asset Configuration
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                  Configure what type of assets your organization tracks and customize the app branding.
+                  Configure what type of assets your organization tracks.
                 </Typography>
                 
                 <Alert severity="info" sx={{ mb: 3 }}>
@@ -1444,95 +1618,6 @@ export default function Settings() {
                     </Card>
                   </Grid>
 
-                  <Grid item xs={12} md={6}>
-                    <Card>
-                      <CardContent>
-                        <Typography variant="h6" gutterBottom>
-                          App Branding
-                        </Typography>
-                        
-                        <TextField
-                          fullWidth
-                          label="App Name"
-                          value={assetConfig.appName || ''}
-                          onChange={(e) => setAssetConfig(prev => ({ ...prev, appName: e.target.value }))}
-                          sx={{ mb: 2 }}
-                          placeholder="e.g., Scanified"
-                        />
-                        
-                        <TextField
-                          fullWidth
-                          label="Primary Color"
-                          type="color"
-                          value={assetConfig.primaryColor || '#2563eb'}
-                          onChange={(e) => setAssetConfig(prev => ({ ...prev, primaryColor: e.target.value }))}
-                          sx={{ mb: 2 }}
-                        />
-                        
-                        <TextField
-                          fullWidth
-                          label="Secondary Color"
-                          type="color"
-                          value={assetConfig.secondaryColor || '#1e40af'}
-                          onChange={(e) => setAssetConfig(prev => ({ ...prev, secondaryColor: e.target.value }))}
-                          sx={{ mb: 2 }}
-                        />
-                        
-                        <Alert severity="warning" sx={{ mb: 2 }}>
-                          <Typography variant="body2">
-                            <strong>App Icon Configuration:</strong> The database columns for app icon settings are not yet available. 
-                            This feature is coming soon!
-                          </Typography>
-                        </Alert>
-
-                        <TextField
-                          fullWidth
-                          label="App Icon URL (Preview Only)"
-                          value={assetConfig.appIcon || ''}
-                          onChange={(e) => setAssetConfig(prev => ({ ...prev, appIcon: e.target.value }))}
-                          sx={{ mb: 2 }}
-                          placeholder="e.g., /landing-icon.png"
-                          helperText="Preview only - cannot be saved yet"
-                          disabled={true}
-                        />
-                        
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={assetConfig.showAppIcon !== false}
-                              onChange={(e) => setAssetConfig(prev => ({ ...prev, showAppIcon: e.target.checked }))}
-                              disabled={true}
-                            />
-                          }
-                          label="Show app icon in header (disabled)"
-                          sx={{ mb: 1 }}
-                        />
-                        
-                        {assetConfig.appIcon && assetConfig.showAppIcon !== false && (
-                          <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
-                            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                              Icon Preview:
-                            </Typography>
-                            <img 
-                              src={assetConfig.appIcon}
-                              alt="App Icon Preview"
-                              style={{ 
-                                width: 40, 
-                                height: 40, 
-                                borderRadius: 8,
-                                objectFit: 'cover',
-                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                              }}
-                              onError={(e) => {
-                                e.target.style.display = 'none';
-                              }}
-                            />
-                          </Box>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </Grid>
-
                   <Grid item xs={12}>
                     {assetConfigChanged && (
                       <Button
@@ -1557,7 +1642,7 @@ export default function Settings() {
 
           {/* Barcodes Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
-            <TabPanel value={activeTab} index={6}>
+            <TabPanel value={activeTabId} tabId="barcodes">
               <Box sx={{ maxWidth: 800 }}>
                 <Typography variant="h4" gutterBottom sx={{ color: 'primary', fontWeight: 600 }}>
                   📋 Barcode & Number Format Configuration
@@ -1822,7 +1907,7 @@ export default function Settings() {
           )}
 
           {/* Help & Support Tab */}
-          <TabPanel value={activeTab} index={4}>
+          <TabPanel value={activeTabId} tabId="support">
             <Typography variant="h4" gutterBottom>
               Help & Support
             </Typography>

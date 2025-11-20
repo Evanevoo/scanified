@@ -39,6 +39,29 @@ function LoginPage() {
     }
   }, [user]);
 
+  // Prevent backspace from navigating back when typing in input fields
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Only prevent backspace navigation if not in an input/textarea/contenteditable
+      if (e.key === 'Backspace' || e.keyCode === 8) {
+        const target = e.target;
+        const isInput = target.tagName === 'INPUT' || 
+                       target.tagName === 'TEXTAREA' || 
+                       target.isContentEditable;
+        
+        // If backspace is pressed outside an input field, prevent default (browser back navigation)
+        if (!isInput) {
+          e.preventDefault();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   useEffect(() => {
     // Simplified navigation logic
     if (!loading) {
@@ -456,6 +479,13 @@ function LoginPage() {
               margin="normal"
               autoComplete="email"
               autoFocus
+              onKeyDown={(e) => {
+                // Prevent backspace from navigating back when in email field
+                if (e.key === 'Backspace' || e.keyCode === 8) {
+                  // Allow normal backspace behavior in input field
+                  e.stopPropagation();
+                }
+              }}
             />
             <TextField
               fullWidth
@@ -465,6 +495,13 @@ function LoginPage() {
               required
               margin="normal"
               autoComplete="current-password"
+              onKeyDown={(e) => {
+                // Prevent backspace from navigating back when in password field
+                if (e.key === 'Backspace' || e.keyCode === 8) {
+                  // Allow normal backspace behavior in input field
+                  e.stopPropagation();
+                }
+              }}
             />
             
             <Box sx={{ mt: 2, mb: 2, textAlign: 'right' }}>

@@ -306,7 +306,8 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
             style={[
               styles.actionButton, 
               styles.shipButton,
-              selectedAction === 'out' && styles.selectedActionButton
+              selectedAction === 'out' && styles.selectedActionButton,
+              { backgroundColor: 'transparent' }
             ]}
             onPress={() => setSelectedAction('out')}
           >
@@ -320,7 +321,8 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
             style={[
               styles.actionButton, 
               styles.returnButton,
-              selectedAction === 'in' && styles.selectedActionButton
+              selectedAction === 'in' && styles.selectedActionButton,
+              { backgroundColor: 'transparent' }
             ]}
             onPress={() => setSelectedAction('in')}
           >
@@ -551,7 +553,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 20,
-    backgroundColor: '#000',
+    backgroundColor: 'transparent',
   },
   manualEntryButton: {
     width: 50,
@@ -571,7 +573,7 @@ const styles = StyleSheet.create({
   actionButton: {
     width: 80,
     height: 80,
-    backgroundColor: '#333',
+    backgroundColor: 'transparent',
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -585,7 +587,7 @@ const styles = StyleSheet.create({
     borderColor: '#FF0000',
   },
   selectedActionButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: 'transparent',
   },
   actionButtonText: {
     color: '#fff',

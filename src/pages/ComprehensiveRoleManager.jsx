@@ -49,7 +49,7 @@ export default function ComprehensiveRoleManager() {
         { id: 'file_format_manager', title: 'File Format Manager', path: '/file-format-manager' },
         { id: 'import_asset_balance', title: 'Import Asset Balance', path: '/import-asset-balance' },
         { id: 'organization_tools', title: 'Organization Tools', path: '/organization-tools' },
-        { id: 'user_management', title: 'User Management', path: '/user-management' },
+        { id: 'user_management', title: 'User Management', path: '/settings?tab=team' },
         { id: 'join_codes', title: 'Join Codes', path: '/organization-join-codes' },
         { id: 'role_management', title: 'Role Management', path: '/comprehensive-role-manager' },
         { id: 'billing', title: 'Billing', path: '/billing' },

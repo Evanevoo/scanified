@@ -52,7 +52,7 @@ export default function OrganizationJoinScreen({
             *,
             organization:organizations(name, slug)
           `)
-          .eq('token', inviteToken)
+          .eq('invite_token', inviteToken)
           .single();
 
         if (!error && inviteData && inviteData.email.toLowerCase() === user.email.toLowerCase()) {

@@ -173,9 +173,7 @@ function AppContent() {
             <Stack.Screen 
               name="EditCylinder" 
               component={EditCylinderScreen}
-              options={{ 
-                headerShown: false,
-              }}
+              options={{ title: 'Edit Cylinder' }}
             />
             <Stack.Screen 
               name="CylinderDetails" 

@@ -365,7 +365,7 @@ export default function HistoryScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Unverified Scans (Last 24h)</Text>
-      {loading ? <ActivityIndicator color="#2563eb" /> : error ? <Text style={styles.error}>{error}</Text> : (
+      {loading ? <ActivityIndicator color="#40B5AD" /> : error ? <Text style={styles.error}>{error}</Text> : (
         <FlatList
           data={scans}
           keyExtractor={item => item.id}
@@ -518,9 +518,9 @@ export default function HistoryScreen() {
             {/* Action Buttons */}
             <View style={{ flexDirection: 'row', marginTop: 12 }}>
               <TouchableOpacity style={[styles.btn, { backgroundColor: '#eee', flex: 1, marginRight: 8 }]} onPress={() => setEditScan(null)}>                   
-                <Text style={{ color: '#2563eb', fontWeight: 'bold' }}>Cancel</Text>                                                                            
+                <Text style={{ color: '#40B5AD', fontWeight: 'bold' }}>Cancel</Text>                                                                            
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.btn, { backgroundColor: '#2563eb', flex: 1, marginLeft: 8 }]} onPress={saveEdit} disabled={saving}>              
+              <TouchableOpacity style={[styles.btn, { backgroundColor: '#40B5AD', flex: 1, marginLeft: 8 }]} onPress={saveEdit} disabled={saving}>              
                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>{saving ? 'Saving...' : 'Save'}</Text>                                                      
               </TouchableOpacity>
             </View>
@@ -559,13 +559,13 @@ export default function HistoryScreen() {
                     setShowCustomerPicker(false);
                   }}
                 >
-                  <Text style={[styles.customerItemText, editCustomer === customer.name && { fontWeight: 'bold', color: '#2563eb' }]}>
+                  <Text style={[styles.customerItemText, editCustomer === customer.name && { fontWeight: 'bold', color: '#40B5AD' }]}>
                     {editCustomer === customer.name && '✓ '}{customer.name}
                   </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <TouchableOpacity style={[styles.btn, { backgroundColor: '#2563eb', marginTop: 18 }]} onPress={() => setShowCustomerPicker(false)}>
+            <TouchableOpacity style={[styles.btn, { backgroundColor: '#40B5AD', marginTop: 18 }]} onPress={() => setShowCustomerPicker(false)}>
               <Text style={{ color: '#fff', fontWeight: 'bold' }}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -584,7 +584,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#2563eb',
+    color: '#40B5AD',
     marginBottom: 16,
     textAlign: 'center',
   },
@@ -605,7 +605,7 @@ const styles = StyleSheet.create({
   scanBarcode: {
     fontWeight: 'bold',
     fontSize: 16,
-    color: '#2563eb',
+    color: '#40B5AD',
     marginBottom: 2,
   },
   scanCustomer: {
@@ -649,7 +649,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontWeight: 'bold',
     fontSize: 18,
-    color: '#2563eb',
+    color: '#40B5AD',
     marginBottom: 12,
     textAlign: 'center',
   },
@@ -702,7 +702,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   addButtonText: {
-    color: '#2563eb',
+    color: '#40B5AD',
     fontWeight: '600',
     fontSize: 14,
   },
@@ -776,7 +776,7 @@ const styles = StyleSheet.create({
   itemDetailsLabel: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#2563eb',
+    color: '#40B5AD',
     marginBottom: 4,
   },
   itemDetailsText: {

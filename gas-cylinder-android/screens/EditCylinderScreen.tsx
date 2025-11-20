@@ -209,25 +209,13 @@ export default function EditCylinderScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header with Return Button */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Edit Cylinder</Text>
-        <View style={styles.headerSpacer} />
-      </View>
-      
       {step === 1 && (
-        <>
+        <View style={{ flex: 1, paddingTop: 20 }}>
           <Text style={styles.stepTitle}>Scan or Enter Cylinder Barcode</Text>
           <View style={{ position: 'relative' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { flex: 1 }]}
                 placeholder="Enter barcode"
                 value={barcode}
                 onChangeText={setBarcode}
@@ -265,11 +253,10 @@ export default function EditCylinderScreen() {
             <Text style={styles.nextButtonText}>Next</Text>
           </TouchableOpacity>
           {error ? <Text style={styles.error}>{error}</Text> : null}
-        </>
+        </View>
       )}
       {step === 2 && cylinder && (
-        <>
-          <Text style={styles.title}>Edit Cylinder Info</Text>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 20, paddingBottom: 20 }}>
           <Text style={styles.label}>Barcode</Text>
           <TextInput
             style={styles.input}
@@ -343,9 +330,9 @@ export default function EditCylinderScreen() {
             <Text style={styles.nextButtonText}>Save</Text>
           </TouchableOpacity>
           {error ? <Text style={styles.error}>{error}</Text> : null}
-        </>
+        </ScrollView>
       )}
-      {loading && <ActivityIndicator size="large" color="#2563eb" style={{ marginTop: 20 }} />}
+      {loading && <ActivityIndicator size="large" color="#40B5AD" style={{ marginTop: 20 }} />}
       {/* Scanner Modal */}
       {scannerVisible && (
         <View style={styles.scannerModal}>
@@ -374,7 +361,7 @@ export default function EditCylinderScreen() {
                     ]
                   );
                 }
-              }} style={{ backgroundColor: '#2563eb', padding: 16, borderRadius: 10 }}>
+              }} style={{ backgroundColor: '#40B5AD', padding: 16, borderRadius: 10 }}>
                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>Continue</Text>
               </TouchableOpacity>
             </View>
@@ -394,19 +381,25 @@ export default function EditCylinderScreen() {
                 width: '90%',
                 height: '18%',
                 borderWidth: 3,
-                borderColor: '#2563eb',
+                borderColor: '#40B5AD',
                 borderRadius: 18,
                 backgroundColor: 'rgba(0,0,0,0.0)',
                 zIndex: 10,
               }} />
-              {/* Optional: darken area outside border */}
-              <View style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '25%', backgroundColor: 'rgba(0,0,0,0.35)' }} />
-              <View style={{ position: 'absolute', top: '75%', left: 0, width: '100%', height: '25%', backgroundColor: 'rgba(0,0,0,0.35)' }} />
-              <View style={{ position: 'absolute', top: '25%', left: 0, width: '10%', height: '50%', backgroundColor: 'rgba(0,0,0,0.35)' }} />
-              <View style={{ position: 'absolute', top: '25%', right: 0, width: '10%', height: '50%', backgroundColor: 'rgba(0,0,0,0.35)' }} />
             </View>
           )}
-          <TouchableOpacity onPress={() => setScannerVisible(false)} style={{ marginTop: 24, backgroundColor: '#2563eb', padding: 16, borderRadius: 10 }}>
+          <TouchableOpacity 
+            onPress={() => setScannerVisible(false)} 
+            style={{ 
+              position: 'absolute',
+              bottom: 50,
+              alignSelf: 'center',
+              backgroundColor: '#40B5AD', 
+              padding: 16, 
+              borderRadius: 10,
+              zIndex: 1000,
+            }}
+          >
             <Text style={{ color: '#fff', fontWeight: 'bold' }}>Close</Text>
           </TouchableOpacity>
         </View>
@@ -420,58 +413,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8FAFC',
     padding: 24,
-    justifyContent: 'center',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-    position: 'absolute',
-    top: 50,
-    left: 24,
-    right: 24,
-    zIndex: 10,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backIcon: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#374151',
-  },
-  headerSpacer: {
-    width: 40,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2563eb',
-    textAlign: 'center',
-    flex: 1,
   },
   stepTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#2563eb',
+    color: '#40B5AD',
     marginBottom: 16,
     textAlign: 'center',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#2563eb',
+    borderColor: '#40B5AD',
     borderRadius: 10,
-    padding: 12,
+    padding: 10,
     fontSize: 16,
     marginBottom: 12,
     backgroundColor: '#fff',
-    flex: 1,
+    minHeight: 44,
   },
   label: {
     fontWeight: 'bold',
@@ -480,7 +438,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   nextButton: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#40B5AD',
     paddingVertical: 14,
     borderRadius: 16,
     alignItems: 'center',
@@ -505,7 +463,7 @@ const styles = StyleSheet.create({
   },
   scannerModal: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.95)',
+    backgroundColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 100,
@@ -515,7 +473,7 @@ const styles = StyleSheet.create({
     top: 50,
     left: 20,
     zIndex: 1000,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.9)',
     borderRadius: 20,
     width: 40,
     height: 40,
@@ -523,7 +481,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   scannerCloseIcon: {
-    color: '#fff',
+    color: '#374151',
     fontSize: 20,
     fontWeight: 'bold',
   },

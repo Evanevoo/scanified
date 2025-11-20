@@ -152,7 +152,18 @@ export async function getCustomerSuggestions(searchTerm, limit = 10) {
 }
 
 /**
- * Batch find customers efficiently (single query)
+ * Normalize CustomerListID for comparison (lowercase, remove trailing letters)
+ * @param {string} id - CustomerListID
+ * @returns {string} Normalized ID
+ */
+function normalizeCustomerId(id) {
+  if (!id) return '';
+  // Convert to lowercase and remove trailing letters (e.g., "80000C0A-1744057121A" -> "80000c0a-1744057121")
+  return id.toLowerCase().trim().replace(/[a-z]+$/, '');
+}
+
+/**
+ * Batch find customers efficiently (chunked queries to avoid URL length limits)
  * @param {Array} customers - Array of customer objects with {name, CustomerListID}
  * @param {string} organizationId - Organization ID for filtering
  * @returns {Promise<Object>} Map of customer key to found customer
@@ -175,34 +186,142 @@ export async function batchFindCustomers(customers, organizationId = null) {
   
   if (!organizationId) return {};
   
-  // Extract all CustomerListIDs and names for batch lookup
-  const customerIds = customers.map(c => c.CustomerListID).filter(Boolean);
-  const customerNames = customers.map(c => c.name).filter(Boolean);
+  // Normalize and deduplicate customer IDs and names
+  const normalizedIds = new Set();
+  const idMap = new Map(); // normalized -> original
+  const normalizedNames = new Set();
+  const nameMap = new Map(); // normalized -> original
   
-  // Single query to get all existing customers
-  let query = supabase
-    .from('customers')
-    .select('CustomerListID, name, contact_details, phone, address2, address3, address4, address5, city, postal_code, barcode')
-    .eq('organization_id', organizationId);
-  
-  // Build OR condition for IDs and names
-  const orConditions = [];
-  if (customerIds.length > 0) {
-    orConditions.push(...customerIds.map(id => `CustomerListID.ilike.${id.trim()}`));
+  for (const customer of customers) {
+    if (customer.CustomerListID) {
+      const normalized = normalizeCustomerId(customer.CustomerListID);
+      if (normalized) {
+        normalizedIds.add(normalized);
+        if (!idMap.has(normalized)) {
+          idMap.set(normalized, []);
+        }
+        idMap.get(normalized).push(customer.CustomerListID);
+      }
+    }
+    if (customer.name) {
+      const normalized = customer.name.toLowerCase().trim();
+      if (normalized) {
+        normalizedNames.add(normalized);
+        if (!nameMap.has(normalized)) {
+          nameMap.set(normalized, []);
+        }
+        nameMap.get(normalized).push(customer.name);
+      }
+    }
   }
-  if (customerNames.length > 0) {
-    orConditions.push(...customerNames.map(name => `name.ilike.${name.trim()}`));
+  
+  // Fetch all existing customers in chunks to avoid URL length limits
+  // Since we're normalizing IDs, we need to fetch all customers and match in JavaScript
+  // But to optimize, we'll fetch in chunks using pattern matching
+  const CHUNK_SIZE = 100; // Limit OR conditions per query
+  const allExistingCustomers = [];
+  const seenCustomerKeys = new Set(); // Track unique customers by ID+name
+  
+  // Fetch by normalized IDs in chunks
+  // Use exact match with ilike (case-insensitive) - we'll handle trailing letter matching in JavaScript
+  const idArray = Array.from(normalizedIds);
+  for (let i = 0; i < idArray.length; i += CHUNK_SIZE) {
+    const chunk = idArray.slice(i, i + CHUNK_SIZE);
+    const orConditions = chunk.map(id => {
+      // Use exact match with ilike (case-insensitive)
+      // PostgREST will handle URL encoding automatically
+      return `CustomerListID.ilike.${id}`;
+    });
+    
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('CustomerListID, name, contact_details, phone, address2, address3, address4, address5, city, postal_code, barcode')
+        .eq('organization_id', organizationId)
+        .or(orConditions.join(','));
+      
+      if (error) {
+        logger.error(`Error in batch customer lookup (chunk ${Math.floor(i / CHUNK_SIZE) + 1}):`, error);
+      } else if (data) {
+        for (const customer of data) {
+          const key = `${customer.CustomerListID}_${customer.name}`;
+          if (!seenCustomerKeys.has(key)) {
+            seenCustomerKeys.add(key);
+            allExistingCustomers.push(customer);
+          }
+        }
+      }
+    } catch (err) {
+      logger.error(`Error fetching customer chunk:`, err);
+    }
   }
   
-  if (orConditions.length > 0) {
-    query = query.or(orConditions.join(','));
+  // Also fetch customers that might match with trailing letters
+  // We'll do this by fetching customers whose IDs start with our normalized IDs
+  // Use a different approach: fetch all customers and filter in JavaScript for better performance
+  // But first, let's try to fetch by pattern matching for IDs that start with normalized ID
+  for (let i = 0; i < idArray.length; i += CHUNK_SIZE) {
+    const chunk = idArray.slice(i, i + CHUNK_SIZE);
+    const orConditions = chunk.map(id => {
+      // Use pattern matching to find IDs that start with normalized ID (handles trailing letters)
+      return `CustomerListID.ilike.*${id}*`;
+    });
+    
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('CustomerListID, name, contact_details, phone, address2, address3, address4, address5, city, postal_code, barcode')
+        .eq('organization_id', organizationId)
+        .or(orConditions.join(','));
+      
+      if (error) {
+        // Pattern matching might not be supported, skip silently
+        logger.log(`Pattern matching not available, using exact matches only`);
+      } else if (data) {
+        for (const customer of data) {
+          const key = `${customer.CustomerListID}_${customer.name}`;
+          if (!seenCustomerKeys.has(key)) {
+            seenCustomerKeys.add(key);
+            allExistingCustomers.push(customer);
+          }
+        }
+      }
+    } catch (err) {
+      // Pattern matching might fail, that's okay - we'll match in JavaScript
+      logger.log(`Pattern matching failed, will match in JavaScript:`, err.message);
+    }
   }
   
-  const { data: existingCustomers, error } = await query;
-  
-  if (error) {
-    logger.error('Error in batch customer lookup:', error);
-    return {};
+  // Fetch by normalized names in chunks
+  const nameArray = Array.from(normalizedNames);
+  for (let i = 0; i < nameArray.length; i += CHUNK_SIZE) {
+    const chunk = nameArray.slice(i, i + CHUNK_SIZE);
+    const orConditions = chunk.map(name => {
+      return `name.ilike.${name}`;
+    });
+    
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('CustomerListID, name, contact_details, phone, address2, address3, address4, address5, city, postal_code, barcode')
+        .eq('organization_id', organizationId)
+        .or(orConditions.join(','));
+      
+      if (error) {
+        logger.error(`Error in batch customer lookup by name (chunk ${Math.floor(i / CHUNK_SIZE) + 1}):`, error);
+      } else if (data) {
+        // Only add if not already in allExistingCustomers (avoid duplicates)
+        for (const customer of data) {
+          const key = `${customer.CustomerListID}_${customer.name}`;
+          if (!seenCustomerKeys.has(key)) {
+            seenCustomerKeys.add(key);
+            allExistingCustomers.push(customer);
+          }
+        }
+      }
+    } catch (err) {
+      logger.error(`Error fetching customer chunk by name:`, err);
+    }
   }
   
   // Create lookup map with enhanced matching
@@ -212,29 +331,24 @@ export async function batchFindCustomers(customers, organizationId = null) {
     const key = `${customer.CustomerListID || ''}_${customer.name || ''}`;
     
     // Find matching existing customer with multiple strategies
-    const found = existingCustomers?.find(existing => {
-      // Strategy 1: Exact ID match (case-insensitive)
+    const found = allExistingCustomers?.find(existing => {
+      // Strategy 1: Normalized ID match (handles case and trailing letters)
       if (customer.CustomerListID && existing.CustomerListID) {
-        if (existing.CustomerListID.toLowerCase() === customer.CustomerListID.toLowerCase()) {
-          return true;
-        }
-        
-        // Strategy 2: Similar ID match (handle cases like 800006B3-1611180703 vs 800006B3-1611180703A)
-        const customerIdBase = customer.CustomerListID.toLowerCase().replace(/[a-z]+$/, '');
-        const existingIdBase = existing.CustomerListID.toLowerCase().replace(/[a-z]+$/, '');
-        if (customerIdBase && existingIdBase && customerIdBase === existingIdBase && customerIdBase.length > 5) {
+        const customerIdNorm = normalizeCustomerId(customer.CustomerListID);
+        const existingIdNorm = normalizeCustomerId(existing.CustomerListID);
+        if (customerIdNorm && existingIdNorm && customerIdNorm === existingIdNorm) {
           return true;
         }
       }
       
-      // Strategy 3: Exact name match (case-insensitive)
+      // Strategy 2: Exact name match (case-insensitive)
       if (customer.name && existing.name) {
         if (existing.name.toLowerCase().trim() === customer.name.toLowerCase().trim()) {
           return true;
         }
       }
       
-      // Strategy 4: Name similarity (fuzzy match for slight variations)
+      // Strategy 3: Name similarity (fuzzy match for slight variations)
       if (customer.name && existing.name) {
         const customerNameNorm = customer.name.toLowerCase().replace(/[^a-z0-9]/g, '');
         const existingNameNorm = existing.name.toLowerCase().replace(/[^a-z0-9]/g, '');

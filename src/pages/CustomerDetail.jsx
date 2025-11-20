@@ -486,6 +486,7 @@ export default function CustomerDetail() {
       city: editForm.city,
       postal_code: editForm.postal_code,
       customer_type: editForm.customer_type || 'CUSTOMER',
+      location: editForm.location,
       // Include barcode if provided (empty string allowed to clear)
       barcode: normalizedBarcode || null
     };

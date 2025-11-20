@@ -17,6 +17,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
+import { useDebounce } from '../utils/performance';
 
 export default function BulkRentalPricingManager() {
   const { organization } = useAuth();
@@ -27,6 +28,7 @@ export default function BulkRentalPricingManager() {
   const [saving, setSaving] = useState(false);
   const [selectedCustomers, setSelectedCustomers] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
   const [sortByPeriod, setSortByPeriod] = useState('all'); // all, monthly, yearly
   const [bulkPricing, setBulkPricing] = useState({
     discountPercent: 0,
@@ -178,25 +180,13 @@ export default function BulkRentalPricingManager() {
   const filteredCustomers = useMemo(() => {
     let filtered = customers;
 
-    logger.log('Filtering customers:', {
-      totalCustomers: customers.length,
-      searchTerm,
-      sortByPeriod,
-      customerPricingCount: customerPricing.length,
-      customerPricingData: customerPricing.map(p => ({
-        customer_id: p.customer_id,
-        rental_period: p.rental_period,
-        discount_percent: p.discount_percent
-      }))
-    });
-
-    // Filter by search term
-    if (searchTerm) {
+    // Filter by search term (using debounced value)
+    if (debouncedSearchTerm) {
+      const searchLower = debouncedSearchTerm.toLowerCase();
       filtered = filtered.filter(customer => 
-        customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        customer.CustomerListID.toLowerCase().includes(searchTerm.toLowerCase())
+        customer.name?.toLowerCase().includes(searchLower) ||
+        customer.CustomerListID?.toLowerCase().includes(searchLower)
       );
-      logger.log('After search filter:', filtered.length);
     }
 
     // Filter by rental period
@@ -205,24 +195,17 @@ export default function BulkRentalPricingManager() {
         const currentPricing = customerPricing.find(p => p.customer_id === customer.CustomerListID);
         
         if (sortByPeriod === 'no-pricing') {
-          const hasNoPricing = !currentPricing;
-          logger.log(`Customer ${customer.name}: no pricing = ${hasNoPricing}`);
-          return hasNoPricing;
+          return !currentPricing;
         } else {
           // Check if customer has pricing with the specific rental period
-          // Handle case where rental_period might be null/undefined (default to monthly)
           const customerPeriod = currentPricing?.rental_period || 'monthly';
-          const hasCorrectPeriod = currentPricing && customerPeriod === sortByPeriod;
-          logger.log(`Customer ${customer.name}: pricing = ${!!currentPricing}, period = ${customerPeriod}, matches ${sortByPeriod} = ${hasCorrectPeriod}`);
-          return hasCorrectPeriod;
+          return currentPricing && customerPeriod === sortByPeriod;
         }
       });
-      logger.log('After period filter:', filtered.length);
     }
 
-    logger.log('Final filtered customers:', filtered.length);
     return filtered;
-  }, [customers, searchTerm, sortByPeriod, customerPricing]);
+  }, [customers, debouncedSearchTerm, sortByPeriod, customerPricing]);
 
   const applyBulkPricing = async () => {
     if (selectedCustomers.length === 0) {
@@ -254,18 +237,31 @@ export default function BulkRentalPricingManager() {
 
       logger.log('Pricing records to insert:', pricingRecords);
 
-      // Delete existing pricing for selected customers
-      logger.log('Deleting existing pricing for customers:', selectedCustomers);
-      const { error: deleteError } = await supabase
-        .from('customer_pricing')
-        .delete()
-        .eq('organization_id', organization.id)
-        .in('customer_id', selectedCustomers);
-
-      if (deleteError) {
-        logger.error('Error deleting existing pricing:', deleteError);
-        throw new Error(`Failed to delete existing pricing: ${deleteError.message || deleteError.details || 'Unknown error'}`);
+      // Delete existing pricing for selected customers (batched to avoid URL length limits)
+      logger.log('Deleting existing pricing for customers:', selectedCustomers.length);
+      const BATCH_SIZE = 100;
+      const batches = [];
+      for (let i = 0; i < selectedCustomers.length; i += BATCH_SIZE) {
+        batches.push(selectedCustomers.slice(i, i + BATCH_SIZE));
       }
+      
+      logger.log(`Splitting ${selectedCustomers.length} customer IDs into ${batches.length} batches for deletion`);
+      
+      // Delete in batches
+      for (const batch of batches) {
+        const { error: deleteError } = await supabase
+          .from('customer_pricing')
+          .delete()
+          .eq('organization_id', organization.id)
+          .in('customer_id', batch);
+
+        if (deleteError) {
+          logger.error('Error deleting existing pricing batch:', deleteError);
+          throw new Error(`Failed to delete existing pricing: ${deleteError.message || deleteError.details || 'Unknown error'}`);
+        }
+      }
+      
+      logger.log('Successfully deleted existing pricing for all customers');
 
       // Insert new pricing records
       logger.log('Inserting new pricing records...');
@@ -544,6 +540,7 @@ export default function BulkRentalPricingManager() {
               placeholder="Search by name or customer ID..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              size="small"
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
@@ -555,7 +552,7 @@ export default function BulkRentalPricingManager() {
           </Grid>
           
           <Grid item xs={12} md={6}>
-            <FormControl fullWidth>
+            <FormControl fullWidth size="small">
               <InputLabel>Filter by Rental Period</InputLabel>
               <Select
                 value={sortByPeriod}

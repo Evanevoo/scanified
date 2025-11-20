@@ -27,7 +27,7 @@ import {
   Map as MapIcon,
   Navigation as NavigationIcon,
   Speed as SpeedIcon,
-  Eco as EcoIcon,
+  Nature as EcoIcon,
   Warning as WarningIcon,
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,

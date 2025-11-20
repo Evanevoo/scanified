@@ -10,8 +10,6 @@ import CloudSyncIcon from '@mui/icons-material/CloudSync';
 import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../hooks/useAssetConfig';
 import AnimatedSection from '../components/AnimatedSection';
-import CTABanner from '../components/CTABanner';
-
 export default function LandingPage() {
   const navigate = useNavigate();
   const { profile, organization } = useAuth();
@@ -148,41 +146,39 @@ export default function LandingPage() {
             <Typography variant="h6" fontWeight={600} sx={{ mb: 3, textAlign: 'center' }}>
               Two Ways to Get Started
             </Typography>
-            <Grid container spacing={3}>
+            <Grid container spacing={3} alignItems="stretch">
               <Grid item xs={12} md={6}>
-                <Box sx={{ textAlign: 'center', p: 2 }}>
+                <Box sx={{ 
+                  textAlign: 'center', 
+                  p: 3,
+                  height: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center'
+                }}>
                   <Typography variant="h6" fontWeight={600} color="primary.main" sx={{ mb: 1 }}>
                     🏢 Create Your Organization
                   </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary">
                     Start your own organization and invite team members. Perfect for business owners and managers.
                   </Typography>
-                  <Button 
-                    variant="contained" 
-                    size="small"
-                    onClick={() => navigate('/create-organization')}
-                    sx={{ textTransform: 'none' }}
-                  >
-                    Create Organization
-                  </Button>
                 </Box>
               </Grid>
               <Grid item xs={12} md={6}>
-                <Box sx={{ textAlign: 'center', p: 2 }}>
+                <Box sx={{ 
+                  textAlign: 'center', 
+                  p: 3,
+                  height: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center'
+                }}>
                   <Typography variant="h6" fontWeight={600} color="success.main" sx={{ mb: 1 }}>
                     🔗 Join with Code/Link
                   </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary">
                     Received an invitation link or join code? Sign in to connect to your organization.
                   </Typography>
-                  <Button 
-                    variant="outlined" 
-                    size="small"
-                    onClick={() => navigate('/login')}
-                    sx={{ textTransform: 'none' }}
-                  >
-                    Sign In to Join
-                  </Button>
                 </Box>
               </Grid>
             </Grid>
@@ -190,143 +186,66 @@ export default function LandingPage() {
         </Box>
 
         {/* Key Benefits Section */}
-        <Box sx={{ textAlign: 'center', mb: 8 }}>
-          <Grid container spacing={4} sx={{ maxWidth: 800, mx: 'auto' }}>
-            <Grid item xs={12} sm={4}>
+        <Box sx={{ textAlign: 'center', mb: 8, display: 'flex', justifyContent: 'center' }}>
+          <Grid container spacing={4} sx={{ maxWidth: 800, justifyContent: 'center' }} alignItems="stretch">
+            <Grid item xs={12} sm={4} sx={{ display: 'flex' }}>
               <Box sx={{ 
                 p: 3, 
                 borderRadius: 3, 
                 bgcolor: 'rgba(59, 130, 246, 0.05)',
-                border: '1px solid rgba(59, 130, 246, 0.1)'
+                border: '1px solid rgba(59, 130, 246, 0.1)',
+                width: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-start'
               }}>
-                <Typography variant="h6" fontWeight={600} color="primary.main" sx={{ mb: 1 }}>
+                <Typography variant="h6" fontWeight={600} color="primary.main" sx={{ mb: 1, minHeight: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   Mobile-First
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" color="text.secondary" sx={{ minHeight: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   Scan and track assets from any smartphone or tablet
                 </Typography>
               </Box>
             </Grid>
-            <Grid item xs={12} sm={4}>
+            <Grid item xs={12} sm={4} sx={{ display: 'flex' }}>
               <Box sx={{ 
                 p: 3, 
                 borderRadius: 3, 
                 bgcolor: 'rgba(16, 185, 129, 0.05)',
-                border: '1px solid rgba(16, 185, 129, 0.1)'
+                border: '1px solid rgba(16, 185, 129, 0.1)',
+                width: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-start'
               }}>
-                <Typography variant="h6" fontWeight={600} color="success.main" sx={{ mb: 1 }}>
+                <Typography variant="h6" fontWeight={600} color="success.main" sx={{ mb: 1, minHeight: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   Real-Time Sync
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" color="text.secondary" sx={{ minHeight: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   Instant updates across all devices and team members
                 </Typography>
               </Box>
             </Grid>
-            <Grid item xs={12} sm={4}>
+            <Grid item xs={12} sm={4} sx={{ display: 'flex' }}>
               <Box sx={{ 
                 p: 3, 
                 borderRadius: 3, 
                 bgcolor: 'rgba(245, 158, 11, 0.05)',
-                border: '1px solid rgba(245, 158, 11, 0.1)'
+                border: '1px solid rgba(245, 158, 11, 0.1)',
+                width: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-start'
               }}>
-                <Typography variant="h6" fontWeight={600} color="warning.main" sx={{ mb: 1 }}>
+                <Typography variant="h6" fontWeight={600} color="warning.main" sx={{ mb: 1, minHeight: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   Easy Setup
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" color="text.secondary" sx={{ minHeight: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   Get started in minutes with simple onboarding
                 </Typography>
               </Box>
             </Grid>
           </Grid>
-        </Box>
-
-        {/* Interactive Demo Preview */}
-        <Box sx={{ textAlign: 'center', mb: 8 }}>
-          <Box
-            sx={{
-              width: '100%',
-              maxWidth: 900,
-              mx: 'auto',
-              position: 'relative',
-              borderRadius: 4,
-              overflow: 'hidden',
-              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.15)',
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              p: 4,
-            }}
-          >
-            <Box sx={{ 
-              bgcolor: 'white', 
-              borderRadius: 3, 
-              p: 3,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 3,
-            }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                <QrCodeScannerIcon sx={{ fontSize: 40, color: 'primary.main' }} />
-                <Typography variant="h6" fontWeight={600}>
-                  Scan, Track, Manage
-                </Typography>
-              </Box>
-              
-              <Grid container spacing={2} sx={{ width: '100%', maxWidth: 600 }}>
-                <Grid item xs={4}>
-                  <Box sx={{ 
-                    bgcolor: 'grey.100', 
-                    borderRadius: 2, 
-                    p: 2, 
-                    textAlign: 'center',
-                    border: '2px solid #3B82F6',
-                  }}>
-                    <PhoneIphoneIcon sx={{ color: 'primary.main', mb: 1 }} />
-                    <Typography variant="caption" display="block">
-                      Mobile Scanning
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={4}>
-                  <Box sx={{ 
-                    bgcolor: 'grey.100', 
-                    borderRadius: 2, 
-                    p: 2, 
-                    textAlign: 'center',
-                    border: '2px solid #10B981',
-                  }}>
-                    <CloudSyncIcon sx={{ color: 'success.main', mb: 1 }} />
-                    <Typography variant="caption" display="block">
-                      Real-time Sync
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={4}>
-                  <Box sx={{ 
-                    bgcolor: 'grey.100', 
-                    borderRadius: 2, 
-                    p: 2, 
-                    textAlign: 'center',
-                    border: '2px solid #F59E0B',
-                  }}>
-                    <SpeedIcon sx={{ color: 'warning.main', mb: 1 }} />
-                    <Typography variant="caption" display="block">
-                      Instant Reports
-                    </Typography>
-                  </Box>
-                </Grid>
-              </Grid>
-              
-              <Button
-                variant="contained"
-                size="small"
-                startIcon={<QrCodeScannerIcon />}
-                sx={{ mt: 2 }}
-                onClick={() => navigate('/demo')}
-              >
-                Try Interactive Demo
-              </Button>
-            </Box>
-          </Box>
         </Box>
       </Container>
 
@@ -373,154 +292,6 @@ export default function LandingPage() {
         </Container>
       </Box>
 
-      {/* Why Choose Us Section */}
-      <Box sx={{ py: 12 }}>
-        <Container maxWidth="lg">
-          <Box sx={{ textAlign: 'center', mb: 8 }}>
-            <Typography variant="h2" fontWeight={700} sx={{ mb: 3 }}>
-              Why Choose Scanified?
-            </Typography>
-            <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto' }}>
-              Built specifically for modern businesses that need reliable, scalable asset management
-            </Typography>
-          </Box>
-
-          <Grid container spacing={4}>
-            <Grid item xs={12} md={6}>
-              <Card sx={{ 
-                p: 4, 
-                height: '100%',
-                borderRadius: 3,
-                border: '1px solid #e2e8f0',
-                transition: 'all 0.3s ease',
-                '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: '0 12px 24px rgba(0, 0, 0, 0.1)'
-                }
-              }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-                  <QrCodeScannerIcon sx={{ fontSize: 32, color: 'primary.main' }} />
-                  <Typography variant="h5" fontWeight={600}>
-                    No Expensive Hardware
-                  </Typography>
-                </Box>
-                <Typography variant="body1" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-                  Use any smartphone or tablet to scan barcodes and QR codes. No need for expensive handheld scanners or specialized equipment.
-                </Typography>
-              </Card>
-            </Grid>
-            
-            <Grid item xs={12} md={6}>
-              <Card sx={{ 
-                p: 4, 
-                height: '100%',
-                borderRadius: 3,
-                border: '1px solid #e2e8f0',
-                transition: 'all 0.3s ease',
-                '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: '0 12px 24px rgba(0, 0, 0, 0.1)'
-                }
-              }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-                  <CloudSyncIcon sx={{ fontSize: 32, color: 'success.main' }} />
-                  <Typography variant="h5" fontWeight={600}>
-                    Real-Time Collaboration
-                  </Typography>
-                </Box>
-                <Typography variant="body1" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-                  Your entire team sees updates instantly. No more waiting for data to sync or wondering if information is current.
-                </Typography>
-              </Card>
-            </Grid>
-            
-            <Grid item xs={12} md={6}>
-              <Card sx={{ 
-                p: 4, 
-                height: '100%',
-                borderRadius: 3,
-                border: '1px solid #e2e8f0',
-                transition: 'all 0.3s ease',
-                '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: '0 12px 24px rgba(0, 0, 0, 0.1)'
-                }
-              }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-                  <SpeedIcon sx={{ fontSize: 32, color: 'warning.main' }} />
-                  <Typography variant="h5" fontWeight={600}>
-                    Quick Implementation
-                  </Typography>
-                </Box>
-                <Typography variant="body1" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-                  Get started in minutes, not months. Simple setup process with no complex integrations or lengthy training required.
-                </Typography>
-              </Card>
-            </Grid>
-            
-            <Grid item xs={12} md={6}>
-              <Card sx={{ 
-                p: 4, 
-                height: '100%',
-                borderRadius: 3,
-                border: '1px solid #e2e8f0',
-                transition: 'all 0.3s ease',
-                '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: '0 12px 24px rgba(0, 0, 0, 0.1)'
-                }
-              }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-                  <SecurityIcon sx={{ fontSize: 32, color: 'error.main' }} />
-                  <Typography variant="h5" fontWeight={600}>
-                    Enterprise Security
-                  </Typography>
-                </Box>
-                <Typography variant="body1" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-                  Built with enterprise-grade security. Your data is protected with encryption, secure authentication, and regular backups.
-                </Typography>
-              </Card>
-            </Grid>
-          </Grid>
-          
-          {/* Trust Indicators */}
-          <Box sx={{ textAlign: 'center', mt: 8 }}>
-            <Typography variant="h6" color="text.secondary" sx={{ mb: 4 }}>
-              Built for reliability and security
-            </Typography>
-            <Grid container spacing={3} alignItems="center" justifyContent="center">
-              {['Cloud-Based', 'Mobile-First', 'Real-Time Sync', 'Secure Authentication', 'Regular Backups'].map((feature, index) => (
-                <Grid item key={index}>
-                  <Box sx={{ 
-                    bgcolor: 'grey.100', 
-                    px: 3, 
-                    py: 1.5, 
-                    borderRadius: 2,
-                    border: '1px solid #e2e8f0',
-                  }}>
-                    <Typography variant="body2" fontWeight={600} color="text.secondary">
-                      {feature}
-                    </Typography>
-                  </Box>
-                </Grid>
-              ))}
-            </Grid>
-          </Box>
-        </Container>
-      </Box>
-
-      {/* CTA Section */}
-      <CTABanner 
-        title="Ready to Transform Your Asset Management?"
-        subtitle={`Create your organization today and see how ${assetConfig.appName} can transform your asset management.`}
-        primaryAction="Create Organization"
-        secondaryAction="Contact Sales"
-        primaryActionUrl="/create-organization"
-        secondaryActionUrl="/contact"
-        variant="gradient"
-        showBadges={true}
-      />
-
       {/* Footer */}
       <Box sx={{ bgcolor: '#1F2937', color: 'white', py: 8 }}>
         <Container maxWidth="lg">
@@ -532,36 +303,6 @@ export default function LandingPage() {
               <Typography color="grey.400" sx={{ mb: 3, lineHeight: 1.6 }}>
                 Modern asset management platform built for today's businesses. Streamline your operations with our mobile-first solution.
               </Typography>
-              <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-                <Button 
-                  variant="outlined" 
-                  size="small"
-                  sx={{ 
-                    borderColor: 'grey.600', 
-                    color: 'grey.300',
-                    '&:hover': { 
-                      borderColor: 'primary.main', 
-                      color: 'primary.main' 
-                    }
-                  }}
-                  onClick={() => navigate('/demo')}
-                >
-                  Free Demo
-                </Button>
-                <Button 
-                  variant="contained" 
-                  size="small"
-                  sx={{ 
-                    bgcolor: 'primary.main',
-                    '&:hover': { 
-                      bgcolor: 'primary.dark' 
-                    }
-                  }}
-                  onClick={() => navigate('/create-organization')}
-                >
-                  Create Organization
-                </Button>
-              </Box>
             </Grid>
             
             <Grid item xs={12} sm={6} md={2}>

@@ -224,12 +224,14 @@ class FeedbackService {
       }
 
       // Fallback 1: Try soundService (has programmatic beep sounds)
-      let soundServiceType: 'scan' | 'error' | 'notification' | 'action' = 'action';
+      let soundServiceType: 'scan' | 'error' | 'duplicate' | 'notification' | 'action' = 'action';
       
       switch (type) {
         case 'success':
-        case 'duplicate':
           soundServiceType = 'scan';
+          break;
+        case 'duplicate':
+          soundServiceType = 'duplicate';
           break;
         case 'error':
           soundServiceType = 'error';

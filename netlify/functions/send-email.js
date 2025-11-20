@@ -101,6 +101,11 @@ exports.handler = async (event, context) => {
     // No email service configured
     else {
       console.error('No email service configured');
+      const availableVars = [];
+      if (process.env.SMTP2GO_USER) availableVars.push('SMTP2GO_USER (missing SMTP2GO_PASSWORD or SMTP2GO_FROM)');
+      if (process.env.EMAIL_USER) availableVars.push('EMAIL_USER (Gmail - but SMTP2GO preferred)');
+      if (process.env.OUTLOOK_USER) availableVars.push('OUTLOOK_USER');
+      
       return {
         statusCode: 500,
         headers: {
@@ -109,7 +114,9 @@ exports.handler = async (event, context) => {
         },
         body: JSON.stringify({ 
           error: 'Email service not configured',
-          details: 'Please configure SMTP2GO, Gmail, or Outlook email credentials in Netlify environment variables'
+          details: 'Please configure SMTP2GO (preferred), Gmail, or Outlook email credentials in Netlify environment variables. ' +
+                   (availableVars.length > 0 ? `Found partial config: ${availableVars.join(', ')}` : 'No email variables found.') +
+                   ' Required: SMTP2GO_USER, SMTP2GO_PASSWORD, SMTP2GO_FROM (or EMAIL_USER, EMAIL_PASSWORD, EMAIL_FROM for Gmail)'
         })
       };
     }

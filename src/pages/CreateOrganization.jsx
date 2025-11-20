@@ -1,5 +1,6 @@
 import logger from '../utils/logger';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Container,
@@ -14,10 +15,13 @@ import {
   StepLabel,
   Stack
 } from '@mui/material';
-import { CheckCircle as CheckIcon, Email as EmailIcon } from '@mui/icons-material';
+import { CheckCircle as CheckIcon, Email as EmailIcon, ContentCopy as CopyIcon } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
+import { useAuth } from '../hooks/useAuth';
 
 export default function CreateOrganization() {
+  const navigate = useNavigate();
+  const { user, profile, organization, loading: authLoading } = useAuth();
   const [step, setStep] = useState(0); // 0 = form, 1 = email sent, 2 = verification complete
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -28,8 +32,49 @@ export default function CreateOrganization() {
     email: '',
     password: ''
   });
+  const [verificationToken, setVerificationToken] = useState(null);
+  const [resending, setResending] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const steps = ['Enter Details', 'Verify Email', 'Complete Setup'];
+
+  // Redirect if user is already logged in and has an organization
+  useEffect(() => {
+    if (!authLoading && user && profile && organization) {
+      logger.log('User already has organization, redirecting to dashboard');
+      navigate('/home');
+    }
+  }, [user, profile, organization, authLoading, navigate]);
+
+  // Helper function to detect if we're in development mode
+  const isDevelopmentMode = () => {
+    // Check if hostname is localhost or 127.0.0.1
+    const hostname = window.location.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '') {
+      return true;
+    }
+    // Check if we're in a development build (Vite sets DEV to true only in dev mode)
+    // In production builds, import.meta.env.DEV is false
+    if (import.meta.env.DEV) {
+      return true;
+    }
+    // Check if MODE is explicitly development
+    if (import.meta.env.MODE === 'development') {
+      return true;
+    }
+    // Otherwise, we're in production
+    return false;
+  };
+
+  // Load token from storage if on verification step
+  useEffect(() => {
+    if (step === 1) {
+      const storedToken = sessionStorage.getItem('verification_token') || localStorage.getItem('verification_token');
+      if (storedToken) {
+        setVerificationToken(storedToken);
+      }
+    }
+  }, [step]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -86,6 +131,8 @@ export default function CreateOrganization() {
       }
 
       // Step 2: Request verification
+      logger.log('🔐 Requesting verification for:', formData.email);
+      
       const { data: tokenData, error: verifyError } = await supabase.rpc(
         'request_organization_verification',
         {
@@ -95,9 +142,24 @@ export default function CreateOrganization() {
         }
       );
 
+      logger.log('📝 Verification request result:', { 
+        success: !verifyError, 
+        hasToken: !!tokenData,
+        tokenLength: tokenData?.length,
+        error: verifyError 
+      });
+
       if (verifyError) {
-        throw verifyError;
+        logger.error('❌ Verification request failed:', verifyError);
+        throw new Error(`Failed to create verification: ${verifyError.message || 'Unknown error'}`);
       }
+
+      if (!tokenData) {
+        throw new Error('No verification token received from database');
+      }
+
+      // Store token in state for resending
+      setVerificationToken(tokenData);
 
       // Step 2: Store password temporarily in sessionStorage AND localStorage as backup
       sessionStorage.setItem('pending_org_password', formData.password);
@@ -119,10 +181,15 @@ export default function CreateOrganization() {
       });
 
       // Step 3: Send verification email
+      const isDevelopment = isDevelopmentMode();
+      const verificationLink = `${window.location.origin}/verify-organization?token=${tokenData}`;
+      
+      // Always try to send email, even in development (if using netlify dev)
+      let emailSent = false;
+      let emailError = null;
+      
       try {
-        const verificationLink = `${window.location.origin}/verify-organization?token=${tokenData}`;
-        
-        await fetch('/.netlify/functions/send-email', {
+        const response = await fetch('/.netlify/functions/send-email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -136,11 +203,28 @@ export default function CreateOrganization() {
             }
           })
         });
-        
-        logger.log('✅ Verification email sent');
-      } catch (emailError) {
-        logger.warn('⚠️ Email service unavailable:', emailError);
-        // Continue anyway - user can manually verify
+
+        if (response.ok) {
+          emailSent = true;
+          logger.log('✅ Verification email sent successfully');
+        } else {
+          const result = await response.json().catch(() => ({}));
+          emailError = result.error || `HTTP ${response.status}`;
+          logger.warn('⚠️ Email service returned error:', emailError);
+        }
+      } catch (fetchError) {
+        emailError = fetchError.message || 'Network error';
+        logger.warn('⚠️ Failed to send email:', emailError);
+      }
+
+      // In development mode, log the link even if email was sent
+      if (isDevelopment) {
+        logger.log('🔗 Development Mode - Verification Link:', verificationLink);
+        console.log('📧 Email status:', emailSent ? 'Sent' : 'Failed');
+        console.log('🔗 Verification Link:', verificationLink);
+        if (!emailSent) {
+          console.log('💡 To test email sending, run: netlify dev');
+        }
       }
 
       // Move to step 2
@@ -157,6 +241,108 @@ export default function CreateOrganization() {
   const handleChange = (field) => (e) => {
     setFormData({ ...formData, [field]: e.target.value });
   };
+
+  const handleCopyVerificationLink = async () => {
+    const token = verificationToken || sessionStorage.getItem('verification_token') || localStorage.getItem('verification_token');
+    if (!token) return;
+    
+    const verificationLink = `${window.location.origin}/verify-organization?token=${token}`;
+    
+    try {
+      await navigator.clipboard.writeText(verificationLink);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch (err) {
+      logger.error('Failed to copy link:', err);
+      // Fallback: select the text
+      const textArea = document.createElement('textarea');
+      textArea.value = verificationLink;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    }
+  };
+
+  const handleResendEmail = async () => {
+    if (!verificationToken) {
+      // Try to get token from storage
+      const storedToken = sessionStorage.getItem('verification_token') || localStorage.getItem('verification_token');
+      if (!storedToken) {
+        setError('Unable to resend email. Please start the registration process again.');
+        return;
+      }
+      setVerificationToken(storedToken);
+    }
+
+    setResending(true);
+    setError('');
+
+    try {
+      const token = verificationToken || sessionStorage.getItem('verification_token') || localStorage.getItem('verification_token');
+      const verificationLink = `${window.location.origin}/verify-organization?token=${token}`;
+      
+      // Always try to send email
+      const response = await fetch('/.netlify/functions/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: formData.email,
+          subject: `Verify your email to create ${formData.organizationName}`,
+          template: 'verify-organization',
+          data: {
+            verificationLink,
+            organizationName: formData.organizationName,
+            userName: formData.userName
+          }
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to send email');
+      }
+
+      logger.log('✅ Verification email resent successfully');
+      alert('Verification email sent! Please check your inbox (and spam folder).');
+    } catch (emailError) {
+      logger.error('Error resending email:', emailError);
+      setError('Failed to resend email. The email service may not be configured. Please contact support or try again later.');
+    } finally {
+      setResending(false);
+    }
+  };
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <Container maxWidth="sm" sx={{ py: 8 }}>
+        <Paper elevation={3} sx={{ p: 4, textAlign: 'center' }}>
+          <CircularProgress sx={{ mb: 2 }} />
+          <Typography variant="body2" color="text.secondary">
+            Loading...
+          </Typography>
+        </Paper>
+      </Container>
+    );
+  }
+
+  // If user already has organization, show redirecting message (will redirect via useEffect)
+  if (user && profile && organization) {
+    return (
+      <Container maxWidth="sm" sx={{ py: 8 }}>
+        <Paper elevation={3} sx={{ p: 4, textAlign: 'center' }}>
+          <CircularProgress sx={{ mb: 2 }} />
+          <Typography variant="body1" color="text.secondary">
+            You already have an organization. Redirecting...
+          </Typography>
+        </Paper>
+      </Container>
+    );
+  }
 
   return (
     <Container maxWidth="sm" sx={{ py: 8 }}>
@@ -296,13 +482,22 @@ export default function CreateOrganization() {
               </Typography>
             </Alert>
 
-            <Button
-              variant="outlined"
-              onClick={() => window.location.href = '/login'}
-              sx={{ mt: 3 }}
-            >
-              Back to Login
-            </Button>
+            <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 3 }}>
+              <Button
+                variant="contained"
+                onClick={handleResendEmail}
+                disabled={resending}
+                sx={{ minWidth: 150 }}
+              >
+                {resending ? <CircularProgress size={24} /> : 'Resend Email'}
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={() => window.location.href = '/login'}
+              >
+                Back to Login
+              </Button>
+            </Stack>
           </Box>
         )}
 

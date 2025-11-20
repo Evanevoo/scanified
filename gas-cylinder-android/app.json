@@ -2,7 +2,7 @@
   "expo": {
     "name": "Scanified Android",
     "slug": "gas-cylinder-android",
-    "version": "1.0.12",
+    "version": "1.0.13",
     "orientation": "portrait",
     "icon": "./assets/app-icon.png",
     "userInterfaceStyle": "automatic",
@@ -10,15 +10,6 @@
       "android"
     ],
     "description": "Professional asset tracking and inventory management solution for Android. Scan barcodes, track assets, manage inventory, and maintain compliance with comprehensive reporting tools.",
-    "keywords": [
-      "asset management",
-      "inventory tracking",
-      "barcode scanner",
-      "enterprise",
-      "compliance",
-      "reporting"
-    ],
-    "privacy": "public",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -33,7 +24,7 @@
         "backgroundColor": "#FFFFFF"
       },
       "package": "com.evanevoo.scanifiedandroid",
-      "versionCode": 25,
+      "versionCode": 30,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
@@ -49,11 +40,11 @@
       "expo-font"
     ],
     "extra": {
-      "eas": {
-        "projectId": "d71ec042-1fec-4186-ac3b-0ae85a6af345"
-      },
       "EXPO_PUBLIC_SUPABASE_URL": "https://jtfucttzaswmqqhmmhfb.supabase.co",
-      "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5NDQ4NzMsImV4cCI6MjA2MTUyMDg3M30.6-CAPYefAektlh3dLRVFZbPKYSnhIAzp3knohc3NDEg"
+      "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5NDQ4NzMsImV4cCI6MjA2MTUyMDg3M30.6-CAPYefAektlh3dLRVFZbPKYSnhIAzp3knohc3NDEg",
+      "eas": {
+        "projectId": "aeaa8128-e08f-4323-a677-5f1e3b5add03"
+      }
     },
     "owner": "evanevoo"
   }

@@ -72,17 +72,9 @@ export default function LocateCylinderScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header with Return Button */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Locate {assetConfig.assetDisplayName}</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+      <Text style={styles.instructionText}>
+        Enter or scan a barcode or serial number to locate {assetConfig.assetDisplayName?.toLowerCase() || 'asset'} details
+      </Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
         <TextInput
           style={[styles.input, { flex: 1, marginBottom: 0 }]}
@@ -134,17 +126,13 @@ export default function LocateCylinderScreen() {
         onRequestClose={() => setScannerVisible(false)}
       >
         <View style={styles.modalContainer}>
-          {/* Modal Header */}
-          <View style={styles.modalHeader}>
-            <TouchableOpacity 
-              style={styles.modalBackButton}
-              onPress={() => setScannerVisible(false)}
-            >
-              <Text style={styles.modalBackIcon}>←</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Scan Barcode</Text>
-            <View style={styles.modalHeaderSpacer} />
-          </View>
+          {/* Close Button */}
+          <TouchableOpacity 
+            style={styles.scannerCloseButton}
+            onPress={() => setScannerVisible(false)}
+          >
+            <Text style={styles.scannerCloseIcon}>✕</Text>
+          </TouchableOpacity>
 
           {!permission ? (
             <View style={styles.modalContent}>
@@ -181,23 +169,8 @@ export default function LocateCylinderScreen() {
               />
               {/* Overlay border rectangle */}
               <View style={styles.scanOverlay} />
-              {/* Darken area outside border */}
-              <View style={styles.overlayTop} />
-              <View style={styles.overlayBottom} />
-              <View style={styles.overlayLeft} />
-              <View style={styles.overlayRight} />
             </View>
           )}
-          
-          {/* Close Button */}
-          <View style={styles.modalFooter}>
-            <TouchableOpacity 
-              style={styles.closeButton}
-              onPress={() => setScannerVisible(false)}
-            >
-              <Text style={styles.closeButtonText}>Close Scanner</Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </Modal>
     </View>
@@ -210,37 +183,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
     padding: 24,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backIcon: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#374151',
-  },
-  headerSpacer: {
-    width: 40,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#2563eb',
+  instructionText: {
+    fontSize: 16,
+    color: '#6B7280',
+    marginBottom: 20,
     textAlign: 'center',
-    flex: 1,
   },
   scanBtn: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#40B5AD',
     borderRadius: 10,
     padding: 12,
     marginLeft: 8,
@@ -261,7 +211,7 @@ const styles = StyleSheet.create({
     borderColor: '#e5e7eb',
   },
   submitBtn: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#40B5AD',
     borderRadius: 10,
     padding: 14,
     alignItems: 'center',
@@ -290,7 +240,7 @@ const styles = StyleSheet.create({
   detailsTitle: {
     fontWeight: 'bold',
     fontSize: 18,
-    color: '#2563eb',
+    color: '#40B5AD',
     marginBottom: 8,
   },
   detailsLabel: {
@@ -305,40 +255,7 @@ const styles = StyleSheet.create({
   // Modal Styles
   modalContainer: {
     flex: 1,
-    backgroundColor: '#000',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 20,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    zIndex: 1000,
-  },
-  modalBackButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalBackIcon: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  modalHeaderSpacer: {
-    width: 40,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
-    flex: 1,
+    backgroundColor: 'transparent',
   },
   modalContent: {
     flex: 1,
@@ -353,7 +270,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   permissionButton: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#40B5AD',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 10,
@@ -377,57 +294,26 @@ const styles = StyleSheet.create({
     width: '90%',
     height: '18%',
     borderWidth: 3,
-    borderColor: '#2563eb',
+    borderColor: '#40B5AD',
     borderRadius: 18,
     backgroundColor: 'rgba(0,0,0,0.0)',
     zIndex: 10,
   },
-  overlayTop: {
+  scannerCloseButton: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '25%',
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  overlayBottom: {
-    position: 'absolute',
-    top: '75%',
-    left: 0,
-    width: '100%',
-    height: '25%',
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  overlayLeft: {
-    position: 'absolute',
-    top: '25%',
-    left: 0,
-    width: '10%',
-    height: '50%',
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  overlayRight: {
-    position: 'absolute',
-    top: '25%',
-    right: 0,
-    width: '10%',
-    height: '50%',
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  modalFooter: {
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-  },
-  closeButton: {
-    backgroundColor: '#2563eb',
-    paddingVertical: 16,
-    borderRadius: 10,
+    bottom: 40,
+    alignSelf: 'center',
+    zIndex: 1000,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 25,
+    width: 50,
+    height: 50,
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  closeButtonText: {
-    color: '#fff',
+  scannerCloseIcon: {
+    color: '#374151',
+    fontSize: 24,
     fontWeight: 'bold',
-    fontSize: 16,
   },
 }); 

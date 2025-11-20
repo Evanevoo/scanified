@@ -8,23 +8,31 @@ import {
   Paper,
   Alert,
   CircularProgress,
-  Button
+  Button,
+  TextField,
+  Stack,
+  Stepper,
+  Step,
+  StepLabel
 } from '@mui/material';
-import { CheckCircle as CheckIcon, Error as ErrorIcon } from '@mui/icons-material';
+import { CheckCircle as CheckIcon, Error as ErrorIcon, Email as EmailIcon } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 
 export default function VerifyOrganization() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const [status, setStatus] = useState('verifying'); // verifying, success, error
+  const [status, setStatus] = useState('verifying'); // verifying, needs-password, success, error
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  const [verificationData, setVerificationData] = useState(null);
+  const [password, setPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
 
   useEffect(() => {
-    verifyAndCreateOrganization();
+    loadVerificationData();
   }, []);
 
-  const verifyAndCreateOrganization = async () => {
+  const loadVerificationData = async () => {
     try {
       const token = searchParams.get('token');
       
@@ -35,16 +43,16 @@ export default function VerifyOrganization() {
         return;
       }
 
-      // Get stored password and email (try sessionStorage first, then localStorage)
-      let password = sessionStorage.getItem('pending_org_password');
-      let email = sessionStorage.getItem('pending_org_email');
+      // First, try to get email and password from storage
+      let storedPassword = sessionStorage.getItem('pending_org_password');
+      let storedEmail = sessionStorage.getItem('pending_org_email');
 
       // If not in sessionStorage, try localStorage (with expiration check)
-      if (!password || !email) {
+      if (!storedPassword || !storedEmail) {
         const expirationTime = localStorage.getItem('verification_expires');
         if (expirationTime && Date.now() < parseInt(expirationTime)) {
-          password = localStorage.getItem('pending_org_password');
-          email = localStorage.getItem('pending_org_email');
+          storedPassword = localStorage.getItem('pending_org_password');
+          storedEmail = localStorage.getItem('pending_org_email');
           logger.log('📦 Using localStorage backup data');
         } else if (expirationTime) {
           // Expired, clean up
@@ -55,19 +63,117 @@ export default function VerifyOrganization() {
         }
       }
 
-      if (!password || !email) {
+      // Retrieve verification data from database
+      logger.log('🔍 Looking up verification token:', token);
+      
+      const { data: verification, error: verifyError } = await supabase
+        .from('organization_verifications')
+        .select('email, organization_name, user_name, created_at, verified')
+        .eq('verification_token', token)
+        .single();
+
+      logger.log('📊 Verification query result:', { 
+        hasData: !!verification, 
+        error: verifyError,
+        errorCode: verifyError?.code,
+        errorMessage: verifyError?.message
+      });
+
+      if (verifyError) {
         setStatus('error');
-        setMessage('Session expired. Please start the registration process again. Go back to /create-organization to try again.');
+        logger.error('❌ Verification lookup error:', verifyError);
+        
+        if (verifyError?.code === 'PGRST116') {
+          // No rows returned
+          setMessage('Invalid or expired verification link. Please create your organization again.');
+        } else if (verifyError?.code === '42P01') {
+          // Table doesn't exist
+          setMessage('Database configuration error. Please contact support. (Table missing)');
+          logger.error('⚠️ organization_verifications table may not exist. Please run the SQL setup script.');
+        } else if (verifyError?.message?.includes('permission denied') || verifyError?.code === '42501') {
+          setMessage('Database permission error. Please contact support.');
+        } else {
+          setMessage(`Verification link not found or already used. Error: ${verifyError.message || 'Unknown error'}. Please create your organization again.`);
+        }
         setLoading(false);
         return;
       }
+
+      if (!verification) {
+        setStatus('error');
+        setMessage('Invalid or expired verification link. Please create your organization again.');
+        setLoading(false);
+        return;
+      }
+
+      // Check if already verified
+      if (verification.verified) {
+        setStatus('error');
+        setMessage('This verification link has already been used. Please sign in instead.');
+        setLoading(false);
+        return;
+      }
+
+      // Check if verification expired (24 hours)
+      const createdAt = new Date(verification.created_at);
+      const now = new Date();
+      const hoursDiff = (now - createdAt) / (1000 * 60 * 60);
+      
+      if (hoursDiff > 24) {
+        setStatus('error');
+        setMessage('This verification link has expired (24 hours). Please create your organization again.');
+        setLoading(false);
+        return;
+      }
+
+      // Store verification data
+      setVerificationData({
+        ...verification,
+        token
+      });
+
+      // If we have stored password and email matches, proceed automatically
+      if (storedPassword && storedEmail && storedEmail.toLowerCase() === verification.email.toLowerCase()) {
+        logger.log('✅ Found stored credentials, proceeding automatically');
+        await verifyAndCreateOrganization(verification.email, storedPassword, token);
+      } else {
+        // Need to ask for password
+        logger.log('⚠️ No stored password found, will prompt user');
+        setStatus('needs-password');
+        setLoading(false);
+      }
+
+    } catch (err) {
+      logger.error('Error loading verification data:', err);
+      setStatus('error');
+      setMessage('Failed to load verification data. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!password || password.length < 6) {
+      setPasswordError('Password must be at least 6 characters');
+      return;
+    }
+
+    setPasswordError('');
+    setLoading(true);
+    setStatus('verifying');
+
+    await verifyAndCreateOrganization(verificationData.email, password, verificationData.token);
+  };
+
+  const verifyAndCreateOrganization = async (email, password, token) => {
+    try {
 
       logger.log('🔍 Verification data found:', { 
         hasToken: !!token, 
         hasPassword: !!password, 
         hasEmail: !!email,
-        email: email,
-        source: sessionStorage.getItem('pending_org_password') ? 'sessionStorage' : 'localStorage'
+        email: email
       });
 
       // Step 1: Try to sign in first (in case user already exists from failed verification)
@@ -141,9 +247,23 @@ export default function VerifyOrganization() {
       setStatus('success');
       setMessage('Your organization has been created successfully!');
       
-      // Redirect to dashboard after 2 seconds
+      // Check if organization needs setup (missing asset_type - the main required field)
+      // Reload organization to get latest data
+      const { data: orgData } = await supabase
+        .from('organizations')
+        .select('asset_type')
+        .eq('id', orgId)
+        .single();
+      
+      const needsSetup = !orgData?.asset_type;
+      
+      // Redirect to setup wizard if needed, otherwise to dashboard
       setTimeout(() => {
-        window.location.href = '/home';
+        if (needsSetup) {
+          window.location.href = '/organization-setup';
+        } else {
+          window.location.href = '/home';
+        }
       }, 2000);
 
     } catch (err) {
@@ -164,9 +284,28 @@ export default function VerifyOrganization() {
     }
   };
 
+  const steps = ['Enter Details', 'Verify Email', 'Complete Setup'];
+  const activeStep = status === 'verifying' ? 1 : status === 'success' ? 2 : status === 'needs-password' ? 1 : 0;
+
   return (
     <Container maxWidth="sm" sx={{ py: 8 }}>
       <Paper elevation={3} sx={{ p: 4, textAlign: 'center' }}>
+        <Box sx={{ mb: 4 }}>
+          <Typography variant="h4" gutterBottom fontWeight="bold">
+            Create Organization
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Start your free 14-day trial
+          </Typography>
+          <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
+            {steps.map((label) => (
+              <Step key={label}>
+                <StepLabel>{label}</StepLabel>
+              </Step>
+            ))}
+          </Stepper>
+        </Box>
+
         {loading && status === 'verifying' && (
           <Box sx={{ py: 4 }}>
             <CircularProgress size={60} sx={{ mb: 3 }} />
@@ -183,14 +322,89 @@ export default function VerifyOrganization() {
           <Box sx={{ py: 4 }}>
             <CheckIcon sx={{ fontSize: 80, color: 'success.main', mb: 2 }} />
             <Typography variant="h5" gutterBottom fontWeight="bold">
-              Success!
+              Setup Complete! 🎉
             </Typography>
             <Typography variant="body1" color="text.secondary" paragraph>
               {message}
             </Typography>
-            <Typography variant="body2" color="text.secondary">
+            <Alert severity="success" sx={{ mt: 3, mb: 3, textAlign: 'left' }}>
+              <Typography variant="body2">
+                <strong>Your organization is ready!</strong><br />
+                • Your account has been created<br />
+                • Your organization has been set up<br />
+                • You're signed in and ready to go
+              </Typography>
+            </Alert>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               Redirecting to your dashboard...
             </Typography>
+            <Button
+              variant="contained"
+              size="large"
+              onClick={() => window.location.href = '/home'}
+              sx={{ mt: 2 }}
+            >
+              Go to Dashboard Now
+            </Button>
+          </Box>
+        )}
+
+        {status === 'needs-password' && verificationData && (
+          <Box sx={{ py: 4 }}>
+            <EmailIcon sx={{ fontSize: 80, color: 'primary.main', mb: 2 }} />
+            <Typography variant="h5" gutterBottom fontWeight="bold">
+              Enter Your Password
+            </Typography>
+            <Typography variant="body1" color="text.secondary" paragraph>
+              Please enter the password you used when creating your organization for <strong>{verificationData.organization_name}</strong>.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              Email: <strong>{verificationData.email}</strong>
+            </Typography>
+            
+            <Box component="form" onSubmit={handlePasswordSubmit}>
+              <Stack spacing={2}>
+                <TextField
+                  fullWidth
+                  label="Password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setPasswordError('');
+                  }}
+                  error={!!passwordError}
+                  helperText={passwordError || 'Enter the password you set during registration'}
+                  required
+                  autoFocus
+                />
+                
+                <Button
+                  type="submit"
+                  variant="contained"
+                  size="large"
+                  fullWidth
+                  disabled={loading}
+                  sx={{ mt: 2 }}
+                >
+                  {loading ? <CircularProgress size={24} /> : 'Verify & Create Organization'}
+                </Button>
+              </Stack>
+            </Box>
+
+            <Alert severity="info" sx={{ mt: 3, textAlign: 'left' }}>
+              <Typography variant="body2">
+                <strong>Forgot your password?</strong>
+                <br />
+                If you don't remember your password, you can start the registration process again at{' '}
+                <Button 
+                  href="/create-organization" 
+                  sx={{ p: 0, textTransform: 'none', minWidth: 'auto' }}
+                >
+                  /create-organization
+                </Button>
+              </Typography>
+            </Alert>
           </Box>
         )}
 

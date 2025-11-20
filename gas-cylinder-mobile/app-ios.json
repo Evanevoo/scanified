@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "AssetTrack Pro",
+    "name": "Scanified",
     "slug": "gas-cylinder-mobile",
-    "version": "1.0.7",
+    "version": "1.0.14",
     "orientation": "portrait",
     "icon": "./assets/app-icon.png",
     "userInterfaceStyle": "automatic",
@@ -18,15 +18,19 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.evanevoo.assettrackpro",
-      "buildNumber": "9",
+      "bundleIdentifier": "com.evanevoo.scanifiedmobile",
+      "buildNumber": "34",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "Allow AssetTrack Pro to access your camera to scan asset barcodes and manage your organization's inventory with enterprise-grade precision.",
+        "NSCameraUsageDescription": "Scanified uses your camera to scan asset barcodes for inventory management and tracking purposes.",
+        "NSPhotoLibraryUsageDescription": "Scanified may access your photo library to save scanned asset images for documentation purposes.",
+        "NSFaceIDUsageDescription": "Scanified uses Face ID for secure and convenient login authentication.",
+        "NSBiometricUsageDescription": "Scanified uses biometric authentication for secure and convenient login.",
+        "LSApplicationCategoryType": "public.app-category.business",
         "CFBundleURLTypes": [
           {
             "CFBundleURLName": "apple-signin",
-            "CFBundleURLSchemes": ["assettrackpro-auth"]
+            "CFBundleURLSchemes": ["scanifiedmobile-auth"]
           }
         ]
       },
@@ -37,19 +41,15 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow AssetTrack Pro to access your camera to scan asset barcodes and manage your organization's inventory with enterprise-grade precision."
+          "cameraPermission": "Scanified uses your camera to scan asset barcodes for inventory management and tracking purposes."
         }
       ],
       "expo-apple-authentication",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/notification-icon.png",
-          "color": "#ffffff"
-        }
-      ]
+      "expo-notifications"
     ],
     "extra": {
+      "EXPO_PUBLIC_SUPABASE_URL": "https://jtfucttzaswmqqhmmhfb.supabase.co",
+      "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5NDQ4NzMsImV4cCI6MjA2MTUyMDg3M30.6-CAPYefAektlh3dLRVFZbPKYSnhIAzp3knohc3NDEg",
       "eas": {
         "projectId": "d71ec042-1fec-4186-ac3b-0ae85a6af345"
       }

@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useState, useLayoutEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Linking, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
@@ -16,13 +16,6 @@ export default function EditCylinderScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { colors } = useTheme();
-
-  // Hide the default navigation header - must be done in useLayoutEffect
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerShown: false,
-    });
-  }, [navigation]);
   const [step, setStep] = useState(1);
   const [barcode, setBarcode] = useState('');
   const [serial, setSerial] = useState('');
@@ -244,24 +237,12 @@ export default function EditCylinderScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      {/* Header with Return Button */}
-      <View style={[styles.header, { backgroundColor: colors.background }]}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.primary }]}>Edit Cylinder</Text>
-        <View style={styles.headerSpacer} />
-      </View>
-      
       {step === 1 && (
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <Text style={[styles.stepTitle, { color: colors.primary }]}>Scan or Enter Cylinder Barcode</Text>
           <View style={styles.inputRow}>
             <TextInput
-              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+              style={[styles.input, { flex: 1, backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
               placeholder="Enter barcode"
               placeholderTextColor={colors.textSecondary}
               value={barcode}
@@ -286,7 +267,7 @@ export default function EditCylinderScreen() {
         </ScrollView>
       )}
       {step === 2 && cylinder && (
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <ScrollView contentContainerStyle={{ paddingTop: 20, paddingBottom: 20 }}>
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.primary }]}>Basic Information</Text>
             
@@ -436,7 +417,7 @@ export default function EditCylinderScreen() {
             style={styles.scannerCloseButton}
             onPress={() => setScannerVisible(false)}
           >
-            <Text style={styles.scannerCloseIcon}>←</Text>
+            <Text style={styles.scannerCloseIcon}>✕</Text>
           </TouchableOpacity>
           
           {!permission ? (
@@ -494,16 +475,8 @@ export default function EditCylinderScreen() {
                 backgroundColor: 'rgba(0,0,0,0.0)',
                 zIndex: 10,
               }} />
-              {/* Optional: darken area outside border */}
-              <View style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '25%', backgroundColor: 'rgba(0,0,0,0.35)' }} />
-              <View style={{ position: 'absolute', top: '75%', left: 0, width: '100%', height: '25%', backgroundColor: 'rgba(0,0,0,0.35)' }} />
-              <View style={{ position: 'absolute', top: '25%', left: 0, width: '10%', height: '50%', backgroundColor: 'rgba(0,0,0,0.35)' }} />
-              <View style={{ position: 'absolute', top: '25%', right: 0, width: '10%', height: '50%', backgroundColor: 'rgba(0,0,0,0.35)' }} />
             </View>
           )}
-          <TouchableOpacity onPress={() => setScannerVisible(false)} style={{ marginTop: 24, backgroundColor: colors.primary, padding: 16, borderRadius: 10 }}>
-            <Text style={{ color: colors.surface, fontWeight: 'bold' }}>Close</Text>
-          </TouchableOpacity>
         </View>
       )}
     </SafeAreaView>
@@ -518,37 +491,6 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 20,
     paddingBottom: 40,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 16,
-    zIndex: 10,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backIcon: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#374151',
-  },
-  headerSpacer: {
-    width: 40,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    flex: 1,
   },
   stepTitle: {
     fontSize: 18,
@@ -574,9 +516,10 @@ const styles = StyleSheet.create({
   },
   input: {
     borderRadius: 12,
-    padding: 16,
+    padding: 10,
     fontSize: 16,
     borderWidth: 1,
+    minHeight: 44,
   },
   inputRow: {
     flexDirection: 'row',
@@ -642,26 +585,26 @@ const styles = StyleSheet.create({
   },
   scannerModal: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.95)',
+    backgroundColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 100,
   },
   scannerCloseButton: {
     position: 'absolute',
-    top: 50,
-    left: 20,
+    bottom: 40,
+    alignSelf: 'center',
     zIndex: 1000,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 20,
-    width: 40,
-    height: 40,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 25,
+    width: 50,
+    height: 50,
     justifyContent: 'center',
     alignItems: 'center',
   },
   scannerCloseIcon: {
-    color: '#fff',
-    fontSize: 20,
+    color: '#374151',
+    fontSize: 24,
     fontWeight: 'bold',
   },
   removeButton: {

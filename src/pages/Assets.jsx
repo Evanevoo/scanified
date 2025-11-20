@@ -2,7 +2,7 @@ import logger from '../utils/logger';
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabase/client';
 import { 
-  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, TextField, FormControl, InputLabel, Select, MenuItem, Alert, Button
+  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, FormControl, InputLabel, Select, MenuItem, Alert, Button
 } from '@mui/material';
 import { useAuth } from '../hooks/useAuth';
 
@@ -151,7 +151,6 @@ export default function Assets() {
   const [error, setError] = useState(null);
   const [organizations, setOrganizations] = useState([]);
   const [selectedOrg, setSelectedOrg] = useState('');
-  const [search, setSearch] = useState('');
   const { profile, organization } = useAuth();
   const [organizationName, setOrganizationName] = useState('');
 
@@ -242,20 +241,6 @@ export default function Assets() {
     }
   };
 
-  // Filter bottles by search
-  const filteredBottles = bottles.filter(bottle => {
-    if (!search) return true;
-    const s = search.toLowerCase();
-    return (
-      (bottle.barcode_number && bottle.barcode_number.toLowerCase().includes(s)) ||
-      (bottle.serial_number && bottle.serial_number.toLowerCase().includes(s)) ||
-      (bottle.type && bottle.type.toLowerCase().includes(s)) ||
-      (bottle.gas_type && bottle.gas_type.toLowerCase().includes(s)) ||
-      (bottle.location && bottle.location.toLowerCase().includes(s)) ||
-      (bottle.organization_name && bottle.organization_name.toLowerCase().includes(s))
-    );
-  });
-
   // Get all unique gas types from the bottles table - these are the gas assets inside the bottles
   const assetTypes = useMemo(() => {
     const assetMap = new Map();
@@ -305,61 +290,86 @@ export default function Assets() {
     })).sort((a, b) => a.gasType.localeCompare(b.gasType));
   }, [bottles]);
 
-  // For each gas type, show bottle inventory (counting physical bottles)
-  const assetRows = assetTypes.map(({ gasType, bottles: bottlesOfType }) => {
-    // Count bottles by status - these are the physical containers we track
-    // FIXED: Use mutually exclusive logic to prevent double counting
-    const available = bottlesOfType.filter(b => 
-      (b.status === 'available' && !b.assigned_customer) || 
-      (!b.status || b.status === 'available')
-    ).length;
-    const rented = bottlesOfType.filter(b => 
-      b.assigned_customer && b.assigned_customer !== '' && 
-      b.status !== 'maintenance' && b.status !== 'lost' && b.status !== 'retired'
-    ).length;
-    const maintenance = bottlesOfType.filter(b => b.status === 'maintenance').length;
-    const lost = bottlesOfType.filter(b => b.status === 'lost').length;
-    const retired = bottlesOfType.filter(b => b.status === 'retired').length;
-    const total = bottlesOfType.length;
+  // Helper function to extract size from bottle description
+  const extractSize = (bottle) => {
+    let desc = bottle.description || '';
+    // Extract size from description if it contains size info
+    const sizeMatch = desc.match(/(?:SIZE|size)\s+(\d+)/i);
+    if (sizeMatch) {
+      return `${sizeMatch[1]} cu ft`;
+    }
+    // Clean up description to remove asset/bottle references
+    desc = desc
+      .replace(/\s+BOTTLE.*$/i, '')
+      .replace(/\s+ASSET.*$/i, '')
+      .replace(/\s+ASSETS.*$/i, '')
+      .trim();
+    return desc || 'Various sizes';
+  };
+
+  // Group by gas type AND size to create separate rows for each size
+  const assetRows = useMemo(() => {
+    const sizeGroupedMap = new Map();
     
-    const sample = bottlesOfType[0] || {};
+    assetTypes.forEach(({ gasType, bottles: bottlesOfType }) => {
+      bottlesOfType.forEach(bottle => {
+        const size = extractSize(bottle);
+        const key = `${gasType}|||${size}`;
+        
+        if (!sizeGroupedMap.has(key)) {
+          sizeGroupedMap.set(key, {
+            gasType: gasType,
+            size: size,
+            bottles: [],
+            product_code: bottle.product_code || '',
+            organization_name: bottle.organization_name || ''
+          });
+        }
+        sizeGroupedMap.get(key).bottles.push(bottle);
+      });
+    });
     
-    // Get bottle size information - show the different sizes of bottles for this gas type
-    const sizes = [...new Set(bottlesOfType.map(b => {
-      let desc = b.description || '';
-      // Extract size from description if it contains size info
-      const sizeMatch = desc.match(/(?:SIZE|size)\s+(\d+)/i);
-      if (sizeMatch) {
-        return `${sizeMatch[1]} cu ft`;
-      }
-      // Clean up description to remove asset/bottle references
-      desc = desc
-        .replace(/\s+BOTTLE.*$/i, '')
-        .replace(/\s+ASSET.*$/i, '')
-        .replace(/\s+ASSETS.*$/i, '')
-        .trim();
-      return desc;
-    }).filter(Boolean))];
-    
-    const sizeInfo = sizes.length === 1 ? sizes[0] : sizes.length > 1 ? `${sizes.length} different sizes` : 'Various sizes';
-    
-    return {
-      gasType: gasType,
-      product_code: sample.product_code || '',
-      sizeInfo: sizeInfo,
-      available: available,
-      rented: rented,
-      maintenance: maintenance,
-      lost: lost,
-      retired: retired,
-      total: total,
-      organization_name: sample.organization_name || '',
-      id: sample.id || '',
-      sizes: sizes,
-      sample_bottle: sample
-      // Removed all_bottles to prevent storage quota issues
-    };
-  });
+    // Convert map to array and calculate counts for each size group
+    return Array.from(sizeGroupedMap.values()).map(({ gasType, size, bottles, product_code, organization_name }) => {
+      // Count bottles by status - these are the physical containers we track
+      // FIXED: Use mutually exclusive logic to prevent double counting
+      const available = bottles.filter(b => 
+        (b.status === 'available' && !b.assigned_customer) || 
+        (!b.status || b.status === 'available')
+      ).length;
+      const rented = bottles.filter(b => 
+        b.assigned_customer && b.assigned_customer !== '' && 
+        b.status !== 'maintenance' && b.status !== 'lost' && b.status !== 'retired'
+      ).length;
+      const maintenance = bottles.filter(b => b.status === 'maintenance').length;
+      const lost = bottles.filter(b => b.status === 'lost').length;
+      const retired = bottles.filter(b => b.status === 'retired').length;
+      const total = bottles.length;
+      
+      const sample = bottles[0] || {};
+      
+      return {
+        gasType: gasType,
+        product_code: product_code,
+        sizeInfo: size,
+        available: available,
+        rented: rented,
+        maintenance: maintenance,
+        lost: lost,
+        retired: retired,
+        total: total,
+        organization_name: organization_name,
+        id: sample.id || '',
+        sizes: [size],
+        sample_bottle: sample
+      };
+    }).sort((a, b) => {
+      // Sort by gas type first, then by size
+      const gasCompare = a.gasType.localeCompare(b.gasType);
+      if (gasCompare !== 0) return gasCompare;
+      return a.sizeInfo.localeCompare(b.sizeInfo);
+    });
+  }, [assetTypes]);
 
 
   if (loading) return (
@@ -388,31 +398,24 @@ export default function Assets() {
         </Box>
 
         {/* Filters */}
-        <Box display="flex" gap={2} mb={3} flexWrap="wrap">
-        {/* Organization Filter - Only for Owners */}
         {profile?.role === 'owner' && (
-          <FormControl sx={{ minWidth: 220 }} size="small">
-            <InputLabel>Organization</InputLabel>
-            <Select
-              value={selectedOrg}
-              label="Organization"
-              onChange={e => setSelectedOrg(e.target.value)}
-            >
-              <MenuItem value="">All Organizations</MenuItem>
-              {organizations.map(org => (
-                <MenuItem key={org.id} value={org.id}>{org.name}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <Box display="flex" gap={2} mb={3} flexWrap="wrap">
+            {/* Organization Filter - Only for Owners */}
+            <FormControl sx={{ minWidth: 220 }} size="small">
+              <InputLabel>Organization</InputLabel>
+              <Select
+                value={selectedOrg}
+                label="Organization"
+                onChange={e => setSelectedOrg(e.target.value)}
+              >
+                <MenuItem value="">All Organizations</MenuItem>
+                {organizations.map(org => (
+                  <MenuItem key={org.id} value={org.id}>{org.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
         )}
-          <TextField
-            size="small"
-            label="Search bottles, barcode, gas type..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            sx={{ minWidth: 260 }}
-          />
-        </Box>
 
         {error && (
           <Alert severity="error" sx={{ mb: 3 }}>
@@ -436,8 +439,8 @@ export default function Assets() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {assetRows.map(row => (
-                  <TableRow key={row.gasType}>
+                {assetRows.map((row, index) => (
+                  <TableRow key={`${row.gasType}-${row.sizeInfo}-${index}`}>
                     <TableCell>
                       <Typography variant="body1" sx={{ fontWeight: 600, color: 'primary.main' }}>
                         {row.gasType}
@@ -452,12 +455,6 @@ export default function Assets() {
                       <Typography variant="body2">
                         {row.sizeInfo}
                       </Typography>
-                      {row.sizes.length > 1 && (
-                        <Typography variant="caption" color="text.secondary">
-                          {row.sizes.slice(0, 3).join(', ')}
-                          {row.sizes.length > 3 && ` +${row.sizes.length - 3} more`}
-                        </Typography>
-                      )}
                     </TableCell>
                     <TableCell>
                       <Typography 

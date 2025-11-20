@@ -22,16 +22,11 @@
       "ios": {
         "simulator": false,
         "buildConfiguration": "Release"
-      }
-    }
-  },
-  "submit": {
-    "production": {
-      "ios": {
-        "appleId": "evanevoo@icloud.com",
-        "ascAppId": "6752309990",
-        "appleTeamId": "FA8UQ322NZ"
-      }
+      },
+      "env": {
+        "EXPO_NO_DOTENV": "1"
+      },
+      "node": "20.18.0"
     }
   }
 }

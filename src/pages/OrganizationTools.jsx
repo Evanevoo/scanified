@@ -28,6 +28,7 @@ import {
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
+import * as XLSX from 'xlsx';
 
 export default function OrganizationTools() {
   const { profile, organization } = useAuth();
@@ -509,6 +510,157 @@ export default function OrganizationTools() {
     ).length;
   };
 
+  const handleExportData = async () => {
+    if (!organization?.id) {
+      alert('No organization found');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Fetch all data for export
+      const [customersResult, bottlesResult, deliveriesResult, locationsResult] = await Promise.all([
+        supabase
+          .from('customers')
+          .select('*')
+          .eq('organization_id', organization.id),
+        supabase
+          .from('bottles')
+          .select('*')
+          .eq('organization_id', organization.id),
+        supabase
+          .from('delivery_manifests')
+          .select('*')
+          .eq('organization_id', organization.id),
+        supabase
+          .from('locations')
+          .select('*')
+          .eq('organization_id', organization.id)
+      ]);
+
+      const customers = customersResult.data || [];
+      const bottles = bottlesResult.data || [];
+      const deliveries = deliveriesResult.data || [];
+      const locations = locationsResult.data || [];
+
+      // Create workbook with multiple sheets
+      const wb = XLSX.utils.book_new();
+      
+      // Organization Summary Sheet
+      const summaryData = [
+        ['Organization Data Export'],
+        [''],
+        ['Organization Name', organization.name || ''],
+        ['Export Date', new Date().toLocaleString()],
+        [''],
+        ['Summary'],
+        ['Customers', customers.length],
+        ['Bottles', bottles.length],
+        ['Deliveries', deliveries.length],
+        ['Locations', locations.length]
+      ];
+      
+      const summaryWS = XLSX.utils.aoa_to_sheet(summaryData);
+      XLSX.utils.book_append_sheet(wb, summaryWS, 'Summary');
+
+      // Customers Sheet
+      if (customers.length > 0) {
+        const customersData = customers.map(customer => ({
+          'ID': customer.id,
+          'Name': customer.name || '',
+          'Email': customer.email || '',
+          'Phone': customer.phone || '',
+          'Address': customer.address || '',
+          'City': customer.city || '',
+          'State': customer.state || '',
+          'Zip': customer.zip || '',
+          'Customer List ID': customer.CustomerListID || '',
+          'Customer Name': customer.CustomerName || '',
+          'Created At': customer.created_at ? new Date(customer.created_at).toLocaleString() : '',
+          'Updated At': customer.updated_at ? new Date(customer.updated_at).toLocaleString() : ''
+        }));
+        
+        const customersWS = XLSX.utils.json_to_sheet(customersData);
+        XLSX.utils.book_append_sheet(wb, customersWS, 'Customers');
+      }
+
+      // Bottles Sheet
+      if (bottles.length > 0) {
+        const bottlesData = bottles.map(bottle => ({
+          'ID': bottle.id,
+          'Serial Number': bottle.serial_number || '',
+          'Barcode Number': bottle.barcode_number || '',
+          'Gas Type': bottle.gas_type || '',
+          'Status': bottle.status || '',
+          'Location': bottle.location || '',
+          'Product Code': bottle.product_code || '',
+          'Description': bottle.description || '',
+          'Created At': bottle.created_at ? new Date(bottle.created_at).toLocaleString() : '',
+          'Updated At': bottle.updated_at ? new Date(bottle.updated_at).toLocaleString() : ''
+        }));
+        
+        const bottlesWS = XLSX.utils.json_to_sheet(bottlesData);
+        XLSX.utils.book_append_sheet(wb, bottlesWS, 'Bottles');
+      }
+
+      // Deliveries Sheet
+      if (deliveries.length > 0) {
+        const deliveriesData = deliveries.map(delivery => ({
+          'ID': delivery.id,
+          'Manifest Date': delivery.manifest_date ? new Date(delivery.manifest_date).toLocaleDateString() : '',
+          'Status': delivery.status || '',
+          'Driver ID': delivery.driver_id || '',
+          'Notes': delivery.notes || '',
+          'Created At': delivery.created_at ? new Date(delivery.created_at).toLocaleString() : '',
+          'Updated At': delivery.updated_at ? new Date(delivery.updated_at).toLocaleString() : ''
+        }));
+        
+        const deliveriesWS = XLSX.utils.json_to_sheet(deliveriesData);
+        XLSX.utils.book_append_sheet(wb, deliveriesWS, 'Deliveries');
+      }
+
+      // Locations Sheet
+      if (locations.length > 0) {
+        const locationsData = locations.map(location => ({
+          'ID': location.id,
+          'Name': location.name || '',
+          'Address': location.address || '',
+          'City': location.city || '',
+          'State': location.state || '',
+          'Zip': location.zip || '',
+          'Phone': location.phone || '',
+          'Created At': location.created_at ? new Date(location.created_at).toLocaleString() : '',
+          'Updated At': location.updated_at ? new Date(location.updated_at).toLocaleString() : ''
+        }));
+        
+        const locationsWS = XLSX.utils.json_to_sheet(locationsData);
+        XLSX.utils.book_append_sheet(wb, locationsWS, 'Locations');
+      }
+
+      // Save the Excel file
+      const fileName = `${organization.name?.replace(/[^a-zA-Z0-9]/g, '_')}_export_${new Date().toISOString().split('T')[0]}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+
+      logger.log('Data exported successfully to Excel');
+      alert('Data exported successfully to Excel!');
+    } catch (error) {
+      logger.error('Error exporting data:', error);
+      alert('Failed to export data: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRunCleanup = () => {
+    // Open the bulk cleanup dialog
+    if (getInvalidBottlesCount() > 0) {
+      setBulkCleanupDialog(true);
+    } else {
+      alert('No invalid data found to clean up!');
+    }
+  };
+
   if (!profile || !organization) {
     return (
       <Box sx={{ p: 3, textAlign: 'center' }}>
@@ -622,9 +774,11 @@ export default function OrganizationTools() {
               <Button
                 variant="contained"
                 startIcon={<DownloadIcon />}
+                onClick={handleExportData}
+                disabled={loading}
                 fullWidth
               >
-                Export Data
+                {loading ? 'Exporting...' : 'Export Data'}
               </Button>
             </CardContent>
           </Card>
@@ -664,6 +818,8 @@ export default function OrganizationTools() {
               <Button
                 variant="contained"
                 startIcon={<DeleteIcon />}
+                onClick={handleRunCleanup}
+                disabled={loading}
                 fullWidth
               >
                 Run Cleanup

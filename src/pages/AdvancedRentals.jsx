@@ -12,8 +12,16 @@ import {
   Divider, Switch, FormControlLabel, FormGroup,
   Stepper, Step, StepLabel, StepContent,
   Tabs, Tab, Slider, FormControlLabel as MuiFormControlLabel,
-  Checkbox, RadioGroup, Radio, Autocomplete, Timeline, TimelineItem, TimelineSeparator, TimelineConnector, TimelineContent, TimelineDot
+  Checkbox, RadioGroup, Radio, Autocomplete
 } from '@mui/material';
+import {
+  Timeline,
+  TimelineItem,
+  TimelineSeparator,
+  TimelineConnector,
+  TimelineContent,
+  TimelineDot
+} from '@mui/lab';
 import {
   AttachMoney as MoneyIcon,
   Add as AddIcon,
@@ -27,19 +35,19 @@ import {
   Map as MapIcon,
   Navigation as NavigationIcon,
   Speed as SpeedIcon,
-  Eco as EcoIcon,
+  Nature as EcoIcon,
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
   QrCode as QrCodeIcon,
   Scanner as ScannerIcon,
-  Package as PackageIcon,
+  Inventory2 as PackageIcon,
   LocalShipping as ShippingIcon,
   Storage as StorageIcon,
   Person as PersonIcon,
   LocationOn as LocationIcon,
   AccessTime as TimeIcon,
-  Distance as DistanceIcon,
-  GasStation as FuelIcon,
+  Straighten as DistanceIcon,
+  LocalGasStation as FuelIcon,
   Security as SecurityIcon,
   Description as DocumentIcon,
   Assessment as AssessmentIcon,
