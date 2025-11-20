@@ -6,7 +6,8 @@ import {
   TextField, FormControl, InputLabel, Select, MenuItem,
   Dialog, DialogTitle, DialogContent, DialogActions,
   Chip, Alert, IconButton, Tooltip, Switch, FormControlLabel,
-  Divider, Accordion, AccordionSummary, AccordionDetails, InputAdornment
+  Divider, Accordion, AccordionSummary, AccordionDetails, InputAdornment,
+  TablePagination
 } from '@mui/material';
 import {
   Save as SaveIcon, Edit as EditIcon, Delete as DeleteIcon,
@@ -30,6 +31,8 @@ export default function BulkRentalPricingManager() {
   const [searchTerm, setSearchTerm] = useState('');
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
   const [sortByPeriod, setSortByPeriod] = useState('all'); // all, monthly, yearly
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [bulkPricing, setBulkPricing] = useState({
     discountPercent: 0,
     markupPercent: 0,
@@ -128,14 +131,6 @@ export default function BulkRentalPricingManager() {
     }
   };
 
-  const handleSelectAll = (selected) => {
-    if (selected) {
-      setSelectedCustomers(filteredCustomers.map(c => c.CustomerListID));
-    } else {
-      setSelectedCustomers([]);
-    }
-  };
-
   const createTestPricingData = async () => {
     if (!organization?.id) return;
     
@@ -206,6 +201,43 @@ export default function BulkRentalPricingManager() {
 
     return filtered;
   }, [customers, debouncedSearchTerm, sortByPeriod, customerPricing]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedSearchTerm, sortByPeriod]);
+
+  // Pagination
+  const paginatedCustomers = filteredCustomers.slice(
+    page * rowsPerPage,
+    page * rowsPerPage + rowsPerPage
+  );
+
+  const handleChangePage = (event, newPage) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
+
+  const handleSelectAll = (selected) => {
+    if (selected) {
+      // Only select customers on current page
+      setSelectedCustomers(prev => {
+        const newSelection = new Set(prev);
+        paginatedCustomers.forEach(c => newSelection.add(c.CustomerListID));
+        return Array.from(newSelection);
+      });
+    } else {
+      // Only deselect customers on current page
+      setSelectedCustomers(prev => {
+        const currentPageIds = new Set(paginatedCustomers.map(c => c.CustomerListID));
+        return prev.filter(id => !currentPageIds.has(id));
+      });
+    }
+  };
 
   const applyBulkPricing = async () => {
     if (selectedCustomers.length === 0) {
@@ -607,11 +639,11 @@ export default function BulkRentalPricingManager() {
           <FormControlLabel
             control={
               <Switch
-                checked={selectedCustomers.length === filteredCustomers.length && filteredCustomers.length > 0}
+                checked={paginatedCustomers.length > 0 && paginatedCustomers.every(c => selectedCustomers.includes(c.CustomerListID))}
                 onChange={(e) => handleSelectAll(e.target.checked)}
               />
             }
-            label="Select All"
+            label={`Select All (${paginatedCustomers.length} on this page)`}
           />
         </Box>
 
@@ -622,7 +654,7 @@ export default function BulkRentalPricingManager() {
                 <TableCell padding="checkbox">
                   <input
                     type="checkbox"
-                    checked={selectedCustomers.length === customers.length && customers.length > 0}
+                    checked={paginatedCustomers.length > 0 && paginatedCustomers.every(c => selectedCustomers.includes(c.CustomerListID))}
                     onChange={(e) => handleSelectAll(e.target.checked)}
                   />
                 </TableCell>
@@ -633,56 +665,77 @@ export default function BulkRentalPricingManager() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {filteredCustomers.map((customer) => {
-                const currentPricing = customerPricing.find(p => p.customer_id === customer.CustomerListID);
-                return (
-                  <TableRow key={customer.id}>
-                    <TableCell padding="checkbox">
-                      <input
-                        type="checkbox"
-                        checked={selectedCustomers.includes(customer.CustomerListID)}
-                        onChange={(e) => handleCustomerSelection(customer.CustomerListID, e.target.checked)}
-                      />
-                    </TableCell>
-                    <TableCell>{customer.name}</TableCell>
-                    <TableCell>{customer.CustomerListID}</TableCell>
-                    <TableCell>
-                      {currentPricing ? (
-                        <Box>
-                          <Chip 
-                            label={`${currentPricing.discount_percent}% discount`} 
-                            size="small" 
-                            color="success" 
-                            sx={{ mr: 1 }}
-                          />
-                          {currentPricing.fixed_rate_override && (
+              {paginatedCustomers.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center">
+                    <Typography variant="body2" color="text.secondary" py={2}>
+                      No customers found matching your filters
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                paginatedCustomers.map((customer) => {
+                  const currentPricing = customerPricing.find(p => p.customer_id === customer.CustomerListID);
+                  return (
+                    <TableRow key={customer.id}>
+                      <TableCell padding="checkbox">
+                        <input
+                          type="checkbox"
+                          checked={selectedCustomers.includes(customer.CustomerListID)}
+                          onChange={(e) => handleCustomerSelection(customer.CustomerListID, e.target.checked)}
+                        />
+                      </TableCell>
+                      <TableCell>{customer.name}</TableCell>
+                      <TableCell>{customer.CustomerListID}</TableCell>
+                      <TableCell>
+                        {currentPricing ? (
+                          <Box>
                             <Chip 
-                              label={`$${currentPricing.fixed_rate_override}/${currentPricing.rental_period || 'month'}`} 
+                              label={`${currentPricing.discount_percent}% discount`} 
                               size="small" 
-                              color="info"
+                              color="success" 
+                              sx={{ mr: 1 }}
                             />
-                          )}
-                        </Box>
-                      ) : (
-                        <Chip label="Standard Pricing" size="small" color="default" />
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {currentPricing && (
-                        <IconButton
-                          size="small"
-                          onClick={() => deleteCustomerPricing(customer.CustomerListID)}
-                          color="error"
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+                            {currentPricing.fixed_rate_override && (
+                              <Chip 
+                                label={`$${currentPricing.fixed_rate_override}/${currentPricing.rental_period || 'month'}`} 
+                                size="small" 
+                                color="info"
+                              />
+                            )}
+                          </Box>
+                        ) : (
+                          <Chip label="Standard Pricing" size="small" color="default" />
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {currentPricing && (
+                          <IconButton
+                            size="small"
+                            onClick={() => deleteCustomerPricing(customer.CustomerListID)}
+                            color="error"
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
             </TableBody>
           </Table>
+          <TablePagination
+            component="div"
+            count={filteredCustomers.length}
+            page={page}
+            onPageChange={handleChangePage}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={handleChangeRowsPerPage}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            labelRowsPerPage="Rows per page:"
+            labelDisplayedRows={({ from, to, count }) => `${from}-${to} of ${count !== -1 ? count : `more than ${to}`}`}
+          />
         </TableContainer>
       </Paper>
 
