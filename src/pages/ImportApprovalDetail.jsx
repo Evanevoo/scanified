@@ -92,6 +92,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const [newPO, setNewPO] = useState('');
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [newLocation, setNewLocation] = useState('');
+  const [locations, setLocations] = useState([]);
   const [scannedBottles, setScannedBottles] = useState([]);
   const [returnedBottles, setReturnedBottles] = useState([]);
 
@@ -723,6 +724,34 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       fetchCustomers();
     }
   }, [showCustomerModal, organization]);
+
+  // Fetch locations for the change location modal
+  useEffect(() => {
+    async function fetchLocations() {
+      if (!organization?.id) return;
+      
+      try {
+        const { data: locationsData, error } = await supabase
+          .from('locations')
+          .select('id, name')
+          .eq('organization_id', organization.id)
+          .order('name');
+        
+        if (error) {
+          logger.error('Error fetching locations:', error);
+          return;
+        }
+        
+        setLocations(locationsData || []);
+      } catch (error) {
+        logger.error('Error fetching locations:', error);
+      }
+    }
+    
+    if (showLocationModal) {
+      fetchLocations();
+    }
+  }, [showLocationModal, organization]);
 
   // Helper function to get order number from data
   const getOrderNumber = (data) => {
@@ -2408,13 +2437,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               }}
             >
               <option value="">Select a location...</option>
-              <option value="SASKATOON">SASKATOON</option>
-              <option value="REGINA">REGINA</option>
-              <option value="PRINCE ALBERT">PRINCE ALBERT</option>
-              <option value="MOOSE JAW">MOOSE JAW</option>
-              <option value="SWIFT CURRENT">SWIFT CURRENT</option>
-              <option value="YORKTON">YORKTON</option>
-              <option value="NORTH BATTLEFORD">NORTH BATTLEFORD</option>
+              {locations.map((location) => (
+                <option key={location.id} value={location.name}>
+                  {location.name}
+                </option>
+              ))}
             </select>
 
             <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
