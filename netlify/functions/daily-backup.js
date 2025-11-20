@@ -43,12 +43,28 @@ exports.handler = async (event, context) => {
   const authHeader = event.headers.authorization;
   const expectedToken = process.env.CRON_SECRET;
   
-  // Allow direct invocation for testing, but require auth for scheduled calls
-  if (event.httpMethod === 'POST' && (!authHeader || authHeader !== `Bearer ${expectedToken}`)) {
+  // Allow GET requests for testing (without auth), but require auth for POST/scheduled calls
+  if (event.httpMethod === 'POST' && expectedToken && (!authHeader || authHeader !== `Bearer ${expectedToken}`)) {
     console.log('⚠️ Unauthorized request to daily backup');
     return {
       statusCode: 401,
-      body: JSON.stringify({ error: 'Unauthorized' })
+      body: JSON.stringify({ error: 'Unauthorized. Please provide valid CRON_SECRET in Authorization header.' })
+    };
+  }
+  
+  // For GET requests, just return status (don't run backup)
+  if (event.httpMethod === 'GET') {
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: 'Daily backup function is available. Use POST with Authorization header to trigger backup.',
+        endpoint: '/.netlify/functions/daily-backup',
+        method: 'POST',
+        note: 'This function runs automatically via scheduled function at 2 AM UTC daily.'
+      })
     };
   }
 

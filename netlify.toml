@@ -30,6 +30,13 @@
 [functions]
   directory = "netlify/functions"
 
+# Scheduled Functions
+# To enable daily backups, go to Netlify Dashboard > Functions > Scheduled Functions
+# Add a new scheduled function:
+# - Function: daily-backup
+# - Schedule: 0 2 * * * (runs daily at 2 AM UTC)
+# - Environment variable: CRON_SECRET (set a secure random string)
+
 [[headers]]
   for = "/assets/*"
   [headers.values]
