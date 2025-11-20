@@ -34,7 +34,8 @@ exports.handler = async (event) => {
       };
     }
 
-    const { token } = JSON.parse(event.body || '{}');
+    const payload = JSON.parse(event.body || '{}');
+    const { token } = payload;
 
     const shouldAccept = payload.accept;
     const profilePayload = payload.profile || null;
