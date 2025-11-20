@@ -14,20 +14,31 @@ const getRoleDisplayName = (user, rolesList = []) => {
   // Try role from JOIN first (roles.name)
   if (user.roles?.name) return user.roles.name;
   
-  // Fallback to direct role field
-  if (user.role) return user.role;
+  // Fallback to direct role field (if it's a string name, not a UUID)
+  if (user.role && typeof user.role === 'string' && !user.role.includes('-')) {
+    return user.role;
+  }
   
-  // Handle common role IDs/names
+  // Handle role_id - always try to look it up in rolesList first
   if (user.role_id) {
     const matchedRole = rolesList.find(r => r.id === user.role_id);
     if (matchedRole?.name) {
       return matchedRole.name;
     }
-    // If role_id looks like a UUID but we don't have the joined name, show a placeholder
-    if (user.role_id.includes('-')) {
-      return 'Role';
+    // If role_id is a UUID but we don't have a match, show a placeholder instead of the UUID
+    if (typeof user.role_id === 'string' && user.role_id.includes('-')) {
+      return 'Unknown Role';
     }
+    // If it's not a UUID, return as-is (shouldn't happen, but handle it)
     return user.role_id;
+  }
+  
+  // If user.role exists but is a UUID, try to look it up
+  if (user.role && typeof user.role === 'string' && user.role.includes('-')) {
+    const matchedRole = rolesList.find(r => r.id === user.role);
+    if (matchedRole?.name) {
+      return matchedRole.name;
+    }
   }
   
   return 'N/A';
