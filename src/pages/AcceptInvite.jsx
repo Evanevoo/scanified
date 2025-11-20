@@ -103,25 +103,54 @@ export default function AcceptInvite() {
 
           if (rpcError) {
             // Check if it's a "function does not exist" error
-            if (rpcError.message?.includes('function') && rpcError.message?.includes('does not exist')) {
+            if (rpcError.message?.includes('function') && (rpcError.message?.includes('does not exist') || rpcError.code === '42883')) {
               logger.warn('RPC function does not exist yet. Please run the SQL function in Supabase.');
               setStatus('error');
-              setMessage('The invite validation function is not set up yet. Please contact the administrator to run the SQL function: get_invite_by_token. The SQL file is available in the project root as validate-invite-token-function.sql');
+              setMessage('The invite validation function is not set up yet. Please contact the administrator to run the SQL migration: create_get_invite_by_token_function.sql in the supabase/migrations folder.');
               return;
             }
             
-            logger.warn('RPC function error, trying direct query:', rpcError);
-            // Fallback to direct query if RPC has other errors
-            const { data: directData, error: directError } = await supabase
-              .from('organization_invites')
-              .select('*, organizations(name)')
-              .eq('invite_token', token)
-              .is('accepted_at', null)
-              .maybeSingle();
-            
-            inviteData = directData;
-            inviteError = directError;
-          } else if (rpcData && rpcData.length > 0) {
+            // Check for permission errors
+            if (rpcError.code === '42501' || rpcError.message?.includes('permission denied')) {
+              logger.warn('RPC function permission error, trying direct query:', rpcError);
+              // Fallback to direct query if RPC has permission errors
+              const { data: directData, error: directError } = await supabase
+                .from('organization_invites')
+                .select('*, organizations(name)')
+                .eq('invite_token', token)
+                .is('accepted_at', null)
+                .maybeSingle();
+              
+              inviteData = directData;
+              inviteError = directError;
+            } else {
+              // For other RPC errors, log and try direct query
+              logger.warn('RPC function error, trying direct query:', rpcError);
+              const { data: directData, error: directError } = await supabase
+                .from('organization_invites')
+                .select('*, organizations(name)')
+                .eq('invite_token', token)
+                .is('accepted_at', null)
+                .maybeSingle();
+              
+              inviteData = directData;
+              inviteError = directError;
+            }
+          } else if (rpcData && Array.isArray(rpcData) && rpcData.length > 0) {
+            // RPC returns an array (table), get first result
+            inviteData = {
+              ...rpcData[0],
+              organizations: rpcData[0].organization_name ? { name: rpcData[0].organization_name } : null
+            };
+            logger.log('Successfully fetched invite via RPC:', inviteData);
+          } else if (rpcData && !Array.isArray(rpcData) && rpcData.id) {
+            // Handle case where RPC returns single object instead of array
+            inviteData = {
+              ...rpcData,
+              organizations: rpcData.organization_name ? { name: rpcData.organization_name } : null
+            };
+            logger.log('Successfully fetched invite via RPC (single object):', inviteData);
+          } else {
             // RPC function returns array, get first result
             const invite = rpcData[0];
             inviteData = {
