@@ -344,8 +344,6 @@ export default function ImportApprovals() {
   // Enhanced state management  
   const [selectedRecords, setSelectedRecords] = useState([]);
   const [viewMode, setViewMode] = useState('list'); // 'list', 'grid', 'timeline'
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [refreshInterval, setRefreshInterval] = useState(30000); // 30 seconds
   const [verificationDialog, setVerificationDialog] = useState({ open: false, record: null, step: 0 });
   const [bulkActionDialog, setBulkActionDialog] = useState({ open: false, action: null });
   const [filterDialog, setFilterDialog] = useState({ open: false });
@@ -443,15 +441,6 @@ export default function ImportApprovals() {
     );
   };
 
-  // Auto-refresh functionality
-  useEffect(() => {
-    if (autoRefresh) {
-      const interval = setInterval(() => {
-        fetchData();
-      }, refreshInterval);
-      return () => clearInterval(interval);
-    }
-  }, [autoRefresh, refreshInterval]);
 
   // Initialize component with optimized loading
   useEffect(() => {
@@ -4248,15 +4237,6 @@ export default function ImportApprovals() {
           </Typography>
         </Box>
         <Box display="flex" gap={2}>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={autoRefresh}
-                onChange={(e) => setAutoRefresh(e.target.checked)}
-              />
-            }
-            label="Auto Refresh"
-          />
           <Button
             startIcon={<RefreshIcon />}
             onClick={fetchData}
@@ -5008,29 +4988,9 @@ export default function ImportApprovals() {
         <DialogTitle>Import Approval Settings</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={autoRefresh}
-                  onChange={(e) => setAutoRefresh(e.target.checked)}
-                />
-              }
-              label="Auto Refresh"
-            />
-            <FormControl fullWidth>
-              <InputLabel>Refresh Interval</InputLabel>
-              <Select
-                value={refreshInterval}
-                onChange={(e) => setRefreshInterval(e.target.value)}
-                label="Refresh Interval"
-                disabled={!autoRefresh}
-              >
-                <MenuItem value={10000}>10 seconds</MenuItem>
-                <MenuItem value={30000}>30 seconds</MenuItem>
-                <MenuItem value={60000}>1 minute</MenuItem>
-                <MenuItem value={300000}>5 minutes</MenuItem>
-              </Select>
-            </FormControl>
+            <Typography variant="body2" color="text.secondary">
+              Settings options will be available here in the future.
+            </Typography>
           </Box>
         </DialogContent>
         <DialogActions>
