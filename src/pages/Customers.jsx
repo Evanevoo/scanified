@@ -175,21 +175,33 @@ function Customers({ profile }) {
       // Fetch asset counts for these customers
       if (data && data.length > 0) {
         const customerIds = data.map(c => c.CustomerListID);
-        const { data: rentalData, error: rentalError } = await supabase
-          .from('rentals')
-          .select('customer_id')
-          .in('customer_id', customerIds)
-          .is('rental_end_date', null); // Only active rentals
+        const counts = {};
+        
+        // Initialize counts for all customers
+        customerIds.forEach(id => {
+          counts[id] = 0;
+        });
 
-        if (rentalError) {
-          logger.error('Error fetching rental data:', rentalError);
+        // Count bottles assigned to customers (primary source of truth)
+        const { data: bottlesData, error: bottlesError } = await supabase
+          .from('bottles')
+          .select('assigned_customer')
+          .in('assigned_customer', customerIds)
+          .eq('organization_id', organization.id)
+          .not('assigned_customer', 'is', null);
+
+        if (bottlesError) {
+          logger.error('Error fetching bottles data:', bottlesError);
         } else {
-          const counts = {};
-          rentalData?.forEach(rental => {
-            counts[rental.customer_id] = (counts[rental.customer_id] || 0) + 1;
+          bottlesData?.forEach(bottle => {
+            if (bottle.assigned_customer) {
+              counts[bottle.assigned_customer] = (counts[bottle.assigned_customer] || 0) + 1;
+            }
           });
-          setAssetCounts(counts);
+          logger.log('Asset counts from bottles:', counts);
         }
+
+        setAssetCounts(counts);
       }
     } catch (err) {
       logger.error('Error in fetchCustomers:', err);
