@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
-import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Button, Grid, List, ListItem, ListItemText, Divider, Alert, Chip, IconButton, Tooltip, Card, CardContent, CardHeader, Accordion, AccordionSummary, AccordionDetails, Badge } from '@mui/material';
+import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Button, Grid, List, ListItem, ListItemText, Divider, Alert, Chip, IconButton, Tooltip, Card, CardContent, CardHeader, Accordion, AccordionSummary, AccordionDetails, Badge, TextField } from '@mui/material';
 import { ExpandMore as ExpandMoreIcon, Person as PersonIcon, Receipt as ReceiptIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon } from '@mui/icons-material';
 import { CardSkeleton } from '../components/SmoothLoading';
 
@@ -95,6 +95,24 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const [locations, setLocations] = useState([]);
   const [scannedBottles, setScannedBottles] = useState([]);
   const [returnedBottles, setReturnedBottles] = useState([]);
+  
+  // Asset action modals
+  const [showReclassifyModal, setShowReclassifyModal] = useState(false);
+  const [selectedAssets, setSelectedAssets] = useState([]);
+  const [newGasType, setNewGasType] = useState('');
+  const [showPropertiesModal, setShowPropertiesModal] = useState(false);
+  const [assetProperties, setAssetProperties] = useState({});
+  const [showAttachNotScannedModal, setShowAttachNotScannedModal] = useState(false);
+  const [notScannedAssets, setNotScannedAssets] = useState([]);
+  const [showAttachBarcodeModal, setShowAttachBarcodeModal] = useState(false);
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const [showReplaceModal, setShowReplaceModal] = useState(false);
+  const [assetToReplace, setAssetToReplace] = useState(null);
+  const [replacementBarcode, setReplacementBarcode] = useState('');
+  const [showDetachModal, setShowDetachModal] = useState(false);
+  const [assetsToDetach, setAssetsToDetach] = useState([]);
+  const [showMoveOrderModal, setShowMoveOrderModal] = useState(false);
+  const [targetOrderNumber, setTargetOrderNumber] = useState('');
 
   // Get filter parameters from URL
   const filterInvoiceNumber = searchParams.get('order') || searchParams.get('invoiceNumber');
@@ -1522,10 +1540,445 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     setTimeout(() => setActionMessage(''), 3000);
   };
 
+  // Asset action handlers
+  const handleReclassifyAssets = async () => {
+    if (!selectedAssets.length || !newGasType) {
+      setActionMessage('Please select assets and specify a new gas type');
+      setTimeout(() => setActionMessage(''), 3000);
+      return;
+    }
+
+    try {
+      setActionMessage('Reclassifying assets...');
+      
+      // Update bottles in database
+      const updates = selectedAssets.map(barcode => 
+        supabase
+          .from('bottles')
+          .update({ gas_type: newGasType })
+          .eq('barcode_number', barcode)
+          .eq('organization_id', organization.id)
+      );
+      
+      await Promise.all(updates);
+      
+      setActionMessage(`Successfully reclassified ${selectedAssets.length} asset(s) to ${newGasType}`);
+      setShowReclassifyModal(false);
+      setSelectedAssets([]);
+      setNewGasType('');
+      
+      // Refresh the page
+      window.location.reload();
+    } catch (error) {
+      logger.error('Error reclassifying assets:', error);
+      setActionMessage(`Error: ${error.message}`);
+    }
+    
+    setTimeout(() => setActionMessage(''), 3000);
+  };
+
+  const handleChangeProperties = async () => {
+    if (!selectedAssets.length) {
+      setActionMessage('Please select assets to modify');
+      setTimeout(() => setActionMessage(''), 3000);
+      return;
+    }
+
+    try {
+      setActionMessage('Updating asset properties...');
+      
+      const updates = selectedAssets.map(barcode => 
+        supabase
+          .from('bottles')
+          .update(assetProperties)
+          .eq('barcode_number', barcode)
+          .eq('organization_id', organization.id)
+      );
+      
+      await Promise.all(updates);
+      
+      setActionMessage(`Successfully updated ${selectedAssets.length} asset(s)`);
+      setShowPropertiesModal(false);
+      setSelectedAssets([]);
+      setAssetProperties({});
+      
+      window.location.reload();
+    } catch (error) {
+      logger.error('Error updating properties:', error);
+      setActionMessage(`Error: ${error.message}`);
+    }
+    
+    setTimeout(() => setActionMessage(''), 3000);
+  };
+
+  const handleAttachNotScanned = async () => {
+    if (!notScannedAssets.length) {
+      setActionMessage('Please select assets to attach');
+      setTimeout(() => setActionMessage(''), 3000);
+      return;
+    }
+
+    try {
+      setActionMessage('Attaching assets...');
+      
+      const data = parseDataField(importRecord.data);
+      const orderNumber = getOrderNumber(data);
+      const customerInfo = getCustomerInfo(data);
+      
+      // Add rows for not-scanned assets
+      const newRows = notScannedAssets.map(asset => ({
+        barcode: asset.barcode_number,
+        product_code: asset.product_code || asset.barcode_number,
+        gas_type: asset.gas_type,
+        qty_out: 1,
+        qty_in: 0,
+        order_number: orderNumber,
+        customer_name: customerInfo.name,
+        date: new Date().toISOString().split('T')[0],
+        description: asset.description || 'Manually attached'
+      }));
+      
+      const updatedData = {
+        ...data,
+        rows: [...(data.rows || []), ...newRows]
+      };
+      
+      await supabase
+        .from('imported_invoices')
+        .update({ data: updatedData })
+        .eq('id', invoiceNumber);
+      
+      setActionMessage(`Successfully attached ${notScannedAssets.length} asset(s)`);
+      setShowAttachNotScannedModal(false);
+      setNotScannedAssets([]);
+      
+      window.location.reload();
+    } catch (error) {
+      logger.error('Error attaching assets:', error);
+      setActionMessage(`Error: ${error.message}`);
+    }
+    
+    setTimeout(() => setActionMessage(''), 3000);
+  };
+
+  const handleAttachByBarcode = async () => {
+    if (!barcodeInput.trim()) {
+      setActionMessage('Please enter a barcode or serial number');
+      setTimeout(() => setActionMessage(''), 3000);
+      return;
+    }
+
+    try {
+      setActionMessage('Looking up and attaching asset...');
+      
+      // Lookup the asset in the database
+      const { data: bottle, error: lookupError } = await supabase
+        .from('bottles')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .or(`barcode_number.eq.${barcodeInput},serial_number.eq.${barcodeInput}`)
+        .single();
+      
+      if (lookupError || !bottle) {
+        setActionMessage('Asset not found. Please check the barcode/serial number.');
+        setTimeout(() => setActionMessage(''), 5000);
+        return;
+      }
+      
+      const data = parseDataField(importRecord.data);
+      const orderNumber = getOrderNumber(data);
+      const customerInfo = getCustomerInfo(data);
+      
+      // Add row for this asset
+      const newRow = {
+        barcode: bottle.barcode_number,
+        product_code: bottle.product_code || bottle.barcode_number,
+        gas_type: bottle.gas_type,
+        qty_out: 1,
+        qty_in: 0,
+        order_number: orderNumber,
+        customer_name: customerInfo.name,
+        date: new Date().toISOString().split('T')[0],
+        description: bottle.description || 'Manually attached'
+      };
+      
+      const updatedData = {
+        ...data,
+        rows: [...(data.rows || []), newRow]
+      };
+      
+      await supabase
+        .from('imported_invoices')
+        .update({ data: updatedData })
+        .eq('id', invoiceNumber);
+      
+      setActionMessage(`Successfully attached asset: ${bottle.barcode_number}`);
+      setShowAttachBarcodeModal(false);
+      setBarcodeInput('');
+      
+      window.location.reload();
+    } catch (error) {
+      logger.error('Error attaching by barcode:', error);
+      setActionMessage(`Error: ${error.message}`);
+    }
+    
+    setTimeout(() => setActionMessage(''), 3000);
+  };
+
+  const handleReplaceAsset = async () => {
+    if (!assetToReplace || !replacementBarcode) {
+      setActionMessage('Please select an asset to replace and provide a replacement barcode');
+      setTimeout(() => setActionMessage(''), 3000);
+      return;
+    }
+
+    try {
+      setActionMessage('Replacing asset...');
+      
+      // Lookup replacement asset
+      const { data: newBottle, error: lookupError } = await supabase
+        .from('bottles')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .or(`barcode_number.eq.${replacementBarcode},serial_number.eq.${replacementBarcode}`)
+        .single();
+      
+      if (lookupError || !newBottle) {
+        setActionMessage('Replacement asset not found.');
+        setTimeout(() => setActionMessage(''), 5000);
+        return;
+      }
+      
+      const data = parseDataField(importRecord.data);
+      
+      // Replace the asset in rows
+      const updatedRows = (data.rows || []).map(row => {
+        if (row.barcode === assetToReplace || row.product_code === assetToReplace) {
+          return {
+            ...row,
+            barcode: newBottle.barcode_number,
+            product_code: newBottle.product_code || newBottle.barcode_number,
+            gas_type: newBottle.gas_type,
+            description: newBottle.description || row.description
+          };
+        }
+        return row;
+      });
+      
+      await supabase
+        .from('imported_invoices')
+        .update({ data: { ...data, rows: updatedRows } })
+        .eq('id', invoiceNumber);
+      
+      setActionMessage(`Successfully replaced ${assetToReplace} with ${newBottle.barcode_number}`);
+      setShowReplaceModal(false);
+      setAssetToReplace(null);
+      setReplacementBarcode('');
+      
+      window.location.reload();
+    } catch (error) {
+      logger.error('Error replacing asset:', error);
+      setActionMessage(`Error: ${error.message}`);
+    }
+    
+    setTimeout(() => setActionMessage(''), 3000);
+  };
+
+  const handleSwitchDeliverReturn = async () => {
+    if (!selectedAssets.length) {
+      setActionMessage('Please select assets to switch. Check the boxes next to assets in the table.');
+      setTimeout(() => setActionMessage(''), 5000);
+      return;
+    }
+
+    try {
+      setActionMessage('Switching deliver/return status...');
+      
+      const data = parseDataField(importRecord.data);
+      
+      // Switch qty_out and qty_in for selected assets
+      const updatedRows = (data.rows || []).map(row => {
+        const rowBarcode = row.barcode || row.product_code;
+        if (selectedAssets.includes(rowBarcode)) {
+          return {
+            ...row,
+            qty_out: row.qty_in || 0,
+            qty_in: row.qty_out || 0
+          };
+        }
+        return row;
+      });
+      
+      await supabase
+        .from('imported_invoices')
+        .update({ data: { ...data, rows: updatedRows } })
+        .eq('id', invoiceNumber);
+      
+      setActionMessage(`Successfully switched status for ${selectedAssets.length} asset(s)`);
+      setSelectedAssets([]);
+      
+      window.location.reload();
+    } catch (error) {
+      logger.error('Error switching deliver/return:', error);
+      setActionMessage(`Error: ${error.message}`);
+    }
+    
+    setTimeout(() => setActionMessage(''), 3000);
+  };
+
+  const handleDetachAssets = async () => {
+    if (!assetsToDetach.length) {
+      setActionMessage('Please select assets to detach');
+      setTimeout(() => setActionMessage(''), 3000);
+      return;
+    }
+
+    try {
+      setActionMessage('Detaching assets...');
+      
+      const data = parseDataField(importRecord.data);
+      
+      // Remove selected assets from rows
+      const updatedRows = (data.rows || []).filter(row => {
+        const rowBarcode = row.barcode || row.product_code;
+        return !assetsToDetach.includes(rowBarcode);
+      });
+      
+      await supabase
+        .from('imported_invoices')
+        .update({ data: { ...data, rows: updatedRows } })
+        .eq('id', invoiceNumber);
+      
+      setActionMessage(`Successfully detached ${assetsToDetach.length} asset(s)`);
+      setShowDetachModal(false);
+      setAssetsToDetach([]);
+      
+      window.location.reload();
+    } catch (error) {
+      logger.error('Error detaching assets:', error);
+      setActionMessage(`Error: ${error.message}`);
+    }
+    
+    setTimeout(() => setActionMessage(''), 3000);
+  };
+
+  const handleMoveToOrder = async () => {
+    if (!selectedAssets.length || !targetOrderNumber) {
+      setActionMessage('Please select assets and specify a target order number');
+      setTimeout(() => setActionMessage(''), 3000);
+      return;
+    }
+
+    try {
+      setActionMessage('Moving assets to another order...');
+      
+      const data = parseDataField(importRecord.data);
+      
+      // Extract rows to move
+      const rowsToMove = (data.rows || []).filter(row => {
+        const rowBarcode = row.barcode || row.product_code;
+        return selectedAssets.includes(rowBarcode);
+      });
+      
+      // Update order number for moved rows
+      const updatedRowsToMove = rowsToMove.map(row => ({
+        ...row,
+        order_number: targetOrderNumber,
+        reference_number: targetOrderNumber
+      }));
+      
+      // Remove from current order
+      const remainingRows = (data.rows || []).filter(row => {
+        const rowBarcode = row.barcode || row.product_code;
+        return !selectedAssets.includes(rowBarcode);
+      });
+      
+      // Update current import record
+      await supabase
+        .from('imported_invoices')
+        .update({ data: { ...data, rows: remainingRows } })
+        .eq('id', invoiceNumber);
+      
+      // Check if target order exists
+      const { data: targetRecord } = await supabase
+        .from('imported_invoices')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .eq('data->>order_number', targetOrderNumber)
+        .single();
+      
+      if (targetRecord) {
+        // Append to existing order
+        const targetData = parseDataField(targetRecord.data);
+        await supabase
+          .from('imported_invoices')
+          .update({ 
+            data: { 
+              ...targetData, 
+              rows: [...(targetData.rows || []), ...updatedRowsToMove] 
+            } 
+          })
+          .eq('id', targetRecord.id);
+      } else {
+        // Create new import record for target order
+        await supabase
+          .from('imported_invoices')
+          .insert({
+            organization_id: organization.id,
+            data: {
+              order_number: targetOrderNumber,
+              rows: updatedRowsToMove
+            },
+            status: 'pending',
+            uploaded_by: importRecord.uploaded_by
+          });
+      }
+      
+      setActionMessage(`Successfully moved ${selectedAssets.length} asset(s) to order ${targetOrderNumber}`);
+      setShowMoveOrderModal(false);
+      setSelectedAssets([]);
+      setTargetOrderNumber('');
+      
+      window.location.reload();
+    } catch (error) {
+      logger.error('Error moving assets:', error);
+      setActionMessage(`Error: ${error.message}`);
+    }
+    
+    setTimeout(() => setActionMessage(''), 3000);
+  };
+
   // Handle asset actions
   const handleAssetAction = (action) => {
-    setActionMessage(`${action} - Feature coming soon!`);
-    setTimeout(() => setActionMessage(''), 3000);
+    switch (action) {
+      case 'Reclassify Assets':
+        setShowReclassifyModal(true);
+        break;
+      case 'Change Asset Properties':
+        setShowPropertiesModal(true);
+        break;
+      case 'Attach Not-Scanned Assets':
+        setShowAttachNotScannedModal(true);
+        break;
+      case 'Attach by Barcode or by Serial #':
+        setShowAttachBarcodeModal(true);
+        break;
+      case 'Replace Incorrect Asset':
+        setShowReplaceModal(true);
+        break;
+      case 'Switch Deliver / Return':
+        handleSwitchDeliverReturn();
+        break;
+      case 'Detach Assets':
+        setShowDetachModal(true);
+        break;
+      case 'Move to Another Sales Order':
+        setShowMoveOrderModal(true);
+        break;
+      default:
+        setActionMessage(`${action} - Feature coming soon!`);
+        setTimeout(() => setActionMessage(''), 3000);
+    }
   };
 
   if (loading) return (
@@ -2464,6 +2917,608 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 }}
               >
                 Update Location
+              </Button>
+            </Box>
+          </Paper>
+        </Box>
+      )}
+
+      {/* Reclassify Assets Modal */}
+      {showReclassifyModal && (
+        <Box
+          sx={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1300
+          }}
+          onClick={() => setShowReclassifyModal(false)}
+        >
+          <Paper
+            sx={{
+              p: 3,
+              maxWidth: 600,
+              width: '90%',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              borderRadius: 2,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Typography variant="h6" fontWeight={700} mb={2}>
+              Reclassify Assets
+            </Typography>
+            
+            <Typography variant="body2" color="text.secondary" mb={3}>
+              Select assets to reclassify and specify the new gas type.
+            </Typography>
+
+            <Box mb={3}>
+              <Typography variant="subtitle2" mb={1}>Select Assets:</Typography>
+              {importRecord?.data?.rows?.map((row, idx) => (
+                <Box key={idx} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedAssets.includes(row.barcode || row.product_code)}
+                    onChange={(e) => {
+                      const barcode = row.barcode || row.product_code;
+                      if (e.target.checked) {
+                        setSelectedAssets([...selectedAssets, barcode]);
+                      } else {
+                        setSelectedAssets(selectedAssets.filter(b => b !== barcode));
+                      }
+                    }}
+                    style={{ marginRight: '8px' }}
+                  />
+                  <Typography variant="body2">
+                    {row.barcode || row.product_code} - {row.gas_type || 'Unknown'}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+
+            <TextField
+              fullWidth
+              label="New Gas Type"
+              value={newGasType}
+              onChange={(e) => setNewGasType(e.target.value)}
+              placeholder="e.g., Oxygen, Argon, CO2"
+              sx={{ mb: 3 }}
+            />
+
+            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+              <Button
+                variant="outlined"
+                onClick={() => {
+                  setShowReclassifyModal(false);
+                  setSelectedAssets([]);
+                  setNewGasType('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="contained"
+                onClick={handleReclassifyAssets}
+                disabled={!selectedAssets.length || !newGasType}
+                sx={{
+                  backgroundColor: '#1976d2',
+                  '&:hover': { backgroundColor: '#1565c0' }
+                }}
+              >
+                Reclassify
+              </Button>
+            </Box>
+          </Paper>
+        </Box>
+      )}
+
+      {/* Change Asset Properties Modal */}
+      {showPropertiesModal && (
+        <Box
+          sx={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1300
+          }}
+          onClick={() => setShowPropertiesModal(false)}
+        >
+          <Paper
+            sx={{
+              p: 3,
+              maxWidth: 600,
+              width: '90%',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              borderRadius: 2,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Typography variant="h6" fontWeight={700} mb={2}>
+              Change Asset Properties
+            </Typography>
+            
+            <Typography variant="body2" color="text.secondary" mb={3}>
+              Select assets and modify their properties.
+            </Typography>
+
+            <Box mb={3}>
+              <Typography variant="subtitle2" mb={1}>Select Assets:</Typography>
+              {importRecord?.data?.rows?.map((row, idx) => (
+                <Box key={idx} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedAssets.includes(row.barcode || row.product_code)}
+                    onChange={(e) => {
+                      const barcode = row.barcode || row.product_code;
+                      if (e.target.checked) {
+                        setSelectedAssets([...selectedAssets, barcode]);
+                      } else {
+                        setSelectedAssets(selectedAssets.filter(b => b !== barcode));
+                      }
+                    }}
+                    style={{ marginRight: '8px' }}
+                  />
+                  <Typography variant="body2">
+                    {row.barcode || row.product_code}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+
+            <TextField
+              fullWidth
+              label="Size"
+              value={assetProperties.size || ''}
+              onChange={(e) => setAssetProperties({ ...assetProperties, size: e.target.value })}
+              sx={{ mb: 2 }}
+            />
+            
+            <TextField
+              fullWidth
+              label="Status"
+              value={assetProperties.status || ''}
+              onChange={(e) => setAssetProperties({ ...assetProperties, status: e.target.value })}
+              placeholder="e.g., available, rented, maintenance"
+              sx={{ mb: 2 }}
+            />
+            
+            <TextField
+              fullWidth
+              label="Description"
+              value={assetProperties.description || ''}
+              onChange={(e) => setAssetProperties({ ...assetProperties, description: e.target.value })}
+              sx={{ mb: 3 }}
+            />
+
+            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+              <Button
+                variant="outlined"
+                onClick={() => {
+                  setShowPropertiesModal(false);
+                  setSelectedAssets([]);
+                  setAssetProperties({});
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="contained"
+                onClick={handleChangeProperties}
+                disabled={!selectedAssets.length || Object.keys(assetProperties).length === 0}
+                sx={{
+                  backgroundColor: '#1976d2',
+                  '&:hover': { backgroundColor: '#1565c0' }
+                }}
+              >
+                Update
+              </Button>
+            </Box>
+          </Paper>
+        </Box>
+      )}
+
+      {/* Attach Not-Scanned Assets Modal */}
+      {showAttachNotScannedModal && (
+        <Box
+          sx={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1300
+          }}
+          onClick={() => setShowAttachNotScannedModal(false)}
+        >
+          <Paper
+            sx={{
+              p: 3,
+              maxWidth: 600,
+              width: '90%',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              borderRadius: 2,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Typography variant="h6" fontWeight={700} mb={2}>
+              Attach Not-Scanned Assets
+            </Typography>
+            
+            <Typography variant="body2" color="text.secondary" mb={3}>
+              This feature will search for assets that belong to this customer but weren't scanned. Feature coming soon.
+            </Typography>
+
+            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+              <Button
+                variant="outlined"
+                onClick={() => setShowAttachNotScannedModal(false)}
+              >
+                Close
+              </Button>
+            </Box>
+          </Paper>
+        </Box>
+      )}
+
+      {/* Attach by Barcode Modal */}
+      {showAttachBarcodeModal && (
+        <Box
+          sx={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1300
+          }}
+          onClick={() => setShowAttachBarcodeModal(false)}
+        >
+          <Paper
+            sx={{
+              p: 3,
+              maxWidth: 500,
+              width: '90%',
+              borderRadius: 2,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Typography variant="h6" fontWeight={700} mb={2}>
+              Attach Asset by Barcode/Serial #
+            </Typography>
+            
+            <Typography variant="body2" color="text.secondary" mb={3}>
+              Enter the barcode or serial number of the asset you want to attach to this order.
+            </Typography>
+
+            <TextField
+              fullWidth
+              label="Barcode or Serial Number"
+              value={barcodeInput}
+              onChange={(e) => setBarcodeInput(e.target.value)}
+              placeholder="Enter barcode or serial number"
+              sx={{ mb: 3 }}
+              autoFocus
+            />
+
+            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+              <Button
+                variant="outlined"
+                onClick={() => {
+                  setShowAttachBarcodeModal(false);
+                  setBarcodeInput('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="contained"
+                onClick={handleAttachByBarcode}
+                disabled={!barcodeInput.trim()}
+                sx={{
+                  backgroundColor: '#1976d2',
+                  '&:hover': { backgroundColor: '#1565c0' }
+                }}
+              >
+                Attach
+              </Button>
+            </Box>
+          </Paper>
+        </Box>
+      )}
+
+      {/* Replace Asset Modal */}
+      {showReplaceModal && (
+        <Box
+          sx={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1300
+          }}
+          onClick={() => setShowReplaceModal(false)}
+        >
+          <Paper
+            sx={{
+              p: 3,
+              maxWidth: 600,
+              width: '90%',
+              borderRadius: 2,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Typography variant="h6" fontWeight={700} mb={2}>
+              Replace Incorrect Asset
+            </Typography>
+            
+            <Typography variant="body2" color="text.secondary" mb={3}>
+              Select an asset to replace and provide the replacement barcode.
+            </Typography>
+
+            <Box mb={3}>
+              <Typography variant="subtitle2" mb={1}>Select Asset to Replace:</Typography>
+              <select
+                value={assetToReplace || ''}
+                onChange={(e) => setAssetToReplace(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  marginBottom: '16px'
+                }}
+              >
+                <option value="">Select an asset...</option>
+                {importRecord?.data?.rows?.map((row, idx) => (
+                  <option key={idx} value={row.barcode || row.product_code}>
+                    {row.barcode || row.product_code} - {row.gas_type || 'Unknown'}
+                  </option>
+                ))}
+              </select>
+            </Box>
+
+            <TextField
+              fullWidth
+              label="Replacement Barcode/Serial #"
+              value={replacementBarcode}
+              onChange={(e) => setReplacementBarcode(e.target.value)}
+              placeholder="Enter replacement barcode or serial number"
+              sx={{ mb: 3 }}
+            />
+
+            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+              <Button
+                variant="outlined"
+                onClick={() => {
+                  setShowReplaceModal(false);
+                  setAssetToReplace(null);
+                  setReplacementBarcode('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="contained"
+                onClick={handleReplaceAsset}
+                disabled={!assetToReplace || !replacementBarcode}
+                sx={{
+                  backgroundColor: '#1976d2',
+                  '&:hover': { backgroundColor: '#1565c0' }
+                }}
+              >
+                Replace
+              </Button>
+            </Box>
+          </Paper>
+        </Box>
+      )}
+
+      {/* Detach Assets Modal */}
+      {showDetachModal && (
+        <Box
+          sx={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1300
+          }}
+          onClick={() => setShowDetachModal(false)}
+        >
+          <Paper
+            sx={{
+              p: 3,
+              maxWidth: 600,
+              width: '90%',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              borderRadius: 2,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Typography variant="h6" fontWeight={700} mb={2}>
+              Detach Assets
+            </Typography>
+            
+            <Typography variant="body2" color="text.secondary" mb={3}>
+              Select assets to remove from this order.
+            </Typography>
+
+            <Box mb={3}>
+              <Typography variant="subtitle2" mb={1}>Select Assets to Detach:</Typography>
+              {importRecord?.data?.rows?.map((row, idx) => (
+                <Box key={idx} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={assetsToDetach.includes(row.barcode || row.product_code)}
+                    onChange={(e) => {
+                      const barcode = row.barcode || row.product_code;
+                      if (e.target.checked) {
+                        setAssetsToDetach([...assetsToDetach, barcode]);
+                      } else {
+                        setAssetsToDetach(assetsToDetach.filter(b => b !== barcode));
+                      }
+                    }}
+                    style={{ marginRight: '8px' }}
+                  />
+                  <Typography variant="body2">
+                    {row.barcode || row.product_code} - {row.gas_type || 'Unknown'}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+
+            <Alert severity="warning" sx={{ mb: 3 }}>
+              Warning: Detached assets will be removed from this order permanently.
+            </Alert>
+
+            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+              <Button
+                variant="outlined"
+                onClick={() => {
+                  setShowDetachModal(false);
+                  setAssetsToDetach([]);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="contained"
+                color="error"
+                onClick={handleDetachAssets}
+                disabled={!assetsToDetach.length}
+              >
+                Detach
+              </Button>
+            </Box>
+          </Paper>
+        </Box>
+      )}
+
+      {/* Move to Another Sales Order Modal */}
+      {showMoveOrderModal && (
+        <Box
+          sx={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1300
+          }}
+          onClick={() => setShowMoveOrderModal(false)}
+        >
+          <Paper
+            sx={{
+              p: 3,
+              maxWidth: 600,
+              width: '90%',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              borderRadius: 2,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Typography variant="h6" fontWeight={700} mb={2}>
+              Move to Another Sales Order
+            </Typography>
+            
+            <Typography variant="body2" color="text.secondary" mb={3}>
+              Select assets to move and specify the target order number.
+            </Typography>
+
+            <Box mb={3}>
+              <Typography variant="subtitle2" mb={1}>Select Assets to Move:</Typography>
+              {importRecord?.data?.rows?.map((row, idx) => (
+                <Box key={idx} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedAssets.includes(row.barcode || row.product_code)}
+                    onChange={(e) => {
+                      const barcode = row.barcode || row.product_code;
+                      if (e.target.checked) {
+                        setSelectedAssets([...selectedAssets, barcode]);
+                      } else {
+                        setSelectedAssets(selectedAssets.filter(b => b !== barcode));
+                      }
+                    }}
+                    style={{ marginRight: '8px' }}
+                  />
+                  <Typography variant="body2">
+                    {row.barcode || row.product_code}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+
+            <TextField
+              fullWidth
+              label="Target Order Number"
+              value={targetOrderNumber}
+              onChange={(e) => setTargetOrderNumber(e.target.value)}
+              placeholder="Enter target order number"
+              sx={{ mb: 3 }}
+            />
+
+            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+              <Button
+                variant="outlined"
+                onClick={() => {
+                  setShowMoveOrderModal(false);
+                  setSelectedAssets([]);
+                  setTargetOrderNumber('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="contained"
+                onClick={handleMoveToOrder}
+                disabled={!selectedAssets.length || !targetOrderNumber}
+                sx={{
+                  backgroundColor: '#1976d2',
+                  '&:hover': { backgroundColor: '#1565c0' }
+                }}
+              >
+                Move
               </Button>
             </Box>
           </Paper>
