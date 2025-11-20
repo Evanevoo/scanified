@@ -407,7 +407,6 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                   width: isCollapsed ? 28 : 36, 
                   borderRadius: 8, 
                   background: `linear-gradient(135deg, ${organizationColors?.primary || '#40B5AD'} 0%, ${organizationColors?.secondary || '#48C9B0'} 100%)`,
-                  background: `linear-gradient(135deg, ${organizationColors?.primary || '#40B5AD'} 0%, ${organizationColors?.secondary || '#48C9B0'} 100%)`,
                   border: '2px solid #e1e5e9',
                   display: 'flex',
                   alignItems: 'center',
