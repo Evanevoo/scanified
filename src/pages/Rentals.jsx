@@ -6,7 +6,7 @@ import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, 
   Card, CardContent, Grid, Chip, IconButton, TextField, FormControl, InputLabel, Select, MenuItem,
   Alert, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions, Tabs, Tab,
-  Tooltip, Badge, Collapse
+  Tooltip, Badge, Collapse, TablePagination
 } from '@mui/material';
 import {
   Business as BusinessIcon,
@@ -79,6 +79,8 @@ function RentalsImproved() {
   });
   const [locations, setLocations] = useState([]);
   const [expandedCustomers, setExpandedCustomers] = useState(new Set());
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
 
   // Statistics
   const [stats, setStats] = useState({
@@ -763,6 +765,26 @@ function RentalsImproved() {
     activeTab === 1 ? filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'monthly')) :
     filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly'));
 
+  // Reset page when filters or tabs change
+  useEffect(() => {
+    setPage(0);
+  }, [filters.search, filters.status, filters.customer_type, activeTab]);
+
+  // Pagination
+  const paginatedCustomers = currentCustomers.slice(
+    page * rowsPerPage,
+    page * rowsPerPage + rowsPerPage
+  );
+
+  const handleChangePage = (event, newPage) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -991,7 +1013,7 @@ function RentalsImproved() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {currentCustomers.length === 0 ? (
+            {paginatedCustomers.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} align="center">
                   <Typography variant="body1" color="text.secondary" py={4}>
@@ -1000,12 +1022,12 @@ function RentalsImproved() {
                 </TableCell>
               </TableRow>
             ) : (
-              currentCustomers.map(({ customer, rentals }, index) => (
+              paginatedCustomers.map(({ customer, rentals }, index) => (
                 <React.Fragment key={customer.CustomerListID}>
                   <TableRow 
                     hover
                     sx={{ 
-                      borderBottom: index < currentCustomers.length - 1 ? '3px solid #e0e0e0' : 'none',
+                      borderBottom: index < paginatedCustomers.length - 1 ? '3px solid #e0e0e0' : 'none',
                       '&:hover': {
                         bgcolor: '#fafafa'
                       }
@@ -1093,7 +1115,7 @@ function RentalsImproved() {
                       colSpan={8} 
                       sx={{ 
                         p: 0,
-                        borderBottom: index < currentCustomers.length - 1 ? '3px solid #e0e0e0' : 'none'
+                        borderBottom: index < paginatedCustomers.length - 1 ? '3px solid #e0e0e0' : 'none'
                       }}
                     >
                       <Box>
@@ -1169,6 +1191,17 @@ function RentalsImproved() {
             )}
           </TableBody>
         </Table>
+        <TablePagination
+          component="div"
+          count={currentCustomers.length}
+          page={page}
+          onPageChange={handleChangePage}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={handleChangeRowsPerPage}
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          labelRowsPerPage="Rows per page:"
+          labelDisplayedRows={({ from, to, count }) => `${from}-${to} of ${count !== -1 ? count : `more than ${to}`}`}
+        />
       </TableContainer>
 
       {/* Edit Customer Rentals Dialog */}
