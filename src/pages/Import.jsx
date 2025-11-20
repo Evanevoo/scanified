@@ -148,7 +148,16 @@ export default function Import() {
     return null;
   }
 
-  const handleFileChange = e => {
+  const handleFileChange = async e => {
+    // Verify user is still authenticated before processing file
+    const currentUser = await getCurrentUser();
+    if (!currentUser) {
+      logger.error('User not authenticated during file selection');
+      setError('Session expired. Please refresh the page and try again.');
+      e.target.value = ''; // Clear file input
+      return;
+    }
+    
     setFile(e.target.files[0]);
     setRawRows([]);
     setColumns([]);
