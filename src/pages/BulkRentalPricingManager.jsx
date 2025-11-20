@@ -193,8 +193,13 @@ export default function BulkRentalPricingManager() {
           return !currentPricing;
         } else {
           // Check if customer has pricing with the specific rental period
-          const customerPeriod = currentPricing?.rental_period || 'monthly';
-          return currentPricing && customerPeriod === sortByPeriod;
+          const customerPeriod = (currentPricing?.rental_period || 'monthly').toLowerCase();
+          if (sortByPeriod === 'yearly') {
+            // Check for yearly variations: yearly, annual, annually
+            return currentPricing && (customerPeriod === 'yearly' || customerPeriod === 'annual' || customerPeriod === 'annually');
+          } else {
+            return currentPricing && customerPeriod === sortByPeriod;
+          }
         }
       });
     }
@@ -224,18 +229,12 @@ export default function BulkRentalPricingManager() {
 
   const handleSelectAll = (selected) => {
     if (selected) {
-      // Only select customers on current page
-      setSelectedCustomers(prev => {
-        const newSelection = new Set(prev);
-        paginatedCustomers.forEach(c => newSelection.add(c.CustomerListID));
-        return Array.from(newSelection);
-      });
+      // Select all filtered customers (all pages)
+      setSelectedCustomers(filteredCustomers.map(c => c.CustomerListID));
     } else {
-      // Only deselect customers on current page
-      setSelectedCustomers(prev => {
-        const currentPageIds = new Set(paginatedCustomers.map(c => c.CustomerListID));
-        return prev.filter(id => !currentPageIds.has(id));
-      });
+      // Deselect all filtered customers
+      const filteredIds = new Set(filteredCustomers.map(c => c.CustomerListID));
+      setSelectedCustomers(prev => prev.filter(id => !filteredIds.has(id)));
     }
   };
 
@@ -591,8 +590,14 @@ export default function BulkRentalPricingManager() {
                 onChange={(e) => setSortByPeriod(e.target.value)}
               >
                 <MenuItem value="all">All Customers ({customers.length})</MenuItem>
-                <MenuItem value="monthly">Monthly Rentals ({customerPricing.filter(p => p.rental_period === 'monthly').length})</MenuItem>
-                <MenuItem value="yearly">Yearly Rentals ({customerPricing.filter(p => p.rental_period === 'yearly').length})</MenuItem>
+                <MenuItem value="monthly">Monthly Rentals ({customerPricing.filter(p => {
+                  const period = (p.rental_period || 'monthly').toLowerCase();
+                  return period === 'monthly';
+                }).length})</MenuItem>
+                <MenuItem value="yearly">Yearly Rentals ({customerPricing.filter(p => {
+                  const period = (p.rental_period || '').toLowerCase();
+                  return period === 'yearly' || period === 'annual' || period === 'annually';
+                }).length})</MenuItem>
                 <MenuItem value="no-pricing">No Custom Pricing ({customers.length - customerPricing.length})</MenuItem>
               </Select>
             </FormControl>
@@ -611,9 +616,23 @@ export default function BulkRentalPricingManager() {
             {customerPricing.length > 0 && (
               <>
                 {' • '}
-                Monthly: {customerPricing.filter(p => (p.rental_period || 'monthly') === 'monthly').length}
+                Monthly: {customerPricing.filter(p => {
+                  const period = (p.rental_period || 'monthly').toLowerCase();
+                  return period === 'monthly';
+                }).length}
                 {' • '}
-                Yearly: {customerPricing.filter(p => p.rental_period === 'yearly').length}
+                Yearly: {customerPricing.filter(p => {
+                  const period = (p.rental_period || '').toLowerCase();
+                  return period === 'yearly' || period === 'annual' || period === 'annually';
+                }).length}
+                {import.meta.env.DEV && (
+                  <>
+                    {' • '}
+                    <span style={{ fontSize: '0.85em', color: '#666' }}>
+                      (Debug: {[...new Set(customerPricing.map(p => p.rental_period || 'null'))].join(', ')})
+                    </span>
+                  </>
+                )}
               </>
             )}
           </Typography>
@@ -639,11 +658,11 @@ export default function BulkRentalPricingManager() {
           <FormControlLabel
             control={
               <Switch
-                checked={paginatedCustomers.length > 0 && paginatedCustomers.every(c => selectedCustomers.includes(c.CustomerListID))}
+                checked={filteredCustomers.length > 0 && filteredCustomers.every(c => selectedCustomers.includes(c.CustomerListID))}
                 onChange={(e) => handleSelectAll(e.target.checked)}
               />
             }
-            label={`Select All (${paginatedCustomers.length} on this page)`}
+            label={`Select All (${filteredCustomers.length} filtered customers)`}
           />
         </Box>
 
@@ -654,7 +673,7 @@ export default function BulkRentalPricingManager() {
                 <TableCell padding="checkbox">
                   <input
                     type="checkbox"
-                    checked={paginatedCustomers.length > 0 && paginatedCustomers.every(c => selectedCustomers.includes(c.CustomerListID))}
+                    checked={filteredCustomers.length > 0 && filteredCustomers.every(c => selectedCustomers.includes(c.CustomerListID))}
                     onChange={(e) => handleSelectAll(e.target.checked)}
                   />
                 </TableCell>
@@ -788,7 +807,10 @@ export default function BulkRentalPricingManager() {
         </Typography>
         
         {(() => {
-          const yearlyCustomers = customerPricing.filter(p => p.rental_period === 'yearly');
+          const yearlyCustomers = customerPricing.filter(p => {
+            const period = (p.rental_period || '').toLowerCase();
+            return period === 'yearly' || period === 'annual' || period === 'annually';
+          });
           return yearlyCustomers.length === 0 ? (
             <Alert severity="info">
               No yearly rental customers configured. Use the rental period selector above to set up yearly pricing.
