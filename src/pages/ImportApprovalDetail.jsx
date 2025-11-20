@@ -771,6 +771,90 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     }
   }, [showLocationModal, organization]);
 
+  // Fetch available gas types
+  const [availableGasTypes, setAvailableGasTypes] = useState([]);
+  
+  useEffect(() => {
+    async function fetchGasTypes() {
+      if (!organization?.id) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('bottles')
+          .select('gas_type')
+          .eq('organization_id', organization.id)
+          .not('gas_type', 'is', null);
+        
+        if (error) {
+          logger.error('Error fetching gas types:', error);
+          return;
+        }
+        
+        // Get unique gas types
+        const uniqueTypes = [...new Set((data || []).map(b => b.gas_type).filter(Boolean))];
+        setAvailableGasTypes(uniqueTypes.sort());
+      } catch (error) {
+        logger.error('Error fetching gas types:', error);
+      }
+    }
+    
+    fetchGasTypes();
+  }, [organization]);
+
+  // Fetch not-scanned assets for the attach modal
+  useEffect(() => {
+    async function fetchNotScannedAssets() {
+      if (!showAttachNotScannedModal || !organization?.id) return;
+      
+      try {
+        const data = parseDataField(importRecord?.data);
+        const customerInfo = getCustomerInfo(data);
+        
+        if (!customerInfo.id && !customerInfo.name) {
+          logger.log('No customer info found for fetching not-scanned assets');
+          return;
+        }
+        
+        // Get assets in current order
+        const assetsInOrder = new Set((data.rows || []).map(row => row.barcode || row.product_code));
+        
+        // Fetch all assets for this customer that aren't in the order
+        let query = supabase
+          .from('bottles')
+          .select('*')
+          .eq('organization_id', organization.id);
+        
+        if (customerInfo.id) {
+          query = query.eq('assigned_customer', customerInfo.id);
+        } else if (customerInfo.name) {
+          query = query.eq('customer_name', customerInfo.name);
+        }
+        
+        const { data: bottles, error } = await query;
+        
+        if (error) {
+          logger.error('Error fetching not-scanned assets:', error);
+          return;
+        }
+        
+        // Filter out assets already in the order
+        const availableAssets = (bottles || []).filter(bottle => 
+          !assetsInOrder.has(bottle.barcode_number) && 
+          !assetsInOrder.has(bottle.product_code)
+        );
+        
+        setNotScannedAssets(availableAssets);
+        logger.log(`Found ${availableAssets.length} not-scanned assets for customer`);
+      } catch (error) {
+        logger.error('Error fetching not-scanned assets:', error);
+      }
+    }
+    
+    if (showAttachNotScannedModal) {
+      fetchNotScannedAssets();
+    }
+  }, [showAttachNotScannedModal, organization, importRecord]);
+
   // Helper function to get order number from data
   const getOrderNumber = (data) => {
     if (!data) return '';
@@ -1612,7 +1696,9 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   };
 
   const handleAttachNotScanned = async () => {
-    if (!notScannedAssets.length) {
+    const selectedAssetsList = notScannedAssets.filter(asset => asset.selected);
+    
+    if (!selectedAssetsList.length) {
       setActionMessage('Please select assets to attach');
       setTimeout(() => setActionMessage(''), 3000);
       return;
@@ -1625,17 +1711,19 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       const orderNumber = getOrderNumber(data);
       const customerInfo = getCustomerInfo(data);
       
-      // Add rows for not-scanned assets
-      const newRows = notScannedAssets.map(asset => ({
+      // Add rows for selected not-scanned assets
+      const newRows = selectedAssetsList.map(asset => ({
         barcode: asset.barcode_number,
         product_code: asset.product_code || asset.barcode_number,
         gas_type: asset.gas_type,
+        size: asset.size,
         qty_out: 1,
         qty_in: 0,
         order_number: orderNumber,
         customer_name: customerInfo.name,
         date: new Date().toISOString().split('T')[0],
-        description: asset.description || 'Manually attached'
+        description: asset.description || 'Manually attached',
+        location: data.rows?.[0]?.location || ''
       }));
       
       const updatedData = {
@@ -1648,7 +1736,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         .update({ data: updatedData })
         .eq('id', invoiceNumber);
       
-      setActionMessage(`Successfully attached ${notScannedAssets.length} asset(s)`);
+      setActionMessage(`Successfully attached ${selectedAssetsList.length} asset(s)`);
       setShowAttachNotScannedModal(false);
       setNotScannedAssets([]);
       
@@ -2983,14 +3071,35 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               ))}
             </Box>
 
-            <TextField
-              fullWidth
-              label="New Gas Type"
-              value={newGasType}
-              onChange={(e) => setNewGasType(e.target.value)}
-              placeholder="e.g., Oxygen, Argon, CO2"
-              sx={{ mb: 3 }}
-            />
+            <Box mb={3}>
+              <Typography variant="subtitle2" mb={1}>New Gas Type:</Typography>
+              <select
+                value={newGasType}
+                onChange={(e) => setNewGasType(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  marginBottom: '8px'
+                }}
+              >
+                <option value="">Select gas type...</option>
+                {availableGasTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="Or enter custom gas type"
+                value={newGasType}
+                onChange={(e) => setNewGasType(e.target.value)}
+              />
+            </Box>
 
             <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
               <Button
@@ -3164,16 +3273,79 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             </Typography>
             
             <Typography variant="body2" color="text.secondary" mb={3}>
-              This feature will search for assets that belong to this customer but weren't scanned. Feature coming soon.
+              Assets that belong to this customer but weren't scanned in this order.
             </Typography>
+
+            {notScannedAssets.length === 0 ? (
+              <Alert severity="info" sx={{ mb: 3 }}>
+                No additional assets found for this customer.
+              </Alert>
+            ) : (
+              <Box mb={3}>
+                <Typography variant="subtitle2" mb={1}>
+                  Select Assets to Attach ({notScannedAssets.length} available):
+                </Typography>
+                <Box sx={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #ddd', borderRadius: 1, p: 1 }}>
+                  {notScannedAssets.map((asset, idx) => (
+                    <Box key={idx} sx={{ display: 'flex', alignItems: 'center', mb: 1, p: 1, '&:hover': { bgcolor: '#f5f5f5' } }}>
+                      <input
+                        type="checkbox"
+                        checked={notScannedAssets.filter(a => a.barcode_number === asset.barcode_number).length > 0 && 
+                                 notScannedAssets.indexOf(asset) < notScannedAssets.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            // Add to selection
+                            if (!notScannedAssets.find(a => a.barcode_number === asset.barcode_number && a.selected)) {
+                              const updated = [...notScannedAssets];
+                              updated[idx] = { ...asset, selected: true };
+                              setNotScannedAssets(updated);
+                            }
+                          } else {
+                            // Remove from selection
+                            const updated = [...notScannedAssets];
+                            updated[idx] = { ...asset, selected: false };
+                            setNotScannedAssets(updated);
+                          }
+                        }}
+                        style={{ marginRight: '8px' }}
+                      />
+                      <Box>
+                        <Typography variant="body2" fontWeight={600}>
+                          {asset.barcode_number || asset.serial_number}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {asset.gas_type} - {asset.size} - {asset.status || 'Unknown status'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              </Box>
+            )}
 
             <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
               <Button
                 variant="outlined"
-                onClick={() => setShowAttachNotScannedModal(false)}
+                onClick={() => {
+                  setShowAttachNotScannedModal(false);
+                  setNotScannedAssets([]);
+                }}
               >
-                Close
+                Cancel
               </Button>
+              {notScannedAssets.length > 0 && (
+                <Button
+                  variant="contained"
+                  onClick={handleAttachNotScanned}
+                  disabled={!notScannedAssets.some(a => a.selected)}
+                  sx={{
+                    backgroundColor: '#1976d2',
+                    '&:hover': { backgroundColor: '#1565c0' }
+                  }}
+                >
+                  Attach Selected
+                </Button>
+              )}
             </Box>
           </Paper>
         </Box>
