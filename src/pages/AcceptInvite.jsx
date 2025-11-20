@@ -151,24 +151,6 @@ export default function AcceptInvite() {
             };
             logger.log('Successfully fetched invite via RPC (single object):', inviteData);
           } else {
-            // RPC function returns array, get first result
-            const invite = rpcData[0];
-            inviteData = {
-              id: invite.id,
-              organization_id: invite.organization_id,
-              email: invite.email,
-              role: invite.role,
-              invite_token: invite.invite_token,
-              expires_at: invite.expires_at,
-              accepted_at: invite.accepted_at,
-              created_at: invite.created_at,
-              invited_at: invite.invited_at,
-              organizations: {
-                name: invite.organization_name
-              }
-            };
-            logger.log('Invite found via RPC:', inviteData);
-          } else {
             // RPC function returned empty array - invite doesn't exist or is expired
             logger.warn('RPC function returned empty result - invite not found or expired');
             inviteData = null;
