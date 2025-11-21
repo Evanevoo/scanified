@@ -48,8 +48,13 @@ import PaymentIcon from '@mui/icons-material/Payment';
 import PeopleIcon from '@mui/icons-material/People';
 import EditIcon from '@mui/icons-material/Edit';
 import SettingsIcon from '@mui/icons-material/Settings';
+import PaletteIcon from '@mui/icons-material/Palette';
+import ViewModuleIcon from '@mui/icons-material/ViewModule';
+import TextFieldsIcon from '@mui/icons-material/TextFields';
 import QrCodeIcon from '@mui/icons-material/QrCode';
 import SupportIcon from '@mui/icons-material/Support';
+import ReceiptIcon from '@mui/icons-material/Receipt';
+import InvoiceTemplateManager from '../components/InvoiceTemplateManager';
 import UserManagement from './UserManagement';
 import { usePermissions } from '../context/PermissionsContext';
 
@@ -352,6 +357,23 @@ export default function Settings() {
   // Logo
   const [logoUrl, setLogoUrl] = useState(organization?.logo_url || '');
 
+  // Organization Info
+  const [orgInfo, setOrgInfo] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    address: '',
+    city: '',
+    state: '',
+    postal_code: '',
+    country: '',
+    website: '',
+    description: ''
+  });
+  const [orgInfoChanged, setOrgInfoChanged] = useState(false);
+  const [orgInfoLoading, setOrgInfoLoading] = useState(false);
+  const [orgInfoMsg, setOrgInfoMsg] = useState('');
+
   // Support form
   const [supportForm, setSupportForm] = useState({
     subject: '',
@@ -361,6 +383,10 @@ export default function Settings() {
   const [supportLoading, setSupportLoading] = useState(false);
   const [supportMsg, setSupportMsg] = useState('');
   const [supportSnackbar, setSupportSnackbar] = useState(false);
+
+  // Invoice Template
+  const [invoiceTemplate, setInvoiceTemplate] = useState(null);
+  const [invoiceTemplateManagerOpen, setInvoiceTemplateManagerOpen] = useState(false);
 
   // Tab configuration based on user role
   const tabsConfig = useMemo(() => {
@@ -375,6 +401,8 @@ export default function Settings() {
     if (profile?.role === 'admin' || profile?.role === 'owner') {
       return [
         ...baseTabs,
+        { label: 'Organization', icon: <BusinessIcon />, id: 'organization' },
+        { label: 'Invoice Template', icon: <ReceiptIcon />, id: 'invoice-template' },
         { label: 'Team', icon: <PeopleIcon />, id: 'team' },
         { label: 'Assets', icon: <DataUsageIcon />, id: 'assets' },
         { label: 'Barcodes', icon: <QrCodeIcon />, id: 'barcodes' }
@@ -472,6 +500,22 @@ export default function Settings() {
       });
       
       setLogoUrl(organization.logo_url || '');
+      
+      // Load organization info
+      setOrgInfo({
+        name: organization.name || '',
+        email: organization.email || '',
+        phone: organization.phone || '',
+        address: organization.address || '',
+        city: organization.city || '',
+        state: organization.state || '',
+        postal_code: organization.postal_code || '',
+        country: organization.country || '',
+        website: organization.website || '',
+        description: organization.description || ''
+      });
+      setOrgInfoChanged(false);
+      setOrgInfoMsg('');
     }
   }, [profile, organization]);
 
@@ -1540,6 +1584,243 @@ export default function Settings() {
             )}
           </TabPanel>
 
+          {/* Organization Tab (Admin/Owner only) */}
+          {(profile?.role === 'admin' || profile?.role === 'owner') && (
+            <TabPanel value={activeTabId} tabId="organization">
+              <Box sx={{ maxWidth: 900 }}>
+                <Typography variant="h4" gutterBottom>
+                  Organization Information
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                  Update your organization's contact information and details. This information will be used on invoices and other documents.
+                </Typography>
+
+                <Paper sx={{ p: 3, mb: 3 }}>
+                  <Typography variant="h6" gutterBottom sx={{ mb: 3 }}>
+                    Basic Information
+                  </Typography>
+                  <Grid container spacing={3}>
+                    <Grid item xs={12}>
+                      <TextField
+                        fullWidth
+                        label="Organization Name"
+                        value={orgInfo.name}
+                        onChange={(e) => {
+                          setOrgInfo(prev => ({ ...prev, name: e.target.value }));
+                          setOrgInfoChanged(true);
+                        }}
+                        required
+                      />
+                    </Grid>
+
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        fullWidth
+                        label="Email"
+                        type="email"
+                        value={orgInfo.email}
+                        onChange={(e) => {
+                          setOrgInfo(prev => ({ ...prev, email: e.target.value }));
+                          setOrgInfoChanged(true);
+                        }}
+                      />
+                    </Grid>
+
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        fullWidth
+                        label="Phone"
+                        value={orgInfo.phone}
+                        onChange={(e) => {
+                          setOrgInfo(prev => ({ ...prev, phone: e.target.value }));
+                          setOrgInfoChanged(true);
+                        }}
+                        placeholder="(123) 456-7890"
+                      />
+                    </Grid>
+
+                    <Grid item xs={12}>
+                      <TextField
+                        fullWidth
+                        label="Website"
+                        value={orgInfo.website}
+                        onChange={(e) => {
+                          setOrgInfo(prev => ({ ...prev, website: e.target.value }));
+                          setOrgInfoChanged(true);
+                        }}
+                        placeholder="https://www.example.com"
+                      />
+                    </Grid>
+
+                    <Grid item xs={12}>
+                      <TextField
+                        fullWidth
+                        label="Description"
+                        multiline
+                        rows={3}
+                        value={orgInfo.description}
+                        onChange={(e) => {
+                          setOrgInfo(prev => ({ ...prev, description: e.target.value }));
+                          setOrgInfoChanged(true);
+                        }}
+                        placeholder="Brief description of your organization"
+                      />
+                    </Grid>
+                  </Grid>
+                </Paper>
+
+                <Paper sx={{ p: 3, mb: 3 }}>
+                  <Typography variant="h6" gutterBottom sx={{ mb: 3 }}>
+                    Address
+                  </Typography>
+                  <Grid container spacing={3}>
+                    <Grid item xs={12}>
+                      <TextField
+                        fullWidth
+                        label="Street Address"
+                        value={orgInfo.address}
+                        onChange={(e) => {
+                          setOrgInfo(prev => ({ ...prev, address: e.target.value }));
+                          setOrgInfoChanged(true);
+                        }}
+                        placeholder="123 Main Street"
+                      />
+                    </Grid>
+
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="City"
+                        value={orgInfo.city}
+                        onChange={(e) => {
+                          setOrgInfo(prev => ({ ...prev, city: e.target.value }));
+                          setOrgInfoChanged(true);
+                        }}
+                      />
+                    </Grid>
+
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="State/Province"
+                        value={orgInfo.state}
+                        onChange={(e) => {
+                          setOrgInfo(prev => ({ ...prev, state: e.target.value }));
+                          setOrgInfoChanged(true);
+                        }}
+                      />
+                    </Grid>
+
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="Postal Code"
+                        value={orgInfo.postal_code}
+                        onChange={(e) => {
+                          setOrgInfo(prev => ({ ...prev, postal_code: e.target.value }));
+                          setOrgInfoChanged(true);
+                        }}
+                      />
+                    </Grid>
+
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        fullWidth
+                        label="Country"
+                        value={orgInfo.country}
+                        onChange={(e) => {
+                          setOrgInfo(prev => ({ ...prev, country: e.target.value }));
+                          setOrgInfoChanged(true);
+                        }}
+                        placeholder="United States"
+                      />
+                    </Grid>
+                  </Grid>
+                </Paper>
+
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
+                  <Button
+                    variant="outlined"
+                    onClick={() => {
+                      setOrgInfo({
+                        name: organization?.name || '',
+                        email: organization?.email || '',
+                        phone: organization?.phone || '',
+                        address: organization?.address || '',
+                        city: organization?.city || '',
+                        state: organization?.state || '',
+                        postal_code: organization?.postal_code || '',
+                        country: organization?.country || '',
+                        website: organization?.website || '',
+                        description: organization?.description || ''
+                      });
+                      setOrgInfoChanged(false);
+                      setOrgInfoMsg('');
+                    }}
+                    disabled={!orgInfoChanged || orgInfoLoading}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="contained"
+                    onClick={async () => {
+                      setOrgInfoLoading(true);
+                      setOrgInfoMsg('');
+                      try {
+                        // MULTI-TENANT SECURITY: Only update the current user's organization
+                        // RLS policies at database level also enforce this, but we filter here too
+                        const { error } = await supabase
+                          .from('organizations')
+                          .update({
+                            name: orgInfo.name,
+                            email: orgInfo.email,
+                            phone: orgInfo.phone,
+                            address: orgInfo.address,
+                            city: orgInfo.city,
+                            state: orgInfo.state,
+                            postal_code: orgInfo.postal_code,
+                            country: orgInfo.country,
+                            website: orgInfo.website,
+                            description: orgInfo.description
+                          })
+                          .eq('id', profile.organization_id);
+
+                        if (error) throw error;
+
+                        setOrgInfoMsg('Organization information updated successfully!');
+                        setOrgInfoChanged(false);
+                        
+                        // Reload organization context
+                        if (reloadOrganization) {
+                          await reloadOrganization();
+                        }
+                      } catch (error) {
+                        logger.error('Error updating organization info:', error);
+                        setOrgInfoMsg('Error updating organization information: ' + error.message);
+                      } finally {
+                        setOrgInfoLoading(false);
+                      }
+                    }}
+                    disabled={!orgInfoChanged || orgInfoLoading}
+                    startIcon={orgInfoLoading ? <CircularProgress size={20} /> : <SaveIcon />}
+                  >
+                    {orgInfoLoading ? 'Saving...' : 'Save Organization Info'}
+                  </Button>
+                </Box>
+
+                {orgInfoMsg && (
+                  <Alert 
+                    severity={orgInfoMsg.includes('Error') ? 'error' : 'success'} 
+                    sx={{ mt: 2 }}
+                    onClose={() => setOrgInfoMsg('')}
+                  >
+                    {orgInfoMsg}
+                  </Alert>
+                )}
+              </Box>
+            </TabPanel>
+          )}
+
           {/* Team Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
             <TabPanel value={activeTabId} tabId="team">
@@ -1906,6 +2187,110 @@ export default function Settings() {
             </TabPanel>
           )}
 
+          {/* Invoice Template Tab (Admin/Owner only) */}
+          {(profile?.role === 'admin' || profile?.role === 'owner') && (
+            <TabPanel value={activeTabId} tabId="invoice-template">
+              <Box sx={{ maxWidth: 900 }}>
+                <Typography variant="h4" gutterBottom>
+                  📄 Invoice Template
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                  Customize your invoice appearance, layout, and default settings.
+                </Typography>
+
+                <Paper sx={{ p: 4, mb: 3, textAlign: 'center' }}>
+                  <ReceiptIcon sx={{ fontSize: 80, color: 'primary.main', mb: 2 }} />
+                  <Typography variant="h5" gutterBottom>
+                    Customize Your Invoice Template
+                  </Typography>
+                  <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+                    Design beautiful invoices with custom colors, fonts, and layouts.<br />
+                    Choose which fields to show, customize sections, and set payment terms.
+                  </Typography>
+
+                  {invoiceTemplate && (
+                    <Box sx={{ mb: 3, p: 2, bgcolor: 'grey.50', borderRadius: 1, display: 'inline-block' }}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Current Template: <strong>{invoiceTemplate.name || 'Modern'}</strong>
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 1 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Box sx={{ width: 24, height: 24, bgcolor: invoiceTemplate.primary_color, borderRadius: 1, border: '1px solid #ccc' }} />
+                          <Typography variant="caption">Primary</Typography>
+                        </Box>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Box sx={{ width: 24, height: 24, bgcolor: invoiceTemplate.secondary_color, borderRadius: 1, border: '1px solid #ccc' }} />
+                          <Typography variant="caption">Secondary</Typography>
+                        </Box>
+                        <Typography variant="caption" sx={{ ml: 2 }}>
+                          Font: {invoiceTemplate.font_family || 'Arial'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+
+                  <Button
+                    variant="contained"
+                    size="large"
+                    startIcon={<SettingsIcon />}
+                    onClick={() => setInvoiceTemplateManagerOpen(true)}
+                    sx={{ minWidth: 200 }}
+                  >
+                    Customize Template
+                  </Button>
+                </Paper>
+
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={4}>
+                    <Card>
+                      <CardContent>
+                        <PaletteIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
+                        <Typography variant="h6" gutterBottom>
+                          Design
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Choose from preset templates or customize colors and fonts
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Card>
+                      <CardContent>
+                        <ViewModuleIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
+                        <Typography variant="h6" gutterBottom>
+                          Layout
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Show/hide sections and columns to match your needs
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Card>
+                      <CardContent>
+                        <TextFieldsIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
+                        <Typography variant="h6" gutterBottom>
+                          Content
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Set payment terms, tax rates, and custom messages
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+
+                <Alert severity="info" sx={{ mt: 3 }}>
+                  <Typography variant="body2">
+                    <strong>💡 Pro Tip:</strong> You can also customize templates directly from the invoice generation dialog in the Rentals page by clicking the ⚙️ icon.
+                  </Typography>
+                </Alert>
+              </Box>
+            </TabPanel>
+          )}
+
           {/* Help & Support Tab */}
           <TabPanel value={activeTabId} tabId="support">
             <Typography variant="h4" gutterBottom>
@@ -2042,6 +2427,17 @@ export default function Settings() {
           </Snackbar>
           
         </Card>
+
+        {/* Invoice Template Manager Dialog */}
+        <InvoiceTemplateManager
+          open={invoiceTemplateManagerOpen}
+          onClose={() => setInvoiceTemplateManagerOpen(false)}
+          currentTemplate={invoiceTemplate}
+          onSave={(newTemplate) => {
+            setInvoiceTemplate(newTemplate);
+            setInvoiceTemplateManagerOpen(false);
+          }}
+        />
       </Box>
     </Box>
   );

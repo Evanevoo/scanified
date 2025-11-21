@@ -18,10 +18,12 @@ import {
   MonetizationOn as MoneyIcon,
   Assignment as AssignmentIcon,
   Receipt as InvoiceIcon,
+  Email as EmailIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
+import InvoiceGenerator from '../components/InvoiceGenerator';
 
 // Business logic functions to determine asset status
 const getAssetStatus = (assignedCustomer, customerType) => {
@@ -70,7 +72,9 @@ function RentalsImproved() {
   const [customers, setCustomers] = useState([]);
   const [activeTab, setActiveTab] = useState(0);
   const [editDialog, setEditDialog] = useState({ open: false, customer: null, rentals: [] });
+  const [invoiceDialog, setInvoiceDialog] = useState({ open: false, customer: null, rentals: [] });
   const [updatingRentals, setUpdatingRentals] = useState(false);
+  const [selectedCustomers, setSelectedCustomers] = useState([]);
   const [error, setError] = useState(null);
   const [filters, setFilters] = useState({
     status: 'all',
@@ -691,74 +695,149 @@ function RentalsImproved() {
     URL.revokeObjectURL(url);
   };
 
-  // QuickBooks invoice export from old rentals page
-  const exportInvoices = (customers) => {
-    if (!customers.length) return;
-    const getNextInvoiceNumber = () => {
-      const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
-      const now = new Date();
-      const currentMonth = now.getFullYear() + '-' + (now.getMonth() + 1).toString().padStart(2, '0');
-      let lastNumber = 10000;
-      let lastMonth = currentMonth;
-      if (state.lastMonth === currentMonth && state.lastNumber) {
-        lastNumber = 10000;
-      } else if (state.lastMonth !== currentMonth && state.lastNumber) {
-        lastNumber = state.lastNumber + 1;
-        lastMonth = currentMonth;
-      }
-      return { next: lastNumber, currentMonth, lastMonth };
-    };
-    
-    const setInvoiceState = (number, month) => {
-      const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
-      if (state.lastMonth !== month) {
-        localStorage.setItem('invoice_state', JSON.stringify({ lastNumber: number, lastMonth: month }));
-      }
-    };
+  // QuickBooks invoice export - uses actual invoices from database
+  const exportInvoices = async (customers) => {
+    if (!customers || customers.length === 0) {
+      logger.warn('No customers selected for export');
+      alert('Please select customers with invoices to export.');
+      return;
+    }
 
-    const getInvoiceDates = () => {
-      const now = new Date();
-      const invoiceDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-      const dueDate = new Date(invoiceDate.getFullYear(), invoiceDate.getMonth() + 1, 1);
-      const fmt = d => d.toISOString().slice(0, 10);
-      return { invoiceDate: fmt(invoiceDate), dueDate: fmt(dueDate) };
-    };
+    try {
+      setLoading(true);
+      
+      // Get customer IDs - handle both { customer, rentals } structure and direct customer objects
+      const customerIds = customers.map(c => {
+        if (c.customer && c.customer.CustomerListID) {
+          return c.customer.CustomerListID;
+        } else if (c.CustomerListID) {
+          return c.CustomerListID;
+        }
+        return null;
+      }).filter(Boolean);
+      
+      if (customerIds.length === 0) {
+        alert('No valid customer IDs found. Please ensure customers have CustomerListID.');
+        setLoading(false);
+        return;
+      }
+      
+      logger.log('Exporting invoices for customer IDs:', customerIds);
+      
+      // Fetch actual invoices from database for these customers
+      // Optionally filter by date range (last 30 days by default, or all if needed)
+      const { data: invoices, error: invoicesError } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .in('customer_id', customerIds)
+        .order('invoice_date', { ascending: false })
+        .order('invoice_number', { ascending: false });
 
-    const { next, currentMonth } = getNextInvoiceNumber();
-    let invoiceNumber = next;
-    const { invoiceDate, dueDate } = getInvoiceDates();
-    const rate = 10;
-    const rows = customers.map(({ customer, rentals }, idx) => {
-      const numBottles = rentals.length;
-      const base = numBottles * rate;
-      // Use the actual tax rate from the first rental (they should all be the same for a customer)
-      const taxRate = rentals[0]?.tax_rate || 0.11;
-      const tax = +(base * taxRate).toFixed(1);
-      const total = +(base + tax).toFixed(2);
-      return {
-        'Invoice#': `W${(invoiceNumber + idx).toString().padStart(5, '0')}`,
-        'Customer Number': customer.CustomerListID,
-        'Total': total,
-        'Date': invoiceDate,
-        'TX': tax,
-        'TX code': 'G',
-        'Due date': dueDate,
-        'Rate': rate,
-        'Name': customer.name,
-        '# of Bottles': numBottles
+      if (invoicesError) {
+        logger.error('Error fetching invoices:', invoicesError);
+        throw new Error('Failed to fetch invoices: ' + invoicesError.message);
+      }
+
+      if (!invoices || invoices.length === 0) {
+        alert('No invoices found for the selected customers. Please generate invoices first using the "Create Invoice" button.');
+        setLoading(false);
+        return;
+      }
+
+      // Get invoice line items to calculate number of bottles
+      const invoiceIds = invoices.map(inv => inv.id);
+      const { data: lineItems, error: lineItemsError } = await supabase
+        .from('invoice_line_items')
+        .select('invoice_id, quantity')
+        .in('invoice_id', invoiceIds);
+
+      if (lineItemsError) {
+        logger.warn('Error fetching line items:', lineItemsError);
+      }
+
+      // Create a map of invoice_id -> total quantity (bottles)
+      const bottlesPerInvoice = {};
+      if (lineItems) {
+        lineItems.forEach(item => {
+          bottlesPerInvoice[item.invoice_id] = (bottlesPerInvoice[item.invoice_id] || 0) + (item.quantity || 1);
+        });
+      }
+
+      // Calculate due date (30 days from invoice date)
+      const calculateDueDate = (invoiceDate) => {
+        const date = new Date(invoiceDate);
+        date.setDate(date.getDate() + 30);
+        return date.toISOString().split('T')[0];
       };
-    });
-    
-    setInvoiceState(invoiceNumber + rows.length - 1, currentMonth);
-    const header = Object.keys(rows[0]).join(',');
-    const csv = [header, ...rows.map(r => Object.values(r).join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `quickbooks_invoices_${invoiceDate}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+
+      // Convert invoices to QuickBooks format
+      const rows = invoices.map(invoice => {
+        const numBottles = bottlesPerInvoice[invoice.id] || invoice.cylinders_count || 0;
+        
+        // Calculate monthly rate per bottle
+        // If we have period dates, calculate months; otherwise use subtotal / bottles as total rate
+        let rate = 10; // Default monthly rate
+        if (invoice.subtotal && numBottles > 0 && invoice.period_start && invoice.period_end) {
+          const startDate = new Date(invoice.period_start);
+          const endDate = new Date(invoice.period_end);
+          const startMonth = startDate.getMonth();
+          const startYear = startDate.getFullYear();
+          const endMonth = endDate.getMonth();
+          const endYear = endDate.getFullYear();
+          const rentalMonths = (endYear - startYear) * 12 + (endMonth - startMonth) + 1;
+          
+          if (rentalMonths > 0) {
+            // Monthly rate per bottle = subtotal / (bottles × months)
+            rate = (invoice.subtotal / (numBottles * rentalMonths)).toFixed(2);
+          } else {
+            // Fallback: total rate per bottle
+            rate = (invoice.subtotal / numBottles).toFixed(2);
+          }
+        } else if (invoice.subtotal && numBottles > 0) {
+          // Fallback: total rate per bottle if no period dates
+          rate = (invoice.subtotal / numBottles).toFixed(2);
+        }
+        
+        return {
+          'Invoice#': invoice.invoice_number || 'N/A',
+          'Customer Number': invoice.customer_id || 'N/A',
+          'Total': invoice.total_amount?.toFixed(2) || '0.00',
+          'Date': invoice.invoice_date || new Date().toISOString().split('T')[0],
+          'TX': invoice.tax_amount?.toFixed(2) || '0.00',
+          'TX code': 'G',
+          'Due date': calculateDueDate(invoice.invoice_date || new Date()),
+          'Rate': rate,
+          'Name': invoice.customer_name || 'N/A',
+          '# of Bottles': numBottles
+        };
+      });
+
+      if (rows.length === 0) {
+        alert('No invoice data to export.');
+        setLoading(false);
+        return;
+      }
+
+      // Generate CSV
+      const header = Object.keys(rows[0]).join(',');
+      const csv = [header, ...rows.map(r => Object.values(r).join(','))].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const exportDate = new Date().toISOString().split('T')[0];
+      a.download = `quickbooks_invoices_${exportDate}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      logger.log(`Exported ${rows.length} invoices to QuickBooks format`);
+      setLoading(false);
+    } catch (error) {
+      logger.error('Error exporting invoices:', error);
+      alert('Failed to export invoices: ' + error.message);
+      setLoading(false);
+    }
   };
 
   const currentCustomers = activeTab === 0 ? filteredCustomers : 
@@ -816,6 +895,21 @@ function RentalsImproved() {
             disabled={filteredCustomers.length === 0}
           >
             Export QuickBooks Invoices
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<EmailIcon />}
+            onClick={() => {
+              const customersWithRentals = filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer_type !== 'VENDOR');
+              if (customersWithRentals.length === 0) {
+                alert('No customers with active rentals found');
+                return;
+              }
+              alert(`Bulk email feature coming soon! Will email ${customersWithRentals.length} customers.`);
+            }}
+            disabled={filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer_type !== 'VENDOR').length === 0}
+          >
+            Bulk Email Invoices
           </Button>
         </Box>
       </Box>
@@ -1095,6 +1189,22 @@ function RentalsImproved() {
                       >
                         View Details
                       </Button>
+                      {rentals.length > 0 && customer.customer_type !== 'VENDOR' && (
+                        <Tooltip title="Generate & Email Invoice">
+                          <IconButton
+                            size="small"
+                            color="primary"
+                            onClick={() => setInvoiceDialog({ 
+                              open: true, 
+                              customer, 
+                              rentals
+                            })}
+                            sx={{ mr: 1 }}
+                          >
+                            <InvoiceIcon />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                       <Tooltip title="Edit Rentals">
                         <IconButton
                           size="small"
@@ -1344,6 +1454,14 @@ function RentalsImproved() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Invoice Generator Dialog */}
+      <InvoiceGenerator
+        open={invoiceDialog.open}
+        onClose={() => setInvoiceDialog({ open: false, customer: null, rentals: [] })}
+        customer={invoiceDialog.customer}
+        rentals={invoiceDialog.rentals}
+      />
     </Box>
   );
 }

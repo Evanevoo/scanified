@@ -6,7 +6,9 @@
   NODE_VERSION = "18"
 
 [dev]
-  targetPort = 5175
+  command = "npm run dev"
+  targetPort = 5174
+  port = 8888
 
 [dev.environment]
   EMAIL_USER = "scanified@gmail.com"
@@ -36,6 +38,14 @@
 # - Function: daily-backup
 # - Schedule: 0 2 * * * (runs daily at 2 AM UTC)
 # - Environment variable: CRON_SECRET (set a secure random string)
+
+# Daily Days at Location Update
+# Configure in Netlify Dashboard > Functions > Scheduled Functions:
+# - Function: update-days-at-location
+# - Schedule: 0 1 * * * (runs daily at 1:00 AM UTC)
+# - Environment variables required:
+#   - VITE_SUPABASE_URL
+#   - SUPABASE_SERVICE_ROLE_KEY
 
 [[headers]]
   for = "/assets/*"
