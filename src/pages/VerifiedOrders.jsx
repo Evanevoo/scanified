@@ -627,7 +627,7 @@ export default function VerifiedOrders() {
 
       setSnackbar({ 
         open: true, 
-        message: 'Order unverified successfully - will appear in Import Approvals', 
+        message: 'Order unverified successfully - will appear in Verification Center', 
         severity: 'success' 
       });
       setUnverifyDialogOpen(false);

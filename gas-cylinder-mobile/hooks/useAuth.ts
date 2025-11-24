@@ -47,7 +47,7 @@ export function useAuth() {
           logger.warn('⚠️ Auth loading timeout - forcing completion');
           setLoading(false);
           setAuthError('Authentication timeout - please restart the app');
-        }, 10000); // 10 second timeout
+        }, 15000); // 15 second timeout (increased from 10)
 
         const { data: { session } } = await supabase.auth.getSession();
         setUser(session?.user || null);

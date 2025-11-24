@@ -445,8 +445,9 @@ export default function ScanCylindersScreen() {
     const data = event?.data || event;
     const type = event?.type || 'unknown';
     
-    logger.log('🔍 Barcode scanned:', { type, data, scanned, scannerTarget });
-    logger.log('🔍 Full event object:', event);
+        if (__DEV__) {
+          logger.debug('🔍 Barcode scanned:', { type, data, scanned, scannerTarget });
+        }
     
     if (!data || typeof data !== 'string') {
       logger.log('❌ Invalid barcode data:', data);
@@ -513,31 +514,23 @@ export default function ScanCylindersScreen() {
         const scannedWithDashes = normalizeWithDashes(scannedBarcode);
         const scannedLoose = normalizeLoose(scannedBarcode);
         
-        logger.log('═══════════════════════════════════════════════════════');
-        logger.log('🔍 CUSTOMER BARCODE SCAN DEBUG');
-        logger.log('═══════════════════════════════════════════════════════');
-        logger.log('📱 Raw scanned data:', data);
-        logger.log('🧹 After normalization:', scannedBarcode);
-        logger.log('🔢 Fully normalized (no special chars):', scannedNormalized);
-        logger.log('➖ With dashes preserved:', scannedWithDashes);
-        logger.log('🧩 Loose normalized:', scannedLoose);
-        logger.log('👥 Total customers to search:', customers.length);
-        logger.log('🏢 Current organization:', customers[0]?.organization_id || 'N/A');
-        logger.log('═══════════════════════════════════════════════════════');
+        // Debug logging (only in development)
+        if (__DEV__) {
+          logger.debug('🔍 CUSTOMER BARCODE SCAN DEBUG');
+          logger.debug('📱 Raw scanned data:', data);
+          logger.debug('🧹 After normalization:', scannedBarcode);
+          logger.debug('👥 Total customers to search:', customers.length);
+          logger.debug('🏢 Current organization:', customers[0]?.organization_id || 'N/A');
+        }
         
-        // First, log ALL customer barcodes for reference
-        logger.log('📋 ALL CUSTOMER BARCODES IN SYSTEM:');
-        customers.forEach((customer, index) => {
-          if (customer.CustomerListID) {
-            logger.log(`  ${index + 1}. "${customer.name}": "${customer.CustomerListID}" → Normalized: "${normalizeForMatching(customer.CustomerListID)}"`);
-          }
-        });
-        logger.log('═══════════════════════════════════════════════════════');
+        // Collect all potential matches with their match quality scores
+        // This prevents always returning the first customer in the array
+        const potentialMatches: Array<{ customer: any; score: number; strategy: string }> = [];
         
-        const matchingCustomer = customers.find(customer => {
+        customers.forEach(customer => {
           if (!customer.CustomerListID) {
             logger.log(`⏭️ Skipping customer "${customer.name}" - no CustomerListID`);
-            return false;
+            return;
           }
           
           const customerBarcode = normalizeBarcode(customer.CustomerListID);
@@ -554,49 +547,68 @@ export default function ScanCylindersScreen() {
           logger.log(`   🧩 Loose: "${customerLoose}"`);
           logger.log(`   📊 Comparing to scanned: "${scannedNormalized}"`);
           
-          // Strategy 1: Exact match (case insensitive)
+          // Strategy 1: Exact match (case insensitive) - Highest priority (score: 100)
           if (customerBarcode.toLowerCase() === scannedBarcode.toLowerCase()) {
             logger.log('✅ Match found: Exact match');
-            return true;
+            potentialMatches.push({ customer, score: 100, strategy: 'exact' });
+            return;
           }
           
-          // Strategy 2: Fully normalized match (removes ALL special characters)
+          // Strategy 2: Fully normalized match (removes ALL special characters) - High priority (score: 90)
           if (customerNormalized === scannedNormalized) {
             logger.log('✅ Match found: Normalized match');
-            return true;
+            potentialMatches.push({ customer, score: 90, strategy: 'normalized' });
+            return;
           }
           
-          // Strategy 3: Match with dashes preserved
+          // Strategy 3: Match with dashes preserved - High priority (score: 85)
           if (customerWithDashes === scannedWithDashes) {
             logger.log('✅ Match found: Dashes match');
-            return true;
+            potentialMatches.push({ customer, score: 85, strategy: 'dashes' });
+            return;
           }
           
-          // Strategy 4: Loose match (removes spaces, dashes, underscores)
+          // Strategy 4: Loose match (removes spaces, dashes, underscores) - Medium priority (score: 80)
           if (customerLoose === scannedLoose) {
             logger.log('✅ Match found: Loose match');
-            return true;
+            potentialMatches.push({ customer, score: 80, strategy: 'loose' });
+            return;
           }
           
-          // Strategy 5: Partial match (contains)
-          if (customerNormalized.includes(scannedNormalized) || scannedNormalized.includes(customerNormalized)) {
-            logger.log('✅ Match found: Partial match');
-            return true;
-          }
-          
-          // Strategy 6: Handle common barcode variations (A/a endings)
+          // Strategy 5: Handle common barcode variations (A/a endings) - Medium priority (score: 75)
           if (scannedBarcode.length > 1 && customerBarcode.length > 1) {
             const baseScanned = scannedBarcode.slice(0, -1);
             const baseCustomer = customerBarcode.slice(0, -1);
             
             if (baseScanned.toLowerCase() === baseCustomer.toLowerCase()) {
               logger.log('✅ Match found: Base match (without last character)');
-              return true;
+              potentialMatches.push({ customer, score: 75, strategy: 'base' });
+              return;
             }
           }
           
-          return false;
+          // Strategy 6: Strict partial match - Only if lengths are similar and match is substantial (score: 50)
+          // Only match if the shorter string is at least 80% of the longer string's length
+          const minLength = Math.min(customerNormalized.length, scannedNormalized.length);
+          const maxLength = Math.max(customerNormalized.length, scannedNormalized.length);
+          const lengthRatio = minLength / maxLength;
+          
+          if (lengthRatio >= 0.8 && minLength >= 4) {
+            if (customerNormalized.includes(scannedNormalized) || scannedNormalized.includes(customerNormalized)) {
+              logger.log('✅ Match found: Strict partial match (length ratio >= 0.8)');
+              potentialMatches.push({ customer, score: 50, strategy: 'partial' });
+              return;
+            }
+          }
         });
+        
+        // Sort matches by score (highest first) and return the best match
+        potentialMatches.sort((a, b) => b.score - a.score);
+        const matchingCustomer = potentialMatches.length > 0 ? potentialMatches[0].customer : null;
+
+        if (__DEV__ && potentialMatches.length > 1) {
+          logger.debug(`⚠️ Multiple matches found (${potentialMatches.length}). Using highest score: ${potentialMatches[0].strategy} (score: ${potentialMatches[0].score})`);
+        }
         
         if (!matchingCustomer) {
           logger.log('⚠️ Scanned barcode does not match any existing customer');
@@ -1019,10 +1031,8 @@ export default function ScanCylindersScreen() {
               barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "codabar", "itf14"],
             }}
             onBarcodeScanned={({ data }) => {
-              logger.log('📷 BARCODE DETECTED:', data);
-              logger.log('📷 Available customers:', customers.length);
-              logger.log('📷 Customer barcodes:', customers.map(c => c.barcode).filter(Boolean));
-              
+              logger.debug('📷 BARCODE DETECTED:', data);
+
               const barcode = data.trim();
               if (barcode) {
                 // Use the main handleBarcodeScanned function to prevent duplicates

@@ -1745,7 +1745,7 @@ export default function Import() {
                 <div>Your import has been submitted and is awaiting approval by an administrator.</div>
                 <div>Total rows: {result.total_rows}</div>
                 <div className="mt-2 text-sm">
-                  You can check the status of your import in the <strong>Import Approvals</strong> page.
+                  You can check the status of your import in the <strong>Verification Center</strong> page.
                 </div>
                 <div className="mt-3">
                   <a href="/verification-center" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
