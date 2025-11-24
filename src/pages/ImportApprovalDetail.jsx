@@ -2631,53 +2631,50 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
             {/* Search Input */}
             <Box mb={2}>
-              <input
-                type="text"
-                placeholder="Search customers..."
-                value={customerSearch}
-                onChange={(e) => setCustomerSearch(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '14px'
+              <Autocomplete
+                options={customers.filter(customer =>
+                  customer.name?.toLowerCase().includes(customerSearch.toLowerCase()) ||
+                  customer.CustomerListID?.toLowerCase().includes(customerSearch.toLowerCase())
+                )}
+                getOptionLabel={(option) => `${option.name} (${option.CustomerListID})`}
+                isOptionEqualToValue={(option, value) => option.CustomerListID === value?.CustomerListID}
+                inputValue={customerSearch}
+                onInputChange={(event, newInputValue) => {
+                  setCustomerSearch(newInputValue);
                 }}
+                onChange={(event, newValue) => {
+                  if (newValue) {
+                    setSelectedCustomer(newValue.CustomerListID);
+                    setCustomerSearch(newValue.name); // Show selected customer name
+                  } else {
+                    setSelectedCustomer('');
+                  }
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    placeholder="Search customers..."
+                    fullWidth
+                    size="small"
+                  />
+                )}
+                renderOption={(props, option) => (
+                  <Box component="li" {...props}>
+                    <Box>
+                      <Typography variant="body2" fontWeight={500}>
+                        {option.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        ID: {option.CustomerListID}
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
+                noOptionsText="No customers found"
+                sx={{ mb: 2 }}
               />
             </Box>
 
-            {/* Customer List */}
-            <Box sx={{ maxHeight: 300, overflow: 'auto', mb: 3 }}>
-              {customers
-                .filter(customer => 
-                  customer.name?.toLowerCase().includes(customerSearch.toLowerCase()) ||
-                  customer.CustomerListID?.toLowerCase().includes(customerSearch.toLowerCase())
-                )
-                .map((customer) => (
-                  <Box
-                    key={customer.CustomerListID}
-                    sx={{
-                      p: 2,
-                      border: '1px solid #ddd',
-                      borderRadius: 1,
-                      mb: 1,
-                      cursor: 'pointer',
-                      backgroundColor: selectedCustomer === customer.CustomerListID ? '#e3f2fd' : 'white',
-                      '&:hover': {
-                        backgroundColor: selectedCustomer === customer.CustomerListID ? '#e3f2fd' : '#f5f5f5'
-                      }
-                    }}
-                    onClick={() => setSelectedCustomer(customer.CustomerListID)}
-                  >
-                    <Typography variant="body1" fontWeight={600}>
-                      {customer.name}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      ID: {customer.CustomerListID}
-                    </Typography>
-                  </Box>
-                ))}
-            </Box>
 
             {/* Action Buttons */}
             <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
@@ -2691,6 +2688,9 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               >
                 Cancel
               </Button>
+              <Typography variant="caption" color="text.secondary" sx={{ flexGrow: 1, textAlign: 'center' }}>
+                Or select a customer from the dropdown above
+              </Typography>
               <Button
                 variant="contained"
                 onClick={handleCustomerChange}

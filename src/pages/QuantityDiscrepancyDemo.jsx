@@ -152,7 +152,7 @@ export default function QuantityDiscrepancyDemo() {
               ✅ Already Integrated
             </Typography>
             <Typography variant="body2" component="ul">
-              <li>Import Approvals workflow</li>
+              <li>Verification Center workflow</li>
               <li>Invoice verification process</li>
               <li>Dashboard statistics</li>
               <li>Grid view quick access</li>

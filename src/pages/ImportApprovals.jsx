@@ -549,7 +549,7 @@ export default function ImportApprovals() {
           return false;
         }
         
-        // CRITICAL: Filter out approved/verified/rejected records - they should NOT appear in Import Approvals
+        // CRITICAL: Filter out approved/verified/rejected records - they should NOT appear in Verification Center
         const recordStatusLower = (record.status || '').toLowerCase();
         if (recordStatusLower === 'approved' || recordStatusLower === 'verified' || recordStatusLower === 'rejected') {
           logger.log(`🚫 REMOVING record ${record.id} (${orderNum}): Status is '${record.status}' - verified orders should not appear here`);
@@ -2968,7 +2968,7 @@ export default function ImportApprovals() {
           location: bottle.location || 'Unknown',
           user_id: user?.id,
           organization_id: organization.id, // CRITICAL: Include organization_id
-          order_number: tempOrderNumber, // Set order_number so scan appears in import approvals
+          order_number: tempOrderNumber, // Set order_number so scan appears in verification center
           created_at: new Date().toISOString()
         });
 
@@ -4233,7 +4233,7 @@ export default function ImportApprovals() {
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box>
           <Typography variant="h4" gutterBottom>
-            Import Verification Center
+            Verification Center
           </Typography>
         </Box>
         <Box display="flex" gap={2}>
@@ -4985,7 +4985,7 @@ export default function ImportApprovals() {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>Import Approval Settings</DialogTitle>
+        <DialogTitle>Verification Center Settings</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Typography variant="body2" color="text.secondary">
@@ -6212,7 +6212,7 @@ export default function ImportApprovals() {
         throw new Error(`Status update failed. Record status is: ${updatedRecord.status}`);
       }
       
-      logger.log('✅ Verified: Record status is now "approved" - it will be removed from Import Approvals');
+      logger.log('✅ Verified: Record status is now "approved" - it will be removed from Verification Center');
       
       // Immediately remove the record from the UI (optimistic update)
       setPendingInvoices(prev => prev.filter(inv => {
