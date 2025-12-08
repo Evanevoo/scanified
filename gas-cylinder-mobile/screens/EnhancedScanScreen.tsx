@@ -1331,36 +1331,38 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     
     switch (action) {
       case 'out':
-        updateData.status = 'delivered';
-        if (location) updateData.location = location;
-        // Always set customer info when shipping - use route params which are the source of truth
-        // Set customer ID if available, otherwise use customer name
-        if (customerId) {
-          updateData.assigned_customer = customerId;
-        } else if (routeCustomerName) {
-          // If no customer ID, use customer name as assigned_customer
-          updateData.assigned_customer = routeCustomerName;
+        // NOTE: Bottles should NOT be assigned here - this bypasses verification
+        // Bottle assignment should ONLY happen during approval/verification via assignBottlesToCustomer()
+        // This function should only update location/status, not assign bottles
+        // Only update location if provided, don't change status or assign customer
+        if (location) {
+          updateData.location = location;
         }
-        // Always set customer_name if available
-        if (routeCustomerName) {
-          updateData.customer_name = routeCustomerName;
-        }
-        // Log customer assignment for debugging
-        logger.log('Setting customer for bottle:', { 
+        // Don't set status to 'delivered' or assign customer - verification will handle that
+        logger.log('Scan recorded - bottle assignment will happen during verification:', { 
           barcode, 
           customerId, 
           customerName: routeCustomerName,
-          assigned_customer: updateData.assigned_customer,
-          customer_name: updateData.customer_name,
-          updateData 
+          note: 'Bottle not assigned - waiting for verification'
         });
+        // If no location update, don't update anything
+        if (!location) {
+          logger.log('No location provided and no assignment - skipping bottle update');
+          return; // Don't update bottle at all
+        }
         break;
       case 'in':
-        // Mark as empty when returned - user will mark as filled via mobile app when refilled
+        // NOTE: Bottle unassignment should also happen during verification
+        // For now, we'll still mark as empty and update location, but not unassign customer
+        // The verification process will handle customer unassignment
         updateData.status = 'empty';
-        updateData.location = 'Warehouse';
-        updateData.assigned_customer = null;
-        updateData.customer_name = null;
+        if (location) {
+          updateData.location = location;
+        } else {
+          updateData.location = 'Warehouse';
+        }
+        // Don't unassign customer here - verification will handle that
+        logger.log('Return scan recorded - customer unassignment will happen during verification');
         break;
       case 'locate':
         // Don't change status for locate, just update location
