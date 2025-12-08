@@ -739,23 +739,30 @@ export default function ImportApprovals() {
       
       logger.log('Split invoices into individual records:', individualRecords.length);
       
+      // DISABLED: Auto-approval removed - bottles should only be assigned after explicit verification
+      // This prevents bottles from being automatically assigned when scans are submitted
+      // Users must manually verify/approve orders in the Verification Center
+      // 
       // Check for auto-approval opportunities
-      const autoApprovedRecords = [];
-      const remainingRecords = [];
+      // const autoApprovedRecords = [];
+      // const remainingRecords = [];
+      // 
+      // for (const record of individualRecords) {
+      //   const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
+      //   if (wasAutoApproved) {
+      //     autoApprovedRecords.push(record);
+      //   } else {
+      //     remainingRecords.push(record);
+      //   }
+      // }
+      // 
+      // if (autoApprovedRecords.length > 0) {
+      //   logger.log(`✅ Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
+      //   setSnackbar(`Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
+      // }
       
-      for (const record of individualRecords) {
-        const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
-        if (wasAutoApproved) {
-          autoApprovedRecords.push(record);
-        } else {
-          remainingRecords.push(record);
-        }
-      }
-      
-      if (autoApprovedRecords.length > 0) {
-        logger.log(`✅ Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
-        setSnackbar(`Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
-      }
+      // All records remain pending until manual verification
+      const remainingRecords = individualRecords;
       
       // Don't set pendingInvoices here - let fetchVerificationStats handle it
       logger.log('📊 fetchPendingInvoices completed, remaining records:', remainingRecords.length);
@@ -2237,24 +2244,31 @@ export default function ImportApprovals() {
           })))
         .filter(r => r !== null);
 
+      // DISABLED: Auto-approval removed - bottles should only be assigned after explicit verification
+      // This prevents bottles from being automatically assigned when scans are submitted
+      // Users must manually verify/approve orders in the Verification Center
+      //
       // Check for auto-approval opportunities in scanned-only records
-      const autoApprovedScannedRecords = [];
-      const remainingScannedRecords = [];
+      // const autoApprovedScannedRecords = [];
+      // const remainingScannedRecords = [];
+      // 
+      // for (const record of scannedOnlyRecords) {
+      //   const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
+      //   if (wasAutoApproved) {
+      //     autoApprovedScannedRecords.push(record);
+      //   } else {
+      //     remainingScannedRecords.push(record);
+      //   }
+      // }
+      // 
+      // if (autoApprovedScannedRecords.length > 0) {
+      //   logger.log(`✅ Auto-approved ${autoApprovedScannedRecords.length} scanned-only records with matching quantities`);
+      //   setSnackbar(`Auto-approved ${autoApprovedScannedRecords.length} scanned-only records with matching quantities`);
+      // }
       
-      for (const record of scannedOnlyRecords) {
-        const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
-        if (wasAutoApproved) {
-          autoApprovedScannedRecords.push(record);
-        } else {
-          remainingScannedRecords.push(record);
-        }
-      }
+      // All scanned-only records remain pending until manual verification
+      const remainingScannedRecords = scannedOnlyRecords;
       
-      if (autoApprovedScannedRecords.length > 0) {
-        logger.log(`✅ Auto-approved ${autoApprovedScannedRecords.length} scanned-only records with matching quantities`);
-        setSnackbar(`Auto-approved ${autoApprovedScannedRecords.length} scanned-only records with matching quantities`);
-      }
-
       // Don't set pendingInvoices here - let fetchVerificationStats handle it
       logger.log('📊 fetchScannedOnlyOrders completed, remaining scanned records:', remainingScannedRecords.length);
 
@@ -2359,15 +2373,20 @@ export default function ImportApprovals() {
       // Normalize order number - try multiple formats
       const orderNumStr = orderNumber.toString().trim();
       const orderNumNum = parseInt(orderNumStr, 10);
+      // Also try removing leading zeros for matching
+      const orderNumStrNoLeadingZeros = orderNumStr.replace(/^0+/, '');
       const orderNumVariants = [
         orderNumStr,                    // "55666"
         orderNumNum.toString(),         // "55666" (as number string)
         orderNumStr.padStart(10, '0'),  // "0000055666" (with leading zeros)
-        orderNumNum                     // 55666 (as number)
+        orderNumNum,                     // 55666 (as number)
+        orderNumStrNoLeadingZeros        // "55666" (without leading zeros)
       ];
       
-      // Remove duplicates
-      const uniqueOrderNumbers = [...new Set(orderNumVariants.map(v => v.toString().trim()))];
+      // Remove duplicates and filter out invalid values
+      const uniqueOrderNumbers = [...new Set(orderNumVariants
+        .map(v => v?.toString().trim())
+        .filter(v => v && v !== 'NaN' && v !== 'undefined'))];
       logger.log('🔍 Trying order number variants:', uniqueOrderNumbers);
       
       // Get all scanned barcodes for this order
@@ -2608,6 +2627,50 @@ export default function ImportApprovals() {
         }
       }
       
+      // If no bottle_scans found with organization filter, try without it (as fallback)
+      if (bottleScans.length === 0 && organization?.id) {
+        logger.log('🔍 Trying bottle_scans table without organization filter...');
+        // Try numeric match without org filter
+        if (!isNaN(orderNumNum)) {
+          const { data: bottleScansNoOrg, error: bottleScansNoOrgError } = await supabase
+            .from('bottle_scans')
+            .select('bottle_barcode, cylinder_barcode, barcode_number, created_at, order_number, organization_id')
+            .eq('order_number', orderNumNum);
+          
+          if (!bottleScansNoOrgError && bottleScansNoOrg && bottleScansNoOrg.length > 0) {
+            // Filter to our organization or null organization_id
+            const filteredBottleScans = bottleScansNoOrg.filter(bs => 
+              !bs.organization_id || bs.organization_id === organization.id
+            );
+            
+            if (filteredBottleScans.length > 0) {
+              bottleScans = filteredBottleScans;
+              logger.log('✅ Found bottle_scans without org filter:', bottleScans.length);
+            }
+          }
+        }
+        
+        // Also try string match without org filter
+        if (bottleScans.length === 0) {
+          const { data: bottleScansNoOrgStr, error: bottleScansNoOrgStrError } = await supabase
+            .from('bottle_scans')
+            .select('bottle_barcode, cylinder_barcode, barcode_number, created_at, order_number, organization_id')
+            .eq('order_number', orderNumStr);
+          
+          if (!bottleScansNoOrgStrError && bottleScansNoOrgStr && bottleScansNoOrgStr.length > 0) {
+            // Filter to our organization or null organization_id
+            const filteredBottleScans = bottleScansNoOrgStr.filter(bs => 
+              !bs.organization_id || bs.organization_id === organization.id
+            );
+            
+            if (filteredBottleScans.length > 0) {
+              bottleScans = filteredBottleScans;
+              logger.log('✅ Found bottle_scans without org filter (string match):', bottleScans.length);
+            }
+          }
+        }
+      }
+      
       // Filter by organization_id if the column exists and we have organization
       if (bottleScans.length > 0 && organization?.id) {
         const beforeFilter = bottleScans.length;
@@ -2703,6 +2766,61 @@ export default function ImportApprovals() {
         }
       } else {
         logger.log('⚠️ FALLBACK: allScannedRows is empty or not loaded');
+      }
+      
+      // ALWAYS check pending invoices/receipts for scanned-only records
+      // Scanned-only records have barcodes in their line items but may not be in scans tables
+      // This is especially important for scanned-only records that haven't been approved yet
+      logger.log('🔍 Checking pending invoices/receipts for scanned-only records...');
+      logger.log(`🔍 Total pending invoices: ${pendingInvoices.length}, pending receipts: ${pendingReceipts.length}`);
+      
+      // Check pending invoices
+      const matchingInvoices = pendingInvoices.filter(inv => {
+        const invOrderNum = inv.data?.order_number || inv.data?.reference_number || inv.data?.invoice_number;
+        const matches = invOrderNum?.toString().trim() === orderNumStr || 
+               invOrderNum?.toString().trim() === orderNumNum.toString() ||
+               invOrderNum == orderNumber;
+        if (matches) {
+          logger.log(`✅ Found matching invoice: ${inv.id}, order: ${invOrderNum}`);
+        }
+        return matches;
+      });
+      
+      // Check pending receipts
+      const matchingReceipts = pendingReceipts.filter(rec => {
+        const recOrderNum = rec.data?.order_number || rec.data?.reference_number || rec.data?.invoice_number;
+        const matches = recOrderNum?.toString().trim() === orderNumStr || 
+               recOrderNum?.toString().trim() === orderNumNum.toString() ||
+               recOrderNum == orderNumber;
+        if (matches) {
+          logger.log(`✅ Found matching receipt: ${rec.id}, order: ${recOrderNum}`);
+        }
+        return matches;
+      });
+      
+      logger.log(`🔍 Found ${matchingInvoices.length} matching invoices and ${matchingReceipts.length} matching receipts`);
+      
+      // Extract barcodes from line items
+      const beforeInvoiceCheck = scannedBarcodes.size;
+      [...matchingInvoices, ...matchingReceipts].forEach(record => {
+        const lineItems = record.data?.rows || record.data?.line_items || [];
+        logger.log(`🔍 Processing ${lineItems.length} line items from record ${record.id}`);
+        lineItems.forEach((item, idx) => {
+          const barcode = item.barcode || item.barcode_number || item.bottle_barcode || item.cylinder_barcode;
+          if (barcode) {
+            scannedBarcodes.add(barcode.toString().trim());
+            if (idx < 3) { // Log first 3 for debugging
+              logger.log(`🔍 Found barcode in invoice/receipt line item [${idx}]: ${barcode}`);
+            }
+          }
+        });
+      });
+      
+      const addedFromInvoices = scannedBarcodes.size - beforeInvoiceCheck;
+      if (addedFromInvoices > 0) {
+        logger.log(`✅ Added ${addedFromInvoices} barcodes from invoice/receipt line items (total now: ${scannedBarcodes.size})`);
+      } else if (matchingInvoices.length > 0 || matchingReceipts.length > 0) {
+        logger.warn(`⚠️ Found matching invoices/receipts but no barcodes extracted. Check line items structure.`);
       }
       
       // Fetch bottle details from database
@@ -3183,27 +3301,13 @@ export default function ImportApprovals() {
             });
           }
 
-          // Get location for this delivery
-          const deliveryLocation = scan.location || customer.city || customer.address || 'Unknown';
-          
-          // Update bottle assignment AND location
-          const { error: bottleError } = await supabase
-            .from('bottles')
-            .update({ 
-              assigned_customer: customer.CustomerListID,
-              location: deliveryLocation, // Update location to customer's location
-              last_location_update: new Date().toISOString()
-            })
-            .eq('barcode_number', scan.cylinder_barcode)
-            .eq('organization_id', organization.id); // SECURITY: Only update bottles from user's organization
-          
-          if (bottleError) {
-            logger.error('Error assigning bottle to customer:', bottleError);
-          } else {
-            logger.log(`✅ Updated bottle ${scan.cylinder_barcode} - Customer: ${customer.CustomerListID}, Location: ${deliveryLocation}`);
-          }
+          // NOTE: Bottles should NOT be assigned here - this is legacy code
+          // Bottle assignment should ONLY happen during approval/verification via assignBottlesToCustomer()
+          // This function should only create invoices and line items, not assign bottles
+          // Removed bottle assignment to prevent premature assignment during scanning
 
           // Create rental record for delivered bottles (qty_out > 0)
+          // NOTE: Rental records should also be created during approval, not here
           if (scan.qty && scan.qty > 0) {
             // Get tax rate for the location
             let taxRate = 0;
@@ -3257,20 +3361,8 @@ export default function ImportApprovals() {
               logger.error('Error ending rental record:', rentalUpdateError);
             }
 
-            // Remove customer assignment and mark as empty for returned bottles
-            const { error: bottleUnassignError } = await supabase
-              .from('bottles')
-              .update({ 
-                assigned_customer: null,
-                status: 'empty',
-                last_location_update: new Date().toISOString()
-              })
-              .eq('barcode_number', scan.cylinder_barcode)
-            .eq('organization_id', organization.id); // SECURITY: Only update bottles from user's organization
-            
-            if (bottleUnassignError) {
-              logger.error('Error unassigning bottle from customer:', bottleUnassignError);
-            }
+            // NOTE: Bottle unassignment should also happen during approval/verification, not here
+            // Removed bottle unassignment to prevent premature changes during scanning
           }
         }
       }
@@ -3435,27 +3527,13 @@ export default function ImportApprovals() {
             });
           }
 
-          // Get location for this delivery
-          const deliveryLocation = scan.location || customer.city || customer.address || 'Unknown';
-          
-          // Update bottle assignment AND location
-          const { error: bottleError } = await supabase
-            .from('bottles')
-            .update({ 
-              assigned_customer: customer.CustomerListID,
-              location: deliveryLocation, // Update location to customer's location
-              last_location_update: new Date().toISOString()
-            })
-            .eq('barcode_number', scan.cylinder_barcode)
-            .eq('organization_id', organization.id); // SECURITY: Only update bottles from user's organization
-          
-          if (bottleError) {
-            logger.error('Error assigning bottle to customer:', bottleError);
-          } else {
-            logger.log(`✅ Updated bottle ${scan.cylinder_barcode} - Customer: ${customer.CustomerListID}, Location: ${deliveryLocation}`);
-          }
+          // NOTE: Bottles should NOT be assigned here - this is legacy code
+          // Bottle assignment should ONLY happen during approval/verification via assignBottlesToCustomer()
+          // This function should only create invoices and line items, not assign bottles
+          // Removed bottle assignment to prevent premature assignment during scanning
 
           // Create rental record for delivered bottles (qty_out > 0)
+          // NOTE: Rental records should also be created during approval, not here
           if (scan.qty && scan.qty > 0) {
             // Get tax rate for the location
             let taxRate = 0;
@@ -3509,20 +3587,8 @@ export default function ImportApprovals() {
               logger.error('Error ending rental record:', rentalUpdateError);
             }
 
-            // Remove customer assignment and mark as empty for returned bottles
-            const { error: bottleUnassignError } = await supabase
-              .from('bottles')
-              .update({ 
-                assigned_customer: null,
-                status: 'empty',
-                last_location_update: new Date().toISOString()
-              })
-              .eq('barcode_number', scan.cylinder_barcode)
-            .eq('organization_id', organization.id); // SECURITY: Only update bottles from user's organization
-            
-            if (bottleUnassignError) {
-              logger.error('Error unassigning bottle from customer:', bottleUnassignError);
-            }
+            // NOTE: Bottle unassignment should also happen during approval/verification, not here
+            // Removed bottle unassignment to prevent premature changes during scanning
           }
         }
       }
@@ -4483,8 +4549,14 @@ export default function ImportApprovals() {
       <Dialog 
         open={bottleInfoDialog.open} 
         onClose={() => setBottleInfoDialog({ open: false, orderNumber: null, bottles: [], scannedBarcodes: [], loading: false })}
-        maxWidth="md"
+        maxWidth="lg"
         fullWidth
+        PaperProps={{
+          sx: {
+            width: '90%',
+            maxWidth: '1200px'
+          }
+        }}
       >
         <DialogTitle>
           <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -4554,7 +4626,7 @@ export default function ImportApprovals() {
                                 return;
                               }
                               
-                              navigate(`/bottle/${bottleData.id}`);
+                              navigate(`/bottle/${bottleData.barcode_number || bottleData.id}`);
                               setBottleInfoDialog({ open: false, orderNumber: null, bottles: [], scannedBarcodes: [], loading: false });
                             } catch (error) {
                               logger.error('Error finding bottle by barcode:', error);
@@ -4651,7 +4723,7 @@ export default function ImportApprovals() {
                               variant="body2"
                               fontWeight={500}
                               component={Link}
-                              to={`/bottle/${bottle.id}`}
+                              to={`/bottle/${bottle.barcode_number || bottle.id}`}
                               sx={{
                                 color: 'primary.main',
                                 textDecoration: 'none',
@@ -6883,6 +6955,38 @@ export default function ImportApprovals() {
       const assignmentSuccesses = [];
       const processedBarcodes = new Set();
       
+      // Check if we have invoice quantities but no scanned bottles - need DNS+ records
+      const hasInvoiceQuantities = rows.some(row => (row.qty_out || 0) > 0);
+      const hasNoScannedBottles = shippedBarcodes.size === 0 && returnedBarcodes.size === 0;
+      
+      if (hasInvoiceQuantities && hasNoScannedBottles && newCustomerId) {
+        logger.log(`📦 Invoice has qty_out but no scanned bottles. Creating DNS+ records for all qty_out items.`);
+        // Group by product_code to create DNS+ records
+        const productQuantities = {};
+        rows.forEach(row => {
+          if ((row.qty_out || 0) > 0 && row.product_code) {
+            const productCode = row.product_code;
+            if (!productQuantities[productCode]) {
+              productQuantities[productCode] = {
+                product_code: productCode,
+                qty_out: 0,
+                description: row.description || row.product_code
+              };
+            }
+            productQuantities[productCode].qty_out += (row.qty_out || 0);
+          }
+        });
+        
+        // Create DNS+ records for each product
+        for (const productCode in productQuantities) {
+          const productQty = productQuantities[productCode];
+          for (let i = 0; i < productQty.qty_out; i++) {
+            await createDNSRentalRecord(newCustomerId, newCustomerName, productQty, orderNumber);
+          }
+          assignmentSuccesses.push(`${productQty.qty_out} DNS+ record(s) created for ${productCode}`);
+        }
+      }
+      
       // First, process RETURNED barcodes - unassign from customer
       for (const barcode of returnedBarcodes) {
         if (processedBarcodes.has(barcode)) continue;
@@ -7071,6 +7175,9 @@ export default function ImportApprovals() {
       }
       
       // Fallback: Process import rows if we didn't get barcodes from scans (for older imports)
+      // Track quantities that need DNS+ records
+      const dnsRecordsToCreate = [];
+      
       for (const row of rows) {
         // For shipped items (qty_out > 0), assign bottles to customer
         if (row.qty_out > 0 && (row.product_code || row.bottle_barcode || row.barcode)) {
@@ -7177,9 +7284,27 @@ export default function ImportApprovals() {
               logger.log(`ℹ️ Bottle ${bottle.barcode_number} is already assigned to ${newCustomerName}`);
             }
           } else {
-            logger.warn(`⚠️ Bottle not found for barcode: ${row.bottle_barcode || row.barcode || row.product_code}`);
-            assignmentWarnings.push(`Bottle not found: ${row.bottle_barcode || row.barcode || row.product_code}`);
+            // No bottle found - create DNS+ record
+            logger.warn(`⚠️ Bottle not found for barcode: ${row.bottle_barcode || row.barcode || row.product_code}. Creating DNS+ record.`);
+            dnsRecordsToCreate.push({
+              product_code: row.product_code,
+              qty_out: row.qty_out || 1,
+              description: row.description || row.product_code,
+              order_number: orderNumber
+            });
           }
+        }
+      }
+      
+      // Create DNS+ rental records for quantities delivered but not scanned
+      if (dnsRecordsToCreate.length > 0 && newCustomerId) {
+        logger.log(`📦 Creating ${dnsRecordsToCreate.length} DNS+ record(s) for customer ${newCustomerName}`);
+        for (const dnsRecord of dnsRecordsToCreate) {
+          // Create one DNS+ rental per qty_out
+          for (let i = 0; i < dnsRecord.qty_out; i++) {
+            await createDNSRentalRecord(newCustomerId, newCustomerName, dnsRecord, orderNumber);
+          }
+          assignmentSuccesses.push(`${dnsRecord.qty_out} DNS+ record(s) created for ${dnsRecord.product_code || 'product'}`);
         }
       }
       
@@ -7248,6 +7373,89 @@ export default function ImportApprovals() {
       }
     } catch (error) {
       logger.error('Error creating rental record:', error);
+    }
+  }
+
+  // Create DNS+ (Delivered Not Scanned) rental record
+  async function createDNSRentalRecord(customerId, customerName, dnsRecord, orderNumber) {
+    try {
+      // Generate a unique DNS+ identifier
+      const dnsBarcode = `DNS+_${orderNumber}_${dnsRecord.product_code}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Create DNS+ rental record (no bottle_id since bottle wasn't scanned)
+      // Build insert object with DNS+ fields (may not exist in older schemas)
+      const insertData = {
+        bottle_id: null,
+        bottle_barcode: dnsBarcode,
+        customer_id: customerId,
+        customer_name: customerName,
+        rental_start_date: new Date().toISOString().split('T')[0],
+        rental_end_date: null,
+        rental_amount: 10, // Default rental amount
+        rental_type: 'monthly',
+        tax_code: 'GST+PST',
+        tax_rate: 0.11,
+        location: 'SASKATOON', // Default location
+        status: 'active',
+        organization_id: organization?.id,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      // Add DNS+ specific fields (may not exist in older schemas - will be handled gracefully)
+      try {
+        insertData.is_dns = true;
+        insertData.dns_product_code = dnsRecord.product_code;
+        insertData.dns_description = dnsRecord.description;
+        insertData.dns_order_number = orderNumber;
+      } catch (e) {
+        // If columns don't exist, continue without them
+        logger.warn('DNS+ columns may not exist in schema, continuing without them:', e);
+      }
+
+      const { error: rentalError } = await supabase
+        .from('rentals')
+        .insert(insertData);
+
+      if (rentalError) {
+        // If error is due to missing columns, try without DNS+ specific fields
+        if (rentalError.message && rentalError.message.includes('column') && rentalError.message.includes('does not exist')) {
+          logger.warn('DNS+ columns not found, creating rental without DNS+ flags');
+          const { error: retryError } = await supabase
+            .from('rentals')
+            .insert({
+              bottle_id: null,
+              bottle_barcode: dnsBarcode,
+              customer_id: customerId,
+              customer_name: customerName,
+              rental_start_date: new Date().toISOString().split('T')[0],
+              rental_end_date: null,
+              rental_amount: 10,
+              rental_type: 'monthly',
+              tax_code: 'GST+PST',
+              tax_rate: 0.11,
+              location: 'SASKATOON',
+              status: 'active',
+              organization_id: organization?.id,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+          if (retryError) {
+            logger.error('Error creating DNS+ rental record (fallback):', retryError);
+            throw retryError;
+          } else {
+            logger.log(`✅ Created DNS+ rental record (without DNS+ flags): ${dnsBarcode} for product ${dnsRecord.product_code}`);
+          }
+        } else {
+          logger.error('Error creating DNS+ rental record:', rentalError);
+          throw rentalError;
+        }
+      } else {
+        logger.log(`✅ Created DNS+ rental record: ${dnsBarcode} for product ${dnsRecord.product_code}`);
+      }
+    } catch (error) {
+      logger.error('Error creating DNS+ rental record:', error);
+      throw error;
     }
   }
 
