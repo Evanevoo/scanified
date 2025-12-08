@@ -43,9 +43,11 @@ import WarehouseIcon from '@mui/icons-material/Warehouse';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import HistoryIcon from '@mui/icons-material/History';
 import SpeedIcon from '@mui/icons-material/Speed';
+import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import { TableSkeleton, CardSkeleton } from '../components/SmoothLoading';
 import { AssetTransferService } from '../services/assetTransferService';
 import { useAuth } from '../hooks/useAuth';
+import DNSConversionDialog from '../components/DNSConversionDialog';
 
 // Helper to check if a string looks like an address
 function looksLikeAddress(str) {
@@ -61,6 +63,7 @@ export default function CustomerDetail() {
   const [customer, setCustomer] = useState(null);
   const [customerAssets, setCustomerAssets] = useState([]);
   const [locationAssets, setLocationAssets] = useState([]);
+  const [dnsRentals, setDNSRentals] = useState([]);
   const [bottleSummary, setBottleSummary] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -137,9 +140,36 @@ export default function CustomerDetail() {
         const { data: rentalData, error: rentalError } = await supabase
           .from('rentals')
           .select('*')
-          .eq('customer_id', id);
+          .eq('customer_id', id)
+          .is('rental_end_date', null);
         if (rentalError) throw rentalError;
         setLocationAssets(rentalData || []);
+        
+        // Fetch DNS+ rentals (delivered not scanned)
+        // Try to fetch DNS+ rentals - handle gracefully if columns don't exist
+        try {
+          const { data: dnsRentals, error: dnsError } = await supabase
+            .from('rentals')
+            .select('*')
+            .eq('customer_id', id)
+            .is('rental_end_date', null);
+          
+          if (dnsError) {
+            logger.warn('Error fetching rentals:', dnsError);
+            setDNSRentals([]);
+          } else {
+            // Filter for DNS+ records (bottle_barcode starts with DNS+ or is_dns is true)
+            const dnsRecords = (dnsRentals || []).filter(r => 
+              (r.is_dns === true) || 
+              (r.bottle_barcode && r.bottle_barcode.startsWith('DNS+')) ||
+              (r.bottle_id === null && r.bottle_barcode && r.bottle_barcode.includes('DNS'))
+            );
+            setDNSRentals(dnsRecords);
+          }
+        } catch (err) {
+          logger.warn('Error fetching DNS+ rentals:', err);
+          setDNSRentals([]);
+        }
       } catch (err) {
         setError(err.message);
       }
@@ -892,37 +922,43 @@ export default function CustomerDetail() {
                   </Button>
                 </Tooltip>
                 <Tooltip title={selectedAssets.length === 0 ? "Select assets to transfer" : `Transfer ${selectedAssets.length} selected asset(s) to customer`}>
-                  <Button
-                    onClick={() => handleOpenTransferDialog(false)}
-                    disabled={selectedAssets.length === 0 || transferLoading}
-                    startIcon={transferLoading ? <CircularProgress size={16} /> : <TransferWithinAStationIcon />}
-                    color="primary"
-                  >
-                    Transfer ({selectedAssets.length})
-                  </Button>
+                  <span>
+                    <Button
+                      onClick={() => handleOpenTransferDialog(false)}
+                      disabled={selectedAssets.length === 0 || transferLoading}
+                      startIcon={transferLoading ? <CircularProgress size={16} /> : <TransferWithinAStationIcon />}
+                      color="primary"
+                    >
+                      Transfer ({selectedAssets.length})
+                    </Button>
+                  </span>
                 </Tooltip>
               </ButtonGroup>
               
               <ButtonGroup variant="outlined" size="small">
                 <Tooltip title="Quick transfer to recent customers">
-                  <Button
-                    onClick={() => handleOpenTransferDialog(true)}
-                    disabled={selectedAssets.length === 0 || transferLoading}
-                    startIcon={<SpeedIcon />}
-                    color="secondary"
-                  >
-                    Quick Transfer
-                  </Button>
+                  <span>
+                    <Button
+                      onClick={() => handleOpenTransferDialog(true)}
+                      disabled={selectedAssets.length === 0 || transferLoading}
+                      startIcon={<SpeedIcon />}
+                      color="secondary"
+                    >
+                      Quick Transfer
+                    </Button>
+                  </span>
                 </Tooltip>
                 <Tooltip title="Return assets to warehouse/in-house">
-                  <Button
-                    onClick={handleTransferToWarehouse}
-                    disabled={selectedAssets.length === 0 || transferLoading}
-                    startIcon={<WarehouseIcon />}
-                    color="warning"
-                  >
-                    To Warehouse ({selectedAssets.length})
-                  </Button>
+                  <span>
+                    <Button
+                      onClick={handleTransferToWarehouse}
+                      disabled={selectedAssets.length === 0 || transferLoading}
+                      startIcon={<WarehouseIcon />}
+                      color="warning"
+                    >
+                      To Warehouse ({selectedAssets.length})
+                    </Button>
+                  </span>
                 </Tooltip>
               </ButtonGroup>
 
@@ -1008,7 +1044,7 @@ export default function CustomerDetail() {
                     <TableCell>
                       {asset.barcode_number ? (
                         <Link
-                          to={`/bottle/${asset.id}`}
+                          to={`/bottle/${asset.barcode_number || asset.id}`}
                           style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}
                         >
                           {asset.barcode_number}
@@ -1048,6 +1084,82 @@ export default function CustomerDetail() {
           </TableContainer>
         )}
       </Paper>
+
+      {/* DNS+ (Delivered Not Scanned) Section */}
+      {dnsRentals && dnsRentals.length > 0 && (
+        <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4, backgroundColor: '#fff3cd', border: '2px solid #ffc107' }}>
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+            <Typography variant="h5" fontWeight={700} color="warning.main">
+              ⚠️ Delivered Not Scanned (DNS+) ({dnsRentals.length})
+            </Typography>
+          </Box>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            These items were delivered according to invoices but no bottles were scanned. Please scan the actual bottles to convert these entries.
+          </Alert>
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow sx={{ backgroundColor: '#fff3cd' }}>
+                  <TableCell sx={{ fontWeight: 700 }}>Product Code</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Order Number</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Rental Start</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {dnsRentals.map((dns) => (
+                  <TableRow key={dns.id}>
+                    <TableCell>{dns.dns_product_code || 'N/A'}</TableCell>
+                    <TableCell>{dns.dns_description || dns.bottle_barcode}</TableCell>
+                    <TableCell>{dns.dns_order_number || 'N/A'}</TableCell>
+                    <TableCell>{new Date(dns.rental_start_date).toLocaleDateString()}</TableCell>
+                    <TableCell>
+                      <DNSConversionDialog 
+                        dnsRental={dns} 
+                        customerId={id}
+                        customerName={customer?.name}
+                        onConverted={() => {
+                          // Refresh data after conversion
+                          const fetchData = async () => {
+                            try {
+                              const { data: allRentals, error: dnsError } = await supabase
+                                .from('rentals')
+                                .select('*')
+                                .eq('customer_id', id)
+                                .is('rental_end_date', null);
+                              
+                              if (!dnsError && allRentals) {
+                                // Filter for DNS+ records
+                                const dnsRecords = allRentals.filter(r => 
+                                  (r.is_dns === true) || 
+                                  (r.bottle_barcode && r.bottle_barcode.startsWith('DNS+')) ||
+                                  (r.bottle_id === null && r.bottle_barcode && r.bottle_barcode.includes('DNS'))
+                                );
+                                setDNSRentals(dnsRecords);
+                              }
+                              
+                              const { data: customerAssetsData, error: customerAssetsError } = await supabase
+                                .from('bottles')
+                                .select('*')
+                                .eq('assigned_customer', id)
+                                .eq('organization_id', customer?.organization_id);
+                              if (!customerAssetsError) setCustomerAssets(customerAssetsData || []);
+                            } catch (err) {
+                              logger.error('Error refreshing data:', err);
+                            }
+                          };
+                          fetchData();
+                        }}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      )}
 
       {/* Rental History */}
       <Paper elevation={3} sx={{ p: 4, borderRadius: 4 }}>
@@ -1131,6 +1243,7 @@ export default function CustomerDetail() {
             <Autocomplete
               options={availableCustomers}
               getOptionLabel={(option) => `${option.name} (${option.CustomerListID})`}
+              isOptionEqualToValue={(option, value) => option.CustomerListID === value?.CustomerListID}
               renderOption={(props, option) => (
                 <Box component="li" {...props}>
                   <Box>

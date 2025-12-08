@@ -568,7 +568,12 @@ export class SyncService {
           } else {
             syncedCount++;
             
-            // If this is a return scan, mark the bottle as empty
+            // NOTE: Bottles should NOT be assigned/unassigned here - this bypasses verification
+            // Bottle assignment should ONLY happen during approval/verification via assignBottlesToCustomer()
+            // This sync only creates scan records, not bottle assignments
+            
+            // If this is a return scan, we can mark the bottle as empty (status only, no customer unassignment)
+            // Customer unassignment will happen during verification
             if (scanData.mode === 'RETURN') {
               const { error: updateError } = await supabase
                 .from('bottles')
@@ -580,6 +585,7 @@ export class SyncService {
                 logger.warn(`Could not update bottle status for ${scanData.bottle_barcode}:`, updateError);
               }
             }
+            // NOTE: For SHIP/DELIVERY scans, we do NOT assign bottles here - verification will handle that
           }
         } catch (error) {
           errors.push(`Error syncing scan ${scan.bottle_barcode || scan.barcode}: ${error}`);
