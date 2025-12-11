@@ -9,6 +9,8 @@ import { AssetProvider } from './context/AssetContext';
 import { useAuth } from './hooks/useAuth';
 import { notificationService } from './services/NotificationService';
 import { soundService } from './services/soundService';
+import { useAppUpdate } from './hooks/useAppUpdate';
+import UpdateModal from './components/UpdateModal';
 
 // Import all screens
 import HomeScreen from './screens/HomeScreen';
@@ -70,6 +72,15 @@ const styles = StyleSheet.create({
 
 function AppContent() {
   const { user, profile, organization, loading, organizationLoading, authError } = useAuth();
+  const { updateInfo, openUpdateUrl } = useAppUpdate();
+  const [showUpdateModal, setShowUpdateModal] = React.useState(false);
+
+  // Show update modal when update is available
+  React.useEffect(() => {
+    if (updateInfo?.hasUpdate) {
+      setShowUpdateModal(true);
+    }
+  }, [updateInfo]);
 
   // Initialize services when user is authenticated
   React.useEffect(() => {
@@ -140,14 +151,15 @@ function AppContent() {
   }
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator
-        screenOptions={{
-          headerShown: true, // Default to showing headers, but individual screens can override
-        }}
-        initialRouteName={user ? "Home" : "Login"}
-      >
-        {!user ? (
+    <>
+      <NavigationContainer>
+        <Stack.Navigator
+          screenOptions={{
+            headerShown: true, // Default to showing headers, but individual screens can override
+          }}
+          initialRouteName={user ? "Home" : "Login"}
+        >
+          {!user ? (
           <Stack.Screen 
             name="Login" 
             component={LoginScreen}
@@ -264,6 +276,20 @@ function AppContent() {
         )}
       </Stack.Navigator>
     </NavigationContainer>
+    
+    {/* Update Modal */}
+    <UpdateModal
+      visible={showUpdateModal}
+      updateInfo={updateInfo}
+      onUpdate={async () => {
+        await openUpdateUrl();
+        if (!updateInfo?.isRequired) {
+          setShowUpdateModal(false);
+        }
+      }}
+      onDismiss={updateInfo?.isRequired ? undefined : () => setShowUpdateModal(false)}
+    />
+    </>
   );
 }
 

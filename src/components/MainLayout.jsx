@@ -185,7 +185,7 @@ export default function MainLayout({ children }) {
       navigate(`/customer/${item.id}`);
     } else if (item.type === 'bottle') {
       // Navigate to bottle detail page
-      navigate(`/bottle/${item.id}`);
+      navigate(`/bottle/${item.barcode_number || item.id}`);
     } else if (item.type === 'asset') {
       // Legacy support for old asset references
       navigate(`/asset/${item.id}`);

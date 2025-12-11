@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert, ScrollView, Dimensions } from 'react-native';
 import { supabase } from '../supabase';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
@@ -74,6 +74,53 @@ export default function HistoryScreen() {
       fetchBottles();
     }
   }, [profile]);
+
+  // Group scans by order_number AND customer_name (to properly separate different customers/orders)
+  const groupScansByOrderNumber = (scans) => {
+    const grouped = {};
+    
+    scans.forEach(scan => {
+      // Create a composite key using both order_number and customer_name
+      // This ensures scans with same order_number but different customers are grouped separately
+      const orderNumber = scan.order_number || null;
+      const customerName = scan.customer_name || 'Unknown Customer';
+      
+      // Use a composite key: order_number + customer_name
+      // If no order_number, group by customer_name only
+      const orderKey = orderNumber 
+        ? `${orderNumber}||${customerName}` 
+        : `no-order||${customerName}||${scan.id}`; // Unique key for scans without order_number
+      
+      if (!grouped[orderKey]) {
+        grouped[orderKey] = {
+          order_number: orderNumber,
+          scans: [],
+          customer_name: customerName,
+          created_at: scan.created_at,
+          verified: scan.verified || false,
+          // Get the earliest created_at for the group
+          earliest_created_at: scan.created_at,
+        };
+      }
+      
+      grouped[orderKey].scans.push(scan);
+      
+      // Update earliest created_at if this scan is older
+      if (new Date(scan.created_at) < new Date(grouped[orderKey].earliest_created_at)) {
+        grouped[orderKey].earliest_created_at = scan.created_at;
+      }
+      
+      // If any scan is verified, mark the group as verified
+      if (scan.verified) {
+        grouped[orderKey].verified = true;
+      }
+    });
+    
+    // Convert to array and sort by earliest_created_at (most recent first)
+    return Object.values(grouped).sort((a, b) => 
+      new Date(b.earliest_created_at) - new Date(a.earliest_created_at)
+    );
+  };
 
   // Filter customer suggestions
   useEffect(() => {
@@ -227,8 +274,10 @@ export default function HistoryScreen() {
           setError(`Failed to load scans: ${error.message || 'Unknown error'}`);
         } else {
           setError('');
-          setScans(data || []);
-          logger.log(`Loaded ${data?.length || 0} scans`);
+          // Group scans by order_number
+          const groupedScans = groupScansByOrderNumber(data || []);
+          setScans(groupedScans);
+          logger.log(`Loaded ${data?.length || 0} scans, grouped into ${groupedScans.length} orders`);
         }
       } catch (err) {
         logger.error('Unexpected error loading scans:', err);
@@ -240,9 +289,9 @@ export default function HistoryScreen() {
     fetchScans();
   }, [profile]);
 
-  const openEdit = (scan) => {
+  const openEdit = (groupedItem) => {
     // Check if scan is within 24 hours
-    const scanTime = new Date(scan.created_at);
+    const scanTime = new Date(groupedItem.earliest_created_at);
     const now = new Date();
     const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
     
@@ -255,16 +304,25 @@ export default function HistoryScreen() {
       return;
     }
     
-    setEditScan(scan);
-    setEditCustomer(scan.customer_name || '');
-    // Parse assets if they exist, otherwise use bottle_barcode
-    if (scan.assets && Array.isArray(scan.assets)) {
-      setEditAssets(scan.assets);
-    } else if (scan.bottle_barcode) {
-      setEditAssets([scan.bottle_barcode]);
-    } else {
-      setEditAssets(['']);
+    // Store the entire grouped item so we can update all scans
+    setEditScan(groupedItem);
+    setEditCustomer(groupedItem.customer_name || '');
+    
+    // Extract all unique barcodes from all scans in the group
+    const allAssets = [];
+    groupedItem.scans.forEach(scan => {
+      // Each scan has a bottle_barcode field
+      if (scan.bottle_barcode && !allAssets.includes(scan.bottle_barcode)) {
+        allAssets.push(scan.bottle_barcode);
+      }
+    });
+    
+    // If no assets found, add an empty one
+    if (allAssets.length === 0) {
+      allAssets.push('');
     }
+    
+    setEditAssets(allAssets);
   };
 
   const saveEdit = async () => {
@@ -274,18 +332,51 @@ export default function HistoryScreen() {
     }
 
     setSaving(true);
-    // Get the first asset barcode or empty string
-    const assetBarcode = editAssets.length > 0 ? editAssets[0] : '';
     
-    const { error } = await supabase
-      .from('bottle_scans')
-      .update({ 
-        customer_name: editCustomer, 
-        bottle_barcode: assetBarcode,
-        assets: editAssets 
-      })
-      .eq('id', editScan?.id)
-      .eq('organization_id', profile.organization_id);
+    // Update all scans in the group
+    const scansToUpdate = editScan?.scans || [];
+    const filteredAssets = editAssets.filter(a => a); // Remove empty strings
+    
+    if (scansToUpdate.length > 0) {
+      // Update each scan, mapping barcodes from editAssets to scans
+      // Try to preserve original barcode mapping if possible
+      const updatePromises = scansToUpdate.map((scan, index) => {
+        // Try to preserve the original barcode if it's still in the edited assets
+        let bottleBarcode = '';
+        if (scan.bottle_barcode && filteredAssets.includes(scan.bottle_barcode)) {
+          // Original barcode is still in the list, keep it
+          bottleBarcode = scan.bottle_barcode;
+        } else if (filteredAssets.length > 0) {
+          // Map barcodes to scans - use index to cycle through if we have fewer barcodes than scans
+          const assetIndex = index % filteredAssets.length;
+          bottleBarcode = filteredAssets[assetIndex];
+        }
+        // If no barcodes provided, leave bottle_barcode as is (don't update it)
+        
+        const updateData: any = {
+          customer_name: editCustomer,
+        };
+        
+        // Only update bottle_barcode if we have a value
+        if (bottleBarcode) {
+          updateData.bottle_barcode = bottleBarcode;
+        }
+        
+        return supabase
+          .from('bottle_scans')
+          .update(updateData)
+          .eq('id', scan.id)
+          .eq('organization_id', profile.organization_id);
+      });
+      
+      const results = await Promise.all(updatePromises);
+      const hasError = results.some(r => r.error);
+      
+      if (hasError) {
+        logger.error('Error updating scans:', results);
+        Alert.alert('Error', 'Failed to update some scans. Please try again.');
+      }
+    }
     
     setSaving(false);
     setEditScan(null);
@@ -297,7 +388,9 @@ export default function HistoryScreen() {
       .eq('organization_id', profile.organization_id)
       .gte('created_at', since)
       .order('created_at', { ascending: false });
-    setScans(data || []);
+    // Group scans by order_number
+    const groupedScans = groupScansByOrderNumber(data || []);
+    setScans(groupedScans);
   };
 
   const deleteScan = async () => {
@@ -319,11 +412,17 @@ export default function HistoryScreen() {
             }
 
             setSaving(true);
-            const { error } = await supabase
-              .from('bottle_scans')
-              .delete()
-              .eq('id', editScan?.id)
-              .eq('organization_id', profile.organization_id);
+            // Delete all scans in the group
+            const scanIds = editScan?.scans?.map(s => s.id) || [];
+            const deletePromises = scanIds.map(scanId =>
+              supabase
+                .from('bottle_scans')
+                .delete()
+                .eq('id', scanId)
+                .eq('organization_id', profile.organization_id)
+            );
+            const results = await Promise.all(deletePromises);
+            const { error } = results.find(r => r.error) || { error: null };
 
             setSaving(false);
             
@@ -339,7 +438,9 @@ export default function HistoryScreen() {
                 .eq('organization_id', profile.organization_id)
                 .gte('created_at', since)
                 .order('created_at', { ascending: false });
-              setScans(data || []);
+              // Group scans by order_number
+              const groupedScans = groupScansByOrderNumber(data || []);
+              setScans(groupedScans);
             }
           }
         }
@@ -368,21 +469,39 @@ export default function HistoryScreen() {
       {loading ? <ActivityIndicator color="#40B5AD" /> : error ? <Text style={styles.error}>{error}</Text> : (
         <FlatList
           data={scans}
-          keyExtractor={item => item.id}
+          keyExtractor={item => item.order_number || `no-order-${item.scans[0]?.id}`}
           renderItem={({ item }) => {
-            const scanTime = new Date(item.created_at);
+            const scanTime = new Date(item.earliest_created_at);
             const now = new Date();
             const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
             const isEditable = hoursDiff <= 24;
             
+            // Get all unique bottle barcodes from the grouped scans
+            const bottleBarcodes = item.scans
+              .map(s => s.bottle_barcode || s.assets?.[0])
+              .filter(Boolean)
+              .filter((v, i, a) => a.indexOf(v) === i); // Remove duplicates
+            
             return (
               <TouchableOpacity 
                 style={[styles.scanItem, !isEditable && styles.scanItemDisabled]} 
-                onPress={() => openEdit(item)}
+                onPress={() => openEdit(item)} // Open edit with entire grouped item
               >
-                <Text style={styles.scanBarcode}>{item.bottle_barcode}</Text>
-                <Text style={styles.scanCustomer}>{item.customer_name}</Text>
-                <Text style={styles.scanDate}>{formatDate(item.created_at)}</Text>
+                <Text style={styles.scanBarcode}>
+                  {item.order_number || 'No Order Number'}
+                </Text>
+                <Text style={styles.scanCustomer}>{item.customer_name || 'No Customer'}</Text>
+                <Text style={styles.scanDate}>{formatDate(item.earliest_created_at)}</Text>
+                <Text style={styles.scanCount}>
+                  {item.scans.length} {item.scans.length === 1 ? 'item' : 'items'}
+                  {bottleBarcodes.length > 0 && ` • ${bottleBarcodes.length} unique ${bottleBarcodes.length === 1 ? 'barcode' : 'barcodes'}`}
+                </Text>
+                {bottleBarcodes.length > 0 && (
+                  <Text style={styles.scanBarcodesList}>
+                    {bottleBarcodes.slice(0, 3).join(', ')}
+                    {bottleBarcodes.length > 3 && ` +${bottleBarcodes.length - 3} more`}
+                  </Text>
+                )}
                 <Text style={styles.scanStatus}>Verified: {item.verified ? 'Yes' : 'No'}</Text>
                 {!isEditable && (
                   <Text style={styles.scanExpired}>Edit expired</Text>
@@ -399,16 +518,20 @@ export default function HistoryScreen() {
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Edit Scan</Text>
             
-            {/* Customer Selection */}
-            <Text style={styles.label}>Customer</Text>
+            <ScrollView 
+              style={styles.modalScrollView}
+              contentContainerStyle={styles.modalScrollContent}
+              showsVerticalScrollIndicator={true}
+              nestedScrollEnabled={true}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Customer Selection */}
+              <Text style={styles.label}>Customer</Text>
             <View style={styles.inputContainer}>
               <TextInput
                 style={[styles.input, { flex: 1 }]}
                 value={editCustomer}
-                onChangeText={(v) => {
-                  setEditCustomer(v);
-                  setCustomerSearch(v);
-                }}
+                onChangeText={setEditCustomer}
                 placeholder="Type or select customer..."
               />
               <TouchableOpacity 
@@ -524,6 +647,7 @@ export default function HistoryScreen() {
                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>{saving ? 'Saving...' : 'Save'}</Text>                                                      
               </TouchableOpacity>
             </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -575,6 +699,8 @@ export default function HistoryScreen() {
   );
 }
 
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -618,6 +744,18 @@ const styles = StyleSheet.create({
     color: '#888',
     marginBottom: 2,
   },
+  scanCount: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+    fontWeight: '500',
+  },
+  scanBarcodesList: {
+    fontSize: 11,
+    color: '#999',
+    marginBottom: 2,
+    fontStyle: 'italic',
+  },
   scanStatus: {
     fontSize: 12,
     color: '#888',
@@ -644,7 +782,15 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 24,
     width: '85%',
+    maxHeight: SCREEN_HEIGHT * 0.85,
     alignItems: 'stretch',
+    justifyContent: 'flex-start',
+  },
+  modalScrollView: {
+    maxHeight: SCREEN_HEIGHT * 0.6,
+  },
+  modalScrollContent: {
+    paddingBottom: 8,
   },
   modalTitle: {
     fontWeight: 'bold',

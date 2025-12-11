@@ -608,7 +608,7 @@ export default function OwnershipManagement() {
                       {bottle.barcode_number ? (
                         <Link
                           component={RouterLink}
-                          to={`/bottle/${bottle.id}`}
+                          to={`/bottle/${bottle.barcode_number || bottle.id}`}
                           underline="hover"
                           sx={{ fontWeight: 600 }}
                         >

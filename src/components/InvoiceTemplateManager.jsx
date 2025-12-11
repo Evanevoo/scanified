@@ -3,15 +3,17 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box,
   Typography, TextField, Grid, FormControlLabel, Switch, Tabs, Tab,
   Card, CardContent, Select, MenuItem, FormControl, InputLabel,
-  IconButton, Alert, Divider
+  IconButton, Alert, Divider, CircularProgress
 } from '@mui/material';
 import {
   Close as CloseIcon,
   Palette as PaletteIcon,
   ViewModule as LayoutIcon,
-  TextFields as TextIcon
+  TextFields as TextIcon,
+  CloudUpload as UploadIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../supabase/client';
 import logger from '../utils/logger';
 
 function TabPanel({ children, value, index }) {
@@ -25,12 +27,14 @@ function TabPanel({ children, value, index }) {
 export default function InvoiceTemplateManager({ open, onClose, onSave, currentTemplate }) {
   const { organization } = useAuth();
   const [activeTab, setActiveTab] = useState(0);
+  const [logoUploading, setLogoUploading] = useState(false);
   const [template, setTemplate] = useState({
     name: 'Modern',
     primary_color: '#000000',
     secondary_color: '#666666',
     font_family: 'Arial',
     font_size: 10,
+    logo_url: '',
     
     // Field visibility
     show_bill_to: true,
@@ -117,6 +121,57 @@ export default function InvoiceTemplateManager({ open, onClose, onSave, currentT
     setTemplate({ ...template, ...preset });
   };
 
+  const handleLogoUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload an image file');
+      return;
+    }
+    
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File size must be less than 5MB');
+      return;
+    }
+    
+    setLogoUploading(true);
+    
+    try {
+      const fileExt = file.name.split('.').pop();
+      const filePath = `invoice-logos/org-${organization.id}-${Date.now()}.${fileExt}`;
+      
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('organization-logos')
+        .upload(filePath, file, { upsert: true });
+      
+      if (uploadError) throw uploadError;
+      
+      // Get public URL
+      const { data } = supabase.storage.from('organization-logos').getPublicUrl(filePath);
+      if (!data?.publicUrl) throw new Error('Failed to get public URL');
+      
+      const logoUrlWithCacheBust = `${data.publicUrl}?t=${Date.now()}`;
+      
+      // Update template with logo URL
+      setTemplate({ ...template, logo_url: logoUrlWithCacheBust });
+      
+      logger.log('Logo uploaded successfully:', logoUrlWithCacheBust);
+    } catch (err) {
+      logger.error('Error uploading logo:', err);
+      alert('Failed to upload logo: ' + err.message);
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
+  const handleRemoveLogo = () => {
+    setTemplate({ ...template, logo_url: '' });
+  };
+
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>
@@ -172,6 +227,66 @@ export default function InvoiceTemplateManager({ open, onClose, onSave, currentT
                   </Grid>
                 ))}
               </Grid>
+            </Grid>
+
+            {/* Logo Upload */}
+            <Grid item xs={12}>
+              <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                Company Logo
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Upload a logo to display on your invoices
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+                {template.logo_url && (
+                  <Box sx={{ position: 'relative', display: 'inline-block' }}>
+                    <img 
+                      src={template.logo_url} 
+                      alt="Company Logo" 
+                      style={{ 
+                        maxHeight: 80, 
+                        maxWidth: 200, 
+                        objectFit: 'contain',
+                        border: '1px solid #ddd',
+                        borderRadius: 4,
+                        padding: 8
+                      }}
+                      onError={(e) => {
+                        logger.error('Failed to load logo:', template.logo_url);
+                        e.target.style.display = 'none';
+                      }}
+                    />
+                    <IconButton
+                      size="small"
+                      onClick={handleRemoveLogo}
+                      sx={{ 
+                        position: 'absolute', 
+                        top: -8, 
+                        right: -8, 
+                        bgcolor: 'error.main',
+                        color: 'white',
+                        '&:hover': { bgcolor: 'error.dark' }
+                      }}
+                    >
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                )}
+                <Button
+                  variant="outlined"
+                  component="label"
+                  startIcon={logoUploading ? <CircularProgress size={20} /> : <UploadIcon />}
+                  disabled={logoUploading}
+                >
+                  {logoUploading ? 'Uploading...' : template.logo_url ? 'Change Logo' : 'Upload Logo'}
+                  <input
+                    type="file"
+                    hidden
+                    accept="image/*"
+                    onChange={handleLogoUpload}
+                  />
+                </Button>
+              </Box>
             </Grid>
 
             <Grid item xs={12}>

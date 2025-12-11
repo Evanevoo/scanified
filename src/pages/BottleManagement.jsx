@@ -50,7 +50,9 @@ import {
 
   TablePagination,
 
-  Chip
+  Chip,
+
+  Checkbox
 
 } from '@mui/material';
 
@@ -104,6 +106,10 @@ const BottleManagement = () => {
 
   const [statusFilter, setStatusFilter] = useState('all');
 
+  const [gasTypeFilter, setGasTypeFilter] = useState('all');
+
+  const [availableGasTypes, setAvailableGasTypes] = useState([]);
+
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
   const [totalCount, setTotalCount] = useState(0);
@@ -144,6 +150,8 @@ const BottleManagement = () => {
 
   const [bottlesToDelete, setBottlesToDelete] = useState([]);
 
+  const [selectedBottles, setSelectedBottles] = useState([]);
+
 
 
   // Load data
@@ -156,9 +164,53 @@ const BottleManagement = () => {
 
       loadCustomers();
 
+      loadGasTypes();
+
     }
 
-  }, [organization, page, rowsPerPage, searchTerm, statusFilter]); // Re-load when search/filter changes
+  }, [organization, page, rowsPerPage, searchTerm, statusFilter, gasTypeFilter]); // Re-load when search/filter changes
+
+  // Fetch available gas types for filter dropdown
+
+  const loadGasTypes = async () => {
+
+    try {
+
+      if (!organization?.id) return;
+
+      const { data, error } = await supabase
+
+        .from('bottles')
+
+        .select('gas_type')
+
+        .eq('organization_id', organization.id)
+
+        .not('gas_type', 'is', null)
+
+        .neq('gas_type', '');
+
+      if (error) {
+
+        logger.error('Error fetching gas types:', error);
+
+        return;
+
+      }
+
+      // Get unique gas types and sort them
+
+      const uniqueTypes = [...new Set((data || []).map(b => b.gas_type).filter(Boolean))];
+
+      setAvailableGasTypes(uniqueTypes.sort());
+
+    } catch (error) {
+
+      logger.error('Error fetching gas types:', error);
+
+    }
+
+  };
 
 
 
@@ -195,11 +247,40 @@ const BottleManagement = () => {
       
 
       // Apply search filter at database level for better performance
-
+      // Handle barcodes that might have leading zeros - search for both with and without leading zeros
       if (searchTerm) {
-
-        query = query.or(`serial_number.ilike.%${searchTerm}%,barcode_number.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
-
+        const trimmedSearch = searchTerm.trim();
+        const isNumeric = /^\d+$/.test(trimmedSearch);
+        
+        // Base search pattern - always search in these fields
+        let searchPattern = `serial_number.ilike.%${trimmedSearch}%,barcode_number.ilike.%${trimmedSearch}%,customer_name.ilike.%${trimmedSearch}%,description.ilike.%${trimmedSearch}%`;
+        
+        // For numeric searches, handle leading zero variations
+        if (isNumeric) {
+          if (!trimmedSearch.startsWith('0') && trimmedSearch.length > 0) {
+            // Search term doesn't start with 0 - also search with leading zero
+            const withLeadingZero = `0${trimmedSearch}`;
+            searchPattern += `,barcode_number.ilike.%${withLeadingZero}%,serial_number.ilike.%${withLeadingZero}%`;
+          } else if (trimmedSearch.startsWith('0') && trimmedSearch.length > 1) {
+            // Search term starts with 0 - also search without leading zeros
+            const withoutLeadingZero = trimmedSearch.replace(/^0+/, '');
+            if (withoutLeadingZero) {
+              searchPattern += `,barcode_number.ilike.%${withoutLeadingZero}%,serial_number.ilike.%${withoutLeadingZero}%`;
+            }
+          }
+        }
+        
+        try {
+          // Log search pattern for debugging (especially for barcode searches)
+          if (isNumeric && (trimmedSearch.includes('8674') || trimmedSearch.includes('08674'))) {
+            logger.log(`🔍 Search query pattern for "${trimmedSearch}": ${searchPattern.substring(0, 200)}...`);
+          }
+          query = query.or(searchPattern);
+        } catch (error) {
+          logger.error('Error building search query:', error);
+          // Fallback to simple search if complex query fails
+          query = query.or(`serial_number.ilike.%${trimmedSearch}%,barcode_number.ilike.%${trimmedSearch}%,customer_name.ilike.%${trimmedSearch}%,description.ilike.%${trimmedSearch}%`);
+        }
       }
 
       
@@ -209,6 +290,14 @@ const BottleManagement = () => {
       if (statusFilter !== 'all') {
 
         query = query.eq('status', statusFilter);
+
+      }
+
+      // Apply gas type filter
+
+      if (gasTypeFilter !== 'all') {
+
+        query = query.eq('gas_type', gasTypeFilter);
 
       }
 
@@ -232,9 +321,18 @@ const BottleManagement = () => {
 
 
 
-      if (error) throw error;
-
+      if (error) {
+        logger.error('Error executing bottle query:', error);
+        throw error;
+      }
       
+      // Log search results for debugging (especially for barcode searches)
+      if (searchTerm && /^\d+$/.test(searchTerm.trim()) && (searchTerm.includes('8674') || searchTerm.includes('08674'))) {
+        logger.log(`🔍 Search for "${searchTerm}" returned ${data?.length || 0} results`);
+        if (data && data.length > 0) {
+          logger.log(`🔍 Found barcodes: ${data.map(b => b.barcode_number).filter(Boolean).join(', ')}`);
+        }
+      }
 
       setBottles(data || []);
 
@@ -289,6 +387,50 @@ const BottleManagement = () => {
   // This allows searching across all 2000+ bottles instantly
 
   const filteredBottles = bottles;
+
+  // Selection handlers
+
+  const handleSelectBottle = (bottleId) => {
+
+    setSelectedBottles(prev =>
+
+      prev.includes(bottleId)
+
+        ? prev.filter(id => id !== bottleId)
+
+        : [...prev, bottleId]
+
+    );
+
+  };
+
+  const handleSelectAll = () => {
+
+    if (selectedBottles.length === filteredBottles.length) {
+
+      setSelectedBottles([]);
+
+    } else {
+
+      setSelectedBottles(filteredBottles.map(b => b.id));
+
+    }
+
+  };
+
+  const isSelected = (bottleId) => selectedBottles.includes(bottleId);
+
+  const isAllSelected = filteredBottles.length > 0 && selectedBottles.length === filteredBottles.length;
+
+  const isIndeterminate = selectedBottles.length > 0 && selectedBottles.length < filteredBottles.length;
+
+  // Clear selection when filters change
+
+  useEffect(() => {
+
+    setSelectedBottles([]);
+
+  }, [searchTerm, statusFilter, gasTypeFilter]);
 
 
 
@@ -394,7 +536,7 @@ const BottleManagement = () => {
 
 
 
-          // Create customer map
+          // Create customer map - store customer objects with id, CustomerListID, and name
 
           const customerMap = new Map();
 
@@ -402,7 +544,7 @@ const BottleManagement = () => {
 
             .from('customers')
 
-            .select('"CustomerListID", name')
+            .select('id, "CustomerListID", name')
 
             .eq('organization_id', organization.id);
 
@@ -412,7 +554,17 @@ const BottleManagement = () => {
 
             existingCustomers.forEach(customer => {
 
-              customerMap.set(customer.CustomerListID.toUpperCase(), customer.name);
+              // Store customer object keyed by CustomerListID (uppercase for case-insensitive matching)
+
+              customerMap.set(customer.CustomerListID.toUpperCase(), {
+
+                id: customer.id, // UUID - this is what assigned_customer should reference
+
+                CustomerListID: customer.CustomerListID,
+
+                name: customer.name
+
+              });
 
             });
 
@@ -446,13 +598,26 @@ const BottleManagement = () => {
 
             const customerName = row['Customer'] || row['customer_name'] || '';
 
-            const customerId = String(row['CustomerListID'] || row['customer_list_id'] || '').trim().toUpperCase();
+            let customerId = String(row['CustomerListID'] || row['customer_list_id'] || '').trim().toUpperCase();
 
             
+            // If CustomerListID is not in a separate column, try to extract it from customer name (e.g., "Name (80000C0A-1744057121A)")
+            if (!customerId && customerName) {
+              const match = customerName.match(/\(([^)]+)\)/);
+              if (match && match[1]) {
+                customerId = match[1].trim().toUpperCase();
+                logger.log(`Extracted CustomerListID ${customerId} from customer name: ${customerName}`);
+              }
+            }
 
             // Collect unique customers (case-insensitive comparison)
+            // Skip if this is the owner organization name
+            // Clean customer name by removing ID in parentheses (same as in update process)
+            const customerNameClean = customerName.trim().replace(/\s*\([^)]*\)\s*$/, '').trim();
+            const isOwnerOrganization = organization && organization.name && 
+              customerNameClean.toLowerCase() === organization.name.toLowerCase().trim();
 
-            if (customerName.trim() && customerId && !processedCustomerIds.has(customerId)) {
+            if (customerName.trim() && customerId && !processedCustomerIds.has(customerId) && !isOwnerOrganization) {
 
               processedCustomerIds.add(customerId);
 
@@ -480,6 +645,8 @@ const BottleManagement = () => {
 
               }
 
+            } else if (isOwnerOrganization) {
+              logger.log(`Skipping customer creation for "${customerNameClean}" - this is the owner organization`);
             }
 
 
@@ -514,15 +681,46 @@ const BottleManagement = () => {
 
 
 
+            // Ensure barcode is properly converted to string, preserving leading zeros
+            // Excel may read numeric barcodes as numbers, so we need to handle that
+            let barcodeValue = row['Barcode'] || row['barcode_number'] || row['Barcode Number'] || '';
+            const originalBarcodeType = typeof barcodeValue;
+            const originalBarcodeValue = barcodeValue;
+            
+            // If it's a number, convert to string without scientific notation
+            // For numbers that should have leading zeros (like 08674030), we need to pad them
+            if (typeof barcodeValue === 'number') {
+              // Check if the original string representation (if available) had leading zeros
+              // Excel might have converted "08674030" to 8674030 (number)
+              // We'll convert to string and check if it's 9 digits or less (likely had leading zero)
+              const numStr = barcodeValue.toFixed(0);
+              // If it's a 9-digit number starting with 8 or 6, it might have had a leading zero
+              // But we can't know for sure, so we'll just convert it as-is
+              barcodeValue = numStr;
+            }
+            const barcode_number = String(barcodeValue).trim();
+            
+            // Log if barcode starts with 6 or 0 for debugging
+            if (barcode_number && (barcode_number.startsWith('6') || barcode_number.startsWith('0'))) {
+              logger.log(`Processing barcode starting with ${barcode_number[0]}: "${barcode_number}" (original type: ${originalBarcodeType}, original value: ${originalBarcodeValue})`);
+            }
+            
+            // Special logging for the specific barcode the user mentioned
+            if (barcode_number === '08674030' || barcode_number === '8674030' || originalBarcodeValue === '08674030' || originalBarcodeValue === 8674030) {
+              logger.log(`🔍 Found barcode 08674030/8674030: processed as "${barcode_number}" (original: ${originalBarcodeType} ${originalBarcodeValue})`);
+            }
+
             const bottle = {
 
-              barcode_number: String(row['Barcode'] || row['barcode_number'] || row['Barcode Number'] || '').trim(),
+              barcode_number: barcode_number,
 
               serial_number: (row['Serial Number'] || row['serial_number'] || row['Serial'] || row['SerialNumber'] || '').toString().trim(),
 
               assigned_customer: Array.from(customerMap.keys()).some(key => key.toUpperCase() === customerId) ? customerId : null,
 
               customer_name: customerName,
+
+              customer_id_from_excel: customerId, // Store the CustomerListID from Excel for later matching
 
               location: location,
 
@@ -600,7 +798,7 @@ const BottleManagement = () => {
 
                   .from('customers')
 
-                  .select('"CustomerListID", name')
+                  .select('id, "CustomerListID", name')
 
                   .in('"CustomerListID"', existingCustomerIds)
 
@@ -612,7 +810,15 @@ const BottleManagement = () => {
 
                   existingCustomers.forEach(customer => {
 
-                    customerMap.set(customer.CustomerListID, customer.name);
+                    customerMap.set(customer.CustomerListID.toUpperCase(), {
+
+                      id: customer.id,
+
+                      CustomerListID: customer.CustomerListID,
+
+                      name: customer.name
+
+                    });
 
                   });
 
@@ -624,39 +830,190 @@ const BottleManagement = () => {
 
             } else {
 
-              // Update customer map with newly created customers
+              // After creating customers, refresh the entire customer map to ensure we have all latest UUIDs
 
-              customersToCreate.forEach(customer => {
+              logger.log('Refreshing customer map after customer creation...');
 
-                customerMap.set(customer.CustomerListID, customer.name);
+              
+              const { data: allCustomers } = await supabase
 
-              });
+                .from('customers')
 
-              logger.log(`Added ${customersToCreate.length} new customers to map`);
+                .select('id, "CustomerListID", name')
+
+                .eq('organization_id', organization.id);
+
+              
+
+              if (allCustomers) {
+
+                // Clear and rebuild the customer map with fresh data
+
+                customerMap.clear();
+
+                allCustomers.forEach(customer => {
+
+                  customerMap.set(customer.CustomerListID.toUpperCase(), {
+
+                    id: customer.id,
+
+                    CustomerListID: customer.CustomerListID,
+
+                    name: customer.name
+
+                  });
+
+                });
+
+                logger.log(`Refreshed customer map with ${allCustomers.length} customers`);
+
+              }
 
             }
 
           }
 
+          // Final refresh of customer map to ensure we have the latest UUIDs before matching
+          // This ensures any customers created during upload are available for matching
+          logger.log('Performing final refresh of customer map before matching...');
+          const { data: finalCustomers } = await supabase
+            .from('customers')
+            .select('id, "CustomerListID", name')
+            .eq('organization_id', organization.id);
+          
+          if (finalCustomers) {
+            customerMap.clear();
+            // Create a name-to-customer map for easier lookup by name
+            const nameMap = new Map();
+            finalCustomers.forEach(customer => {
+              const customerData = {
+                id: customer.id,
+                CustomerListID: customer.CustomerListID,
+                name: customer.name
+              };
+              // Map by CustomerListID (uppercase)
+              customerMap.set(customer.CustomerListID.toUpperCase(), customerData);
+              // Also map by normalized name for name-based lookups
+              if (customer.name) {
+                const normalizedName = customer.name.trim().toLowerCase();
+                // Store in nameMap, but allow multiple customers with same name (take first)
+                if (!nameMap.has(normalizedName)) {
+                  nameMap.set(normalizedName, customerData);
+                }
+              }
+            });
+            // Store nameMap in customerMap for later use
+            customerMap._nameMap = nameMap;
+            logger.log(`Final customer map refreshed with ${finalCustomers.length} customers (${nameMap.size} unique names)`);
+          }
 
-
-          // Now update bottles with correct assigned_customer values
+          // Now update bottles with correct assigned_customer values (using customer UUID id, not CustomerListID)
 
           bottlesToInsert.forEach(bottle => {
 
             if (bottle.customer_name && bottle.customer_name.trim()) {
 
-              // Find the customer ID for this bottle by matching customer name (case-insensitive)
+              let customer = null;
 
-              const customerId = Array.from(customerMap.keys()).find(id => 
+              let customerListIdKey = null;
 
-                customerMap.get(id).toLowerCase() === bottle.customer_name.trim().toLowerCase()
+              
 
-              );
+              // First, try to match by CustomerListID from Excel (most reliable)
 
-              if (customerId) {
+              if (bottle.customer_id_from_excel) {
 
-                bottle.assigned_customer = customerId;
+                const excelCustomerId = bottle.customer_id_from_excel.toUpperCase();
+
+                if (customerMap.has(excelCustomerId)) {
+
+                  customer = customerMap.get(excelCustomerId);
+
+                  customerListIdKey = excelCustomerId;
+
+                }
+
+              }
+
+              
+
+              // If not found by ID, try to match by customer name
+
+              if (!customer) {
+
+                // Extract name part (remove ID in parentheses if present)
+
+                const customerNameClean = bottle.customer_name.trim().replace(/\s*\([^)]*\)\s*$/, '').trim();
+
+                
+
+                // Try exact match first
+
+                customerListIdKey = Array.from(customerMap.keys()).find(key => 
+
+                  customerMap.get(key).name.toLowerCase() === bottle.customer_name.trim().toLowerCase()
+
+                );
+
+                
+
+                // If exact match fails, try matching cleaned name (without ID in parentheses)
+
+                if (!customerListIdKey && customerNameClean !== bottle.customer_name.trim()) {
+
+                  customerListIdKey = Array.from(customerMap.keys()).find(key => 
+
+                    customerMap.get(key).name.toLowerCase() === customerNameClean.toLowerCase()
+
+                  );
+
+                }
+
+                
+
+                // If still not found, try matching parent customer (for child accounts like "PARENT:CHILD:SUBCHILD")
+                // Extract the part before the first colon as the parent name
+                if (!customerListIdKey && customerNameClean.includes(':')) {
+
+                  const parentName = customerNameClean.split(':')[0].trim();
+
+                  if (parentName) {
+
+                    customerListIdKey = Array.from(customerMap.keys()).find(key => 
+
+                      customerMap.get(key).name.toLowerCase() === parentName.toLowerCase()
+
+                    );
+
+                    if (customerListIdKey) {
+
+                      logger.log(`Matched child account "${customerNameClean}" to parent customer "${customerMap.get(customerListIdKey).name}"`);
+
+                    }
+
+                  }
+
+                }
+
+                
+
+                if (customerListIdKey) {
+
+                  customer = customerMap.get(customerListIdKey);
+
+                }
+
+              }
+
+              
+
+              if (customer) {
+
+                // Use CustomerListID for assigned_customer (application logic uses CustomerListID, not UUID)
+
+                bottle.assigned_customer = customer.CustomerListID;
+
+                bottle.status = 'rented'; // Ensure status is rented if customer is assigned
 
               } else {
 
@@ -677,6 +1034,11 @@ const BottleManagement = () => {
               bottle.assigned_customer = null;
 
             }
+
+            
+
+            // Keep customer_id_from_excel for now - we need it for auto-creating missing customers during updates
+            // It will be removed after all processing is complete
 
           });
 
@@ -699,12 +1061,13 @@ const BottleManagement = () => {
           if (bottleBarcodes.length > 0 || bottleSerials.length > 0) {
 
             // Get ALL existing bottles for this organization to check against
+            // Include customer info to compare if customer has changed
 
             const { data: allExisting } = await supabase
 
               .from('bottles')
 
-              .select('barcode_number, serial_number, id')
+              .select('barcode_number, serial_number, id, assigned_customer, customer_name')
 
               .eq('organization_id', organization.id);
 
@@ -718,9 +1081,11 @@ const BottleManagement = () => {
 
           
 
-          // Filter out bottles that already exist (check by barcode first, then serial)
+          // Separate bottles into: new bottles, bottles to update (different customer), and true duplicates (same customer)
 
           const newBottles = [];
+
+          const bottlesToUpdate = [];
 
           const duplicates = [];
 
@@ -731,45 +1096,134 @@ const BottleManagement = () => {
             const barcode = bottle.barcode_number?.trim();
 
             const serial = bottle.serial_number?.trim();
+            
+            // Special logging for barcode 08674030
+            if (barcode === '08674030' || barcode === '8674030' || barcode?.endsWith('08674030') || barcode?.endsWith('8674030')) {
+              logger.log(`🔍 Processing barcode "${barcode}" (serial: "${serial}") - checking for existing bottle...`);
+            }
 
             
 
-            // Check for existing bottle by barcode
-
-            const hasExistingBarcode = barcode && existingBottles.some(existing => 
-
-              existing.barcode_number?.trim() === barcode
-
-            );
+            // Find existing bottle by barcode or serial
+            // Handle case where Excel converts barcodes with leading zeros to numbers
+            // e.g., "08674030" becomes 8674030, but database has "08674030"
+            const existingBottle = existingBottles.find(existing => {
+              const existingBarcode = existing.barcode_number?.trim();
+              const existingSerial = existing.serial_number?.trim();
+              
+              // Exact match first
+              if (barcode && existingBarcode === barcode) return true;
+              if (serial && existingSerial === serial) return true;
+              
+              // Handle leading zero mismatch: if one starts with 0 and the other doesn't,
+              // try matching the numeric parts
+              if (barcode && existingBarcode) {
+                const barcodeNum = barcode.replace(/^0+/, ''); // Remove leading zeros
+                const existingBarcodeNum = existingBarcode.replace(/^0+/, ''); // Remove leading zeros
+                if (barcodeNum && existingBarcodeNum && barcodeNum === existingBarcodeNum) {
+                  logger.log(`Matched barcode with leading zero mismatch: "${barcode}" matches "${existingBarcode}"`);
+                  return true;
+                }
+              }
+              
+              return false;
+            });
 
             
 
-            // Check for existing bottle by serial
-
-            const hasExistingSerial = serial && existingBottles.some(existing => 
-
-              existing.serial_number?.trim() === serial
-
-            );
-
+            // Special logging for barcode 08674030
+            if (barcode === '08674030' || barcode === '8674030' || barcode?.endsWith('08674030') || barcode?.endsWith('8674030')) {
+              if (existingBottle) {
+                logger.log(`🔍 Found existing bottle for "${barcode}": id=${existingBottle.id}, existing_barcode="${existingBottle.barcode_number}", existing_customer="${existingBottle.assigned_customer || existingBottle.customer_name}"`);
+              } else {
+                logger.log(`🔍 No existing bottle found for "${barcode}" - will be inserted as new`);
+              }
+            }
             
+            if (existingBottle) {
 
-            if (hasExistingBarcode || hasExistingSerial) {
+              // Bottle exists - check if customer is different
+              // Get the CustomerListID from the existing bottle's assigned_customer
+              const existingCustomerListID = existingBottle.assigned_customer || '';
+              
+              // Get the new customer assignment from the uploaded file
+              // The bottle object should have assigned_customer set during customer matching (lines 720-852)
+              let newCustomerListID = bottle.assigned_customer || '';
+              
+              // Normalize both for comparison
+              const existingCustomerNormalized = String(existingCustomerListID).trim().toUpperCase();
+              const newCustomerNormalized = String(newCustomerListID).trim().toUpperCase();
+              
+              // Also get customer names for fallback comparison
+              const existingCustomerName = String(existingBottle.customer_name || '').trim().toUpperCase();
+              const newCustomerName = String(bottle.customer_name || '').trim().toUpperCase();
+              
+              // Determine if customer has changed
+              // Customer is different if:
+              // 1. CustomerListIDs are different (most reliable)
+              // 2. One has a customer and the other doesn't
+              // 3. Both have customer names but they're different AND neither has a CustomerListID
+              const customerChanged = 
+                (existingCustomerNormalized !== newCustomerNormalized) ||
+                (!existingCustomerNormalized && newCustomerNormalized) ||
+                (existingCustomerNormalized && !newCustomerNormalized) ||
+                (!existingCustomerNormalized && !newCustomerNormalized && 
+                 existingCustomerName && newCustomerName && 
+                 existingCustomerName !== newCustomerName);
 
-              duplicates.push({
+              if (customerChanged) {
 
-                barcode: barcode || 'N/A',
+                // Customer has changed - update the existing bottle
 
-                serial: serial || 'N/A',
+                bottlesToUpdate.push({
 
-                reason: hasExistingBarcode ? 'barcode' : 'serial'
+                  id: existingBottle.id,
 
-              });
+                  bottle: bottle,
 
-              logger.log(`Skipping duplicate bottle: ${barcode || serial} (${hasExistingBarcode ? 'barcode' : 'serial'} match)`);
+                  reason: barcode && existingBottle.barcode_number?.trim() === barcode ? 'barcode' : 'serial',
+
+                  oldCustomer: existingCustomerListID || existingBottle.customer_name || 'No customer',
+
+                  newCustomer: newCustomerListID || bottle.customer_name || 'No customer'
+
+                });
+
+                logger.log(`Updating bottle ${barcode || serial}: customer changed from "${existingCustomerListID || existingBottle.customer_name || 'No customer'}" to "${newCustomerListID || bottle.customer_name || 'No customer'}"`);
+
+              } else {
+
+                // Same bottle, same customer - skip as duplicate
+
+                duplicates.push({
+
+                  barcode: barcode || 'N/A',
+
+                  serial: serial || 'N/A',
+
+                  reason: barcode && existingBottle.barcode_number?.trim() === barcode ? 'barcode' : 'serial',
+
+                  customer: newCustomerListID || bottle.customer_name || 'No customer'
+
+                });
+
+                logger.log(`Skipping duplicate bottle: ${barcode || serial} (same customer: ${newCustomerListID || bottle.customer_name || 'No customer'})`);
+
+              }
 
             } else {
 
+              // Bottle doesn't exist - add to new bottles
+              // Log if barcode starts with 6 or 0 for debugging
+              if (bottle.barcode_number && (bottle.barcode_number.startsWith('6') || bottle.barcode_number.startsWith('0'))) {
+                logger.log(`Adding new bottle with barcode starting with ${bottle.barcode_number[0]}: "${bottle.barcode_number}"`);
+              }
+              
+              // Special logging for barcode 08674030
+              if (barcode === '08674030' || barcode === '8674030') {
+                logger.log(`🔍 Adding barcode "${barcode}" as NEW bottle (not found in existing bottles)`);
+              }
+              
               newBottles.push(bottle);
 
             }
@@ -778,7 +1232,396 @@ const BottleManagement = () => {
 
           
 
-          logger.log(`Found ${duplicates.length} duplicates, inserting ${newBottles.length} new bottles`);
+          logger.log(`Found ${duplicates.length} duplicates (skipped), ${bottlesToUpdate.length} bottles to update, ${newBottles.length} new bottles to insert`);
+
+
+
+          // Update bottles with different customers - ONLY update customer fields, don't modify other bottle data
+          // Batch updates in parallel for better performance
+
+          if (bottlesToUpdate.length > 0) {
+
+            logger.log(`Updating ${bottlesToUpdate.length} bottles in batches...`);
+
+            // Fetch locations again to ensure we have them for location name filtering
+            const { data: updateLocations } = await supabase
+              .from('locations')
+              .select('name')
+              .eq('organization_id', organization.id);
+            const updateLocationNames = updateLocations?.map(loc => loc.name.toLowerCase()) || [];
+            
+            // Refresh customer map one more time right before validation to ensure we have latest data
+            logger.log('Refreshing customer map one final time before validation...');
+            const { data: validationCustomers } = await supabase
+              .from('customers')
+              .select('id, "CustomerListID", name')
+              .eq('organization_id', organization.id);
+            
+            if (validationCustomers) {
+              customerMap.clear();
+              // Create name map for faster lookups
+              const nameMap = new Map();
+              validationCustomers.forEach(customer => {
+                const customerData = {
+                  id: customer.id,
+                  CustomerListID: customer.CustomerListID,
+                  name: customer.name
+                };
+                customerMap.set(customer.CustomerListID.toUpperCase(), customerData);
+                if (customer.name) {
+                  const normalizedName = customer.name.trim().toLowerCase();
+                  if (!nameMap.has(normalizedName)) {
+                    nameMap.set(normalizedName, customerData);
+                  }
+                }
+              });
+              customerMap._nameMap = nameMap;
+              logger.log(`Customer map refreshed with ${validationCustomers.length} customers for validation`);
+            }
+            
+            // Track missing customers to avoid duplicate warnings and collect for auto-creation
+            const missingCustomersSet = new Set();
+            const missingCustomersToCreate = new Map(); // Map: normalizedName -> { name, CustomerListID from Excel }
+            
+            // No need to validate UUIDs - we're using CustomerListID which is the application identifier
+            const batchSize = 50; // Process 50 updates in parallel at a time
+
+            
+
+            for (let i = 0; i < bottlesToUpdate.length; i += batchSize) {
+
+              const batch = bottlesToUpdate.slice(i, i + batchSize);
+
+              
+
+              // Process batch in parallel
+
+              const batchPromises = batch.map(({ id, bottle }) => {
+
+                // Use CustomerListID directly (application logic uses CustomerListID, not UUID)
+                let assignedCustomer = bottle.assigned_customer;
+                
+                // If assigned_customer is not set but we have customer_name, try to find the customer
+                if (!assignedCustomer && bottle.customer_name && bottle.customer_name.trim()) {
+                  const customerNameClean = bottle.customer_name.trim().replace(/\s*\([^)]*\)\s*$/, '').trim();
+                  
+                  // Check if this looks like a location name rather than a customer name
+                  // Common location names that shouldn't be treated as customers
+                  const commonLocationNames = ['saskatoon', 'regina', 'prince george', 'chilliwack', 'horseshoe lake', 
+                    'warehouse', 'inventory', 'stock', 'available', 'unassigned', 'home', 'base'];
+                  const isLikelyLocation = commonLocationNames.some(loc => 
+                    customerNameClean.toLowerCase().includes(loc.toLowerCase())
+                  );
+                  
+                  // Also check if it matches any known locations in the organization
+                  let isKnownLocation = false;
+                  const locationNamesToCheck = updateLocationNames || locationNames || [];
+                  if (locationNamesToCheck.length > 0) {
+                    const normalizedCustomerName = customerNameClean.toLowerCase();
+                    isKnownLocation = locationNamesToCheck.some(loc => 
+                      normalizedCustomerName === loc || 
+                      normalizedCustomerName.includes(loc) || 
+                      loc.includes(normalizedCustomerName)
+                    );
+                  }
+                  
+                  // Check if it matches the organization name (owner) - owners are not customers
+                  const isOwnerOrganization = organization && organization.name && 
+                    customerNameClean.toLowerCase() === organization.name.toLowerCase().trim();
+                  
+                  // If it's likely a location or the owner organization, skip customer matching and set to null silently
+                  if (isLikelyLocation || isKnownLocation || isOwnerOrganization) {
+                    if (isOwnerOrganization) {
+                      logger.log(`Skipping customer lookup for "${bottle.customer_name}" - this is the owner organization`);
+                    } else {
+                      logger.log(`Skipping customer lookup for "${bottle.customer_name}" - appears to be a location name`);
+                    }
+                    assignedCustomer = null;
+                  } else {
+                    let matchingCustomer = null;
+                    
+                    // First, try using the nameMap if available (faster lookup)
+                    if (customerMap._nameMap) {
+                      const normalizedName = customerNameClean.toLowerCase();
+                      matchingCustomer = customerMap._nameMap.get(normalizedName);
+                    }
+                    
+                    // If not found in nameMap, search through all customers (fallback)
+                    if (!matchingCustomer) {
+                      matchingCustomer = Array.from(customerMap.values()).find(c => {
+                        if (!c || !c.name) return false;
+                        const cName = c.name.trim().toLowerCase();
+                        const bottleName = bottle.customer_name.trim().toLowerCase();
+                        const cleanName = customerNameClean.toLowerCase();
+                        return cName === bottleName || cName === cleanName;
+                      });
+                    }
+                    
+                    // If not found, try fuzzy matching (handle extra spaces, case differences)
+                    if (!matchingCustomer) {
+                      const normalizedBottleName = customerNameClean.toLowerCase().replace(/\s+/g, ' ').trim();
+                      matchingCustomer = Array.from(customerMap.values()).find(c => {
+                        if (!c || !c.name) return false;
+                        const normalizedCName = c.name.trim().toLowerCase().replace(/\s+/g, ' ').trim();
+                        return normalizedCName === normalizedBottleName;
+                      });
+                    }
+                    
+                    // If not found, try matching parent customer (for child accounts)
+                    if (!matchingCustomer && customerNameClean.includes(':')) {
+                      const parentName = customerNameClean.split(':')[0].trim();
+                      if (parentName) {
+                        if (customerMap._nameMap) {
+                          matchingCustomer = customerMap._nameMap.get(parentName.toLowerCase());
+                        }
+                        if (!matchingCustomer) {
+                          matchingCustomer = Array.from(customerMap.values()).find(c => 
+                            c && c.name && c.name.toLowerCase().trim() === parentName.toLowerCase()
+                          );
+                        }
+                        if (matchingCustomer) {
+                          logger.log(`Matched child account "${customerNameClean}" to parent customer "${matchingCustomer.name}"`);
+                        }
+                      }
+                    }
+                    
+                    if (matchingCustomer) {
+                      assignedCustomer = matchingCustomer.CustomerListID;
+                      logger.log(`Found customer CustomerListID ${assignedCustomer} for ${bottle.customer_name}`);
+                    } else {
+                      // Try partial/fuzzy matching as last resort (e.g., "Central Welding" might match "Central Welding Supplies")
+                      const normalizedSearch = customerNameClean.toLowerCase().replace(/[^a-z0-9]/g, '');
+                      const fuzzyMatch = Array.from(customerMap.values()).find(c => {
+                        if (!c || !c.name) return false;
+                        const normalizedCName = c.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        // Check if search name is contained in customer name or vice versa (for partial matches)
+                        return (normalizedCName.includes(normalizedSearch) || normalizedSearch.includes(normalizedCName)) && 
+                               normalizedSearch.length > 5; // Only for names longer than 5 chars to avoid false matches
+                      });
+                      
+                      if (fuzzyMatch) {
+                        assignedCustomer = fuzzyMatch.CustomerListID;
+                        logger.log(`Found customer via fuzzy match: CustomerListID ${assignedCustomer} for "${bottle.customer_name}" (matched: "${fuzzyMatch.name}")`);
+                      } else {
+                        // Check if this is the owner organization before tracking for auto-creation
+                        const isOwnerOrganization = organization && organization.name && 
+                          customerNameClean.toLowerCase() === organization.name.toLowerCase().trim();
+                        
+                        // Debug logging for owner organization check
+                        if (customerNameClean.toLowerCase().includes('central welding')) {
+                          logger.log(`Owner check for "${customerNameClean}": org.name="${organization?.name}", isOwner=${isOwnerOrganization}`);
+                        }
+                        
+                        // Only track if it's not a location, not the owner organization, and not a very short name (likely data error)
+                        const isShortName = customerNameClean.length < 3;
+                        if (!isShortName && !isOwnerOrganization) {
+                          // Track missing customer for auto-creation
+                          const normalizedMissingName = customerNameClean.toLowerCase();
+                          if (!missingCustomersSet.has(normalizedMissingName)) {
+                            missingCustomersSet.add(normalizedMissingName);
+                            // Try to extract CustomerListID from the bottle's customer_id_from_excel if available
+                            // Also try to extract from customer_name if it has ID in parentheses
+                            let customerIdFromExcel = bottle.customer_id_from_excel;
+                            if (!customerIdFromExcel && bottle.customer_name) {
+                              const idMatch = bottle.customer_name.match(/\(([^)]+)\)/);
+                              if (idMatch && idMatch[1]) {
+                                customerIdFromExcel = idMatch[1].trim().toUpperCase();
+                              }
+                            }
+                            if (!missingCustomersToCreate.has(normalizedMissingName)) {
+                              const autoCustomerId = customerIdFromExcel || `AUTO-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                              missingCustomersToCreate.set(normalizedMissingName, {
+                                name: customerNameClean,
+                                CustomerListID: autoCustomerId
+                              });
+                              logger.log(`Will auto-create customer: "${customerNameClean}" with ID: ${autoCustomerId}`);
+                            }
+                          }
+                        } else if (isOwnerOrganization) {
+                          logger.log(`Skipping auto-creation for "${customerNameClean}" - this is the owner organization`);
+                        }
+                        assignedCustomer = null;
+                      }
+                    }
+                  }
+                }
+                
+                // Determine status: if customer is assigned, status should be 'rented', otherwise 'available'
+
+                const hasCustomer = assignedCustomer || 
+
+                                   (bottle.customer_name && bottle.customer_name.trim());
+
+                const newStatus = hasCustomer ? 'rented' : 'available';
+
+                
+
+                return supabase
+
+                  .from('bottles')
+
+                  .update({
+
+                    assigned_customer: assignedCustomer,
+
+                    customer_name: bottle.customer_name,
+
+                    status: newStatus // Set status based on whether customer is assigned
+
+                  })
+
+                  .eq('id', id);
+
+              });
+
+              
+
+              // Wait for this batch to complete before starting next batch
+
+              const results = await Promise.all(batchPromises);
+
+              
+
+              // Check for errors
+
+              for (const result of results) {
+
+                if (result.error) {
+
+                  logger.error('Error updating bottle:', result.error);
+
+                  throw result.error;
+
+                }
+
+              }
+
+              
+
+              logger.log(`Updated batch: ${Math.min(i + batchSize, bottlesToUpdate.length)} / ${bottlesToUpdate.length}`);
+
+            }
+
+            
+
+            logger.log(`Successfully updated ${bottlesToUpdate.length} bottles`);
+            
+            // Auto-create missing customers that were found during updates
+            if (missingCustomersToCreate.size > 0) {
+              logger.log(`Auto-creating ${missingCustomersToCreate.size} missing customer(s) found during updates...`);
+              const customersToAutoCreate = Array.from(missingCustomersToCreate.values()).map(customer => ({
+                CustomerListID: customer.CustomerListID,
+                name: customer.name,
+                organization_id: organization.id
+              }));
+              
+              const { error: autoCreateError } = await supabase
+                .from('customers')
+                .upsert(customersToAutoCreate, {
+                  onConflict: 'CustomerListID',
+                  ignoreDuplicates: false
+                });
+              
+              if (autoCreateError) {
+                logger.error('Error auto-creating missing customers:', autoCreateError);
+              } else {
+                logger.log(`✅ Auto-created ${customersToAutoCreate.length} missing customer(s)`);
+                
+                // Refresh customer map with newly created customers
+                const { data: refreshedCustomers } = await supabase
+                  .from('customers')
+                  .select('id, "CustomerListID", name')
+                  .eq('organization_id', organization.id);
+                
+                if (refreshedCustomers) {
+                  customerMap.clear();
+                  const nameMap = new Map();
+                  refreshedCustomers.forEach(customer => {
+                    const customerData = {
+                      id: customer.id,
+                      CustomerListID: customer.CustomerListID,
+                      name: customer.name
+                    };
+                    customerMap.set(customer.CustomerListID.toUpperCase(), customerData);
+                    if (customer.name) {
+                      const normalizedName = customer.name.trim().toLowerCase();
+                      if (!nameMap.has(normalizedName)) {
+                        nameMap.set(normalizedName, customerData);
+                      }
+                    }
+                  });
+                  customerMap._nameMap = nameMap;
+                  logger.log(`Refreshed customer map with ${refreshedCustomers.length} customers (including newly created)`);
+                  
+                  // Now update bottles again with the newly created customers
+                  logger.log('Re-updating bottles with newly created customers...');
+                  for (let i = 0; i < bottlesToUpdate.length; i += batchSize) {
+                    const batch = bottlesToUpdate.slice(i, i + batchSize);
+                    const batchPromises = batch.map(({ id, bottle }) => {
+                      let assignedCustomer = bottle.assigned_customer;
+                      
+                      // Try to find customer again now that we've created missing ones
+                      if (!assignedCustomer && bottle.customer_name && bottle.customer_name.trim()) {
+                        const customerNameClean = bottle.customer_name.trim().replace(/\s*\([^)]*\)\s*$/, '').trim();
+                        const normalizedName = customerNameClean.toLowerCase();
+                        
+                        // Check if it's a location (skip)
+                        const isLikelyLocation = ['saskatoon', 'regina', 'prince george', 'chilliwack', 'horseshoe lake', 
+                          'warehouse', 'inventory', 'stock', 'available', 'unassigned', 'home', 'base'].some(loc => 
+                          customerNameClean.toLowerCase().includes(loc.toLowerCase())
+                        );
+                        const isKnownLocation = updateLocationNames.some(loc => 
+                          normalizedName === loc || normalizedName.includes(loc) || loc.includes(normalizedName)
+                        );
+                        
+                        // Check if it matches the organization name (owner) - owners are not customers
+                        const isOwnerOrganization = organization && organization.name && 
+                          normalizedName === organization.name.toLowerCase().trim();
+                        
+                        if (!isLikelyLocation && !isKnownLocation && !isOwnerOrganization) {
+                          // Try to find customer now
+                          if (customerMap._nameMap) {
+                            const matchingCustomer = customerMap._nameMap.get(normalizedName);
+                            if (matchingCustomer) {
+                              assignedCustomer = matchingCustomer.CustomerListID;
+                            }
+                          }
+                        }
+                      }
+                      
+                      const hasCustomer = assignedCustomer || (bottle.customer_name && bottle.customer_name.trim());
+                      const newStatus = hasCustomer ? 'rented' : 'available';
+                      
+                      return supabase
+                        .from('bottles')
+                        .update({
+                          assigned_customer: assignedCustomer,
+                          customer_name: bottle.customer_name,
+                          status: newStatus
+                        })
+                        .eq('id', id);
+                    });
+                    
+                    await Promise.all(batchPromises);
+                  }
+                  logger.log('✅ Re-updated bottles with newly created customers');
+                }
+              }
+            }
+            
+            // Clean up customer_id_from_excel from all bottles after processing
+            bottlesToInsert.forEach(bottle => {
+              if (bottle.customer_id_from_excel) {
+                delete bottle.customer_id_from_excel;
+              }
+            });
+            bottlesToUpdate.forEach(({ bottle }) => {
+              if (bottle.customer_id_from_excel) {
+                delete bottle.customer_id_from_excel;
+              }
+            });
+
+          }
 
 
 
@@ -791,19 +1634,35 @@ const BottleManagement = () => {
             for (let i = 0; i < newBottles.length; i += batchSize) {
 
               const batch = newBottles.slice(i, i + batchSize);
+              
+              // Clean up customer_id_from_excel from batch before inserting (explicitly exclude it)
+              const cleanBatch = batch.map(bottle => {
+                const { customer_id_from_excel, ...cleanBottle } = bottle;
+                return cleanBottle;
+              });
+              
+              // Log barcodes starting with 6 in this batch for debugging
+              const barcodesStartingWith6 = batch.filter(b => b.barcode_number && b.barcode_number.startsWith('6'));
+              if (barcodesStartingWith6.length > 0) {
+                logger.log(`Inserting batch ${i / batchSize + 1}: ${barcodesStartingWith6.length} bottles with barcodes starting with 6:`, 
+                  barcodesStartingWith6.map(b => b.barcode_number));
+              }
 
               const { error } = await supabase
 
                 .from('bottles')
 
-                .insert(batch);
+                .insert(cleanBatch);
 
 
 
               if (error) {
 
                 logger.error('Error inserting batch:', error);
-
+                // Log which barcodes failed if error is about barcodes
+                if (error.message && error.message.includes('barcode')) {
+                  logger.error('Failed barcodes in batch:', batch.map(b => b.barcode_number));
+                }
                 throw error;
 
               }
@@ -814,13 +1673,39 @@ const BottleManagement = () => {
 
 
 
-          // Show proper success message with duplicate info
+          // Show proper success message with update and duplicate info
 
-          let message = `${newBottles.length} bottles uploaded successfully!`;
+          let message = '';
+
+          if (newBottles.length > 0) {
+
+            message += `${newBottles.length} bottles uploaded`;
+
+          }
+
+          if (bottlesToUpdate.length > 0) {
+
+            if (message) message += ', ';
+
+            message += `${bottlesToUpdate.length} bottles updated`;
+
+          }
 
           if (duplicates.length > 0) {
 
-            message += ` (${duplicates.length} duplicates skipped)`;
+            if (message) message += ', ';
+
+            message += `${duplicates.length} duplicates skipped`;
+
+          }
+
+          if (!message) {
+
+            message = 'No changes made';
+
+          } else {
+
+            message += ' successfully!';
 
           }
 
@@ -1138,7 +2023,7 @@ const BottleManagement = () => {
 
   const handleBottleDetails = (bottle) => {
 
-    navigate(`/bottle/${bottle.id}`);
+    navigate(`/bottle/${bottle.barcode_number || bottle.id}`);
 
   };
 
@@ -1516,7 +2401,7 @@ const BottleManagement = () => {
 
                 .from('bottles')
 
-                .update({ assigned_customer: customer.CustomerListID })
+                .update({ assigned_customer: customer.CustomerListID }) // Use CustomerListID (application logic)
 
                 .eq('customer_name', customer.name)
 
@@ -1704,7 +2589,13 @@ const BottleManagement = () => {
 
             label="Status"
 
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => {
+
+              setStatusFilter(e.target.value);
+
+              handleChangePage(null, 0); // Reset to first page when filtering
+
+            }}
 
           >
 
@@ -1718,15 +2609,100 @@ const BottleManagement = () => {
 
         </FormControl>
 
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+
+          <InputLabel>Gas Type</InputLabel>
+
+          <Select
+
+            value={gasTypeFilter}
+
+            label="Gas Type"
+
+            onChange={(e) => {
+
+              setGasTypeFilter(e.target.value);
+
+              handleChangePage(null, 0); // Reset to first page when filtering
+
+            }}
+
+          >
+
+            <MenuItem value="all">All</MenuItem>
+
+            {availableGasTypes.map((gasType) => (
+
+              <MenuItem key={gasType} value={gasType}>
+
+                {gasType}
+
+              </MenuItem>
+
+            ))}
+
+          </Select>
+
+        </FormControl>
+
       </Box>
 
 
+
+      {/* Bulk Actions Bar */}
+      {selectedBottles.length > 0 && (
+        <Box sx={{ mb: 2, p: 2, bgcolor: 'primary.light', borderRadius: 1, display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="body1" fontWeight={600}>
+            {selectedBottles.length} bottle{selectedBottles.length !== 1 ? 's' : ''} selected
+          </Typography>
+          <Button
+            variant="outlined"
+            color="error"
+            size="small"
+            onClick={() => {
+              const bottlesToDelete = filteredBottles.filter(b => selectedBottles.includes(b.id));
+              setBottlesToDelete(bottlesToDelete);
+              setDeleteDialog(true);
+            }}
+          >
+            Delete Selected
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setSelectedBottles([])}
+          >
+            Clear Selection
+          </Button>
+        </Box>
+      )}
 
       {/* Responsive Table */}
 
       <ResponsiveTable
 
         columns={[
+
+          { 
+            field: 'select', 
+            header: 'Select',
+            renderHeader: () => (
+              <Checkbox
+                checked={isAllSelected}
+                indeterminate={isIndeterminate}
+                onChange={handleSelectAll}
+                size="small"
+              />
+            ),
+            render: (value, row) => (
+              <Checkbox
+                checked={isSelected(row.id)}
+                onChange={() => handleSelectBottle(row.id)}
+                size="small"
+                onClick={(e) => e.stopPropagation()}
+              />
+            )
+          },
 
           { field: 'serial_number', header: 'Serial Number' },
 

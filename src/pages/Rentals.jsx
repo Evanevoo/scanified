@@ -24,6 +24,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 import InvoiceGenerator from '../components/InvoiceGenerator';
+import BulkInvoiceEmailDialog from '../components/BulkInvoiceEmailDialog';
 
 // Business logic functions to determine asset status
 const getAssetStatus = (assignedCustomer, customerType) => {
@@ -73,6 +74,7 @@ function RentalsImproved() {
   const [activeTab, setActiveTab] = useState(0);
   const [editDialog, setEditDialog] = useState({ open: false, customer: null, rentals: [] });
   const [invoiceDialog, setInvoiceDialog] = useState({ open: false, customer: null, rentals: [] });
+  const [bulkEmailDialogOpen, setBulkEmailDialogOpen] = useState(false);
   const [updatingRentals, setUpdatingRentals] = useState(false);
   const [selectedCustomers, setSelectedCustomers] = useState([]);
   const [error, setError] = useState(null);
@@ -286,85 +288,94 @@ function RentalsImproved() {
       }
 
       // 6. Get customers with their types (with fallback) - include lease agreement customers
-      const customerIds = Array.from(new Set([
+      // NOTE: assigned_customer can be either UUID or CustomerListID - we need to handle both
+      const customerIdentifiers = Array.from(new Set([
         ...deduplicatedData.map(r => r.customer_id).filter(Boolean),
         ...(leaseAgreements || []).map(a => a.customer_id).filter(Boolean)
       ]));
       let customersMap = {};
 
-      logger.log('Looking up customers for IDs:', customerIds.length);
+      logger.log('Looking up customers for identifiers:', customerIdentifiers.length);
 
-      if (customerIds.length > 0) {
-        // Batch customer lookups to avoid URL length limits (max ~100 IDs per batch)
-        const BATCH_SIZE = 100;
-        const batches = [];
-        for (let i = 0; i < customerIds.length; i += BATCH_SIZE) {
-          batches.push(customerIds.slice(i, i + BATCH_SIZE));
-        }
+      if (customerIdentifiers.length > 0) {
+        // Separate UUIDs from CustomerListIDs
+        const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const uuids = customerIdentifiers.filter(id => uuidPattern.test(String(id)));
+        const customerListIds = customerIdentifiers.filter(id => !uuidPattern.test(String(id)));
         
-        logger.log(`Splitting ${customerIds.length} customer IDs into ${batches.length} batches`);
+        logger.log(`Found ${uuids.length} UUIDs and ${customerListIds.length} CustomerListIDs`);
 
-        try {
-          // Fetch all batches in parallel
+        // Fetch customers by UUID
+        if (uuids.length > 0) {
+          const BATCH_SIZE = 100;
+          const batches = [];
+          for (let i = 0; i < uuids.length; i += BATCH_SIZE) {
+            batches.push(uuids.slice(i, i + BATCH_SIZE));
+          }
+          
           const batchPromises = batches.map(async (batch) => {
             const { data: customersData, error: customersError } = await supabase
               .from('customers')
-              .select('*')
+              .select('*, email')
+              .eq('organization_id', organization.id)
+              .in('id', batch);
+            
+            if (customersError) {
+              logger.error(`Error fetching customer batch by UUID:`, customersError);
+              return [];
+            }
+            
+            return customersData || [];
+          });
+
+          const uuidCustomers = (await Promise.all(batchPromises)).flat();
+          uuidCustomers.forEach(c => {
+            // Map by both UUID and CustomerListID for easy lookup
+            customersMap[c.id] = c;
+            customersMap[c.CustomerListID] = c;
+          });
+          logger.log(`Found ${uuidCustomers.length} customers by UUID`);
+        }
+
+        // Fetch customers by CustomerListID
+        if (customerListIds.length > 0) {
+          const BATCH_SIZE = 100;
+          const batches = [];
+          for (let i = 0; i < customerListIds.length; i += BATCH_SIZE) {
+            batches.push(customerListIds.slice(i, i + BATCH_SIZE));
+          }
+          
+          const batchPromises = batches.map(async (batch) => {
+            const { data: customersData, error: customersError } = await supabase
+              .from('customers')
+              .select('*, email')
               .eq('organization_id', organization.id)
               .in('CustomerListID', batch);
             
             if (customersError) {
-              logger.error(`Error fetching customer batch:`, customersError);
+              logger.error(`Error fetching customer batch by CustomerListID:`, customersError);
               return [];
             }
             
             return customersData || [];
           });
 
-          const allCustomersData = (await Promise.all(batchPromises)).flat();
-          
-          logger.log('Customers fetched from database:', allCustomersData.length);
-          customersMap = allCustomersData.reduce((map, c) => {
-            map[c.CustomerListID] = c;
-            return map;
-          }, {});
-          
-          // Log which customer IDs were found vs not found
-          const foundIds = Object.keys(customersMap);
-          const notFoundIds = customerIds.filter(id => !foundIds.includes(id));
-          if (notFoundIds.length > 0) {
-            logger.warn(`Customer IDs not found in database: ${notFoundIds.length} out of ${customerIds.length}`);
-            if (notFoundIds.length <= 10) {
-              logger.warn('Missing customer IDs:', notFoundIds);
-            }
-          }
-        } catch (error) {
-          logger.log('Customer_type column not found, using fallback:', error);
-          
-          // Try fallback with batching
-          const batchPromises = batches.map(async (batch) => {
-            const { data: customersData, error: fallbackError } = await supabase
-              .from('customers')
-              .select('CustomerListID, name, contact_details, phone')
-              .eq('organization_id', organization.id)
-              .in('CustomerListID', batch);
-
-            if (fallbackError) {
-              logger.error(`Error in fallback customer batch query:`, fallbackError);
-              return [];
-            }
-
-            return customersData || [];
+          const customerListIdCustomers = (await Promise.all(batchPromises)).flat();
+          customerListIdCustomers.forEach(c => {
+            // Map by both UUID and CustomerListID for easy lookup
+            customersMap[c.id] = c;
+            customersMap[c.CustomerListID] = c;
           });
-
-          const allCustomersData = (await Promise.all(batchPromises)).flat();
-
-          if (allCustomersData.length > 0) {
-            logger.log('Customers fetched (fallback):', allCustomersData.length);
-            customersMap = allCustomersData.reduce((map, c) => {
-              map[c.CustomerListID] = { ...c, customer_type: 'CUSTOMER' };
-              return map;
-            }, {});
+          logger.log(`Found ${customerListIdCustomers.length} customers by CustomerListID`);
+        }
+        
+        // Log which customer identifiers were found vs not found
+        const foundIds = Object.keys(customersMap);
+        const notFoundIds = customerIdentifiers.filter(id => !foundIds.includes(String(id)));
+        if (notFoundIds.length > 0) {
+          logger.warn(`Customer identifiers not found in database: ${notFoundIds.length} out of ${customerIdentifiers.length}`);
+          if (notFoundIds.length <= 10) {
+            logger.warn('Missing customer identifiers:', notFoundIds);
           }
         }
       }
@@ -546,7 +557,7 @@ function RentalsImproved() {
         logger.log('Falling back to basic customer query');
         const { data, error: fallbackError } = await supabase
           .from('customers')
-          .select('CustomerListID, name, contact_details, phone')
+          .select('CustomerListID, name, contact_details, phone, email')
           .eq('organization_id', organization.id)
           .order('name');
         
@@ -695,8 +706,15 @@ function RentalsImproved() {
     URL.revokeObjectURL(url);
   };
 
+  // State for export options dialog
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportCustomers, setExportCustomers] = useState([]);
+  const [exportMode, setExportMode] = useState('most_recent'); // 'most_recent', 'all', 'date_range'
+  const [exportDateStart, setExportDateStart] = useState('');
+  const [exportDateEnd, setExportDateEnd] = useState('');
+
   // QuickBooks invoice export - uses actual invoices from database
-  const exportInvoices = async (customers) => {
+  const exportInvoices = async (customers, mode = 'most_recent', dateStart = null, dateEnd = null) => {
     if (!customers || customers.length === 0) {
       logger.warn('No customers selected for export');
       alert('Please select customers with invoices to export.');
@@ -705,6 +723,11 @@ function RentalsImproved() {
 
     try {
       setLoading(true);
+      
+      // Validate organization
+      if (!organization || !organization.id) {
+        throw new Error('Organization not found. Please ensure you are logged in.');
+      }
       
       // Get customer IDs - handle both { customer, rentals } structure and direct customer objects
       const customerIds = customers.map(c => {
@@ -722,22 +745,88 @@ function RentalsImproved() {
         return;
       }
       
-      logger.log('Exporting invoices for customer IDs:', customerIds);
+      logger.log('Exporting invoices for customer IDs:', customerIds.length, 'customers. Mode:', mode, 'Organization:', organization.id);
       
-      // Fetch actual invoices from database for these customers
-      // Optionally filter by date range (last 30 days by default, or all if needed)
-      const { data: invoices, error: invoicesError } = await supabase
-        .from('invoices')
-        .select('*')
-        .eq('organization_id', organization.id)
-        .in('customer_id', customerIds)
-        .order('invoice_date', { ascending: false })
-        .order('invoice_number', { ascending: false });
-
-      if (invoicesError) {
-        logger.error('Error fetching invoices:', invoicesError);
-        throw new Error('Failed to fetch invoices: ' + invoicesError.message);
+      // Validate customerIds array
+      if (!Array.isArray(customerIds) || customerIds.length === 0) {
+        throw new Error('Invalid customer IDs array');
       }
+
+      // Supabase has limits on .in() clause size (typically 100-1000 items)
+      // Batch the queries if we have too many customer IDs
+      const BATCH_SIZE = 100; // Conservative batch size
+      let allInvoices = [];
+      
+      if (customerIds.length > BATCH_SIZE) {
+        logger.log(`Batching query: ${customerIds.length} customers in batches of ${BATCH_SIZE}`);
+        
+        // Process in batches
+        for (let i = 0; i < customerIds.length; i += BATCH_SIZE) {
+          const batch = customerIds.slice(i, i + BATCH_SIZE);
+          logger.log(`Fetching batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(customerIds.length / BATCH_SIZE)} (${batch.length} customers)`);
+          
+          // Build query for this batch
+          let batchQuery = supabase
+            .from('invoices')
+            .select('*')
+            .eq('organization_id', organization.id)
+            .in('customer_id', batch);
+
+          // Apply date range filter if specified
+          if (mode === 'date_range' && dateStart && dateEnd) {
+            batchQuery = batchQuery
+              .gte('invoice_date', dateStart)
+              .lte('invoice_date', dateEnd);
+          }
+          
+          const { data: batchInvoices, error: batchError } = await batchQuery
+            .order('invoice_date', { ascending: false });
+
+          if (batchError) {
+            logger.error(`Error fetching batch ${Math.floor(i / BATCH_SIZE) + 1}:`, batchError);
+            throw new Error(`Failed to fetch invoices batch: ${batchError.message || batchError.code || 'Unknown error'}`);
+          }
+
+          if (batchInvoices) {
+            allInvoices = allInvoices.concat(batchInvoices);
+          }
+        }
+      } else {
+        // Single query for smaller sets
+        let query = supabase
+          .from('invoices')
+          .select('*')
+          .eq('organization_id', organization.id)
+          .in('customer_id', customerIds);
+
+        // Apply date range filter if specified
+        if (mode === 'date_range' && dateStart && dateEnd) {
+          query = query
+            .gte('invoice_date', dateStart)
+            .lte('invoice_date', dateEnd);
+        }
+        
+        const { data: invoices, error: invoicesError } = await query
+          .order('invoice_date', { ascending: false });
+
+        if (invoicesError) {
+          logger.error('Error fetching invoices:', invoicesError);
+          logger.error('Full error object:', JSON.stringify(invoicesError, null, 2));
+          logger.error('Query details:', {
+            organizationId: organization?.id,
+            customerIdsCount: customerIds.length,
+            customerIdsSample: customerIds.slice(0, 5),
+            mode,
+            dateStart,
+            dateEnd
+          });
+          throw new Error('Failed to fetch invoices: ' + (invoicesError.message || invoicesError.code || invoicesError.details || 'Unknown error'));
+        }
+
+        allInvoices = invoices || [];
+      }
+
+      const invoices = allInvoices;
 
       if (!invoices || invoices.length === 0) {
         alert('No invoices found for the selected customers. Please generate invoices first using the "Create Invoice" button.');
@@ -745,11 +834,110 @@ function RentalsImproved() {
         return;
       }
 
+      // Filter out old timestamp-based invoice numbers (e.g., W522378)
+      // New format: W00018 (prefix + exactly 5 digits padded with zeros)
+      // Old format: W522378 (prefix + 6 digits from timestamp)
+      // Pattern: Any letters/prefix followed by exactly 5 digits
+      const newFormatPattern = /^[A-Za-z]+\d{5}$/; // Matches: W00018, INV00019, etc. (prefix + 5 digits)
+      const oldFormatPattern = /^[A-Za-z]+\d{6}$/; // Matches: W522378 (prefix + 6 digits - old format)
+      
+      const filteredInvoices = invoices.filter(invoice => {
+        if (!invoice.invoice_number) return false;
+        const invNum = invoice.invoice_number.trim();
+        // Exclude old 6-digit format, only include new 5-digit format
+        if (oldFormatPattern.test(invNum)) {
+          return false; // Skip old format
+        }
+        // Include new 5-digit format
+        return newFormatPattern.test(invNum);
+      });
+
+      if (filteredInvoices.length === 0) {
+        alert('No invoices found with the new invoice numbering format. Please generate new invoices using the "Create Invoice" button.');
+        setLoading(false);
+        return;
+      }
+
+      logger.log(`Filtered ${invoices.length - filteredInvoices.length} old invoices, keeping ${filteredInvoices.length} new format invoices`);
+
+      // Sort by invoice_date (already done) and then by invoice_number as secondary sort
+      filteredInvoices.sort((a, b) => {
+        const dateA = new Date(a.invoice_date);
+        const dateB = new Date(b.invoice_date);
+        if (dateB.getTime() !== dateA.getTime()) {
+          return dateB.getTime() - dateA.getTime(); // Most recent first
+        }
+        // If dates are equal, sort by invoice number (higher number = more recent)
+        const numA = parseInt(a.invoice_number?.replace(/[^0-9]/g, '') || '0');
+        const numB = parseInt(b.invoice_number?.replace(/[^0-9]/g, '') || '0');
+        return numB - numA;
+      });
+
+      // Filter to most recent invoice per customer if mode is 'most_recent'
+      let invoicesToExport = filteredInvoices;
+      if (mode === 'most_recent') {
+        const customerInvoiceMap = new Map();
+        filteredInvoices.forEach(invoice => {
+          const customerId = invoice.customer_id;
+          if (!customerInvoiceMap.has(customerId)) {
+            customerInvoiceMap.set(customerId, invoice);
+          } else {
+            // Compare dates - keep the most recent
+            const existing = customerInvoiceMap.get(customerId);
+            const existingDate = new Date(existing.invoice_date);
+            const currentDate = new Date(invoice.invoice_date);
+            
+            // Priority: 1) More recent date, 2) If same date, prefer emailed invoices, 3) If both emailed or both not, higher invoice number
+            if (currentDate > existingDate) {
+              customerInvoiceMap.set(customerId, invoice);
+            } else if (currentDate.getTime() === existingDate.getTime()) {
+              // Same date - prioritize invoices that were sent via email
+              const existingEmailed = existing.email_sent || false;
+              const currentEmailed = invoice.email_sent || false;
+              
+              if (currentEmailed && !existingEmailed) {
+                // Current was emailed, existing was not - prefer current
+                customerInvoiceMap.set(customerId, invoice);
+              } else if (!currentEmailed && existingEmailed) {
+                // Existing was emailed, current was not - keep existing
+                // Do nothing, keep existing
+              } else {
+                // Both emailed or both not emailed - compare invoice numbers (higher number = more recent)
+                const existingNum = parseInt(existing.invoice_number?.replace(/[^0-9]/g, '') || '0');
+                const currentNum = parseInt(invoice.invoice_number?.replace(/[^0-9]/g, '') || '0');
+                if (currentNum > existingNum) {
+                  customerInvoiceMap.set(customerId, invoice);
+                }
+              }
+            }
+          }
+        });
+        invoicesToExport = Array.from(customerInvoiceMap.values());
+        logger.log(`Filtered to ${invoicesToExport.length} most recent invoices (from ${filteredInvoices.length} new-format invoices)`);
+        
+        // Log which invoice is being exported for each customer (for verification)
+        invoicesToExport.forEach(inv => {
+          const emailStatus = inv.email_sent ? '✅ EMAILED' : '❌ NOT EMAILED';
+          logger.log(`Exporting invoice ${inv.invoice_number} for customer ${inv.customer_id} (${inv.customer_name || 'Unknown'}) - Date: ${inv.invoice_date} - ${emailStatus}`);
+        });
+        
+        // Verify we're exporting invoices that match what was sent via email
+        const emailedInvoices = invoicesToExport.filter(inv => inv.email_sent);
+        const notEmailedInvoices = invoicesToExport.filter(inv => !inv.email_sent);
+        if (emailedInvoices.length > 0) {
+          logger.log(`✅ ${emailedInvoices.length} of ${invoicesToExport.length} exported invoices were sent via email`);
+        }
+        if (notEmailedInvoices.length > 0) {
+          logger.warn(`⚠️ ${notEmailedInvoices.length} of ${invoicesToExport.length} exported invoices were NOT sent via email:`, 
+            notEmailedInvoices.map(inv => `${inv.invoice_number} (${inv.customer_name})`));
+        }
+      }
+
       // Get invoice line items to calculate number of bottles
-      const invoiceIds = invoices.map(inv => inv.id);
+      const invoiceIds = invoicesToExport.map(inv => inv.id);
       const { data: lineItems, error: lineItemsError } = await supabase
         .from('invoice_line_items')
-        .select('invoice_id, quantity')
+        .select('invoice_id, quantity, monthly_rate')
         .in('invoice_id', invoiceIds);
 
       if (lineItemsError) {
@@ -772,7 +960,7 @@ function RentalsImproved() {
       };
 
       // Convert invoices to QuickBooks format
-      const rows = invoices.map(invoice => {
+      const rows = invoicesToExport.map(invoice => {
         const numBottles = bottlesPerInvoice[invoice.id] || invoice.cylinders_count || 0;
         
         // Calculate monthly rate per bottle
@@ -799,8 +987,14 @@ function RentalsImproved() {
           rate = (invoice.subtotal / numBottles).toFixed(2);
         }
         
+        // Ensure invoice number matches what was sent via email
+        const invoiceNumber = invoice.invoice_number || 'N/A';
+        if (invoiceNumber === 'N/A') {
+          logger.warn(`Invoice ${invoice.id} has no invoice number!`);
+        }
+        
         return {
-          'Invoice#': invoice.invoice_number || 'N/A',
+          'Invoice#': invoiceNumber,
           'Customer Number': invoice.customer_id || 'N/A',
           'Total': invoice.total_amount?.toFixed(2) || '0.00',
           'Date': invoice.invoice_date || new Date().toISOString().split('T')[0],
@@ -831,13 +1025,29 @@ function RentalsImproved() {
       a.click();
       URL.revokeObjectURL(url);
 
-      logger.log(`Exported ${rows.length} invoices to QuickBooks format`);
+      logger.log(`Exported ${rows.length} invoices to QuickBooks format (${mode === 'most_recent' ? 'most recent per customer' : mode === 'date_range' ? 'date range filtered' : 'all invoices'})`);
       setLoading(false);
     } catch (error) {
       logger.error('Error exporting invoices:', error);
       alert('Failed to export invoices: ' + error.message);
       setLoading(false);
     }
+  };
+
+  // Handle export button click - show dialog
+  const handleExportClick = (customers) => {
+    if (!customers || customers.length === 0) {
+      alert('Please select customers with invoices to export.');
+      return;
+    }
+    setExportCustomers(customers);
+    setExportDialogOpen(true);
+  };
+
+  // Handle export confirmation
+  const handleExportConfirm = () => {
+    setExportDialogOpen(false);
+    exportInvoices(exportCustomers, exportMode, exportDateStart || null, exportDateEnd || null);
   };
 
   const currentCustomers = activeTab === 0 ? filteredCustomers : 
@@ -891,7 +1101,7 @@ function RentalsImproved() {
           <Button
             variant="outlined"
             startIcon={<MoneyIcon />}
-            onClick={() => exportInvoices(filteredCustomers)}
+            onClick={() => handleExportClick(filteredCustomers)}
             disabled={filteredCustomers.length === 0}
           >
             Export QuickBooks Invoices
@@ -905,7 +1115,7 @@ function RentalsImproved() {
                 alert('No customers with active rentals found');
                 return;
               }
-              alert(`Bulk email feature coming soon! Will email ${customersWithRentals.length} customers.`);
+              setBulkEmailDialogOpen(true);
             }}
             disabled={filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer_type !== 'VENDOR').length === 0}
           >
@@ -1272,9 +1482,12 @@ function RentalsImproved() {
                                     size="small"
                                     variant="outlined"
                                     onClick={() => {
-                                      // Navigate to bottle details page
+                                      // Navigate to bottle details page using barcode
+                                      const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || rental.bottle_barcode;
                                       const bottleId = rental.bottles?.id || rental.bottle_id;
-                                      if (bottleId) {
+                                      if (barcode) {
+                                        navigate(`/bottle/${barcode}`);
+                                      } else if (bottleId) {
                                         navigate(`/bottle/${bottleId}`);
                                       }
                                     }}
@@ -1462,6 +1675,91 @@ function RentalsImproved() {
         customer={invoiceDialog.customer}
         rentals={invoiceDialog.rentals}
       />
+
+      {/* Bulk Email Dialog */}
+      <BulkInvoiceEmailDialog
+        open={bulkEmailDialogOpen}
+        onClose={() => setBulkEmailDialogOpen(false)}
+        customers={filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer_type !== 'VENDOR')}
+      />
+
+      {/* Export Options Dialog */}
+      <Dialog open={exportDialogOpen} onClose={() => setExportDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Export QuickBooks Invoices</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Choose how to export invoices for {exportCustomers.length} selected customer{exportCustomers.length !== 1 ? 's' : ''}.
+          </Typography>
+
+          <FormControl fullWidth sx={{ mb: 3 }}>
+            <InputLabel>Export Mode</InputLabel>
+            <Select
+              value={exportMode}
+              onChange={(e) => setExportMode(e.target.value)}
+              label="Export Mode"
+            >
+              <MenuItem value="most_recent">
+                Most Recent Invoice Per Customer (Recommended)
+              </MenuItem>
+              <MenuItem value="all">All Invoices</MenuItem>
+              <MenuItem value="date_range">Date Range</MenuItem>
+            </Select>
+          </FormControl>
+
+          {exportMode === 'date_range' && (
+            <Grid container spacing={2}>
+              <Grid item xs={6}>
+                <TextField
+                  fullWidth
+                  type="date"
+                  label="Start Date"
+                  value={exportDateStart}
+                  onChange={(e) => setExportDateStart(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={6}>
+                <TextField
+                  fullWidth
+                  type="date"
+                  label="End Date"
+                  value={exportDateEnd}
+                  onChange={(e) => setExportDateEnd(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+            </Grid>
+          )}
+
+          {exportMode === 'most_recent' && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              <Typography variant="body2">
+                This will export only the most recent invoice for each customer. 
+                This is recommended if you've generated multiple test invoices.
+              </Typography>
+            </Alert>
+          )}
+
+          {exportMode === 'all' && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              <Typography variant="body2">
+                This will export ALL invoices for the selected customers. 
+                Make sure this is what you want before proceeding.
+              </Typography>
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setExportDialogOpen(false)}>Cancel</Button>
+          <Button 
+            onClick={handleExportConfirm} 
+            variant="contained"
+            disabled={exportMode === 'date_range' && (!exportDateStart || !exportDateEnd)}
+          >
+            Export
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

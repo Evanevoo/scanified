@@ -1066,13 +1066,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           const feedbackMsg = `✅ ${updated.length} ${bottleText} scanned (${actionLabel})`;
           logger.log('📦 Setting feedback:', feedbackMsg);
           setScanFeedback(feedbackMsg);
-          
-          // Also show alert for visibility
-          Alert.alert(
-            '✅ Scan Successful',
-            `${updated.length} ${bottleText} scanned (${actionLabel})\n\nBarcode: ${scanResult.barcode}`,
-            [{ text: 'OK' }]
-          );
         } else {
           setScanFeedback(`✅ Scanned: ${scanResult.barcode}`);
         }

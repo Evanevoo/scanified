@@ -28,6 +28,7 @@ const FIELD_ALIASES = {
   name: ['name', 'customername', 'customer name', 'holdername', 'company', 'company name'],
   contact_details: ['contact_details', 'address', 'contact', 'contact info', 'contact information', 'address1', 'address 1', 'billtofulladdress'],
   phone: ['phone', 'phone number', 'phonenumber', 'contact phone', 'mobile', 'mobile number'],
+  email: ['email', 'email address', 'emailaddress', 'e-mail', 'e_mail', 'contact email', 'customer email', 'rentalbillemailto', 'billing email'],
   barcode: ['barcode', 'customer_barcode', 'customer barcode', 'holderbarcode', 'customeridbarcode', 'scan code', 'scan_code'],
   address2: ['address2', 'address 2', 'billing address 2', 'shipping address line2', 'shipping address 2'],
   address3: ['address3', 'address 3', 'billing address 3', 'shipping address line3', 'shipping address 3'],
@@ -48,6 +49,7 @@ const ALLOWED_FIELDS = [
   { key: 'city', label: 'City' },
   { key: 'postal_code', label: 'Postal Code' },
   { key: 'phone', label: 'Phone' },
+  { key: 'email', label: 'Email' },
   { key: 'barcode', label: 'Customer Barcode' }
 ];
 
@@ -277,6 +279,10 @@ const ImportCustomerInfo = () => {
       if (detectedColumns.includes('HolderStr')) initialMapping['CustomerListID'] = 'HolderStr';
       if (detectedColumns.includes('HolderName')) initialMapping['name'] = 'HolderName';
       if (detectedColumns.includes('BillToFullAddress')) initialMapping['contact_details'] = 'BillToFullAddress';
+      // Common email headers
+      if (detectedColumns.includes('RentalBillEmailTo')) initialMapping['email'] = 'RentalBillEmailTo';
+      if (detectedColumns.includes('Email')) initialMapping['email'] = 'Email';
+      if (detectedColumns.includes('Email Address')) initialMapping['email'] = 'Email Address';
       // Common barcode headers
       if (detectedColumns.includes('Customer Barcode')) initialMapping['barcode'] = 'Customer Barcode';
       if (detectedColumns.includes('Barcode')) initialMapping['barcode'] = 'Barcode';
@@ -504,6 +510,13 @@ const ImportCustomerInfo = () => {
               hasUpdates = true;
             }
           }
+          if (customer.email) {
+            const newEmail = customer.email.trim().toLowerCase();
+            if (newEmail && (!existingCustomer.email || newEmail !== existingCustomer.email.toLowerCase())) {
+              updateData.email = newEmail;
+              hasUpdates = true;
+            }
+          }
           if (customer.barcode) {
             const newBarcode = (customer.barcode || '').toString().trim();
             if (newBarcode && newBarcode !== existingCustomer.barcode) {
@@ -544,6 +557,7 @@ const ImportCustomerInfo = () => {
           city: (customer.city || '').trim() || null,
           postal_code: (customer.postal_code || '').trim() || null,
           phone: (customer.phone || '').trim() || null,
+          email: (customer.email || '').trim().toLowerCase() || null,
           barcode: (customer.barcode || '').toString().trim() || null,
           organization_id: profile.organization_id
         };

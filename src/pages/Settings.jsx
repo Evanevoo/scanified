@@ -1587,7 +1587,7 @@ export default function Settings() {
           {/* Organization Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
             <TabPanel value={activeTabId} tabId="organization">
-              <Box sx={{ maxWidth: 900 }}>
+              <Box sx={{ maxWidth: { xs: '100%', md: 1400 } }}>
                 <Typography variant="h4" gutterBottom>
                   Organization Information
                 </Typography>
@@ -1832,7 +1832,7 @@ export default function Settings() {
           {/* Assets Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
             <TabPanel value={activeTabId} tabId="assets">
-              <Box sx={{ maxWidth: 800 }}>
+              <Box sx={{ maxWidth: { xs: '100%', md: 1400 } }}>
                 <Typography variant="h4" gutterBottom>
                   Asset Configuration
                 </Typography>
@@ -1924,7 +1924,7 @@ export default function Settings() {
           {/* Barcodes Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
             <TabPanel value={activeTabId} tabId="barcodes">
-              <Box sx={{ maxWidth: 800 }}>
+              <Box sx={{ maxWidth: { xs: '100%', md: 1400 } }}>
                 <Typography variant="h4" gutterBottom sx={{ color: 'primary', fontWeight: 600 }}>
                   📋 Barcode & Number Format Configuration
                 </Typography>
@@ -2190,7 +2190,7 @@ export default function Settings() {
           {/* Invoice Template Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
             <TabPanel value={activeTabId} tabId="invoice-template">
-              <Box sx={{ maxWidth: 900 }}>
+              <Box sx={{ maxWidth: { xs: '100%', md: 1400 } }}>
                 <Typography variant="h4" gutterBottom>
                   📄 Invoice Template
                 </Typography>

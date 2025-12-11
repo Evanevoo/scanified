@@ -1,5 +1,9 @@
 -- Function to get pending invites for an organization
 -- This function bypasses RLS so organization admins can view invites
+
+-- Drop the function if it exists (needed when changing return type)
+DROP FUNCTION IF EXISTS get_pending_invites(UUID);
+
 CREATE OR REPLACE FUNCTION get_pending_invites(p_organization_id UUID)
 RETURNS TABLE(
     id UUID,
@@ -9,11 +13,11 @@ RETURNS TABLE(
     invite_token TEXT,
     expires_at TIMESTAMP WITH TIME ZONE,
     accepted_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE,
     invited_at TIMESTAMP WITH TIME ZONE
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 BEGIN
     RETURN QUERY
@@ -25,7 +29,6 @@ BEGIN
         oi.invite_token,
         oi.expires_at,
         oi.accepted_at,
-        oi.created_at,
         oi.invited_at
     FROM organization_invites oi
     WHERE oi.organization_id = p_organization_id

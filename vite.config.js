@@ -9,7 +9,14 @@ export default defineConfig({
     }
   },
   server: {
-    port: 5174
+    port: 5174,
+    proxy: {
+      '/.netlify/functions': {
+        target: 'http://localhost:8888',
+        changeOrigin: true,
+        secure: false
+      }
+    }
   },
   preview: {
     port: 5174

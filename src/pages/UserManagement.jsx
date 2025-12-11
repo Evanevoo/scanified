@@ -9,6 +9,9 @@ import {
 import { Delete as DeleteIcon, Edit as EditIcon, Add as AddIcon, ContentCopy as CopyIcon } from '@mui/icons-material';
 import { usePermissions } from '../context/PermissionsContext';
 
+// Helper function to check if a limit is effectively unlimited
+const isUnlimited = (limit) => limit === -1 || limit >= 999999;
+
 // Helper function to get role display name
 const getRoleDisplayName = (user, rolesList = []) => {
   // Try role from JOIN first (roles.name)
@@ -91,6 +94,14 @@ export default function UserManagement() {
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [pendingInvites, setPendingInvites] = useState([]);
   const [loadingTimeout, setLoadingTimeout] = useState(false);
+  const [currentPlan, setCurrentPlan] = useState(null);
+
+  const planMaxUsers = currentPlan?.max_users ?? organization?.max_users ?? 0;
+  const isUnlimitedUsers = isUnlimited(planMaxUsers);
+  const planMaxUsersLabel = isUnlimitedUsers
+    ? 'Unlimited'
+    : (planMaxUsers > 0 ? planMaxUsers : 'N/A');
+  const reachedUserLimit = !isUnlimitedUsers && planMaxUsers > 0 && users.length >= planMaxUsers;
 
   useEffect(() => {
     if (organization && can('manage:users')) {
@@ -98,6 +109,7 @@ export default function UserManagement() {
       fetchUsage();
       fetchRoles();
       fetchPendingInvites();
+      fetchCurrentPlan();
     }
   }, [profile, organization, can]);
 
@@ -163,6 +175,34 @@ export default function UserManagement() {
     }
   }
 
+  async function fetchCurrentPlan() {
+    try {
+      // Get subscription_plan_id from organization
+      if (!organization?.subscription_plan_id) {
+        setCurrentPlan(null);
+        return;
+      }
+
+      // Fetch plan details from subscription_plans table
+      const { data: planData, error: planError } = await supabase
+        .from('subscription_plans')
+        .select('*')
+        .eq('id', organization.subscription_plan_id)
+        .single();
+
+      if (planError) {
+        logger.error('Error fetching current plan:', planError);
+        setCurrentPlan(null);
+        return;
+      }
+
+      setCurrentPlan(planData);
+    } catch (error) {
+      logger.error('Error in fetchCurrentPlan:', error);
+      setCurrentPlan(null);
+    }
+  }
+
   async function fetchPendingInvites() {
     try {
       // Try RPC function first (bypasses RLS)
@@ -170,18 +210,26 @@ export default function UserManagement() {
         p_organization_id: organization.id
       });
 
-      if (!rpcError && rpcData) {
+      if (!rpcError && rpcData !== null) {
         // RPC function returns array directly
         setPendingInvites(rpcData || []);
-        logger.log('Fetched pending invites via RPC:', rpcData.length);
+        logger.log('Fetched pending invites via RPC:', (rpcData || []).length);
         return;
       }
 
-      // If RPC function doesn't exist or has error, fallback to direct query
+      // If RPC function doesn't exist or has error, check the error type
       if (rpcError) {
-        logger.warn('RPC function error, trying direct query:', rpcError);
+        // Check if function doesn't exist (42883) or permission denied (42501)
+        if (rpcError.code === '42883' || (rpcError.message?.includes('function') && rpcError.message?.includes('does not exist'))) {
+          logger.warn('get_pending_invites function not found in database. Please run the SQL from get-pending-invites-function.sql in your Supabase SQL Editor.');
+        } else {
+          logger.error('RPC function error (run SQL in Supabase):', rpcError);
+          // Log full error details for debugging
+          console.error('Full RPC error:', JSON.stringify(rpcError, null, 2));
+        }
       }
 
+      // Fallback to direct query (may fail due to RLS)
       const { data, error } = await supabase
         .from('organization_invites')
         .select('*')
@@ -191,10 +239,29 @@ export default function UserManagement() {
       
       if (error) {
         // Handle RLS permission errors gracefully
-        if (error.code === '42501' || error.code === 'PGRST301' || error.message?.includes('permission denied')) {
-          logger.warn('Cannot fetch pending invites due to RLS permissions. Please run the SQL function: get_pending_invites');
-          setPendingInvites([]);
-          return;
+        if (error.code === '42501' || error.code === 'PGRST301' || error.message?.includes('permission denied') || error.code === 'PGRST116') {
+          const isFunctionMissing = rpcError?.code === '42883' || (rpcError?.message?.includes('function') && rpcError?.message?.includes('does not exist'));
+          
+          if (isFunctionMissing) {
+            const errorMsg = 'The get_pending_invites SQL function is not installed in your Supabase database.\n\n' +
+              'To fix this:\n' +
+              '1. Open your Supabase Dashboard (https://app.supabase.com)\n' +
+              '2. Go to SQL Editor\n' +
+              '3. Open the file: get-pending-invites-function.sql\n' +
+              '4. Copy the entire SQL and paste it into the SQL Editor\n' +
+              '5. Click "Run" to execute it\n\n' +
+              'This function bypasses RLS so you can view pending invites.';
+            logger.warn(errorMsg);
+            // Don't show as error if there might not be any invites anyway
+            // Just log it and set empty array
+            setPendingInvites([]);
+            return;
+          } else {
+            const errorMsg = 'Cannot fetch pending invites due to RLS permissions. The get_pending_invites function may need to be reinstalled or permissions may need to be granted.';
+            logger.warn(errorMsg);
+            setPendingInvites([]);
+            return;
+          }
         }
         logger.error('Error fetching pending invites:', error);
         setPendingInvites([]);
@@ -204,8 +271,9 @@ export default function UserManagement() {
       setPendingInvites(data || []);
     } catch (err) {
       // Handle RLS permission errors gracefully
-      if (err.code === '42501' || err.code === 'PGRST301' || err.message?.includes('permission denied')) {
+      if (err.code === '42501' || err.code === 'PGRST301' || err.message?.includes('permission denied') || err.code === 'PGRST116') {
         logger.warn('Cannot fetch pending invites due to RLS permissions. Please run the SQL function: get_pending_invites');
+        setError('⚠️ Cannot fetch pending invites due to RLS permissions. Please run the SQL function: get_pending_invites');
         setPendingInvites([]);
         return;
       }
@@ -424,6 +492,12 @@ export default function UserManagement() {
     }
 
     try {
+      // Check if we're in local development
+      const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (isLocalDev && window.location.port === '5175') {
+        logger.warn('Running on Vite dev server. Netlify functions require "netlify dev" to be running on port 8888.');
+      }
+
       const response = await fetch('/.netlify/functions/delete-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -433,16 +507,58 @@ export default function UserManagement() {
         })
       });
 
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || 'Unknown error removing user');
+      // Parse response
+      let responseData;
+      try {
+        const responseText = await response.text();
+        responseData = responseText ? JSON.parse(responseText) : {};
+      } catch (parseError) {
+        logger.error('Error parsing delete response:', parseError);
+        responseData = {};
       }
 
-      setSuccess(`User ${userEmail} has been PERMANENTLY DELETED from Supabase. They will need to create a new account to rejoin.`);
-      fetchUsers();
+      if (!response.ok) {
+        let errorMessage = 'Unknown error removing user';
+        
+        if (response.status === 404) {
+          if (isLocalDev) {
+            errorMessage = 'Delete user function not found. To fix this:\n\n1. Stop the current dev server (Ctrl+C)\n2. Run "netlify dev" instead of "npm run dev"\n3. Access the app at http://localhost:8888 (not port 5175)\n\nThis will start both Vite and Netlify Functions servers.';
+          } else {
+            errorMessage = 'Delete user function not found. Please ensure the function is deployed to Netlify.';
+          }
+        } else {
+          errorMessage = responseData.error || responseData.message || `Server returned status ${response.status}`;
+          if (responseData.details) {
+            logger.error('Delete user error details:', responseData.details);
+          }
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      // Success
+      if (responseData.success) {
+        logger.log('User deleted successfully:', responseData.deletedUser);
+        setSuccess(`User ${userEmail} has been PERMANENTLY DELETED from Supabase. They will need to create a new account to rejoin.`);
+        // Refresh the user list
+        await fetchUsers();
+      } else {
+        throw new Error(responseData.error || 'User deletion may have failed');
+      }
     } catch (err) {
       logger.error('Error deleting user:', err);
-      setError(`Failed to delete user: ${err.message}`);
+      
+      // Handle network errors (function server not running)
+      if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError') || err.name === 'TypeError') {
+        const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        if (isLocalDev) {
+          setError('Cannot connect to Netlify Functions. Please run "netlify dev" (not "npm run dev") and access the app at http://localhost:8888');
+        } else {
+          setError(`Failed to delete user: ${err.message}`);
+        }
+      } else {
+        setError(`Failed to delete user: ${err.message}`);
+      }
     }
   }
 
@@ -562,17 +678,17 @@ export default function UserManagement() {
           <Stack direction="row" spacing={3}>
             <Box>
               <Typography variant="body2" color="text.secondary">
-                Users ({users.length} / {organization?.max_users === -1 ? 'Unlimited' : organization?.max_users ?? 'N/A'})
+                Users ({users.length} / {planMaxUsersLabel})
               </Typography>
               <LinearProgress 
                 variant="determinate" 
-                value={organization?.max_users && organization.max_users !== -1 ? (users.length / organization.max_users) * 100 : 0}
+                value={isUnlimitedUsers || planMaxUsers <= 0 ? 0 : Math.min((users.length / planMaxUsers) * 100, 100)}
                 sx={{ mt: 1, width: 200 }}
               />
             </Box>
             <Box>
               <Typography variant="body2" color="text.secondary">
-                Plan: {organization?.subscription_plan ?? 'N/A'}
+                Plan: {currentPlan?.name || organization?.subscription_plan || 'N/A'}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Status: {organization?.subscription_status ?? 'N/A'}
@@ -588,11 +704,11 @@ export default function UserManagement() {
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => setShowAddDialog(true)}
-          disabled={(organization?.max_users !== -1 && users.length >= (organization?.max_users || 0)) || !can('manage:users')}
+          disabled={reachedUserLimit || !can('manage:users')}
         >
           Invite User
         </Button>
-        {organization?.max_users !== -1 && users.length >= (organization?.max_users || 0) && (
+        {reachedUserLimit && (
           <Typography variant="caption" color="error" sx={{ ml: 2 }}>
             User limit reached. Upgrade your plan to add more users.
           </Typography>
