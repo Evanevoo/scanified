@@ -250,18 +250,20 @@ export default function HomeScreen() {
     }
 
     try {
-      // Get total scans for this organization
+      // Get total scans for this user (filter by user_id)
       const { count: totalScans } = await supabase
         .from('bottle_scans')
         .select('*', { count: 'exact', head: true })
-        .eq('organization_id', profile.organization_id);
+        .eq('organization_id', profile.organization_id)
+        .eq('user_id', profile.id);
 
-      // Get today's scans for this organization
+      // Get today's scans for this user
       const today = new Date().toISOString().split('T')[0];
       const { count: todayScans } = await supabase
         .from('bottle_scans')
         .select('*', { count: 'exact', head: true })
         .eq('organization_id', profile.organization_id)
+        .eq('user_id', profile.id)
         .gte('created_at', today);
 
       setStats({

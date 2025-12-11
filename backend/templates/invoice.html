@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Invoice {{ invoice.invoice_number }}</title>
+</head>
+<body>
+    <!-- Header Section -->
+    {% if header.show %}
+    <div class="header">
+        {% if header.text %}
+        <div>{{ header.text }}</div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Company Info Section -->
+    <div class="company-info">
+        {% if logo_url %}
+        <img src="{{ logo_url }}" alt="Company Logo" class="logo" />
+        {% endif %}
+        
+        <div class="company-name">{{ invoice.organization_name or 'Company Name' }}</div>
+        {% if invoice.organization_address %}
+        <div>{{ invoice.organization_address }}</div>
+        {% endif %}
+        {% if invoice.organization_phone %}
+        <div>Phone: {{ invoice.organization_phone }}</div>
+        {% endif %}
+        {% if invoice.organization_email %}
+        <div>Email: {{ invoice.organization_email }}</div>
+        {% endif %}
+    </div>
+
+    <!-- Invoice Title -->
+    <div class="invoice-title">INVOICE</div>
+
+    <!-- Invoice Details -->
+    <div class="invoice-details">
+        <div><strong>Invoice #:</strong> {{ invoice.invoice_number }}</div>
+        <div><strong>Date:</strong> {{ invoice.invoice_date }}</div>
+        <div><strong>Period:</strong> {{ invoice.invoice_period_start }} to {{ invoice.invoice_period_end }}</div>
+        <div><strong>Status:</strong> {{ invoice.status|default('draft')|upper }}</div>
+    </div>
+
+    <!-- Bill To Section -->
+    <div class="bill-to">
+        <div class="bill-to-title">BILL TO:</div>
+        <div class="customer-name">{{ invoice.customer_name }}</div>
+        {% if invoice.customer_address %}
+        <div>{{ invoice.customer_address }}</div>
+        {% endif %}
+        {% if invoice.customer_email %}
+        <div>{{ invoice.customer_email }}</div>
+        {% endif %}
+    </div>
+
+    <!-- Line Items Table -->
+    <table>
+        <thead>
+            <tr>
+                {% for column in columns %}
+                    {% if column.visible %}
+                    <th>{{ column.label }}</th>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in invoice.line_items %}
+            <tr>
+                {% for column in columns %}
+                    {% if column.visible %}
+                    <td>
+                        {% if column.id == 'description' %}
+                            {{ item.description }}
+                        {% elif column.id == 'quantity' %}
+                            {{ item.quantity }}
+                        {% elif column.id == 'barcode' %}
+                            {{ item.barcode if fields.show_barcode else '' }}
+                        {% elif column.id == 'serial_number' %}
+                            {{ item.serial_number if fields.show_serial_number else '' }}
+                        {% elif column.id == 'start_date' %}
+                            {{ item.rental_start_date if fields.show_start_date else '' }}
+                        {% elif column.id == 'rental_days' %}
+                            {{ item.rental_days if fields.show_rental_days else '' }}
+                        {% elif column.id == 'unit_price' %}
+                            ${{ "%.2f"|format(item.unit_price) }}
+                        {% elif column.id == 'total_price' %}
+                            ${{ "%.2f"|format(item.total_price) }}
+                        {% endif %}
+                    </td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Totals Section -->
+    <div class="totals">
+        <div class="total-row">
+            <span class="total-label">Subtotal:</span>
+            <span class="total-amount">${{ "%.2f"|format(invoice.subtotal) }}</span>
+        </div>
+        <div class="total-row">
+            <span class="total-label">Tax ({{ "%.1f"|format(invoice.tax_rate * 100) }}%):</span>
+            <span class="total-amount">${{ "%.2f"|format(invoice.tax_amount) }}</span>
+        </div>
+        <div class="total-row grand-total">
+            <span class="total-label">Total:</span>
+            <span class="total-amount">${{ "%.2f"|format(invoice.total_amount) }}</span>
+        </div>
+    </div>
+
+    <!-- Notes Section -->
+    {% if invoice.notes or invoice.invoice_notes %}
+    <div class="notes">
+        <strong>Notes:</strong><br>
+        {{ invoice.notes or invoice.invoice_notes }}
+    </div>
+    {% endif %}
+
+    <!-- Payment Terms -->
+    {% if invoice.payment_terms %}
+    <div style="margin-top: 20px;">
+        <strong>Payment Terms:</strong> {{ invoice.payment_terms }}
+    </div>
+    {% endif %}
+
+    <!-- Footer Section -->
+    {% if footer.show %}
+    <div class="footer">
+        {% if footer.text %}
+        <div>{{ footer.text }}</div>
+        {% endif %}
+        <div style="margin-top: 10px;">Page 1 of 1</div>
+    </div>
+    {% endif %}
+</body>
+</html>
+

@@ -17,7 +17,8 @@ import {
   CardContent,
   Chip,
   Stack,
-  Divider
+  Divider,
+  Checkbox
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
@@ -71,8 +72,14 @@ const ResponsiveTable = ({
         <CardContent sx={{ p: 2 }}>
           {/* Primary Info */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', mb: 2 }}>
+            {/* Checkbox for selection */}
+            {columns[0]?.field === 'select' && columns[0]?.render && (
+              <Box sx={{ mr: 1, display: 'flex', alignItems: 'center' }}>
+                {columns[0].render(null, row)}
+              </Box>
+            )}
             <Box sx={{ flex: 1 }}>
-              {columns.slice(0, 2).map((column, index) => (
+              {columns.filter(c => c.field !== 'select').slice(0, 2).map((column, index) => (
                 <Typography 
                   key={index}
                   variant={index === 0 ? 'subtitle1' : 'body2'}
@@ -111,7 +118,7 @@ const ResponsiveTable = ({
 
           {/* Secondary Info */}
           <Box sx={{ mb: 2 }}>
-            {columns.slice(4, 6).map((column, index) => (
+            {columns.filter(c => c.field !== 'select').slice(4, 6).map((column, index) => (
               <Typography 
                 key={index}
                 variant="body2" 
@@ -173,7 +180,7 @@ const ResponsiveTable = ({
                     fontSize: '0.875rem'
                   }}
                 >
-                  {column.header}
+                  {column.renderHeader ? column.renderHeader() : column.header}
                 </TableCell>
               ))}
               <TableCell sx={{ 
@@ -252,7 +259,7 @@ const ResponsiveTable = ({
                   fontSize: '0.875rem'
                 }}
               >
-                {column.header}
+                {column.renderHeader ? column.renderHeader() : column.header}
               </TableCell>
             ))}
             {renderActions && (

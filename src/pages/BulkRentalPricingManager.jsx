@@ -14,7 +14,8 @@ import {
   Add as AddIcon, People as PeopleIcon, AttachMoney as MoneyIcon,
   TrendingUp as TrendingUpIcon, Settings as SettingsIcon,
   ExpandMore as ExpandMoreIcon, CheckCircle as CheckIcon,
-  Warning as WarningIcon, Info as InfoIcon, Search as SearchIcon
+  Warning as WarningIcon, Info as InfoIcon, Search as SearchIcon,
+  Visibility as VisibilityIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
@@ -25,6 +26,7 @@ export default function BulkRentalPricingManager() {
   const [customers, setCustomers] = useState([]);
   const [pricingTiers, setPricingTiers] = useState([]);
   const [customerPricing, setCustomerPricing] = useState([]);
+  const [leaseAgreements, setLeaseAgreements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedCustomers, setSelectedCustomers] = useState([]);
@@ -46,6 +48,7 @@ export default function BulkRentalPricingManager() {
   // Dialog states
   const [tierDialog, setTierDialog] = useState({ open: false, tier: null, isNew: false });
   const [customerDialog, setCustomerDialog] = useState({ open: false, customer: null, isNew: false });
+  const [pricingDetailDialog, setPricingDetailDialog] = useState({ open: false, customer: null, pricing: null });
 
   useEffect(() => {
     if (organization?.id) {
@@ -110,9 +113,22 @@ export default function BulkRentalPricingManager() {
         throw new Error(`Failed to load customer pricing: ${pricingError.message || pricingError.details || 'Unknown error'}`);
       }
 
+      // Load lease agreements
+      const { data: agreementsData, error: agreementsError } = await supabase
+        .from('lease_agreements')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .eq('status', 'active');
+      
+      if (agreementsError) {
+        logger.error('Error loading lease agreements:', agreementsError);
+        // Don't throw - lease agreements are optional for this page
+      }
+
       setCustomers(customersData || []);
       setPricingTiers(tiersData || []);
       setCustomerPricing(pricingData || []);
+      setLeaseAgreements(agreementsData || []);
       
     } catch (error) {
       logger.error('Error loading data:', error);
@@ -129,6 +145,28 @@ export default function BulkRentalPricingManager() {
     } else {
       setSelectedCustomers(prev => prev.filter(id => id !== customerListId));
     }
+  };
+
+  // Helper function to check if a rental period is yearly
+  const isYearlyPeriod = (period) => {
+    if (!period) return false;
+    const periodStr = period.toString().toLowerCase().trim();
+    return periodStr === 'yearly' || 
+           periodStr === 'annual' || 
+           periodStr === 'annually' ||
+           periodStr === 'year' ||
+           periodStr.includes('year') ||
+           periodStr.includes('annual');
+  };
+
+  // Helper function to check if billing frequency is yearly (for lease agreements)
+  const isYearlyBillingFrequency = (frequency) => {
+    if (!frequency) return false;
+    const freqStr = frequency.toString().toLowerCase().trim();
+    return freqStr === 'annual' || 
+           freqStr === 'yearly' || 
+           freqStr === 'annually' ||
+           freqStr === 'semi-annual';
   };
 
   const createTestPricingData = async () => {
@@ -188,16 +226,31 @@ export default function BulkRentalPricingManager() {
     if (sortByPeriod !== 'all') {
       filtered = filtered.filter(customer => {
         const currentPricing = customerPricing.find(p => p.customer_id === customer.CustomerListID);
+        const customerLease = leaseAgreements.find(a => 
+          (a.customer_id === customer.CustomerListID || a.customer_name === customer.name) &&
+          a.status === 'active'
+        );
         
         if (sortByPeriod === 'no-pricing') {
-          return !currentPricing;
+          return !currentPricing && !customerLease;
         } else {
           // Check if customer has pricing with the specific rental period
-          const customerPeriod = (currentPricing?.rental_period || 'monthly').toLowerCase();
           if (sortByPeriod === 'yearly') {
-            // Check for yearly variations: yearly, annual, annually
-            return currentPricing && (customerPeriod === 'yearly' || customerPeriod === 'annual' || customerPeriod === 'annually');
+            // Check for yearly variations with more robust matching
+            // Include customers with yearly pricing OR yearly lease agreements
+            return (currentPricing && isYearlyPeriod(currentPricing.rental_period)) ||
+                   (customerLease && isYearlyBillingFrequency(customerLease.billing_frequency));
+          } else if (sortByPeriod === 'monthly') {
+            // For monthly filter, exclude customers with yearly lease agreements
+            // Only show customers with monthly pricing AND no yearly lease agreements
+            const hasYearlyLease = customerLease && isYearlyBillingFrequency(customerLease.billing_frequency);
+            if (hasYearlyLease) {
+              return false; // Exclude customers with yearly lease agreements from monthly filter
+            }
+            const customerPeriod = (currentPricing?.rental_period || 'monthly').toLowerCase().trim();
+            return currentPricing && customerPeriod === sortByPeriod;
           } else {
+            const customerPeriod = (currentPricing?.rental_period || 'monthly').toLowerCase().trim();
             return currentPricing && customerPeriod === sortByPeriod;
           }
         }
@@ -205,7 +258,7 @@ export default function BulkRentalPricingManager() {
     }
 
     return filtered;
-  }, [customers, debouncedSearchTerm, sortByPeriod, customerPricing]);
+  }, [customers, debouncedSearchTerm, sortByPeriod, customerPricing, leaseAgreements]);
 
   // Reset page when filters change
   useEffect(() => {
@@ -594,10 +647,7 @@ export default function BulkRentalPricingManager() {
                   const period = (p.rental_period || 'monthly').toLowerCase();
                   return period === 'monthly';
                 }).length})</MenuItem>
-                <MenuItem value="yearly">Yearly Rentals ({customerPricing.filter(p => {
-                  const period = (p.rental_period || '').toLowerCase();
-                  return period === 'yearly' || period === 'annual' || period === 'annually';
-                }).length})</MenuItem>
+                <MenuItem value="yearly">Yearly Rentals ({customerPricing.filter(p => isYearlyPeriod(p.rental_period)).length + leaseAgreements.filter(a => isYearlyBillingFrequency(a.billing_frequency)).length})</MenuItem>
                 <MenuItem value="no-pricing">No Custom Pricing ({customers.length - customerPricing.length})</MenuItem>
               </Select>
             </FormControl>
@@ -612,30 +662,86 @@ export default function BulkRentalPricingManager() {
             {sortByPeriod !== 'all' && ` (filtered by ${sortByPeriod})`}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            <strong>Pricing Records:</strong> {customerPricing.length} total
-            {customerPricing.length > 0 && (
+            <strong>Customer Breakdown:</strong>
+            {' '}
+            {(() => {
+              // Get customers with yearly lease agreements
+              const yearlyLeaseAgreements = leaseAgreements.filter(a => isYearlyBillingFrequency(a.billing_frequency));
+              const yearlyLeaseCustomerIds = new Set(
+                yearlyLeaseAgreements.map(a => a.customer_id || a.customer_name)
+              );
+              const yearlyLeaseCustomerNames = new Set(
+                yearlyLeaseAgreements.map(a => a.customer_name).filter(Boolean)
+              );
+              
+              // Get customers with yearly pricing
+              const yearlyPricingCustomerIds = new Set(
+                customerPricing
+                  .filter(p => isYearlyPeriod(p.rental_period))
+                  .map(p => p.customer_id)
+              );
+              
+              // Count monthly customers (those with monthly pricing AND no yearly lease)
+              const monthlyCount = customerPricing.filter(p => {
+                const period = (p.rental_period || 'monthly').toLowerCase();
+                if (period !== 'monthly') return false;
+                
+                // Check if this customer has a yearly lease
+                const customer = customers.find(c => c.CustomerListID === p.customer_id);
+                const hasYearlyLease = yearlyLeaseCustomerIds.has(p.customer_id) || 
+                                      (customer && yearlyLeaseCustomerNames.has(customer.name));
+                return !hasYearlyLease;
+              }).length;
+              
+              // Count yearly customers (unique customers with yearly pricing OR yearly lease)
+              const allYearlyCustomerIds = new Set([
+                ...yearlyPricingCustomerIds,
+                ...yearlyLeaseCustomerIds
+              ]);
+              
+              // Also check by customer name for lease agreements
+              yearlyLeaseAgreements.forEach(lease => {
+                const customer = customers.find(c => 
+                  c.CustomerListID === lease.customer_id || c.name === lease.customer_name
+                );
+                if (customer) {
+                  allYearlyCustomerIds.add(customer.CustomerListID);
+                }
+              });
+              
+              const yearlyCount = allYearlyCustomerIds.size;
+              
+              return `Monthly: ${monthlyCount} • Yearly: ${yearlyCount} • Total: ${customers.length}`;
+            })()}
+            {import.meta.env.DEV && (
               <>
                 {' • '}
-                Monthly: {customerPricing.filter(p => {
+                <span style={{ fontSize: '0.85em', color: '#666' }}>
+                  (Pricing records: {customerPricing.length}, Leases: {leaseAgreements.length})
+                </span>
+              </>
+            )}
+          </Typography>
+          {import.meta.env.DEV && (
+            <>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                <strong>Detailed Breakdown:</strong>
+                {' '}
+                Customer Pricing Records: {customerPricing.length} total
+                {' • '}
+                Monthly pricing: {customerPricing.filter(p => {
                   const period = (p.rental_period || 'monthly').toLowerCase();
                   return period === 'monthly';
                 }).length}
                 {' • '}
-                Yearly: {customerPricing.filter(p => {
-                  const period = (p.rental_period || '').toLowerCase();
-                  return period === 'yearly' || period === 'annual' || period === 'annually';
-                }).length}
-                {import.meta.env.DEV && (
-                  <>
-                    {' • '}
-                    <span style={{ fontSize: '0.85em', color: '#666' }}>
-                      (Debug: {[...new Set(customerPricing.map(p => p.rental_period || 'null'))].join(', ')})
-                    </span>
-                  </>
-                )}
-              </>
-            )}
-          </Typography>
+                Yearly pricing: {customerPricing.filter(p => isYearlyPeriod(p.rental_period)).length}
+                {' • '}
+                Lease Agreements: {leaseAgreements.length} active
+                {' • '}
+                Yearly leases: {leaseAgreements.filter(a => isYearlyBillingFrequency(a.billing_frequency)).length}
+              </Typography>
+            </>
+          )}
           {customerPricing.length === 0 && (
             <Button 
               size="small" 
@@ -695,6 +801,12 @@ export default function BulkRentalPricingManager() {
               ) : (
                 paginatedCustomers.map((customer) => {
                   const currentPricing = customerPricing.find(p => p.customer_id === customer.CustomerListID);
+                  const customerLease = leaseAgreements.find(a => 
+                    (a.customer_id === customer.CustomerListID || a.customer_name === customer.name) &&
+                    a.status === 'active'
+                  );
+                  const hasYearlyLease = customerLease && isYearlyBillingFrequency(customerLease.billing_frequency);
+                  
                   return (
                     <TableRow key={customer.id}>
                       <TableCell padding="checkbox">
@@ -702,12 +814,29 @@ export default function BulkRentalPricingManager() {
                           type="checkbox"
                           checked={selectedCustomers.includes(customer.CustomerListID)}
                           onChange={(e) => handleCustomerSelection(customer.CustomerListID, e.target.checked)}
+                          disabled={hasYearlyLease} // Disable selection for customers with yearly lease agreements
                         />
                       </TableCell>
                       <TableCell>{customer.name}</TableCell>
                       <TableCell>{customer.CustomerListID}</TableCell>
                       <TableCell>
-                        {currentPricing ? (
+                        {hasYearlyLease ? (
+                          <Box>
+                            <Chip 
+                              label="Lease Agreement (Annual)" 
+                              size="small" 
+                              color="secondary" 
+                              sx={{ mr: 1 }}
+                            />
+                            {customerLease.agreement_number && (
+                              <Chip 
+                                label={customerLease.agreement_number} 
+                                size="small" 
+                                color="info"
+                              />
+                            )}
+                          </Box>
+                        ) : currentPricing ? (
                           <Box>
                             <Chip 
                               label={`${currentPricing.discount_percent}% discount`} 
@@ -728,15 +857,32 @@ export default function BulkRentalPricingManager() {
                         )}
                       </TableCell>
                       <TableCell>
-                        {currentPricing && (
-                          <IconButton
-                            size="small"
-                            onClick={() => deleteCustomerPricing(customer.CustomerListID)}
-                            color="error"
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        )}
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <Tooltip title="View Pricing Details">
+                            <IconButton
+                              size="small"
+                              onClick={() => setPricingDetailDialog({ 
+                                open: true, 
+                                customer, 
+                                pricing: hasYearlyLease ? { ...customerLease, isLease: true } : currentPricing 
+                              })}
+                              color="primary"
+                            >
+                              <VisibilityIcon />
+                            </IconButton>
+                          </Tooltip>
+                          {currentPricing && !hasYearlyLease && (
+                            <Tooltip title="Remove Custom Pricing">
+                              <IconButton
+                                size="small"
+                                onClick={() => deleteCustomerPricing(customer.CustomerListID)}
+                                color="error"
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </Box>
                       </TableCell>
                     </TableRow>
                   );
@@ -758,47 +904,222 @@ export default function BulkRentalPricingManager() {
         </TableContainer>
       </Paper>
 
-      {/* Current Pricing Overview */}
-      <Paper sx={{ p: 3, mt: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Current Customer Pricing Overview
-        </Typography>
-        
-        {customerPricing.length === 0 ? (
-          <Alert severity="info">
-            No custom pricing configured. All customers use standard pricing tiers.
-          </Alert>
-        ) : (
-          <Grid container spacing={2}>
-            {customerPricing.map((pricing) => {
-              // Find customer name manually since we can't join
-              const customer = customers.find(c => c.CustomerListID === pricing.customer_id);
-              return (
-                <Grid item xs={12} md={6} key={pricing.id}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="subtitle1" gutterBottom>
-                        {customer?.name || `Customer ID: ${pricing.customer_id}`}
+      {/* Pricing Detail Dialog */}
+      <Dialog 
+        open={pricingDetailDialog.open} 
+        onClose={() => setPricingDetailDialog({ open: false, customer: null, pricing: null })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          Pricing Details - {pricingDetailDialog.customer?.name || 'Customer'}
+        </DialogTitle>
+        <DialogContent>
+          {pricingDetailDialog.pricing ? (
+            <Box sx={{ mt: 2 }}>
+              {pricingDetailDialog.pricing.isLease ? (
+                // Lease Agreement Details
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Customer ID
+                    </Typography>
+                    <Typography variant="body1" sx={{ mb: 2 }}>
+                      {pricingDetailDialog.customer?.CustomerListID || 'N/A'}
+                    </Typography>
+                  </Grid>
+                  
+                  {pricingDetailDialog.pricing.agreement_number && (
+                    <Grid item xs={12}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        Agreement Number
                       </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Discount: {pricing.discount_percent}%
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        {pricingDetailDialog.pricing.agreement_number}
                       </Typography>
-                      {pricing.fixed_rate_override && (
-                        <Typography variant="body2" color="text.secondary">
-                          Fixed Rate: ${pricing.fixed_rate_override}/{pricing.rental_period || 'month'}
-                        </Typography>
-                      )}
-                      <Typography variant="body2" color="text.secondary">
-                        Effective: {new Date(pricing.effective_date).toLocaleDateString()}
+                    </Grid>
+                  )}
+                  
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Billing Frequency
+                    </Typography>
+                    <Typography variant="body1" sx={{ mb: 2 }}>
+                      <Chip 
+                        label={pricingDetailDialog.pricing.billing_frequency?.toUpperCase() || 'ANNUAL'} 
+                        size="small" 
+                        color="secondary"
+                      />
+                    </Typography>
+                  </Grid>
+                  
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Status
+                    </Typography>
+                    <Typography variant="body1" sx={{ mb: 2 }}>
+                      <Chip 
+                        label={pricingDetailDialog.pricing.status || 'Active'} 
+                        size="small" 
+                        color="success"
+                      />
+                    </Typography>
+                  </Grid>
+                  
+                  {pricingDetailDialog.pricing.annual_amount && (
+                    <Grid item xs={12}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        Annual Amount
                       </Typography>
-                    </CardContent>
-                  </Card>
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        ${parseFloat(pricingDetailDialog.pricing.annual_amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Typography>
+                    </Grid>
+                  )}
+                  
+                  {pricingDetailDialog.pricing.start_date && (
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        Start Date
+                      </Typography>
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        {new Date(pricingDetailDialog.pricing.start_date).toLocaleDateString()}
+                      </Typography>
+                    </Grid>
+                  )}
+                  
+                  {pricingDetailDialog.pricing.end_date && (
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        End Date
+                      </Typography>
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        {new Date(pricingDetailDialog.pricing.end_date).toLocaleDateString()}
+                      </Typography>
+                    </Grid>
+                  )}
                 </Grid>
-              );
-            })}
-          </Grid>
-        )}
-      </Paper>
+              ) : (
+                // Customer Pricing Details
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Customer ID
+                    </Typography>
+                    <Typography variant="body1" sx={{ mb: 2 }}>
+                      {pricingDetailDialog.customer?.CustomerListID || 'N/A'}
+                    </Typography>
+                  </Grid>
+                  
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Rental Period
+                    </Typography>
+                    <Typography variant="body1" sx={{ mb: 2 }}>
+                      <Chip 
+                        label={pricingDetailDialog.pricing.rental_period?.toUpperCase() || 'MONTHLY'} 
+                        size="small" 
+                        color="primary"
+                      />
+                    </Typography>
+                  </Grid>
+                  
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Status
+                    </Typography>
+                    <Typography variant="body1" sx={{ mb: 2 }}>
+                      <Chip 
+                        label={pricingDetailDialog.pricing.is_active ? 'Active' : 'Inactive'} 
+                        size="small" 
+                        color={pricingDetailDialog.pricing.is_active ? 'success' : 'default'}
+                      />
+                    </Typography>
+                  </Grid>
+                  
+                  {pricingDetailDialog.pricing.discount_percent > 0 && (
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        Discount Percentage
+                      </Typography>
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        {pricingDetailDialog.pricing.discount_percent}%
+                      </Typography>
+                    </Grid>
+                  )}
+                  
+                  {pricingDetailDialog.pricing.markup_percent > 0 && (
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        Markup Percentage
+                      </Typography>
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        {pricingDetailDialog.pricing.markup_percent}%
+                      </Typography>
+                    </Grid>
+                  )}
+                  
+                  {pricingDetailDialog.pricing.fixed_rate_override && (
+                    <Grid item xs={12}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        Fixed Rate Override
+                      </Typography>
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        ${pricingDetailDialog.pricing.fixed_rate_override} / {pricingDetailDialog.pricing.rental_period || 'month'}
+                      </Typography>
+                    </Grid>
+                  )}
+                  
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Effective Date
+                    </Typography>
+                    <Typography variant="body1" sx={{ mb: 2 }}>
+                      {new Date(pricingDetailDialog.pricing.effective_date).toLocaleDateString()}
+                    </Typography>
+                  </Grid>
+                  
+                  {pricingDetailDialog.pricing.expiry_date && (
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        Expiry Date
+                      </Typography>
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        {new Date(pricingDetailDialog.pricing.expiry_date).toLocaleDateString()}
+                      </Typography>
+                    </Grid>
+                  )}
+                  
+                  {pricingDetailDialog.pricing.notes && (
+                    <Grid item xs={12}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        Notes
+                      </Typography>
+                      <Typography variant="body2" sx={{ mb: 2 }}>
+                        {pricingDetailDialog.pricing.notes}
+                      </Typography>
+                    </Grid>
+                  )}
+                </Grid>
+              )}
+            </Box>
+          ) : (
+            <Box sx={{ mt: 2 }}>
+              <Alert severity="info">
+                This customer is using standard pricing tiers. No custom pricing has been configured.
+              </Alert>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                Customer ID: {pricingDetailDialog.customer?.CustomerListID || 'N/A'}
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPricingDetailDialog({ open: false, customer: null, pricing: null })}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Yearly Rental Customers Section */}
       <Paper sx={{ p: 3, mt: 3 }}>
@@ -807,49 +1128,138 @@ export default function BulkRentalPricingManager() {
         </Typography>
         
         {(() => {
-          const yearlyCustomers = customerPricing.filter(p => {
-            const period = (p.rental_period || '').toLowerCase();
-            return period === 'yearly' || period === 'annual' || period === 'annually';
-          });
-          return yearlyCustomers.length === 0 ? (
+          // Filter for yearly customers from customer_pricing table
+          const yearlyPricingCustomers = customerPricing.filter(p => isYearlyPeriod(p.rental_period));
+          
+          // Filter for yearly customers from lease_agreements table
+          const yearlyLeaseCustomers = leaseAgreements.filter(agreement => 
+            isYearlyBillingFrequency(agreement.billing_frequency)
+          );
+          
+          // Combine both sources
+          const allYearlyCustomers = [
+            ...yearlyPricingCustomers.map(p => ({
+              type: 'pricing',
+              id: p.id,
+              customer_id: p.customer_id,
+              customer_name: customers.find(c => c.CustomerListID === p.customer_id)?.name,
+              discount_percent: p.discount_percent,
+              fixed_rate_override: p.fixed_rate_override,
+              effective_date: p.effective_date,
+              expiry_date: p.expiry_date,
+              rental_period: p.rental_period
+            })),
+            ...yearlyLeaseCustomers.map(agreement => ({
+              type: 'lease',
+              id: agreement.id,
+              customer_id: agreement.customer_id || agreement.customer_name,
+              customer_name: agreement.customer_name || customers.find(c => 
+                c.CustomerListID === agreement.customer_id || c.name === agreement.customer_name
+              )?.name,
+              annual_amount: agreement.annual_amount,
+              billing_frequency: agreement.billing_frequency,
+              start_date: agreement.start_date,
+              end_date: agreement.end_date,
+              agreement_number: agreement.agreement_number
+            }))
+          ];
+          
+          // Debug: Log all rental periods if in dev mode
+          if (import.meta.env.DEV) {
+            logger.log('Yearly customers from pricing:', yearlyPricingCustomers.length);
+            logger.log('Yearly customers from leases:', yearlyLeaseCustomers.length);
+            logger.log('Total yearly customers:', allYearlyCustomers.length);
+            if (leaseAgreements.length > 0) {
+              logger.log('All lease agreements:', leaseAgreements.map(a => ({
+                id: a.id,
+                customer_name: a.customer_name,
+                billing_frequency: a.billing_frequency,
+                status: a.status
+              })));
+            }
+          }
+          
+          return allYearlyCustomers.length === 0 ? (
             <Alert severity="info">
-              No yearly rental customers configured. Use the rental period selector above to set up yearly pricing.
+              No yearly rental customers configured. Use the rental period selector above to set up yearly pricing, or create a lease agreement with annual billing frequency.
+              {import.meta.env.DEV && (
+                <Box sx={{ mt: 1 }}>
+                  <Typography variant="caption" component="div">
+                    Debug: Found {customerPricing.length} pricing records, {leaseAgreements.length} lease agreements.
+                    {customerPricing.length > 0 && ` Rental periods: ${[...new Set(customerPricing.map(p => p.rental_period || 'null'))].join(', ')}`}
+                    {leaseAgreements.length > 0 && ` Billing frequencies: ${[...new Set(leaseAgreements.map(a => a.billing_frequency || 'null'))].join(', ')}`}
+                  </Typography>
+                </Box>
+              )}
             </Alert>
           ) : (
             <Grid container spacing={2}>
-              {yearlyCustomers.map((pricing) => {
-                // Find customer name manually since we can't join
-                const customer = customers.find(c => c.CustomerListID === pricing.customer_id);
+              {allYearlyCustomers.map((item) => {
                 return (
-                  <Grid item xs={12} md={6} key={pricing.id}>
+                  <Grid item xs={12} md={6} key={`${item.type}-${item.id}`}>
                     <Card variant="outlined" sx={{ borderColor: 'primary.main', borderWidth: 2 }}>
                       <CardContent>
                         <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                           <Chip 
-                            label="YEARLY" 
+                            label={item.type === 'lease' ? 'LEASE AGREEMENT' : 'YEARLY'} 
                             size="small" 
-                            color="primary" 
+                            color={item.type === 'lease' ? 'secondary' : 'primary'} 
                             sx={{ mr: 1, fontWeight: 'bold' }}
                           />
                           <Typography variant="subtitle1" gutterBottom sx={{ mb: 0 }}>
-                            {customer?.name || `Customer ID: ${pricing.customer_id}`}
+                            {item.customer_name || `Customer ID: ${item.customer_id}`}
                           </Typography>
                         </Box>
-                        <Typography variant="body2" color="text.secondary">
-                          Discount: {pricing.discount_percent}%
-                        </Typography>
-                        {pricing.fixed_rate_override && (
-                          <Typography variant="body2" color="text.secondary">
-                            Fixed Rate: ${pricing.fixed_rate_override}/year
-                          </Typography>
-                        )}
-                        <Typography variant="body2" color="text.secondary">
-                          Effective: {new Date(pricing.effective_date).toLocaleDateString()}
-                        </Typography>
-                        {pricing.expiry_date && (
-                          <Typography variant="body2" color="text.secondary">
-                            Expires: {new Date(pricing.expiry_date).toLocaleDateString()}
-                          </Typography>
+                        
+                        {item.type === 'pricing' ? (
+                          <>
+                            {item.discount_percent > 0 && (
+                              <Typography variant="body2" color="text.secondary">
+                                Discount: {item.discount_percent}%
+                              </Typography>
+                            )}
+                            {item.fixed_rate_override && (
+                              <Typography variant="body2" color="text.secondary">
+                                Fixed Rate: ${item.fixed_rate_override}/year
+                              </Typography>
+                            )}
+                            {item.effective_date && (
+                              <Typography variant="body2" color="text.secondary">
+                                Effective: {new Date(item.effective_date).toLocaleDateString()}
+                              </Typography>
+                            )}
+                            {item.expiry_date && (
+                              <Typography variant="body2" color="text.secondary">
+                                Expires: {new Date(item.expiry_date).toLocaleDateString()}
+                              </Typography>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            {item.agreement_number && (
+                              <Typography variant="body2" color="text.secondary">
+                                Agreement: {item.agreement_number}
+                              </Typography>
+                            )}
+                            {item.annual_amount && (
+                              <Typography variant="body2" color="text.secondary">
+                                Annual Amount: ${parseFloat(item.annual_amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </Typography>
+                            )}
+                            <Typography variant="body2" color="text.secondary">
+                              Billing: {item.billing_frequency || 'annual'}
+                            </Typography>
+                            {item.start_date && (
+                              <Typography variant="body2" color="text.secondary">
+                                Start: {new Date(item.start_date).toLocaleDateString()}
+                              </Typography>
+                            )}
+                            {item.end_date && (
+                              <Typography variant="body2" color="text.secondary">
+                                End: {new Date(item.end_date).toLocaleDateString()}
+                              </Typography>
+                            )}
+                          </>
                         )}
                       </CardContent>
                     </Card>

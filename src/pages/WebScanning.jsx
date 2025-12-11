@@ -280,47 +280,57 @@ export default function WebScanning() {
     }
 
     // Process based on scan mode
-    let updateData = {};
+    // NOTE: Bottles are NOT assigned/unassigned here - only scan records are created
+    // Assignment happens later in Verification Center after approval
     let message = '';
 
     switch (mode) {
       case 'delivery':
-        updateData = {
-          status: 'delivered',
-          location: customerInfo?.name || 'Customer Location',
-          assigned_customer: customerInfo?.id || null,
-        };
-        message = `Delivered to ${customerInfo?.name || 'customer'}`;
+        // Just record the scan - assignment happens in Verification Center
+        message = `Scan recorded for delivery to ${customerInfo?.name || 'customer'}`;
         break;
 
       case 'pickup':
-        updateData = {
-          status: 'picked_up',
-          location: 'In Transit',
-          assigned_customer: null,
-        };
-        message = 'Picked up from customer';
+        // Just record the scan - unassignment happens in Verification Center
+        message = 'Scan recorded for pickup';
         break;
 
       case 'audit':
-        updateData = {
-          last_audited: new Date().toISOString(),
-          audit_location: location ? `${location.latitude},${location.longitude}` : null,
-        };
+        // Audit scans can update the bottle directly (non-assignment update)
+        const { error: auditUpdateError } = await supabase
+          .from('bottles')
+          .update({
+            last_audited: new Date().toISOString(),
+            audit_location: location ? `${location.latitude},${location.longitude}` : null,
+          })
+          .eq('id', asset.id)
+          .eq('organization_id', profile.organization_id);
+        
+        if (auditUpdateError) {
+          logger.warn('Failed to update audit info:', auditUpdateError);
+        }
         message = 'Audit scan completed';
         break;
 
       case 'maintenance':
-        updateData = {
-          status: 'maintenance',
-          last_maintenance: new Date().toISOString(),
-        };
+        // Maintenance scans can update the bottle directly (non-assignment update)
+        const { error: maintenanceUpdateError } = await supabase
+          .from('bottles')
+          .update({
+            status: 'maintenance',
+            last_maintenance: new Date().toISOString(),
+          })
+          .eq('id', asset.id)
+          .eq('organization_id', profile.organization_id);
+        
+        if (maintenanceUpdateError) {
+          logger.warn('Failed to update maintenance info:', maintenanceUpdateError);
+        }
         message = 'Marked for maintenance';
         break;
 
       case 'locate':
-        // Just update location for locate
-        updateData = {};
+        // Just record location scan
         message = `Located at ${asset.location || 'Unknown location'}`;
         break;
 
@@ -328,25 +338,15 @@ export default function WebScanning() {
         throw new Error('Invalid scan mode');
     }
 
-    // Update asset in database
+    // Create scan record (always done, regardless of mode)
     if (isOnline) {
-      // SECURITY: Double-check organization_id to prevent cross-organization updates
-      const { error: updateError } = await supabase
-        .from('bottles')
-        .update(updateData)
-        .eq('id', asset.id)
-        .eq('organization_id', profile.organization_id);
-
-      if (updateError) {
-        throw new Error('Failed to update asset');
-      }
-
-      // Create scan record
+      // Create scan record - this is what will be used for verification
       const { error: scanError } = await supabase
         .from('bottle_scans')
         .insert({
           bottle_barcode: barcode,
           scan_type: mode,
+          mode: mode === 'delivery' ? 'SHIP' : mode === 'pickup' ? 'RETURN' : mode.toUpperCase(),
           customer_id: customerInfo?.id,
           location: location ? `${location.latitude},${location.longitude}` : null,
           notes: proofOfDelivery.notes,
@@ -356,13 +356,13 @@ export default function WebScanning() {
 
       if (scanError) {
         logger.warn('Failed to create scan record:', scanError);
+        throw new Error('Failed to create scan record');
       }
     } else {
-      // Queue for offline sync
+      // Queue for offline sync (no updateData - we don't update bottles on scan)
       setOfflineQueue(prev => [...prev, {
         barcode,
         mode,
-        updateData,
         timestamp: new Date().toISOString(),
         customerInfo,
         location,

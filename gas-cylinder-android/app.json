@@ -2,7 +2,7 @@
   "expo": {
     "name": "Scanified Android",
     "slug": "gas-cylinder-android",
-    "version": "1.0.13",
+    "version": "1.0.14",
     "orientation": "portrait",
     "icon": "./assets/app-icon.png",
     "userInterfaceStyle": "automatic",
@@ -24,7 +24,7 @@
         "backgroundColor": "#FFFFFF"
       },
       "package": "com.evanevoo.scanifiedandroid",
-      "versionCode": 30,
+      "versionCode": 31,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"

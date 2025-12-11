@@ -1,6 +1,12 @@
 const nodemailer = require('nodemailer');
 
 exports.handler = async (event, context) => {
+  // Log function invocation
+  console.log('=== send-invoice-email function invoked ===');
+  console.log('HTTP Method:', event.httpMethod);
+  console.log('Event body length:', event.body?.length || 0);
+  console.log('Context:', { requestId: context?.requestId, functionName: context?.functionName });
+  
   // Wrap everything in try-catch to ensure we always return a response
   try {
     // Handle CORS preflight requests
@@ -32,9 +38,25 @@ exports.handler = async (event, context) => {
       // Parse request body
       let requestData;
       try {
+        if (!event.body) {
+          console.error('Event body is missing or empty');
+          return {
+            statusCode: 400,
+            headers: {
+              'Access-Control-Allow-Origin': '*',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ 
+              error: 'Request body is required',
+              details: 'The request body is missing or empty'
+            })
+          };
+        }
         requestData = JSON.parse(event.body);
+        console.log('Request data parsed successfully. Fields:', Object.keys(requestData));
       } catch (parseError) {
         console.error('Failed to parse request body:', parseError);
+        console.error('Event body (first 500 chars):', event.body?.substring(0, 500));
         return {
           statusCode: 400,
           headers: {
@@ -62,8 +84,39 @@ exports.handler = async (event, context) => {
         };
       }
 
-      // Use provided 'from' email (logged-in user's email) or fallback to environment variable
-      const senderEmail = from || process.env.SMTP2GO_FROM || process.env.EMAIL_FROM || process.env.OUTLOOK_FROM;
+      // Check PDF size (Netlify has 6MB request body limit, but we should keep PDFs smaller)
+      // Base64 is ~33% larger than binary, so 4MB base64 ≈ 3MB binary
+      const pdfBase64Size = typeof pdfBase64 === 'string' ? Buffer.byteLength(pdfBase64, 'utf8') : 0;
+      const maxSize = 4 * 1024 * 1024; // 4MB in bytes
+      if (pdfBase64Size > maxSize) {
+        console.error(`PDF too large: ${(pdfBase64Size / 1024 / 1024).toFixed(2)}MB (max: ${(maxSize / 1024 / 1024).toFixed(2)}MB)`);
+        return {
+          statusCode: 400,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ 
+            error: 'PDF file too large',
+            details: `PDF size is ${(pdfBase64Size / 1024 / 1024).toFixed(2)}MB, maximum allowed is ${(maxSize / 1024 / 1024).toFixed(2)}MB. Please reduce the PDF size or contact support.`
+          })
+        };
+      }
+
+      console.log(`Processing invoice email: to=${to}, from=${from}, pdfSize=${(pdfBase64Size / 1024).toFixed(2)}KB`);
+
+      // Use provided 'from' email (logged-in user's email) - it should always be provided
+      // Only fallback to environment variable if 'from' is explicitly not provided (undefined)
+      let senderEmail;
+      if (from !== undefined && from !== null && from !== '') {
+        // 'from' field was provided, use it
+        senderEmail = from;
+      } else {
+        // 'from' field was not provided, fallback to environment variable (for backward compatibility)
+        senderEmail = process.env.SMTP2GO_FROM || process.env.EMAIL_FROM || process.env.OUTLOOK_FROM;
+        console.warn('No "from" email provided in request, using environment variable fallback:', senderEmail);
+      }
+      
       if (!senderEmail) {
         return {
           statusCode: 400,
@@ -71,7 +124,7 @@ exports.handler = async (event, context) => {
             'Access-Control-Allow-Origin': '*',
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ error: 'Missing sender email. Please provide "from" field or configure SMTP_FROM environment variable.' })
+          body: JSON.stringify({ error: 'Missing sender email. The "from" field is required and must be the logged-in user\'s email address.' })
         };
       }
 
@@ -169,15 +222,21 @@ exports.handler = async (event, context) => {
       let pdfBuffer;
       try {
         if (!pdfBase64 || typeof pdfBase64 !== 'string') {
-          throw new Error('Invalid PDF base64 data');
+          throw new Error('Invalid PDF base64 data: must be a non-empty string');
         }
-        pdfBuffer = Buffer.from(pdfBase64, 'base64');
+        
+        // Remove data URL prefix if present (e.g., "data:application/pdf;base64,")
+        const base64Data = pdfBase64.includes(',') ? pdfBase64.split(',')[1] : pdfBase64;
+        
+        pdfBuffer = Buffer.from(base64Data, 'base64');
         if (pdfBuffer.length === 0) {
-          throw new Error('PDF buffer is empty');
+          throw new Error('PDF buffer is empty after base64 decoding');
         }
-        console.log(`PDF buffer created, size: ${pdfBuffer.length} bytes`);
+        console.log(`PDF buffer created successfully, size: ${(pdfBuffer.length / 1024).toFixed(2)}KB`);
       } catch (bufferError) {
         console.error('Error creating PDF buffer:', bufferError);
+        console.error('PDF base64 length:', pdfBase64?.length || 0);
+        console.error('PDF base64 type:', typeof pdfBase64);
         return {
           statusCode: 400,
           headers: {
@@ -186,7 +245,7 @@ exports.handler = async (event, context) => {
           },
           body: JSON.stringify({
             error: 'Invalid PDF data',
-            details: bufferError.message
+            details: bufferError.message || 'Failed to decode PDF base64 data'
           })
         };
       }
@@ -208,9 +267,21 @@ exports.handler = async (event, context) => {
         ]
       };
 
-      const info = await transporter.sendMail(mailOptions);
-      console.log(`Invoice email sent successfully via ${emailService} from: ${senderEmail} to: ${to}`);
-      console.log('Message ID:', info.messageId);
+      let info;
+      try {
+        // Set a timeout for sending email (25 seconds to stay under Netlify's 26s limit)
+        const sendPromise = transporter.sendMail(mailOptions);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Email sending timed out after 25 seconds')), 25000)
+        );
+        
+        info = await Promise.race([sendPromise, timeoutPromise]);
+        console.log(`Invoice email sent successfully via ${emailService} from: ${senderEmail} to: ${to}`);
+        console.log('Message ID:', info.messageId);
+      } catch (sendError) {
+        console.error('Error sending email:', sendError);
+        throw new Error(`Failed to send email via ${emailService}: ${sendError.message}`);
+      }
 
       return {
         statusCode: 200,
@@ -245,19 +316,37 @@ exports.handler = async (event, context) => {
     }
   } catch (outerError) {
     // Catch any errors that occur outside the main try block (e.g., parsing, etc.)
-    console.error('Fatal error in handler:', outerError);
-    console.error('Error stack:', outerError.stack);
+    console.error('=== FATAL ERROR in handler ===');
+    console.error('Error name:', outerError?.name);
+    console.error('Error message:', outerError?.message);
+    console.error('Error stack:', outerError?.stack);
+    console.error('Error type:', typeof outerError);
+    
+    // Ensure we always return a response, even if JSON.stringify fails
+    let errorResponse;
+    try {
+      errorResponse = JSON.stringify({
+        error: 'Fatal error in email function',
+        details: outerError?.message || 'Unknown error',
+        type: outerError?.name || 'Error'
+      });
+    } catch (stringifyError) {
+      // If JSON.stringify fails, return a simple string
+      errorResponse = JSON.stringify({
+        error: 'Fatal error in email function',
+        details: 'An unexpected error occurred and could not be serialized'
+      });
+    }
+    
     return {
       statusCode: 500,
       headers: {
         'Access-Control-Allow-Origin': '*',
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        error: 'Fatal error in email function',
-        details: outerError.message || 'Unknown error',
-        type: outerError.name || 'Error'
-      })
+      body: errorResponse
     };
+  } finally {
+    console.log('=== send-invoice-email function completed ===');
   }
 };

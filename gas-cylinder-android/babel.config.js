@@ -7,7 +7,7 @@ module.exports = function(api) {
         helpers: true,
         regenerator: true,
       }],
-      'react-native-worklets/plugin',
+      'react-native-reanimated/plugin', // Must be last
     ],
   };
 }; 

@@ -107,7 +107,7 @@ export default function AssetHistory() {
           <div className="grid grid-cols-2 gap-2 mb-2">
             <div><b>Barcode:</b> {asset.barcode_number ? (
               <Link
-                to={`/bottle/${asset.id}`}
+                to={`/bottle/${asset.barcode_number || asset.id}`}
                 style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}
               >
                 {asset.barcode_number}

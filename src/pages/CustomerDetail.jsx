@@ -499,45 +499,183 @@ export default function CustomerDetail() {
     setSaving(true);
     setSaveError(null);
     setSaveSuccess(false);
-    // Normalize barcode: trim whitespace only (organizations control format)
-    const normalizedBarcode = (editForm.barcode || '')
-      .toString()
-      .trim();
-    const updateFields = {
-      name: editForm.name,
-      email: editForm.email,
-      phone: editForm.phone,
-      contact_details: editForm.contact_details,
-      address: editForm.address,
-      address2: editForm.address2,
-      address3: editForm.address3,
-      address4: editForm.address4,
-      address5: editForm.address5,
-      city: editForm.city,
-      postal_code: editForm.postal_code,
-      customer_type: editForm.customer_type || 'CUSTOMER',
-      location: editForm.location,
-      // Include barcode if provided (empty string allowed to clear)
-      barcode: normalizedBarcode || null
-    };
-    const { error } = await supabase
-      .from('customers')
-      .update(updateFields)
-      .eq('CustomerListID', id);
-    if (error) {
-      setSaveError(error.message);
+    
+    try {
+      // Validate CustomerListID if changed
+      const newCustomerListID = (editForm.CustomerListID || '').trim();
+      const oldCustomerListID = customer.CustomerListID;
+      const customerIdChanged = newCustomerListID !== oldCustomerListID;
+      
+      if (!newCustomerListID) {
+        setSaveError('Customer ID is required.');
+        setSaving(false);
+        return;
+      }
+      
+      // If CustomerListID changed, check for uniqueness
+      if (customerIdChanged) {
+        const { data: existingCustomer, error: checkError } = await supabase
+          .from('customers')
+          .select('CustomerListID')
+          .eq('CustomerListID', newCustomerListID)
+          .eq('organization_id', organization?.id || customer?.organization_id)
+          .maybeSingle();
+        
+        if (checkError) {
+          setSaveError(`Error checking Customer ID: ${checkError.message}`);
+          setSaving(false);
+          return;
+        }
+        
+        if (existingCustomer) {
+          setSaveError(`Customer ID "${newCustomerListID}" already exists. Please choose a different ID.`);
+          setSaving(false);
+          return;
+        }
+      }
+      
+      // Normalize barcode: trim whitespace only (organizations control format)
+      const normalizedBarcode = (editForm.barcode || '')
+        .toString()
+        .trim();
+      
+      const updateFields = {
+        name: editForm.name,
+        email: editForm.email,
+        phone: editForm.phone,
+        contact_details: editForm.contact_details,
+        address: editForm.address,
+        address2: editForm.address2,
+        address3: editForm.address3,
+        address4: editForm.address4,
+        address5: editForm.address5,
+        city: editForm.city,
+        postal_code: editForm.postal_code,
+        customer_type: editForm.customer_type || 'CUSTOMER',
+        location: editForm.location,
+        // Include barcode if provided (empty string allowed to clear)
+        barcode: normalizedBarcode || null
+      };
+      
+      // If CustomerListID changed, update customer record FIRST (before related records)
+      // This ensures the new CustomerListID exists in the customers table for foreign key constraints
+      if (customerIdChanged) {
+        logger.log(`Updating Customer ID from "${oldCustomerListID}" to "${newCustomerListID}"`);
+        
+        // Include CustomerListID in update fields
+        updateFields.CustomerListID = newCustomerListID;
+        
+        // Update the customer record FIRST using UUID id (not CustomerListID)
+        // This creates the new CustomerListID in the customers table
+        const { error: customerUpdateError } = await supabase
+          .from('customers')
+          .update(updateFields)
+          .eq('id', customer.id)
+          .eq('organization_id', organization?.id || customer?.organization_id);
+        
+        if (customerUpdateError) {
+          logger.error('Error updating customer:', customerUpdateError);
+          setSaveError(`Failed to update customer: ${customerUpdateError.message}`);
+          setSaving(false);
+          return;
+        }
+        
+        // Now update all related records that reference the old CustomerListID
+        // Update bottles assigned to this customer
+        const { error: bottlesError } = await supabase
+          .from('bottles')
+          .update({ assigned_customer: newCustomerListID })
+          .eq('assigned_customer', oldCustomerListID)
+          .eq('organization_id', organization?.id || customer?.organization_id);
+        
+        if (bottlesError) {
+          logger.error('Error updating bottles:', bottlesError);
+          // Try to rollback customer update if bottle update fails
+          const { error: rollbackError } = await supabase
+            .from('customers')
+            .update({ CustomerListID: oldCustomerListID })
+            .eq('id', customer.id);
+          
+          if (rollbackError) {
+            logger.error('CRITICAL: Failed to rollback customer ID change:', rollbackError);
+          }
+          
+          setSaveError(`Failed to update assigned bottles: ${bottlesError.message}`);
+          setSaving(false);
+          return;
+        }
+        
+        // Update rentals
+        const { error: rentalsError } = await supabase
+          .from('rentals')
+          .update({ customer_id: newCustomerListID })
+          .eq('customer_id', oldCustomerListID)
+          .eq('organization_id', organization?.id || customer?.organization_id);
+        
+        if (rentalsError) {
+          logger.warn('Warning updating rentals (may not exist):', rentalsError);
+          // Don't fail if rentals table doesn't have this structure
+        }
+        
+        // Update invoices
+        const { error: invoicesError } = await supabase
+          .from('invoices')
+          .update({ customer_id: newCustomerListID })
+          .eq('customer_id', oldCustomerListID)
+          .eq('organization_id', organization?.id || customer?.organization_id);
+        
+        if (invoicesError) {
+          logger.warn('Warning updating invoices (may not exist):', invoicesError);
+          // Don't fail if invoices table doesn't have this structure
+        }
+        
+        // Update rental_invoices
+        const { error: rentalInvoicesError } = await supabase
+          .from('rental_invoices')
+          .update({ customer_id: newCustomerListID })
+          .eq('customer_id', oldCustomerListID)
+          .eq('organization_id', organization?.id || customer?.organization_id);
+        
+        if (rentalInvoicesError) {
+          logger.warn('Warning updating rental_invoices (may not exist):', rentalInvoicesError);
+          // Don't fail if rental_invoices table doesn't have this structure
+        }
+        
+        // Navigate to new URL after successful update
+        logger.log(`Customer ID updated successfully. Navigating to new URL.`);
+        navigate(`/customer/${newCustomerListID}`, { replace: true });
+        // The useEffect will reload the data with the new ID
+        return;
+      }
+      
+      // If CustomerListID didn't change, just update the customer record normally
+      const { error } = await supabase
+        .from('customers')
+        .update(updateFields)
+        .eq('CustomerListID', oldCustomerListID)
+        .eq('organization_id', organization?.id || customer?.organization_id);
+      
+      if (error) {
+        setSaveError(error.message);
+        setSaving(false);
+        return;
+      }
+      
+      // Update local state
+      setCustomer({ ...customer, ...updateFields });
+      setEditing(false);
       setSaving(false);
-      return;
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
+    } catch (err) {
+      logger.error('Error saving customer:', err);
+      setSaveError(err.message || 'An unexpected error occurred');
+      setSaving(false);
     }
-    setCustomer({ ...customer, ...updateFields });
-    setEditing(false);
-    setSaving(false);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 2000);
   };
 
   if (loading) return (
-    <Box sx={{ p: 4, maxWidth: 900, mx: 'auto' }}>
+    <Box sx={{ p: 4, maxWidth: { xs: '100%', md: 1400 }, mx: 'auto' }}>
       <CardSkeleton count={1} />
       <Box mt={4}><TableSkeleton rows={4} columns={5} /></Box>
       <Box mt={4}><TableSkeleton rows={3} columns={7} /></Box>
@@ -557,7 +695,7 @@ export default function CustomerDetail() {
   );
 
   return (
-    <Box sx={{ p: 4, maxWidth: 900, mx: 'auto' }}>
+    <Box sx={{ p: 4, maxWidth: { xs: '100%', md: 1400 }, mx: 'auto' }}>
       <Button
         startIcon={<ArrowBackIcon />}
         onClick={() => navigate(-1)}
@@ -596,10 +734,31 @@ export default function CustomerDetail() {
           )}
         </Box>
         <Divider sx={{ mb: 2 }} />
-        <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={3}>
+        <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr', lg: '1fr 1fr 1fr' }} gap={3}>
           <Box>
             <Typography variant="body2" color="text.secondary">Customer ID</Typography>
-            <Typography variant="body1" fontWeight={600} fontFamily="monospace" sx={{ mb: 2 }}>{customer.CustomerListID}</Typography>
+            {editing ? (
+              <>
+                <TextField 
+                  name="CustomerListID" 
+                  value={editForm.CustomerListID || ''} 
+                  onChange={handleEditChange} 
+                  size="small" 
+                  label="Customer ID" 
+                  required
+                  sx={{ mb: 1, minWidth: 220 }} 
+                  helperText={editForm.CustomerListID !== customer.CustomerListID ? "Changing ID will update all assigned bottles and related records" : "Unique identifier for this customer"}
+                  error={saveError && saveError.includes('CustomerListID')}
+                />
+                {editForm.CustomerListID && editForm.CustomerListID !== customer.CustomerListID && (
+                  <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>
+                    This will update all bottles, rentals, and invoices assigned to this customer.
+                  </Alert>
+                )}
+              </>
+            ) : (
+              <Typography variant="body1" fontWeight={600} fontFamily="monospace" sx={{ mb: 2 }}>{customer.CustomerListID}</Typography>
+            )}
             <Typography variant="body2" color="text.secondary">Customer Barcode</Typography>
             {editing ? (
               <TextField 

@@ -16,6 +16,7 @@ import OwnerProtectedRoute from './components/OwnerProtectedRoute';
 import RoleProtectedRoute from './components/RoleProtectedRoute';
 import { initAllTracking, trackPageView } from './utils/analytics';
 import { initializeDisasterRecovery } from './utils/disasterRecovery';
+import './utils/backgroundService'; // Auto-starts daily days_at_location updates
 import './styles/responsive.css';
 import './styles/accessibility.css';
 import Billing from './pages/Billing';
@@ -128,7 +129,7 @@ const QuickMapReport = lazy(() => import('./pages/management-reports/QuickMapRep
 const QuickAdd = lazy(() => import('./pages/QuickAdd'));
 const LotReports = lazy(() => import('./pages/LotReports'));
 const Rental = lazy(() => import('./pages/Rental'));
-const CustomerDetail = lazy(() => import('./pages/CustomerDetail'));
+const CustomerDetail = lazy(() => import('./pages/CustomerDetail.jsx'));
 const AssetHistory = lazy(() => import('./pages/AssetHistory'));
 const AssetHistoryLookup = lazy(() => import('./pages/AssetHistoryLookup'));
 const Import = lazy(() => import('./pages/Import'));
@@ -336,12 +337,17 @@ function AppContent() {
                     <Route path="/unified-role-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/import-asset-balance" element={<ImportAssetBalance />} />
                     <Route path="/verification-center" element={<ImportApprovals />} />
+                    {/* Legacy route redirect */}
+                    <Route path="/importapprovals" element={<Navigate to="/verification-center" replace />} />
+                    <Route path="/import-approvals" element={<Navigate to="/verification-center" replace />} />
                     <Route path="/import-approval/:id/detail" element={<ImportApprovalDetail />} />
                     <Route path="/verified-orders" element={<VerifiedOrders />} />
                     {/* Generate ID route removed per App Store guidelines */}
                     <Route path="/barcode-generator" element={<BarcodeGenerator />} />
                     {/* Organization-level routes - accessible to all organization users */}
-                    <Route path="/bottle/:id" element={<AssetDetail />} />
+                    <Route path="/bottle/:barcode" element={<AssetDetail />} />
+                    {/* Legacy route for UUIDs - redirect to barcode lookup */}
+                    <Route path="/bottle-uuid/:id" element={<AssetDetail />} />
                     <Route path="/bottle-management" element={<BottleManagement />} />
                     <Route path="/ownership-management" element={<OwnershipManagement />} />
                     <Route path="/daily-update-admin" element={<DailyUpdateAdmin />} />

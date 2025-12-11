@@ -268,7 +268,7 @@ export default function AdvancedSearch({ onResultSelect }) {
       // Default navigation
       switch (type) {
         case 'bottle':
-          navigate(`/bottle/${item.id}`);
+          navigate(`/bottle/${item.barcode_number || item.id}`);
           break;
         case 'customer':
           navigate(`/customer/${item.CustomerListID}`);

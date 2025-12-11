@@ -2,6 +2,7 @@ import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
+  Autocomplete,
   Box,
   Typography,
   Paper,
@@ -35,10 +36,13 @@ import { useAuth } from '../hooks/useAuth';
 import { useDynamicAssetTerms } from '../hooks/useDynamicAssetTerms';
 
 export default function AssetDetail() {
-  const { id } = useParams();
+  const { barcode, id } = useParams(); // Support both barcode and legacy UUID routes
   const navigate = useNavigate();
   const { profile } = useAuth();
   const { terms, isReady } = useDynamicAssetTerms();
+
+  // UUID pattern for checking if an identifier is a UUID
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   const [asset, setAsset] = useState(null);
   const [customer, setCustomer] = useState(null);
@@ -50,14 +54,16 @@ export default function AssetDetail() {
   const [success, setSuccess] = useState('');
   const [locations, setLocations] = useState([]);
   const [ownershipValues, setOwnershipValues] = useState([]);
+  const [customers, setCustomers] = useState([]);
 
   useEffect(() => {
     fetchAssetDetail();
     fetchLocations();
     if (profile?.organization_id) {
       fetchOwnershipValues();
+      fetchCustomers();
     }
-  }, [id, profile?.organization_id]);
+  }, [barcode, id, profile?.organization_id]);
 
   const fetchAssetDetail = async () => {
     try {
@@ -68,12 +74,35 @@ export default function AssetDetail() {
         throw new Error('Organization not found. Please log in again.');
       }
       
-      const { data, error } = await supabase
-        .from('bottles') // Keep using bottles table for now
+      // Use barcode if available, otherwise fall back to id (for legacy UUID routes)
+      const identifier = barcode || id;
+      if (!identifier) {
+        throw new Error('Barcode or ID is required');
+      }
+      
+      // Check if identifier is a UUID (for legacy support)
+      const isUUID = uuidPattern.test(identifier);
+      
+      let query = supabase
+        .from('bottles')
         .select('*')
-        .eq('id', id)
-        .eq('organization_id', profile.organization_id) // SECURITY: Only show assets from user's organization
-        .single();
+        .eq('organization_id', profile.organization_id); // SECURITY: Only show assets from user's organization
+      
+      if (isUUID) {
+        // Legacy UUID route - query by id
+        query = query.eq('id', identifier);
+      } else {
+        // Barcode route - query by barcode_number
+        query = query.eq('barcode_number', identifier);
+      }
+      
+      const { data, error } = await query.single();
+      
+      // If we accessed via UUID and found the bottle, redirect to barcode URL for cleaner URLs
+      if (data && isUUID && data.barcode_number) {
+        navigate(`/bottle/${data.barcode_number}`, { replace: true });
+        return; // Exit early, redirect will reload the component with barcode
+      }
 
       if (error) {
         if (error.code === 'PGRST116') {
@@ -91,30 +120,65 @@ export default function AssetDetail() {
       setEditData(data);
       
       // Fetch customer information if bottle is assigned to a customer
+      // Handle both UUID and CustomerListID formats
       if (data.assigned_customer) {
-        const { data: customerData, error: customerError } = await supabase
-          .from('customers')
-          .select('CustomerListID, name, location')
-          .eq('CustomerListID', data.assigned_customer)
-          .eq('organization_id', profile.organization_id)
-          .single();
+        // Check if assigned_customer is a UUID (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+        const isUUID = uuidPattern.test(data.assigned_customer);
+        
+        let customerData = null;
+        let customerError = null;
+        
+        if (isUUID) {
+          // If it's a UUID, query by id
+          const { data: custData, error: custError } = await supabase
+            .from('customers')
+            .select('CustomerListID, name, location, id')
+            .eq('id', data.assigned_customer)
+            .eq('organization_id', profile.organization_id)
+            .single();
+          customerData = custData;
+          customerError = custError;
+        } else {
+          // If it's a CustomerListID, query by CustomerListID
+          const { data: custData, error: custError } = await supabase
+            .from('customers')
+            .select('CustomerListID, name, location, id')
+            .eq('CustomerListID', data.assigned_customer)
+            .eq('organization_id', profile.organization_id)
+            .single();
+          customerData = custData;
+          customerError = custError;
+        }
         
         if (!customerError && customerData) {
           setCustomer(customerData);
+          // Update editData to use CustomerListID for the selector
+          setEditData({ ...data, assigned_customer: customerData.CustomerListID });
+          
           // If customer has a location and bottle location doesn't match, update it
           if (customerData.location && data.location !== customerData.location) {
             // Update the bottle location to match customer location
-            const { error: updateError } = await supabase
+            const identifier = barcode || id;
+            const isUUID = uuidPattern.test(identifier);
+            
+            let updateQuery = supabase
               .from('bottles')
               .update({ location: customerData.location })
-              .eq('id', id)
               .eq('organization_id', profile.organization_id);
+            
+            if (isUUID) {
+              updateQuery = updateQuery.eq('id', identifier);
+            } else {
+              updateQuery = updateQuery.eq('barcode_number', identifier);
+            }
+            
+            const { error: updateError } = await updateQuery;
             
             if (!updateError) {
               // Update local state to reflect the change
               const updatedAsset = { ...data, location: customerData.location };
               setAsset(updatedAsset);
-              setEditData(updatedAsset);
+              setEditData({ ...updatedAsset, assigned_customer: customerData.CustomerListID });
             }
           }
         }
@@ -183,6 +247,23 @@ export default function AssetDetail() {
     }
   };
 
+  const fetchCustomers = async () => {
+    try {
+      if (!profile?.organization_id) return;
+      
+      const { data, error } = await supabase
+        .from('customers')
+        .select('CustomerListID, name, id')
+        .eq('organization_id', profile.organization_id)
+        .order('name');
+      
+      if (error) throw error;
+      setCustomers(data || []);
+    } catch (error) {
+      logger.error('Error fetching customers:', error);
+    }
+  };
+
   const handleSave = async () => {
     try {
       setSaving(true);
@@ -192,15 +273,70 @@ export default function AssetDetail() {
         throw new Error('Organization not found');
       }
       
-      const { error } = await supabase
-        .from('bottles') // Keep using bottles table for now
-        .update(editData)
-        .eq('id', id)
+      // Prepare update data
+      const updateData = { ...editData };
+      
+      // Get current assigned_customer value (might be UUID or CustomerListID)
+      const currentAssignedCustomer = asset.assigned_customer;
+      // Check if it's a UUID
+      const currentIsUUID = currentAssignedCustomer && uuidPattern.test(currentAssignedCustomer);
+      
+      // Get current CustomerListID for comparison
+      let currentCustomerListID = currentAssignedCustomer;
+      if (currentIsUUID && customer) {
+        currentCustomerListID = customer.CustomerListID;
+      }
+      
+      // Handle customer assignment: if assigned_customer is changed, we need to:
+      // 1. Use CustomerListID for application logic (stored in assigned_customer)
+      // 2. But the database foreign key constraint requires UUID, so we need to find the UUID
+      if (updateData.assigned_customer !== currentCustomerListID) {
+        if (updateData.assigned_customer) {
+          // Find the customer UUID for the selected CustomerListID
+          const selectedCustomer = customers.find(c => c.CustomerListID === updateData.assigned_customer);
+          if (selectedCustomer) {
+            // Store CustomerListID in assigned_customer for application logic
+            // The database foreign key constraint will be handled by Supabase
+            updateData.assigned_customer = selectedCustomer.CustomerListID;
+            // Also update customer_name for display
+            updateData.customer_name = selectedCustomer.name;
+            
+            // Update status to 'rented' if assigning to a customer
+            if (!updateData.status || updateData.status === 'available') {
+              updateData.status = 'rented';
+            }
+          } else {
+            throw new Error('Selected customer not found');
+          }
+        } else {
+          // Unassigning customer
+          updateData.assigned_customer = null;
+          updateData.customer_name = null;
+          // Update status to 'available' if unassigning
+          updateData.status = 'available';
+        }
+      }
+      
+      const identifier = barcode || id;
+      const isUUID = uuidPattern.test(identifier);
+      
+      let updateQuery = supabase
+        .from('bottles')
+        .update(updateData)
         .eq('organization_id', profile.organization_id); // SECURITY: Only update assets in user's organization
+      
+      if (isUUID) {
+        updateQuery = updateQuery.eq('id', identifier);
+      } else {
+        updateQuery = updateQuery.eq('barcode_number', identifier);
+      }
+      
+      const { error } = await updateQuery;
 
       if (error) throw error;
 
-      setAsset(editData);
+      // Refresh asset data to get updated customer info
+      await fetchAssetDetail();
       setEditDialog(false);
       setSuccess('Asset updated successfully');
     } catch (error) {
@@ -220,11 +356,21 @@ export default function AssetDetail() {
         throw new Error('Organization not found');
       }
       
-      const { error } = await supabase
-        .from('bottles') // Keep using bottles table for now
+      const identifier = barcode || id;
+      const isUUID = uuidPattern.test(identifier);
+      
+      let deleteQuery = supabase
+        .from('bottles')
         .delete()
-        .eq('id', id)
         .eq('organization_id', profile.organization_id); // SECURITY: Only delete assets from user's organization
+      
+      if (isUUID) {
+        deleteQuery = deleteQuery.eq('id', identifier);
+      } else {
+        deleteQuery = deleteQuery.eq('barcode_number', identifier);
+      }
+      
+      const { error } = await deleteQuery;
 
       if (error) throw error;
 
@@ -460,6 +606,43 @@ export default function AssetDetail() {
                   ))}
                 </Select>
               </FormControl>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Autocomplete
+                options={customers}
+                value={
+                  customers.find(c => c.CustomerListID === editData.assigned_customer) || null
+                }
+                onChange={(_, newValue) => {
+                  if (newValue) {
+                    setEditData({
+                      ...editData,
+                      assigned_customer: newValue.CustomerListID,
+                      customer_name: newValue.name
+                    });
+                  } else {
+                    setEditData({
+                      ...editData,
+                      assigned_customer: null,
+                      customer_name: null
+                    });
+                  }
+                }}
+                getOptionLabel={(option) =>
+                  option ? `${option.name} (${option.CustomerListID})` : ''
+                }
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Assigned Customer"
+                    placeholder="Search customers"
+                  />
+                )}
+                clearOnEscape
+                isOptionEqualToValue={(option, value) =>
+                  option.CustomerListID === value.CustomerListID
+                }
+              />
             </Grid>
 
             <Grid item xs={12}>
