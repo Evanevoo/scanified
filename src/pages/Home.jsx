@@ -18,6 +18,7 @@ import {
   Work as WorkIcon, Security as SecurityIcon
 } from '@mui/icons-material';
 import { useTheme } from '../context/ThemeContext';
+import { Touch3D, Card3D, MobileCard, MobileButton, MobileGrid, MobileStack, MobileTypography } from '../components/design-system';
 
 export default function Home() {
   const { profile, organization } = useAuth();
@@ -51,17 +52,161 @@ export default function Home() {
       setLoading(true);
       
       // Core statistics - available to all users
-      const [customersRes, cylindersRes, rentalsRes, deliveriesRes] = await Promise.all([
+      const [customersRes, cylindersRes, deliveriesRes] = await Promise.all([
         supabase.from('customers').select('id', { count: 'exact' }).eq('organization_id', organization.id),
         supabase.from('bottles').select('id', { count: 'exact' }).eq('organization_id', organization.id),
-        supabase.from('bottles').select('id', { count: 'exact' }).eq('organization_id', organization.id).not('assigned_customer', 'is', null),
         supabase.from('deliveries').select('id', { count: 'exact' }).eq('organization_id', organization.id).eq('status', 'pending')
       ]);
+
+      // Get active rentals count (matching rental page logic - excluding vendors)
+      let activeRentalsCount = 0;
+      
+      try {
+        // 1. Get all active rentals (use select('*') like rental page)
+        const { data: activeRentalsData, error: rentalsQueryError } = await supabase
+          .from('rentals')
+          .select('*')
+          .is('rental_end_date', null);
+        
+        if (rentalsQueryError) {
+          logger.error('Error fetching active rentals:', rentalsQueryError);
+          // Fallback: use simple count query
+          const { count } = await supabase
+            .from('rentals')
+            .select('*', { count: 'exact', head: true })
+            .is('rental_end_date', null)
+            .eq('organization_id', organization.id);
+          activeRentalsCount = count || 0;
+        } else {
+          // 2. Get all bottles for this organization (matching rental page exactly)
+          const { data: allBottles, error: allBottlesError } = await supabase
+            .from('bottles')
+            .select('*')
+            .eq('organization_id', organization.id);
+          
+          // 2b. Get assigned bottles (matching rental page)
+          const { data: assignedBottles, error: assignedBottlesError } = await supabase
+            .from('bottles')
+            .select('*')
+            .eq('organization_id', organization.id)
+            .not('assigned_customer', 'is', null);
+          
+          if (allBottlesError || assignedBottlesError) {
+            logger.error('Error fetching bottles:', allBottlesError || assignedBottlesError);
+            activeRentalsCount = 0;
+          } else {
+            // Create bottles map (matching rental page)
+            const bottlesMap = (allBottles || []).reduce((map, bottle) => {
+              map[bottle.barcode_number || bottle.barcode] = bottle;
+              return map;
+            }, {});
+
+            // 3. Combine rentals with bottles (matching rental page logic exactly)
+            const allRentalData = [];
+            
+            // Add rentals that have matching bottles in this organization
+            for (const rental of activeRentalsData || []) {
+              const bottle = bottlesMap[rental.bottle_barcode];
+              if (bottle) {
+                allRentalData.push({
+                  ...rental,
+                  source: 'rental',
+                  bottles: bottle
+                });
+              }
+            }
+
+            // Add bottles that are assigned but don't have rental records
+            const existingBottleBarcodes = new Set(allRentalData.map(r => r.bottle_barcode));
+            
+            for (const bottle of assignedBottles || []) {
+              const barcode = bottle.barcode_number || bottle.barcode;
+              if (barcode && !existingBottleBarcodes.has(barcode)) {
+                allRentalData.push({
+                  id: `bottle_${bottle.id}`,
+                  source: 'bottle_assignment',
+                  customer_id: bottle.assigned_customer,
+                  bottle_barcode: barcode,
+                  bottles: bottle,
+                  rental_end_date: null
+                });
+              }
+            }
+
+            // Remove duplicates (keep rental records over bottle assignments)
+            const deduplicatedData = [];
+            const seenBarcodes = new Set();
+            
+            // First pass: Add all rental records (priority)
+            for (const item of allRentalData) {
+              if (item.source === 'rental' && !seenBarcodes.has(item.bottle_barcode)) {
+                deduplicatedData.push(item);
+                seenBarcodes.add(item.bottle_barcode);
+              }
+            }
+            
+            // Second pass: Add bottle assignments only if no rental record exists
+            for (const item of allRentalData) {
+              if (item.source === 'bottle_assignment' && !seenBarcodes.has(item.bottle_barcode)) {
+                deduplicatedData.push(item);
+                seenBarcodes.add(item.bottle_barcode);
+              }
+            }
+
+            // 4. Get customer IDs and fetch customer types
+            const customerIds = Array.from(new Set(
+              deduplicatedData.map(r => r.customer_id).filter(Boolean)
+            ));
+
+            let customersMap = {};
+            if (customerIds.length > 0) {
+              const { data: customersData } = await supabase
+                .from('customers')
+                .select('CustomerListID, customer_type')
+                .eq('organization_id', organization.id)
+                .in('CustomerListID', customerIds);
+              
+              if (customersData) {
+                customersMap = customersData.reduce((map, c) => {
+                  map[c.CustomerListID] = c;
+                  return map;
+                }, {});
+              }
+            }
+
+            // 5. Attach customer info and filter out vendors (matching rental page exactly)
+            const rentalsWithCustomer = deduplicatedData.map(r => ({
+              ...r,
+              customer: customersMap[r.customer_id] || null
+            }));
+
+            // Filter out vendors (matching rental page logic exactly)
+            const filteredRentals = rentalsWithCustomer.filter(r => 
+              r.customer_id && 
+              r.customer &&
+              r.customer.customer_type !== 'VENDOR'  // Exclude vendors from rentals view
+            );
+
+            // Count rentals (excluding vendors) - this matches rental page's rentedToCustomers count
+            activeRentalsCount = filteredRentals.length;
+
+            logger.log('Dashboard active rentals count:', {
+              allRentalData: allRentalData.length,
+              deduplicatedData: deduplicatedData.length,
+              filteredRentals: filteredRentals.length,
+              total: activeRentalsCount
+            });
+          }
+        }
+      } catch (error) {
+        logger.error('Error calculating active rentals:', error);
+        activeRentalsCount = 0;
+      }
 
       const newStats = {
         customers: customersRes.count || 0,
         cylinders: cylindersRes.count || 0,
-        activeRentals: rentalsRes.count || 0,
+        activeRentals: activeRentalsCount,
         pendingDeliveries: deliveriesRes.count || 0,
         overdueInvoices: 0,
         totalUsers: 0,
@@ -277,35 +422,32 @@ export default function Home() {
       <Grid container spacing={3} sx={{ mb: 3 }}>
         {statCards.map((card, index) => (
           <Grid item xs={12} sm={6} md={4} lg={2} key={index}>
-            <Card 
-              onClick={card.onClick}
-              sx={{ 
-                height: '100%', 
-                background: `linear-gradient(135deg, ${card.color} 0%, ${card.color}CC 100%)`,
-                color: 'white',
-                transition: 'transform 0.2s',
-                cursor: 'pointer',
-                '&:hover': { 
-                  transform: 'translateY(-4px)',
-                  boxShadow: '0 8px 25px rgba(0,0,0,0.15)'
-                }
-              }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Box>
-                    <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
-                      {card.value}
-                    </Typography>
-                    <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                      {card.title}
-                    </Typography>
+            <Touch3D intensity="medium">
+              <Card 
+                onClick={card.onClick}
+                sx={{ 
+                  height: '100%', 
+                  background: `linear-gradient(135deg, ${card.color} 0%, ${card.color}CC 100%)`,
+                  color: 'white',
+                  cursor: 'pointer',
+                }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Box>
+                      <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
+                        {card.value}
+                      </Typography>
+                      <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                        {card.title}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ opacity: 0.8 }}>
+                      {card.icon}
+                    </Box>
                   </Box>
-                  <Box sx={{ opacity: 0.8 }}>
-                    {card.icon}
-                  </Box>
-                </Box>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </Touch3D>
           </Grid>
         ))}
       </Grid>
@@ -313,43 +455,50 @@ export default function Home() {
       <Grid container spacing={3}>
         {/* Quick Actions */}
         <Grid item xs={12} md={8}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent>
-              <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                <WorkIcon color="primary" />
-                Quick Actions
-              </Typography>
-              <Grid container spacing={2}>
-                {quickActions.map((action, index) => (
-                  <Grid item xs={12} sm={6} md={4} key={index}>
-                    <Button
-                      fullWidth
-                      variant="outlined"
-                      color={action.color}
-                      startIcon={action.icon}
-                      onClick={() => navigate(action.path)}
-                      sx={{ 
-                        py: 1.5, 
-                        justifyContent: 'flex-start',
-                        transition: 'all 0.2s',
-                        '&:hover': { 
-                          transform: 'translateY(-2px)',
-                          boxShadow: 2
-                        }
-                      }}
-                    >
-                      {action.title}
-                    </Button>
-                  </Grid>
-                ))}
-              </Grid>
-            </CardContent>
+          <Card sx={{ height: '100%', p: 3 }}>
+            <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+              <WorkIcon color="primary" />
+              Quick Actions
+            </Typography>
+            <Grid container spacing={2}>
+              {quickActions.map((action, index) => (
+                <Grid item xs={12} sm={6} md={4} key={index}>
+                  <Button
+                    fullWidth
+                    variant="outlined"
+                    color={action.color}
+                    startIcon={action.icon}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      logger.log('Quick action clicked:', action.title, action.path);
+                      navigate(action.path);
+                    }}
+                    sx={{ 
+                      justifyContent: 'flex-start',
+                      minHeight: 48,
+                      py: 1.5,
+                      transition: 'all 0.2s ease-in-out',
+                      position: 'relative',
+                      zIndex: 10,
+                      pointerEvents: 'auto',
+                      cursor: 'pointer',
+                      '&:hover': {
+                        transform: 'translateY(-2px)',
+                        boxShadow: 2,
+                      },
+                    }}
+                  >
+                    {action.title}
+                  </Button>
+                </Grid>
+              ))}
+            </Grid>
           </Card>
         </Grid>
 
         {/* Recent Activity */}
         <Grid item xs={12} md={4}>
-          <Card sx={{ height: '100%' }}>
+          <Card3D intensity="light" sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Notifications color="primary" />
@@ -379,7 +528,7 @@ export default function Home() {
                 </Typography>
               )}
             </CardContent>
-          </Card>
+          </Card3D>
         </Grid>
       </Grid>
 
