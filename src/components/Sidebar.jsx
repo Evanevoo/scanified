@@ -6,7 +6,6 @@ import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
 import { useTheme } from '../context/ThemeContext';
 import { ListItem, ListItemButton, ListItemIcon, ListItemText, TextField, InputAdornment } from '@mui/material';
-import { alpha } from '@mui/material/styles';
 import {
   List, Divider, Box, Typography, Collapse, Chip, IconButton, Tooltip
 } from '@mui/material';
@@ -34,10 +33,6 @@ const collapsedWidth = 72;
 const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   const { profile, organization } = useAuth();
   const { organizationColors } = useTheme();
-  const accentColor = organizationColors?.primary || '#667eea';
-  const accentSelectedBg = alpha(accentColor, 0.15);
-  const accentHoverBg = alpha(accentColor, 0.08);
-  const accentShadow = alpha(accentColor, 0.25);
   
   // CRITICAL: Check profile BEFORE calling any other hooks to avoid hook inconsistency
   if (!profile) return null;
@@ -181,7 +176,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                     width: 40, 
                     borderRadius: 6, 
                     background: `linear-gradient(135deg, ${organizationColors?.primary || '#40B5AD'} 0%, ${organizationColors?.secondary || '#48C9B0'} 100%)`,
-                    border: '1px solid #eee',
+                    border: '1px solid',
+borderColor: 'divider',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -248,7 +244,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         { title: 'Import Data', path: '/import', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
         { title: 'Import Customers', path: '/import-customer-info', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
         { title: 'Import Asset Balance', path: '/import-asset-balance', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Verification Center', path: '/verification-center', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Import Approvals', path: '/import-approvals', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
         { title: 'Verified Orders', path: '/verified-orders', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
         { title: 'Organization Tools', path: '/organization-tools', icon: <BuildIcon />, roles: ['admin', 'manager'] },
               { title: 'User Management', path: '/settings?tab=team', icon: <AdminPanelSettings />, roles: ['admin', 'manager'] },
@@ -276,6 +272,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       items: [
         { title: 'Deliveries', path: '/deliveries', icon: <LocalShipping />, roles: ['admin', 'user', 'manager'] },
         { title: 'Rentals', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Scanned Orders', path: '/scanned-orders', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Lease Agreements', path: '/lease-agreements', icon: <WorkIcon />, roles: ['admin', 'manager'] },
         { title: 'Generate Customer ID', path: '/generateid', icon: <IntegrationIcon />, roles: ['owner'] },
         { title: 'Barcode Generator', path: '/barcode-generator', icon: <QrCodeIcon />, roles: ['admin', 'user', 'manager'] },
@@ -334,18 +331,19 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   return (
     <Box sx={{ 
       overflow: 'auto', 
-      mt: 8, 
-      height: 'calc(100% - 64px)',
-      backgroundColor: '#fafbfc',
-      borderRight: '1px solid #e1e5e9'
+      height: '100%',
+      backgroundColor: 'background.default',
+      borderRight: '1px solid',
+      borderRightColor: 'divider'
     }}>
         {/* Collapse Toggle */}
         <Box sx={{ 
           display: 'flex', 
           justifyContent: isCollapsed ? 'center' : 'flex-end', 
           p: 2, 
-          borderBottom: '1px solid #e1e5e9',
-          backgroundColor: '#ffffff',
+          borderBottom: '1px solid',
+          borderBottomColor: 'divider',
+          backgroundColor: 'background.paper',
           boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
         }}>
           <Tooltip title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
@@ -353,12 +351,13 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
               onClick={onToggleCollapse}
               size="small"
               sx={{
-                backgroundColor: isCollapsed ? 'primary.main' : '#f8f9fa',
+                backgroundColor: isCollapsed ? 'primary.main' : 'background.default',
                 color: isCollapsed ? 'white' : 'text.secondary',
                 borderRadius: 2,
-                border: '1px solid #e1e5e9',
+                border: '1px solid',
+                borderColor: 'divider',
                 '&:hover': {
-                  backgroundColor: isCollapsed ? 'primary.dark' : '#e9ecef',
+                  backgroundColor: isCollapsed ? 'primary.dark' : 'action.hover',
                   transform: 'scale(1.05)',
                   transition: 'all 0.2s ease'
                 }
@@ -374,7 +373,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
           <Box sx={{ 
             p: isCollapsed ? 1.5 : 2.5, 
             borderBottom: '1px solid #e1e5e9', 
-            backgroundColor: '#ffffff',
+            backgroundColor: 'background.paper',
             display: 'flex', 
             alignItems: 'center', 
             justifyContent: isCollapsed ? 'center' : 'flex-start',
@@ -392,7 +391,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                   objectFit: 'contain', 
                   borderRadius: 8, 
                   background: '#fff', 
-                  border: '2px solid #e1e5e9',
+                  border: '2px solid',
+borderColor: 'divider',
                   boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                 }}
                 onError={(e) => {
@@ -407,7 +407,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                   width: isCollapsed ? 28 : 36, 
                   borderRadius: 8, 
                   background: `linear-gradient(135deg, ${organizationColors?.primary || '#40B5AD'} 0%, ${organizationColors?.secondary || '#48C9B0'} 100%)`,
-                  border: '2px solid #e1e5e9',
+                  border: '2px solid',
+borderColor: 'divider',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -437,12 +438,17 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         {!isCollapsed && (
           <Box sx={{ 
             p: 2.5, 
-            borderBottom: '1px solid #e1e5e9',
-            backgroundColor: '#ffffff',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+            backgroundColor: 'background.paper',
+            border: 'none',
+            borderBottom: 'none',
+            borderTop: 'none',
+            borderLeft: 'none',
+            borderRight: 'none',
+            boxShadow: 'none'
           }}>
             <TextField
               size="small"
+              variant="outlined"
               placeholder="Search menu..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -450,23 +456,52 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
               sx={{
                 '& .MuiOutlinedInput-root': {
                   borderRadius: 2,
-                  backgroundColor: '#f8f9fa',
-                  border: '1px solid #e1e5e9',
+                  backgroundColor: 'background.default',
+                  border: 'none !important',
+                  borderLeft: 'none !important',
+                  borderRight: 'none !important',
+                  borderTop: 'none !important',
+                  borderBottom: 'none !important',
+                  outline: 'none !important',
+                  boxShadow: 'none !important',
+                  '& fieldset': {
+                    borderColor: '#e1e5e9 !important',
+                    borderWidth: '1px !important',
+                    borderStyle: 'solid !important',
+                    borderLeftWidth: '1px !important',
+                    borderRightWidth: '1px !important',
+                    borderTopWidth: '1px !important',
+                    borderBottomWidth: '1px !important',
+                  },
+                  '&:hover fieldset': {
+                    borderColor: 'primary.main !important',
+                    borderWidth: '1px !important',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: 'primary.main !important',
+                    borderWidth: '1px !important',
+                  },
                   '&:hover': {
-                    borderColor: accentColor,
                     backgroundColor: '#ffffff'
                   },
                   '&.Mui-focused': {
-                    borderColor: accentColor,
-                    backgroundColor: '#ffffff',
-                    boxShadow: `0 0 0 3px ${alpha(accentColor, 0.15)}`
+                    backgroundColor: 'background.paper',
+                    boxShadow: '0 0 0 3px rgba(102, 126, 234, 0.1)'
                   }
+                },
+                '& .MuiOutlinedInput-input': {
+                  border: 'none !important',
+                  borderLeft: 'none !important',
+                  borderRight: 'none !important',
+                  borderTop: 'none !important',
+                  borderBottom: 'none !important',
+                  outline: 'none !important',
                 }
               }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <SearchIcon fontSize="small" sx={{ color: '#6c757d' }} />
+                    <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
                   </InputAdornment>
                 ),
               }}
@@ -488,11 +523,11 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                   sx={{ 
                     py: 1.5,
                     px: 2,
-                    backgroundColor: '#f8f9fa',
+                    backgroundColor: 'background.default',
                     borderBottom: '1px solid #e1e5e9',
                     borderRadius: 0,
                     '&:hover': {
-                      backgroundColor: '#e9ecef',
+                      backgroundColor: 'action.hover',
                       transform: 'translateX(2px)',
                       transition: 'all 0.2s ease'
                     }
@@ -501,7 +536,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                   <ListItemIcon sx={{ minWidth: isCollapsed ? 'auto' : 40 }}>
                     <Tooltip title={isCollapsed ? section.title : ''} placement="right">
                       <Box sx={{ 
-                        color: accentColor,
+                        color: 'primary.main',
                         fontSize: '20px',
                         display: 'flex',
                         alignItems: 'center',
@@ -549,22 +584,26 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                             pl: isCollapsed ? 1.5 : 3.5,
                             py: 1.2,
                             px: 2,
-                            borderBottom: index < section.items.length - 1 ? '1px solid #e9ecef' : 'none',
+                            borderBottom: index < section.items.length - 1 ? '1px solid' : 'none',
+borderBottomColor: index < section.items.length - 1 ? 'divider' : 'transparent',
                             borderRadius: 0,
-                            backgroundColor: isActive(item.path) ? accentSelectedBg : 'transparent',
-                            borderLeft: isActive(item.path) ? `4px solid ${accentColor}` : '4px solid transparent',
+                            backgroundColor: isActive(item.path) ? 'primary.light' : 'transparent',
+                            borderLeft: isActive(item.path) ? '4px solid' : '4px solid transparent',
+                            borderLeftColor: isActive(item.path) ? 'primary.main' : 'transparent',
                             transition: 'all 0.2s ease',
                             '&:hover': {
-                              backgroundColor: isActive(item.path) ? accentSelectedBg : accentHoverBg,
+                              backgroundColor: isActive(item.path) ? 'primary.light' : 'background.default',
                               transform: 'translateX(4px)',
-                              borderLeft: `4px solid ${accentColor}`,
-                              boxShadow: `0 2px 8px ${accentShadow}`
+                              borderLeft: '4px solid',
+                              borderLeftColor: 'primary.main',
+                              boxShadow: '0 2px 8px rgba(64, 181, 173, 0.15)'
                             },
                             '&.Mui-selected': {
-                              backgroundColor: accentSelectedBg,
-                              borderLeft: `4px solid ${accentColor}`,
+                              backgroundColor: 'primary.light',
+                              borderLeft: '4px solid',
+                              borderLeftColor: 'primary.main',
                               '&:hover': {
-                                backgroundColor: accentSelectedBg,
+                                backgroundColor: 'primary.light',
                                 transform: 'translateX(4px)',
                               },
                             },
@@ -573,7 +612,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                           <ListItemIcon sx={{ minWidth: isCollapsed ? 'auto' : 40 }}>
                             <Tooltip title={isCollapsed ? item.title : ''} placement="right">
                               <Box sx={{ 
-                                color: isActive(item.path) ? accentColor : '#6c757d',
+                                color: isActive(item.path) ? 'primary.main' : 'text.secondary',
                                 fontSize: '18px',
                                 display: 'flex',
                                 alignItems: 'center',

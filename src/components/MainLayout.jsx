@@ -67,7 +67,7 @@ export default function MainLayout({ children }) {
     : [
         { label: 'Home', to: '/home' },
         { label: 'Inventory', to: '/inventory' },
-        { label: 'Orders', to: '/verification-center' },
+        { label: 'Orders', to: '/import-approvals' },
         { label: 'Rentals', to: '/rentals' },
       ];
 
@@ -185,7 +185,7 @@ export default function MainLayout({ children }) {
       navigate(`/customer/${item.id}`);
     } else if (item.type === 'bottle') {
       // Navigate to bottle detail page
-      navigate(`/bottle/${item.barcode_number || item.id}`);
+      navigate(`/bottle/${item.id}`);
     } else if (item.type === 'asset') {
       // Legacy support for old asset references
       navigate(`/asset/${item.id}`);
@@ -272,8 +272,8 @@ export default function MainLayout({ children }) {
               minWidth: `${sidebarCollapsed ? collapsedWidth : drawerWidth}px !important`,
               maxWidth: `${sidebarCollapsed ? collapsedWidth : drawerWidth}px !important`,
               boxSizing: 'border-box',
-              top: 0,
-              height: '100vh',
+              top: 64,
+              height: 'calc(100vh - 64px)',
               overflow: 'hidden',
               transition: 'width 0.3s ease',
               zIndex: (theme) => theme.zIndex.drawer,
@@ -291,7 +291,7 @@ export default function MainLayout({ children }) {
         elevation={0}
         sx={{
           zIndex: (theme) => theme.zIndex.drawer + 1,
-          bgcolor: '#fff',
+          bgcolor: 'background.paper',
           color: '#111',
           boxShadow: 'none',
           border: 'none',
