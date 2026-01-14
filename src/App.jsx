@@ -16,7 +16,6 @@ import OwnerProtectedRoute from './components/OwnerProtectedRoute';
 import RoleProtectedRoute from './components/RoleProtectedRoute';
 import { initAllTracking, trackPageView } from './utils/analytics';
 import { initializeDisasterRecovery } from './utils/disasterRecovery';
-import './utils/backgroundService'; // Auto-starts daily days_at_location updates
 import './styles/responsive.css';
 import './styles/accessibility.css';
 import Billing from './pages/Billing';
@@ -24,6 +23,7 @@ import OwnerDashboard from './pages/OwnerDashboard';
 import CustomerPortal from './pages/CustomerPortal';
 import BarcodeGenerator from './pages/BarcodeGenerator';
 import LandingPage from './pages/LandingPage';
+import ModernLandingPage from './pages/ModernLandingPage';
 import FixOrganizationLink from './pages/FixOrganizationLink';
 import OAuthOrganizationLink from './pages/OAuthOrganizationLink';
 
@@ -81,6 +81,7 @@ import Reviews from './pages/Reviews';
 import CookieNotice from './components/CookieNotice';
 import NavigationBar from './components/NavigationBar';
 import Demo from './pages/Demo';
+import ParticleTextDemo from './pages/ParticleTextDemo';
 import Features from './pages/Features';
 import Pricing from './pages/Pricing';
 import About from './pages/About';
@@ -91,6 +92,8 @@ import CompetitorAnalysis from './pages/CompetitorAnalysis';
 import Blog from './pages/Blog';
 import Security from './pages/Security';
 import OwnershipManagement from './pages/OwnershipManagement';
+import CaseStudiesPage from './pages/CaseStudiesPage';
+import KnowledgeBase from './pages/KnowledgeBase';
 
 // Lazy load all page components
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -129,12 +132,13 @@ const QuickMapReport = lazy(() => import('./pages/management-reports/QuickMapRep
 const QuickAdd = lazy(() => import('./pages/QuickAdd'));
 const LotReports = lazy(() => import('./pages/LotReports'));
 const Rental = lazy(() => import('./pages/Rental'));
-const CustomerDetail = lazy(() => import('./pages/CustomerDetail.jsx'));
+const CustomerDetail = lazy(() => import('./pages/CustomerDetail'));
 const AssetHistory = lazy(() => import('./pages/AssetHistory'));
 const AssetHistoryLookup = lazy(() => import('./pages/AssetHistoryLookup'));
 const Import = lazy(() => import('./pages/Import'));
 const Settings = lazy(() => import('./pages/Settings'));
 const ImportCustomerInfo = lazy(() => import('./pages/ImportCustomerInfo'));
+const ScannedOrders = lazy(() => import('./pages/ScannedOrders'));
 const SupabaseOrders = lazy(() => import('./pages/management-reports/SupabaseOrders'));
 const UserManagement = lazy(() => import('./pages/UserManagement'));
 const ImportAssetBalance = lazy(() => import('./pages/ImportAssetBalance'));
@@ -211,15 +215,15 @@ function AppContent() {
                 <Routes>
                   {/* Smart root redirect based on user state */}
                   <Route path="/" element={
-                    loading ? <LandingPage /> :
-                    (sessionStorage.getItem('skip_org_redirect_once') ? <LandingPage /> : (
+                    loading ? <ModernLandingPage /> :
+                    (sessionStorage.getItem('skip_org_redirect_once') ? <ModernLandingPage /> : (
                       profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
                       profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
                       profile && !organization ? <Navigate to="/connect-organization" replace /> :
-                      <LandingPage />
+                      <ModernLandingPage />
                     ))
                   } />
-                  <Route path="/landing" element={<LandingPage />} />
+                  <Route path="/landing" element={<ModernLandingPage />} />
                   <Route path="/create-organization" element={<CreateOrganization />} />
                   <Route path="/verify-organization" element={<VerifyOrganization />} />
                   <Route path="/accept-invite" element={<AcceptInvite />} />
@@ -261,13 +265,16 @@ function AppContent() {
 
                   <Route path="/test-landing" element={<LandingPage />} />
                   <Route path="/demo" element={<Demo />} />
+                  <Route path="/particle-demo" element={<ParticleTextDemo />} />
                   <Route path="/features" element={<Features />} />
                   <Route path="/pricing" element={<Pricing />} />
                   <Route path="/about" element={<About />} />
-                  <Route path="/case-studies" element={<CaseStudies />} />
+                  <Route path="/case-studies" element={<CaseStudiesPage />} />
                   <Route path="/compare" element={<CompetitorAnalysis />} />
-                                  <Route path="/blog" element={<Blog />} />
-                <Route path="/security" element={<Security />} />
+                  <Route path="/blog" element={<Blog />} />
+                  <Route path="/security" element={<Security />} />
+                  <Route path="/knowledge-base" element={<KnowledgeBase />} />
+                  <Route path="/help" element={<KnowledgeBase />} />
                   <Route path="/integrations" element={
                     <Suspense fallback={<LoadingSpinner />}>
                       <IntegrationsPage />
@@ -327,6 +334,7 @@ function AppContent() {
                     <Route path="/import" element={<Import />} />
                     <Route path="/settings" element={<Settings />} />
                     <Route path="/import-customer-info" element={<ImportCustomerInfo />} />
+                    <Route path="/scanned-orders" element={<ScannedOrders />} />
                     <Route path="/user-management" element={<Navigate to="/settings?tab=team" replace />} />
                     <Route path="/user-invites" element={<UserInvites />} />
                     <Route path="/role-management" element={<ComprehensiveRoleManager />} />
@@ -336,23 +344,20 @@ function AppContent() {
                     <Route path="/role-permission-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/unified-role-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/import-asset-balance" element={<ImportAssetBalance />} />
-                    <Route path="/verification-center" element={<ImportApprovals />} />
-                    {/* Legacy route redirect */}
-                    <Route path="/importapprovals" element={<Navigate to="/verification-center" replace />} />
-                    <Route path="/import-approvals" element={<Navigate to="/verification-center" replace />} />
+                    <Route path="/import-approvals" element={<ImportApprovals />} />
                     <Route path="/import-approval/:id/detail" element={<ImportApprovalDetail />} />
                     <Route path="/verified-orders" element={<VerifiedOrders />} />
+                    <Route path="/orders-report" element={<ScannedOrders />} />
                     {/* Generate ID route removed per App Store guidelines */}
                     <Route path="/barcode-generator" element={<BarcodeGenerator />} />
                     {/* Organization-level routes - accessible to all organization users */}
-                    <Route path="/bottle/:barcode" element={<AssetDetail />} />
-                    {/* Legacy route for UUIDs - redirect to barcode lookup */}
-                    <Route path="/bottle-uuid/:id" element={<AssetDetail />} />
+                    <Route path="/bottle/:id" element={<AssetDetail />} />
                     <Route path="/bottle-management" element={<BottleManagement />} />
                     <Route path="/ownership-management" element={<OwnershipManagement />} />
                     <Route path="/daily-update-admin" element={<DailyUpdateAdmin />} />
                     <Route path="/assets/:id" element={<AssetDetail />} />
                     <Route path="/asset/:id" element={<AssetDetail />} />
+                    <Route path="/orders" element={<ScannedOrders />} />
                     <Route path="/billing" element={
                       <RoleProtectedRoute allowedRoles={['admin', 'manager', 'user']}>
                         <Billing />
@@ -497,20 +502,20 @@ function AppContent() {
                 toastOptions={{
                   duration: 5000,
                   style: {
-                    background: '#363636',
-                    color: '#fff',
+                    background: 'var(--mui-palette-background-paper, #363636)',
+                    color: 'var(--mui-palette-text-primary, #fff)',
                   },
                   success: {
                     duration: 3000,
                     iconTheme: {
-                      primary: '#4ade80',
+                      primary: '#10B981',
                       secondary: '#fff',
                     },
                   },
                   error: {
                     duration: 4000,
                     iconTheme: {
-                      primary: '#ef4444',
+                      primary: '#EF4444',
                       secondary: '#fff',
                     },
                   },
