@@ -3,7 +3,7 @@
   command = "npm run build"
 
 [build.environment]
-  NODE_VERSION = "18"
+  NODE_VERSION = "20"
 
 [dev]
   command = "npm run dev"
@@ -14,6 +14,8 @@
   # Email credentials should be set in Netlify Dashboard environment variables, NOT in this file
   # Required: EMAIL_USER, EMAIL_PASSWORD, EMAIL_FROM
 
+# Catch-all redirect for SPA
+# Note: Netlify automatically excludes /.netlify/functions/* from redirects
 [[redirects]]
   from = "/*"
   to = "/index.html"
@@ -30,13 +32,22 @@
 
 [functions]
   directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[functions.environment]
+  NODE_VERSION = "20"
 
 # Scheduled Functions
 # To enable daily backups, go to Netlify Dashboard > Functions > Scheduled Functions
-# Add a new scheduled function:
-# - Function: daily-backup
-# - Schedule: 0 2 * * * (runs daily at 2 AM UTC)
-# - Environment variable: CRON_SECRET (set a secure random string)
+# Add scheduled functions:
+# 1. Daily Tenant Backup:
+#    - Function: daily-tenant-backup
+#    - Schedule: 0 2 * * * (runs daily at 2 AM UTC)
+#    - Environment variable: CRON_SECRET (set a secure random string)
+# 2. Legacy Daily Backup (optional):
+#    - Function: daily-backup
+#    - Schedule: 0 2 * * * (runs daily at 2 AM UTC)
+#    - Environment variable: CRON_SECRET
 
 # Daily Days at Location Update
 # Configure in Netlify Dashboard > Functions > Scheduled Functions:

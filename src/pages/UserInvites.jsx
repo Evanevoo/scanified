@@ -126,6 +126,14 @@ export default function UserInvites() {
     setSuccess('');
 
     try {
+      // Normalize email to lowercase for consistent database queries
+      const normalizedEmail = inviteForm.email.trim().toLowerCase();
+      
+      if (!normalizedEmail || !normalizedEmail.includes('@')) {
+        setError('Please enter a valid email address');
+        return;
+      }
+
       // Create invite
       const { data: user } = await supabase.auth.getUser();
       
@@ -133,7 +141,7 @@ export default function UserInvites() {
         'create_user_invite',
         {
           p_organization_id: organization.id,
-          p_email: inviteForm.email,
+          p_email: normalizedEmail,
           p_role: inviteForm.role,
           p_invited_by: user.user?.id
         }
@@ -154,7 +162,7 @@ export default function UserInvites() {
             p_expires_hours: 168, // 7 days (same as invite)
             p_max_uses: 1,
             p_assigned_role: inviteForm.role,
-            p_notes: `Invite for ${inviteForm.email}`
+            p_notes: `Invite for ${normalizedEmail}`
           }
         );
 
@@ -171,32 +179,73 @@ export default function UserInvites() {
       const inviteLink = `${window.location.origin}/accept-invite?token=${token}`;
       
       try {
-        await fetch('/.netlify/functions/send-invite-email', {
+        const emailResponse = await fetch('/.netlify/functions/send-email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            to: inviteForm.email,
-            inviteLink,
-            organizationName: organization.name,
-            inviter: profile.name || profile.email,
-            joinCode: joinCode // Include code in email if available
+            to: normalizedEmail,
+            subject: `You're invited to join ${organization.name}`,
+            template: 'invite',
+            data: {
+              inviteLink,
+              organizationName: organization.name,
+              inviterName: profile.name || profile.email,
+              joinCode: joinCode // Include code in email if available
+            }
           })
         });
+
+        if (!emailResponse.ok) {
+          // Try to parse error response, but handle empty responses
+          let errorMessage = 'Unknown error';
+          let errorDetails = '';
+          try {
+            const errorData = await emailResponse.json();
+            errorMessage = errorData.error || errorData.message || 'Email service unavailable';
+            errorDetails = errorData.details || '';
+            
+            // Provide actionable error messages
+            if (errorMessage.includes('Email service not configured')) {
+              errorMessage = '❌ Email service not configured in Netlify. ';
+              errorMessage += 'Go to Netlify Dashboard → Site Settings → Environment Variables and add:\n';
+              errorMessage += '• SMTP2GO_USER, SMTP2GO_PASSWORD, SMTP2GO_FROM (recommended)\n';
+              errorMessage += 'OR\n';
+              errorMessage += '• EMAIL_USER, EMAIL_PASSWORD, EMAIL_FROM (Gmail - use App Password)';
+            } else if (errorMessage.includes('connection failed') || errorMessage.includes('SMTP')) {
+              errorMessage = `❌ Email connection failed: ${errorDetails || errorMessage}\n\n`;
+              errorMessage += 'Check:\n';
+              errorMessage += '1. Email credentials are correct in Netlify environment variables\n';
+              errorMessage += '2. For Gmail: Use an App Password, not your regular password\n';
+              errorMessage += '3. Check Netlify function logs for detailed error messages';
+            }
+          } catch (parseError) {
+            errorMessage = `Email service returned status ${emailResponse.status}. Check Netlify function logs for details.`;
+          }
+          logger.error('Email sending failed:', errorMessage, errorDetails);
+          throw new Error(errorMessage + (errorDetails ? '\n\nDetails: ' + errorDetails : ''));
+        }
+
+        // Email sent successfully
+        const responseData = await emailResponse.json();
+        logger.log('Invitation email sent successfully to:', normalizedEmail, responseData);
         
         if (joinCode) {
-          setSuccess(`✅ Invite sent to ${inviteForm.email}! Code: ${joinCode} (also copied to clipboard)`);
+          setSuccess(`✅ Invite sent to ${normalizedEmail}! Code: ${joinCode} (also copied to clipboard)`);
           navigator.clipboard.writeText(joinCode);
         } else {
-          setSuccess(`✅ Invite sent to ${inviteForm.email}!`);
+          setSuccess(`✅ Invite sent to ${normalizedEmail}!`);
         }
       } catch (emailError) {
         logger.warn('Email failed:', emailError);
+        const errorMsg = emailError.message || 'Unknown error';
         if (joinCode) {
           setSuccess(`✅ Invite created! Code: ${joinCode} (copied to clipboard). Email service unavailable - share the code or link manually.`);
           navigator.clipboard.writeText(joinCode);
         } else {
           setSuccess(`✅ Invite created! Email service unavailable - copy the link from the table below.`);
         }
+        // Log the error for debugging
+        logger.error('Email sending error details:', errorMsg);
       }
 
       // Reset form and refresh
@@ -373,7 +422,7 @@ export default function UserInvites() {
               label="Email Address"
               type="email"
               value={inviteForm.email}
-              onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
+              onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value.toLowerCase().trim() })}
               placeholder="user@example.com"
             />
 
