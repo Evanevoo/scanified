@@ -302,8 +302,10 @@ class FeedbackService {
     // Play haptic feedback
     await this.playHaptic(type);
 
-    // Play sound effect
-    await this.playSound(type);
+    // Play sound effect (skip sound for duplicate scans)
+    if (type !== 'duplicate') {
+      await this.playSound(type);
+    }
 
     // Provide voice feedback
     if (this.settings.voiceEnabled) {

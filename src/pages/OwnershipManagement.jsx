@@ -27,11 +27,8 @@ import {
   Checkbox,
   Grid,
   Card,
-  CardContent,
-  TablePagination,
-  Link
+  CardContent
 } from '@mui/material';
-import { Link as RouterLink } from 'react-router-dom';
 import {
   Add as AddIcon,
   Delete as DeleteIcon,
@@ -68,18 +65,12 @@ export default function OwnershipManagement() {
   const [selectedBottles, setSelectedBottles] = useState(new Set());
   const [bulkChangeFrom, setBulkChangeFrom] = useState('');
   const [bulkChangeTo, setBulkChangeTo] = useState('');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(100);
 
   useEffect(() => {
     if (organization) {
       loadData();
     }
   }, [organization]);
-
-  useEffect(() => {
-    setPage(0);
-  }, [selectedOwnership, searchTerm]);
 
   const loadData = async () => {
     try {
@@ -319,27 +310,6 @@ export default function OwnershipManagement() {
     return matchesOwnership && matchesSearch;
   });
 
-  useEffect(() => {
-    const maxPage = Math.max(0, Math.ceil(filteredBottles.length / rowsPerPage) - 1);
-    if (page > maxPage) {
-      setPage(maxPage);
-    }
-  }, [filteredBottles.length, rowsPerPage, page]);
-
-  const paginatedBottles = filteredBottles.slice(
-    page * rowsPerPage,
-    page * rowsPerPage + rowsPerPage
-  );
-
-  const handleChangePage = (_event, newPage) => {
-    setPage(newPage);
-  };
-
-  const handleChangeRowsPerPage = (event) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
-  };
-
   const getOwnershipStats = () => {
     const stats = {};
     bottles.forEach(bottle => {
@@ -353,10 +323,6 @@ export default function OwnershipManagement() {
   };
 
   const ownershipStats = getOwnershipStats();
-
-  const handleOwnershipChipClick = (value) => {
-    setSelectedOwnership(prev => (prev === value ? '' : value));
-  };
 
   if (loading) {
     return (
@@ -457,45 +423,21 @@ export default function OwnershipManagement() {
           <Typography variant="h6" fontWeight={600} gutterBottom>
             Ownership Values
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Click a value to filter the table. Use the edit icon to rename or the delete icon to remove.
-          </Typography>
-          {selectedOwnership && (
-            <Button
-              variant="text"
-              size="small"
-              sx={{ mt: 1, mb: 1 }}
-              onClick={() => setSelectedOwnership('')}
-            >
-              Clear ownership filter ({selectedOwnership})
-            </Button>
-          )}
           <Box display="flex" flexWrap="wrap" gap={2} mt={2}>
             {ownershipValues.map((ownership) => (
-              <Box key={ownership.id || ownership.value} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Chip
-                  label={`${ownership.value} (${ownershipStats[ownership.value] || 0})`}
-                  onDelete={() => {
-                    setOwnershipToDelete(ownership);
-                    setDeleteDialog(true);
-                  }}
-                  onClick={() => handleOwnershipChipClick(ownership.value)}
-                  color={selectedOwnership === ownership.value ? 'primary' : 'default'}
-                  variant={selectedOwnership === ownership.value ? 'filled' : 'outlined'}
-                  icon={<FilterListIcon fontSize="small" />}
-                  sx={{ fontSize: '1rem', py: 2.5, px: 1 }}
-                />
-                <IconButton
-                  size="small"
-                  onClick={() => {
-                    setEditingOwnership({ ...ownership });
-                    setEditDialog(true);
-                  }}
-                  aria-label={`Edit ${ownership.value}`}
-                >
-                  <EditIcon fontSize="small" />
-                </IconButton>
-              </Box>
+              <Chip
+                key={ownership.id || ownership.value}
+                label={`${ownership.value} (${ownershipStats[ownership.value] || 0})`}
+                onDelete={() => {
+                  setOwnershipToDelete(ownership);
+                  setDeleteDialog(true);
+                }}
+                onClick={() => {
+                  setEditingOwnership({ ...ownership });
+                  setEditDialog(true);
+                }}
+                sx={{ fontSize: '1rem', py: 2.5, px: 1 }}
+              />
             ))}
             {ownershipValues.length === 0 && (
               <Typography color="text.secondary">
@@ -538,10 +480,7 @@ export default function OwnershipManagement() {
             </Grid>
             <Grid item xs={12} md={4}>
               <Typography variant="body2" color="text.secondary" sx={{ pb: 0.5 }}>
-                Showing {paginatedBottles.length > 0 ? page * rowsPerPage + 1 : 0}
-                –
-                {Math.min((page + 1) * rowsPerPage, filteredBottles.length)}
-                {' '}of {filteredBottles.length} bottles
+                Showing {filteredBottles.length} of {bottles.length} bottles
               </Typography>
             </Grid>
           </Grid>
@@ -555,23 +494,13 @@ export default function OwnershipManagement() {
                 <TableRow>
                   <TableCell padding="checkbox" sx={{ width: 48, fontWeight: 600, px: 1 }}>
                     <Checkbox
-                      checked={
-                        paginatedBottles.length > 0 &&
-                        paginatedBottles.every(bottle => selectedBottles.has(bottle.id))
-                      }
-                      indeterminate={
-                        paginatedBottles.some(bottle => selectedBottles.has(bottle.id)) &&
-                        !paginatedBottles.every(bottle => selectedBottles.has(bottle.id))
-                      }
+                      checked={selectedBottles.size === filteredBottles.length && filteredBottles.length > 0}
+                      indeterminate={selectedBottles.size > 0 && selectedBottles.size < filteredBottles.length}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          const newSelected = new Set(selectedBottles);
-                          paginatedBottles.forEach(bottle => newSelected.add(bottle.id));
-                          setSelectedBottles(newSelected);
+                          setSelectedBottles(new Set(filteredBottles.map(b => b.id)));
                         } else {
-                          const newSelected = new Set(selectedBottles);
-                          paginatedBottles.forEach(bottle => newSelected.delete(bottle.id));
-                          setSelectedBottles(newSelected);
+                          setSelectedBottles(new Set());
                         }
                       }}
                       size="small"
@@ -587,7 +516,7 @@ export default function OwnershipManagement() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {paginatedBottles.map((bottle) => (
+                {filteredBottles.map((bottle) => (
                   <TableRow key={bottle.id} hover>
                     <TableCell padding="checkbox" sx={{ width: 48, px: 1 }}>
                       <Checkbox
@@ -604,20 +533,7 @@ export default function OwnershipManagement() {
                         size="small"
                       />
                     </TableCell>
-                    <TableCell sx={{ whiteSpace: 'nowrap', px: 2 }}>
-                      {bottle.barcode_number ? (
-                        <Link
-                          component={RouterLink}
-                          to={`/bottle/${bottle.barcode_number || bottle.id}`}
-                          underline="hover"
-                          sx={{ fontWeight: 600 }}
-                        >
-                          {bottle.barcode_number}
-                        </Link>
-                      ) : (
-                        '-'
-                      )}
-                    </TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap', px: 2 }}>{bottle.barcode_number || '-'}</TableCell>
                     <TableCell sx={{ whiteSpace: 'nowrap', px: 2 }}>{bottle.serial_number || '-'}</TableCell>
                     <TableCell sx={{ whiteSpace: 'nowrap', px: 2 }}>{bottle.product_code || '-'}</TableCell>
                     <TableCell sx={{ whiteSpace: 'nowrap', px: 2 }}>{bottle.gas_type || '-'}</TableCell>
@@ -643,8 +559,6 @@ export default function OwnershipManagement() {
                     <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                       <Typography color="text.secondary">
                         No bottles found
-                        {searchTerm && ` for search "${searchTerm}"`}
-                        {selectedOwnership && ` in ownership "${selectedOwnership}"`}
                       </Typography>
                     </TableCell>
                   </TableRow>
@@ -652,16 +566,6 @@ export default function OwnershipManagement() {
               </TableBody>
             </Table>
           </TableContainer>
-          <TablePagination
-            component="div"
-            count={filteredBottles.length}
-            rowsPerPage={rowsPerPage}
-            page={page}
-            onPageChange={handleChangePage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
-            rowsPerPageOptions={[25, 50, 100]}
-            labelRowsPerPage="Bottles per page"
-          />
         </Paper>
 
         {/* Add Ownership Dialog */}

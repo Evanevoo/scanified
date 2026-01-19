@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fix Customer Barcodes</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 30px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+        button {
+            flex: 1;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        .btn-primary:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+        .btn-secondary:hover:not(:disabled) {
+            background: #e0e0e0;
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+        .status.info {
+            background: #e3f2fd;
+            color: #1976d2;
+            border-left: 4px solid #1976d2;
+        }
+        .status.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-left: 4px solid #2e7d32;
+        }
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+            border-left: 4px solid #c62828;
+        }
+        .status.warning {
+            background: #fff3e0;
+            color: #e65100;
+            border-left: 4px solid #e65100;
+        }
+        .results {
+            margin-top: 30px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .result-item {
+            padding: 12px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            background: #f9f9f9;
+            border-left: 4px solid #667eea;
+        }
+        .result-item.success {
+            border-left-color: #2e7d32;
+            background: #e8f5e9;
+        }
+        .result-item.error {
+            border-left-color: #c62828;
+            background: #ffebee;
+        }
+        .result-item.skip {
+            border-left-color: #ff9800;
+            background: #fff3e0;
+        }
+        .result-header {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .result-details {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+        .summary {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        .summary-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .summary-item:last-child {
+            border-bottom: none;
+        }
+        .summary-label {
+            font-weight: 600;
+            color: #333;
+        }
+        .summary-value {
+            color: #666;
+        }
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .config-section {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .config-section h3 {
+            margin-bottom: 10px;
+            color: #333;
+            font-size: 16px;
+        }
+        .config-input {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔖 Fix Customer Barcodes</h1>
+        <p class="subtitle">Auto-generate missing barcodes for customers using the standard pattern: %{lowercase_customer_id}</p>
+        
+        <div class="config-section">
+            <h3>Supabase Configuration</h3>
+            <div class="form-group config-input">
+                <label>Supabase URL</label>
+                <input type="text" id="supabaseUrl" placeholder="https://your-project.supabase.co" value="">
+            </div>
+            <div class="form-group config-input">
+                <label>Supabase Anon Key</label>
+                <input type="password" id="supabaseKey" placeholder="Your Supabase anon key">
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label>Customer ID (Optional)</label>
+            <input type="text" id="customerId" placeholder="800005BE-1578330321A (leave empty to fix all customers without barcodes)">
+        </div>
+        
+        <div class="button-group">
+            <button class="btn-primary" id="fixBtn" onclick="fixBarcodes()">
+                Fix Barcodes
+            </button>
+            <button class="btn-secondary" id="checkBtn" onclick="checkBarcodes()">
+                Check Status
+            </button>
+        </div>
+        
+        <div id="status" class="status"></div>
+        
+        <div id="results" class="results"></div>
+        
+        <div id="summary" class="summary" style="display: none;"></div>
+    </div>
+
+    <script>
+        let supabaseClient = null;
+
+        function initSupabase() {
+            const url = document.getElementById('supabaseUrl').value.trim();
+            const key = document.getElementById('supabaseKey').value.trim();
+            
+            if (!url || !key) {
+                showStatus('Please enter Supabase URL and Key', 'error');
+                return false;
+            }
+            
+            supabaseClient = window.supabase.createClient(url, key);
+            return true;
+        }
+
+        function generateBarcode(customerId) {
+            if (!customerId) return null;
+            const normalized = customerId.toLowerCase().replace(/\s+/g, '');
+            return `%${normalized}`;
+        }
+
+        function showStatus(message, type = 'info') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+            statusEl.style.display = 'block';
+        }
+
+        function addResult(customer, type, message, details = '') {
+            const resultsEl = document.getElementById('results');
+            const item = document.createElement('div');
+            item.className = `result-item ${type}`;
+            item.innerHTML = `
+                <div class="result-header">${message}</div>
+                <div class="result-details">${details}</div>
+            `;
+            resultsEl.appendChild(item);
+            resultsEl.scrollTop = resultsEl.scrollHeight;
+        }
+
+        function showSummary(stats) {
+            const summaryEl = document.getElementById('summary');
+            summaryEl.innerHTML = `
+                <h3>Summary</h3>
+                <div class="summary-item">
+                    <span class="summary-label">Total Processed:</span>
+                    <span class="summary-value">${stats.total}</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Successfully Fixed:</span>
+                    <span class="summary-value" style="color: #2e7d32; font-weight: 600;">${stats.success}</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Skipped (already had barcode):</span>
+                    <span class="summary-value" style="color: #ff9800;">${stats.skipped}</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Errors:</span>
+                    <span class="summary-value" style="color: #c62828; font-weight: 600;">${stats.errors}</span>
+                </div>
+            `;
+            summaryEl.style.display = 'block';
+        }
+
+        async function checkBarcodes() {
+            if (!initSupabase()) return;
+            
+            const customerId = document.getElementById('customerId').value.trim();
+            document.getElementById('results').innerHTML = '';
+            document.getElementById('summary').style.display = 'none';
+            
+            showStatus('Checking barcode status...', 'info');
+            
+            try {
+                let query = supabaseClient
+                    .from('customers')
+                    .select('CustomerListID, name, barcode, customer_barcode');
+                
+                if (customerId) {
+                    query = query.eq('CustomerListID', customerId);
+                } else {
+                    query = query.or('barcode.is.null,barcode.eq.,customer_barcode.is.null,customer_barcode.eq.');
+                }
+                
+                const { data: customers, error } = await query;
+                
+                if (error) throw error;
+                
+                if (!customers || customers.length === 0) {
+                    showStatus('✅ All customers have barcodes!', 'success');
+                    return;
+                }
+                
+                showStatus(`Found ${customers.length} customer(s) without barcodes`, 'warning');
+                
+                customers.forEach(customer => {
+                    const hasBarcode = customer.barcode && customer.barcode.trim() !== '';
+                    const expectedBarcode = generateBarcode(customer.CustomerListID);
+                    
+                    addResult(
+                        customer,
+                        hasBarcode ? 'success' : 'error',
+                        `${customer.name || customer.CustomerListID}`,
+                        `ID: ${customer.CustomerListID} | Current: ${customer.barcode || '(empty)'} | Expected: ${expectedBarcode}`
+                    );
+                });
+                
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        async function fixBarcodes() {
+            if (!initSupabase()) return;
+            
+            const customerId = document.getElementById('customerId').value.trim();
+            document.getElementById('results').innerHTML = '';
+            document.getElementById('summary').style.display = 'none';
+            
+            const fixBtn = document.getElementById('fixBtn');
+            const checkBtn = document.getElementById('checkBtn');
+            fixBtn.disabled = true;
+            checkBtn.disabled = true;
+            fixBtn.innerHTML = '<span class="loading"></span> Fixing...';
+            
+            showStatus('Starting barcode fix...', 'info');
+            
+            const stats = {
+                total: 0,
+                success: 0,
+                skipped: 0,
+                errors: 0
+            };
+            
+            try {
+                let query = supabaseClient
+                    .from('customers')
+                    .select('CustomerListID, name, barcode, customer_barcode');
+                
+                if (customerId) {
+                    query = query.eq('CustomerListID', customerId);
+                } else {
+                    query = query.or('barcode.is.null,barcode.eq.,customer_barcode.is.null,customer_barcode.eq.');
+                }
+                
+                const { data: customers, error: fetchError } = await query;
+                
+                if (fetchError) throw fetchError;
+                
+                if (!customers || customers.length === 0) {
+                    showStatus('✅ No customers found without barcodes!', 'success');
+                    fixBtn.disabled = false;
+                    checkBtn.disabled = false;
+                    fixBtn.innerHTML = 'Fix Barcodes';
+                    return;
+                }
+                
+                stats.total = customers.length;
+                showStatus(`Processing ${customers.length} customer(s)...`, 'info');
+                
+                for (const customer of customers) {
+                    const currentBarcode = customer.barcode || customer.customer_barcode;
+                    
+                    // Skip if already has a barcode
+                    if (currentBarcode && currentBarcode.trim() !== '') {
+                        addResult(
+                            customer,
+                            'skip',
+                            `⏭️ Skipped: ${customer.name || customer.CustomerListID}`,
+                            `Already has barcode: ${currentBarcode}`
+                        );
+                        stats.skipped++;
+                        continue;
+                    }
+                    
+                    const newBarcode = generateBarcode(customer.CustomerListID);
+                    
+                    if (!newBarcode) {
+                        addResult(
+                            customer,
+                            'error',
+                            `❌ Error: ${customer.name || customer.CustomerListID}`,
+                            `Invalid CustomerListID: ${customer.CustomerListID}`
+                        );
+                        stats.errors++;
+                        continue;
+                    }
+                    
+                    const { error: updateError } = await supabaseClient
+                        .from('customers')
+                        .update({
+                            barcode: newBarcode,
+                            customer_barcode: newBarcode
+                        })
+                        .eq('CustomerListID', customer.CustomerListID);
+                    
+                    if (updateError) {
+                        addResult(
+                            customer,
+                            'error',
+                            `❌ Error: ${customer.name || customer.CustomerListID}`,
+                            updateError.message
+                        );
+                        stats.errors++;
+                    } else {
+                        addResult(
+                            customer,
+                            'success',
+                            `✅ Fixed: ${customer.name || customer.CustomerListID}`,
+                            `ID: ${customer.CustomerListID} | New barcode: ${newBarcode}`
+                        );
+                        stats.success++;
+                    }
+                }
+                
+                showStatus(`✅ Fix complete! Fixed ${stats.success}, skipped ${stats.skipped}, errors ${stats.errors}`, 'success');
+                showSummary(stats);
+                
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+                console.error(error);
+            } finally {
+                fixBtn.disabled = false;
+                checkBtn.disabled = false;
+                fixBtn.innerHTML = 'Fix Barcodes';
+            }
+        }
+
+        // Load saved config from localStorage
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedUrl = localStorage.getItem('supabaseUrl');
+            const savedKey = localStorage.getItem('supabaseKey');
+            
+            if (savedUrl) document.getElementById('supabaseUrl').value = savedUrl;
+            if (savedKey) document.getElementById('supabaseKey').value = savedKey;
+            
+            // Save config on change
+            document.getElementById('supabaseUrl').addEventListener('change', (e) => {
+                localStorage.setItem('supabaseUrl', e.target.value);
+            });
+            document.getElementById('supabaseKey').addEventListener('change', (e) => {
+                localStorage.setItem('supabaseKey', e.target.value);
+            });
+        });
+    </script>
+</body>
+</html>

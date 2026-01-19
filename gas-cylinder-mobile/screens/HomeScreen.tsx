@@ -8,6 +8,8 @@ import { useAssetConfig } from '../context/AssetContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Platform } from '../utils/platform';
 import { soundService } from '../services/soundService';
+import { StatCard, ModernCard } from '../components/design-system';
+import { LinearGradient } from 'expo-linear-gradient';
 
 // Quick Actions Configuration - will be updated with dynamic terms
 const getQuickActions = (config) => [
@@ -16,56 +18,56 @@ const getQuickActions = (config) => [
     subtitle: 'Scan for shipping or returns',
     icon: '📷',
     action: 'ScanCylinders',
-    color: '#2563eb'
+    color: '#3B82F6' // Modern Blue
   },
   {
     title: `Add ${config?.assetDisplayName || 'Cylinder'}`,
     subtitle: `Add new ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} to inventory`,
     icon: '➕',
     action: 'AddCylinder',
-    color: '#10B981'
+    color: '#10B981' // Green
   },
   {
     title: `Edit ${config?.assetDisplayName || 'Cylinder'}`,
     subtitle: `Modify ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} details`,
     icon: '✏️',
     action: 'EditCylinder',
-    color: '#F59E0B'
+    color: '#F59E0B' // Orange
   },
   {
     title: `Locate ${config?.assetDisplayName || 'Cylinder'}`,
     subtitle: `Find ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} location`,
     icon: '🔍',
     action: 'LocateCylinder',
-    color: '#8B5CF6'
+    color: '#8B5CF6' // Purple
   },
   {
     title: `Fill ${config?.assetDisplayName || 'Cylinder'}`,
     subtitle: `Mark ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} as filled`,
     icon: '⛽',
     action: 'FillCylinder',
-    color: '#EF4444'
+    color: '#EF4444' // Red
   },
   {
     title: 'History',
     subtitle: 'View scan history',
     icon: '📊',
     action: 'History',
-    color: '#6B7280'
+    color: '#06B6D4' // Cyan
   },
   {
     title: 'Analytics',
     subtitle: 'View performance metrics',
     icon: '📈',
     action: 'Analytics',
-    color: '#8B5CF6'
+    color: '#8B5CF6' // Purple
   },
   {
     title: 'Data Health',
     subtitle: 'Monitor sync status',
-    icon: '🔍',
+    icon: '💾',
     action: 'DataHealth',
-    color: '#10B981'
+    color: '#10B981' // Green
   }
 ];
 
@@ -338,65 +340,83 @@ export default function HomeScreen() {
         style={[styles.container, { backgroundColor: colors.background }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <Text style={[styles.welcomeText, { color: colors.text }]}>
-              Welcome back{profile?.full_name ? `, ${profile.full_name}` : ''}!
-            </Text>
-            <Text style={[styles.appName, { color: colors.primary }]}>
-              {organization?.app_name || organization?.name || assetConfig.appName}
-            </Text>
+        {/* Header with Gradient */}
+        <LinearGradient
+          colors={colors.gradient || [colors.primary, colors.secondary]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.headerGradient}
+        >
+          <View style={styles.header}>
+            <View style={styles.headerContent}>
+              <Text style={styles.welcomeText}>
+                Welcome back{profile?.full_name ? `, ${profile.full_name}` : ''}!
+              </Text>
+              <Text style={styles.appName}>
+                {organization?.app_name || organization?.name || assetConfig.appName}
+              </Text>
+            </View>
+            <View style={styles.headerActions}>
+              <TouchableOpacity 
+                style={styles.headerButton} 
+                onPress={() => navigation.navigate('RecentScans')}
+              >
+                <Text style={styles.headerButtonIcon}>🔔</Text>
+                {stats.unreadScans > 0 && (
+                  <View style={[styles.badge, { backgroundColor: colors.error }]}>
+                    <Text style={[styles.badgeText, { color: '#fff' }]}>{stats.unreadScans}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.headerButton} 
+                onPress={() => navigation.navigate('Settings')}
+              >
+                <Text style={styles.headerButtonIcon}>⚙️</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-          <View style={styles.headerActions}>
-            <TouchableOpacity 
-              style={[styles.headerButton, { backgroundColor: colors.surface, borderColor: colors.border }]} 
-              onPress={() => navigation.navigate('RecentScans')}
-            >
-              <Text style={styles.headerButtonIcon}>🔔</Text>
-              {stats.unreadScans > 0 && (
-                <View style={[styles.badge, { backgroundColor: colors.error }]}>
-                  <Text style={[styles.badgeText, { color: colors.surface }]}>{stats.unreadScans}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.headerButton, { backgroundColor: colors.surface, borderColor: colors.border }]} 
-              onPress={() => navigation.navigate('Settings')}
-            >
-              <Text style={styles.headerButtonIcon}>⚙️</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        </LinearGradient>
 
         {/* Stats Cards */}
         <View style={styles.statsContainer}>
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.statNumber, { color: colors.primary }]}>{stats.totalScans}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Total Scans</Text>
+          <View style={styles.statCardWrapper}>
+            <StatCard
+              label="Total Scans"
+              value={stats.totalScans}
+              color={colors.primary}
+            />
           </View>
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.statNumber, { color: '#10B981' }]}>{stats.todayScans}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Today</Text>
+          <View style={styles.statCardWrapper}>
+            <StatCard
+              label="Today"
+              value={stats.todayScans}
+              color="#10B981"
+            />
           </View>
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.statNumber, { color: '#F59E0B' }]}>{stats.unreadScans}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Unread</Text>
+          <View style={styles.statCardWrapper}>
+            <StatCard
+              label="Unread"
+              value={stats.unreadScans}
+              color="#F59E0B"
+            />
           </View>
         </View>
 
         {/* Search Bar */}
         <View style={styles.searchContainer}>
-          <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={styles.searchIcon}></Text>
-            <TextInput
-              style={[styles.searchInput, { color: colors.text }]}
-              placeholder={`Search customers or ${assetConfig.assetTypePlural}...`}
-              placeholderTextColor={colors.textSecondary}
-              value={search}
-              onChangeText={setSearch}
-            />
-          </View>
+          <ModernCard elevated={false} style={styles.searchBarCard}>
+            <View style={styles.searchBar}>
+              <Text style={styles.searchIcon}>🔍</Text>
+              <TextInput
+                style={[styles.searchInput, { color: colors.text }]}
+                placeholder={`Search customers or ${assetConfig.assetTypePlural}...`}
+                placeholderTextColor={colors.textSecondary}
+                value={search}
+                onChangeText={setSearch}
+              />
+            </View>
+          </ModernCard>
         </View>
 
         {/* Search Results */}
@@ -446,21 +466,21 @@ export default function HomeScreen() {
 
         {/* Quick Actions */}
         <View style={styles.quickActionsContainer}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Quick Actions</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text, fontWeight: '800' }]}>Quick Actions</Text>
           <View style={styles.actionsGrid}>
             {getQuickActions(assetConfig).map((action, index) => (
-              <TouchableOpacity
+              <ModernCard
                 key={index}
-                style={[styles.actionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
                 onPress={() => handleQuickAction(action.action)}
-                activeOpacity={0.7}
+                elevated
+                style={styles.actionCard}
               >
                 <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                   <Text style={styles.actionIconText}>{action.icon}</Text>
                 </View>
-                <Text style={[styles.actionTitle, { color: colors.text }]}>{action.title}</Text>
+                <Text style={[styles.actionTitle, { color: colors.text, fontWeight: '700' }]}>{action.title}</Text>
                 <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>{action.subtitle}</Text>
-              </TouchableOpacity>
+              </ModernCard>
             ))}
           </View>
         </View>
@@ -476,24 +496,32 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  headerGradient: {
+    paddingTop: 8,
+    paddingBottom: 20,
+    marginBottom: 20,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 12,
   },
   headerContent: {
     flex: 1,
   },
   welcomeText: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
+    color: '#ffffff',
+    opacity: 0.95,
   },
   appName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginTop: 2,
+    fontSize: 28,
+    fontWeight: '800',
+    marginTop: 4,
+    color: '#ffffff',
   },
   headerActions: {
     flexDirection: 'row',
@@ -505,7 +533,9 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
     position: 'relative',
   },
   headerButtonIcon: {
@@ -535,31 +565,20 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     width: '100%',
   },
-  statCard: {
+  statCardWrapper: {
     flex: 1,
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  statNumber: {
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  statLabel: {
-    fontSize: 12,
-    fontWeight: '500',
-    marginTop: 4,
   },
   searchContainer: {
     paddingHorizontal: 20,
     marginBottom: 24,
   },
+  searchBarCard: {
+    marginBottom: 0,
+    padding: 0,
+  },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 16,
-    borderWidth: 1,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
@@ -625,10 +644,9 @@ const styles = StyleSheet.create({
   },
   actionCard: {
     width: Platform.OS === 'ios' && Platform.isPad ? '31%' : '48%',
-    padding: Platform.OS === 'ios' && Platform.isPad ? 24 : 16,
-    borderRadius: 16,
-    borderWidth: 1,
+    padding: Platform.OS === 'ios' && Platform.isPad ? 24 : 20,
     alignItems: 'center',
+    marginBottom: 0,
   },
   actionIcon: {
     width: 48,

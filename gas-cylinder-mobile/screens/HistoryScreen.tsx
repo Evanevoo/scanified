@@ -1,29 +1,157 @@
 import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert, ScrollView } from 'react-native';
 import { supabase } from '../supabase';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
+import { Ionicons } from '@expo/vector-icons';
 
 function formatDate(dateStr) {
   const d = new Date(dateStr);
   return d.toLocaleString();
 }
 
+interface GroupedOrder {
+  order_number: string;
+  scans: any[];
+  customer_name: string;
+  earliest_date: string;
+  latest_date: string;
+  isEditable: boolean;
+}
+
+interface BottleInfo {
+  barcode: string;
+  product_code?: string;
+  description?: string;
+  gas_type?: string;
+  status?: string;
+  location?: string;
+}
+
 export default function HistoryScreen() {
   const { config: assetConfig } = useAssetConfig();
   const { profile } = useAuth();
   const [scans, setScans] = useState([]);
+  const [groupedOrders, setGroupedOrders] = useState<GroupedOrder[]>([]);
+  const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [editScan, setEditScan] = useState(null);
+  const [editOrder, setEditOrder] = useState<GroupedOrder | null>(null);
   const [editCustomer, setEditCustomer] = useState('');
-  const [editAssets, setEditAssets] = useState([]);
+  const [editOrderNumber, setEditOrderNumber] = useState('');
+  const [editBottles, setEditBottles] = useState<string[]>([]);
+  const [bottleInfo, setBottleInfo] = useState<Map<string, BottleInfo>>(new Map());
+  const [newBottleBarcode, setNewBottleBarcode] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Fetch bottle information
+  const fetchBottleInfo = async (barcodes: string[]) => {
+    if (!profile?.organization_id || barcodes.length === 0) return;
+    
+    try {
+      // Only select columns that exist in the bottles table
+      // Note: size column does not exist in this database schema
+      const { data, error } = await supabase
+        .from('bottles')
+        .select('barcode_number, product_code, description, gas_type, status, location')
+        .eq('organization_id', profile.organization_id)
+        .in('barcode_number', barcodes);
+      
+      if (error) {
+        // If error mentions 'size', it might be cached code - try minimal query
+        if (error.message?.includes('size')) {
+          logger.warn('Size column error detected, trying minimal query...');
+          const { data: minimalData, error: minimalError } = await supabase
+            .from('bottles')
+            .select('barcode_number, product_code, description')
+            .eq('organization_id', profile.organization_id)
+            .in('barcode_number', barcodes);
+          
+          if (minimalError) {
+            logger.warn('Could not fetch bottle info (non-critical):', minimalError.message);
+            return;
+          }
+          
+          const infoMap = new Map<string, BottleInfo>();
+          (minimalData || []).forEach(bottle => {
+            infoMap.set(bottle.barcode_number, {
+              barcode: bottle.barcode_number,
+              product_code: bottle.product_code || undefined,
+              description: bottle.description || undefined
+            });
+          });
+          setBottleInfo(infoMap);
+          return;
+        }
+        
+        // Log error but don't crash - bottle info is optional
+        logger.warn('Could not fetch bottle info (non-critical):', error.message);
+        return;
+      }
+      
+      const infoMap = new Map<string, BottleInfo>();
+      (data || []).forEach(bottle => {
+        infoMap.set(bottle.barcode_number, {
+          barcode: bottle.barcode_number,
+          product_code: bottle.product_code || undefined,
+          description: bottle.description || undefined,
+          gas_type: bottle.gas_type || undefined,
+          status: bottle.status || undefined,
+          location: bottle.location || undefined
+        });
+      });
+      
+      setBottleInfo(infoMap);
+    } catch (err: any) {
+      // Silently handle errors - bottle info is optional for display
+      logger.warn('Error in fetchBottleInfo (non-critical):', err.message);
+    }
+  };
+
+  // Group scans by order number
+  const groupScansByOrder = (scans: any[]): GroupedOrder[] => {
+    const orderMap = new Map<string, any[]>();
+    
+    // Group scans by order_number
+    scans.forEach(scan => {
+      const orderNum = scan.order_number || 'No Order Number';
+      if (!orderMap.has(orderNum)) {
+        orderMap.set(orderNum, []);
+      }
+      orderMap.get(orderNum)!.push(scan);
+    });
+    
+    // Convert to array and calculate metadata
+    const grouped: GroupedOrder[] = [];
+    orderMap.forEach((orderScans, orderNumber) => {
+      const sortedScans = orderScans.sort((a, b) => 
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      
+      const earliest = new Date(Math.min(...orderScans.map(s => new Date(s.created_at).getTime())));
+      const latest = new Date(Math.max(...orderScans.map(s => new Date(s.created_at).getTime())));
+      const hoursDiff = (new Date().getTime() - earliest.getTime()) / (1000 * 60 * 60);
+      
+      grouped.push({
+        order_number: orderNumber,
+        scans: sortedScans,
+        customer_name: orderScans[0].customer_name || 'Unknown Customer',
+        earliest_date: earliest.toISOString(),
+        latest_date: latest.toISOString(),
+        isEditable: hoursDiff <= 24
+      });
+    });
+    
+    // Sort by latest scan date
+    return grouped.sort((a, b) => 
+      new Date(b.latest_date).getTime() - new Date(a.latest_date).getTime()
+    );
+  };
 
   useEffect(() => {
     const fetchScans = async () => {
-      if (!profile?.organization_id && !authLoading) {
+      if (!profile?.organization_id) {
         setError('Organization not found');
         setLoading(false);
         return;
@@ -63,9 +191,18 @@ export default function HistoryScreen() {
         } else {
           setError('');
           setScans(data || []);
-          logger.log(`Loaded ${data?.length || 0} scans`);
+          const grouped = groupScansByOrder(data || []);
+          setGroupedOrders(grouped);
+          
+          // Fetch bottle information for all scanned bottles
+          const allBarcodes = data?.map(scan => scan.bottle_barcode).filter(Boolean) || [];
+          if (allBarcodes.length > 0) {
+            await fetchBottleInfo(allBarcodes);
+          }
+          
+          logger.log(`Loaded ${data?.length || 0} scans grouped into ${grouped.length} orders`);
         }
-      } catch (err) {
+      } catch (err: any) {
         logger.error('Unexpected error loading scans:', err);
         setError(`Unexpected error: ${err.message}`);
       }
@@ -75,107 +212,377 @@ export default function HistoryScreen() {
     fetchScans();
   }, [profile]);
 
-  const openEdit = (scan) => {
-    // Check if scan is within 24 hours
-    const scanTime = new Date(scan.created_at);
-    const now = new Date();
-    const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
-    
-    if (hoursDiff > 24) {
+  const toggleOrderExpansion = (orderNumber: string) => {
+    const newExpanded = new Set(expandedOrders);
+    if (newExpanded.has(orderNumber)) {
+      newExpanded.delete(orderNumber);
+    } else {
+      newExpanded.add(orderNumber);
+    }
+    setExpandedOrders(newExpanded);
+  };
+
+  const openEditOrder = (order: GroupedOrder) => {
+    if (!order.isEditable) {
       Alert.alert(
         'Edit Not Allowed',
-        'Scans can only be edited within 24 hours of submission.',
+        'Orders can only be edited within 24 hours of the first scan.',
         [{ text: 'OK' }]
       );
       return;
     }
     
-    setEditScan(scan);
-    setEditCustomer(scan.customer_name || '');
-    setEditAssets(scan.assets || scan.bottle_barcode ? [scan.bottle_barcode] : []);
+    setEditOrder(order);
+    setEditCustomer(order.customer_name || '');
+    setEditOrderNumber(order.order_number || '');
+    
+    // Get unique bottle barcodes from scans
+    const bottles = [...new Set(order.scans.map(s => s.bottle_barcode).filter(Boolean))];
+    setEditBottles(bottles);
+    setNewBottleBarcode('');
   };
 
-  const saveEdit = async () => {
-    if (!profile?.organization_id && !authLoading) {
+  const addBottleToOrder = async () => {
+    if (!newBottleBarcode.trim()) {
+      Alert.alert('Error', 'Please enter a bottle barcode');
+      return;
+    }
+    
+    if (editBottles.includes(newBottleBarcode.trim())) {
+      Alert.alert('Error', 'This bottle is already in the order');
+      return;
+    }
+    
+    // Fetch info for the new bottle
+    await fetchBottleInfo([newBottleBarcode.trim()]);
+    
+    setEditBottles([...editBottles, newBottleBarcode.trim()]);
+    setNewBottleBarcode('');
+  };
+
+  const removeBottleFromOrder = (barcode: string) => {
+    Alert.alert(
+      'Remove Bottle',
+      `Remove ${barcode} from this order?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            setEditBottles(editBottles.filter(b => b !== barcode));
+          }
+        }
+      ]
+    );
+  };
+
+  const saveEditOrder = async () => {
+    if (!profile?.organization_id || !editOrder) {
       setError('Organization not found');
       return;
     }
 
     setSaving(true);
-    const { error } = await supabase
-      .from('bottle_scans')
-      .update({ customer_name: editCustomer, bottle_barcode: editAssets[0] })
-      .eq('id', editScan?.id)
-      .eq('organization_id', profile.organization_id);
+    
+    try {
+      const originalBottles = [...new Set(editOrder.scans.map(s => s.bottle_barcode).filter(Boolean))];
+      const removedBottles = originalBottles.filter(b => !editBottles.includes(b));
+      const addedBottles = editBottles.filter(b => !originalBottles.includes(b));
+      
+      // Delete scans for removed bottles
+      if (removedBottles.length > 0) {
+        const scansToDelete = editOrder.scans
+          .filter(s => removedBottles.includes(s.bottle_barcode))
+          .map(s => s.id);
+        
+        const { error: deleteError } = await supabase
+          .from('bottle_scans')
+          .delete()
+          .in('id', scansToDelete)
+          .eq('organization_id', profile.organization_id);
+        
+        if (deleteError) {
+          throw deleteError;
+        }
+        
+        logger.log(`Deleted ${scansToDelete.length} scans for removed bottles`);
+      }
+      
+      // Update existing scans with new customer name and order number
+      const scansToUpdate = editOrder.scans
+        .filter(s => editBottles.includes(s.bottle_barcode))
+        .map(s => s.id);
+      
+      if (scansToUpdate.length > 0) {
+        const { error: updateError } = await supabase
+          .from('bottle_scans')
+          .update({ 
+            customer_name: editCustomer,
+            order_number: editOrderNumber
+          })
+          .in('id', scansToUpdate)
+          .eq('organization_id', profile.organization_id);
+        
+        if (updateError) {
+          throw updateError;
+        }
+        
+        logger.log(`Updated ${scansToUpdate.length} existing scans`);
+      }
+      
+      // Create new scans for added bottles
+      if (addedBottles.length > 0) {
+        const newScans = addedBottles.map(barcode => ({
+          organization_id: profile.organization_id,
+          bottle_barcode: barcode,
+          order_number: editOrderNumber,
+          customer_name: editCustomer,
+          mode: editOrder.scans[0]?.mode || 'SHIP',
+          user_id: profile.id,
+          created_at: new Date().toISOString(),
+          timestamp: new Date().toISOString()
+        }));
+        
+        const { error: insertError } = await supabase
+          .from('bottle_scans')
+          .insert(newScans);
+        
+        if (insertError) {
+          throw insertError;
+        }
+        
+        logger.log(`Created ${newScans.length} new scans for added bottles`);
+      }
+      
+      // Refresh list
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data, error: fetchError } = await supabase
+        .from('bottle_scans')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .gte('created_at', since)
+        .order('created_at', { ascending: false });
+      
+      if (fetchError) {
+        throw fetchError;
+      }
+      
+      setScans(data || []);
+      const grouped = groupScansByOrder(data || []);
+      setGroupedOrders(grouped);
+      
+      // Fetch bottle info for new bottles
+      const allBarcodes = data?.map(scan => scan.bottle_barcode).filter(Boolean) || [];
+      if (allBarcodes.length > 0) {
+        await fetchBottleInfo(allBarcodes);
+      }
+      
+      setEditOrder(null);
+      
+      let message = `Order ${editOrderNumber} updated`;
+      if (addedBottles.length > 0) message += `\n+${addedBottles.length} bottles added`;
+      if (removedBottles.length > 0) message += `\n-${removedBottles.length} bottles removed`;
+      
+      Alert.alert('Success', message);
+    } catch (err: any) {
+      logger.error('Error updating order:', err);
+      Alert.alert('Error', `Failed to update order: ${err.message}`);
+    }
+    
     setSaving(false);
-    setEditScan(null);
-    // Refresh list
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { data } = await supabase
-      .from('bottle_scans')
-      .select('*')
-      .eq('organization_id', profile.organization_id)
-      .gte('created_at', since)
-      .order('created_at', { ascending: false });
-    setScans(data || []);
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Unverified Scans (Last 24h)</Text>
-      {loading ? <ActivityIndicator color="#40B5AD" /> : error ? <Text style={styles.error}>{error}</Text> : (
+      <Text style={styles.title}>Scan History (Last 24h)</Text>
+      <Text style={styles.subtitle}>Grouped by Order Number</Text>
+      
+      {loading ? (
+        <ActivityIndicator color="#40B5AD" size="large" style={{ marginTop: 24 }} />
+      ) : error ? (
+        <Text style={styles.error}>{error}</Text>
+      ) : (
         <FlatList
-          data={scans}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => {
-            const scanTime = new Date(item.created_at);
-            const now = new Date();
-            const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
-            const isEditable = hoursDiff <= 24;
+          data={groupedOrders}
+          keyExtractor={item => item.order_number}
+          renderItem={({ item: order }) => {
+            const isExpanded = expandedOrders.has(order.order_number);
+            const bottleCount = order.scans.length;
             
             return (
-              <TouchableOpacity 
-                style={[styles.scanItem, !isEditable && styles.scanItemDisabled]} 
-                onPress={() => openEdit(item)}
-              >
-                <Text style={styles.scanBarcode}>{item.bottle_barcode}</Text>
-                <Text style={styles.scanCustomer}>{item.customer_name}</Text>
-                <Text style={styles.scanDate}>{formatDate(item.created_at)}</Text>
-                <Text style={styles.scanStatus}>Verified: {item.verified ? 'Yes' : 'No'}</Text>
-                {!isEditable && (
-                  <Text style={styles.scanExpired}>Edit expired</Text>
+              <View style={[styles.orderCard, !order.isEditable && styles.orderCardDisabled]}>
+                {/* Order Header - Collapsible */}
+                <TouchableOpacity 
+                  style={styles.orderHeader}
+                  onPress={() => toggleOrderExpansion(order.order_number)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.orderHeaderLeft}>
+                    <Ionicons 
+                      name={isExpanded ? 'chevron-down' : 'chevron-forward'} 
+                      size={24} 
+                      color="#40B5AD" 
+                    />
+                    <View style={styles.orderInfo}>
+                      <Text style={styles.orderNumber}>Order: {order.order_number}</Text>
+                      <Text style={styles.orderCustomer}>{order.customer_name}</Text>
+                      <Text style={styles.orderDate}>{formatDate(order.latest_date)}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.orderBadge}>
+                    <Text style={styles.orderBadgeText}>{bottleCount}</Text>
+                    <Text style={styles.orderBadgeLabel}>bottles</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Expanded Bottle List */}
+                {isExpanded && (
+                  <View style={styles.bottleList}>
+                    {order.scans.map((scan, index) => {
+                      const info = bottleInfo.get(scan.bottle_barcode);
+                      return (
+                        <View key={scan.id} style={styles.bottleItem}>
+                          <View style={styles.bottleItemContent}>
+                            <Text style={styles.bottleBarcode}>
+                              {index + 1}. {scan.bottle_barcode}
+                            </Text>
+                            {info && (
+                              <Text style={styles.bottleType}>
+                                {info.description || info.product_code || 'Unknown Type'}
+                                {info.gas_type && ` • ${info.gas_type}`}
+                              </Text>
+                            )}
+                            <Text style={styles.bottleDate}>{formatDate(scan.created_at)}</Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                    
+                    {/* Edit Button */}
+                    <TouchableOpacity 
+                      style={[
+                        styles.editButton,
+                        !order.isEditable && styles.editButtonDisabled
+                      ]}
+                      onPress={() => openEditOrder(order)}
+                      disabled={!order.isEditable}
+                    >
+                      <Ionicons name="create-outline" size={20} color="#fff" />
+                      <Text style={styles.editButtonText}>
+                        {order.isEditable ? 'Edit Order' : 'Edit Expired'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
-              </TouchableOpacity>
+                
+                {!order.isEditable && !isExpanded && (
+                  <Text style={styles.expiredBadge}>Edit period expired</Text>
+                )}
+              </View>
             );
           }}
-          ListEmptyComponent={!error ? <Text style={{ color: '#888', textAlign: 'center', marginTop: 24 }}>No unverified scans in the last 24 hours.</Text> : null}
+          ListEmptyComponent={
+            !error ? (
+              <Text style={styles.emptyText}>
+                No scans in the last 24 hours.
+              </Text>
+            ) : null
+          }
         />
       )}
-      {/* Edit Modal */}
-      <Modal visible={!!editScan} animationType="slide" transparent onRequestClose={() => setEditScan(null)}>
+
+      {/* Edit Order Modal */}
+      <Modal 
+        visible={!!editOrder} 
+        animationType="slide" 
+        transparent 
+        onRequestClose={() => setEditOrder(null)}
+      >
         <View style={styles.modalBg}>
           <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Edit Scan</Text>
-            <Text style={styles.label}>Customer</Text>
+            <Text style={styles.modalTitle}>Edit Order</Text>
+            <Text style={styles.modalSubtitle}>
+              Editing {editOrder?.scans.length} bottles
+            </Text>
+            
+            <Text style={styles.label}>Order Number</Text>
+            <TextInput
+              style={styles.input}
+              value={editOrderNumber}
+              onChangeText={setEditOrderNumber}
+              placeholder="Order Number"
+            />
+            
+            <Text style={styles.label}>Customer Name</Text>
             <TextInput
               style={styles.input}
               value={editCustomer}
               onChangeText={setEditCustomer}
               placeholder="Customer Name"
             />
-            <Text style={styles.label}>{assetConfig?.assetDisplayName || 'Asset'} Barcode</Text>
-            <TextInput
-              style={styles.input}
-              value={editAssets[0] || ''}
-              onChangeText={v => setEditAssets([v])}
-              placeholder={`${assetConfig?.assetDisplayName || 'Asset'} Barcode`}
-            />
-            <View style={{ flexDirection: 'row', marginTop: 18 }}>
-              <TouchableOpacity style={[styles.btn, { backgroundColor: '#eee', flex: 1, marginRight: 8 }]} onPress={() => setEditScan(null)}>
-                <Text style={{ color: '#40B5AD', fontWeight: 'bold' }}>Cancel</Text>
+            
+            {/* Bottles in order */}
+            <Text style={styles.label}>Bottles in this order ({editBottles.length}):</Text>
+            <ScrollView style={styles.modalBottleList}>
+              {editBottles.map((barcode, index) => {
+                const info = bottleInfo.get(barcode);
+                return (
+                  <View key={index} style={styles.modalBottleRow}>
+                    <View style={styles.modalBottleInfo}>
+                      <Text style={styles.modalBottleBarcode}>
+                        {index + 1}. {barcode}
+                      </Text>
+                      {info && (
+                        <Text style={styles.modalBottleType}>
+                          {info.description || info.product_code || 'Unknown'}
+                          {info.gas_type && ` • ${info.gas_type}`}
+                        </Text>
+                      )}
+                    </View>
+                    <TouchableOpacity
+                      style={styles.removeBottleButton}
+                      onPress={() => removeBottleFromOrder(barcode)}
+                    >
+                      <Ionicons name="close-circle" size={24} color="#ef4444" />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </ScrollView>
+            
+            {/* Add bottle section */}
+            <Text style={styles.label}>Add Bottle:</Text>
+            <View style={styles.addBottleContainer}>
+              <TextInput
+                style={[styles.input, styles.addBottleInput]}
+                value={newBottleBarcode}
+                onChangeText={setNewBottleBarcode}
+                placeholder="Enter bottle barcode"
+              />
+              <TouchableOpacity
+                style={styles.addBottleButton}
+                onPress={addBottleToOrder}
+              >
+                <Ionicons name="add-circle" size={28} color="#40B5AD" />
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.btn, { backgroundColor: '#40B5AD', flex: 1, marginLeft: 8 }]} onPress={saveEdit} disabled={saving}>
-                <Text style={{ color: '#fff', fontWeight: 'bold' }}>{saving ? 'Saving...' : 'Save'}</Text>
+            </View>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={[styles.btn, styles.btnCancel]} 
+                onPress={() => setEditOrder(null)}
+              >
+                <Text style={styles.btnCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.btn, styles.btnSave]} 
+                onPress={saveEditOrder} 
+                disabled={saving}
+              >
+                <Text style={styles.btnSaveText}>
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -192,60 +599,159 @@ const styles = StyleSheet.create({
     padding: 18,
   },
   title: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
     color: '#40B5AD',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#888',
     marginBottom: 16,
     textAlign: 'center',
   },
-  scanItem: {
+  // Order Card Styles
+  orderCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 16,
     marginBottom: 12,
     shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+    overflow: 'hidden',
   },
-  scanItemDisabled: {
-    backgroundColor: '#f5f5f5',
-    opacity: 0.7,
+  orderCardDisabled: {
+    backgroundColor: '#f9fafb',
+    opacity: 0.8,
   },
-  scanBarcode: {
-    fontWeight: 'bold',
+  orderHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+  },
+  orderHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  orderInfo: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  orderNumber: {
     fontSize: 16,
+    fontWeight: 'bold',
     color: '#40B5AD',
-    marginBottom: 2,
+    marginBottom: 4,
   },
-  scanCustomer: {
+  orderCustomer: {
     fontSize: 14,
     color: '#444',
     marginBottom: 2,
   },
-  scanDate: {
-    fontSize: 12,
-    color: '#888',
-    marginBottom: 2,
-  },
-  scanStatus: {
+  orderDate: {
     fontSize: 12,
     color: '#888',
   },
-  scanExpired: {
+  orderBadge: {
+    backgroundColor: '#40B5AD',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignItems: 'center',
+    minWidth: 60,
+  },
+  orderBadgeText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  orderBadgeLabel: {
+    fontSize: 10,
+    color: '#fff',
+    textTransform: 'uppercase',
+  },
+  expiredBadge: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
     fontSize: 12,
     color: '#ff5a1f',
+    fontWeight: '600',
+  },
+  // Bottle List Styles
+  bottleList: {
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+    paddingTop: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    backgroundColor: '#f9fafb',
+  },
+  bottleItem: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  bottleItemContent: {
+    flex: 1,
+  },
+  bottleBarcode: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 2,
+  },
+  bottleType: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+    fontStyle: 'italic',
+  },
+  bottleDate: {
+    fontSize: 11,
+    color: '#888',
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#40B5AD',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 12,
+  },
+  editButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  editButtonText: {
+    color: '#fff',
     fontWeight: 'bold',
-    marginTop: 4,
+    fontSize: 15,
+    marginLeft: 8,
+  },
+  // General Styles
+  emptyText: {
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 32,
+    fontSize: 15,
   },
   error: {
     color: '#ff5a1f',
     textAlign: 'center',
     marginTop: 16,
+    fontSize: 14,
   },
+  // Modal Styles
   modalBg: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -253,34 +759,111 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 24,
-    width: '85%',
-    alignItems: 'stretch',
+    width: '90%',
+    maxHeight: '80%',
   },
   modalTitle: {
     fontWeight: 'bold',
-    fontSize: 18,
+    fontSize: 20,
     color: '#40B5AD',
-    marginBottom: 12,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 16,
     textAlign: 'center',
   },
   label: {
-    fontWeight: 'bold',
+    fontWeight: '600',
     color: '#222',
-    marginBottom: 4,
-    marginTop: 8,
+    marginBottom: 6,
+    marginTop: 12,
+    fontSize: 14,
   },
   input: {
     backgroundColor: '#F3F4F6',
     borderRadius: 10,
-    padding: 12,
+    padding: 14,
     fontSize: 16,
     marginBottom: 8,
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
+  modalBottleList: {
+    maxHeight: 200,
+    backgroundColor: '#f9fafb',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  modalBottleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    backgroundColor: '#fff',
+    borderRadius: 6,
+    marginBottom: 6,
+  },
+  modalBottleInfo: {
+    flex: 1,
+  },
+  modalBottleBarcode: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 2,
+  },
+  modalBottleType: {
+    fontSize: 11,
+    color: '#666',
+    fontStyle: 'italic',
+  },
+  removeBottleButton: {
+    padding: 4,
+  },
+  addBottleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  addBottleInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  addBottleButton: {
+    padding: 4,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    marginTop: 20,
+    gap: 12,
+  },
   btn: {
+    flex: 1,
     borderRadius: 10,
     padding: 14,
     alignItems: 'center',
+  },
+  btnCancel: {
+    backgroundColor: '#e5e7eb',
+  },
+  btnCancelText: {
+    color: '#40B5AD',
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+  btnSave: {
+    backgroundColor: '#40B5AD',
+  },
+  btnSaveText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 15,
   },
 }); 

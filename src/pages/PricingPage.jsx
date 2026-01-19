@@ -21,6 +21,11 @@ function PricingPage() {
 
       if (error) {
         logger.error('Error fetching pricing plans:', error);
+        // Fallback to default plans if database fetch fails
+        setPlans(getDefaultPlans());
+      } else if (!data || data.length === 0) {
+        // Use default plans if no data in database
+        setPlans(getDefaultPlans());
       } else {
         setPlans(data);
       }
@@ -28,6 +33,56 @@ function PricingPage() {
     };
     fetchPlans();
   }, []);
+
+  const getDefaultPlans = () => [
+    {
+      id: 'starter',
+      name: 'Starter',
+      price: 49,
+      price_interval: 'month',
+      is_most_popular: false,
+      features: [
+        '5000 cylinders',
+        '15 users',
+        'Mobile app access',
+        'Email support',
+        'Basic reporting',
+        'Data export'
+      ]
+    },
+    {
+      id: 'professional',
+      name: 'Professional',
+      price: 149,
+      price_interval: 'month',
+      is_most_popular: true,
+      features: [
+        'Up to 10,000 cylinders',
+        '25 users',
+        'Mobile app access',
+        'Advanced analytics',
+        'Delivery management',
+        'Priority support',
+        'API access'
+      ]
+    },
+    {
+      id: 'enterprise',
+      name: 'Enterprise',
+      price: null,
+      price_interval: 'custom',
+      is_most_popular: false,
+      features: [
+        'Unlimited cylinders',
+        'Unlimited users',
+        'Custom development',
+        'Dedicated support',
+        'White labeling',
+        'On-premise option',
+        'SLA guarantee'
+      ]
+    }
+  ];
 
   const handleGetStarted = (plan) => {
     if (plan.name.toLowerCase() === 'enterprise') {
@@ -63,7 +118,7 @@ function PricingPage() {
                 p: 3, 
                 borderRadius: 4,
                 border: plan.is_most_popular ? '2px solid' : '1px solid',
-                borderColor: plan.is_most_popular ? 'primary.main' : 'grey.300',
+                borderColor: plan.is_most_popular ? '#000000' : 'grey.300',
                 position: 'relative',
                 height: '100%',
                 display: 'flex',

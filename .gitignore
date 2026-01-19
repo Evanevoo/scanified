@@ -156,3 +156,6 @@ backups/
 
 # Netlify
 .netlify
+
+# Security - Backup configuration with secrets
+YOUR_BACKUP_CONFIG.md

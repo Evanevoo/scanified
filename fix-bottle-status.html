@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fix Bottle Status</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 20px;
+    }
+    .input-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+      color: #555;
+    }
+    input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    button {
+      background: #1976d2;
+      color: white;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin-right: 10px;
+      margin-top: 10px;
+    }
+    button:hover {
+      background: #1565c0;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .status {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 4px;
+      display: none;
+    }
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    .status.info {
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+    .log {
+      margin-top: 20px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      max-height: 400px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Fix Bottle Status</h1>
+    <p>Updates bottles that are assigned to customers but have status "available" to status "rented" (unless they are customer-owned).</p>
+    
+    <div class="input-group">
+      <label for="supabaseUrl">Supabase URL</label>
+      <input type="text" id="supabaseUrl" placeholder="https://your-project.supabase.co" />
+    </div>
+    
+    <div class="input-group">
+      <label for="supabaseKey">Supabase Anon Key</label>
+      <input type="password" id="supabaseKey" placeholder="your-anon-key" />
+    </div>
+    
+    <button onclick="checkStatus()">Check Status</button>
+    <button onclick="fixBottles()">Fix Bottles</button>
+    
+    <div id="status" class="status"></div>
+    <div id="log" class="log"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    let supabase = null;
+
+    function log(message) {
+      const logDiv = document.getElementById('log');
+      const timestamp = new Date().toLocaleTimeString();
+      logDiv.textContent += `[${timestamp}] ${message}\n`;
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function showStatus(message, type) {
+      const statusDiv = document.getElementById('status');
+      statusDiv.textContent = message;
+      statusDiv.className = `status ${type}`;
+      statusDiv.style.display = 'block';
+    }
+
+    function initSupabase() {
+      const url = document.getElementById('supabaseUrl').value.trim();
+      const key = document.getElementById('supabaseKey').value.trim();
+      
+      if (!url || !key) {
+        showStatus('Please enter Supabase URL and Key', 'error');
+        return false;
+      }
+      
+      supabase = window.supabase.createClient(url, key);
+      return true;
+    }
+
+    async function checkStatus() {
+      if (!initSupabase()) return;
+      
+      log('🔍 Checking bottle status...');
+      showStatus('Checking...', 'info');
+      
+      try {
+        // Get all bottles that are assigned to customers but have status "available"
+        const { data: bottles, error: fetchError } = await supabase
+          .from('bottles')
+          .select('id, barcode_number, assigned_customer, customer_name, ownership, status, organization_id')
+          .not('assigned_customer', 'is', null)
+          .eq('status', 'available');
+        
+        if (fetchError) throw fetchError;
+        
+        if (!bottles || bottles.length === 0) {
+          log('✅ No bottles found that need fixing.');
+          showStatus('No bottles need fixing!', 'success');
+          return;
+        }
+        
+        // Count customer-owned bottles
+        const customerOwned = bottles.filter(b => {
+          const ownership = String(b.ownership || '').trim().toLowerCase();
+          return ownership.includes('customer') || ownership.includes('owned');
+        }).length;
+        
+        const needsFix = bottles.length - customerOwned;
+        
+        log(`📊 Found ${bottles.length} bottles assigned to customers with status "available"`);
+        log(`   - ${needsFix} need to be updated to "rented"`);
+        log(`   - ${customerOwned} are customer-owned (will be skipped)`);
+        
+        showStatus(`Found ${needsFix} bottles that need fixing`, 'info');
+        
+      } catch (error) {
+        log(`❌ Error: ${error.message}`);
+        showStatus(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function fixBottles() {
+      if (!initSupabase()) return;
+      
+      if (!confirm('This will update bottles assigned to customers from "available" to "rented". Customer-owned bottles will be skipped. Continue?')) {
+        return;
+      }
+      
+      log('🔧 Starting fix...');
+      showStatus('Fixing bottles...', 'info');
+      
+      try {
+        // Get all bottles that are assigned to customers but have status "available"
+        const { data: bottles, error: fetchError } = await supabase
+          .from('bottles')
+          .select('id, barcode_number, assigned_customer, customer_name, ownership, status, organization_id')
+          .not('assigned_customer', 'is', null)
+          .eq('status', 'available');
+        
+        if (fetchError) throw fetchError;
+        
+        if (!bottles || bottles.length === 0) {
+          log('✅ No bottles found that need fixing.');
+          showStatus('No bottles need fixing!', 'success');
+          return;
+        }
+        
+        log(`📊 Found ${bottles.length} bottles assigned to customers with status "available"`);
+        
+        // Group by organization for batch updates
+        const bottlesByOrg = {};
+        bottles.forEach(bottle => {
+          if (!bottlesByOrg[bottle.organization_id]) {
+            bottlesByOrg[bottle.organization_id] = [];
+          }
+          bottlesByOrg[bottle.organization_id].push(bottle);
+        });
+        
+        let totalUpdated = 0;
+        let totalSkipped = 0;
+        
+        for (const [orgId, orgBottles] of Object.entries(bottlesByOrg)) {
+          log(`\n🏢 Processing organization ${orgId} (${orgBottles.length} bottles)...`);
+          
+          for (const bottle of orgBottles) {
+            const ownershipValue = String(bottle.ownership || '').trim().toLowerCase();
+            const isCustomerOwned = ownershipValue.includes('customer') || 
+                                   ownershipValue.includes('owned') || 
+                                   ownershipValue === 'customer owned';
+            
+            // Skip customer-owned bottles (they should stay as "available")
+            if (isCustomerOwned) {
+              log(`⏭️  Skipping customer-owned bottle: ${bottle.barcode_number || bottle.id}`);
+              totalSkipped++;
+              continue;
+            }
+            
+            // Update status to "rented"
+            const { error: updateError } = await supabase
+              .from('bottles')
+              .update({ status: 'rented' })
+              .eq('id', bottle.id)
+              .eq('organization_id', orgId);
+            
+            if (updateError) {
+              log(`❌ Error updating bottle ${bottle.barcode_number || bottle.id}: ${updateError.message}`);
+            } else {
+              log(`✅ Updated bottle ${bottle.barcode_number || bottle.id} to status "rented"`);
+              totalUpdated++;
+            }
+          }
+        }
+        
+        log(`\n✅ Fix complete!`);
+        log(`   - Updated: ${totalUpdated} bottles`);
+        log(`   - Skipped (customer-owned): ${totalSkipped} bottles`);
+        log(`   - Total processed: ${bottles.length} bottles`);
+        
+        showStatus(`Fixed ${totalUpdated} bottles!`, 'success');
+        
+      } catch (error) {
+        log(`❌ Error: ${error.message}`);
+        showStatus(`Error: ${error.message}`, 'error');
+      }
+    }
+  </script>
+</body>
+</html>

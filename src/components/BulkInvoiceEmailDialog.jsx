@@ -3,13 +3,17 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box,
   Typography, Checkbox, Alert, CircularProgress, LinearProgress,
   FormControlLabel, TextField, List, ListItem, ListItemText, ListItemIcon,
-  Chip, Divider
+  Chip, Divider, IconButton, InputAdornment, FormControl, InputLabel, Select, MenuItem, Grid
 } from '@mui/material';
 import { 
   Email as EmailIcon,
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
-  Warning as WarningIcon
+  Warning as WarningIcon,
+  Edit as EditIcon,
+  Save as SaveIcon,
+  Cancel as CancelIcon,
+  Download as DownloadIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
@@ -25,12 +29,17 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [results, setResults] = useState([]);
   const [invoiceTemplate, setInvoiceTemplate] = useState(null);
+  const [editingEmails, setEditingEmails] = useState({}); // { customerId: email }
+  const [emailInputs, setEmailInputs] = useState({}); // { customerId: email }
+  const [savingEmail, setSavingEmail] = useState({}); // { customerId: true/false }
   const [formData, setFormData] = useState({
     invoice_date: new Date().toISOString().split('T')[0],
     period_start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
     period_end: new Date().toISOString().split('T')[0],
-    custom_message: ''
+    custom_message: '',
+    sender_email: '' // Selected sender email
   });
+  const [invoiceEmails, setInvoiceEmails] = useState([]);
 
   useEffect(() => {
     if (open && organization) {
@@ -53,12 +62,70 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
         logger.error('Error loading invoice template:', error);
       }
 
+      // Load invoice emails from organization
+      const loadInvoiceEmails = async () => {
+        try {
+          const { data: orgData, error: orgError } = await supabase
+            .from('organizations')
+            .select('invoice_emails, default_invoice_email, email')
+            .eq('id', organization.id)
+            .single();
+
+          if (!orgError && orgData) {
+            // Get invoice emails array, fallback to organization.email if empty
+            let emails = [];
+            if (orgData.invoice_emails && Array.isArray(orgData.invoice_emails)) {
+              emails = orgData.invoice_emails;
+            } else if (orgData.email) {
+              emails = [orgData.email];
+            }
+            
+            // Also include user email and profile email as options
+            const allEmails = new Set(emails);
+            if (user?.email) allEmails.add(user.email);
+            if (profile?.email) allEmails.add(profile.email);
+            if (orgData.email) allEmails.add(orgData.email);
+            
+            const emailList = Array.from(allEmails).filter(Boolean);
+            setInvoiceEmails(emailList);
+            
+            // Set default sender email
+            const defaultEmail = orgData.default_invoice_email || 
+                                 orgData.email || 
+                                 user?.email || 
+                                 profile?.email || 
+                                 emailList[0] || '';
+            
+            setFormData(prev => ({
+              ...prev,
+              sender_email: defaultEmail
+            }));
+          }
+        } catch (error) {
+          logger.error('Error loading invoice emails:', error);
+          // Fallback to user/profile/organization email
+          const fallbackEmail = user?.email || profile?.email || organization?.email || '';
+          setInvoiceEmails(fallbackEmail ? [fallbackEmail] : []);
+          setFormData(prev => ({
+            ...prev,
+            sender_email: fallbackEmail
+          }));
+        }
+      };
+
+      loadInvoiceEmails();
+
       // Select all customers by default
       if (customers && customers.length > 0) {
         setSelectedCustomers(customers.map(c => c.customer?.CustomerListID || c.CustomerListID).filter(Boolean));
       }
+      
+      // Reset email editing state
+      setEditingEmails({});
+      setEmailInputs({});
+      setSavingEmail({});
     }
-  }, [open, organization, customers]);
+  }, [open, organization, customers, user, profile]);
 
   const handleToggleCustomer = (customerId) => {
     setSelectedCustomers(prev => 
@@ -76,9 +143,33 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
     }
   };
 
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+  };
+
+  const formatAddress = (obj) => {
+    if (!obj) return '';
+    const parts = [
+      obj.address || obj.contact_details,
+      obj.city,
+      obj.province || obj.state,
+      obj.postal_code
+    ].filter(Boolean);
+    return parts.join(', ');
+  };
+
   const generateInvoiceForCustomer = async (customerData) => {
-    const customer = customerData.customer || customerData;
+    let customer = customerData.customer || customerData;
     const rentals = customerData.rentals || [];
+    
+    // Check if email was updated in emailInputs (for customers that just had email added)
+    const customerId = customer.CustomerListID;
+    if (emailInputs[customerId] && !customer.email) {
+      // Use the email from input if customer doesn't have one yet
+      customer = { ...customer, email: emailInputs[customerId] };
+    }
 
     if (!rentals || rentals.length === 0) {
       return { success: false, error: 'No active rentals' };
@@ -171,20 +262,160 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
         throw new Error('Failed to generate invoice number: ' + settingsErr.message);
       }
 
-      // Generate PDF (simplified - you may want to extract the full PDF generation logic)
+      // Generate PDF with proper formatting
       const doc = new jsPDF();
-      doc.setFillColor(0, 0, 0);
-      doc.rect(0, 0, 210, 20, 'F');
+      const primaryColor = invoiceTemplate?.primary_color || '#000000';
+      const colorRgb = primaryColor.startsWith('#') 
+        ? [
+            parseInt(primaryColor.slice(1, 3), 16),
+            parseInt(primaryColor.slice(3, 5), 16),
+            parseInt(primaryColor.slice(5, 7), 16)
+          ]
+        : [0, 0, 0];
+
+      // Header - Black bar
+      doc.setFillColor(colorRgb[0], colorRgb[1], colorRgb[2]);
+      doc.rect(0, 0, 210, 25, 'F');
+      
       doc.setTextColor(255, 255, 255);
-      doc.setFontSize(16);
-      doc.text('INVOICE', 105, 12, { align: 'center' });
+      doc.setFontSize(10);
+      doc.text('INVOICE DATE', 15, 10);
+      doc.setFontSize(12);
+      doc.text(formatDate(formData.invoice_date), 15, 18);
+      
+      doc.setFontSize(10);
+      doc.text('INVOICE NUMBER', 85, 10);
+      doc.setFontSize(12);
+      doc.text(invoiceNumber, 85, 18);
+      
+      doc.setFontSize(10);
+      doc.text('AMOUNT DUE', 155, 10);
+      doc.setFontSize(12);
+      doc.text(`$${total.toFixed(2)}`, 155, 18);
 
-      // Add company info, customer info, invoice details, etc.
-      // (This is simplified - you should use the full PDF generation from InvoiceGenerator)
+      // Reset text color
+      doc.setTextColor(0, 0, 0);
+      
+      let y = 35;
 
-      // Get PDF as base64
+      // Company info
+      doc.setFontSize(14);
+      doc.setFont(undefined, 'bold');
+      doc.text(organization.name, 15, y);
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      y += 7;
+      
+      const companyAddress = formatAddress(organization);
+      if (companyAddress) {
+        doc.text(companyAddress, 15, y);
+        y += 5;
+      }
+      if (organization.phone) {
+        doc.text(`Phone: ${organization.phone}`, 15, y);
+        y += 5;
+      }
+      if (organization.email) {
+        doc.text(`Email: ${organization.email}`, 15, y);
+        y += 5;
+      }
+
+      y += 10;
+
+      // Bill To
+      doc.setFont(undefined, 'bold');
+      doc.text('BILL TO:', 15, y);
+      doc.setFont(undefined, 'normal');
+      doc.text(customer.name, 15, y + 7);
+      const customerAddress = formatAddress(customer);
+      if (customerAddress) {
+        doc.text(customerAddress, 15, y + 14);
+      }
+      y += 30;
+
+      // Rental Period Table
+      autoTable(doc, {
+        startY: y,
+        head: [['RENTAL PERIOD', 'BILL TO ACCT #', 'SHIP TO ACCT #', 'TERMS', 'DUE DATE']],
+        body: [[
+          `${formatDate(formData.period_start)} - ${formatDate(formData.period_end)}`,
+          customer.CustomerListID || '',
+          customer.CustomerListID || '',
+          invoiceTemplate?.payment_terms || 'CREDIT CARD',
+          formatDate(new Date(new Date(formData.invoice_date).getTime() + 30 * 24 * 60 * 60 * 1000))
+        ]],
+        theme: 'plain',
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
+      });
+
+      y = doc.lastAutoTable.finalY + 10;
+
+      // Rental Summary Table
+      const rentalsData = rentals.map(rental => {
+        // Calculate actual days held from delivery date to period end (same logic as InvoiceGenerator)
+        const rentalStartDate = rental.rental_start_date 
+          ? new Date(rental.rental_start_date) 
+          : (rental.bottles?.delivery_date ? new Date(rental.bottles.delivery_date) : startDate);
+        // Calculate days from the earliest date (rental start or period start) to period end
+        const actualStartDate = rentalStartDate < startDate ? rentalStartDate : startDate;
+        const daysHeld = Math.ceil((endDate - actualStartDate) / (1000 * 60 * 60 * 24)) + 1;
+        
+        return [
+          rental.product_code || rental.product_type || rental.description || 'Cylinder',
+          '1',
+          daysHeld,
+          `$${monthlyRate.toFixed(3)}`,
+          `$${(monthlyRate * rentalMonths).toFixed(2)}`
+        ];
+      });
+
+      autoTable(doc, {
+        startY: y,
+        head: [['ITEM', 'QTY', 'DAYS', 'RATE/MONTH', 'TOTAL']],
+        body: rentalsData,
+        theme: 'plain',
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
+      });
+
+      y = doc.lastAutoTable.finalY + 10;
+
+      // Financial Summary
+      const summaryX = 140;
+      doc.setFontSize(10);
+      
+      doc.text('Subtotal:', summaryX, y);
+      doc.text(`$${subtotal.toFixed(2)}`, 180, y, { align: 'right' });
+      y += 7;
+      
+      doc.text('Tax:', summaryX, y);
+      doc.text(`$${taxAmount.toFixed(2)}`, 180, y, { align: 'right' });
+      y += 7;
+
+      // Amount Due - Black bar
+      doc.setFillColor(colorRgb[0], colorRgb[1], colorRgb[2]);
+      doc.rect(summaryX - 5, y - 5, 55, 10, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFont(undefined, 'bold');
+      doc.text('AMOUNT DUE', summaryX, y);
+      doc.text(`$${total.toFixed(2)}`, 180, y, { align: 'right' });
+      
+      // Reset
+      doc.setTextColor(0, 0, 0);
+      doc.setFont(undefined, 'normal');
+
+      // Get PDF as base64 for email
       const pdfBase64 = doc.output('base64');
       const pdfFileName = `Invoice_${invoiceNumber}_${formData.invoice_date}.pdf`;
+      
+      // Convert base64 to blob for download
+      const base64Data = pdfBase64;
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const pdfBlob = new Blob([byteArray], { type: 'application/pdf' });
 
       // Save invoice to database
       logger.log(`Saving invoice ${invoiceNumber} for customer ${customer.name}...`);
@@ -225,17 +456,28 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
       // Save line items
       logger.log(`Saving ${rentals.length} line items for invoice ${finalInvoiceNumber}...`);
       for (const rental of rentals) {
+        // Calculate actual days held from delivery date to period end (same logic as InvoiceGenerator)
+        const rentalStartDate = rental.rental_start_date 
+          ? new Date(rental.rental_start_date) 
+          : (rental.bottles?.delivery_date ? new Date(rental.bottles.delivery_date) : startDate);
+        // Calculate days from the earliest date (rental start or period start) to period end
+        const actualStartDate = rentalStartDate < startDate ? rentalStartDate : startDate;
+        const daysHeld = Math.ceil((endDate - actualStartDate) / (1000 * 60 * 60 * 24)) + 1;
+        
+        const dailyRate = monthlyRate / 30; // Convert monthly rate to daily rate
+        const lineTotal = monthlyRate * rentalMonths;
+        
         const { error: lineItemError } = await supabase
           .from('invoice_line_items')
           .insert({
             invoice_id: invoiceRecord.id,
             item_description: rental.product_code || rental.product_type || rental.description || 'Cylinder',
-            barcode: rental.barcode || rental.bottles?.barcode_number || rental.bottle_barcode,
-            serial_number: rental.serial_number || rental.bottles?.serial_number,
+            barcode: rental.barcode || rental.bottles?.barcode_number || rental.bottle_barcode || null,
+            serial_number: rental.serial_number || rental.bottles?.serial_number || null,
             quantity: 1,
-            rental_days: rental.daysHeld || rental.bottles?.days_at_location || rental.days_at_location || 0,
-            monthly_rate: monthlyRate,
-            line_total: monthlyRate * rentalMonths
+            rental_days: daysHeld,
+            daily_rate: dailyRate,
+            line_total: lineTotal
           });
         
         if (lineItemError) {
@@ -261,15 +503,18 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
         const timeoutId = setTimeout(() => controller.abort(), 60000);
 
         try {
-          // Get the current user's email from Supabase auth to ensure we always have it
-          let senderEmail = user?.email || profile?.email || organization?.email;
+          // Check if we're in local development
+          const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+          
+          // Use the selected sender email from form, with fallback
+          let senderEmail = formData.sender_email || user?.email || profile?.email || organization?.email;
           if (!senderEmail) {
             const { data: { user: authUser } } = await supabase.auth.getUser();
             senderEmail = authUser?.email;
           }
           
           if (!senderEmail) {
-            throw new Error('Unable to determine sender email. Please ensure you are logged in.');
+            throw new Error('Unable to determine sender email. Please select a sender email address.');
           }
 
           const emailResponse = await fetch('/.netlify/functions/send-invoice-email', {
@@ -285,11 +530,41 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
               invoiceNumber: finalInvoiceNumber
             }),
             signal: controller.signal
+          }).catch((fetchError) => {
+            // Handle network errors, aborts, etc.
+            logger.error('Fetch error:', fetchError);
+            
+            // Check if this is a local development issue
+            if (isLocalDev && (fetchError.message.includes('Failed to fetch') || fetchError.message.includes('NetworkError'))) {
+              throw new Error('Netlify functions are not available. To test email functionality locally, please run "netlify dev" instead of "npm run dev". Alternatively, deploy to Netlify to use email functionality in production.');
+            }
+            
+            if (fetchError.name === 'AbortError') {
+              throw new Error('Email request timed out after 60 seconds. The PDF might be too large or the email service is slow.');
+            }
+            throw new Error(`Network error while sending email: ${fetchError.message}. Please check your internet connection and try again.`);
           }).finally(() => clearTimeout(timeoutId));
 
           if (!emailResponse.ok) {
-            const errorText = await emailResponse.text();
-            throw new Error(`Email failed: ${errorText}`);
+            let errorText = '';
+            let errorDetails = null;
+            try {
+              const errorData = await emailResponse.json();
+              errorText = errorData.error || errorData.details || 'Unknown error';
+              errorDetails = errorData;
+            } catch (parseError) {
+              // If JSON parsing fails, try to get text
+              errorText = await emailResponse.text() || `HTTP ${emailResponse.status}: ${emailResponse.statusText}`;
+            }
+            
+            logger.error('Email response error:', {
+              status: emailResponse.status,
+              statusText: emailResponse.statusText,
+              error: errorText,
+              details: errorDetails
+            });
+            
+            throw new Error(`Email failed (${emailResponse.status}): ${errorText}`);
           }
 
           // Update invoice as sent
@@ -303,7 +578,9 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
             success: true, 
             invoiceNumber: finalInvoiceNumber, 
             email: customer.email,
-            customer: customer
+            customer: customer,
+            pdfBlob: pdfBlob,
+            pdfFileName: pdfFileName
           };
         } catch (emailError) {
           logger.error('Email error for customer:', customer.name, emailError);
@@ -312,7 +589,9 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
             success: false, 
             error: 'Email failed: ' + emailError.message, 
             invoiceNumber: finalInvoiceNumber,
-            customer: customer
+            customer: customer,
+            pdfBlob: pdfBlob,
+            pdfFileName: pdfFileName
           };
         }
       } else {
@@ -321,7 +600,9 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
           success: false, 
           error: 'No email address', 
           invoiceNumber: finalInvoiceNumber,
-          customer: customer
+          customer: customer,
+          pdfBlob: pdfBlob,
+          pdfFileName: pdfFileName
         };
       }
     } catch (error) {
@@ -331,9 +612,27 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
         success: false, 
         error: error.message,
         invoiceNumber: invoiceNumber || undefined,
-        customer: customer
+        customer: customer,
+        pdfBlob: undefined,
+        pdfFileName: undefined
       };
     }
+  };
+
+  const handleDownloadInvoice = (result) => {
+    if (!result.pdfBlob) {
+      alert('PDF not available for download');
+      return;
+    }
+    
+    const url = URL.createObjectURL(result.pdfBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = result.pdfFileName || `Invoice_${result.invoiceNumber || 'invoice'}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handleBulkEmail = async () => {
@@ -381,6 +680,76 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
 
     setLoading(false);
     setProcessing(false);
+  };
+
+  const handleStartEditEmail = (customerId, currentEmail) => {
+    setEditingEmails(prev => ({ ...prev, [customerId]: true }));
+    setEmailInputs(prev => ({ ...prev, [customerId]: currentEmail || '' }));
+  };
+
+  const handleCancelEditEmail = (customerId) => {
+    setEditingEmails(prev => {
+      const newState = { ...prev };
+      delete newState[customerId];
+      return newState;
+    });
+    setEmailInputs(prev => {
+      const newState = { ...prev };
+      delete newState[customerId];
+      return newState;
+    });
+  };
+
+  const handleSaveEmail = async (customerId, customerData) => {
+    const customer = customerData.customer || customerData;
+    const email = emailInputs[customerId]?.trim();
+    
+    if (!email) {
+      alert('Please enter a valid email address');
+      return;
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      alert('Please enter a valid email address');
+      return;
+    }
+
+    setSavingEmail(prev => ({ ...prev, [customerId]: true }));
+    
+    try {
+      const { error } = await supabase
+        .from('customers')
+        .update({ email })
+        .eq('CustomerListID', customerId)
+        .eq('organization_id', organization.id);
+
+      if (error) {
+        throw error;
+      }
+
+      // Update the customer object in the customers array
+      customer.email = email;
+      
+      // Close edit mode
+      setEditingEmails(prev => {
+        const newState = { ...prev };
+        delete newState[customerId];
+        return newState;
+      });
+      
+      logger.log(`Email saved for customer ${customer.name}: ${email}`);
+    } catch (error) {
+      logger.error('Error saving email:', error);
+      alert('Failed to save email: ' + error.message);
+    } finally {
+      setSavingEmail(prev => {
+        const newState = { ...prev };
+        delete newState[customerId];
+        return newState;
+      });
+    }
   };
 
   const customersToShow = customers || [];
@@ -434,6 +803,23 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
                   InputLabelProps={{ shrink: true }}
                 />
               </Box>
+              <FormControl fullWidth sx={{ mt: 2 }}>
+                <InputLabel>Send From Email</InputLabel>
+                <Select
+                  value={formData.sender_email || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, sender_email: e.target.value }))}
+                  label="Send From Email"
+                >
+                  {invoiceEmails.map((email) => (
+                    <MenuItem key={email} value={email}>
+                      {email}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                Select which email address will send all invoices. Manage invoice emails in Settings.
+              </Typography>
               <TextField
                 fullWidth
                 multiline
@@ -457,7 +843,8 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
 
             {customersWithoutEmail > 0 && (
               <Alert severity="warning" sx={{ mb: 2 }}>
-                {customersWithoutEmail} selected customer(s) don't have email addresses and will be skipped.
+                {customersWithoutEmail} selected customer(s) don't have email addresses and will be skipped. 
+                You can add email addresses by clicking the edit icon next to each customer.
               </Alert>
             )}
 
@@ -490,9 +877,59 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
                           }
                           secondary={
                             <Box>
-                              <Typography variant="body2" color="text.secondary">
-                                {customer.email || 'No email address'}
-                              </Typography>
+                              {editingEmails[customerId] ? (
+                                <Box display="flex" alignItems="center" gap={1} sx={{ mt: 1 }}>
+                                  <TextField
+                                    size="small"
+                                    type="email"
+                                    placeholder="Enter email address"
+                                    value={emailInputs[customerId] || ''}
+                                    onChange={(e) => setEmailInputs(prev => ({ ...prev, [customerId]: e.target.value }))}
+                                    sx={{ flex: 1, minWidth: 200 }}
+                                    InputProps={{
+                                      endAdornment: (
+                                        <InputAdornment position="end">
+                                          <IconButton
+                                            size="small"
+                                            onClick={() => handleSaveEmail(customerId, customerData)}
+                                            disabled={savingEmail[customerId]}
+                                            color="primary"
+                                          >
+                                            {savingEmail[customerId] ? (
+                                              <CircularProgress size={16} />
+                                            ) : (
+                                              <SaveIcon fontSize="small" />
+                                            )}
+                                          </IconButton>
+                                          <IconButton
+                                            size="small"
+                                            onClick={() => handleCancelEditEmail(customerId)}
+                                            disabled={savingEmail[customerId]}
+                                          >
+                                            <CancelIcon fontSize="small" />
+                                          </IconButton>
+                                        </InputAdornment>
+                                      )
+                                    }}
+                                  />
+                                </Box>
+                              ) : (
+                                <Box display="flex" alignItems="center" gap={1}>
+                                  <Typography variant="body2" color="text.secondary">
+                                    {customer.email || 'No email address'}
+                                  </Typography>
+                                  {!hasEmail && (
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => handleStartEditEmail(customerId, customer.email)}
+                                      sx={{ ml: 0.5 }}
+                                      title="Add email address"
+                                    >
+                                      <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  )}
+                                </Box>
+                              )}
                               <Typography variant="body2" color="text.secondary">
                                 {rentalCount} active rental(s)
                               </Typography>
@@ -564,6 +1001,16 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
                         </Typography>
                       )}
                     </Box>
+                    {result.pdfBlob && result.invoiceNumber && (
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDownloadInvoice(result)}
+                        title="Download invoice PDF"
+                        color="primary"
+                      >
+                        <DownloadIcon fontSize="small" />
+                      </IconButton>
+                    )}
                   </Box>
                 ))}
               </Box>
@@ -589,4 +1036,5 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
     </Dialog>
   );
 }
+
 

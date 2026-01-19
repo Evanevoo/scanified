@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Audio } from 'expo-av';
+import { AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 
 export interface CustomSound {
@@ -53,7 +53,7 @@ export interface CustomizationSettings {
 class CustomizationService {
   private static instance: CustomizationService;
   private settings: CustomizationSettings | null = null;
-  private soundCache: Map<string, Audio.Sound> = new Map();
+  private soundCache: Map<string, AudioPlayer> = new Map();
   private isInitialized = false;
 
   static getInstance(): CustomizationService {
@@ -176,7 +176,7 @@ class CustomizationService {
     try {
       const audioSound = this.soundCache.get(sound.id);
       if (audioSound) {
-        await audioSound.replayAsync();
+        audioSound.play();
         logger.log(`🔊 Played sound: ${sound.name}`);
       } else {
         logger.log(`🔊 Sound ${sound.name} not loaded (using haptic feedback instead)`);
@@ -226,10 +226,7 @@ class CustomizationService {
     // Preload the new sound
     if (newSound.enabled) {
       try {
-        const { sound: audioSound } = await Audio.Sound.createAsync(
-          { uri: `asset:///sounds/${newSound.file}` },
-          { shouldPlay: false, isLooping: false }
-        );
+        const audioSound = new AudioPlayer({ uri: `asset:///sounds/${newSound.file}` });
         this.soundCache.set(newSound.id, audioSound);
       } catch (error) {
         logger.warn(`Failed to preload new sound ${newSound.name}:`, error);
@@ -252,15 +249,12 @@ class CustomizationService {
     if (updates.enabled === false) {
       const audioSound = this.soundCache.get(soundId);
       if (audioSound) {
-        await audioSound.unloadAsync();
+        audioSound.remove();
         this.soundCache.delete(soundId);
       }
     } else if (updates.enabled === true || updates.file) {
       try {
-        const { sound: audioSound } = await Audio.Sound.createAsync(
-          { uri: `asset:///sounds/${this.settings.sounds[soundIndex].file}` },
-          { shouldPlay: false, isLooping: false }
-        );
+        const audioSound = new AudioPlayer({ uri: `asset:///sounds/${this.settings.sounds[soundIndex].file}` });
         this.soundCache.set(soundId, audioSound);
       } catch (error) {
         logger.warn(`Failed to preload updated sound:`, error);
@@ -277,7 +271,7 @@ class CustomizationService {
     // Remove from cache
     const audioSound = this.soundCache.get(soundId);
     if (audioSound) {
-      await audioSound.unloadAsync();
+      audioSound.remove();
       this.soundCache.delete(soundId);
     }
   }
@@ -416,12 +410,12 @@ class CustomizationService {
   }
 
   async cleanup(): Promise<void> {
-    // Unload all sounds
+    // Remove all sounds
     for (const [id, sound] of this.soundCache) {
       try {
-        await sound.unloadAsync();
+        sound.remove();
       } catch (error) {
-        logger.warn(`Failed to unload sound ${id}:`, error);
+        logger.warn(`Failed to remove sound ${id}:`, error);
       }
     }
     this.soundCache.clear();

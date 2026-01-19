@@ -245,7 +245,6 @@ export default function TransferFromCustomers() {
           <Autocomplete
             options={sourceCustomers}
             getOptionLabel={(option) => `${option.name} (${option.CustomerListID})`}
-            isOptionEqualToValue={(option, value) => option.CustomerListID === value?.CustomerListID}
             renderOption={(props, option) => (
               <Box component="li" {...props}>
                 <Box>

@@ -85,25 +85,13 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
     }
 
     try {
-      // First validate that the barcode exists in the system
-      const itemDetails = await lookupItemDetails(manualBarcode.trim());
-      
-      if (!itemDetails) {
-        Alert.alert(
-          'Barcode Not Found', 
-          `The barcode "${manualBarcode.trim()}" is not in the system. Please check the barcode or contact your administrator.`,
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-
-      // Barcode exists, proceed with the scan
+      // Allow scanning even if barcode doesn't exist - it will show as unclassified
       await handleBarcodeScannedWithAction({ data: manualBarcode.trim() }, manualAction);
       setManualBarcode('');
       setManualEntryModal(false);
     } catch (error) {
-      logger.error('Error validating barcode:', error);
-      Alert.alert('Error', 'Failed to validate barcode. Please try again.');
+      logger.error('Error processing barcode:', error);
+      Alert.alert('Error', 'Failed to process barcode. Please try again.');
     }
   };
 
@@ -160,12 +148,14 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
       }
       
       // Save to offline storage
+      // Include product_code if found, null if unknown (will show as unclassified on website)
       logger.log('📱 Saving scan to offline queue:', {
         orderNumber,
         customerName,
         customerId,
         userOrgId: user?.organization_id,
-        userId: user?.id
+        userId: user?.id,
+        product_code: itemDetails?.product_code || null
       });
       
       await OfflineStorageService.addToOfflineQueue({
@@ -177,7 +167,8 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
           notes: null,
           order_number: orderNumber,
           customer_name: customerName,
-          customer_id: customerId
+          customer_id: customerId,
+          product_code: itemDetails?.product_code || null // Include product_code, null if unknown
         },
         organizationId: user?.organization_id || '',
         userId: user?.id || ''
@@ -267,11 +258,7 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
         <CameraView
           style={styles.camera}
           onBarcodeScanned={handleBarcodeScanned}
-          barcodeScannerSettings={{
-            barcodeTypes: [
-              'qr', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 'code128', 'pdf417', 'aztec', 'datamatrix', 'itf14',
-            ],
-          }}
+          barcodeScannerSettings={{}}
           enableTorch={isFlashlightOn}
         />
         
@@ -503,17 +490,17 @@ const styles = StyleSheet.create({
   },
   scanningFrame: {
     position: 'absolute',
-    top: '50%',
+    top: '30%', // Moved up from 50% to camera level
     left: '50%',
-    transform: [{ translateX: -150 }, { translateY: -100 }],
-    width: 300,
-    height: 200,
+    transform: [{ translateX: -160 }, { translateY: -75 }], // Center 320px width, 150px height
+    width: 320,
+    height: 150,
   },
   scanningBox: {
-    width: 300,
-    height: 200,
-    borderWidth: 3,
-    borderColor: '#FF0000',
+    width: 320,
+    height: 150,
+    borderWidth: 2,
+    borderColor: '#fff',
     borderRadius: 8,
     backgroundColor: 'transparent',
   },
@@ -521,7 +508,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: -60,
     top: '50%',
-    color: '#FF0000',
+    color: '#fff', // Changed to white to match border
     fontSize: 12,
     fontWeight: 'bold',
     transform: [{ translateY: -10 }],

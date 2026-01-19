@@ -264,10 +264,21 @@ export default function ImportInvoices() {
           // --- Bulk insert new customers ---
           const newCustomers = batchRows
             .filter(row => !existingCustomerIds.has(row.customer_id))
-            .map(row => ({
-              CustomerListID: row.customer_id,
-              name: row.customer_name
-            }));
+            .map(row => {
+              // Determine location from city or use default
+              const city = (row.city || row.City || '').trim().toUpperCase();
+              let location = 'SASKATOON'; // Default
+              if (city.includes('REGINA')) location = 'REGINA';
+              else if (city.includes('CHILLIWACK')) location = 'CHILLIWACK';
+              else if (city.includes('PRINCE GEORGE') || city.includes('PRINCE_GEORGE')) location = 'PRINCE_GEORGE';
+              else if (city.includes('SASKATOON')) location = 'SASKATOON';
+              
+              return {
+                CustomerListID: row.customer_id,
+                name: row.customer_name,
+                location: location
+              };
+            });
           if (newCustomers.length) {
             const { error: custErr } = await supabase.from('customers').insert(newCustomers);
             if (custErr) batchErrors.push({ type: 'customer', error: custErr.message });

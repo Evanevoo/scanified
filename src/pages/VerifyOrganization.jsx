@@ -13,10 +13,12 @@ import {
   Stack,
   Stepper,
   Step,
-  StepLabel
+  StepLabel,
+  LinearProgress
 } from '@mui/material';
 import { CheckCircle as CheckIcon, Error as ErrorIcon, Email as EmailIcon } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
+import { validateInput } from '../utils/security';
 
 export default function VerifyOrganization() {
   const [searchParams] = useSearchParams();
@@ -154,8 +156,10 @@ export default function VerifyOrganization() {
   const handlePasswordSubmit = async (e) => {
     e.preventDefault();
     
-    if (!password || password.length < 6) {
-      setPasswordError('Password must be at least 6 characters');
+    // Use security.js validation for strong passwords
+    const passwordValidation = validateInput.validatePassword(password);
+    if (!passwordValidation.valid) {
+      setPasswordError(passwordValidation.message);
       return;
     }
 

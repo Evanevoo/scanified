@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import { Audio } from 'expo-av';
+import { AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -10,7 +10,7 @@ export interface SoundSettings {
 
 class SoundService {
   private static instance: SoundService;
-  private soundCache: Map<string, Audio.Sound> = new Map();
+  private soundCache: Map<string, AudioPlayer> = new Map();
   private settings: SoundSettings = {
     soundEnabled: true,
     hapticFeedback: true,
@@ -65,11 +65,8 @@ class SoundService {
 
       for (const [id, source] of Object.entries(soundFiles)) {
         try {
-          const { sound } = await Audio.Sound.createAsync(source, {
-            shouldPlay: false,
-            isLooping: false,
-            volume: 0.7,
-          });
+          const sound = new AudioPlayer(source);
+          sound.volume = 0.7;
           
           this.soundCache.set(id, sound);
           logger.log(`🔊 Loaded sound: ${id}`);
@@ -91,9 +88,8 @@ class SoundService {
         const sound = this.soundCache.get(soundId);
         
         if (sound) {
-          // Reset position to start and play
-          await sound.setPositionAsync(0);
-          await sound.playAsync();
+          // Play the sound (expo-audio AudioPlayer automatically resets to start)
+          sound.play();
           logger.log(`🔊 Played sound: ${type}`);
         } else {
           logger.log(`🔊 Sound not available, using haptic: ${type}`);
@@ -162,9 +158,9 @@ class SoundService {
   async cleanup(): Promise<void> {
     for (const [id, sound] of this.soundCache) {
       try {
-        await sound.unloadAsync();
+        sound.remove();
       } catch (error) {
-        logger.warn(`Failed to unload sound ${id}:`, error);
+        logger.warn(`Failed to remove sound ${id}:`, error);
       }
     }
     this.soundCache.clear();

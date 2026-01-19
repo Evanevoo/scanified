@@ -6,7 +6,7 @@ import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, 
   Card, CardContent, Grid, Chip, IconButton, TextField, FormControl, InputLabel, Select, MenuItem,
   Alert, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions, Tabs, Tab,
-  Tooltip, Badge, Collapse, TablePagination
+  Tooltip, Badge, Collapse, FormControlLabel, Checkbox
 } from '@mui/material';
 import {
   Business as BusinessIcon,
@@ -18,13 +18,15 @@ import {
   MonetizationOn as MoneyIcon,
   Assignment as AssignmentIcon,
   Receipt as InvoiceIcon,
-  Email as EmailIcon,
   ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon
+  ExpandLess as ExpandLessIcon,
+  Email as EmailIcon,
+  Warning as WarningIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 import InvoiceGenerator from '../components/InvoiceGenerator';
 import BulkInvoiceEmailDialog from '../components/BulkInvoiceEmailDialog';
+import DNSConversionDialog from '../components/DNSConversionDialog';
 
 // Business logic functions to determine asset status
 const getAssetStatus = (assignedCustomer, customerType) => {
@@ -76,17 +78,15 @@ function RentalsImproved() {
   const [invoiceDialog, setInvoiceDialog] = useState({ open: false, customer: null, rentals: [] });
   const [bulkEmailDialogOpen, setBulkEmailDialogOpen] = useState(false);
   const [updatingRentals, setUpdatingRentals] = useState(false);
-  const [selectedCustomers, setSelectedCustomers] = useState([]);
   const [error, setError] = useState(null);
   const [filters, setFilters] = useState({
     status: 'all',
     customer_type: 'all',
-    search: ''
+    search: '',
+    showDNSOnly: false
   });
   const [locations, setLocations] = useState([]);
   const [expandedCustomers, setExpandedCustomers] = useState(new Set());
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
 
   // Statistics
   const [stats, setStats] = useState({
@@ -117,12 +117,12 @@ function RentalsImproved() {
       logger.log('Fetching rentals for organization:', organization.id);
 
       // Simplified approach - get all data separately to debug
-      // 1. Get all active rentals (from rentals table) for this organization
+      // 1. Get all active rentals (from rentals table) - including DNS rentals
       const { data: rentalsData, error: rentalsError } = await supabase
         .from('rentals')
         .select('*')
-        .eq('organization_id', organization.id)
-        .is('rental_end_date', null);
+        .is('rental_end_date', null)
+        .eq('organization_id', organization.id); // Only rentals for this organization
 
       if (rentalsError) {
         logger.error('Rentals query error:', rentalsError);
@@ -130,11 +130,21 @@ function RentalsImproved() {
       }
 
       logger.log('All active rentals:', rentalsData?.length || 0);
+      
+      // Log how many rentals have bottle_id vs how many don't
+      const rentalsWithBottleId = (rentalsData || []).filter(r => r.bottle_id).length;
+      const rentalsWithoutBottleId = (rentalsData || []).filter(r => !r.bottle_id).length;
+      logger.log('Rentals breakdown:', {
+        total: rentalsData?.length || 0,
+        withBottleId: rentalsWithBottleId,
+        withoutBottleId: rentalsWithoutBottleId,
+        dnsRentals: (rentalsData || []).filter(r => r.is_dns === true).length
+      });
 
       // 2. Get all assigned bottles for this organization
       const { data: assignedBottles, error: bottlesError } = await supabase
         .from('bottles')
-        .select('*')
+        .select('*, customers:assigned_customer(customer_type)')
         .eq('organization_id', organization.id)
         .not('assigned_customer', 'is', null);
 
@@ -156,50 +166,34 @@ function RentalsImproved() {
         throw allBottlesError;
       }
 
-      // Create a map of bottles for quick lookup
+      // Create a map of bottles for quick lookup by barcode AND by bottle_id
       const bottlesMap = (allBottles || []).reduce((map, bottle) => {
-        map[bottle.barcode_number || bottle.barcode] = bottle;
+        const barcode = bottle.barcode_number || bottle.barcode;
+        if (barcode) {
+          map[barcode] = bottle;
+        }
+        // Also map by bottle_id for rentals that reference bottles by ID
+        if (bottle.id) {
+          map[`id:${bottle.id}`] = bottle;
+        }
         return map;
       }, {});
 
-      logger.log('Total bottles for org:', allBottles?.length || 0);
+      const totalBottles = allBottles?.length || 0;
+      const assignedBottlesCount = assignedBottles?.length || 0;
+      const unassignedBottles = totalBottles - assignedBottlesCount;
+      
+      logger.log('Bottles breakdown:', {
+        totalBottles: totalBottles,
+        assignedBottles: assignedBottlesCount,
+        unassignedBottles: unassignedBottles,
+        expectedInRentals: assignedBottlesCount
+      });
 
       // 4. Combine rentals with bottles from this organization
       const allRentalData = [];
       
-      // Add rentals that have matching bottles in this organization
-      for (const rental of rentalsData || []) {
-        const bottle = bottlesMap[rental.bottle_barcode];
-        if (bottle) {
-          // Update rental with location-specific tax rate if not already set
-          const rentalLocation = (rental.location || bottle.location || 'SASKATOON').toUpperCase();
-          const locationTaxRate = locationTaxMap[rentalLocation] || rental.tax_rate || 0.11;
-          
-          allRentalData.push({
-            ...rental,
-            source: 'rental',
-            bottles: bottle,
-            tax_rate: locationTaxRate,
-            location: rentalLocation
-          });
-        }
-      }
-
-      // Add bottles that are assigned but don't have rental records
-      const existingBottleBarcodes = new Set(allRentalData.map(r => r.bottle_barcode));
-      
-      // Load customer pricing to apply correct rates
-      const { data: customerPricing } = await supabase
-        .from('customer_pricing')
-        .select('*')
-        .eq('organization_id', organization.id);
-      
-      const pricingMap = (customerPricing || []).reduce((map, pricing) => {
-        map[pricing.customer_id] = pricing;
-        return map;
-      }, {});
-
-      // Load location tax rates
+      // Load location tax rates first (needed for both regular and DNS rentals)
       const { data: locations } = await supabase
         .from('locations')
         .select('id, name, total_tax_rate')
@@ -212,9 +206,161 @@ function RentalsImproved() {
       
       logger.log('Location tax rates loaded:', locationTaxMap);
       
+      // Add rentals that have matching bottles in this organization
+      // Also include DNS rentals (is_dns = true) even if they don't have matching bottles
+      let rentalsIncluded = 0;
+      let rentalsExcluded = 0;
+      
+      for (const rental of rentalsData || []) {
+        // Try to find bottle by barcode first
+        let bottle = bottlesMap[rental.bottle_barcode];
+        
+        // If not found by barcode, try by bottle_id (for rentals with placeholder barcodes)
+        if (!bottle && rental.bottle_id) {
+          bottle = bottlesMap[`id:${rental.bottle_id}`];
+        }
+        
+        const isDNS = rental.is_dns === true;
+        
+        // Include rental if:
+        // 1. It has a matching bottle (by barcode OR by bottle_id), OR
+        // 2. It's a DNS rental, OR
+        // 3. It has a bottle_id (bottle exists but barcode might be placeholder)
+        if (bottle || isDNS || rental.bottle_id) {
+          rentalsIncluded++;
+          // For DNS rentals, use rental location or default
+          const rentalLocation = bottle 
+            ? (rental.location || bottle.location || 'SASKATOON').toUpperCase()
+            : (rental.location || 'SASKATOON').toUpperCase();
+          const locationTaxRate = locationTaxMap[rentalLocation] || rental.tax_rate || 0.11;
+          
+          allRentalData.push({
+            ...rental,
+            source: 'rental',
+            bottles: bottle || null, // null for DNS rentals without bottles
+            tax_rate: locationTaxRate,
+            location: rentalLocation,
+            is_dns: isDNS
+          });
+        } else {
+          rentalsExcluded++;
+          logger.warn('Rental excluded (no matching bottle, not DNS, no bottle_id):', {
+            rental_id: rental.id,
+            bottle_barcode: rental.bottle_barcode,
+            bottle_id: rental.bottle_id,
+            customer_id: rental.customer_id
+          });
+        }
+      }
+      
+      logger.log(`Rentals processing: ${rentalsIncluded} included, ${rentalsExcluded} excluded`);
+
+      // Helper to detect placeholder barcodes (used in multiple places)
+      const isPlaceholderBarcode = (barcode) => {
+        if (!barcode || typeof barcode !== 'string') return false;
+        const normalized = barcode.trim().toLowerCase();
+        return normalized === 'delivered not-scanned' || 
+               normalized === 'delivered not scanned' ||
+               normalized === 'returned not-scanned' ||
+               normalized === 'returned not scanned' ||
+               normalized === 'not scanned' ||
+               normalized === 'dns';
+      };
+      
+      // Query for rentals that might have bottle_id but no matching bottle by barcode
+      // This catches rentals with placeholder barcodes that weren't included above
+      const { data: rentalsByBottleId, error: rentalsByBottleIdError } = await supabase
+        .from('rentals')
+        .select('*')
+        .is('rental_end_date', null)
+        .eq('organization_id', organization.id)
+        .not('bottle_id', 'is', null);
+      
+      if (!rentalsByBottleIdError && rentalsByBottleId) {
+        logger.log(`Found ${rentalsByBottleId.length} rentals with bottle_id (including placeholder barcodes)`);
+        
+        let rentalsByBottleIdAdded = 0;
+        // Add rentals that weren't already included (by bottle_id lookup)
+        for (const rental of rentalsByBottleId) {
+          const bottle = bottlesMap[`id:${rental.bottle_id}`] || bottlesMap[rental.bottle_barcode];
+          const isDNS = rental.is_dns === true;
+          
+          // Check if this rental is already in allRentalData
+          const alreadyIncluded = allRentalData.some(r => r.id === rental.id);
+          
+          // Include rental if:
+          // 1. It has a matching bottle, OR
+          // 2. It's a DNS rental, OR
+          // 3. It has a bottle_id (even if bottle not found in bottlesMap - bottle might exist in assignedBottles)
+          // We should include ALL rentals with bottle_id because those bottles exist (they're in assignedBottles)
+          if (!alreadyIncluded && (bottle || isDNS || rental.bottle_id)) {
+            const rentalLocation = bottle 
+              ? (rental.location || bottle.location || 'SASKATOON').toUpperCase()
+              : (rental.location || 'SASKATOON').toUpperCase();
+            const locationTaxRate = locationTaxMap[rentalLocation] || rental.tax_rate || 0.11;
+            
+            allRentalData.push({
+              ...rental,
+              source: 'rental',
+              bottles: bottle || null,
+              tax_rate: locationTaxRate,
+              location: rentalLocation,
+              is_dns: isDNS
+            });
+            rentalsByBottleIdAdded++;
+          }
+        }
+        logger.log(`Added ${rentalsByBottleIdAdded} rentals by bottle_id to allRentalData`);
+      }
+      
+      // Add bottles that are assigned but don't have rental records
+      // Track both barcodes AND bottle_ids to catch all cases
+      const existingBottleBarcodes = new Set();
+      const existingBottleIds = new Set();
+      
+      allRentalData.forEach(r => {
+        // Only track real barcodes (not placeholders) to avoid false matches
+        if (r.bottle_barcode && !isPlaceholderBarcode(r.bottle_barcode)) {
+          existingBottleBarcodes.add(r.bottle_barcode);
+        }
+        if (r.bottle_id) existingBottleIds.add(r.bottle_id);
+        if (r.bottles?.id) existingBottleIds.add(r.bottles.id);
+      });
+      
+      logger.log('Existing rentals tracking:', {
+        barcodes: existingBottleBarcodes.size,
+        bottle_ids: existingBottleIds.size,
+        totalRentals: allRentalData.length
+      });
+      
+      // Load customer pricing to apply correct rates
+      const { data: customerPricing } = await supabase
+        .from('customer_pricing')
+        .select('*')
+        .eq('organization_id', organization.id);
+      
+      const pricingMap = (customerPricing || []).reduce((map, pricing) => {
+        map[pricing.customer_id] = pricing;
+        return map;
+      }, {});
+      
+      let bottlesAdded = 0;
+      let bottlesSkipped = 0;
+      
       for (const bottle of assignedBottles || []) {
         const barcode = bottle.barcode_number || bottle.barcode;
-        if (!existingBottleBarcodes.has(barcode)) {
+        const bottleId = bottle.id;
+        const isPlaceholder = isPlaceholderBarcode(barcode);
+        
+        // Check if this bottle is already in rentals
+        // For placeholder barcodes, only check by bottle_id (not barcode)
+        // For real barcodes, check by both barcode AND bottle_id
+        const alreadyInRentals = isPlaceholder
+          ? (bottleId && existingBottleIds.has(bottleId))
+          : ((barcode && existingBottleBarcodes.has(barcode)) || 
+             (bottleId && existingBottleIds.has(bottleId)));
+        
+        if (!alreadyInRentals) {
           // Get customer-specific pricing or use default
           const customerPricing = pricingMap[bottle.assigned_customer];
           let rentalAmount = 15; // Default rate
@@ -238,7 +384,7 @@ function RentalsImproved() {
             id: `bottle_${bottle.id}`,
             source: 'bottle_assignment',
             customer_id: bottle.assigned_customer,
-            bottle_barcode: barcode,
+            bottle_barcode: barcode || null, // Can be null for bottles without barcodes
             bottle_id: bottle.id,
             bottles: bottle,
             rental_start_date: bottle.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
@@ -249,30 +395,142 @@ function RentalsImproved() {
             tax_rate: locationTaxRate,
             location: bottleLocation
           });
+          
+          // Track this bottle so we don't add it again
+          // Only track real barcodes (not placeholders) in the barcode set to avoid false matches
+          if (barcode && !isPlaceholder) {
+            existingBottleBarcodes.add(barcode);
+          }
+          if (bottleId) {
+            existingBottleIds.add(bottleId);
+          }
+          bottlesAdded++;
+        } else {
+          bottlesSkipped++;
+          logger.log(`Skipping bottle (already in rentals):`, { 
+            bottle_id: bottleId, 
+            barcode: barcode || 'no barcode',
+            is_placeholder: isPlaceholder,
+            customer_id: bottle.assigned_customer 
+          });
         }
       }
+      
+      logger.log(`Bottle assignments: ${bottlesAdded} added, ${bottlesSkipped} skipped (already in rentals)`);
 
-      // Remove duplicates based on bottle_barcode (keep rental records over bottle assignments)
+      // Remove duplicates based on bottle_barcode OR bottle_id (keep rental records over bottle assignments)
+      // For placeholder barcodes, use bottle_id as the unique identifier
       const deduplicatedData = [];
       const seenBarcodes = new Set();
+      const seenBottleIds = new Set(); // Track bottle_ids for bottles without barcodes or with placeholder barcodes
+      const duplicateBarcodes = new Map(); // Track which barcodes have duplicates
       
       // First pass: Add all rental records (priority over bottle assignments)
+      let dnsRentalsIncluded = 0;
       for (const item of allRentalData) {
-        if (item.source === 'rental' && !seenBarcodes.has(item.bottle_barcode)) {
-          deduplicatedData.push(item);
-          seenBarcodes.add(item.bottle_barcode);
+        if (item.source === 'rental') {
+          const barcode = item.bottle_barcode;
+          const bottleId = item.bottle_id || item.bottles?.id;
+          const isDNS = item.is_dns === true;
+          const isPlaceholder = isPlaceholderBarcode(barcode);
+          
+          // For placeholder barcodes or DNS, use bottle_id as unique identifier
+          if (isDNS || isPlaceholder || !barcode || (typeof barcode === 'string' && barcode.trim() === '')) {
+            // DNS rentals, placeholder barcodes, or rentals without barcode - use bottle_id
+            if (bottleId && seenBottleIds.has(bottleId)) {
+              // Duplicate bottle_id found
+              duplicateBarcodes.set(barcode || 'no_barcode', (duplicateBarcodes.get(barcode || 'no_barcode') || 1) + 1);
+              logger.warn(`Duplicate rental record for bottle_id ${bottleId}:`, item);
+            } else {
+              deduplicatedData.push(item);
+              if (isDNS) dnsRentalsIncluded++;
+              if (bottleId) seenBottleIds.add(bottleId);
+            }
+          } else if (!seenBarcodes.has(barcode)) {
+            // Real barcode - use barcode as unique identifier
+            deduplicatedData.push(item);
+            seenBarcodes.add(barcode);
+            if (bottleId) seenBottleIds.add(bottleId);
+          } else {
+            // Duplicate real barcode found
+            duplicateBarcodes.set(barcode, (duplicateBarcodes.get(barcode) || 1) + 1);
+            logger.warn(`Duplicate rental record for barcode ${barcode}:`, item);
+          }
         }
       }
+      
+      logger.log(`Included ${dnsRentalsIncluded} DNS rentals in deduplication`);
       
       // Second pass: Add bottle assignments only if no rental record exists
+      let bottlesWithoutBarcode = 0;
+      let placeholderBottlesAdded = 0;
+      let placeholderBottlesSkipped = 0;
+      
       for (const item of allRentalData) {
-        if (item.source === 'bottle_assignment' && !seenBarcodes.has(item.bottle_barcode)) {
-          deduplicatedData.push(item);
-          seenBarcodes.add(item.bottle_barcode);
+        if (item.source === 'bottle_assignment') {
+          const barcode = item.bottle_barcode;
+          const bottleId = item.bottle_id || item.bottles?.id;
+          const isPlaceholder = isPlaceholderBarcode(barcode);
+          
+          // For placeholder barcodes, check by bottle_id only (barcode is not unique)
+          // For real barcodes, check by both barcode AND bottle_id
+          const alreadyIncluded = isPlaceholder
+            ? (bottleId && seenBottleIds.has(bottleId))
+            : ((barcode && seenBarcodes.has(barcode)) || (bottleId && seenBottleIds.has(bottleId)));
+          
+          if (alreadyIncluded) {
+            // This is expected - rental record already exists for this barcode/bottle_id
+            if (barcode && !isPlaceholder) {
+              duplicateBarcodes.set(barcode, (duplicateBarcodes.get(barcode) || 1) + 1);
+            }
+            if (isPlaceholder) {
+              placeholderBottlesSkipped++;
+            }
+            logger.log(`Bottle assignment skipped (rental record exists):`, { 
+              customer_id: item.customer_id, 
+              bottle_id: bottleId,
+              barcode: barcode || 'no barcode',
+              is_placeholder: isPlaceholder
+            });
+          } else {
+            // Include this bottle assignment
+            deduplicatedData.push(item);
+            // Only track real barcodes (not placeholders) in seenBarcodes
+            // Always track bottle_id for both placeholders and real barcodes
+            if (barcode && !isPlaceholder) {
+              seenBarcodes.add(barcode);
+            }
+            if (bottleId) {
+              seenBottleIds.add(bottleId);
+            }
+            if (isPlaceholder) {
+              placeholderBottlesAdded++;
+            }
+            if (!barcode || (typeof barcode === 'string' && barcode.trim() === '')) {
+              bottlesWithoutBarcode++;
+            }
+          }
         }
       }
       
-      logger.log('Before deduplication:', allRentalData.length, 'After deduplication:', deduplicatedData.length);
+      logger.log(`Placeholder bottles: ${placeholderBottlesAdded} added, ${placeholderBottlesSkipped} skipped`);
+      logger.log(`Deduplication summary:`, {
+        totalBefore: allRentalData.length,
+        totalAfter: deduplicatedData.length,
+        removed: allRentalData.length - deduplicatedData.length,
+        rentalsIncluded: deduplicatedData.filter(r => r.source === 'rental').length,
+        bottleAssignmentsIncluded: deduplicatedData.filter(r => r.source === 'bottle_assignment').length,
+        placeholderBottlesAdded,
+        placeholderBottlesSkipped
+      });
+      
+      if (duplicateBarcodes.size > 0) {
+        const duplicateEntries = Array.from(duplicateBarcodes.entries());
+        const totalDuplicates = duplicateEntries.reduce((sum, [barcode, count]) => sum + (count - 1), 0);
+        logger.warn(`Found ${duplicateBarcodes.size} unique barcodes with ${totalDuplicates} total duplicate entries. Sample duplicates:`, duplicateEntries.slice(0, 10));
+      }
+      
+      logger.log('Before deduplication:', allRentalData.length, 'After deduplication:', deduplicatedData.length, 'Duplicates removed:', allRentalData.length - deduplicatedData.length, 'Bottles without barcode included:', bottlesWithoutBarcode);
 
       logger.log('Combined rental data:', deduplicatedData.length);
 
@@ -288,100 +546,44 @@ function RentalsImproved() {
       }
 
       // 6. Get customers with their types (with fallback) - include lease agreement customers
-      // NOTE: assigned_customer can be either UUID or CustomerListID - we need to handle both
-      const customerIdentifiers = Array.from(new Set([
+      const customerIds = Array.from(new Set([
         ...deduplicatedData.map(r => r.customer_id).filter(Boolean),
         ...(leaseAgreements || []).map(a => a.customer_id).filter(Boolean)
       ]));
       let customersMap = {};
 
-      logger.log('Looking up customers for identifiers:', customerIdentifiers.length);
-
-      if (customerIdentifiers.length > 0) {
-        // Separate UUIDs from CustomerListIDs
-        const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        const uuids = customerIdentifiers.filter(id => uuidPattern.test(String(id)));
-        const customerListIds = customerIdentifiers.filter(id => !uuidPattern.test(String(id)));
-        
-        logger.log(`Found ${uuids.length} UUIDs and ${customerListIds.length} CustomerListIDs`);
-
-        // Fetch customers by UUID
-        if (uuids.length > 0) {
-          const BATCH_SIZE = 100;
-          const batches = [];
-          for (let i = 0; i < uuids.length; i += BATCH_SIZE) {
-            batches.push(uuids.slice(i, i + BATCH_SIZE));
-          }
+      if (customerIds.length > 0) {
+        try {
+          const { data: customersData, error: customersError } = await supabase
+            .from('customers')
+            .select('*')
+            .eq('organization_id', organization.id)
+            .in('CustomerListID', customerIds);
           
-          const batchPromises = batches.map(async (batch) => {
-            const { data: customersData, error: customersError } = await supabase
-              .from('customers')
-              .select('*, email')
-              .eq('organization_id', organization.id)
-              .in('id', batch);
-            
-            if (customersError) {
-              logger.error(`Error fetching customer batch by UUID:`, customersError);
-              return [];
-            }
-            
-            return customersData || [];
-          });
-
-          const uuidCustomers = (await Promise.all(batchPromises)).flat();
-          uuidCustomers.forEach(c => {
-            // Map by both UUID and CustomerListID for easy lookup
-            customersMap[c.id] = c;
-            customersMap[c.CustomerListID] = c;
-          });
-          logger.log(`Found ${uuidCustomers.length} customers by UUID`);
-        }
-
-        // Fetch customers by CustomerListID
-        if (customerListIds.length > 0) {
-          const BATCH_SIZE = 100;
-          const batches = [];
-          for (let i = 0; i < customerListIds.length; i += BATCH_SIZE) {
-            batches.push(customerListIds.slice(i, i + BATCH_SIZE));
+          if (!customersError && customersData) {
+            customersMap = customersData.reduce((map, c) => {
+              map[c.CustomerListID] = c;
+              return map;
+            }, {});
           }
-          
-          const batchPromises = batches.map(async (batch) => {
-            const { data: customersData, error: customersError } = await supabase
-              .from('customers')
-              .select('*, email')
-              .eq('organization_id', organization.id)
-              .in('CustomerListID', batch);
-            
-            if (customersError) {
-              logger.error(`Error fetching customer batch by CustomerListID:`, customersError);
-              return [];
-            }
-            
-            return customersData || [];
-          });
+        } catch (error) {
+          logger.log('Customer_type column not found, using fallback');
+          const { data: customersData } = await supabase
+            .from('customers')
+            .select('CustomerListID, name, contact_details, phone')
+            .eq('organization_id', organization.id)
+            .in('CustomerListID', customerIds);
 
-          const customerListIdCustomers = (await Promise.all(batchPromises)).flat();
-          customerListIdCustomers.forEach(c => {
-            // Map by both UUID and CustomerListID for easy lookup
-            customersMap[c.id] = c;
-            customersMap[c.CustomerListID] = c;
-          });
-          logger.log(`Found ${customerListIdCustomers.length} customers by CustomerListID`);
-        }
-        
-        // Log which customer identifiers were found vs not found
-        const foundIds = Object.keys(customersMap);
-        const notFoundIds = customerIdentifiers.filter(id => !foundIds.includes(String(id)));
-        if (notFoundIds.length > 0) {
-          logger.warn(`Customer identifiers not found in database: ${notFoundIds.length} out of ${customerIdentifiers.length}`);
-          if (notFoundIds.length <= 10) {
-            logger.warn('Missing customer identifiers:', notFoundIds);
+          if (customersData) {
+            customersMap = customersData.reduce((map, c) => {
+              map[c.CustomerListID] = { ...c, customer_type: 'CUSTOMER' };
+              return map;
+            }, {});
           }
         }
       }
 
-      logger.log('Total customers found in map:', Object.keys(customersMap).length);
-      logger.log('Customer IDs in map:', Object.keys(customersMap));
+      logger.log('Customers found:', Object.keys(customersMap).length);
 
       // 7. Process lease agreements and include them as yearly rentals
       if (leaseAgreements && leaseAgreements.length > 0) {
@@ -474,59 +676,131 @@ function RentalsImproved() {
         customer: customersMap[r.customer_id] || null
       }));
 
-      logger.log('Rentals with customer info:', rentalsWithCustomer.length);
-      logger.log('Unique customer IDs:', [...new Set(rentalsWithCustomer.map(r => r.customer_id).filter(Boolean))]);
-      logger.log('Customers map keys:', Object.keys(customersMap));
-
       // Filter out vendors from rental page (they should only appear in inventory/in-house)
-      const filteredRentals = rentalsWithCustomer.filter(r => 
-        r.customer_id && 
-        r.customer &&
-        r.customer.customer_type !== 'VENDOR'  // Exclude vendors from rentals view
-      );
-      
-      logger.log('Filtered rentals (vendors excluded):', filteredRentals.length);
-      const uniqueCustomerIds = [...new Set(filteredRentals.map(r => r.customer?.CustomerListID).filter(Boolean))];
-      logger.log('Unique customers in filtered rentals:', uniqueCustomerIds.length, uniqueCustomerIds);
-      
-      // Log distribution of rentals by customer
-      const customerDistribution = {};
-      filteredRentals.forEach(r => {
-        const custId = r.customer?.CustomerListID;
-        if (custId) {
-          customerDistribution[custId] = (customerDistribution[custId] || 0) + 1;
+      // But include rentals even if customer is null (they might have customer_id but customer not found)
+      const filteredRentals = rentalsWithCustomer.filter(r => {
+        // Include if it has a customer_id (even if customer object is null - might be missing customer record)
+        if (!r.customer_id) {
+          logger.warn('Rental missing customer_id:', r);
+          return false;
         }
+        // Exclude vendors
+        if (r.customer && r.customer.customer_type === 'VENDOR') {
+          return false;
+        }
+        return true;
       });
-      logger.log('Rentals per customer:', customerDistribution);
+      
+      logger.log('Rentals breakdown:', {
+        totalAfterDeduplication: deduplicatedData.length,
+        withCustomer: rentalsWithCustomer.filter(r => r.customer).length,
+        withoutCustomer: rentalsWithCustomer.filter(r => !r.customer).length,
+        afterFiltering: filteredRentals.length,
+        excludedVendors: rentalsWithCustomer.filter(r => r.customer?.customer_type === 'VENDOR').length,
+        excludedNoCustomerId: rentalsWithCustomer.filter(r => !r.customer_id).length
+      });
       
       setAssets(filteredRentals);
 
-      // 7. Calculate statistics (proper separation of IN-HOUSE vs RENTED)
-      const unassignedBottles = allBottles?.filter(b => !b.assigned_customer).length || 0;
-      // Get vendor bottles from original data (before filtering vendors out)
-      const bottlesWithVendors = rentalsWithCustomer?.filter(r => r.customer?.customer_type === 'VENDOR').length || 0;
-      const inHouseTotal = unassignedBottles + bottlesWithVendors; // Unassigned + vendors = in-house
-      // All filtered rentals are now customer rentals (vendors excluded)
-      const rentedToCustomers = filteredRentals.length;
-      // Calculate revenue from customer rentals (vendors already excluded) including tax
-      const totalRevenue = filteredRentals?.reduce((sum, rental) => {
+      // 7. Calculate statistics based on bottle status and customer assignment
+      // IMPORTANT: Bottles at locations WITHOUT customers should be "in-house" (available), not "rented"
+      
+      // Get customer types for assigned bottles
+      const customerIdsForBottles = Array.from(new Set(
+        (assignedBottles || []).map(b => b.assigned_customer).filter(Boolean)
+      ));
+      
+      let customerTypesMap = {};
+      if (customerIdsForBottles.length > 0) {
+        const { data: customersData } = await supabase
+          .from('customers')
+          .select('CustomerListID, customer_type')
+          .eq('organization_id', organization.id)
+          .in('CustomerListID', customerIdsForBottles);
+        
+        if (customersData) {
+          customerTypesMap = customersData.reduce((map, c) => {
+            map[c.CustomerListID] = c.customer_type || 'CUSTOMER';
+            return map;
+          }, {});
+        }
+      }
+      
+      // Count bottles by status and customer type
+      // Bottles assigned to vendors are "with vendors" (in-house, no charge)
+      const bottlesWithVendors = (assignedBottles || []).filter(bottle => {
+        const customerType = customerTypesMap[bottle.assigned_customer] || 'CUSTOMER';
+        return customerType === 'VENDOR';
+      }).length;
+      
+      // Count rented bottles: ONLY bottles assigned to CUSTOMERS (not vendors) with status "rented" (excluding customer-owned)
+      // Bottles at locations without customers are NOT rented - they're in-house
+      const rentedBottles = (assignedBottles || []).filter(bottle => {
+        const customerType = customerTypesMap[bottle.assigned_customer] || 'CUSTOMER';
+        const ownershipValue = String(bottle.ownership || '').trim().toLowerCase();
+        const isCustomerOwned = ownershipValue.includes('customer') || 
+                               ownershipValue.includes('owned') || 
+                               ownershipValue === 'customer owned';
+        
+        // Only count as rented if:
+        // 1. Assigned to a customer (not vendor, not null)
+        // 2. Customer type is CUSTOMER (not VENDOR) 
+        // 3. Status is "rented"
+        // 4. Not customer-owned (customer-owned bottles should be "available")
+        // Note: Bottles at locations without customers are NOT in assignedBottles, so they're already in-house
+        return bottle.assigned_customer && 
+               customerType === 'CUSTOMER' && 
+               (bottle.status === 'rented' || bottle.status === 'RENTED') &&
+               !isCustomerOwned;
+      }).length;
+      
+      // Available/In-House = unassigned bottles + vendor bottles + assigned bottles with status "available" OR customer-owned bottles
+      // Also includes bottles at locations without customer assignment (they're in-house)
+      const assignedBottlesAvailable = (assignedBottles || []).filter(bottle => {
+        const customerType = customerTypesMap[bottle.assigned_customer] || 'CUSTOMER';
+        const ownershipValue = String(bottle.ownership || '').trim().toLowerCase();
+        const isCustomerOwned = ownershipValue.includes('customer') || 
+                               ownershipValue.includes('owned') || 
+                               ownershipValue === 'customer owned';
+        
+        // Count as available if:
+        // 1. Status is "available", OR
+        // 2. Customer-owned (even if status is "rented", customer-owned should show as available)
+        // 3. Assigned to vendor (vendors are in-house, no charge)
+        return (bottle.status === 'available' || bottle.status === 'AVAILABLE') ||
+               (isCustomerOwned && customerType !== 'VENDOR') ||
+               customerType === 'VENDOR';
+      }).length;
+      
+      // In-house total includes:
+      // - Unassigned bottles (no customer, may have location)
+      // - Vendor bottles (assigned to vendors)
+      // - Assigned bottles with status "available" or customer-owned
+      const inHouseTotal = unassignedBottles + bottlesWithVendors + assignedBottlesAvailable;
+      
+      // Calculate revenue from actual rental records (for display purposes)
+      const customerRentals = filteredRentals.filter(r => r.source === 'rental');
+      const totalRevenue = customerRentals.reduce((sum, rental) => {
         const baseAmount = rental.rental_amount || 0;
         const taxAmount = baseAmount * (rental.tax_rate || 0);
         return sum + baseAmount + taxAmount;
-      }, 0) || 0;
+      }, 0);
 
       setStats({ 
-        inHouse: inHouseTotal,  // Unassigned + vendors
-        withVendors: bottlesWithVendors,  // Show vendor bottles for info
-        rented: rentedToCustomers,  // Only customer bottles are "rented"
+        inHouse: inHouseTotal,  // Unassigned + vendor bottles + assigned with status "available"
+        withVendors: bottlesWithVendors,  // Bottles assigned to vendors
+        rented: rentedBottles,  // Bottles assigned to customers with status "rented"
         totalRevenue 
       });
 
       logger.log('Final results:', {
+        totalBottles: totalBottles,
         unassignedBottles: unassignedBottles,
+        assignedBottlesCount: assignedBottlesCount,
         bottlesWithVendors: bottlesWithVendors,
-        availableAssets: inHouseTotal, // Renamed from inHouseTotal
-        rentedToCustomers: rentedToCustomers,
+        rentedBottles: rentedBottles,
+        assignedBottlesAvailable: assignedBottlesAvailable,
+        availableAssets: inHouseTotal,
         revenue: totalRevenue
       });
 
@@ -557,7 +831,7 @@ function RentalsImproved() {
         logger.log('Falling back to basic customer query');
         const { data, error: fallbackError } = await supabase
           .from('customers')
-          .select('CustomerListID, name, contact_details, phone, email')
+          .select('CustomerListID, name, contact_details, phone')
           .eq('organization_id', organization.id)
           .order('name');
         
@@ -595,22 +869,35 @@ function RentalsImproved() {
   // Group rentals by customer (like original rentals page)
   const customersWithRentals = [];
   const customerMap = {};
+  let dnsCount = 0;
+  let rentalsWithoutCustomer = 0;
 
-  logger.log('Grouping rentals - total assets:', assets.length);
-  
   for (const rental of assets) {
-    if (!rental.customer) {
-      logger.warn('Rental missing customer:', rental.customer_id, rental.bottle_barcode);
-      continue;
+    // Count DNS rentals
+    if (rental.is_dns === true) {
+      dnsCount++;
     }
-    const custId = rental.customer.CustomerListID;
+    
+    // Use customer_id if customer object is null (customer might not exist in DB)
+    const custId = rental.customer?.CustomerListID || rental.customer_id;
     if (!custId) {
-      logger.warn('Rental customer missing CustomerListID:', rental.customer);
+      rentalsWithoutCustomer++;
+      logger.warn('Rental has no customer_id or customer:', { 
+        rental_id: rental.id, 
+        is_dns: rental.is_dns, 
+        dns_product_code: rental.dns_product_code 
+      });
       continue;
     }
+    
+    // Create customer object if it doesn't exist
     if (!customerMap[custId]) {
       customerMap[custId] = {
-        customer: rental.customer,
+        customer: rental.customer || {
+          CustomerListID: custId,
+          name: rental.customer_name || `Customer ${custId}`,
+          customer_type: 'CUSTOMER' // Default to CUSTOMER if unknown
+        },
         rentals: [],
       };
       customersWithRentals.push(customerMap[custId]);
@@ -618,20 +905,44 @@ function RentalsImproved() {
     customerMap[custId].rentals.push(rental);
   }
   
-  logger.log('Customers with rentals:', customersWithRentals.length);
-  logger.log('Customer IDs:', customersWithRentals.map(c => c.customer.CustomerListID));
-
-  // Filter customers based on search
-  const filteredCustomers = customersWithRentals.filter(({ customer, rentals }) => {
-    const searchText = filters.search.toLowerCase();
-    if (filters.search) {
-      return customer.name?.toLowerCase().includes(searchText) ||
-             customer.CustomerListID?.toLowerCase().includes(searchText) ||
-             rentals.some(r => r.bottles?.barcode_number?.toLowerCase().includes(searchText) ||
-                              r.bottles?.barcode?.toLowerCase().includes(searchText));
-    }
-    return true;
+  logger.log('Grouped rentals:', {
+    totalRentals: assets.length,
+    customersWithRentals: customersWithRentals.length,
+    totalBottles: customersWithRentals.reduce((sum, c) => sum + c.rentals.length, 0),
+    dnsRentals: dnsCount,
+    rentalsWithoutCustomer: rentalsWithoutCustomer
   });
+
+  // Filter customers based on search and DNS filter
+  const filteredCustomers = customersWithRentals
+    .map(({ customer, rentals }) => {
+      // Filter rentals within each customer if DNS filter is active
+      let filteredRentals = rentals;
+      if (filters.showDNSOnly) {
+        filteredRentals = rentals.filter(r => r.is_dns === true);
+      }
+      
+      // Return customer with filtered rentals (only include if they have rentals after filtering)
+      return { customer, rentals: filteredRentals };
+    })
+    .filter(({ customer, rentals }) => {
+      // Only include customers that have rentals after filtering
+      if (rentals.length === 0) return false;
+      
+      // Apply search filter
+      const searchText = filters.search.toLowerCase();
+      if (filters.search) {
+        return customer.name?.toLowerCase().includes(searchText) ||
+               customer.CustomerListID?.toLowerCase().includes(searchText) ||
+               rentals.some(r => {
+                 const barcode = r.bottles?.barcode_number || r.bottles?.barcode || r.bottle_barcode;
+                 const dnsLabel = r.is_dns ? `${r.dns_product_code || 'DNS'} - ${r.dns_description || 'Not Scanned'}` : '';
+                 return barcode?.toLowerCase().includes(searchText) || 
+                        dnsLabel.toLowerCase().includes(searchText);
+               });
+      }
+      return true;
+    });
 
   const tabs = [
     { 
@@ -649,10 +960,23 @@ function RentalsImproved() {
       value: 'yearly', 
       count: filteredCustomers.reduce((count, c) => count + c.rentals.filter(r => r.rental_type === 'yearly').length, 0)
     },
+    { 
+      label: 'DNS (Not Scanned)', 
+      value: 'dns', 
+      count: dnsCount,
+      color: 'warning'
+    },
   ];
 
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
+    // Automatically enable DNS filter when DNS tab is selected
+    if (newValue === 3) { // DNS tab is index 3
+      setFilters({ ...filters, showDNSOnly: true });
+    } else if (filters.showDNSOnly && activeTab === 3) {
+      // If switching away from DNS tab, disable DNS filter
+      setFilters({ ...filters, showDNSOnly: false });
+    }
   };
 
   const handleEditAsset = (asset) => {
@@ -706,373 +1030,80 @@ function RentalsImproved() {
     URL.revokeObjectURL(url);
   };
 
-  // State for export options dialog
-  const [exportDialogOpen, setExportDialogOpen] = useState(false);
-  const [exportCustomers, setExportCustomers] = useState([]);
-  const [exportMode, setExportMode] = useState('most_recent'); // 'most_recent', 'all', 'date_range'
-  const [exportDateStart, setExportDateStart] = useState('');
-  const [exportDateEnd, setExportDateEnd] = useState('');
-
-  // QuickBooks invoice export - uses actual invoices from database
-  const exportInvoices = async (customers, mode = 'most_recent', dateStart = null, dateEnd = null) => {
-    if (!customers || customers.length === 0) {
-      logger.warn('No customers selected for export');
-      alert('Please select customers with invoices to export.');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      
-      // Validate organization
-      if (!organization || !organization.id) {
-        throw new Error('Organization not found. Please ensure you are logged in.');
+  // QuickBooks invoice export from old rentals page
+  const exportInvoices = (customers) => {
+    if (!customers.length) return;
+    const getNextInvoiceNumber = () => {
+      const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
+      const now = new Date();
+      const currentMonth = now.getFullYear() + '-' + (now.getMonth() + 1).toString().padStart(2, '0');
+      let lastNumber = 10000;
+      let lastMonth = currentMonth;
+      if (state.lastMonth === currentMonth && state.lastNumber) {
+        lastNumber = 10000;
+      } else if (state.lastMonth !== currentMonth && state.lastNumber) {
+        lastNumber = state.lastNumber + 1;
+        lastMonth = currentMonth;
       }
-      
-      // Get customer IDs - handle both { customer, rentals } structure and direct customer objects
-      const customerIds = customers.map(c => {
-        if (c.customer && c.customer.CustomerListID) {
-          return c.customer.CustomerListID;
-        } else if (c.CustomerListID) {
-          return c.CustomerListID;
-        }
-        return null;
-      }).filter(Boolean);
-      
-      if (customerIds.length === 0) {
-        alert('No valid customer IDs found. Please ensure customers have CustomerListID.');
-        setLoading(false);
-        return;
+      return { next: lastNumber, currentMonth, lastMonth };
+    };
+    
+    const setInvoiceState = (number, month) => {
+      const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
+      if (state.lastMonth !== month) {
+        localStorage.setItem('invoice_state', JSON.stringify({ lastNumber: number, lastMonth: month }));
       }
-      
-      logger.log('Exporting invoices for customer IDs:', customerIds.length, 'customers. Mode:', mode, 'Organization:', organization.id);
-      
-      // Validate customerIds array
-      if (!Array.isArray(customerIds) || customerIds.length === 0) {
-        throw new Error('Invalid customer IDs array');
-      }
+    };
 
-      // Supabase has limits on .in() clause size (typically 100-1000 items)
-      // Batch the queries if we have too many customer IDs
-      const BATCH_SIZE = 100; // Conservative batch size
-      let allInvoices = [];
-      
-      if (customerIds.length > BATCH_SIZE) {
-        logger.log(`Batching query: ${customerIds.length} customers in batches of ${BATCH_SIZE}`);
-        
-        // Process in batches
-        for (let i = 0; i < customerIds.length; i += BATCH_SIZE) {
-          const batch = customerIds.slice(i, i + BATCH_SIZE);
-          logger.log(`Fetching batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(customerIds.length / BATCH_SIZE)} (${batch.length} customers)`);
-          
-          // Build query for this batch
-          let batchQuery = supabase
-            .from('invoices')
-            .select('*')
-            .eq('organization_id', organization.id)
-            .in('customer_id', batch);
+    const getInvoiceDates = () => {
+      const now = new Date();
+      const invoiceDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const dueDate = new Date(invoiceDate.getFullYear(), invoiceDate.getMonth() + 1, 1);
+      const fmt = d => d.toISOString().slice(0, 10);
+      return { invoiceDate: fmt(invoiceDate), dueDate: fmt(dueDate) };
+    };
 
-          // Apply date range filter if specified
-          if (mode === 'date_range' && dateStart && dateEnd) {
-            batchQuery = batchQuery
-              .gte('invoice_date', dateStart)
-              .lte('invoice_date', dateEnd);
-          }
-          
-          const { data: batchInvoices, error: batchError } = await batchQuery
-            .order('invoice_date', { ascending: false });
-
-          if (batchError) {
-            logger.error(`Error fetching batch ${Math.floor(i / BATCH_SIZE) + 1}:`, batchError);
-            throw new Error(`Failed to fetch invoices batch: ${batchError.message || batchError.code || 'Unknown error'}`);
-          }
-
-          if (batchInvoices) {
-            allInvoices = allInvoices.concat(batchInvoices);
-          }
-        }
-      } else {
-        // Single query for smaller sets
-        let query = supabase
-          .from('invoices')
-          .select('*')
-          .eq('organization_id', organization.id)
-          .in('customer_id', customerIds);
-
-        // Apply date range filter if specified
-        if (mode === 'date_range' && dateStart && dateEnd) {
-          query = query
-            .gte('invoice_date', dateStart)
-            .lte('invoice_date', dateEnd);
-        }
-        
-        const { data: invoices, error: invoicesError } = await query
-          .order('invoice_date', { ascending: false });
-
-        if (invoicesError) {
-          logger.error('Error fetching invoices:', invoicesError);
-          logger.error('Full error object:', JSON.stringify(invoicesError, null, 2));
-          logger.error('Query details:', {
-            organizationId: organization?.id,
-            customerIdsCount: customerIds.length,
-            customerIdsSample: customerIds.slice(0, 5),
-            mode,
-            dateStart,
-            dateEnd
-          });
-          throw new Error('Failed to fetch invoices: ' + (invoicesError.message || invoicesError.code || invoicesError.details || 'Unknown error'));
-        }
-
-        allInvoices = invoices || [];
-      }
-
-      const invoices = allInvoices;
-
-      if (!invoices || invoices.length === 0) {
-        alert('No invoices found for the selected customers. Please generate invoices first using the "Create Invoice" button.');
-        setLoading(false);
-        return;
-      }
-
-      // Filter out old timestamp-based invoice numbers (e.g., W522378)
-      // New format: W00018 (prefix + exactly 5 digits padded with zeros)
-      // Old format: W522378 (prefix + 6 digits from timestamp)
-      // Pattern: Any letters/prefix followed by exactly 5 digits
-      const newFormatPattern = /^[A-Za-z]+\d{5}$/; // Matches: W00018, INV00019, etc. (prefix + 5 digits)
-      const oldFormatPattern = /^[A-Za-z]+\d{6}$/; // Matches: W522378 (prefix + 6 digits - old format)
-      
-      const filteredInvoices = invoices.filter(invoice => {
-        if (!invoice.invoice_number) return false;
-        const invNum = invoice.invoice_number.trim();
-        // Exclude old 6-digit format, only include new 5-digit format
-        if (oldFormatPattern.test(invNum)) {
-          return false; // Skip old format
-        }
-        // Include new 5-digit format
-        return newFormatPattern.test(invNum);
-      });
-
-      if (filteredInvoices.length === 0) {
-        alert('No invoices found with the new invoice numbering format. Please generate new invoices using the "Create Invoice" button.');
-        setLoading(false);
-        return;
-      }
-
-      logger.log(`Filtered ${invoices.length - filteredInvoices.length} old invoices, keeping ${filteredInvoices.length} new format invoices`);
-
-      // Sort by invoice_date (already done) and then by invoice_number as secondary sort
-      filteredInvoices.sort((a, b) => {
-        const dateA = new Date(a.invoice_date);
-        const dateB = new Date(b.invoice_date);
-        if (dateB.getTime() !== dateA.getTime()) {
-          return dateB.getTime() - dateA.getTime(); // Most recent first
-        }
-        // If dates are equal, sort by invoice number (higher number = more recent)
-        const numA = parseInt(a.invoice_number?.replace(/[^0-9]/g, '') || '0');
-        const numB = parseInt(b.invoice_number?.replace(/[^0-9]/g, '') || '0');
-        return numB - numA;
-      });
-
-      // Filter to most recent invoice per customer if mode is 'most_recent'
-      let invoicesToExport = filteredInvoices;
-      if (mode === 'most_recent') {
-        const customerInvoiceMap = new Map();
-        filteredInvoices.forEach(invoice => {
-          const customerId = invoice.customer_id;
-          if (!customerInvoiceMap.has(customerId)) {
-            customerInvoiceMap.set(customerId, invoice);
-          } else {
-            // Compare dates - keep the most recent
-            const existing = customerInvoiceMap.get(customerId);
-            const existingDate = new Date(existing.invoice_date);
-            const currentDate = new Date(invoice.invoice_date);
-            
-            // Priority: 1) More recent date, 2) If same date, prefer emailed invoices, 3) If both emailed or both not, higher invoice number
-            if (currentDate > existingDate) {
-              customerInvoiceMap.set(customerId, invoice);
-            } else if (currentDate.getTime() === existingDate.getTime()) {
-              // Same date - prioritize invoices that were sent via email
-              const existingEmailed = existing.email_sent || false;
-              const currentEmailed = invoice.email_sent || false;
-              
-              if (currentEmailed && !existingEmailed) {
-                // Current was emailed, existing was not - prefer current
-                customerInvoiceMap.set(customerId, invoice);
-              } else if (!currentEmailed && existingEmailed) {
-                // Existing was emailed, current was not - keep existing
-                // Do nothing, keep existing
-              } else {
-                // Both emailed or both not emailed - compare invoice numbers (higher number = more recent)
-                const existingNum = parseInt(existing.invoice_number?.replace(/[^0-9]/g, '') || '0');
-                const currentNum = parseInt(invoice.invoice_number?.replace(/[^0-9]/g, '') || '0');
-                if (currentNum > existingNum) {
-                  customerInvoiceMap.set(customerId, invoice);
-                }
-              }
-            }
-          }
-        });
-        invoicesToExport = Array.from(customerInvoiceMap.values());
-        logger.log(`Filtered to ${invoicesToExport.length} most recent invoices (from ${filteredInvoices.length} new-format invoices)`);
-        
-        // Log which invoice is being exported for each customer (for verification)
-        invoicesToExport.forEach(inv => {
-          const emailStatus = inv.email_sent ? '✅ EMAILED' : '❌ NOT EMAILED';
-          logger.log(`Exporting invoice ${inv.invoice_number} for customer ${inv.customer_id} (${inv.customer_name || 'Unknown'}) - Date: ${inv.invoice_date} - ${emailStatus}`);
-        });
-        
-        // Verify we're exporting invoices that match what was sent via email
-        const emailedInvoices = invoicesToExport.filter(inv => inv.email_sent);
-        const notEmailedInvoices = invoicesToExport.filter(inv => !inv.email_sent);
-        if (emailedInvoices.length > 0) {
-          logger.log(`✅ ${emailedInvoices.length} of ${invoicesToExport.length} exported invoices were sent via email`);
-        }
-        if (notEmailedInvoices.length > 0) {
-          logger.warn(`⚠️ ${notEmailedInvoices.length} of ${invoicesToExport.length} exported invoices were NOT sent via email:`, 
-            notEmailedInvoices.map(inv => `${inv.invoice_number} (${inv.customer_name})`));
-        }
-      }
-
-      // Get invoice line items to calculate number of bottles
-      const invoiceIds = invoicesToExport.map(inv => inv.id);
-      const { data: lineItems, error: lineItemsError } = await supabase
-        .from('invoice_line_items')
-        .select('invoice_id, quantity, monthly_rate')
-        .in('invoice_id', invoiceIds);
-
-      if (lineItemsError) {
-        logger.warn('Error fetching line items:', lineItemsError);
-      }
-
-      // Create a map of invoice_id -> total quantity (bottles)
-      const bottlesPerInvoice = {};
-      if (lineItems) {
-        lineItems.forEach(item => {
-          bottlesPerInvoice[item.invoice_id] = (bottlesPerInvoice[item.invoice_id] || 0) + (item.quantity || 1);
-        });
-      }
-
-      // Calculate due date (30 days from invoice date)
-      const calculateDueDate = (invoiceDate) => {
-        const date = new Date(invoiceDate);
-        date.setDate(date.getDate() + 30);
-        return date.toISOString().split('T')[0];
+    const { next, currentMonth } = getNextInvoiceNumber();
+    let invoiceNumber = next;
+    const { invoiceDate, dueDate } = getInvoiceDates();
+    const rate = 10;
+    const rows = customers.map(({ customer, rentals }, idx) => {
+      const numBottles = rentals.length;
+      const base = numBottles * rate;
+      // Use the actual tax rate from the first rental (they should all be the same for a customer)
+      const taxRate = rentals[0]?.tax_rate || 0.11;
+      const tax = +(base * taxRate).toFixed(1);
+      const total = +(base + tax).toFixed(2);
+      return {
+        'Invoice#': `W${(invoiceNumber + idx).toString().padStart(5, '0')}`,
+        'Customer Number': customer.CustomerListID,
+        'Total': total,
+        'Date': invoiceDate,
+        'TX': tax,
+        'TX code': 'G',
+        'Due date': dueDate,
+        'Rate': rate,
+        'Name': customer.name,
+        '# of Bottles': numBottles
       };
-
-      // Convert invoices to QuickBooks format
-      const rows = invoicesToExport.map(invoice => {
-        const numBottles = bottlesPerInvoice[invoice.id] || invoice.cylinders_count || 0;
-        
-        // Calculate monthly rate per bottle
-        // If we have period dates, calculate months; otherwise use subtotal / bottles as total rate
-        let rate = 10; // Default monthly rate
-        if (invoice.subtotal && numBottles > 0 && invoice.period_start && invoice.period_end) {
-          const startDate = new Date(invoice.period_start);
-          const endDate = new Date(invoice.period_end);
-          const startMonth = startDate.getMonth();
-          const startYear = startDate.getFullYear();
-          const endMonth = endDate.getMonth();
-          const endYear = endDate.getFullYear();
-          const rentalMonths = (endYear - startYear) * 12 + (endMonth - startMonth) + 1;
-          
-          if (rentalMonths > 0) {
-            // Monthly rate per bottle = subtotal / (bottles × months)
-            rate = (invoice.subtotal / (numBottles * rentalMonths)).toFixed(2);
-          } else {
-            // Fallback: total rate per bottle
-            rate = (invoice.subtotal / numBottles).toFixed(2);
-          }
-        } else if (invoice.subtotal && numBottles > 0) {
-          // Fallback: total rate per bottle if no period dates
-          rate = (invoice.subtotal / numBottles).toFixed(2);
-        }
-        
-        // Ensure invoice number matches what was sent via email
-        const invoiceNumber = invoice.invoice_number || 'N/A';
-        if (invoiceNumber === 'N/A') {
-          logger.warn(`Invoice ${invoice.id} has no invoice number!`);
-        }
-        
-        return {
-          'Invoice#': invoiceNumber,
-          'Customer Number': invoice.customer_id || 'N/A',
-          'Total': invoice.total_amount?.toFixed(2) || '0.00',
-          'Date': invoice.invoice_date || new Date().toISOString().split('T')[0],
-          'TX': invoice.tax_amount?.toFixed(2) || '0.00',
-          'TX code': 'G',
-          'Due date': calculateDueDate(invoice.invoice_date || new Date()),
-          'Rate': rate,
-          'Name': invoice.customer_name || 'N/A',
-          '# of Bottles': numBottles
-        };
-      });
-
-      if (rows.length === 0) {
-        alert('No invoice data to export.');
-        setLoading(false);
-        return;
-      }
-
-      // Generate CSV
-      const header = Object.keys(rows[0]).join(',');
-      const csv = [header, ...rows.map(r => Object.values(r).join(','))].join('\n');
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const exportDate = new Date().toISOString().split('T')[0];
-      a.download = `quickbooks_invoices_${exportDate}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      logger.log(`Exported ${rows.length} invoices to QuickBooks format (${mode === 'most_recent' ? 'most recent per customer' : mode === 'date_range' ? 'date range filtered' : 'all invoices'})`);
-      setLoading(false);
-    } catch (error) {
-      logger.error('Error exporting invoices:', error);
-      alert('Failed to export invoices: ' + error.message);
-      setLoading(false);
-    }
-  };
-
-  // Handle export button click - show dialog
-  const handleExportClick = (customers) => {
-    if (!customers || customers.length === 0) {
-      alert('Please select customers with invoices to export.');
-      return;
-    }
-    setExportCustomers(customers);
-    setExportDialogOpen(true);
-  };
-
-  // Handle export confirmation
-  const handleExportConfirm = () => {
-    setExportDialogOpen(false);
-    exportInvoices(exportCustomers, exportMode, exportDateStart || null, exportDateEnd || null);
+    });
+    
+    setInvoiceState(invoiceNumber + rows.length - 1, currentMonth);
+    const header = Object.keys(rows[0]).join(',');
+    const csv = [header, ...rows.map(r => Object.values(r).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `quickbooks_invoices_${invoiceDate}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const currentCustomers = activeTab === 0 ? filteredCustomers : 
     activeTab === 1 ? filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'monthly')) :
-    filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly'));
-
-  // Reset page when filters or tabs change
-  useEffect(() => {
-    setPage(0);
-  }, [filters.search, filters.status, filters.customer_type, activeTab]);
-
-  // Pagination
-  const paginatedCustomers = currentCustomers.slice(
-    page * rowsPerPage,
-    page * rowsPerPage + rowsPerPage
-  );
-
-  const handleChangePage = (event, newPage) => {
-    setPage(newPage);
-  };
-
-  const handleChangeRowsPerPage = (event) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
-  };
+    activeTab === 2 ? filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly')) :
+    filteredCustomers.filter(c => c.rentals.some(r => r.is_dns === true));
 
   if (loading) {
     return (
@@ -1101,7 +1132,7 @@ function RentalsImproved() {
           <Button
             variant="outlined"
             startIcon={<MoneyIcon />}
-            onClick={() => handleExportClick(filteredCustomers)}
+            onClick={() => exportInvoices(filteredCustomers)}
             disabled={filteredCustomers.length === 0}
           >
             Export QuickBooks Invoices
@@ -1110,14 +1141,14 @@ function RentalsImproved() {
             variant="contained"
             startIcon={<EmailIcon />}
             onClick={() => {
-              const customersWithRentals = filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer_type !== 'VENDOR');
+              const customersWithRentals = filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer?.customer_type !== 'VENDOR');
               if (customersWithRentals.length === 0) {
                 alert('No customers with active rentals found');
                 return;
               }
               setBulkEmailDialogOpen(true);
             }}
-            disabled={filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer_type !== 'VENDOR').length === 0}
+            disabled={filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer?.customer_type !== 'VENDOR').length === 0}
           >
             Bulk Email Invoices
           </Button>
@@ -1208,6 +1239,29 @@ function RentalsImproved() {
             </CardContent>
           </Card>
         </Grid>
+
+        {dnsCount > 0 && (
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ border: '2px solid', borderColor: 'warning.main' }}>
+              <CardContent>
+                <Box display="flex" alignItems="center" justifyContent="between">
+                  <Box>
+                    <Typography variant="h4" fontWeight="bold" color="warning.main">
+                      {dnsCount}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      DNS Bottles
+                    </Typography>
+                    <Typography variant="caption" color="warning.main">
+                      (Not Scanned)
+                    </Typography>
+                  </Box>
+                  <WarningIcon sx={{ fontSize: 40, color: '#ed6c02' }} />
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
       </Grid>
 
       {/* Filters */}
@@ -1252,6 +1306,28 @@ function RentalsImproved() {
                 </Select>
               </FormControl>
             </Grid>
+            <Grid item xs={12} sm={6} md={3.8}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={filters.showDNSOnly}
+                    onChange={(e) => setFilters({ ...filters, showDNSOnly: e.target.checked })}
+                    color="warning"
+                  />
+                }
+                label={
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="body2">Show DNS Only</Typography>
+                    <Chip 
+                      label={dnsCount} 
+                      size="small" 
+                      color="warning" 
+                      sx={{ height: 20, fontSize: '0.7rem' }}
+                    />
+                  </Box>
+                }
+              />
+            </Grid>
           </Grid>
         </CardContent>
       </Card>
@@ -1284,6 +1360,7 @@ function RentalsImproved() {
                   <Chip 
                     label={tab.count} 
                     size="small" 
+                    color={tab.color || 'default'}
                     sx={{ 
                       height: 20,
                       fontSize: '0.75rem',
@@ -1317,7 +1394,7 @@ function RentalsImproved() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {paginatedCustomers.length === 0 ? (
+            {currentCustomers.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} align="center">
                   <Typography variant="body1" color="text.secondary" py={4}>
@@ -1326,12 +1403,12 @@ function RentalsImproved() {
                 </TableCell>
               </TableRow>
             ) : (
-              paginatedCustomers.map(({ customer, rentals }, index) => (
+              currentCustomers.map(({ customer, rentals }, index) => (
                 <React.Fragment key={customer.CustomerListID}>
                   <TableRow 
                     hover
                     sx={{ 
-                      borderBottom: index < paginatedCustomers.length - 1 ? '3px solid #e0e0e0' : 'none',
+                      borderBottom: index < currentCustomers.length - 1 ? '3px solid #e0e0e0' : 'none',
                       '&:hover': {
                         bgcolor: '#fafafa'
                       }
@@ -1435,7 +1512,7 @@ function RentalsImproved() {
                       colSpan={8} 
                       sx={{ 
                         p: 0,
-                        borderBottom: index < paginatedCustomers.length - 1 ? '3px solid #e0e0e0' : 'none'
+                        borderBottom: index < currentCustomers.length - 1 ? '3px solid #e0e0e0' : 'none'
                       }}
                     >
                       <Box>
@@ -1472,35 +1549,51 @@ function RentalsImproved() {
                         </Box>
                         <Collapse in={expandedCustomers.has(customer.CustomerListID)}>
                           <Box sx={{ p: 1.5, bgcolor: '#fafafa' }}>
-                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
                               {rentals.map((rental, idx) => {
-                                const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || `Asset ${idx + 1}`;
+                                const isDNS = rental.is_dns === true;
+                                const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || rental.bottle_barcode;
+                                const displayLabel = isDNS 
+                                  ? `${rental.dns_product_code || 'DNS'} - ${rental.dns_description || 'Not Scanned'}`
+                                  : (barcode || `Asset ${idx + 1}`);
+                                
                                 return (
-                                  <Chip
-                                    key={idx}
-                                    label={barcode}
-                                    size="small"
-                                    variant="outlined"
-                                    onClick={() => {
-                                      // Navigate to bottle details page using barcode
-                                      const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || rental.bottle_barcode;
-                                      const bottleId = rental.bottles?.id || rental.bottle_id;
-                                      if (barcode) {
-                                        navigate(`/bottle/${barcode}`);
-                                      } else if (bottleId) {
-                                        navigate(`/bottle/${bottleId}`);
-                                      }
-                                    }}
-                                    sx={{ 
-                                      fontSize: 11,
-                                      cursor: 'pointer',
-                                      '&:hover': {
-                                        bgcolor: 'primary.light',
-                                        color: 'primary.contrastText',
-                                        borderColor: 'primary.main'
-                                      }
-                                    }}
-                                  />
+                                  <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <Chip
+                                      label={displayLabel}
+                                      size="small"
+                                      variant="outlined"
+                                      color={isDNS ? 'warning' : 'default'}
+                                      onClick={() => {
+                                        // Navigate to bottle details page (only if not DNS)
+                                        if (!isDNS) {
+                                          const bottleId = rental.bottles?.id || rental.bottle_id;
+                                          if (bottleId) {
+                                            navigate(`/bottle/${bottleId}`);
+                                          }
+                                        }
+                                      }}
+                                      sx={{ 
+                                        fontSize: 11,
+                                        cursor: isDNS ? 'default' : 'pointer',
+                                        '&:hover': isDNS ? {} : {
+                                          bgcolor: 'primary.light',
+                                          color: 'primary.contrastText',
+                                          borderColor: 'primary.main'
+                                        }
+                                      }}
+                                    />
+                                    {isDNS && (
+                                      <DNSConversionDialog
+                                        dnsRental={rental}
+                                        customerId={customer.CustomerListID}
+                                        customerName={customer.name}
+                                        onConverted={() => {
+                                          fetchRentals();
+                                        }}
+                                      />
+                                    )}
+                                  </Box>
                                 );
                               })}
                             </Box>
@@ -1514,17 +1607,6 @@ function RentalsImproved() {
             )}
           </TableBody>
         </Table>
-        <TablePagination
-          component="div"
-          count={currentCustomers.length}
-          page={page}
-          onPageChange={handleChangePage}
-          rowsPerPage={rowsPerPage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-          rowsPerPageOptions={[10, 25, 50, 100]}
-          labelRowsPerPage="Rows per page:"
-          labelDisplayedRows={({ from, to, count }) => `${from}-${to} of ${count !== -1 ? count : `more than ${to}`}`}
-        />
       </TableContainer>
 
       {/* Edit Customer Rentals Dialog */}
@@ -1680,86 +1762,8 @@ function RentalsImproved() {
       <BulkInvoiceEmailDialog
         open={bulkEmailDialogOpen}
         onClose={() => setBulkEmailDialogOpen(false)}
-        customers={filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer_type !== 'VENDOR')}
+        customers={filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer?.customer_type !== 'VENDOR')}
       />
-
-      {/* Export Options Dialog */}
-      <Dialog open={exportDialogOpen} onClose={() => setExportDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Export QuickBooks Invoices</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Choose how to export invoices for {exportCustomers.length} selected customer{exportCustomers.length !== 1 ? 's' : ''}.
-          </Typography>
-
-          <FormControl fullWidth sx={{ mb: 3 }}>
-            <InputLabel>Export Mode</InputLabel>
-            <Select
-              value={exportMode}
-              onChange={(e) => setExportMode(e.target.value)}
-              label="Export Mode"
-            >
-              <MenuItem value="most_recent">
-                Most Recent Invoice Per Customer (Recommended)
-              </MenuItem>
-              <MenuItem value="all">All Invoices</MenuItem>
-              <MenuItem value="date_range">Date Range</MenuItem>
-            </Select>
-          </FormControl>
-
-          {exportMode === 'date_range' && (
-            <Grid container spacing={2}>
-              <Grid item xs={6}>
-                <TextField
-                  fullWidth
-                  type="date"
-                  label="Start Date"
-                  value={exportDateStart}
-                  onChange={(e) => setExportDateStart(e.target.value)}
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-              <Grid item xs={6}>
-                <TextField
-                  fullWidth
-                  type="date"
-                  label="End Date"
-                  value={exportDateEnd}
-                  onChange={(e) => setExportDateEnd(e.target.value)}
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-            </Grid>
-          )}
-
-          {exportMode === 'most_recent' && (
-            <Alert severity="info" sx={{ mt: 2 }}>
-              <Typography variant="body2">
-                This will export only the most recent invoice for each customer. 
-                This is recommended if you've generated multiple test invoices.
-              </Typography>
-            </Alert>
-          )}
-
-          {exportMode === 'all' && (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              <Typography variant="body2">
-                This will export ALL invoices for the selected customers. 
-                Make sure this is what you want before proceeding.
-              </Typography>
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setExportDialogOpen(false)}>Cancel</Button>
-          <Button 
-            onClick={handleExportConfirm} 
-            variant="contained"
-            disabled={exportMode === 'date_range' && (!exportDateStart || !exportDateEnd)}
-          >
-            Export
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 }

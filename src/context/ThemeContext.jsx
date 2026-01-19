@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ThemeProvider as MuiThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, GlobalStyles } from '@mui/material';
 import { themes, modernTheme } from '../theme/themes';
@@ -184,7 +184,17 @@ export const ThemeProvider = ({ children }) => {
   });
   
   const [isDarkMode, setIsDarkMode] = useState(() => {
-    return localStorage.getItem('darkMode') === 'true';
+    const saved = localStorage.getItem('darkMode') === 'true';
+    // Initialize HTML class on mount for Tailwind dark mode
+    if (typeof document !== 'undefined') {
+      const htmlElement = document.documentElement;
+      if (saved) {
+        htmlElement.classList.add('dark');
+      } else {
+        htmlElement.classList.remove('dark');
+      }
+    }
+    return saved;
   });
   
   const [mode, setMode] = useState(() => {
@@ -194,12 +204,11 @@ export const ThemeProvider = ({ children }) => {
     return savedMode || (savedDarkMode ? 'dark' : 'light');
   });
   
-  const [accent, setAccent] = useState('#1976d2');
-  const [baseOrganizationColors, setBaseOrganizationColors] = useState({
+  const [accent, setAccent] = useState('#40B5AD'); // Scanified primary teal
+  const [organizationColors, setOrganizationColors] = useState({
     primary: '#40B5AD',
     secondary: '#48C9B0'
   });
-  const [personalColors, setPersonalColors] = useState(null);
 
   // Load user-specific accent color and organization colors when user changes
   useEffect(() => {
@@ -240,15 +249,15 @@ export const ThemeProvider = ({ children }) => {
             setAccent(hexAccent);
           } else {
             // Set default accent if no user-specific color is found
-            setAccent('#1976d2');
+            setAccent('#40B5AD'); // Scanified primary teal
           }
         } catch (error) {
           logger.error('Error loading user accent color:', error);
-          setAccent('#1976d2');
+          setAccent('#40B5AD'); // Scanified primary teal
         }
       } else {
         // Set default accent when no user is logged in
-        setAccent('#1976d2');
+        setAccent('#40B5AD'); // Scanified primary teal
       }
     };
 
@@ -258,62 +267,17 @@ export const ThemeProvider = ({ children }) => {
   // Load organization colors when organization changes
   useEffect(() => {
     if (organization) {
-      setBaseOrganizationColors({
+      setOrganizationColors({
         primary: organization.primary_color || '#40B5AD',
         secondary: organization.secondary_color || '#48C9B0'
       });
     } else {
-      setBaseOrganizationColors({
+      setOrganizationColors({
         primary: '#40B5AD',
         secondary: '#48C9B0'
       });
     }
   }, [organization]);
-
-  const loadPersonalColors = useCallback(() => {
-    if (!user?.id) {
-      setPersonalColors(null);
-      return;
-    }
-
-    const storageKey = `appearancePrefs_${user.id}`;
-
-    try {
-      const stored = localStorage.getItem(storageKey);
-      if (!stored) {
-        setPersonalColors(null);
-        return;
-      }
-
-      const parsed = JSON.parse(stored);
-      if (parsed?.primaryColor && parsed?.secondaryColor) {
-        setPersonalColors({
-          primary: parsed.primaryColor,
-          secondary: parsed.secondaryColor
-        });
-      } else {
-        setPersonalColors(null);
-      }
-    } catch (error) {
-      logger.error('Error reading personal appearance settings:', error);
-      setPersonalColors(null);
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    loadPersonalColors();
-  }, [loadPersonalColors, organization?.primary_color, organization?.secondary_color]);
-
-  useEffect(() => {
-    const handleAppearanceUpdate = () => {
-      loadPersonalColors();
-    };
-
-    window.addEventListener('appearancePrefsUpdated', handleAppearanceUpdate);
-    return () => window.removeEventListener('appearancePrefsUpdated', handleAppearanceUpdate);
-  }, [loadPersonalColors]);
-
-  const resolvedColors = personalColors || baseOrganizationColors;
 
   useEffect(() => {
     localStorage.setItem('theme', currentTheme);
@@ -321,6 +285,14 @@ export const ThemeProvider = ({ children }) => {
 
   useEffect(() => {
     localStorage.setItem('darkMode', isDarkMode);
+    
+    // Apply dark class to HTML element for Tailwind dark mode
+    const htmlElement = document.documentElement;
+    if (isDarkMode) {
+      htmlElement.classList.add('dark');
+    } else {
+      htmlElement.classList.remove('dark');
+    }
   }, [isDarkMode]);
   
   useEffect(() => {
@@ -338,7 +310,17 @@ export const ThemeProvider = ({ children }) => {
 
   const toggleDarkMode = () => {
     logger.log('Toggling dark mode:', { from: isDarkMode, to: !isDarkMode });
-    setIsDarkMode(!isDarkMode);
+    const newDarkMode = !isDarkMode;
+    setIsDarkMode(newDarkMode);
+    setMode(newDarkMode ? 'dark' : 'light');
+    
+    // Immediately update HTML class for Tailwind (before useEffect runs)
+    const htmlElement = document.documentElement;
+    if (newDarkMode) {
+      htmlElement.classList.add('dark');
+    } else {
+      htmlElement.classList.remove('dark');
+    }
   };
 
   // Wrapper function to ensure accent is always stored as hex
@@ -364,7 +346,7 @@ export const ThemeProvider = ({ children }) => {
         'slate-500': '#64748b',
         'sky-500': '#0ea5e9',
       };
-      hexAccent = colorMap[hexAccent] || '#1976d2';
+      hexAccent = colorMap[hexAccent] || '#40B5AD'; // Scanified primary teal
     }
     setAccent(hexAccent);
   };
@@ -377,24 +359,24 @@ export const ThemeProvider = ({ children }) => {
     if (!hexAccent.startsWith('#')) {
       // If it's a color key like 'blue-600', convert it to hex
       const colorMap = {
-        'blue-600': '#2563eb',
-        'emerald-500': '#10b981',
-        'purple-600': '#7c3aed',
+        'blue-600': '#40B5AD', // Scanified primary teal
+        'emerald-500': '#48C9B0', // Scanified secondary turquoise
+        'purple-600': '#8B7BA8', // Scanified purple accent
         'rose-500': '#f43f5e',
         'amber-500': '#f59e42',
-        'teal-500': '#14b8a6',
-        'cyan-500': '#06b6d4',
-        'green-500': '#22c55e',
+        'teal-500': '#40B5AD', // Scanified primary teal
+        'cyan-500': '#5FCDC5', // Scanified light teal
+        'green-500': '#48C9B0', // Scanified secondary turquoise
         'orange-500': '#f97316',
         'red-500': '#ef4444',
         'pink-500': '#ec4899',
         'indigo-500': '#6366f1',
         'lime-500': '#84cc16',
-        'violet-600': '#a21caf',
+        'violet-600': '#8B7BA8', // Scanified purple accent
         'slate-500': '#64748b',
-        'sky-500': '#0ea5e9',
+        'sky-500': '#5FCDC5', // Scanified light teal
       };
-      hexAccent = colorMap[hexAccent] || '#1976d2';
+      hexAccent = colorMap[hexAccent] || '#40B5AD'; // Scanified primary teal
     }
     
     // Apply dark mode if enabled
@@ -406,11 +388,11 @@ export const ThemeProvider = ({ children }) => {
           mode: 'dark',
           primary: {
             ...baseTheme.palette.primary,
-            main: resolvedColors.primary,
+            main: organizationColors.primary,
           },
           secondary: {
             ...baseTheme.palette.secondary,
-            main: resolvedColors.secondary,
+            main: organizationColors.secondary,
           },
           background: {
             default: '#0a0a0a',
@@ -432,11 +414,11 @@ export const ThemeProvider = ({ children }) => {
         ...baseTheme.palette,
         primary: {
           ...baseTheme.palette.primary,
-          main: resolvedColors.primary,
+          main: organizationColors.primary,
         },
         secondary: {
           ...baseTheme.palette.secondary,
-          main: resolvedColors.secondary,
+          main: organizationColors.secondary,
         },
       },
     });
@@ -449,9 +431,7 @@ export const ThemeProvider = ({ children }) => {
     setMode,
     accent,
     setAccent: setAccentColor,
-    organizationColors: resolvedColors,
-    personalColors,
-    refreshAppearanceColors: loadPersonalColors,
+    organizationColors,
     changeTheme,
     toggleDarkMode,
     availableThemes: themes,

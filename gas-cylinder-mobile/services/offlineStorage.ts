@@ -195,6 +195,7 @@ export class OfflineStorageService {
 
   /**
    * Sync scan operation
+   * Uses bottle_scans table for consistency with Android and web app
    */
   private static async syncScanOperation(supabase: any, operation: OfflineData): Promise<void> {
     logger.log('🔄 Syncing scan operation:', {
@@ -204,18 +205,34 @@ export class OfflineStorageService {
       orderNumber: operation.data.order_number
     });
 
+    // Map action to mode for bottle_scans table compatibility
+    const actionToMode = (action: string): string => {
+      switch (action?.toLowerCase()) {
+        case 'out':
+        case 'ship':
+          return 'SHIP';
+        case 'in':
+        case 'return':
+          return 'RETURN';
+        case 'fill':
+          return 'FILL';
+        default:
+          return action?.toUpperCase() || 'SHIP';
+      }
+    };
+
     const { data, error } = await supabase
-      .from('scans')
+      .from('bottle_scans')
       .insert([{
         organization_id: operation.organizationId || null,
-        barcode_number: operation.data.barcode_number,
-        action: operation.data.action,
+        bottle_barcode: operation.data.barcode_number,
+        mode: actionToMode(operation.data.action),
         location: operation.data.location || null,
-        notes: operation.data.notes || null,
-        scanned_by: operation.userId || null,
+        user_id: operation.userId || null,
         order_number: operation.data.order_number || null,
         customer_name: operation.data.customer_name || null,
-        customer_id: operation.data.customer_id || null
+        customer_id: operation.data.customer_id || null,
+        product_code: operation.data.product_code || null // Include product_code for unclassified detection
       }]);
 
     if (error) {

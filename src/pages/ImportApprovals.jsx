@@ -177,6 +177,126 @@ const VERIFICATION_STEPS = [
   }
 ];
 
+// Edit Bottle Dialog Component
+function EditBottleDialog({ open, bottle, barcode, isNew, organizationId, onClose, onSave }) {
+  const [formData, setFormData] = useState({
+    barcode_number: bottle?.barcode_number || barcode || '',
+    product_code: bottle?.product_code || '',
+    description: bottle?.description || '',
+    gas_type: bottle?.gas_type || '',
+    status: bottle?.status || 'available',
+    location: bottle?.location || '',
+    serial_number: bottle?.serial_number || ''
+  });
+
+  useEffect(() => {
+    if (bottle) {
+      setFormData({
+        barcode_number: bottle.barcode_number || '',
+        product_code: bottle.product_code || '',
+        description: bottle.description || '',
+        gas_type: bottle.gas_type || '',
+        status: bottle.status || 'available',
+        location: bottle.location || '',
+        serial_number: bottle.serial_number || ''
+      });
+    } else if (barcode) {
+      setFormData(prev => ({ ...prev, barcode_number: barcode }));
+    }
+  }, [bottle, barcode]);
+
+  const handleSave = () => {
+    const dataToSave = {
+      ...formData,
+      barcode_number: isNew ? barcode : formData.barcode_number
+    };
+    // Remove empty strings, convert to null
+    Object.keys(dataToSave).forEach(key => {
+      if (dataToSave[key] === '') {
+        dataToSave[key] = null;
+      }
+    });
+    onSave(dataToSave);
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>
+        {isNew ? 'Create Bottle (Unclassified)' : 'Edit Bottle'}
+      </DialogTitle>
+      <DialogContent>
+        <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <TextField
+            label="Barcode"
+            value={formData.barcode_number}
+            onChange={(e) => setFormData({...formData, barcode_number: e.target.value})}
+            fullWidth
+            disabled={isNew} // Don't allow editing barcode for new bottles
+            required
+          />
+          <TextField
+            label="Product Code"
+            value={formData.product_code}
+            onChange={(e) => setFormData({...formData, product_code: e.target.value})}
+            fullWidth
+            placeholder="Enter product code"
+            helperText={isNew ? "Required to classify this bottle" : ""}
+          />
+          <TextField
+            label="Description"
+            value={formData.description}
+            onChange={(e) => setFormData({...formData, description: e.target.value})}
+            fullWidth
+            multiline
+            rows={2}
+          />
+          <TextField
+            label="Gas Type"
+            value={formData.gas_type}
+            onChange={(e) => setFormData({...formData, gas_type: e.target.value})}
+            fullWidth
+          />
+          <TextField
+            label="Serial Number"
+            value={formData.serial_number}
+            onChange={(e) => setFormData({...formData, serial_number: e.target.value})}
+            fullWidth
+          />
+          <FormControl fullWidth>
+            <InputLabel>Location</InputLabel>
+            <Select
+              value={formData.location || ''}
+              onChange={(e) => setFormData({...formData, location: e.target.value})}
+              label="Location"
+            >
+              <MenuItem value="SASKATOON">Saskatoon (Saskatchewan)</MenuItem>
+              <MenuItem value="REGINA">Regina (Saskatchewan)</MenuItem>
+              <MenuItem value="CHILLIWACK">Chilliwack (British Columbia)</MenuItem>
+              <MenuItem value="PRINCE_GEORGE">Prince George (British Columbia)</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl fullWidth>
+            <InputLabel>Status</InputLabel>
+            <Select
+              value={formData.status}
+              onChange={(e) => setFormData({...formData, status: e.target.value})}
+              label="Status"
+            >
+              <MenuItem value="available">Available</MenuItem>
+              <MenuItem value="rented">Rented</MenuItem>
+              <MenuItem value="delivered">Delivered</MenuItem>
+            </Select>
+          </FormControl>
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={handleSave} variant="contained">Save</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 function formatDate(dt) {
   if (!dt) return '';
   return new Date(dt).toLocaleString();
@@ -437,6 +557,12 @@ export default function ImportApprovals() {
     bottles: [],
     scannedBarcodes: [], // Track scanned barcodes even if bottles not found
     loading: false
+  });
+  const [editBottleDialog, setEditBottleDialog] = useState({
+    open: false,
+    bottle: null,
+    barcode: null, // For unclassified bottles that don't exist yet
+    isNew: false
   });
   
   // Existing state
@@ -4555,18 +4681,29 @@ export default function ImportApprovals() {
                               
                               const { data: bottleData, error } = await supabase
                                 .from('bottles')
-                                .select('id')
+                                .select('*')
                                 .eq('barcode_number', barcode)
                                 .eq('organization_id', organization.id)
                                 .limit(1)
-                                .single();
+                                .maybeSingle();
                               
-                              if (error || !bottleData) {
-                                setSnackbar(`Bottle with barcode ${barcode} not found in system`);
-                                return;
+                              if (bottleData) {
+                                // Bottle exists, open edit dialog
+                                setEditBottleDialog({
+                                  open: true,
+                                  bottle: bottleData,
+                                  barcode: null,
+                                  isNew: false
+                                });
+                              } else {
+                                // Bottle doesn't exist, open create dialog
+                                setEditBottleDialog({
+                                  open: true,
+                                  bottle: null,
+                                  barcode: barcode,
+                                  isNew: true
+                                });
                               }
-                              
-                              navigate(`/bottle/${bottleData.id}`);
                               setBottleInfoDialog({ open: false, orderNumber: null, bottles: [], scannedBarcodes: [], loading: false });
                             } catch (error) {
                               logger.error('Error finding bottle by barcode:', error);
@@ -4652,6 +4789,7 @@ export default function ImportApprovals() {
                       <TableCell><strong>Category/Group/Type</strong></TableCell>
                       <TableCell><strong>Description</strong></TableCell>
                       <TableCell><strong>Scan Action</strong></TableCell>
+                      <TableCell><strong>Actions</strong></TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -4748,6 +4886,21 @@ export default function ImportApprovals() {
                             }
                           />
                         </TableCell>
+                        <TableCell>
+                          <IconButton
+                            size="small"
+                            color="primary"
+                            onClick={() => setEditBottleDialog({
+                              open: true,
+                              bottle: bottle,
+                              barcode: null,
+                              isNew: false
+                            })}
+                            title="Edit bottle"
+                          >
+                            <EditIcon />
+                          </IconButton>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -4764,6 +4917,53 @@ export default function ImportApprovals() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Edit/Create Bottle Dialog */}
+      <EditBottleDialog
+        open={editBottleDialog.open}
+        bottle={editBottleDialog.bottle}
+        barcode={editBottleDialog.barcode}
+        isNew={editBottleDialog.isNew}
+        organizationId={organization?.id}
+        onClose={() => setEditBottleDialog({ open: false, bottle: null, barcode: null, isNew: false })}
+        onSave={async (bottleData) => {
+          try {
+            if (editBottleDialog.isNew) {
+              // Create new bottle
+              const { error } = await supabase
+                .from('bottles')
+                .insert([{
+                  ...bottleData,
+                  organization_id: organization.id,
+                  barcode_number: editBottleDialog.barcode,
+                  status: bottleData.status || 'available'
+                }]);
+              
+              if (error) throw error;
+              setSnackbar('Bottle created successfully');
+            } else {
+              // Update existing bottle
+              const { error } = await supabase
+                .from('bottles')
+                .update(bottleData)
+                .eq('id', editBottleDialog.bottle.id);
+              
+              if (error) throw error;
+              setSnackbar('Bottle updated successfully');
+            }
+            
+            // Refresh bottle info dialog
+            if (bottleInfoDialog.orderNumber) {
+              await fetchBottleInfoForOrder(bottleInfoDialog.orderNumber);
+            }
+            
+            setEditBottleDialog({ open: false, bottle: null, barcode: null, isNew: false });
+          } catch (error) {
+            logger.error('Error saving bottle:', error);
+            setSnackbar(`Failed to save bottle: ${error.message}`);
+          }
+        }}
+      />
 
       {/* Speed Dial for Quick Actions */}
       <SpeedDial

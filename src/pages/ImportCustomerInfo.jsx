@@ -403,6 +403,16 @@ const ImportCustomerInfo = () => {
         return id.toLowerCase().trim().replace(/[a-z]+$/, '');
       };
       
+      // Helper to get value from customer object using mapping
+      const getMappedValue = (customer, fieldKey) => {
+        const mappedColumn = mapping[fieldKey];
+        if (mappedColumn && customer[mappedColumn] !== undefined) {
+          return customer[mappedColumn];
+        }
+        // Fallback to direct field key access (for backwards compatibility)
+        return customer[fieldKey];
+      };
+      
       // Filter out invalid entries and detect duplicates within import data
       const seenCustomers = new Set();
       const seenBarcodes = new Map(); // Track barcodes (case-insensitive) -> customer
@@ -415,9 +425,9 @@ const ImportCustomerInfo = () => {
       };
       
       for (const customer of preview) {
-        const customerName = customer.name || '';
-        const customerId = customer.CustomerListID || '';
-        const customerBarcode = normalizeBarcode(customer.barcode);
+        const customerName = getMappedValue(customer, 'name') || '';
+        const customerId = getMappedValue(customer, 'CustomerListID') || '';
+        const customerBarcode = normalizeBarcode(getMappedValue(customer, 'barcode'));
         
         if (!customerName.trim() && !customerId.trim()) {
           invalidCustomers.push('Empty name and ID');
@@ -465,44 +475,54 @@ const ImportCustomerInfo = () => {
           let hasUpdates = false;
           
           // Update all fields if new data is provided (always use new data, don't check if more complete)
-          if (customer.contact_details !== undefined && customer.contact_details !== null && customer.contact_details !== '') {
-            updateData.contact_details = customer.contact_details.trim() || null;
+          const contactDetails = getMappedValue(customer, 'contact_details');
+          if (contactDetails !== undefined && contactDetails !== null && contactDetails !== '') {
+            updateData.contact_details = contactDetails.trim() || null;
             hasUpdates = true;
           }
-          if (customer.address2 !== undefined && customer.address2 !== null && customer.address2 !== '') {
-            updateData.address2 = customer.address2.trim() || null;
+          const address2 = getMappedValue(customer, 'address2');
+          if (address2 !== undefined && address2 !== null && address2 !== '') {
+            updateData.address2 = address2.trim() || null;
             hasUpdates = true;
           }
-          if (customer.address3 !== undefined && customer.address3 !== null && customer.address3 !== '') {
-            updateData.address3 = customer.address3.trim() || null;
+          const address3 = getMappedValue(customer, 'address3');
+          if (address3 !== undefined && address3 !== null && address3 !== '') {
+            updateData.address3 = address3.trim() || null;
             hasUpdates = true;
           }
-          if (customer.address4 !== undefined && customer.address4 !== null && customer.address4 !== '') {
-            updateData.address4 = customer.address4.trim() || null;
+          const address4 = getMappedValue(customer, 'address4');
+          if (address4 !== undefined && address4 !== null && address4 !== '') {
+            updateData.address4 = address4.trim() || null;
             hasUpdates = true;
           }
-          if (customer.address5 !== undefined && customer.address5 !== null && customer.address5 !== '') {
-            updateData.address5 = customer.address5.trim() || null;
+          const address5 = getMappedValue(customer, 'address5');
+          if (address5 !== undefined && address5 !== null && address5 !== '') {
+            updateData.address5 = address5.trim() || null;
             hasUpdates = true;
           }
-          if (customer.city !== undefined && customer.city !== null && customer.city !== '') {
-            updateData.city = customer.city.trim() || null;
+          const city = getMappedValue(customer, 'city');
+          if (city !== undefined && city !== null && city !== '') {
+            updateData.city = city.trim() || null;
             hasUpdates = true;
           }
-          if (customer.postal_code !== undefined && customer.postal_code !== null && customer.postal_code !== '') {
-            updateData.postal_code = customer.postal_code.trim() || null;
+          const postalCode = getMappedValue(customer, 'postal_code');
+          if (postalCode !== undefined && postalCode !== null && postalCode !== '') {
+            updateData.postal_code = postalCode.trim() || null;
             hasUpdates = true;
           }
-          if (customer.phone !== undefined && customer.phone !== null && customer.phone !== '') {
-            updateData.phone = customer.phone.trim() || null;
+          const phone = getMappedValue(customer, 'phone');
+          if (phone !== undefined && phone !== null && phone !== '') {
+            updateData.phone = phone.trim() || null;
             hasUpdates = true;
           }
-          if (customer.email !== undefined && customer.email !== null && customer.email !== '') {
-            updateData.email = customer.email.trim() || null;
+          const email = getMappedValue(customer, 'email');
+          if (email !== undefined && email !== null && email !== '') {
+            updateData.email = email.trim() || null;
             hasUpdates = true;
           }
-          if (customer.barcode !== undefined && customer.barcode !== null && customer.barcode !== '') {
-            const newBarcode = customer.barcode.toString().trim();
+          const barcode = getMappedValue(customer, 'barcode');
+          if (barcode !== undefined && barcode !== null && barcode !== '') {
+            const newBarcode = barcode.toString().trim();
             if (newBarcode) {
               updateData.barcode = newBarcode;
               hasUpdates = true;
@@ -510,16 +530,18 @@ const ImportCustomerInfo = () => {
           }
           
           // Always update name if provided (in case of slight variations)
-          if (customer.name && customer.name.trim()) {
-            updateData.name = customer.name.trim();
+          const name = getMappedValue(customer, 'name');
+          if (name && name.trim()) {
+            updateData.name = name.trim();
             hasUpdates = true;
           }
           
           // Always add to update list if customer exists (even if no field changes detected)
           // This ensures we still update the customer record timestamp
+          const nameValue = getMappedValue(customer, 'name');
           customersToUpdate.push({
             CustomerListID: existingCustomer.CustomerListID,
-            updateData: hasUpdates ? updateData : { name: customer.name.trim() }, // At minimum update name
+            updateData: hasUpdates ? updateData : { name: nameValue ? nameValue.trim() : customerName.trim() }, // At minimum update name
             displayName: `${customerName} (${customerId})`
           });
           continue;
@@ -529,7 +551,8 @@ const ImportCustomerInfo = () => {
         // Normalize CustomerListID to lowercase (remove trailing letters for consistency)
         const normalizedId = normalizeId(customerId) || generateCustomerId();
         // Determine location from city or use default
-        const city = (customer.city || '').trim().toUpperCase();
+        const cityValue = getMappedValue(customer, 'city');
+        const city = (cityValue || '').trim().toUpperCase();
         let location = 'SASKATOON'; // Default
         if (city.includes('REGINA')) location = 'REGINA';
         else if (city.includes('CHILLIWACK')) location = 'CHILLIWACK';
@@ -537,20 +560,21 @@ const ImportCustomerInfo = () => {
         else if (city.includes('SASKATOON')) location = 'SASKATOON';
         
         // Normalize barcode (case-insensitive storage, but preserve original case)
-        const normalizedBarcode = customer.barcode ? customer.barcode.toString().trim() : null;
+        const barcodeValue = getMappedValue(customer, 'barcode');
+        const normalizedBarcode = barcodeValue ? barcodeValue.toString().trim() : null;
         
         const customerData = {
           CustomerListID: normalizedId,
           name: customerName.trim(),
-          contact_details: (customer.contact_details || '').trim() || null,
-          address2: (customer.address2 || '').trim() || null,
-          address3: (customer.address3 || '').trim() || null,
-          address4: (customer.address4 || '').trim() || null,
-          address5: (customer.address5 || '').trim() || null,
-          city: (customer.city || '').trim() || null,
-          postal_code: (customer.postal_code || '').trim() || null,
-          phone: (customer.phone || '').trim() || null,
-          email: (customer.email || '').trim() || null,
+          contact_details: (getMappedValue(customer, 'contact_details') || '').trim() || null,
+          address2: (getMappedValue(customer, 'address2') || '').trim() || null,
+          address3: (getMappedValue(customer, 'address3') || '').trim() || null,
+          address4: (getMappedValue(customer, 'address4') || '').trim() || null,
+          address5: (getMappedValue(customer, 'address5') || '').trim() || null,
+          city: (cityValue || '').trim() || null,
+          postal_code: (getMappedValue(customer, 'postal_code') || '').trim() || null,
+          phone: (getMappedValue(customer, 'phone') || '').trim() || null,
+          email: (getMappedValue(customer, 'email') || '').trim() || null,
           barcode: normalizedBarcode,
           location: location,
           organization_id: profile.organization_id
@@ -934,14 +958,21 @@ const ImportCustomerInfo = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {preview.slice(0, 10).map((customer, idx) => (
-                    <tr key={idx}>
-                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>{customer.CustomerListID}</td>
-                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>{customer.name}</td>
-                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>{customer.contact_details}</td>
-                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>{customer.email}</td>
-                    </tr>
-                  ))}
+                  {preview.slice(0, 10).map((customer, idx) => {
+                    // Helper to get mapped value for display
+                    const getValue = (fieldKey) => {
+                      const mappedColumn = mapping[fieldKey];
+                      return mappedColumn ? (customer[mappedColumn] || '') : (customer[fieldKey] || '');
+                    };
+                    return (
+                      <tr key={idx}>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>{getValue('CustomerListID')}</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>{getValue('name')}</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>{getValue('contact_details')}</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>{getValue('email')}</td>
+                      </tr>
+                    );
+                  })}
                   {preview.length > 10 && (
                     <tr>
                       <td colSpan={4} style={{ padding: '8px', textAlign: 'center', border: '1px solid #ddd', fontStyle: 'italic' }}>

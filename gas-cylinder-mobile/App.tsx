@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, LogBox } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -11,6 +11,32 @@ import { notificationService } from './services/NotificationService';
 import { soundService } from './services/soundService';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import UpdateModal from './components/UpdateModal';
+import SessionTimeoutWarning from './components/SessionTimeoutWarning';
+import logger from './utils/logger';
+
+// Silence known, harmless development warnings - MUST BE BEFORE OTHER IMPORTS USE THEM
+if (__DEV__) {
+  LogBox.ignoreLogs([
+    // React Navigation warnings
+    'Non-serializable values were found in the navigation state',
+    'Sending `onAnimatedValueUpdate` with no listeners registered',
+    // Expo warnings
+    'Constants.platform.ios.model has been deprecated',
+    'AsyncStorage has been extracted from react-native',
+    // Worklets warnings (camera/video)
+    'Worklet',
+    '[react-native-reanimated]',
+    // Metro bundler warnings
+    'Remote debugger is in a background tab',
+    // Common harmless warnings
+    'VirtualizedLists should never be nested',
+    'Possible Unhandled Promise Rejection',
+    'Setting a timer for a long period',
+    // Supabase/Network warnings
+    'Network request failed',
+    'Unable to resolve host',
+  ]);
+}
 
 // Import all screens
 import HomeScreen from './screens/HomeScreen';
@@ -71,9 +97,20 @@ const styles = StyleSheet.create({
 });
 
 function AppContent() {
-  const { user, profile, organization, loading, organizationLoading, authError } = useAuth();
+  const { 
+    user, 
+    profile, 
+    organization, 
+    loading, 
+    organizationLoading, 
+    authError,
+    sessionTimeoutWarning,
+    updateActivity,
+    signOut
+  } = useAuth();
   const { updateInfo, openUpdateUrl } = useAppUpdate();
   const [showUpdateModal, setShowUpdateModal] = React.useState(false);
+  const [organizationLoadTimeout, setOrganizationLoadTimeout] = React.useState(false);
 
   // Show update modal when update is available
   React.useEffect(() => {
@@ -81,6 +118,32 @@ function AppContent() {
       setShowUpdateModal(true);
     }
   }, [updateInfo]);
+
+  // Add timeout safeguard for organization loading
+  React.useEffect(() => {
+    if (organizationLoading && user) {
+      const timeout = setTimeout(() => {
+        logger.warn('⚠️ Organization loading exceeded 25 seconds - showing timeout state');
+        setOrganizationLoadTimeout(true);
+      }, 25000); // 25 second timeout (slightly longer than useAuth's 20s)
+      
+      return () => {
+        clearTimeout(timeout);
+        setOrganizationLoadTimeout(false);
+      };
+    } else {
+      setOrganizationLoadTimeout(false);
+    }
+  }, [organizationLoading, user]);
+
+  // Handle session timeout warning actions
+  const handleExtendSession = React.useCallback(() => {
+    updateActivity();
+  }, [updateActivity]);
+
+  const handleLogout = React.useCallback(async () => {
+    await signOut();
+  }, [signOut]);
 
   // Initialize services when user is authenticated
   React.useEffect(() => {
@@ -139,7 +202,7 @@ function AppContent() {
   }
 
   // Show loading while organization is being fetched
-  if (user && organizationLoading) {
+  if (user && organizationLoading && !organizationLoadTimeout) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.content}>
@@ -150,9 +213,28 @@ function AppContent() {
     );
   }
 
+  // Show timeout error if organization loading took too long
+  if (user && organizationLoadTimeout && !organization) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.content}>
+          <Text style={styles.title}>⚠️ Loading Timeout</Text>
+          <Text style={styles.text}>
+            Loading your organization data is taking longer than expected.
+          </Text>
+          <Text style={styles.subtext}>
+            Please check your internet connection and try again. If the problem persists, contact support.
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <>
-      <NavigationContainer>
+      <NavigationContainer
+        key={user ? 'authenticated' : 'unauthenticated'}
+      >
         <Stack.Navigator
           screenOptions={{
             headerShown: true, // Default to showing headers, but individual screens can override
@@ -288,6 +370,14 @@ function AppContent() {
         }
       }}
       onDismiss={updateInfo?.isRequired ? undefined : () => setShowUpdateModal(false)}
+    />
+    
+    {/* Session Timeout Warning */}
+    <SessionTimeoutWarning
+      visible={sessionTimeoutWarning}
+      onExtendSession={handleExtendSession}
+      onLogout={handleLogout}
+      timeoutSeconds={120}
     />
     </>
   );

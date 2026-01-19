@@ -3,39 +3,41 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAccessibility } from '../hooks/useAccessibility';
 
-// Mobile theme definitions - Scanified Branding
+// Mobile theme definitions - Modern Conversion-Focused Design
 const mobileThemes = {
   light: {
-    primary: '#40B5AD',
-    secondary: '#48C9B0',
-    background: '#ffffff',
-    surface: '#f8fafc',
-    text: '#1e293b',
-    textSecondary: '#64748b',
-    error: '#ef4444',
-    warning: '#f59e0b',
-    success: '#48C9B0',
-    info: '#40B5AD',
-    border: '#e2e8f0',
+    primary: '#3B82F6', // Modern Blue
+    secondary: '#8B5CF6', // Purple
+    background: '#F8FAFC',
+    surface: '#ffffff',
+    text: '#1F2937',
+    textSecondary: '#6B7280',
+    error: '#EF4444',
+    warning: '#F59E0B',
+    success: '#10B981',
+    info: '#06B6D4',
+    border: '#E5E7EB',
     shadow: 'rgba(0, 0, 0, 0.1)',
     cardBackground: '#ffffff',
     statusBar: 'dark-content' as const,
+    gradient: ['#3B82F6', '#8B5CF6'], // Gradient colors
   },
   dark: {
-    primary: '#5FCDC5',
-    secondary: '#48C9B0',
-    background: '#0f172a',
-    surface: '#1e293b',
-    text: '#f8fafc',
-    textSecondary: '#cbd5e1',
-    error: '#ef4444',
-    warning: '#f59e0b',
-    success: '#48C9B0',
-    info: '#5FCDC5',
+    primary: '#60A5FA',
+    secondary: '#A78BFA',
+    background: '#0F172A',
+    surface: '#1E293B',
+    text: '#F8FAFC',
+    textSecondary: '#CBD5E1',
+    error: '#EF4444',
+    warning: '#F59E0B',
+    success: '#10B981',
+    info: '#06B6D4',
     border: '#334155',
     shadow: 'rgba(0, 0, 0, 0.3)',
-    cardBackground: '#1e293b',
+    cardBackground: '#1E293B',
     statusBar: 'light-content' as const,
+    gradient: ['#60A5FA', '#A78BFA'],
   },
   blue: {
     primary: '#1e40af',

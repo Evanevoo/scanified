@@ -214,7 +214,6 @@ export class TemporaryCustomerService {
       }
 
       // Assign the item to temp customer
-      // Use CustomerListID for assigned_customer (application logic uses CustomerListID)
       const { data, error } = await supabase
         .from('bottles')
         .update({

@@ -1,13 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { cn } from "@/lib/utils";
 
 const Calendar = ({ 
   events = [], 
-  className = '', 
+  className = '',
+  onDateSelect,
+  selectedDate,
   ...props 
 }) => {
   const today = new Date();
-  const currentMonth = today.getMonth();
-  const currentYear = today.getFullYear();
+  const [currentMonth, setCurrentMonth] = useState(today.getMonth());
+  const [currentYear, setCurrentYear] = useState(today.getFullYear());
+  
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
   const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
   
@@ -35,19 +39,81 @@ const Calendar = ({
       return eventDate.toDateString() === dayDate.toDateString();
     });
   };
+
+  const isToday = (day) => {
+    return day === today.getDate() && 
+           currentMonth === today.getMonth() && 
+           currentYear === today.getFullYear();
+  };
+
+  const isSelected = (day) => {
+    if (!selectedDate || !day) return false;
+    const selected = new Date(selectedDate);
+    return day === selected.getDate() &&
+           currentMonth === selected.getMonth() &&
+           currentYear === selected.getFullYear();
+  };
+
+  const handleDateClick = (day) => {
+    if (day && onDateSelect) {
+      const date = new Date(currentYear, currentMonth, day);
+      onDateSelect(date);
+    }
+  };
+
+  const goToPreviousMonth = () => {
+    if (currentMonth === 0) {
+      setCurrentMonth(11);
+      setCurrentYear(currentYear - 1);
+    } else {
+      setCurrentMonth(currentMonth - 1);
+    }
+  };
+
+  const goToNextMonth = () => {
+    if (currentMonth === 11) {
+      setCurrentMonth(0);
+      setCurrentYear(currentYear + 1);
+    } else {
+      setCurrentMonth(currentMonth + 1);
+    }
+  };
   
   return (
-    <div className={`bg-white rounded-lg shadow ${className}`} {...props}>
-      <div className="p-4 border-b">
-        <h2 className="text-lg font-semibold text-gray-900">
-          {monthNames[currentMonth]} {currentYear}
-        </h2>
+    <div className={cn(
+      "bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden",
+      className
+    )} {...props}>
+      <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-[#40B5AD]/5 to-transparent">
+        <div className="flex items-center justify-between mb-2">
+          <button
+            onClick={goToPreviousMonth}
+            className="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
+            aria-label="Previous month"
+          >
+            <svg className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <h2 className="text-xl font-bold text-gray-900">
+            {monthNames[currentMonth]} {currentYear}
+          </h2>
+          <button
+            onClick={goToNextMonth}
+            className="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
+            aria-label="Next month"
+          >
+            <svg className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        </div>
       </div>
       
       <div className="p-4">
-        <div className="grid grid-cols-7 gap-1 mb-2">
+        <div className="grid grid-cols-7 gap-1 mb-3">
           {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-            <div key={day} className="p-2 text-center text-sm font-medium text-gray-500">
+            <div key={day} className="p-2 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
               {day}
             </div>
           ))}
@@ -56,43 +122,60 @@ const Calendar = ({
         <div className="grid grid-cols-7 gap-1">
           {days.map((day, index) => {
             const dayEvents = getEventsForDay(day);
-            const isToday = day === today.getDate() && 
-                           currentMonth === today.getMonth() && 
-                           currentYear === today.getFullYear();
+            const todayFlag = isToday(day);
+            const selectedFlag = isSelected(day);
             
             return (
-              <div
+              <button
                 key={index}
-                className={`min-h-[80px] p-1 border border-gray-100 ${
-                  day ? 'bg-white hover:bg-gray-50' : 'bg-gray-50'
-                } ${isToday ? 'bg-blue-50 border-blue-200' : ''}`}
+                onClick={() => handleDateClick(day)}
+                disabled={!day}
+                className={cn(
+                  "min-h-[70px] p-2 rounded-lg border transition-all duration-200 ease-out",
+                  "flex flex-col items-start",
+                  day 
+                    ? 'bg-white hover:bg-gray-50 border-gray-100 hover:border-gray-200 cursor-pointer' 
+                    : 'bg-transparent border-transparent cursor-default',
+                  todayFlag && 'border-[#40B5AD] bg-[#40B5AD]/5',
+                  selectedFlag && 'bg-[#40B5AD] text-white border-[#40B5AD] hover:bg-[#2E9B94]',
+                  !selectedFlag && day && 'text-gray-900'
+                )}
               >
                 {day && (
                   <>
-                    <div className={`text-sm font-medium ${
-                      isToday ? 'text-blue-600' : 'text-gray-900'
-                    }`}>
+                    <div className={cn(
+                      "text-sm font-semibold mb-1",
+                      selectedFlag ? 'text-white' : todayFlag ? 'text-[#40B5AD]' : 'text-gray-700'
+                    )}>
                       {day}
                     </div>
-                    <div className="mt-1 space-y-1">
+                    <div className="flex-1 w-full space-y-0.5">
                       {dayEvents.slice(0, 2).map((event, eventIndex) => (
                         <div
                           key={eventIndex}
-                          className="px-1 py-0.5 text-xs bg-blue-100 text-blue-800 rounded truncate"
+                          className={cn(
+                            "px-1.5 py-0.5 text-[10px] rounded truncate w-full",
+                            selectedFlag
+                              ? 'bg-white/20 text-white'
+                              : 'bg-[#40B5AD]/10 text-[#40B5AD]'
+                          )}
                           title={event.title}
                         >
                           {event.title}
                         </div>
                       ))}
                       {dayEvents.length > 2 && (
-                        <div className="text-xs text-gray-500">
-                          +{dayEvents.length - 2} more
+                        <div className={cn(
+                          "text-[10px] px-1",
+                          selectedFlag ? 'text-white/80' : 'text-gray-500'
+                        )}>
+                          +{dayEvents.length - 2}
                         </div>
                       )}
                     </div>
                   </>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>

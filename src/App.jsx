@@ -16,6 +16,7 @@ import OwnerProtectedRoute from './components/OwnerProtectedRoute';
 import RoleProtectedRoute from './components/RoleProtectedRoute';
 import { initAllTracking, trackPageView } from './utils/analytics';
 import { initializeDisasterRecovery } from './utils/disasterRecovery';
+import { initGlobalErrorHandler } from './utils/globalErrorHandler';
 import './styles/responsive.css';
 import './styles/accessibility.css';
 import Billing from './pages/Billing';
@@ -80,6 +81,7 @@ import FAQ from './pages/FAQ';
 import Reviews from './pages/Reviews';
 import CookieNotice from './components/CookieNotice';
 import NavigationBar from './components/NavigationBar';
+import SessionTimeoutWarning from './components/SessionTimeoutWarning';
 import Demo from './pages/Demo';
 import ParticleTextDemo from './pages/ParticleTextDemo';
 import Features from './pages/Features';
@@ -175,10 +177,22 @@ function AnalyticsTracker() {
 function AppContent() {
   const { profile, organization, loading } = useAuth();
   
-  // Initialize analytics and disaster recovery on app start
+  // Initialize analytics, disaster recovery, and global error handler on app start
   useEffect(() => {
     initAllTracking();
     initializeDisasterRecovery();
+    
+    // Initialize global error handler for unhandled errors and promise rejections
+    initGlobalErrorHandler({
+      enableLogging: true,
+      enableReporting: import.meta.env.PROD, // Only report in production
+      onError: (errorInfo) => {
+        // Optional: integrate with error tracking service (e.g., Sentry)
+        if (import.meta.env.PROD && errorInfo.type === 'error') {
+          console.error('Global error captured:', errorInfo.message);
+        }
+      }
+    });
   }, []);
 
   // Global snackbar state
@@ -546,6 +560,8 @@ function AppContent() {
               </Snackbar>
               {/* Global Cookie Notice */}
               <CookieNotice />
+              {/* Session Timeout Warning */}
+              <SessionTimeoutWarning />
             </Router>
           </ThemeProvider>
         </PermissionsProvider>

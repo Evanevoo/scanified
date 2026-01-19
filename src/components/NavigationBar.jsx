@@ -106,9 +106,9 @@ export default function NavigationBar() {
     return location.pathname === path;
   };
 
-  // Don't show navigation on certain pages
-  const hideNavPages = ['/login'];
-  if (hideNavPages.includes(location.pathname) || profile) {
+  // Don't show navigation on login page only
+  // Show navbar on landing pages and all other pages
+  if (location.pathname === '/login') {
     return null;
   }
 
@@ -120,10 +120,9 @@ export default function NavigationBar() {
           color="default" 
           elevation={0}
           sx={{ 
-            bgcolor: 'rgba(255, 255, 255, 0.95)',
+            bgcolor: 'white',
             backdropFilter: 'blur(10px)',
-            borderBottom: 1,
-            borderColor: 'divider'
+            borderBottom: '2px solid #000000'
           }}
         >
           <Container maxWidth="lg">
@@ -133,7 +132,7 @@ export default function NavigationBar() {
                 variant="h5" 
                 fontWeight={700} 
                 sx={{ 
-                  color: '#3B82F6', 
+                  color: '#000000', 
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -158,8 +157,8 @@ export default function NavigationBar() {
                           textTransform: 'none',
                           px: 2,
                           '&:hover': {
-                            bgcolor: 'rgba(59, 130, 246, 0.04)',
-                            color: 'primary.main'
+                            bgcolor: 'rgba(0, 0, 0, 0.04)',
+                            color: '#000000'
                           }
                         }}
                       >
@@ -183,8 +182,8 @@ export default function NavigationBar() {
                             onClick={() => handleNavigate(subItem.path)}
                             sx={{
                               '&:hover': {
-                                bgcolor: 'rgba(59, 130, 246, 0.04)',
-                                color: 'primary.main'
+                                bgcolor: 'rgba(0, 0, 0, 0.04)',
+                                color: '#000000'
                               }
                             }}
                           >
@@ -198,14 +197,14 @@ export default function NavigationBar() {
                       key={item.path}
                       onClick={() => navigate(item.path)}
                       sx={{
-                        color: isActive(item.path) ? 'primary.main' : 'text.primary',
+                        color: isActive(item.path) ? '#000000' : 'text.primary',
                         fontWeight: isActive(item.path) ? 600 : 500,
                         textTransform: 'none',
                         px: 2,
                         position: 'relative',
                         '&:hover': {
-                          bgcolor: 'rgba(59, 130, 246, 0.04)',
-                          color: 'primary.main'
+                          bgcolor: 'rgba(0, 0, 0, 0.04)',
+                          color: '#000000'
                         },
                         '&::after': {
                           content: '""',
@@ -215,7 +214,7 @@ export default function NavigationBar() {
                           transform: 'translateX(-50%)',
                           width: isActive(item.path) ? '80%' : '0%',
                           height: 2,
-                          bgcolor: 'primary.main',
+                          bgcolor: '#000000',
                           transition: 'width 0.3s ease'
                         }
                       }}
@@ -235,8 +234,12 @@ export default function NavigationBar() {
                     textTransform: 'none',
                     fontWeight: 600,
                     borderWidth: 2,
+                    borderColor: '#000000',
+                    color: '#000000',
                     '&:hover': {
-                      borderWidth: 2
+                      borderWidth: 2,
+                      borderColor: '#000000',
+                      bgcolor: 'rgba(0, 0, 0, 0.04)'
                     }
                   }}
                 >
@@ -248,9 +251,12 @@ export default function NavigationBar() {
                   sx={{
                     textTransform: 'none',
                     fontWeight: 600,
+                    bgcolor: '#000000',
+                    color: 'white',
                     boxShadow: 'none',
                     '&:hover': {
-                      boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)'
+                      bgcolor: '#1F2937',
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
                     }
                   }}
                 >
@@ -281,7 +287,7 @@ export default function NavigationBar() {
               height: 2,
               bgcolor: 'transparent',
               '& .MuiLinearProgress-bar': {
-                bgcolor: 'primary.main'
+                bgcolor: '#000000'
               }
             }}
           />
@@ -339,11 +345,11 @@ export default function NavigationBar() {
                     sx={{
                       justifyContent: 'flex-start',
                       textTransform: 'none',
-                      color: isActive(item.path) ? 'primary.main' : 'text.primary',
+                      color: isActive(item.path) ? '#000000' : 'text.primary',
                       fontWeight: isActive(item.path) ? 600 : 500,
                       px: 2,
                       py: 1.5,
-                      bgcolor: isActive(item.path) ? 'rgba(59, 130, 246, 0.04)' : 'transparent'
+                      bgcolor: isActive(item.path) ? 'rgba(0, 0, 0, 0.04)' : 'transparent'
                     }}
                   >
                     {item.label}

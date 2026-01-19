@@ -1,31 +1,122 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
+import logger from '../utils/logger';
+import { validateInput } from '../utils/security';
 import {
   Box, Card, CardContent, Typography, TextField, Button, 
-  Alert, CircularProgress, InputAdornment, IconButton
+  Alert, CircularProgress, InputAdornment, IconButton, LinearProgress
 } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
 
 function ResetPassword() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [hasValidSession, setHasValidSession] = useState(false);
 
   useEffect(() => {
-    // Check if we have a session (user clicked reset link)
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+    // Handle password reset from email link
+    // Supabase automatically handles hash fragments via onAuthStateChange
+    // But we also manually check in case the listener hasn't fired yet
+    const handlePasswordReset = async () => {
+      setCheckingSession(true);
+      try {
+        // First, check if we have hash fragments in the URL
+        const hash = window.location.hash;
+        if (hash && hash.includes('access_token')) {
+          logger.log('Password reset link detected with hash fragment');
+          
+          // Parse hash parameters
+          const hashParams = new URLSearchParams(hash.substring(1));
+          const accessToken = hashParams.get('access_token');
+          const type = hashParams.get('type');
+          
+          // If we have an access token and it's a recovery type, set the session
+          if (accessToken && type === 'recovery') {
+            logger.log('Exchanging password reset token for session...');
+            
+            const { data, error } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: hashParams.get('refresh_token') || ''
+            });
+            
+            if (error) {
+              logger.error('Error setting session from reset link:', error);
+              setError('Invalid or expired reset link. Please request a new password reset.');
+              setCheckingSession(false);
+              return;
+            }
+            
+            if (data.session) {
+              logger.log('Session established from password reset link');
+              setHasValidSession(true);
+              // Clear the hash from URL for security
+              window.history.replaceState(null, '', '/reset-password');
+              setCheckingSession(false);
+              return;
+            }
+          }
+        }
+        
+        // Check if we have a valid session (either from hash or already established)
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          logger.log('Valid session found');
+          setHasValidSession(true);
+        } else {
+          // Only show error if we don't have hash fragments (meaning link might be expired)
+          if (!hash || !hash.includes('access_token')) {
+            setError('Invalid or expired reset link. Please request a new password reset.');
+          } else {
+            // Wait a bit for onAuthStateChange to fire
+            setTimeout(async () => {
+              const { data: { session: retrySession } } = await supabase.auth.getSession();
+              if (retrySession) {
+                setHasValidSession(true);
+              } else {
+                setError('Invalid or expired reset link. Please request a new password reset.');
+              }
+              setCheckingSession(false);
+            }, 1000);
+            return;
+          }
+        }
+      } catch (err) {
+        logger.error('Error handling password reset:', err);
         setError('Invalid or expired reset link. Please request a new password reset.');
       }
+      setCheckingSession(false);
     };
-    checkSession();
+    
+    // Also listen for auth state changes (Supabase's built-in handler)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      logger.log('Auth state change event:', event, 'Session:', !!session);
+      if (event === 'PASSWORD_RECOVERY' && session) {
+        logger.log('Password recovery event detected via onAuthStateChange');
+        setHasValidSession(true);
+        // Clear hash from URL
+        window.history.replaceState(null, '', '/reset-password');
+        setCheckingSession(false);
+        } else if (session && event === 'SIGNED_IN') {
+          // Also handle SIGNED_IN event which might fire for password recovery
+          logger.log('Signed in event detected, checking if it is a password recovery');
+          setHasValidSession(true);
+          setCheckingSession(false);
+        }
+    });
+    
+    handlePasswordReset();
+    
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const handlePasswordReset = async (e) => {
@@ -36,8 +127,17 @@ function ResetPassword() {
       return;
     }
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters long');
+    // Use security.js validation for strong passwords
+    const passwordValidation = validateInput.validatePassword(password);
+    if (!passwordValidation.valid) {
+      setError(passwordValidation.message);
+      return;
+    }
+
+    // Verify we have a valid session before attempting to update password
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setError('Auth session missing! Please click the reset link from your email again.');
       return;
     }
 
@@ -49,7 +149,12 @@ function ResetPassword() {
     });
 
     if (error) {
-      setError(error.message);
+      logger.error('Error updating password:', error);
+      if (error.message.includes('session') || error.message.includes('Auth')) {
+        setError('Auth session missing! Please click the reset link from your email again.');
+      } else {
+        setError(error.message);
+      }
     } else {
       setSuccess(true);
       // Redirect to login after a short delay
@@ -67,6 +172,9 @@ function ResetPassword() {
   const handleClickShowConfirmPassword = () => {
     setShowConfirmPassword(!showConfirmPassword);
   };
+
+  // Get password strength for visual feedback
+  const passwordStrength = validateInput.getPasswordStrength(password);
 
   if (success) {
     return (
@@ -95,6 +203,29 @@ function ResetPassword() {
             >
               Go to Login
             </Button>
+          </CardContent>
+        </Card>
+      </Box>
+    );
+  }
+
+  // Show loading state while checking session
+  if (checkingSession) {
+    return (
+      <Box sx={{ 
+        minHeight: '100vh', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        p: 2
+      }}>
+        <Card sx={{ maxWidth: 400, width: '100%' }}>
+          <CardContent sx={{ p: 4, textAlign: 'center' }}>
+            <CircularProgress sx={{ mb: 2 }} />
+            <Typography variant="body1" color="text.secondary">
+              Verifying reset link...
+            </Typography>
           </CardContent>
         </Card>
       </Box>
@@ -134,7 +265,8 @@ function ResetPassword() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              sx={{ mb: 2 }}
+              sx={{ mb: 1 }}
+              helperText="Min 8 characters with uppercase, lowercase, and number"
               InputProps={{
                 endAdornment: (
                   <InputAdornment position="end">
@@ -148,6 +280,34 @@ function ResetPassword() {
                 ),
               }}
             />
+            
+            {/* Password Strength Indicator */}
+            {password && (
+              <Box sx={{ mb: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                  <LinearProgress 
+                    variant="determinate" 
+                    value={(passwordStrength.score / 4) * 100}
+                    sx={{ 
+                      flexGrow: 1, 
+                      height: 6, 
+                      borderRadius: 3,
+                      bgcolor: '#e0e0e0',
+                      '& .MuiLinearProgress-bar': {
+                        bgcolor: passwordStrength.color,
+                        borderRadius: 3
+                      }
+                    }}
+                  />
+                  <Typography 
+                    variant="caption" 
+                    sx={{ color: passwordStrength.color, fontWeight: 500, minWidth: 80 }}
+                  >
+                    {passwordStrength.label}
+                  </Typography>
+                </Box>
+              </Box>
+            )}
             
             <TextField
               fullWidth

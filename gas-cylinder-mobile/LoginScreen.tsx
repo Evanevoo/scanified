@@ -21,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { useAuth } from './hooks/useAuth';
+import { useNavigation } from '@react-navigation/native';
 
 const translations = {
   en: {
@@ -52,6 +53,7 @@ const translations = {
 };
 
 export default function LoginScreen() {
+  const navigation = useNavigation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -64,6 +66,7 @@ export default function LoginScreen() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricType, setBiometricType] = useState<'face' | 'touch' | 'unknown'>('unknown');
   const [language, setLanguage] = useState<'en' | 'es'>('en');
+  const { user, organization, organizationLoading } = useAuth();
   const t = translations[language];
 
   useEffect(() => {
@@ -114,9 +117,20 @@ export default function LoginScreen() {
     })();
   }, []);
 
+  // Handle navigation after successful authentication
+  useEffect(() => {
+    if (user && organization && !organizationLoading) {
+      logger.log('✅ Authentication complete - user and organization loaded');
+      // Navigation will be handled automatically by App.tsx conditional rendering
+      // The key prop on NavigationContainer will force a remount when user state changes
+    }
+  }, [user, organization, organizationLoading]);
+
   const validateForm = (): boolean => {
     const emailValidation = ValidationSchemas.login.email(email);
-    const passwordValidation = ValidationSchemas.login.password(password);
+    // Use simple validation for login - existing users may have weak passwords
+    // Strong password validation is enforced on signup/password change
+    const passwordValidation = ValidationSchemas.login.passwordSimple(password);
     
     setEmailError(emailValidation.errors[0] || '');
     setPasswordError(passwordValidation.errors[0] || '');
@@ -148,15 +162,29 @@ export default function LoginScreen() {
       // Continue with login even if saving credentials fails
     }
     
-    await withErrorHandling(async () => {
-      const { error } = await supabase.auth.signInWithPassword({ 
+    const result = await withErrorHandling(async () => {
+      const { data, error } = await supabase.auth.signInWithPassword({ 
         email: email.trim(), 
         password 
       });
       if (error) {
         throw new Error(error.message);
       }
+      return data;
     }, 'Login Failed');
+    
+    // If login was successful, wait for auth state to update and navigate
+    if (result) {
+      logger.log('✅ Login successful, waiting for auth state update...');
+      // Wait a moment for useAuth to update, then check if we should navigate
+      setTimeout(() => {
+        // Navigation will be handled by App.tsx conditional rendering
+        // But we can also explicitly navigate if needed
+        if (user && organization) {
+          logger.log('✅ User and organization loaded, navigation should happen automatically');
+        }
+      }, 500);
+    }
   };
 
   const handleForgotPassword = async () => {
@@ -241,15 +269,26 @@ export default function LoginScreen() {
         setRememberMe(true);
         
         // Automatically attempt login
-        await withErrorHandling(async () => {
-          const { error } = await supabase.auth.signInWithPassword({ 
+        const result = await withErrorHandling(async () => {
+          const { data, error } = await supabase.auth.signInWithPassword({ 
             email: savedEmail.trim(), 
             password: savedPassword 
           });
           if (error) {
             throw new Error(error.message);
           }
+          return data;
         }, 'Biometric Login Failed');
+        
+        // If login was successful, wait for auth state to update
+        if (result) {
+          logger.log('✅ Biometric login successful, waiting for auth state update...');
+          setTimeout(() => {
+            if (user && organization) {
+              logger.log('✅ User and organization loaded after biometric login');
+            }
+          }, 500);
+        }
       }
     } catch (err) {
       logger.log('🔐 Biometric login error:', err);
@@ -414,11 +453,11 @@ export default function LoginScreen() {
               </Text>
             </Text>
             <View style={styles.legalLinks}>
-              <TouchableOpacity onPress={() => Linking.openURL('https://yourdomain.com/terms')}>
+              <TouchableOpacity onPress={() => Linking.openURL('https://www.scanified.com/terms')}>
                 <Text style={styles.legalLink}>Terms</Text>
               </TouchableOpacity>
               <Text style={styles.legalSeparator}>•</Text>
-              <TouchableOpacity onPress={() => Linking.openURL('https://yourdomain.com/privacy')}>
+              <TouchableOpacity onPress={() => Linking.openURL('https://www.scanified.com/privacy')}>
                 <Text style={styles.legalLink}>Privacy</Text>
               </TouchableOpacity>
             </View>

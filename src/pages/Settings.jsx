@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -26,6 +26,7 @@ import {
   List,
   ListItem,
   ListItemText,
+  ListItemIcon,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -48,12 +49,13 @@ import PaymentIcon from '@mui/icons-material/Payment';
 import PeopleIcon from '@mui/icons-material/People';
 import EditIcon from '@mui/icons-material/Edit';
 import SettingsIcon from '@mui/icons-material/Settings';
-import PaletteIcon from '@mui/icons-material/Palette';
-import ViewModuleIcon from '@mui/icons-material/ViewModule';
-import TextFieldsIcon from '@mui/icons-material/TextFields';
 import QrCodeIcon from '@mui/icons-material/QrCode';
 import SupportIcon from '@mui/icons-material/Support';
 import ReceiptIcon from '@mui/icons-material/Receipt';
+import PaletteIcon from '@mui/icons-material/Palette';
+import ViewModuleIcon from '@mui/icons-material/ViewModule';
+import TextFieldsIcon from '@mui/icons-material/TextFields';
+import DeleteIcon from '@mui/icons-material/Delete';
 import InvoiceTemplateManager from '../components/InvoiceTemplateManager';
 import UserManagement from './UserManagement';
 import { usePermissions } from '../context/PermissionsContext';
@@ -251,17 +253,16 @@ const serialNumberTypes = {
   }
 };
 
-function TabPanel({ children, value, tabId, ...other }) {
-  const isActive = value === tabId;
+function TabPanel({ children, value, index, ...other }) {
   return (
     <div
       role="tabpanel"
-      hidden={!isActive}
-      id={`settings-tabpanel-${tabId}`}
-      aria-labelledby={`settings-tab-${tabId}`}
+      hidden={value !== index}
+      id={`settings-tabpanel-${index}`}
+      aria-labelledby={`settings-tab-${index}`}
       {...other}
     >
-      {isActive && <Box sx={{ p: 3 }}>{children}</Box>}
+      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
     </div>
   );
 }
@@ -271,7 +272,7 @@ export default function Settings() {
   const { isOrgAdmin } = usePermissions();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [activeTabId, setActiveTabId] = useState('profile');
+  const [activeTab, setActiveTab] = useState(0);
 
   // Loading states
   const [profileLoading, setProfileLoading] = useState(false);
@@ -329,15 +330,6 @@ export default function Settings() {
   });
   const [assetConfigChanged, setAssetConfigChanged] = useState(false);
 
-  // Appearance preferences (per user)
-  const [appearanceSettings, setAppearanceSettings] = useState({
-    primaryColor: '#2563eb',
-    secondaryColor: '#1e40af'
-  });
-  const [appearanceBaseline, setAppearanceBaseline] = useState(null);
-  const [appearanceChanged, setAppearanceChanged] = useState(false);
-  const [appearanceMsg, setAppearanceMsg] = useState('');
-
   // Barcode Format Configuration
   const [barcodeConfig, setBarcodeConfig] = useState({
     barcodeType: 'custom',
@@ -357,23 +349,6 @@ export default function Settings() {
   // Logo
   const [logoUrl, setLogoUrl] = useState(organization?.logo_url || '');
 
-  // Organization Info
-  const [orgInfo, setOrgInfo] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    address: '',
-    city: '',
-    state: '',
-    postal_code: '',
-    country: '',
-    website: '',
-    description: ''
-  });
-  const [orgInfoChanged, setOrgInfoChanged] = useState(false);
-  const [orgInfoLoading, setOrgInfoLoading] = useState(false);
-  const [orgInfoMsg, setOrgInfoMsg] = useState('');
-
   // Support form
   const [supportForm, setSupportForm] = useState({
     subject: '',
@@ -387,9 +362,16 @@ export default function Settings() {
   // Invoice Template
   const [invoiceTemplate, setInvoiceTemplate] = useState(null);
   const [invoiceTemplateManagerOpen, setInvoiceTemplateManagerOpen] = useState(false);
+  
+  // Invoice Email Management
+  const [invoiceEmails, setInvoiceEmails] = useState([]);
+  const [defaultInvoiceEmail, setDefaultInvoiceEmail] = useState('');
+  const [newInvoiceEmail, setNewInvoiceEmail] = useState('');
+  const [invoiceEmailLoading, setInvoiceEmailLoading] = useState(false);
+  const [invoiceEmailMsg, setInvoiceEmailMsg] = useState('');
 
   // Tab configuration based on user role
-  const tabsConfig = useMemo(() => {
+  const getTabsConfig = () => {
     const baseTabs = [
       { label: 'Profile', icon: <AccountCircleIcon />, id: 'profile' },
       { label: 'Security', icon: <SecurityIcon />, id: 'security' },
@@ -398,28 +380,20 @@ export default function Settings() {
       { label: 'Help & Support', icon: <SupportIcon />, id: 'support' },
     ];
 
+    const adminTabs = [];
     if (profile?.role === 'admin' || profile?.role === 'owner') {
-      return [
-        ...baseTabs,
-        { label: 'Organization', icon: <BusinessIcon />, id: 'organization' },
+      adminTabs.push(
         { label: 'Invoice Template', icon: <ReceiptIcon />, id: 'invoice-template' },
         { label: 'Team', icon: <PeopleIcon />, id: 'team' },
         { label: 'Assets', icon: <DataUsageIcon />, id: 'assets' },
         { label: 'Barcodes', icon: <QrCodeIcon />, id: 'barcodes' }
-      ];
+      );
     }
 
-    return baseTabs;
-  }, [profile?.role]);
+    return [...baseTabs, ...adminTabs];
+  };
 
-  useEffect(() => {
-    if (!tabsConfig.some(tab => tab.id === activeTabId)) {
-      const fallbackId = tabsConfig[0]?.id || 'profile';
-      if (activeTabId !== fallbackId) {
-        setActiveTabId(fallbackId);
-      }
-    }
-  }, [tabsConfig, activeTabId]);
+  const tabsConfig = getTabsConfig();
 
   // Initialize data
   useEffect(() => {
@@ -500,57 +474,8 @@ export default function Settings() {
       });
       
       setLogoUrl(organization.logo_url || '');
-      
-      // Load organization info
-      setOrgInfo({
-        name: organization.name || '',
-        email: organization.email || '',
-        phone: organization.phone || '',
-        address: organization.address || '',
-        city: organization.city || '',
-        state: organization.state || '',
-        postal_code: organization.postal_code || '',
-        country: organization.country || '',
-        website: organization.website || '',
-        description: organization.description || ''
-      });
-      setOrgInfoChanged(false);
-      setOrgInfoMsg('');
     }
   }, [profile, organization]);
-
-  // Load personal appearance prefs
-  useEffect(() => {
-    if (!user) return;
-
-    const storageKey = `appearancePrefs_${user.id}`;
-    let storedPrefs = null;
-
-    try {
-      storedPrefs = JSON.parse(localStorage.getItem(storageKey));
-    } catch (err) {
-      logger.warn('Failed to parse appearance settings', err);
-    }
-
-    const defaults = storedPrefs || {
-      primaryColor: organization?.primary_color || '#2563eb',
-      secondaryColor: organization?.secondary_color || '#1e40af'
-    };
-
-    setAppearanceSettings(defaults);
-    setAppearanceBaseline(defaults);
-    setAppearanceChanged(false);
-    setAppearanceMsg('');
-  }, [user, organization?.primary_color, organization?.secondary_color]);
-
-  useEffect(() => {
-    if (!appearanceBaseline) return;
-    const changed =
-      appearanceSettings.primaryColor !== appearanceBaseline.primaryColor ||
-      appearanceSettings.secondaryColor !== appearanceBaseline.secondaryColor;
-
-    setAppearanceChanged(changed);
-  }, [appearanceSettings, appearanceBaseline]);
 
 
   // Track changes
@@ -565,7 +490,9 @@ export default function Settings() {
       assetConfig.assetType !== (organization?.asset_type || 'cylinder') ||
       assetConfig.assetDisplayName !== (organization?.asset_display_name || '') ||
       assetConfig.assetDisplayNamePlural !== (organization?.asset_display_name_plural || '') ||
-      assetConfig.appName !== (organization?.app_name || '')
+      assetConfig.appName !== (organization?.app_name || '') ||
+      assetConfig.primaryColor !== (organization?.primary_color || '#40B5AD') ||
+      assetConfig.secondaryColor !== (organization?.secondary_color || '#48C9B0')
     );
   }, [assetConfig, organization]);
 
@@ -579,6 +506,65 @@ export default function Settings() {
       barcodeConfig.serialNumberPattern !== (organization?.format_configuration?.customer_id_format?.pattern || '^[A-Z0-9]{4,10}$') ||
       barcodeConfig.serialNumberDescription !== (organization?.format_configuration?.customer_id_format?.description || '4-10 alphanumeric characters')
     );
+
+    // Load invoice template
+    if (organization?.id) {
+      try {
+        const savedTemplate = localStorage.getItem(`invoiceTemplate_${organization.id}`);
+        if (savedTemplate) {
+          setInvoiceTemplate(JSON.parse(savedTemplate));
+        }
+      } catch (error) {
+        logger.error('Error loading invoice template:', error);
+      }
+      
+      // Load invoice emails
+      const loadInvoiceEmails = async () => {
+        try {
+          // Try to select the new columns, but handle if they don't exist
+          const { data: orgData, error: orgError } = await supabase
+            .from('organizations')
+            .select('invoice_emails, default_invoice_email, email')
+            .eq('id', organization.id)
+            .single();
+
+          if (orgError) {
+            // If error is about missing columns, show helpful message
+            if (orgError.message?.includes('invoice_emails') || orgError.message?.includes('default_invoice_email') || orgError.message?.includes('schema cache')) {
+              logger.warn('Invoice email columns may not exist. Migration may need to be run.');
+              setInvoiceEmailMsg('⚠️ Invoice email feature requires database migration. Please run VERIFY_AND_FIX_INVOICE_EMAILS.sql in Supabase SQL Editor, then wait 30 seconds and refresh this page.');
+              // Fallback to using organization.email
+              if (organization?.email) {
+                setInvoiceEmails([organization.email]);
+                setDefaultInvoiceEmail(organization.email);
+              }
+              return;
+            }
+            throw orgError;
+          }
+
+          if (orgData) {
+            let emails = [];
+            if (orgData.invoice_emails && Array.isArray(orgData.invoice_emails)) {
+              emails = orgData.invoice_emails;
+            } else if (orgData.email) {
+              emails = [orgData.email];
+            }
+            setInvoiceEmails(emails);
+            setDefaultInvoiceEmail(orgData.default_invoice_email || orgData.email || '');
+          }
+        } catch (error) {
+          logger.error('Error loading invoice emails:', error);
+          // Fallback to using organization.email
+          if (organization?.email) {
+            setInvoiceEmails([organization.email]);
+            setDefaultInvoiceEmail(organization.email);
+          }
+        }
+      };
+      
+      loadInvoiceEmails();
+    }
   }, [barcodeConfig, organization]);
 
   // Profile update
@@ -805,44 +791,6 @@ export default function Settings() {
     }
   };
 
-  const handleSaveAppearance = () => {
-    if (!user) return;
-    const storageKey = `appearancePrefs_${user.id}`;
-    const orgDefaults = {
-      primaryColor: organization?.primary_color || '#2563eb',
-      secondaryColor: organization?.secondary_color || '#1e40af'
-    };
-
-    try {
-      if (
-        appearanceSettings.primaryColor === orgDefaults.primaryColor &&
-        appearanceSettings.secondaryColor === orgDefaults.secondaryColor
-      ) {
-        localStorage.removeItem(storageKey);
-      } else {
-        localStorage.setItem(storageKey, JSON.stringify(appearanceSettings));
-      }
-
-      const updatedBaseline = { ...appearanceSettings };
-      setAppearanceBaseline(updatedBaseline);
-      setAppearanceChanged(false);
-      setAppearanceMsg('Saved! Only you will see these colors on this device.');
-      window.dispatchEvent(new Event('appearancePrefsUpdated'));
-    } catch (err) {
-      logger.error('Failed to store appearance preferences', err);
-      setAppearanceMsg('Unable to save appearance preferences. Please try again.');
-    }
-  };
-
-  const handleResetAppearance = () => {
-    const defaults = {
-      primaryColor: organization?.primary_color || '#2563eb',
-      secondaryColor: organization?.secondary_color || '#1e40af'
-    };
-    setAppearanceSettings(defaults);
-    setAppearanceMsg('Reverted to organization colors. Click save to confirm.');
-  };
-
   // Barcode type change handlers
   const handleBarcodeTypeChange = (type) => {
     const selectedType = barcodeTypes[type];
@@ -936,29 +884,27 @@ export default function Settings() {
     }
   };
 
-  const handleTabChange = (_event, newTabId) => {
-    setActiveTabId(newTabId);
-    if (newTabId) {
-      setSearchParams({ tab: newTabId });
+  const handleTabChange = (event, newValue) => {
+    setActiveTab(newValue);
+    // Update URL parameter when tab changes
+    const tabId = tabsConfig[newValue]?.id;
+    if (tabId) {
+      setSearchParams({ tab: tabId });
     } else {
       setSearchParams({});
     }
   };
 
-  // Sync the active tab with the ?tab=... query parameter
+  // Handle tab parameter from URL on mount
   useEffect(() => {
     const tabParam = searchParams.get('tab');
-    if (!tabParam) return;
-
-    const exists = tabsConfig.some(tab => tab.id === tabParam);
-
-    if (exists) {
-      setActiveTabId(tabParam);
-    } else {
-      // Strip invalid tabs from the URL so the page doesn't "bounce" back to another tab
-      setSearchParams({});
+    if (tabParam === 'team') {
+      const teamIndex = tabsConfig.findIndex(tab => tab.id === 'team');
+      if (teamIndex >= 0) {
+        setActiveTab(teamIndex);
+      }
     }
-  }, [searchParams, tabsConfig, setSearchParams]);
+  }, [searchParams, tabsConfig]);
 
 
   const handleLogoUpload = async (e) => {
@@ -1008,7 +954,7 @@ export default function Settings() {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc', py: 4 }}>
-      <Box sx={{ maxWidth: '1200px', mx: 'auto', px: 3 }}>
+      <Box sx={{ width: '100%', px: 3 }}>
         <Box sx={{ mb: 4 }}>
           <Typography variant="h3" fontWeight={700} color="primary" sx={{ mb: 1 }}>
             Settings
@@ -1020,7 +966,7 @@ export default function Settings() {
 
         <Card sx={{ border: '1px solid #e2e8f0', borderRadius: 3 }}>
           <Tabs 
-            value={activeTabId} 
+            value={activeTab} 
             onChange={handleTabChange} 
             sx={{ 
               borderBottom: '1px solid #e2e8f0',
@@ -1070,15 +1016,12 @@ export default function Settings() {
             variant="scrollable" 
             scrollButtons="auto"
           >
-            {tabsConfig.map((tab) => (
+            {tabsConfig.map((tab, index) => (
               <Tab 
                 key={tab.id} 
                 label={tab.label} 
                 icon={tab.icon} 
                 iconPosition="start"
-                value={tab.id}
-                id={`settings-tab-${tab.id}`}
-                aria-controls={`settings-tabpanel-${tab.id}`}
                 disableRipple={true}
                 disableTouchRipple={true}
                 disableFocusRipple={true}
@@ -1104,7 +1047,7 @@ export default function Settings() {
           </Tabs>
           
           {/* Profile Tab */}
-          <TabPanel value={activeTabId} tabId="profile">
+          <TabPanel value={activeTab} index={0}>
             <Typography variant="h4" gutterBottom>
               Profile Settings
             </Typography>
@@ -1154,7 +1097,7 @@ export default function Settings() {
           </TabPanel>
 
           {/* Security Tab */}
-          <TabPanel value={activeTabId} tabId="security">
+          <TabPanel value={activeTab} index={1}>
             <Stack spacing={3}>
               <Paper sx={{ p: 3, backgroundColor: '#fff3cd', border: '1px solid #ffeaa7' }}>
                 <Typography variant="h5" gutterBottom sx={{ color: '#856404' }}>
@@ -1429,118 +1372,54 @@ export default function Settings() {
           </TabPanel>
 
           {/* Appearance Tab */}
-          <TabPanel value={activeTabId} tabId="appearance">
+          <TabPanel value={activeTab} index={2}>
             <Stack spacing={3}>
-              <Typography variant="h5" gutterBottom>Appearance & Branding</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Update your personal theme colors without affecting anyone else. Organization branding (logo, app name) remains admin-controlled.
-              </Typography>
+              <Typography variant="h5" gutterBottom>Organization Settings</Typography>
+              
+              
 
-              <Grid container spacing={3}>
-                {isOrgAdmin && (
-                  <Grid item xs={12} md={6}>
-                    <Card>
-                      <CardContent>
-                        <Typography variant="h6" sx={{ mb: 2 }}>Organization Logo</Typography>
-                        {logoUrl && (
-                          <Box sx={{ mb: 2 }}>
-                            <img 
-                              src={logoUrl} 
-                              alt="Organization Logo" 
-                              style={{ 
-                                maxHeight: 64, 
-                                maxWidth: 128, 
-                                borderRadius: 8, 
-                                border: '1px solid #eee' 
-                              }} 
-                            />
-                          </Box>
-                        )}
-                        <Button
-                          variant="contained"
-                          component="label"
-                          disabled={logoUploading}
-                          sx={{ mb: 1 }}
-                        >
-                          {logoUploading ? 'Uploading...' : 'Upload Logo'}
-                          <input type="file" accept="image/*" hidden onChange={handleLogoUpload} />
-                        </Button>
-                        {logoMsg && (
-                          <Alert severity={logoMsg.includes('Error') ? 'error' : 'success'} sx={{ mt: 1 }}>
-                            {logoMsg}
-                          </Alert>
-                        )}
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                          Recommended: PNG, JPG, or SVG. Max 1MB.
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                )}
-
-                <Grid item xs={12} md={isOrgAdmin ? 6 : 12}>
-                  <Card>
-                    <CardContent>
-                      <Typography variant="h6" gutterBottom>
-                        Personal Theme Colors
-                      </Typography>
-                      <Alert severity="info" sx={{ mb: 3 }}>
-                        These colors only change the experience for your account on this device.
-                      </Alert>
-
-                      <TextField
-                        fullWidth
-                        label="Primary Accent Color"
-                        type="color"
-                        value={appearanceSettings.primaryColor}
-                        onChange={(e) => setAppearanceSettings(prev => ({ ...prev, primaryColor: e.target.value }))}
-                        sx={{ mb: 2 }}
+              {isOrgAdmin && (
+                <Box>
+                  <Typography variant="h6" sx={{ mb: 2 }}>Organization Logo</Typography>
+                  {logoUrl && (
+                    <Box sx={{ mb: 2 }}>
+                      <img 
+                        src={logoUrl} 
+                        alt="Organization Logo" 
+                        style={{ 
+                          maxHeight: 64, 
+                          maxWidth: 128, 
+                          borderRadius: 8, 
+                          border: '1px solid #eee' 
+                        }} 
                       />
-
-                      <TextField
-                        fullWidth
-                        label="Secondary Accent Color"
-                        type="color"
-                        value={appearanceSettings.secondaryColor}
-                        onChange={(e) => setAppearanceSettings(prev => ({ ...prev, secondaryColor: e.target.value }))}
-                        sx={{ mb: 3 }}
-                      />
-
-                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                        <Button
-                          variant="contained"
-                          onClick={handleSaveAppearance}
-                          startIcon={<SaveIcon />}
-                          disabled={!appearanceChanged}
-                        >
-                          Save Appearance
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          onClick={handleResetAppearance}
-                        >
-                          Reset to Organization Colors
-                        </Button>
-                      </Stack>
-
-                      {appearanceMsg && (
-                        <Alert
-                          severity={appearanceMsg.includes('Unable') ? 'error' : 'success'}
-                          sx={{ mt: 2 }}
-                        >
-                          {appearanceMsg}
-                        </Alert>
-                      )}
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
+                    </Box>
+                  )}
+                  <Button
+                    variant="contained"
+                    component="label"
+                    disabled={logoUploading}
+                    sx={{ mb: 1 }}
+                  >
+                    {logoUploading ? 'Uploading...' : 'Upload Logo'}
+                    <input type="file" accept="image/*" hidden onChange={handleLogoUpload} />
+                  </Button>
+                  {logoMsg && (
+                    <Alert severity={logoMsg.includes('Error') ? 'error' : 'success'} sx={{ mt: 1 }}>
+                      {logoMsg}
+                    </Alert>
+                  )}
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    Recommended: PNG, JPG, or SVG. Max 1MB.
+                  </Typography>
+                </Box>
+              )}
             </Stack>
           </TabPanel>
 
 
           {/* Billing Tab */}
-            <TabPanel value={activeTabId} tabId="billing">
+            <TabPanel value={activeTab} index={3}>
             {profile?.role === 'owner' ? (
               <Box sx={{ p: 3, textAlign: 'center' }}>
                 <Alert severity="info" sx={{ mb: 3 }}>
@@ -1584,246 +1463,366 @@ export default function Settings() {
             )}
           </TabPanel>
 
-          {/* Organization Tab (Admin/Owner only) */}
+          {/* Invoice Template Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
-            <TabPanel value={activeTabId} tabId="organization">
+            <TabPanel value={activeTab} index={5}>
               <Box sx={{ maxWidth: { xs: '100%', md: 1400 } }}>
                 <Typography variant="h4" gutterBottom>
-                  Organization Information
+                  📄 Invoice Template
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                  Update your organization's contact information and details. This information will be used on invoices and other documents.
+                  Customize your invoice appearance, layout, and default settings.
                 </Typography>
 
-                <Paper sx={{ p: 3, mb: 3 }}>
-                  <Typography variant="h6" gutterBottom sx={{ mb: 3 }}>
-                    Basic Information
+                <Paper sx={{ p: 4, mb: 3, textAlign: 'center' }}>
+                  <ReceiptIcon sx={{ fontSize: 80, color: 'primary.main', mb: 2 }} />
+                  <Typography variant="h5" gutterBottom>
+                    Customize Your Invoice Template
                   </Typography>
-                  <Grid container spacing={3}>
-                    <Grid item xs={12}>
-                      <TextField
-                        fullWidth
-                        label="Organization Name"
-                        value={orgInfo.name}
-                        onChange={(e) => {
-                          setOrgInfo(prev => ({ ...prev, name: e.target.value }));
-                          setOrgInfoChanged(true);
-                        }}
-                        required
-                      />
-                    </Grid>
-
-                    <Grid item xs={12} md={6}>
-                      <TextField
-                        fullWidth
-                        label="Email"
-                        type="email"
-                        value={orgInfo.email}
-                        onChange={(e) => {
-                          setOrgInfo(prev => ({ ...prev, email: e.target.value }));
-                          setOrgInfoChanged(true);
-                        }}
-                      />
-                    </Grid>
-
-                    <Grid item xs={12} md={6}>
-                      <TextField
-                        fullWidth
-                        label="Phone"
-                        value={orgInfo.phone}
-                        onChange={(e) => {
-                          setOrgInfo(prev => ({ ...prev, phone: e.target.value }));
-                          setOrgInfoChanged(true);
-                        }}
-                        placeholder="(123) 456-7890"
-                      />
-                    </Grid>
-
-                    <Grid item xs={12}>
-                      <TextField
-                        fullWidth
-                        label="Website"
-                        value={orgInfo.website}
-                        onChange={(e) => {
-                          setOrgInfo(prev => ({ ...prev, website: e.target.value }));
-                          setOrgInfoChanged(true);
-                        }}
-                        placeholder="https://www.example.com"
-                      />
-                    </Grid>
-
-                    <Grid item xs={12}>
-                      <TextField
-                        fullWidth
-                        label="Description"
-                        multiline
-                        rows={3}
-                        value={orgInfo.description}
-                        onChange={(e) => {
-                          setOrgInfo(prev => ({ ...prev, description: e.target.value }));
-                          setOrgInfoChanged(true);
-                        }}
-                        placeholder="Brief description of your organization"
-                      />
-                    </Grid>
-                  </Grid>
-                </Paper>
-
-                <Paper sx={{ p: 3, mb: 3 }}>
-                  <Typography variant="h6" gutterBottom sx={{ mb: 3 }}>
-                    Address
+                  <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+                    Design beautiful invoices with custom colors, fonts, and layouts.<br />
+                    Choose which fields to show, customize sections, and set payment terms.
                   </Typography>
-                  <Grid container spacing={3}>
-                    <Grid item xs={12}>
-                      <TextField
-                        fullWidth
-                        label="Street Address"
-                        value={orgInfo.address}
-                        onChange={(e) => {
-                          setOrgInfo(prev => ({ ...prev, address: e.target.value }));
-                          setOrgInfoChanged(true);
-                        }}
-                        placeholder="123 Main Street"
-                      />
-                    </Grid>
 
-                    <Grid item xs={12} md={4}>
-                      <TextField
-                        fullWidth
-                        label="City"
-                        value={orgInfo.city}
-                        onChange={(e) => {
-                          setOrgInfo(prev => ({ ...prev, city: e.target.value }));
-                          setOrgInfoChanged(true);
-                        }}
-                      />
-                    </Grid>
+                  {invoiceTemplate && (
+                    <Box sx={{ mb: 3, p: 2, bgcolor: 'grey.50', borderRadius: 1, display: 'inline-block' }}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Current Template: <strong>{invoiceTemplate.name || 'Modern'}</strong>
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 1 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Box sx={{ width: 24, height: 24, bgcolor: invoiceTemplate.primary_color, borderRadius: 1, border: '1px solid #ccc' }} />
+                          <Typography variant="caption">Primary</Typography>
+                        </Box>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Box sx={{ width: 24, height: 24, bgcolor: invoiceTemplate.secondary_color, borderRadius: 1, border: '1px solid #ccc' }} />
+                          <Typography variant="caption">Secondary</Typography>
+                        </Box>
+                        <Typography variant="caption" sx={{ ml: 2 }}>
+                          Font: {invoiceTemplate.font_family || 'Arial'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
 
-                    <Grid item xs={12} md={4}>
-                      <TextField
-                        fullWidth
-                        label="State/Province"
-                        value={orgInfo.state}
-                        onChange={(e) => {
-                          setOrgInfo(prev => ({ ...prev, state: e.target.value }));
-                          setOrgInfoChanged(true);
-                        }}
-                      />
-                    </Grid>
-
-                    <Grid item xs={12} md={4}>
-                      <TextField
-                        fullWidth
-                        label="Postal Code"
-                        value={orgInfo.postal_code}
-                        onChange={(e) => {
-                          setOrgInfo(prev => ({ ...prev, postal_code: e.target.value }));
-                          setOrgInfoChanged(true);
-                        }}
-                      />
-                    </Grid>
-
-                    <Grid item xs={12} md={6}>
-                      <TextField
-                        fullWidth
-                        label="Country"
-                        value={orgInfo.country}
-                        onChange={(e) => {
-                          setOrgInfo(prev => ({ ...prev, country: e.target.value }));
-                          setOrgInfoChanged(true);
-                        }}
-                        placeholder="United States"
-                      />
-                    </Grid>
-                  </Grid>
-                </Paper>
-
-                <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
-                  <Button
-                    variant="outlined"
-                    onClick={() => {
-                      setOrgInfo({
-                        name: organization?.name || '',
-                        email: organization?.email || '',
-                        phone: organization?.phone || '',
-                        address: organization?.address || '',
-                        city: organization?.city || '',
-                        state: organization?.state || '',
-                        postal_code: organization?.postal_code || '',
-                        country: organization?.country || '',
-                        website: organization?.website || '',
-                        description: organization?.description || ''
-                      });
-                      setOrgInfoChanged(false);
-                      setOrgInfoMsg('');
-                    }}
-                    disabled={!orgInfoChanged || orgInfoLoading}
-                  >
-                    Cancel
-                  </Button>
                   <Button
                     variant="contained"
-                    onClick={async () => {
-                      setOrgInfoLoading(true);
-                      setOrgInfoMsg('');
-                      try {
-                        // MULTI-TENANT SECURITY: Only update the current user's organization
-                        // RLS policies at database level also enforce this, but we filter here too
-                        const { error } = await supabase
-                          .from('organizations')
-                          .update({
-                            name: orgInfo.name,
-                            email: orgInfo.email,
-                            phone: orgInfo.phone,
-                            address: orgInfo.address,
-                            city: orgInfo.city,
-                            state: orgInfo.state,
-                            postal_code: orgInfo.postal_code,
-                            country: orgInfo.country,
-                            website: orgInfo.website,
-                            description: orgInfo.description
-                          })
-                          .eq('id', profile.organization_id);
-
-                        if (error) throw error;
-
-                        setOrgInfoMsg('Organization information updated successfully!');
-                        setOrgInfoChanged(false);
-                        
-                        // Reload organization context
-                        if (reloadOrganization) {
-                          await reloadOrganization();
-                        }
-                      } catch (error) {
-                        logger.error('Error updating organization info:', error);
-                        setOrgInfoMsg('Error updating organization information: ' + error.message);
-                      } finally {
-                        setOrgInfoLoading(false);
-                      }
-                    }}
-                    disabled={!orgInfoChanged || orgInfoLoading}
-                    startIcon={orgInfoLoading ? <CircularProgress size={20} /> : <SaveIcon />}
+                    size="large"
+                    startIcon={<SettingsIcon />}
+                    onClick={() => setInvoiceTemplateManagerOpen(true)}
+                    sx={{ minWidth: 200 }}
                   >
-                    {orgInfoLoading ? 'Saving...' : 'Save Organization Info'}
+                    Customize Template
                   </Button>
-                </Box>
+                </Paper>
 
-                {orgInfoMsg && (
-                  <Alert 
-                    severity={orgInfoMsg.includes('Error') ? 'error' : 'success'} 
-                    sx={{ mt: 2 }}
-                    onClose={() => setOrgInfoMsg('')}
-                  >
-                    {orgInfoMsg}
-                  </Alert>
-                )}
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={4}>
+                    <Card>
+                      <CardContent>
+                        <PaletteIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
+                        <Typography variant="h6" gutterBottom>
+                          Design
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Choose from preset templates or customize colors and fonts
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Card>
+                      <CardContent>
+                        <ViewModuleIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
+                        <Typography variant="h6" gutterBottom>
+                          Layout
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Show/hide sections and columns to match your needs
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Card>
+                      <CardContent>
+                        <TextFieldsIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
+                        <Typography variant="h6" gutterBottom>
+                          Content
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Set payment terms, tax rates, and custom messages
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+
+                <Alert severity="info" sx={{ mt: 3 }}>
+                  <Typography variant="body2">
+                    <strong>💡 Pro Tip:</strong> You can also customize templates directly from the invoice generation dialog in the Rentals page by clicking the ⚙️ icon.
+                  </Typography>
+                </Alert>
+
+                {/* Invoice Email Management */}
+                <Paper sx={{ p: 3, mt: 3 }}>
+                  <Typography variant="h5" gutterBottom>
+                    📧 Invoice Email Addresses
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                    Manage email addresses that can be used to send invoices. Select a default email that will be pre-selected when sending invoices.
+                  </Typography>
+                  
+                  {invoiceEmailMsg && invoiceEmailMsg.includes('migration') && (
+                    <Alert severity="warning" sx={{ mb: 2 }}>
+                      <Typography variant="body2">
+                        <strong>Database Migration Required:</strong> To use invoice email management, please run the migration file:
+                        <br />
+                        <code>supabase/migrations/20250123_add_invoice_emails_to_organizations.sql</code>
+                        <br />
+                        <br />
+                        After running the migration, refresh this page.
+                      </Typography>
+                    </Alert>
+                  )}
+
+                  <Box sx={{ mb: 3 }}>
+                    <Typography variant="subtitle1" gutterBottom>
+                      Add New Email Address
+                    </Typography>
+                    <Box display="flex" gap={2} alignItems="flex-start">
+                      <TextField
+                        fullWidth
+                        label="Email Address"
+                        type="email"
+                        value={newInvoiceEmail}
+                        onChange={(e) => setNewInvoiceEmail(e.target.value)}
+                        placeholder="billing@yourcompany.com"
+                        helperText="Enter a valid email address that can send invoices"
+                      />
+                      <Button
+                        variant="contained"
+                        onClick={async () => {
+                          if (!newInvoiceEmail || !newInvoiceEmail.includes('@')) {
+                            setInvoiceEmailMsg('Please enter a valid email address');
+                            return;
+                          }
+                          
+                          if (invoiceEmails.includes(newInvoiceEmail)) {
+                            setInvoiceEmailMsg('This email address is already added');
+                            return;
+                          }
+
+                          setInvoiceEmailLoading(true);
+                          setInvoiceEmailMsg('');
+                          
+                          try {
+                            const updatedEmails = [...invoiceEmails, newInvoiceEmail];
+                            
+                            // Build update object conditionally
+                            const updateData = { invoice_emails: updatedEmails };
+                            
+                            // Only include default_invoice_email if we're setting it
+                            if (defaultInvoiceEmail || newInvoiceEmail) {
+                              updateData.default_invoice_email = defaultInvoiceEmail || newInvoiceEmail;
+                            }
+                            
+                            const { error } = await supabase
+                              .from('organizations')
+                              .update(updateData)
+                              .eq('id', organization.id);
+
+                            if (error) {
+                              // If error is about missing column, try updating only invoice_emails
+                              if (error.message?.includes('default_invoice_email') || error.message?.includes('schema cache')) {
+                                logger.warn('default_invoice_email column may not exist, trying invoice_emails only');
+                                const { error: emailOnlyError } = await supabase
+                                  .from('organizations')
+                                  .update({ invoice_emails: updatedEmails })
+                                  .eq('id', organization.id);
+                                
+                                if (emailOnlyError) throw emailOnlyError;
+                                
+                                // Set default locally even if column doesn't exist yet
+                                if (!defaultInvoiceEmail) {
+                                  setDefaultInvoiceEmail(newInvoiceEmail);
+                                }
+                              } else {
+                                throw error;
+                              }
+                            }
+
+                            setInvoiceEmails(updatedEmails);
+                            if (!defaultInvoiceEmail) {
+                              setDefaultInvoiceEmail(newInvoiceEmail);
+                            }
+                            setNewInvoiceEmail('');
+                            setInvoiceEmailMsg('Email address added successfully!');
+                            
+                            if (reloadOrganization) {
+                              await reloadOrganization();
+                            }
+                          } catch (error) {
+                            logger.error('Error adding invoice email:', error);
+                            
+                            // Check if it's a schema cache error
+                            if (error.message?.includes('schema cache') || error.message?.includes('invoice_emails')) {
+                              setInvoiceEmailMsg('Schema cache error. Please: 1) Run VERIFY_AND_FIX_INVOICE_EMAILS.sql in Supabase, 2) Wait 30 seconds, 3) Refresh this page and try again.');
+                            } else {
+                              setInvoiceEmailMsg('Failed to add email: ' + error.message);
+                            }
+                          } finally {
+                            setInvoiceEmailLoading(false);
+                          }
+                        }}
+                        disabled={invoiceEmailLoading || !newInvoiceEmail}
+                      >
+                        Add
+                      </Button>
+                    </Box>
+                  </Box>
+
+                  {invoiceEmailMsg && (
+                    <Alert 
+                      severity={invoiceEmailMsg.includes('successfully') ? 'success' : 'error'} 
+                      sx={{ mb: 2 }}
+                      onClose={() => setInvoiceEmailMsg('')}
+                    >
+                      {invoiceEmailMsg}
+                    </Alert>
+                  )}
+
+                  <Box sx={{ mb: 3 }}>
+                    <Typography variant="subtitle1" gutterBottom>
+                      Current Email Addresses
+                    </Typography>
+                    {invoiceEmails.length === 0 ? (
+                      <Alert severity="info">
+                        No invoice email addresses configured. Add an email address above.
+                      </Alert>
+                    ) : (
+                      <List>
+                        {invoiceEmails.map((email, index) => (
+                          <ListItem
+                            key={email}
+                            sx={{
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 1,
+                              mb: 1,
+                              bgcolor: defaultInvoiceEmail === email ? 'action.selected' : 'background.paper'
+                            }}
+                          >
+                            <ListItemText
+                              primary={email}
+                              secondary={defaultInvoiceEmail === email ? 'Default (pre-selected when sending invoices)' : 'Click to set as default'}
+                            />
+                            <Box display="flex" gap={1}>
+                              {defaultInvoiceEmail !== email && (
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  onClick={async () => {
+                                    setInvoiceEmailLoading(true);
+                                    try {
+                                      const { error } = await supabase
+                                        .from('organizations')
+                                        .update({ default_invoice_email: email })
+                                        .eq('id', organization.id);
+
+                                      if (error) {
+                                        // If column doesn't exist, just update locally
+                                        if (error.message?.includes('default_invoice_email') || error.message?.includes('schema cache')) {
+                                          logger.warn('default_invoice_email column may not exist, updating locally only');
+                                          setDefaultInvoiceEmail(email);
+                                          setInvoiceEmailMsg('Default email updated (migration may need to be run for persistence)');
+                                        } else {
+                                          throw error;
+                                        }
+                                      }
+
+                                      setDefaultInvoiceEmail(email);
+                                      setInvoiceEmailMsg('Default email updated successfully!');
+                                      
+                                      if (reloadOrganization) {
+                                        await reloadOrganization();
+                                      }
+                                    } catch (error) {
+                                      logger.error('Error setting default email:', error);
+                                      setInvoiceEmailMsg('Failed to set default email: ' + error.message);
+                                    } finally {
+                                      setInvoiceEmailLoading(false);
+                                    }
+                                  }}
+                                  disabled={invoiceEmailLoading}
+                                >
+                                  Set as Default
+                                </Button>
+                              )}
+                              {defaultInvoiceEmail === email && (
+                                <Chip label="Default" color="primary" size="small" />
+                              )}
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={async () => {
+                                  if (invoiceEmails.length === 1) {
+                                    setInvoiceEmailMsg('Cannot remove the last email address');
+                                    return;
+                                  }
+                                  
+                                  if (defaultInvoiceEmail === email) {
+                                    setInvoiceEmailMsg('Cannot remove the default email. Set another email as default first.');
+                                    return;
+                                  }
+
+                                  setInvoiceEmailLoading(true);
+                                  try {
+                                    const updatedEmails = invoiceEmails.filter(e => e !== email);
+                                    const { error } = await supabase
+                                      .from('organizations')
+                                      .update({ invoice_emails: updatedEmails })
+                                      .eq('id', organization.id);
+
+                                    if (error) {
+                                      // If column doesn't exist, show helpful message
+                                      if (error.message?.includes('invoice_emails') || error.message?.includes('schema cache')) {
+                                        throw new Error('Invoice email columns do not exist. Please run the migration: 20250123_add_invoice_emails_to_organizations.sql');
+                                      }
+                                      throw error;
+                                    }
+
+                                    setInvoiceEmails(updatedEmails);
+                                    setInvoiceEmailMsg('Email address removed successfully!');
+                                    
+                                    if (reloadOrganization) {
+                                      await reloadOrganization();
+                                    }
+                                  } catch (error) {
+                                    logger.error('Error removing invoice email:', error);
+                                    setInvoiceEmailMsg('Failed to remove email: ' + error.message);
+                                  } finally {
+                                    setInvoiceEmailLoading(false);
+                                  }
+                                }}
+                                disabled={invoiceEmailLoading}
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </Box>
+                          </ListItem>
+                        ))}
+                      </List>
+                    )}
+                  </Box>
+                </Paper>
               </Box>
             </TabPanel>
           )}
 
           {/* Team Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
-            <TabPanel value={activeTabId} tabId="team">
+            <TabPanel value={activeTab} index={6}>
               <UserManagement />
             </TabPanel>
           )}
@@ -1831,13 +1830,13 @@ export default function Settings() {
 
           {/* Assets Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
-            <TabPanel value={activeTabId} tabId="assets">
-              <Box sx={{ maxWidth: { xs: '100%', md: 1400 } }}>
+            <TabPanel value={activeTab} index={7}>
+              <Box sx={{ maxWidth: 800 }}>
                 <Typography variant="h4" gutterBottom>
                   Asset Configuration
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                  Configure what type of assets your organization tracks.
+                  Configure what type of assets your organization tracks and customize the app branding.
                 </Typography>
                 
                 <Alert severity="info" sx={{ mb: 3 }}>
@@ -1899,6 +1898,95 @@ export default function Settings() {
                     </Card>
                   </Grid>
 
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="h6" gutterBottom>
+                          App Branding
+                        </Typography>
+                        
+                        <TextField
+                          fullWidth
+                          label="App Name"
+                          value={assetConfig.appName || ''}
+                          onChange={(e) => setAssetConfig(prev => ({ ...prev, appName: e.target.value }))}
+                          sx={{ mb: 2 }}
+                          placeholder="e.g., Scanified"
+                        />
+                        
+                        <TextField
+                          fullWidth
+                          label="Primary Color"
+                          type="color"
+                          value={assetConfig.primaryColor || '#2563eb'}
+                          onChange={(e) => setAssetConfig(prev => ({ ...prev, primaryColor: e.target.value }))}
+                          sx={{ mb: 2 }}
+                        />
+                        
+                        <TextField
+                          fullWidth
+                          label="Secondary Color"
+                          type="color"
+                          value={assetConfig.secondaryColor || '#1e40af'}
+                          onChange={(e) => setAssetConfig(prev => ({ ...prev, secondaryColor: e.target.value }))}
+                          sx={{ mb: 2 }}
+                        />
+                        
+                        <Alert severity="warning" sx={{ mb: 2 }}>
+                          <Typography variant="body2">
+                            <strong>App Icon Configuration:</strong> The database columns for app icon settings are not yet available. 
+                            This feature is coming soon!
+                          </Typography>
+                        </Alert>
+
+                        <TextField
+                          fullWidth
+                          label="App Icon URL (Preview Only)"
+                          value={assetConfig.appIcon || ''}
+                          onChange={(e) => setAssetConfig(prev => ({ ...prev, appIcon: e.target.value }))}
+                          sx={{ mb: 2 }}
+                          placeholder="e.g., /landing-icon.png"
+                          helperText="Preview only - cannot be saved yet"
+                          disabled={true}
+                        />
+                        
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              checked={assetConfig.showAppIcon !== false}
+                              onChange={(e) => setAssetConfig(prev => ({ ...prev, showAppIcon: e.target.checked }))}
+                              disabled={true}
+                            />
+                          }
+                          label="Show app icon in header (disabled)"
+                          sx={{ mb: 1 }}
+                        />
+                        
+                        {assetConfig.appIcon && assetConfig.showAppIcon !== false && (
+                          <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                              Icon Preview:
+                            </Typography>
+                            <img 
+                              src={assetConfig.appIcon}
+                              alt="App Icon Preview"
+                              style={{ 
+                                width: 40, 
+                                height: 40, 
+                                borderRadius: 8,
+                                objectFit: 'cover',
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                              }}
+                              onError={(e) => {
+                                e.target.style.display = 'none';
+                              }}
+                            />
+                          </Box>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </Grid>
+
                   <Grid item xs={12}>
                     {assetConfigChanged && (
                       <Button
@@ -1923,8 +2011,8 @@ export default function Settings() {
 
           {/* Barcodes Tab (Admin/Owner only) */}
           {(profile?.role === 'admin' || profile?.role === 'owner') && (
-            <TabPanel value={activeTabId} tabId="barcodes">
-              <Box sx={{ maxWidth: { xs: '100%', md: 1400 } }}>
+            <TabPanel value={activeTab} index={8}>
+              <Box sx={{ maxWidth: 800 }}>
                 <Typography variant="h4" gutterBottom sx={{ color: 'primary', fontWeight: 600 }}>
                   📋 Barcode & Number Format Configuration
                 </Typography>
@@ -2187,112 +2275,8 @@ export default function Settings() {
             </TabPanel>
           )}
 
-          {/* Invoice Template Tab (Admin/Owner only) */}
-          {(profile?.role === 'admin' || profile?.role === 'owner') && (
-            <TabPanel value={activeTabId} tabId="invoice-template">
-              <Box sx={{ maxWidth: { xs: '100%', md: 1400 } }}>
-                <Typography variant="h4" gutterBottom>
-                  📄 Invoice Template
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                  Customize your invoice appearance, layout, and default settings.
-                </Typography>
-
-                <Paper sx={{ p: 4, mb: 3, textAlign: 'center' }}>
-                  <ReceiptIcon sx={{ fontSize: 80, color: 'primary.main', mb: 2 }} />
-                  <Typography variant="h5" gutterBottom>
-                    Customize Your Invoice Template
-                  </Typography>
-                  <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-                    Design beautiful invoices with custom colors, fonts, and layouts.<br />
-                    Choose which fields to show, customize sections, and set payment terms.
-                  </Typography>
-
-                  {invoiceTemplate && (
-                    <Box sx={{ mb: 3, p: 2, bgcolor: 'grey.50', borderRadius: 1, display: 'inline-block' }}>
-                      <Typography variant="subtitle2" gutterBottom>
-                        Current Template: <strong>{invoiceTemplate.name || 'Modern'}</strong>
-                      </Typography>
-                      <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 1 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Box sx={{ width: 24, height: 24, bgcolor: invoiceTemplate.primary_color, borderRadius: 1, border: '1px solid #ccc' }} />
-                          <Typography variant="caption">Primary</Typography>
-                        </Box>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Box sx={{ width: 24, height: 24, bgcolor: invoiceTemplate.secondary_color, borderRadius: 1, border: '1px solid #ccc' }} />
-                          <Typography variant="caption">Secondary</Typography>
-                        </Box>
-                        <Typography variant="caption" sx={{ ml: 2 }}>
-                          Font: {invoiceTemplate.font_family || 'Arial'}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  )}
-
-                  <Button
-                    variant="contained"
-                    size="large"
-                    startIcon={<SettingsIcon />}
-                    onClick={() => setInvoiceTemplateManagerOpen(true)}
-                    sx={{ minWidth: 200 }}
-                  >
-                    Customize Template
-                  </Button>
-                </Paper>
-
-                <Grid container spacing={2}>
-                  <Grid item xs={12} md={4}>
-                    <Card>
-                      <CardContent>
-                        <PaletteIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
-                        <Typography variant="h6" gutterBottom>
-                          Design
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Choose from preset templates or customize colors and fonts
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid item xs={12} md={4}>
-                    <Card>
-                      <CardContent>
-                        <ViewModuleIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
-                        <Typography variant="h6" gutterBottom>
-                          Layout
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Show/hide sections and columns to match your needs
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid item xs={12} md={4}>
-                    <Card>
-                      <CardContent>
-                        <TextFieldsIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
-                        <Typography variant="h6" gutterBottom>
-                          Content
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Set payment terms, tax rates, and custom messages
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
-
-                <Alert severity="info" sx={{ mt: 3 }}>
-                  <Typography variant="body2">
-                    <strong>💡 Pro Tip:</strong> You can also customize templates directly from the invoice generation dialog in the Rentals page by clicking the ⚙️ icon.
-                  </Typography>
-                </Alert>
-              </Box>
-            </TabPanel>
-          )}
-
           {/* Help & Support Tab */}
-          <TabPanel value={activeTabId} tabId="support">
+          <TabPanel value={activeTab} index={4}>
             <Typography variant="h4" gutterBottom>
               Help & Support
             </Typography>

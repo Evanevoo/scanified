@@ -1,104 +1,79 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Box, CircularProgress, Skeleton } from '@mui/material';
-import { useProgressiveImage } from '../hooks/useLazyLoading';
+import React, { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 
-const LazyImage = ({
-  src,
-  alt = '',
-  placeholder,
-  width = '100%',
-  height = 'auto',
-  objectFit = 'cover',
-  borderRadius = 0,
-  loading = 'lazy',
-  onLoad,
-  onError,
-  sx = {},
-  ...props
-}) => {
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState(false);
-  const [imageSrc, setImageRef] = useProgressiveImage(src, placeholder);
+export default function LazyImage({ 
+  src, 
+  alt, 
+  className = '', 
+  placeholder = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"%3E%3Crect width="400" height="300" fill="%23f3f4f6"/%3E%3C/svg%3E',
+  onLoad 
+}) {
+  const [imageSrc, setImageSrc] = useState(placeholder);
+  const [imageRef, setImageRef] = useState();
+  const [isLoaded, setIsLoaded] = useState(false);
 
-  const handleLoad = () => {
-    setLoaded(true);
-    onLoad && onLoad();
-  };
-
-  const handleError = () => {
-    setError(true);
-    onError && onError();
-  };
+  useEffect(() => {
+    let observer;
+    
+    if (imageRef && imageSrc === placeholder) {
+      observer = new IntersectionObserver(
+        entries => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              // Load the actual image
+              const img = new Image();
+              img.src = src;
+              img.onload = () => {
+                setImageSrc(src);
+                setIsLoaded(true);
+                if (onLoad) onLoad();
+              };
+              observer.unobserve(imageRef);
+            }
+          });
+        },
+        {
+          rootMargin: '50px' // Start loading 50px before the image enters viewport
+        }
+      );
+      
+      observer.observe(imageRef);
+    }
+    
+    return () => {
+      if (observer && imageRef) {
+        observer.unobserve(imageRef);
+      }
+    };
+  }, [imageRef, imageSrc, src, placeholder, onLoad]);
 
   return (
-    <Box
-      sx={{
-        position: 'relative',
-        width,
-        height,
-        borderRadius,
-        overflow: 'hidden',
-        backgroundColor: 'grey.100',
-        ...sx
-      }}
-      {...props}
-    >
-      {/* Loading skeleton */}
-      {!loaded && !error && (
-        <Skeleton
-          variant="rectangular"
-          width="100%"
-          height="100%"
-          sx={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            zIndex: 1
-          }}
-        />
-      )}
-
-      {/* Error placeholder */}
-      {error && (
-        <Box
-          sx={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: 'grey.200',
-            color: 'text.secondary',
-            fontSize: '0.875rem'
-          }}
-        >
-          Failed to load image
-        </Box>
-      )}
-
-      {/* Actual image */}
-      {!error && (
-        <img
-          ref={setImageRef}
-          src={imageSrc}
-          alt={alt}
-          onLoad={handleLoad}
-          onError={handleError}
-          loading={loading}
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit,
-            opacity: loaded ? 1 : 0,
-            transition: 'opacity 0.3s ease-in-out'
-          }}
-        />
-      )}
-    </Box>
+    <motion.img
+      ref={setImageRef}
+      src={imageSrc}
+      alt={alt}
+      className={`${className} ${isLoaded ? '' : 'blur-sm'}`}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: isLoaded ? 1 : 0.5 }}
+      transition={{ duration: 0.3 }}
+      loading="lazy"
+      decoding="async"
+    />
   );
-};
+}
 
-export default LazyImage;
+// WebP Image component with fallback
+export function OptimizedImage({ 
+  src, 
+  webpSrc, 
+  alt, 
+  className = '',
+  ...props 
+}) {
+  return (
+    <picture>
+      {webpSrc && <source srcSet={webpSrc} type="image/webp" />}
+      <LazyImage src={src} alt={alt} className={className} {...props} />
+    </picture>
+  );
+}

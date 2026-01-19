@@ -271,10 +271,14 @@ export default function UserManagementAllOrgs() {
   const sendPasswordReset = async () => {
     setSendingReset(true);
     try {
+      // Use production URL for password reset links to avoid Netlify routing issues
+      const productionUrl = 'https://www.scanified.com';
+      const redirectUrl = `${productionUrl}/reset-password`;
+      
       const { error } = await supabase.auth.resetPasswordForEmail(
         resetDialog.user.email,
         {
-          redirectTo: `${window.location.origin}/reset-password`
+          redirectTo: redirectUrl
         }
       );
       

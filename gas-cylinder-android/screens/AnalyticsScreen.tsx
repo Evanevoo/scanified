@@ -86,11 +86,23 @@ export default function AnalyticsScreen() {
         topCustomersResult,
         scanTrendsResult
       ] = await Promise.all([
-        // Scan counts
-        supabase
-          .from('scans')
-          .select('id, created_at')
-          .eq('organization_id', orgId),
+        // Scan counts - try bottle_scans first, fallback to scans
+        (async () => {
+          let result = await supabase
+            .from('bottle_scans')
+            .select('id, created_at')
+            .eq('organization_id', orgId);
+          
+          // If bottle_scans doesn't exist, try scans table
+          if (result.error && result.error.message?.includes('relation') && result.error.message?.includes('does not exist')) {
+            logger.log('bottle_scans table not found, trying scans table...');
+            result = await supabase
+              .from('scans')
+              .select('id, created_at')
+              .eq('organization_id', orgId);
+          }
+          return result;
+        })(),
         
         // Asset counts
         supabase
@@ -104,20 +116,27 @@ export default function AnalyticsScreen() {
           .select('id')
           .eq('organization_id', orgId),
         
-        // Recent activity
-        supabase
-          .from('scans')
-          .select(`
-            id,
-            action,
-            bottle_id,
-            customer_name,
-            created_at,
-            bottles(barcode_number)
-          `)
-          .eq('organization_id', orgId)
-          .order('created_at', { ascending: false })
-          .limit(10),
+        // Recent activity - try bottle_scans first, fallback to scans
+        (async () => {
+          let result = await supabase
+            .from('bottle_scans')
+            .select('id, mode, bottle_barcode, customer_name, created_at')
+            .eq('organization_id', orgId)
+            .order('created_at', { ascending: false })
+            .limit(10);
+          
+          // If bottle_scans doesn't exist, try scans table
+          if (result.error && result.error.message?.includes('relation') && result.error.message?.includes('does not exist')) {
+            logger.log('bottle_scans table not found, trying scans table...');
+            result = await supabase
+              .from('scans')
+              .select('id, action, bottle_id, customer_name, created_at')
+              .eq('organization_id', orgId)
+              .order('created_at', { ascending: false })
+              .limit(10);
+          }
+          return result;
+        })(),
         
         // Top customers
         supabase
@@ -126,13 +145,27 @@ export default function AnalyticsScreen() {
           .eq('organization_id', orgId)
           .not('customer_name', 'is', null),
         
-        // Scan trends (last 7 days)
-        supabase
-          .from('scans')
-          .select('created_at')
-          .eq('organization_id', orgId)
-          .gte('created_at', weekAgo.toISOString())
-          .order('created_at', { ascending: true })
+        // Scan trends (last 7 days) - try bottle_scans first, fallback to scans
+        (async () => {
+          let result = await supabase
+            .from('bottle_scans')
+            .select('created_at')
+            .eq('organization_id', orgId)
+            .gte('created_at', weekAgo.toISOString())
+            .order('created_at', { ascending: true });
+          
+          // If bottle_scans doesn't exist, try scans table
+          if (result.error && result.error.message?.includes('relation') && result.error.message?.includes('does not exist')) {
+            logger.log('bottle_scans table not found, trying scans table...');
+            result = await supabase
+              .from('scans')
+              .select('created_at')
+              .eq('organization_id', orgId)
+              .gte('created_at', weekAgo.toISOString())
+              .order('created_at', { ascending: true });
+          }
+          return result;
+        })()
       ]);
 
       // Process scan data
@@ -157,13 +190,19 @@ export default function AnalyticsScreen() {
       const totalCustomers = customersResult.data?.length || 0;
 
       // Process recent activity
-      const recentActivity = (recentActivityResult.data || []).map(scan => ({
-        id: scan.id,
-        action: scan.action,
-        asset_id: scan.bottles?.barcode_number || scan.bottle_id,
-        customer_name: scan.customer_name || 'Unknown',
-        timestamp: scan.created_at
-      }));
+      const recentActivity = (recentActivityResult.data || []).map(scan => {
+        // Handle both bottle_scans (mode) and scans (action) schemas
+        const action = scan.mode ? (scan.mode === 'SHIP' ? 'out' : scan.mode === 'RETURN' ? 'in' : scan.mode.toLowerCase()) : scan.action;
+        const asset_id = scan.bottle_barcode || scan.bottles?.barcode_number || scan.bottle_id;
+        
+        return {
+          id: scan.id,
+          action: action,
+          asset_id: asset_id,
+          customer_name: scan.customer_name || 'Unknown',
+          timestamp: scan.created_at
+        };
+      });
 
       // Process top customers
       const customerCounts = (topCustomersResult.data || []).reduce((acc, asset) => {

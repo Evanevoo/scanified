@@ -59,11 +59,6 @@ const ScanArea: React.FC<ScanAreaProps> = ({
 
     const trimmedBarcode = barcode.trim();
 
-    // Check against validation pattern
-    if (!validationPattern.test(trimmedBarcode)) {
-      return { isValid: false, errorMessage: 'Invalid barcode format' };
-    }
-
     // Additional validation for common barcode issues
     if (trimmedBarcode.includes(' ')) {
       return { isValid: false, errorMessage: 'Barcode contains spaces' };
@@ -73,8 +68,29 @@ const ScanArea: React.FC<ScanAreaProps> = ({
       return { isValid: false, errorMessage: 'Barcode too short' };
     }
 
-    if (trimmedBarcode.length > 20) {
+    if (trimmedBarcode.length > 50) {
       return { isValid: false, errorMessage: 'Barcode too long' };
+    }
+
+    // Check if this is a sales receipt barcode (starts with %)
+    if (trimmedBarcode.startsWith('%')) {
+      // Sales receipt format: % + 8 alphanumeric + hyphen + 10 digits + optional letter
+      // Examples: %800006B3-1611180703A, %800005ca-1579809606A
+      const salesReceiptPattern = /^%[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?$/;
+      if (salesReceiptPattern.test(trimmedBarcode)) {
+        return { isValid: true };
+      }
+      // Also accept without the % prefix if it matches the pattern
+      const withoutPrefix = trimmedBarcode.replace(/^%/, '');
+      const patternWithoutPrefix = /^[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?$/;
+      if (patternWithoutPrefix.test(withoutPrefix)) {
+        return { isValid: true };
+      }
+    }
+
+    // Check against validation pattern (for packing slips - 9 digits)
+    if (!validationPattern.test(trimmedBarcode)) {
+      return { isValid: false, errorMessage: 'Invalid barcode format' };
     }
 
     return { isValid: true };
@@ -155,20 +171,18 @@ const ScanArea: React.FC<ScanAreaProps> = ({
         <TouchableOpacity
           style={{
             position: 'absolute',
-            top: 40,
-            left: 20,
+            top: 50,
+            right: 20,
             zIndex: 1000,
             backgroundColor: 'rgba(0,0,0,0.5)',
-            borderRadius: 20,
-            padding: 8,
-            width: 40,
-            height: 40,
+            borderRadius: 8,
+            padding: 12,
             justifyContent: 'center',
             alignItems: 'center',
           }}
           onPress={onClose}
         >
-          <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold' }}>←</Text>
+          <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>✕ Close</Text>
         </TouchableOpacity>
       )}
       <Text style={styles.header}>{label}</Text>
@@ -194,10 +208,6 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                 onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
                 barcodeScannerEnabled={true}
                 barcodeScannerSettings={{
-                  barcodeTypes: [
-                    'qr', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 
-                    'code128', 'pdf417', 'aztec', 'datamatrix', 'itf14', 'interleaved2of5'
-                  ],
                   ...(regionOfInterest && { regionOfInterest })
                 }}
               />
@@ -206,10 +216,6 @@ const ScanArea: React.FC<ScanAreaProps> = ({
               {enableRegionOfInterest && (
                 <>
                   <View style={styles.scanningFrame} />
-                  <View style={[styles.corner, styles.topLeft]} />
-                  <View style={[styles.corner, styles.topRight]} />
-                  <View style={[styles.corner, styles.bottomLeft]} />
-                  <View style={[styles.corner, styles.bottomRight]} />
                   
                   {/* Scanning animation */}
                   {isProcessing && !hideScanningLine && (
@@ -306,55 +312,22 @@ const styles = StyleSheet.create({
   },
   scanningFrame: {
     position: 'absolute',
-    top: '35%',
-    left: '10%',
-    width: '80%',
-    height: '30%',
+    top: '20%', // Moved up from 35% to camera level
+    left: '50%',
+    transform: [{ translateX: -160 }], // Center 320px width
+    width: 320,
+    height: 150,
     borderWidth: 2,
-    borderColor: '#3B82F6',
-    borderRadius: 12,
-    backgroundColor: 'transparent',
-  },
-  corner: {
-    position: 'absolute',
-    width: 20,
-    height: 20,
     borderColor: '#fff',
-    borderWidth: 3,
-  },
-  topLeft: {
-    top: '35%',
-    left: '10%',
-    borderRightWidth: 0,
-    borderBottomWidth: 0,
-    borderTopLeftRadius: 8,
-  },
-  topRight: {
-    top: '35%',
-    right: '10%',
-    borderLeftWidth: 0,
-    borderBottomWidth: 0,
-    borderTopRightRadius: 8,
-  },
-  bottomLeft: {
-    bottom: '35%',
-    left: '10%',
-    borderRightWidth: 0,
-    borderTopWidth: 0,
-    borderBottomLeftRadius: 8,
-  },
-  bottomRight: {
-    bottom: '35%',
-    right: '10%',
-    borderLeftWidth: 0,
-    borderTopWidth: 0,
-    borderBottomRightRadius: 8,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
   },
   scanningLine: {
     position: 'absolute',
-    top: '50%',
-    left: '10%',
-    width: '80%',
+    top: '27.5%', // Center of 320x150 frame at 20% top
+    left: '50%',
+    transform: [{ translateX: -160 }], // Center 320px width
+    width: 320,
     height: 2,
     backgroundColor: '#10B981',
     opacity: 0.8,

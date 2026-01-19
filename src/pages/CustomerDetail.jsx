@@ -43,7 +43,6 @@ import WarehouseIcon from '@mui/icons-material/Warehouse';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import HistoryIcon from '@mui/icons-material/History';
 import SpeedIcon from '@mui/icons-material/Speed';
-import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import { TableSkeleton, CardSkeleton } from '../components/SmoothLoading';
 import { AssetTransferService } from '../services/assetTransferService';
 import { useAuth } from '../hooks/useAuth';
@@ -63,7 +62,6 @@ export default function CustomerDetail() {
   const [customer, setCustomer] = useState(null);
   const [customerAssets, setCustomerAssets] = useState([]);
   const [locationAssets, setLocationAssets] = useState([]);
-  const [dnsRentals, setDNSRentals] = useState([]);
   const [bottleSummary, setBottleSummary] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -137,39 +135,14 @@ export default function CustomerDetail() {
         });
         setBottleSummary(summary);
         
+        // Get all rentals including DNS (Delivered Not Scanned) rentals
         const { data: rentalData, error: rentalError } = await supabase
           .from('rentals')
           .select('*')
           .eq('customer_id', id)
-          .is('rental_end_date', null);
+          .is('rental_end_date', null); // Only active rentals
         if (rentalError) throw rentalError;
         setLocationAssets(rentalData || []);
-        
-        // Fetch DNS+ rentals (delivered not scanned)
-        // Try to fetch DNS+ rentals - handle gracefully if columns don't exist
-        try {
-          const { data: dnsRentals, error: dnsError } = await supabase
-            .from('rentals')
-            .select('*')
-            .eq('customer_id', id)
-            .is('rental_end_date', null);
-          
-          if (dnsError) {
-            logger.warn('Error fetching rentals:', dnsError);
-            setDNSRentals([]);
-          } else {
-            // Filter for DNS+ records (bottle_barcode starts with DNS+ or is_dns is true)
-            const dnsRecords = (dnsRentals || []).filter(r => 
-              (r.is_dns === true) || 
-              (r.bottle_barcode && r.bottle_barcode.startsWith('DNS+')) ||
-              (r.bottle_id === null && r.bottle_barcode && r.bottle_barcode.includes('DNS'))
-            );
-            setDNSRentals(dnsRecords);
-          }
-        } catch (err) {
-          logger.warn('Error fetching DNS+ rentals:', err);
-          setDNSRentals([]);
-        }
       } catch (err) {
         setError(err.message);
       }
@@ -499,183 +472,45 @@ export default function CustomerDetail() {
     setSaving(true);
     setSaveError(null);
     setSaveSuccess(false);
-    
-    try {
-      // Validate CustomerListID if changed
-      const newCustomerListID = (editForm.CustomerListID || '').trim();
-      const oldCustomerListID = customer.CustomerListID;
-      const customerIdChanged = newCustomerListID !== oldCustomerListID;
-      
-      if (!newCustomerListID) {
-        setSaveError('Customer ID is required.');
-        setSaving(false);
-        return;
-      }
-      
-      // If CustomerListID changed, check for uniqueness
-      if (customerIdChanged) {
-        const { data: existingCustomer, error: checkError } = await supabase
-          .from('customers')
-          .select('CustomerListID')
-          .eq('CustomerListID', newCustomerListID)
-          .eq('organization_id', organization?.id || customer?.organization_id)
-          .maybeSingle();
-        
-        if (checkError) {
-          setSaveError(`Error checking Customer ID: ${checkError.message}`);
-          setSaving(false);
-          return;
-        }
-        
-        if (existingCustomer) {
-          setSaveError(`Customer ID "${newCustomerListID}" already exists. Please choose a different ID.`);
-          setSaving(false);
-          return;
-        }
-      }
-      
-      // Normalize barcode: trim whitespace only (organizations control format)
-      const normalizedBarcode = (editForm.barcode || '')
-        .toString()
-        .trim();
-      
-      const updateFields = {
-        name: editForm.name,
-        email: editForm.email,
-        phone: editForm.phone,
-        contact_details: editForm.contact_details,
-        address: editForm.address,
-        address2: editForm.address2,
-        address3: editForm.address3,
-        address4: editForm.address4,
-        address5: editForm.address5,
-        city: editForm.city,
-        postal_code: editForm.postal_code,
-        customer_type: editForm.customer_type || 'CUSTOMER',
-        location: editForm.location,
-        // Include barcode if provided (empty string allowed to clear)
-        barcode: normalizedBarcode || null
-      };
-      
-      // If CustomerListID changed, update customer record FIRST (before related records)
-      // This ensures the new CustomerListID exists in the customers table for foreign key constraints
-      if (customerIdChanged) {
-        logger.log(`Updating Customer ID from "${oldCustomerListID}" to "${newCustomerListID}"`);
-        
-        // Include CustomerListID in update fields
-        updateFields.CustomerListID = newCustomerListID;
-        
-        // Update the customer record FIRST using UUID id (not CustomerListID)
-        // This creates the new CustomerListID in the customers table
-        const { error: customerUpdateError } = await supabase
-          .from('customers')
-          .update(updateFields)
-          .eq('id', customer.id)
-          .eq('organization_id', organization?.id || customer?.organization_id);
-        
-        if (customerUpdateError) {
-          logger.error('Error updating customer:', customerUpdateError);
-          setSaveError(`Failed to update customer: ${customerUpdateError.message}`);
-          setSaving(false);
-          return;
-        }
-        
-        // Now update all related records that reference the old CustomerListID
-        // Update bottles assigned to this customer
-        const { error: bottlesError } = await supabase
-          .from('bottles')
-          .update({ assigned_customer: newCustomerListID })
-          .eq('assigned_customer', oldCustomerListID)
-          .eq('organization_id', organization?.id || customer?.organization_id);
-        
-        if (bottlesError) {
-          logger.error('Error updating bottles:', bottlesError);
-          // Try to rollback customer update if bottle update fails
-          const { error: rollbackError } = await supabase
-            .from('customers')
-            .update({ CustomerListID: oldCustomerListID })
-            .eq('id', customer.id);
-          
-          if (rollbackError) {
-            logger.error('CRITICAL: Failed to rollback customer ID change:', rollbackError);
-          }
-          
-          setSaveError(`Failed to update assigned bottles: ${bottlesError.message}`);
-          setSaving(false);
-          return;
-        }
-        
-        // Update rentals
-        const { error: rentalsError } = await supabase
-          .from('rentals')
-          .update({ customer_id: newCustomerListID })
-          .eq('customer_id', oldCustomerListID)
-          .eq('organization_id', organization?.id || customer?.organization_id);
-        
-        if (rentalsError) {
-          logger.warn('Warning updating rentals (may not exist):', rentalsError);
-          // Don't fail if rentals table doesn't have this structure
-        }
-        
-        // Update invoices
-        const { error: invoicesError } = await supabase
-          .from('invoices')
-          .update({ customer_id: newCustomerListID })
-          .eq('customer_id', oldCustomerListID)
-          .eq('organization_id', organization?.id || customer?.organization_id);
-        
-        if (invoicesError) {
-          logger.warn('Warning updating invoices (may not exist):', invoicesError);
-          // Don't fail if invoices table doesn't have this structure
-        }
-        
-        // Update rental_invoices
-        const { error: rentalInvoicesError } = await supabase
-          .from('rental_invoices')
-          .update({ customer_id: newCustomerListID })
-          .eq('customer_id', oldCustomerListID)
-          .eq('organization_id', organization?.id || customer?.organization_id);
-        
-        if (rentalInvoicesError) {
-          logger.warn('Warning updating rental_invoices (may not exist):', rentalInvoicesError);
-          // Don't fail if rental_invoices table doesn't have this structure
-        }
-        
-        // Navigate to new URL after successful update
-        logger.log(`Customer ID updated successfully. Navigating to new URL.`);
-        navigate(`/customer/${newCustomerListID}`, { replace: true });
-        // The useEffect will reload the data with the new ID
-        return;
-      }
-      
-      // If CustomerListID didn't change, just update the customer record normally
-      const { error } = await supabase
-        .from('customers')
-        .update(updateFields)
-        .eq('CustomerListID', oldCustomerListID)
-        .eq('organization_id', organization?.id || customer?.organization_id);
-      
-      if (error) {
-        setSaveError(error.message);
-        setSaving(false);
-        return;
-      }
-      
-      // Update local state
-      setCustomer({ ...customer, ...updateFields });
-      setEditing(false);
+    // Normalize barcode: trim whitespace only (organizations control format)
+    const normalizedBarcode = (editForm.barcode || '')
+      .toString()
+      .trim();
+    const updateFields = {
+      name: editForm.name,
+      email: editForm.email,
+      phone: editForm.phone,
+      contact_details: editForm.contact_details,
+      address: editForm.address,
+      address2: editForm.address2,
+      address3: editForm.address3,
+      address4: editForm.address4,
+      address5: editForm.address5,
+      city: editForm.city,
+      postal_code: editForm.postal_code,
+      customer_type: editForm.customer_type || 'CUSTOMER',
+      location: editForm.location || 'SASKATOON',
+      // Include barcode if provided (empty string allowed to clear)
+      barcode: normalizedBarcode || null
+    };
+    const { error } = await supabase
+      .from('customers')
+      .update(updateFields)
+      .eq('CustomerListID', id);
+    if (error) {
+      setSaveError(error.message);
       setSaving(false);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 2000);
-    } catch (err) {
-      logger.error('Error saving customer:', err);
-      setSaveError(err.message || 'An unexpected error occurred');
-      setSaving(false);
+      return;
     }
+    setCustomer({ ...customer, ...updateFields });
+    setEditing(false);
+    setSaving(false);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2000);
   };
 
   if (loading) return (
-    <Box sx={{ p: 4, maxWidth: { xs: '100%', md: 1400 }, mx: 'auto' }}>
+    <Box sx={{ p: 4, width: '100%' }}>
       <CardSkeleton count={1} />
       <Box mt={4}><TableSkeleton rows={4} columns={5} /></Box>
       <Box mt={4}><TableSkeleton rows={3} columns={7} /></Box>
@@ -695,7 +530,7 @@ export default function CustomerDetail() {
   );
 
   return (
-    <Box sx={{ p: 4, maxWidth: { xs: '100%', md: 1400 }, mx: 'auto' }}>
+    <Box sx={{ p: 4, width: '100%' }}>
       <Button
         startIcon={<ArrowBackIcon />}
         onClick={() => navigate(-1)}
@@ -734,31 +569,10 @@ export default function CustomerDetail() {
           )}
         </Box>
         <Divider sx={{ mb: 2 }} />
-        <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr', lg: '1fr 1fr 1fr' }} gap={3}>
+        <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={3}>
           <Box>
             <Typography variant="body2" color="text.secondary">Customer ID</Typography>
-            {editing ? (
-              <>
-                <TextField 
-                  name="CustomerListID" 
-                  value={editForm.CustomerListID || ''} 
-                  onChange={handleEditChange} 
-                  size="small" 
-                  label="Customer ID" 
-                  required
-                  sx={{ mb: 1, minWidth: 220 }} 
-                  helperText={editForm.CustomerListID !== customer.CustomerListID ? "Changing ID will update all assigned bottles and related records" : "Unique identifier for this customer"}
-                  error={saveError && saveError.includes('CustomerListID')}
-                />
-                {editForm.CustomerListID && editForm.CustomerListID !== customer.CustomerListID && (
-                  <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>
-                    This will update all bottles, rentals, and invoices assigned to this customer.
-                  </Alert>
-                )}
-              </>
-            ) : (
-              <Typography variant="body1" fontWeight={600} fontFamily="monospace" sx={{ mb: 2 }}>{customer.CustomerListID}</Typography>
-            )}
+            <Typography variant="body1" fontWeight={600} fontFamily="monospace" sx={{ mb: 2 }}>{customer.CustomerListID}</Typography>
             <Typography variant="body2" color="text.secondary">Customer Barcode</Typography>
             {editing ? (
               <TextField 
@@ -1081,43 +895,37 @@ export default function CustomerDetail() {
                   </Button>
                 </Tooltip>
                 <Tooltip title={selectedAssets.length === 0 ? "Select assets to transfer" : `Transfer ${selectedAssets.length} selected asset(s) to customer`}>
-                  <span>
-                    <Button
-                      onClick={() => handleOpenTransferDialog(false)}
-                      disabled={selectedAssets.length === 0 || transferLoading}
-                      startIcon={transferLoading ? <CircularProgress size={16} /> : <TransferWithinAStationIcon />}
-                      color="primary"
-                    >
-                      Transfer ({selectedAssets.length})
-                    </Button>
-                  </span>
+                  <Button
+                    onClick={() => handleOpenTransferDialog(false)}
+                    disabled={selectedAssets.length === 0 || transferLoading}
+                    startIcon={transferLoading ? <CircularProgress size={16} /> : <TransferWithinAStationIcon />}
+                    color="primary"
+                  >
+                    Transfer ({selectedAssets.length})
+                  </Button>
                 </Tooltip>
               </ButtonGroup>
               
               <ButtonGroup variant="outlined" size="small">
                 <Tooltip title="Quick transfer to recent customers">
-                  <span>
-                    <Button
-                      onClick={() => handleOpenTransferDialog(true)}
-                      disabled={selectedAssets.length === 0 || transferLoading}
-                      startIcon={<SpeedIcon />}
-                      color="secondary"
-                    >
-                      Quick Transfer
-                    </Button>
-                  </span>
+                  <Button
+                    onClick={() => handleOpenTransferDialog(true)}
+                    disabled={selectedAssets.length === 0 || transferLoading}
+                    startIcon={<SpeedIcon />}
+                    color="secondary"
+                  >
+                    Quick Transfer
+                  </Button>
                 </Tooltip>
                 <Tooltip title="Return assets to warehouse/in-house">
-                  <span>
-                    <Button
-                      onClick={handleTransferToWarehouse}
-                      disabled={selectedAssets.length === 0 || transferLoading}
-                      startIcon={<WarehouseIcon />}
-                      color="warning"
-                    >
-                      To Warehouse ({selectedAssets.length})
-                    </Button>
-                  </span>
+                  <Button
+                    onClick={handleTransferToWarehouse}
+                    disabled={selectedAssets.length === 0 || transferLoading}
+                    startIcon={<WarehouseIcon />}
+                    color="warning"
+                  >
+                    To Warehouse ({selectedAssets.length})
+                  </Button>
                 </Tooltip>
               </ButtonGroup>
 
@@ -1203,7 +1011,7 @@ export default function CustomerDetail() {
                     <TableCell>
                       {asset.barcode_number ? (
                         <Link
-                          to={`/bottle/${asset.barcode_number || asset.id}`}
+                          to={`/bottle/${asset.id}`}
                           style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}
                         >
                           {asset.barcode_number}
@@ -1226,11 +1034,14 @@ export default function CustomerDetail() {
                             ? "In-house (no charge)" 
                             : customer?.customer_type === 'TEMPORARY'
                             ? "Rented (temp - needs setup)"
-                            : "Rented"
+                            : (asset.status === 'rented' || asset.status === 'RENTED') 
+                              ? "Rented" 
+                              : asset.status || "Rented"
                         }
                         color={
                           customer?.customer_type === 'VENDOR' ? 'default' : 
-                          customer?.customer_type === 'TEMPORARY' ? 'warning' : 'success'
+                          customer?.customer_type === 'TEMPORARY' ? 'warning' : 
+                          (asset.status === 'rented' || asset.status === 'RENTED') ? 'success' : 'warning'
                         }
                         size="small"
                         icon={customer?.customer_type === 'VENDOR' ? <HomeIcon /> : null}
@@ -1243,82 +1054,6 @@ export default function CustomerDetail() {
           </TableContainer>
         )}
       </Paper>
-
-      {/* DNS+ (Delivered Not Scanned) Section */}
-      {dnsRentals && dnsRentals.length > 0 && (
-        <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4, backgroundColor: '#fff3cd', border: '2px solid #ffc107' }}>
-          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-            <Typography variant="h5" fontWeight={700} color="warning.main">
-              ⚠️ Delivered Not Scanned (DNS+) ({dnsRentals.length})
-            </Typography>
-          </Box>
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            These items were delivered according to invoices but no bottles were scanned. Please scan the actual bottles to convert these entries.
-          </Alert>
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow sx={{ backgroundColor: '#fff3cd' }}>
-                  <TableCell sx={{ fontWeight: 700 }}>Product Code</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Order Number</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Rental Start</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {dnsRentals.map((dns) => (
-                  <TableRow key={dns.id}>
-                    <TableCell>{dns.dns_product_code || 'N/A'}</TableCell>
-                    <TableCell>{dns.dns_description || dns.bottle_barcode}</TableCell>
-                    <TableCell>{dns.dns_order_number || 'N/A'}</TableCell>
-                    <TableCell>{new Date(dns.rental_start_date).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      <DNSConversionDialog 
-                        dnsRental={dns} 
-                        customerId={id}
-                        customerName={customer?.name}
-                        onConverted={() => {
-                          // Refresh data after conversion
-                          const fetchData = async () => {
-                            try {
-                              const { data: allRentals, error: dnsError } = await supabase
-                                .from('rentals')
-                                .select('*')
-                                .eq('customer_id', id)
-                                .is('rental_end_date', null);
-                              
-                              if (!dnsError && allRentals) {
-                                // Filter for DNS+ records
-                                const dnsRecords = allRentals.filter(r => 
-                                  (r.is_dns === true) || 
-                                  (r.bottle_barcode && r.bottle_barcode.startsWith('DNS+')) ||
-                                  (r.bottle_id === null && r.bottle_barcode && r.bottle_barcode.includes('DNS'))
-                                );
-                                setDNSRentals(dnsRecords);
-                              }
-                              
-                              const { data: customerAssetsData, error: customerAssetsError } = await supabase
-                                .from('bottles')
-                                .select('*')
-                                .eq('assigned_customer', id)
-                                .eq('organization_id', customer?.organization_id);
-                              if (!customerAssetsError) setCustomerAssets(customerAssetsData || []);
-                            } catch (err) {
-                              logger.error('Error refreshing data:', err);
-                            }
-                          };
-                          fetchData();
-                        }}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Paper>
-      )}
 
       {/* Rental History */}
       <Paper elevation={3} sx={{ p: 4, borderRadius: 4 }}>
@@ -1333,47 +1068,98 @@ export default function CustomerDetail() {
             <Table>
               <TableHead>
                 <TableRow sx={{ backgroundColor: '#f5f7fa' }}>
-                  <TableCell sx={{ fontWeight: 700 }}>Serial Number</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Serial/Barcode</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Type/Product</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Rental Type</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Rental Amount</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Start Date</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {locationAssets.map((rental) => (
-                  <TableRow key={rental.id} hover>
-                    <TableCell>{rental.cylinder?.serial_number || 'Unknown'}</TableCell>
-                    <TableCell>{rental.cylinder?.type || 'Unknown'}</TableCell>
-                    <TableCell>
-                      <Chip 
-                        label={rental.rental_type || 'Monthly'} 
-                        color="primary" 
-                        size="small"
-                        variant="outlined"
-                      />
-                    </TableCell>
-                    <TableCell>${rental.rental_amount || 0}</TableCell>
-                    <TableCell>
-                      <Chip 
-                        label={rental.location || 'Unknown'} 
-                        color="secondary" 
-                        size="small"
-                        variant="outlined"
-                      />
-                    </TableCell>
-                    <TableCell>{rental.rental_start_date || '-'}</TableCell>
-                    <TableCell>
-                      <Chip 
-                        label={rental.status || 'Active'} 
-                        color={rental.status === 'at_home' ? 'warning' : 'success'} 
-                        size="small"
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {locationAssets.map((rental) => {
+                  const isDNS = rental.is_dns === true;
+                  return (
+                    <TableRow key={rental.id} hover sx={{ bgcolor: isDNS ? '#fff3cd' : 'inherit' }}>
+                      <TableCell>
+                        {isDNS ? (
+                          <Chip 
+                            label="DNS" 
+                            color="warning" 
+                            size="small"
+                            sx={{ fontWeight: 'bold' }}
+                          />
+                        ) : (
+                          rental.bottle_barcode || rental.cylinder?.serial_number || 'Unknown'
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {isDNS ? (
+                          <Box>
+                            <Typography variant="body2" fontWeight="bold">
+                              {rental.dns_product_code || 'N/A'}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {rental.dns_description || 'Not Scanned'}
+                            </Typography>
+                          </Box>
+                        ) : (
+                          rental.cylinder?.type || 'Unknown'
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Chip 
+                          label={rental.rental_type || 'Monthly'} 
+                          color="primary" 
+                          size="small"
+                          variant="outlined"
+                        />
+                      </TableCell>
+                      <TableCell>${rental.rental_amount || 0}</TableCell>
+                      <TableCell>
+                        <Chip 
+                          label={rental.location || 'Unknown'} 
+                          color="secondary" 
+                          size="small"
+                          variant="outlined"
+                        />
+                      </TableCell>
+                      <TableCell>{rental.rental_start_date || '-'}</TableCell>
+                      <TableCell>
+                        <Chip 
+                          label={isDNS ? 'DNS (Not Scanned)' : (rental.status || 'Active')} 
+                          color={isDNS ? 'warning' : (rental.status === 'at_home' ? 'warning' : 'success')}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {isDNS && (
+                          <DNSConversionDialog
+                            dnsRental={rental}
+                            customerId={customer?.CustomerListID}
+                            customerName={customer?.name}
+                            onConverted={() => {
+                              // Reload data
+                              const fetchData = async () => {
+                                const { data: rentalData, error: rentalError } = await supabase
+                                  .from('rentals')
+                                  .select('*')
+                                  .eq('customer_id', id)
+                                  .is('rental_end_date', null);
+                                if (!rentalError) {
+                                  setLocationAssets(rentalData || []);
+                                }
+                              };
+                              fetchData();
+                            }}
+                          />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </TableContainer>
@@ -1402,7 +1188,6 @@ export default function CustomerDetail() {
             <Autocomplete
               options={availableCustomers}
               getOptionLabel={(option) => `${option.name} (${option.CustomerListID})`}
-              isOptionEqualToValue={(option, value) => option.CustomerListID === value?.CustomerListID}
               renderOption={(props, option) => (
                 <Box component="li" {...props}>
                   <Box>

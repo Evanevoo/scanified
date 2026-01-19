@@ -4,6 +4,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, Activity
 import { supabase } from '../supabase';
 import { useNavigation } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { Ionicons } from '@expo/vector-icons';
 import SimpleCameraTest from '../SimpleCameraTest';
 import { useTheme } from '../context/ThemeContext';
 import { useAssetConfig } from '../context/AssetContext';
@@ -51,7 +52,115 @@ const levenshteinDistance = (str1: string, str2: string): number => {
 // (common Code 39 start/stop characters). Stored values are not altered.
 const normalizeBarcode = (value: string): string => {
   if (!value) return '';
-  return value.trim().replace(/^[%*]+|[%*]+$/g, '');
+  // Remove Code 39 start/stop characters: *, Z, %, and combinations
+  let normalized = value.trim()
+    .replace(/^[Z*%]+/i, '') // Remove leading Z, *, %
+    .replace(/[Z*%]+$/i, ''); // Remove trailing Z, *, %
+  return normalized;
+};
+
+// Correct common OCR errors in scanned barcodes
+// Handles common misreads: O→0, I→1, S→5, Z→2, etc.
+const correctOCRErrors = (scanned: string): string => {
+  if (!scanned) return scanned;
+  
+  // Common OCR error mappings
+  const ocrCorrections: { [key: string]: string } = {
+    // Letter to number corrections
+    'O': '0', 'o': '0', 'D': '0', 'Q': '0',
+    'I': '1', 'l': '1', '|': '1',
+    'S': '5', 's': '5',
+    'Z': '2', 'z': '2',
+    'B': '8', 'b': '8',
+    'G': '6', 'g': '6',
+    // Number to letter corrections (less common but possible)
+    '0': 'O', // Only if context suggests it should be a letter
+    '1': 'I',
+    '5': 'S',
+    '2': 'Z',
+    '8': 'B',
+    '6': 'G',
+  };
+  
+  // Common multi-character OCR errors
+  const multiCharCorrections: { [key: string]: string } = {
+    'OKKK': '8000',
+    'OKK': '800',
+    'OK': '80',
+    'KK': '00',
+    'A5': '15',
+    'A1': '11',
+    'A0': '10',
+    'A8': '18',
+    'A7': '17',
+    'A3': '13',
+    'A2': '12',
+    'A9': '19',
+    'A6': '16',
+    'A4': '14',
+    'C+': '80',  // Common OCR error: c+ → 80
+    'C+8': '800', // c+8 → 800
+    '+8': '80',   // +8 → 80
+    '+': '',      // Remove standalone +
+  };
+  
+  // Pattern-based corrections for common OCR mistakes
+  // Handle patterns like "7133021B" → "78330321A" (1→8, B→A)
+  const patternCorrections = [
+    // If we see "7133021B" pattern, likely should be "78330321A"
+    { pattern: /^(\d)133021([A-Z])$/, replacement: (match: RegExpMatchArray) => {
+      // If first digit is 7 and last is B, likely 78330321A
+      if (match[1] === '7' && match[2] === 'B') return '78330321A';
+      return match[0];
+    }},
+  ];
+  
+  let corrected = scanned.toUpperCase();
+  
+  // Remove special characters that are likely OCR errors
+  corrected = corrected.replace(/[+*%]/g, '');
+  
+  // Apply multi-character corrections first
+  for (const [error, correction] of Object.entries(multiCharCorrections)) {
+    if (corrected.includes(error)) {
+      corrected = corrected.replace(new RegExp(error.replace(/[+*%]/g, '\\$&'), 'g'), correction);
+    }
+  }
+  
+  // Apply pattern-based corrections
+  for (const { pattern, replacement } of patternCorrections) {
+    const match = corrected.match(pattern);
+    if (match) {
+      corrected = replacement(match);
+    }
+  }
+  
+  // Apply single-character corrections for ambiguous characters
+  // Only correct if it makes sense in context (e.g., O in numeric context → 0)
+  const numericContext = /[0-9]/.test(corrected);
+  
+  if (numericContext) {
+    // In numeric context, prefer number corrections
+    corrected = corrected.replace(/[ODQ]/g, '0');
+    corrected = corrected.replace(/[Il|]/g, '1');
+    corrected = corrected.replace(/[SZ]/g, '5');
+    corrected = corrected.replace(/[B]/g, '8');
+    corrected = corrected.replace(/[G]/g, '6');
+    // Additional OCR errors for hex-like patterns
+    corrected = corrected.replace(/E/g, '5'); // E often misread as 5
+    corrected = corrected.replace(/F/g, '7'); // F often misread as 7
+  }
+  
+  // Handle trailing letter corrections (B→A, etc.) in customer ID context
+  // If the barcode ends with a letter and has a pattern like customer ID
+  if (/^[0-9A-F]{8}-[0-9]{10}[A-Z]$/.test(corrected)) {
+    // Common OCR errors for trailing letters
+    corrected = corrected.replace(/B$/, 'A'); // B at end often misread A
+    corrected = corrected.replace(/I$/, 'A'); // I at end often misread A
+    corrected = corrected.replace(/1$/, 'A'); // 1 at end often misread A
+  }
+  
+  return corrected;
 };
 
 // Check if barcode is within scan rectangle bounds - More lenient
@@ -256,6 +365,13 @@ export default function ScanCylindersScreen() {
   const [showCustomerScan, setShowCustomerScan] = useState(false);
   const [showOrderScan, setShowOrderScan] = useState(false);
   const [showSimpleTest, setShowSimpleTest] = useState(false);
+  const [flashEnabled, setFlashEnabled] = useState(false);
+  
+  // Track last scanned barcode and timestamp to prevent rapid duplicate scans
+  const lastScannedBarcodeRef = React.useRef<string | null>(null);
+  const lastScanTimeRef = React.useRef<number>(0);
+  const scanCooldownRef = React.useRef<NodeJS.Timeout | null>(null);
+  const [cameraZoom, setCameraZoom] = useState(0);
 
 
   useEffect(() => {
@@ -391,6 +507,15 @@ export default function ScanCylindersScreen() {
     };
     validateCustomer();
   }, [search, selectedCustomer, profile?.organization_id]);
+  
+  // Cleanup scan cooldown on unmount
+  useEffect(() => {
+    return () => {
+      if (scanCooldownRef.current) {
+        clearTimeout(scanCooldownRef.current);
+      }
+    };
+  }, []);
 
   // Initialize feedback service for sound/haptic feedback
   useEffect(() => {
@@ -455,8 +580,19 @@ export default function ScanCylindersScreen() {
       return;
     }
     
+    // Prevent duplicate scans of the same barcode
+    const barcode = data.trim();
+    const now = Date.now();
+    const timeSinceLastScan = now - lastScanTimeRef.current;
+    const MIN_SCAN_INTERVAL = 2000; // Minimum 2 seconds between scans
+    
+    if (barcode === lastScannedBarcodeRef.current && timeSinceLastScan < MIN_SCAN_INTERVAL) {
+      logger.log('⚠️ Duplicate scan detected, ignoring (too soon)');
+      return;
+    }
+    
     if (scanned) {
-      logger.log('⚠️ Already scanned, ignoring');
+      logger.log('⚠️ Already processing scan, ignoring');
       return;
     }
     
@@ -465,15 +601,26 @@ export default function ScanCylindersScreen() {
       return;
     }
     
+    // Clear any existing cooldown
+    if (scanCooldownRef.current) {
+      clearTimeout(scanCooldownRef.current);
+    }
+    
     // Set scanned immediately to prevent duplicate scans
     setScanned(true);
     setScannerEnabled(false); // Disable scanner temporarily
+    lastScannedBarcodeRef.current = barcode;
+    lastScanTimeRef.current = now;
     
-    // Reset scanned state and re-enable scanner after 2 seconds
-    setTimeout(() => {
+    // Reset scanned state and re-enable scanner after cooldown period
+    scanCooldownRef.current = setTimeout(() => {
       setScanned(false);
       setScannerEnabled(true);
-    }, 2000);
+      // Clear the last scanned barcode after a longer period to allow re-scanning the same barcode
+      setTimeout(() => {
+        lastScannedBarcodeRef.current = null;
+      }, 5000); // Allow same barcode to be scanned again after 5 seconds
+    }, MIN_SCAN_INTERVAL);
     
     // Add a small delay to allow the UI to update
     setTimeout(async () => {
@@ -487,7 +634,14 @@ export default function ScanCylindersScreen() {
         logger.log('👤 Setting customer search:', data);
         
         // Check if the scanned barcode matches any existing customer
-        const scannedBarcode = normalizeBarcode(data);
+        let scannedBarcode = normalizeBarcode(data);
+        
+        // Apply OCR error correction to handle scanner misreads
+        const correctedBarcode = correctOCRErrors(scannedBarcode);
+        if (correctedBarcode !== scannedBarcode) {
+          logger.log(`🔧 OCR correction: "${scannedBarcode}" → "${correctedBarcode}"`);
+          scannedBarcode = correctedBarcode;
+        }
         
         // Multiple normalization strategies for comprehensive matching
         const normalizeForMatching = (barcode: string): string => {
@@ -545,10 +699,24 @@ export default function ScanCylindersScreen() {
             return;
           }
           
+          // Try matching against CustomerListID directly
           const customerBarcode = normalizeBarcode(customer.CustomerListID);
           const customerNormalized = normalizeForMatching(customerBarcode);
           const customerWithDashes = normalizeWithDashes(customerBarcode);
           const customerLoose = normalizeLoose(customerBarcode);
+          
+          // Also check if customer has a stored barcode field
+          const storedBarcode = customer.barcode || customer.customer_barcode;
+          let storedBarcodeNormalized = '';
+          let storedBarcodeWithDashes = '';
+          let storedBarcodeLoose = '';
+          
+          if (storedBarcode) {
+            const normalizedStored = normalizeBarcode(storedBarcode);
+            storedBarcodeNormalized = normalizeForMatching(normalizedStored);
+            storedBarcodeWithDashes = normalizeWithDashes(normalizedStored);
+            storedBarcodeLoose = normalizeLoose(normalizedStored);
+          }
           
           // Log each customer barcode for debugging (only in development)
           if (__DEV__) {
@@ -558,34 +726,63 @@ export default function ScanCylindersScreen() {
             logger.debug(`   🔢 Fully normalized: "${customerNormalized}"`);
             logger.debug(`   ➖ With dashes: "${customerWithDashes}"`);
             logger.debug(`   🧩 Loose: "${customerLoose}"`);
+            if (storedBarcode) {
+              logger.debug(`   📦 Stored barcode: "${storedBarcode}"`);
+              logger.debug(`   📦 Stored normalized: "${storedBarcodeNormalized}"`);
+            }
             logger.debug(`   📊 Comparing to scanned: "${scannedNormalized}"`);
           }
           
           // Strategy 1: Exact match (case insensitive) - Highest priority (score: 100)
           if (customerBarcode.toLowerCase() === scannedBarcode.toLowerCase()) {
-            if (__DEV__) logger.debug('✅ Match found: Exact match');
+            if (__DEV__) logger.debug('✅ Match found: Exact match (CustomerListID)');
             potentialMatches.push({ customer, score: 100, strategy: 'exact' });
+            return;
+          }
+          
+          // Strategy 1b: Match against stored barcode field (if exists)
+          if (storedBarcode && storedBarcode.toLowerCase() === scannedBarcode.toLowerCase()) {
+            if (__DEV__) logger.debug('✅ Match found: Exact match (stored barcode)');
+            potentialMatches.push({ customer, score: 100, strategy: 'exact_stored' });
             return;
           }
           
           // Strategy 2: Fully normalized match (removes ALL special characters) - High priority (score: 90)
           if (customerNormalized === scannedNormalized) {
-            if (__DEV__) logger.debug('✅ Match found: Normalized match');
+            if (__DEV__) logger.debug('✅ Match found: Normalized match (CustomerListID)');
             potentialMatches.push({ customer, score: 90, strategy: 'normalized' });
+            return;
+          }
+          
+          if (storedBarcodeNormalized && storedBarcodeNormalized === scannedNormalized) {
+            if (__DEV__) logger.debug('✅ Match found: Normalized match (stored barcode)');
+            potentialMatches.push({ customer, score: 90, strategy: 'normalized_stored' });
             return;
           }
           
           // Strategy 3: Match with dashes preserved - High priority (score: 85)
           if (customerWithDashes === scannedWithDashes) {
-            if (__DEV__) logger.debug('✅ Match found: Dashes match');
+            if (__DEV__) logger.debug('✅ Match found: Dashes match (CustomerListID)');
             potentialMatches.push({ customer, score: 85, strategy: 'dashes' });
+            return;
+          }
+          
+          if (storedBarcodeWithDashes && storedBarcodeWithDashes === scannedWithDashes) {
+            if (__DEV__) logger.debug('✅ Match found: Dashes match (stored barcode)');
+            potentialMatches.push({ customer, score: 85, strategy: 'dashes_stored' });
             return;
           }
           
           // Strategy 4: Loose match (removes spaces, dashes, underscores) - Medium priority (score: 80)
           if (customerLoose === scannedLoose) {
-            if (__DEV__) logger.debug('✅ Match found: Loose match');
+            if (__DEV__) logger.debug('✅ Match found: Loose match (CustomerListID)');
             potentialMatches.push({ customer, score: 80, strategy: 'loose' });
+            return;
+          }
+          
+          if (storedBarcodeLoose && storedBarcodeLoose === scannedLoose) {
+            if (__DEV__) logger.debug('✅ Match found: Loose match (stored barcode)');
+            potentialMatches.push({ customer, score: 80, strategy: 'loose_stored' });
             return;
           }
           
@@ -614,6 +811,60 @@ export default function ScanCylindersScreen() {
               return;
             }
           }
+          
+          // Strategy 7: Substring match - Check if scanned barcode is a significant substring of customer ID (score: 40)
+          // Useful for partial barcodes like "8ef0321A" matching "1578330321A"
+          if (scannedNormalized.length >= 6) { // At least 6 characters for substring match
+            // Check if scanned is contained in customer ID
+            // Check if scanned is contained in customer ID (anywhere)
+            if (customerNormalized.includes(scannedNormalized)) {
+              const matchRatio = scannedNormalized.length / customerNormalized.length;
+              if (matchRatio >= 0.3) { // At least 30% of the customer ID (lowered for better matching)
+                if (__DEV__) logger.debug(`✅ Match found: Substring match (${Math.round(matchRatio * 100)}% of customer ID)`);
+                potentialMatches.push({ customer, score: 40, strategy: 'substring' });
+                return;
+              }
+            }
+            // Check if scanned matches the END of customer ID (common for partial scans) - Higher priority
+            const customerEnd = customerNormalized.slice(-scannedNormalized.length);
+            if (customerEnd === scannedNormalized) {
+              if (__DEV__) logger.debug('✅ Match found: End substring match (scanned matches end of customer ID)');
+              potentialMatches.push({ customer, score: 45, strategy: 'end_substring' });
+              return;
+            }
+            // Check if scanned matches the START of customer ID
+            const customerStart = customerNormalized.slice(0, scannedNormalized.length);
+            if (customerStart === scannedNormalized) {
+              if (__DEV__) logger.debug('✅ Match found: Start substring match (scanned matches start of customer ID)');
+              potentialMatches.push({ customer, score: 45, strategy: 'start_substring' });
+              return;
+            }
+            // Check if scanned is a substring of stored barcode
+            if (storedBarcodeNormalized && storedBarcodeNormalized.includes(scannedNormalized)) {
+              const matchRatio = scannedNormalized.length / storedBarcodeNormalized.length;
+              if (matchRatio >= 0.3) {
+                if (__DEV__) logger.debug(`✅ Match found: Substring match in stored barcode (${Math.round(matchRatio * 100)}%)`);
+                potentialMatches.push({ customer, score: 40, strategy: 'substring_stored' });
+                return;
+              }
+            }
+            // Check if scanned matches end of stored barcode
+            if (storedBarcodeNormalized) {
+              const storedEnd = storedBarcodeNormalized.slice(-scannedNormalized.length);
+              if (storedEnd === scannedNormalized) {
+                if (__DEV__) logger.debug('✅ Match found: End substring match in stored barcode');
+                potentialMatches.push({ customer, score: 45, strategy: 'end_substring_stored' });
+                return;
+              }
+              // Check if scanned matches start of stored barcode
+              const storedStart = storedBarcodeNormalized.slice(0, scannedNormalized.length);
+              if (storedStart === scannedNormalized) {
+                if (__DEV__) logger.debug('✅ Match found: Start substring match in stored barcode');
+                potentialMatches.push({ customer, score: 45, strategy: 'start_substring_stored' });
+                return;
+              }
+            }
+          }
         });
         
         // Sort matches by score (highest first) and return the best match
@@ -629,19 +880,41 @@ export default function ScanCylindersScreen() {
           logger.log('⚠️ Scanned barcode does not match any existing customer');
           
           // Find similar customers with their full info for selection
+          // Find similar customers with their full info for selection
+          // Lower threshold to catch more partial matches
           const similarCustomers = customers
             .filter(customer => customer.CustomerListID)
-            .map(customer => ({
-              customer,
-              barcode: normalizeBarcode(customer.CustomerListID),
-              similarity: calculateSimilarity(
+            .map(customer => {
+              const customerBarcode = normalizeBarcode(customer.CustomerListID);
+              const customerNormalized = normalizeForMatching(customerBarcode);
+              const scannedNorm = normalizeForMatching(scannedBarcode);
+              
+              // Calculate base similarity
+              let similarity = calculateSimilarity(
                 scannedBarcode.toLowerCase(), 
-                normalizeBarcode(customer.CustomerListID).toLowerCase()
-              )
-            }))
-            .filter(item => item.similarity > 0.7) // 70% similarity threshold
+                customerBarcode.toLowerCase()
+              );
+              
+              // Boost similarity if scanned is a substring of customer ID
+              if (customerNormalized.includes(scannedNorm) && scannedNorm.length >= 6) {
+                const substringRatio = scannedNorm.length / customerNormalized.length;
+                similarity = Math.max(similarity, substringRatio * 0.9); // Boost by substring ratio
+              }
+              
+              // Boost if customer ID ends with scanned value (common for partial scans)
+              if (customerNormalized.endsWith(scannedNorm) && scannedNorm.length >= 6) {
+                similarity = Math.max(similarity, 0.75);
+              }
+              
+              return {
+                customer,
+                barcode: customerBarcode,
+                similarity
+              };
+            })
+            .filter(item => item.similarity > 0.5) // Lower threshold: 50% similarity (was 70%)
             .sort((a, b) => b.similarity - a.similarity) // Sort by similarity
-            .slice(0, 3); // Show max 3 suggestions
+            .slice(0, 5); // Show max 5 suggestions (was 3)
           
           // Close the camera scanner immediately to prevent repeated scans
           setShowCustomerScan(false);
@@ -657,8 +930,7 @@ export default function ScanCylindersScreen() {
                 setSearch(item.barcode);
                 setSelectedCustomer(item.customer);
                 
-                // Play success sound when customer is manually selected
-                await feedbackService.scanSuccess(item.barcode);
+                // No sound feedback for customer selection
                 
                 Alert.alert(
                   'Customer Selected',
@@ -683,8 +955,7 @@ export default function ScanCylindersScreen() {
             );
           } else {
             // No similar customers found
-            // Play error sound
-            await feedbackService.scanError('Customer not found');
+            // No sound feedback for customer not found
             
             Alert.alert(
               'Customer Not Found',
@@ -709,8 +980,7 @@ export default function ScanCylindersScreen() {
         setScannerVisible(false);
         setScannerTarget(null);
         
-        // Play success sound and haptic feedback
-        await feedbackService.scanSuccess(data);
+        // No sound feedback for customer scanning
         
         // Show success feedback
         Alert.alert(
@@ -1037,40 +1307,96 @@ export default function ScanCylindersScreen() {
           <CameraView
             style={styles.fullscreenCamera}
             facing="back"
+            enableTorch={flashEnabled}
             barcodeScannerEnabled={scannerEnabled}
-            barcodeScannerSettings={{
-              barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "codabar", "itf14"],
-            }}
-            onBarcodeScanned={({ data }) => {
-              logger.log('📷 BARCODE DETECTED:', data);
-              logger.log('📷 Available customers:', customers.length);
-              logger.log('📷 Customer barcodes:', customers.map(c => c.barcode).filter(Boolean));
+            autofocus="on"
+            zoom={cameraZoom}
+            mode="picture"
+            barcodeScannerSettings={{}}
+            onBarcodeScanned={({ data, bounds }) => {
+              // Check if barcode is within scan area (if bounds are available)
+              if (bounds && !isBarcodeInScanArea(bounds)) {
+                logger.log('📷 Customer barcode outside scan area, ignoring');
+                return;
+              }
+              
+              // Don't process if scanner is disabled or already processing
+              if (!scannerEnabled || scanned) {
+                return;
+              }
               
               const barcode = data.trim();
               if (barcode) {
+                logger.log('📷 BARCODE DETECTED:', barcode);
+                logger.log('📷 Available customers:', customers.length);
                 // Use the main handleBarcodeScanned function to prevent duplicates
                 handleBarcodeScanned({ data: barcode, type: 'camera' });
               }
             }}
           />
           
-          {/* Scan area with border */}
-          <View style={styles.scanArea}>
-            <View style={styles.scanFrame}>
-              <View style={[styles.corner, styles.topLeft]} />
-              <View style={[styles.corner, styles.topRight]} />
-              <View style={[styles.corner, styles.bottomLeft]} />
-              <View style={[styles.corner, styles.bottomRight]} />
-            </View>
+          {/* Camera Overlay - Matching EnhancedScanScreen */}
+          <View
+            style={styles.cameraOverlay}
+            pointerEvents="none"
+          >
+            <View
+              style={styles.scanFrame}
+              pointerEvents="none"
+            />
+            <Text style={styles.scanInstructions} pointerEvents="none">
+              Point camera at customer barcode on receipt
+            </Text>
+            <Text style={styles.scanHint} pointerEvents="none">
+              Hold steady, ensure good lighting
+            </Text>
           </View>
           
-          {/* Close button */}
-          <View style={styles.closeButtonContainer}>
-            <TouchableOpacity 
-              style={styles.closeButton} 
-              onPress={() => setShowCustomerScan(false)}
+          {/* Close Button - Separate from overlay to ensure it works */}
+          <TouchableOpacity
+            style={styles.closeCameraButton}
+            onPress={() => {
+              setShowCustomerScan(false);
+            }}
+          >
+            <Text style={styles.closeCameraText}>✕ Close</Text>
+          </TouchableOpacity>
+
+          {/* Flash Toggle Button */}
+          <TouchableOpacity
+            style={styles.flashButton}
+            onPress={() => {
+              setFlashEnabled(!flashEnabled);
+              feedbackService.quickAction('flash toggled');
+            }}
+          >
+            <Ionicons 
+              name={flashEnabled ? 'flash' : 'flash-off'} 
+              size={28} 
+              color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
+            />
+          </TouchableOpacity>
+
+          {/* Zoom Controls */}
+          <View style={styles.zoomControls}>
+            <TouchableOpacity
+              style={styles.zoomButton}
+              onPress={() => {
+                setCameraZoom(Math.max(0, cameraZoom - 0.1));
+                feedbackService.quickAction('zoom out');
+              }}
             >
-              <Text style={styles.closeButtonText}>Close</Text>
+              <Ionicons name="remove-outline" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+            <Text style={styles.zoomText}>{Math.round(cameraZoom * 100)}%</Text>
+            <TouchableOpacity
+              style={styles.zoomButton}
+              onPress={() => {
+                setCameraZoom(Math.min(1, cameraZoom + 0.1));
+                feedbackService.quickAction('zoom in');
+              }}
+            >
+              <Ionicons name="add-outline" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
         </View>
@@ -1082,10 +1408,9 @@ export default function ScanCylindersScreen() {
           <CameraView
             style={styles.fullscreenCamera}
             facing="back"
+            enableTorch={flashEnabled}
             barcodeScannerEnabled={scannerEnabled}
-            barcodeScannerSettings={{
-              barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "codabar", "itf14"],
-            }}
+            barcodeScannerSettings={{}}
             onBarcodeScanned={({ data, bounds }) => {
               logger.log('📷 Raw order barcode event:', data, 'bounds:', bounds);
               
@@ -1110,6 +1435,21 @@ export default function ScanCylindersScreen() {
             onPress={() => setShowOrderScan(false)}
           >
             <Text style={styles.closeButtonText}>✕ Close</Text>
+          </TouchableOpacity>
+          
+          {/* Flash Toggle Button */}
+          <TouchableOpacity
+            style={styles.flashButton}
+            onPress={() => {
+              setFlashEnabled(!flashEnabled);
+              feedbackService.quickAction('flash toggled');
+            }}
+          >
+            <Ionicons 
+              name={flashEnabled ? 'flash' : 'flash-off'} 
+              size={28} 
+              color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
+            />
           </TouchableOpacity>
         </View>
       )}
@@ -1274,38 +1614,79 @@ const styles = StyleSheet.create({
   },
   scanRectangle: {
     position: 'absolute',
-    top: '40%',
-    left: '7.5%',
-    width: '85%',
-    height: '20%',
+    top: '25%', // Moved up from 40% to camera level
+    left: '50%',
+    transform: [{ translateX: -160 }], // Center 320px width
+    width: 320,
+    height: 150,
     borderWidth: 2,
-    borderColor: '#2563eb',
+    borderColor: '#fff',
+    borderRadius: 8,
     backgroundColor: 'transparent',
   },
   scanAreaOverlay: {
     position: 'absolute',
-    top: '40%',
-    left: '7.5%',
-    width: '85%',
-    height: '20%',
+    top: '25%', // Moved up from 40% to camera level
+    left: '50%',
+    transform: [{ translateX: -160 }], // Center 320px width
+    width: 320,
+    height: 150,
     borderWidth: 2,
-    borderColor: '#2563eb',
+    borderColor: '#fff',
+    borderRadius: 8,
     backgroundColor: 'transparent',
   },
   closeButton: {
     position: 'absolute',
     top: 50,
     right: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 8,
     zIndex: 1000,
   },
   closeButtonText: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#2563eb',
+    color: '#fff',
+  },
+  flashButton: {
+    position: 'absolute',
+    top: 50,
+    right: 100,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 8,
+    zIndex: 1000,
+    width: 52,
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomControls: {
+    position: 'absolute',
+    bottom: 120,
+    right: 20,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 25,
+    padding: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  zoomButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  zoomText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    minWidth: 45,
+    textAlign: 'center',
   },
   cooldownOverlay: {
     position: 'absolute',
@@ -1398,54 +1779,54 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 20,
   },
-  scanArea: {
+  cameraOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
-    justifyContent: 'center',
+    bottom: 120, // Leave space for bottom action buttons
+    justifyContent: 'flex-start',
     alignItems: 'center',
+    paddingTop: 150, // Position scan frame at camera level
   },
   scanFrame: {
-    width: '80%',
-    height: 200,
-    position: 'relative',
+    width: 320,
+    height: 150,
+    borderWidth: 2,
+    borderColor: '#fff',
+    borderRadius: 8,
+    backgroundColor: 'transparent',
   },
-  corner: {
-    position: 'absolute',
-    width: 30,
-    height: 30,
-    borderColor: '#00ff00',
-    borderWidth: 3,
+  scanInstructions: {
+    color: '#fff',
+    fontSize: 16,
+    marginTop: 20,
+    textAlign: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 8,
+    borderRadius: 4,
+    fontWeight: '600',
   },
-  topLeft: {
-    top: 0,
-    left: 0,
-    borderRightWidth: 0,
-    borderBottomWidth: 0,
+  scanHint: {
+    color: '#fff',
+    fontSize: 13,
+    marginTop: 8,
+    textAlign: 'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    padding: 6,
+    borderRadius: 4,
+    fontStyle: 'italic',
   },
-  topRight: {
-    top: 0,
-    right: 0,
-    borderLeftWidth: 0,
-    borderBottomWidth: 0,
-  },
-  bottomLeft: {
-    bottom: 0,
-    left: 0,
-    borderRightWidth: 0,
-    borderTopWidth: 0,
-  },
-  bottomRight: {
-    bottom: 0,
-    right: 0,
-    borderLeftWidth: 0,
-    borderTopWidth: 0,
-  },
-  closeButtonContainer: {
+  closeCameraButton: {
     position: 'absolute',
     top: 50,
     right: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 8,
+  },
+  closeCameraText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
 }); 

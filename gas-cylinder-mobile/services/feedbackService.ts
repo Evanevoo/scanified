@@ -1,9 +1,28 @@
 import logger from '../utils/logger';
-import { AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
 import { customizationService } from './customizationService';
 import { soundService } from './soundService';
+
+// Import expo-av for reliable sound playback on both platforms
+let Audio: any = null;
+try {
+  const avModule = require('expo-av');
+  Audio = avModule.Audio || null;
+  if (Audio) {
+    logger.log('🔊 Successfully imported expo-av Audio for audio playback');
+    // Sound is accessed via Audio.Sound, not as a separate export
+    if (Audio.Sound) {
+      logger.log('🔊 Audio.Sound is available');
+    } else {
+      logger.warn('⚠️ Audio.Sound not available');
+    }
+  } else {
+    logger.warn('⚠️ expo-av Audio not available');
+  }
+} catch (e) {
+  logger.error('❌ Could not import Audio from expo-av:', e);
+}
 
 /**
  * Feedback Service - Provides audio and haptic feedback for user interactions
@@ -35,7 +54,7 @@ class FeedbackService {
     volume: 0.8,
   };
 
-  private sounds: { [key: string]: AudioPlayer | null } = {};
+  private sounds: { [key: string]: any } = {};
   private isInitialized = false;
 
   /**
@@ -48,8 +67,21 @@ class FeedbackService {
       // Initialize customization service
       await customizationService.initialize();
       
-      // Note: expo-audio handles audio session configuration automatically
-      // No need to manually configure audio mode
+      // Configure audio session for iOS to ensure sounds play even in silent mode
+      if (Platform.OS === 'ios' && Audio && Audio.setAudioModeAsync) {
+        try {
+          await Audio.setAudioModeAsync({
+            playsInSilentModeIOS: true,
+            staysActiveInBackground: false,
+            shouldDuckAndroid: true,
+          });
+          logger.log('🔊 iOS audio session configured for playback');
+        } catch (audioError) {
+          logger.warn('⚠️ Could not configure iOS audio session:', audioError);
+        }
+      } else if (Platform.OS === 'ios') {
+        logger.warn('⚠️ Audio API not available for iOS audio session configuration');
+      }
 
       // Preload sound effects
       await this.preloadSounds();
@@ -63,16 +95,30 @@ class FeedbackService {
 
   /**
    * Preload sound effects for better performance
+   * Note: For iOS, we use expo-av Sound which creates sounds on-demand
    */
   private async preloadSounds() {
     logger.log('🔊 Preloading sound files...');
     
+    // For iOS, we don't preload - expo-av Sound creates sounds on-demand
+    if (Platform.OS === 'ios' && Audio?.Sound) {
+      logger.log('🔊 iOS: Using expo-av Sound (on-demand creation)');
+      // Initialize soundService as fallback
+      try {
+        await soundService.initialize();
+      } catch (error) {
+        logger.warn('⚠️ Could not initialize soundService fallback:', error);
+      }
+      return;
+    }
+    
+    // For Android, preload using expo-audio AudioPlayer
     const soundFiles = {
-      success: require('../assets/sounds/scan_success.mp3'), // Store scanner beep sound
+      success: require('../assets/sounds/scan_success.mp3'),
       error: require('../assets/sounds/scan_error.mp3'),
-      duplicate: require('../assets/sounds/scan_duplicate.mp3'), // Duplicate scan sound
+      duplicate: require('../assets/sounds/scan_duplicate.mp3'),
       batch_complete: require('../assets/sounds/sync_success.mp3'),
-      warning: require('../assets/sounds/scan_error.mp3'), // Use error sound for warnings
+      warning: require('../assets/sounds/scan_error.mp3'),
       info: require('../assets/sounds/button_press.mp3'),
       start_batch: require('../assets/sounds/button_press.mp3'),
       quick_action: require('../assets/sounds/button_press.mp3'),
@@ -80,6 +126,8 @@ class FeedbackService {
 
     let loadedCount = 0;
     try {
+      const { AudioPlayer } = require('expo-audio');
+      
       for (const [key, source] of Object.entries(soundFiles)) {
         try {
           const player = new AudioPlayer(source);
@@ -89,14 +137,7 @@ class FeedbackService {
           if (key === 'success') {
             logger.log('🔊 Scanner beep sound loaded successfully');
           }
-          if (key === 'duplicate') {
-            logger.log('🔊 Duplicate scan sound loaded successfully');
-          }
-          if (key === 'batch_complete') {
-            logger.log('🔊 Sync completion sound loaded successfully');
-          }
         } catch (error) {
-          // Silently fail - we'll use fallback sounds
           this.sounds[key] = null;
         }
       }
@@ -105,21 +146,11 @@ class FeedbackService {
         logger.log(`🔊 Loaded ${loadedCount} sound file(s) including scanner beep`);
       } else {
         logger.log('🔊 No MP3 files loaded, will use programmatic sounds');
-        // Initialize soundService as fallback
-        try {
-          await soundService.initialize();
-        } catch (error) {
-          logger.warn('⚠️ Could not initialize soundService fallback:', error);
-        }
+        await soundService.initialize();
       }
     } catch (error) {
       logger.warn('⚠️ Could not preload sounds, using fallback:', error);
-      // Initialize soundService as fallback
-      try {
-        await soundService.initialize();
-      } catch (fallbackError) {
-        logger.warn('⚠️ Could not initialize soundService fallback:', fallbackError);
-      }
+      await soundService.initialize();
     }
   }
 
@@ -178,6 +209,8 @@ class FeedbackService {
    * Play sound effect with customization support
    */
   private async playSound(type: FeedbackType) {
+    logger.log(`🔊 playSound called for type: ${type}, soundEnabled: ${this.settings.soundEnabled}, volume: ${this.settings.volume}`);
+    
     if (!this.settings.soundEnabled) {
       logger.log('🔇 Sound disabled in settings');
       return;
@@ -201,22 +234,111 @@ class FeedbackService {
         logger.log(`⚠️ No sound file found for type: ${type}`);
       } else {
         try {
-          // Create a new player instance for each play to ensure it works
-          const player = new AudioPlayer(soundSource);
-          player.volume = this.settings.volume;
-          player.play();
-          logger.log(`🔊 Playing sound for type: ${type}`);
+          // Use expo-av Sound API for both platforms (more reliable than expo-audio)
+          // Sound is accessed via Audio.Sound, not as a separate export
+          const Sound = Audio?.Sound;
+          logger.log(`🔊 Attempting to play sound: Platform=${Platform.OS}, Audio.Sound available=${!!Sound}, Audio available=${!!Audio}`);
           
-          // Clean up after sound finishes (approximately)
-          setTimeout(() => {
+          if (Sound) {
             try {
-              player.remove();
-            } catch (e) {
-              // Ignore cleanup errors
+              // Configure audio session first
+              if (Audio && Audio.setAudioModeAsync) {
+                await Audio.setAudioModeAsync({
+                  playsInSilentModeIOS: true,
+                  staysActiveInBackground: false,
+                  shouldDuckAndroid: true,
+                });
+                logger.log('🔊 Audio session configured');
+              }
+              
+              // Load and play sound using expo-av Sound
+              logger.log(`🔊 Creating sound for type: ${type} with source:`, soundSource);
+              const { sound } = await Audio.Sound.createAsync(soundSource, {
+                shouldPlay: false, // Load first, then play
+                volume: this.settings.volume,
+                isMuted: false,
+              });
+              
+              logger.log(`🔊 Sound created successfully, playing now...`);
+              
+              // Set playback status update before playing
+              sound.setOnPlaybackStatusUpdate((status: any) => {
+                if (status.isLoaded) {
+                  logger.log(`🔊 Sound status: isPlaying=${status.isPlaying}, didJustFinish=${status.didJustFinish}`);
+                  if (status.didJustFinish) {
+                    sound.unloadAsync().catch(() => {});
+                  }
+                } else if (status.error) {
+                  logger.error(`❌ Sound playback error:`, status.error);
+                }
+              });
+              
+              // Play the sound
+              const playbackStatus = await sound.playAsync();
+              logger.log(`🔊 Sound playAsync called, status:`, playbackStatus);
+              
+              // Verify it's playing
+              const status = await sound.getStatusAsync();
+              logger.log(`🔊 Sound status after play:`, status);
+              
+              // Clean up after sound finishes (approximately 2 seconds for most sounds)
+              setTimeout(async () => {
+                try {
+                  const finalStatus = await sound.getStatusAsync();
+                  logger.log(`🔊 Cleaning up sound, final status:`, finalStatus);
+                  await sound.unloadAsync();
+                } catch (e) {
+                  logger.warn(`⚠️ Error cleaning up sound:`, e);
+                }
+              }, 3000);
+              
+              return;
+            } catch (avError) {
+              logger.error(`❌ Error playing sound with expo-av Sound:`, avError);
+              // Continue to fallback
             }
-          }, 5000);
+          }
           
-          return;
+          // Fallback: Try expo-audio AudioPlayer only on Android (iOS has issues with expo-audio)
+          if (Platform.OS === 'android') {
+            try {
+              const audioModule = require('expo-audio');
+              const AudioPlayer = audioModule.AudioPlayer || audioModule.default?.AudioPlayer;
+              
+              if (!AudioPlayer) {
+                throw new Error('AudioPlayer not found in expo-audio module');
+              }
+              
+              // Configure audio session for Android
+              if (Audio && Audio.setAudioModeAsync) {
+                await Audio.setAudioModeAsync({
+                  playsInSilentModeIOS: true,
+                  staysActiveInBackground: false,
+                  shouldDuckAndroid: true,
+                });
+              }
+              
+              const player = new AudioPlayer(soundSource);
+              player.volume = this.settings.volume;
+              player.play();
+              logger.log(`🔊 Playing sound for type: ${type} on Android using expo-audio, volume: ${this.settings.volume}`);
+              
+              setTimeout(() => {
+                try {
+                  player.remove();
+                } catch (e) {
+                  // Ignore cleanup errors
+                }
+            }, 5000);
+            
+            return;
+          } catch (audioError) {
+            logger.error(`❌ Error playing sound with expo-audio:`, audioError);
+            // Continue to next fallback
+          }
+        } else {
+          logger.warn('⚠️ Skipping expo-audio fallback on iOS (use expo-av instead)');
+        }
         } catch (playError) {
           logger.warn(`⚠️ Error creating/playing sound ${type}:`, playError);
           // Continue to fallback
@@ -302,8 +424,10 @@ class FeedbackService {
     // Play haptic feedback
     await this.playHaptic(type);
 
-    // Play sound effect
-    await this.playSound(type);
+    // Play sound effect (skip sound for duplicate scans)
+    if (type !== 'duplicate') {
+      await this.playSound(type);
+    }
 
     // Provide voice feedback
     if (this.settings.voiceEnabled) {
@@ -385,7 +509,18 @@ class FeedbackService {
     try {
       for (const sound of Object.values(this.sounds)) {
         if (sound) {
-          sound.remove();
+          try {
+            // Handle expo-av Sound (has unloadAsync)
+            if (sound.unloadAsync) {
+              await sound.unloadAsync();
+            } 
+            // Handle expo-audio AudioPlayer (has remove)
+            else if (sound.remove) {
+              sound.remove();
+            }
+          } catch (e) {
+            // Ignore cleanup errors
+          }
         }
       }
       this.sounds = {};

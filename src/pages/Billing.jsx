@@ -305,8 +305,17 @@ export default function Billing() {
         .order('price', { ascending: true });
 
       if (plansError) throw plansError;
-      logger.log('Loaded subscription plans:', plansData);
-      setPlans(plansData);
+      
+      // Normalize unlimited values in plans: null, undefined, or >= 999999 should be -1
+      const normalizedPlans = (plansData || []).map(plan => ({
+        ...plan,
+        max_users: plan.max_users === null || plan.max_users === undefined || plan.max_users >= 999999 ? -1 : plan.max_users,
+        max_cylinders: plan.max_cylinders === null || plan.max_cylinders === undefined || plan.max_cylinders >= 999999 ? -1 : plan.max_cylinders,
+        max_customers: plan.max_customers === null || plan.max_customers === undefined || plan.max_customers >= 999999 ? -1 : plan.max_customers
+      }));
+      
+      logger.log('Loaded subscription plans:', normalizedPlans);
+      setPlans(normalizedPlans);
 
       // Load current subscription
       const { data: subData, error: subError } = await supabase
@@ -587,15 +596,21 @@ export default function Billing() {
         if (paymentIntent.status === 'succeeded') {
           logger.log('Payment successful, updating database...');
           // Payment successful, now update the database
+          // Normalize unlimited values: null, undefined, or >= 999999 should be -1
+          const normalizeLimit = (limit) => {
+            if (limit === null || limit === undefined || limit >= 999999) return -1;
+            return limit;
+          };
+
           const { error: updateError } = await supabase
             .from('organizations')
             .update({ 
               subscription_plan_id: selectedPlan.id,
               subscription_status: 'active',
               subscription_start_date: new Date().toISOString(),
-              max_users: selectedPlan.max_users,
-              max_cylinders: selectedPlan.max_cylinders,
-              max_customers: selectedPlan.max_customers,
+              max_users: normalizeLimit(selectedPlan.max_users),
+              max_cylinders: normalizeLimit(selectedPlan.max_cylinders),
+              max_customers: normalizeLimit(selectedPlan.max_customers),
               stripe_customer_id: paymentIntent.customer || organization.stripe_customer_id
             })
             .eq('id', organization.id);
@@ -630,15 +645,21 @@ export default function Billing() {
       // Free plan - allow direct upgrade
       setUpgrading(true);
       try {
+        // Normalize unlimited values: null, undefined, or >= 999999 should be -1
+        const normalizeLimit = (limit) => {
+          if (limit === null || limit === undefined || limit >= 999999) return -1;
+          return limit;
+        };
+
         const { error } = await supabase
           .from('organizations')
           .update({ 
             subscription_plan_id: selectedPlan.id,
             subscription_status: 'active',
             subscription_start_date: new Date().toISOString(),
-            max_users: selectedPlan.max_users,
-            max_cylinders: selectedPlan.max_cylinders,
-            max_customers: selectedPlan.max_customers
+            max_users: normalizeLimit(selectedPlan.max_users),
+            max_cylinders: normalizeLimit(selectedPlan.max_cylinders),
+            max_customers: normalizeLimit(selectedPlan.max_customers)
           })
           .eq('id', organization.id);
 
@@ -722,15 +743,21 @@ export default function Billing() {
     if (!organization) return;
     setUpgrading(true);
     try {
+      // Normalize unlimited values: null, undefined, or >= 999999 should be -1
+      const normalizeLimit = (limit) => {
+        if (limit === null || limit === undefined || limit >= 999999) return -1;
+        return limit;
+      };
+
       const { error } = await supabase
         .from('organizations')
         .update({
           subscription_plan_id: plan.id,
           subscription_status: 'active',
           subscription_start_date: new Date().toISOString(),
-          max_users: plan.max_users,
-          max_cylinders: plan.max_cylinders,
-          max_customers: plan.max_customers
+          max_users: normalizeLimit(plan.max_users),
+          max_cylinders: normalizeLimit(plan.max_cylinders),
+          max_customers: normalizeLimit(plan.max_customers)
         })
         .eq('id', organization.id);
       if (error) throw error;
@@ -985,7 +1012,7 @@ export default function Billing() {
   const isOnTrial = subscription?.subscription_status === 'trial';
 
   return (
-    <Box maxWidth="lg" mx="auto" mt={8} mb={4}>
+    <Box sx={{ width: '100%', mt: 8, mb: 4, px: 3 }}>
       <Paper elevation={3} sx={{ p: 4, borderRadius: 4, bgcolor: 'background.default' }}>
         <Stack direction="row" alignItems="center" spacing={2} mb={4}>
           <IconButton color="primary" onClick={() => navigate('/settings')}>

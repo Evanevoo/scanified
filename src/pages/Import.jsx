@@ -148,16 +148,7 @@ export default function Import() {
     return null;
   }
 
-  const handleFileChange = async e => {
-    // Verify user is still authenticated before processing file
-    const currentUser = await getCurrentUser();
-    if (!currentUser) {
-      logger.error('User not authenticated during file selection');
-      setError('Session expired. Please refresh the page and try again.');
-      e.target.value = ''; // Clear file input
-      return;
-    }
-    
+  const handleFileChange = e => {
     setFile(e.target.files[0]);
     setRawRows([]);
     setColumns([]);
@@ -1035,11 +1026,20 @@ export default function Import() {
       
       if (customerRow && !seenInBatch.has(customerId)) {
         logger.log(`Customer ${customerId} will be created for this organization`);
+        // Determine location from city or use default
+        const city = (customerRow.city || customerRow.City || '').trim().toUpperCase();
+        let location = 'SASKATOON'; // Default
+        if (city.includes('REGINA')) location = 'REGINA';
+        else if (city.includes('CHILLIWACK')) location = 'CHILLIWACK';
+        else if (city.includes('PRINCE GEORGE') || city.includes('PRINCE_GEORGE')) location = 'PRINCE_GEORGE';
+        else if (city.includes('SASKATOON')) location = 'SASKATOON';
+        
         customersToCreate.push({
           CustomerListID: customerRow.customer_id, // Use original case
           name: customerRow.customer_name || `Customer ${customerRow.customer_id}`,
           barcode: `*%${(customerRow.customer_id || '').toLowerCase().replace(/\s+/g, '')}*`,
           customer_barcode: `*%${(customerRow.customer_id || '').toLowerCase().replace(/\s+/g, '')}*`,
+          location: location,
           organization_id: userProfile.organization_id // Explicitly set organization_id
         });
         seenInBatch.add(customerId);
@@ -1210,11 +1210,20 @@ export default function Import() {
             continue;
           }
           
+          // Determine location from city or use default
+          const city = (row.city || row.City || '').trim().toUpperCase();
+          let location = 'SASKATOON'; // Default
+          if (city.includes('REGINA')) location = 'REGINA';
+          else if (city.includes('CHILLIWACK')) location = 'CHILLIWACK';
+          else if (city.includes('PRINCE GEORGE') || city.includes('PRINCE_GEORGE')) location = 'PRINCE_GEORGE';
+          else if (city.includes('SASKATOON')) location = 'SASKATOON';
+          
           newCustomers.push({
             CustomerListID: customerId,
             name: row.customer_name.trim(),
             barcode: `*%${customerIdLower.replace(/\s+/g, '')}*`,
             customer_barcode: `*%${customerIdLower.replace(/\s+/g, '')}*`,
+            location: location,
             organization_id: userProfile.organization_id // Explicitly set organization_id
           });
           seenInChunk.add(customerIdLower);
@@ -1745,11 +1754,11 @@ export default function Import() {
                 <div>Your import has been submitted and is awaiting approval by an administrator.</div>
                 <div>Total rows: {result.total_rows}</div>
                 <div className="mt-2 text-sm">
-                  You can check the status of your import in the <strong>Verification Center</strong> page.
+                  You can check the status of your import in the <strong>Import Approvals</strong> page.
                 </div>
                 <div className="mt-3">
-                  <a href="/verification-center" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
-                    Go to Verification Center
+                  <a href="/import-approvals" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
+                    Go to Import Approvals
                   </a>
                 </div>
               </>

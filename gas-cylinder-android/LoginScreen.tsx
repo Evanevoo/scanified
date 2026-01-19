@@ -98,7 +98,9 @@ export default function LoginScreen() {
 
   const validateForm = (): boolean => {
     const emailValidation = ValidationSchemas.login.email(email);
-    const passwordValidation = ValidationSchemas.login.password(password);
+    // Use simple validation for login - existing users may have weak passwords
+    // Strong password validation is enforced on signup/password change
+    const passwordValidation = ValidationSchemas.login.passwordSimple(password);
     
     setEmailError(emailValidation.errors[0] || '');
     setPasswordError(passwordValidation.errors[0] || '');
@@ -340,11 +342,11 @@ export default function LoginScreen() {
               </Text>
             </Text>
             <View style={styles.legalLinks}>
-              <TouchableOpacity onPress={() => Linking.openURL('https://yourdomain.com/terms')}>
+              <TouchableOpacity onPress={() => Linking.openURL('https://www.scanified.com/terms')}>
                 <Text style={styles.legalLink}>Terms</Text>
               </TouchableOpacity>
               <Text style={styles.legalSeparator}>•</Text>
-              <TouchableOpacity onPress={() => Linking.openURL('https://yourdomain.com/privacy')}>
+              <TouchableOpacity onPress={() => Linking.openURL('https://www.scanified.com/privacy')}>
                 <Text style={styles.legalLink}>Privacy</Text>
               </TouchableOpacity>
             </View>

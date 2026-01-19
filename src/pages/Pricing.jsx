@@ -79,7 +79,7 @@ const pricingPlans = [
     monthlyPrice: 149,
     yearlyPrice: 119,
     icon: <TrendingUpIcon />,
-    color: '#3B82F6',
+    color: '#000000',
     popular: true,
     features: [
       { text: 'Up to 1,000 assets', included: true },
@@ -225,8 +225,7 @@ export default function Pricing() {
       {/* Header */}
       <Box sx={{ 
         bgcolor: 'white', 
-        borderBottom: 1, 
-        borderColor: 'divider',
+        borderBottom: '2px solid #000000',
         position: 'sticky',
         top: 0,
         zIndex: 1000
@@ -241,7 +240,7 @@ export default function Pricing() {
             <Typography 
               variant="h5" 
               fontWeight={700} 
-              sx={{ color: '#3B82F6', cursor: 'pointer' }}
+              sx={{ color: '#000000', cursor: 'pointer' }}
               onClick={() => navigate('/')}
             >
               Scanified
@@ -251,14 +250,34 @@ export default function Pricing() {
               <Button 
                 variant="outlined" 
                 onClick={() => navigate('/demo')}
-                sx={{ textTransform: 'none', fontWeight: 600 }}
+                sx={{ 
+                  textTransform: 'none', 
+                  fontWeight: 600,
+                  border: '2px solid #000000',
+                  color: '#000000',
+                  '&:hover': {
+                    backgroundColor: '#000000',
+                    color: '#FFFFFF',
+                    borderColor: '#000000'
+                  }
+                }}
               >
                 Try Demo
               </Button>
               <Button 
                 variant="contained" 
-                onClick={() => navigate('/register')}
-                sx={{ textTransform: 'none', fontWeight: 600 }}
+                onClick={() => navigate('/create-organization')}
+                sx={{ 
+                  textTransform: 'none', 
+                  fontWeight: 600,
+                  backgroundColor: '#000000',
+                  color: '#FFFFFF',
+                  border: '2px solid #000000',
+                  '&:hover': {
+                    backgroundColor: '#1F2937',
+                    borderColor: '#1F2937'
+                  }
+                }}
               >
                 Start Free Trial
               </Button>
@@ -269,18 +288,18 @@ export default function Pricing() {
 
       {/* Hero Section */}
       <Box sx={{ 
-        background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+        backgroundColor: '#F9FAFB',
         py: 10
       }}>
         <Container maxWidth="lg">
           <Box sx={{ textAlign: 'center' }}>
             <Fade in timeout={1000}>
-              <Typography variant="h2" fontWeight={800} sx={{ mb: 3 }}>
+              <Typography variant="h2" fontWeight={800} sx={{ mb: 3, color: '#000000' }}>
                 Simple, Transparent Pricing
               </Typography>
             </Fade>
             <Fade in timeout={1500}>
-              <Typography variant="h5" color="text.secondary" sx={{ mb: 6, maxWidth: 600, mx: 'auto' }}>
+              <Typography variant="h5" sx={{ mb: 6, maxWidth: 600, mx: 'auto', color: '#6B7280' }}>
                 Choose the perfect plan for your business. No hidden fees, no surprises.
               </Typography>
             </Fade>
@@ -288,7 +307,10 @@ export default function Pricing() {
             {/* Billing Toggle */}
             <Fade in timeout={2000}>
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 2 }}>
-                <Typography variant="body1" sx={{ fontWeight: billingPeriod === 'monthly' ? 600 : 400 }}>
+                <Typography variant="body1" sx={{ 
+                  fontWeight: billingPeriod === 'monthly' ? 700 : 400,
+                  color: billingPeriod === 'monthly' ? '#000000' : '#6B7280'
+                }}>
                   Monthly
                 </Typography>
                 <FormControlLabel
@@ -296,20 +318,34 @@ export default function Pricing() {
                     <Switch 
                       checked={billingPeriod === 'yearly'} 
                       onChange={handleBillingToggle}
-                      color="primary"
+                      sx={{
+                        '& .MuiSwitch-switchBase.Mui-checked': {
+                          color: '#000000',
+                        },
+                        '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                          backgroundColor: '#000000',
+                        },
+                      }}
                     />
                   }
                   label=""
                 />
                 <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography variant="body1" sx={{ fontWeight: billingPeriod === 'yearly' ? 600 : 400 }}>
+                  <Typography variant="body1" sx={{ 
+                    fontWeight: billingPeriod === 'yearly' ? 700 : 400,
+                    color: billingPeriod === 'yearly' ? '#000000' : '#6B7280'
+                  }}>
                     Yearly
                   </Typography>
                   <Chip 
                     label="Save 20%" 
                     size="small" 
-                    color="success"
-                    sx={{ fontWeight: 600 }}
+                    sx={{ 
+                      fontWeight: 700,
+                      backgroundColor: '#000000',
+                      color: '#FFFFFF',
+                      border: '2px solid #000000'
+                    }}
                   />
                 </Stack>
               </Box>
@@ -329,11 +365,11 @@ export default function Pricing() {
                     height: '100%',
                     position: 'relative',
                     transition: 'all 0.3s ease',
-                    border: plan.popular ? '2px solid' : '1px solid',
-                    borderColor: plan.popular ? plan.color : 'divider',
+                    border: '2px solid #000000',
+                    borderRadius: '8px',
                     '&:hover': {
                       transform: 'translateY(-8px)',
-                      boxShadow: '0 20px 40px rgba(0, 0, 0, 0.1)'
+                      boxShadow: '0 20px 40px rgba(0, 0, 0, 0.2)'
                     }
                   }}
                 >
@@ -343,13 +379,14 @@ export default function Pricing() {
                       top: -12,
                       left: '50%',
                       transform: 'translateX(-50%)',
-                      bgcolor: plan.color,
-                      color: 'white',
+                      bgcolor: '#000000',
+                      color: '#FFFFFF',
                       px: 3,
                       py: 0.5,
                       borderRadius: 2,
                       fontSize: '0.875rem',
-                      fontWeight: 600
+                      fontWeight: 700,
+                      border: '2px solid #000000'
                     }}>
                       MOST POPULAR
                     </Box>
@@ -362,26 +399,26 @@ export default function Pricing() {
                         display: 'inline-flex',
                         p: 2,
                         borderRadius: 2,
-                        bgcolor: `${plan.color}20`,
-                        color: plan.color,
+                        bgcolor: '#000000',
+                        color: '#FFFFFF',
                         mb: 2
                       }}>
                         {plan.icon}
                       </Box>
-                      <Typography variant="h4" fontWeight={700} gutterBottom>
+                      <Typography variant="h4" fontWeight={700} gutterBottom sx={{ color: '#000000' }}>
                         {plan.name}
                       </Typography>
-                      <Typography color="text.secondary" sx={{ mb: 3 }}>
+                      <Typography sx={{ color: '#6B7280', mb: 3 }}>
                         {plan.description}
                       </Typography>
                       
                       {/* Price */}
                       <Box sx={{ my: 3 }}>
-                        <Typography variant="h3" fontWeight={800} color={plan.color}>
+                        <Typography variant="h3" fontWeight={800} sx={{ color: '#000000' }}>
                           {getPriceLabel(plan)}
                         </Typography>
                         {plan.monthlyPrice !== 'Custom' && (
-                          <Typography variant="body2" color="text.secondary">
+                          <Typography variant="body2" sx={{ color: '#6B7280' }}>
                             {billingPeriod === 'yearly' ? 'per month, billed annually' : 'billed monthly'}
                           </Typography>
                         )}
@@ -392,16 +429,17 @@ export default function Pricing() {
                         variant={plan.popular ? 'contained' : 'outlined'}
                         fullWidth
                         size="large"
-                        onClick={() => plan.id === 'enterprise' ? navigate('/contact') : navigate('/register')}
+                        onClick={() => plan.id === 'enterprise' ? navigate('/contact') : navigate('/create-organization')}
                         sx={{ 
                           mb: 3,
                           fontWeight: 600,
-                          bgcolor: plan.popular ? plan.color : 'transparent',
-                          borderColor: plan.color,
-                          color: plan.popular ? 'white' : plan.color,
+                          backgroundColor: plan.popular ? '#000000' : 'transparent',
+                          border: '2px solid #000000',
+                          color: plan.popular ? '#FFFFFF' : '#000000',
                           '&:hover': {
-                            bgcolor: plan.popular ? plan.color : `${plan.color}10`,
-                            borderColor: plan.color
+                            backgroundColor: plan.popular ? '#1F2937' : '#000000',
+                            borderColor: '#000000',
+                            color: '#FFFFFF'
                           }
                         }}
                       >
@@ -416,13 +454,18 @@ export default function Pricing() {
                             label={highlight}
                             size="small"
                             variant="outlined"
-                            sx={{ borderColor: `${plan.color}50` }}
+                            sx={{ 
+                              borderColor: '#000000',
+                              borderWidth: '2px',
+                              color: '#000000',
+                              fontWeight: 600
+                            }}
                           />
                         ))}
                       </Stack>
                     </Box>
 
-                    <Divider sx={{ my: 3 }} />
+                    <Divider sx={{ my: 3, borderColor: '#E5E7EB' }} />
 
                     {/* Features List */}
                     <List dense>
@@ -430,18 +473,18 @@ export default function Pricing() {
                         <ListItem key={idx} sx={{ px: 0 }}>
                           <ListItemIcon sx={{ minWidth: 32 }}>
                             {feature.included ? (
-                              <CheckIcon sx={{ fontSize: 20, color: plan.color }} />
+                              <CheckIcon sx={{ fontSize: 20, color: '#000000' }} />
                             ) : (
-                              <CloseIcon sx={{ fontSize: 20, color: 'text.disabled' }} />
+                              <CloseIcon sx={{ fontSize: 20, color: '#9CA3AF' }} />
                             )}
                           </ListItemIcon>
                           <ListItemText 
                             primary={feature.text}
                             primaryTypographyProps={{ 
                               sx: { 
-                                color: feature.included ? 'text.primary' : 'text.disabled',
+                                color: feature.included ? '#374151' : '#9CA3AF',
                                 textDecoration: feature.included ? 'none' : 'line-through'
-                              }
+                              } 
                             }}
                           />
                         </ListItem>
@@ -456,24 +499,29 @@ export default function Pricing() {
 
         {/* Additional Features */}
         <Box sx={{ mt: 12 }}>
-          <Typography variant="h4" fontWeight={700} sx={{ textAlign: 'center', mb: 6 }}>
+          <Typography variant="h4" fontWeight={700} sx={{ textAlign: 'center', mb: 6, color: '#000000' }}>
             Everything You Need to Succeed
           </Typography>
           
           <Grid container spacing={4}>
             {additionalFeatures.map((category, index) => (
               <Grid item xs={12} md={4} key={index}>
-                <Paper sx={{ p: 4, height: '100%' }}>
+                <Paper sx={{ 
+                  p: 4, 
+                  height: '100%',
+                  border: '2px solid #000000',
+                  borderRadius: '8px'
+                }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
                     <Box sx={{
                       p: 1.5,
                       borderRadius: 2,
-                      bgcolor: 'primary.main',
-                      color: 'white'
+                      bgcolor: '#000000',
+                      color: '#FFFFFF'
                     }}>
                       {category.icon}
                     </Box>
-                    <Typography variant="h6" fontWeight={600}>
+                    <Typography variant="h6" fontWeight={700} sx={{ color: '#000000' }}>
                       {category.category}
                     </Typography>
                   </Box>
@@ -482,11 +530,11 @@ export default function Pricing() {
                     {category.features.map((feature, idx) => (
                       <ListItem key={idx} sx={{ px: 0 }}>
                         <ListItemIcon sx={{ minWidth: 28 }}>
-                          <CheckIcon sx={{ fontSize: 18, color: 'success.main' }} />
+                          <CheckIcon sx={{ fontSize: 18, color: '#000000' }} />
                         </ListItemIcon>
                         <ListItemText 
                           primary={feature}
-                          primaryTypographyProps={{ variant: 'body2' }}
+                          primaryTypographyProps={{ variant: 'body2', sx: { color: '#374151' } }}
                         />
                       </ListItem>
                     ))}
@@ -501,16 +549,17 @@ export default function Pricing() {
         <Box sx={{ 
           mt: 12, 
           p: 6, 
-          borderRadius: 4,
-          background: 'linear-gradient(135deg, #7C3AED 0%, #6366F1 100%)',
-          color: 'white'
+          borderRadius: '8px',
+          backgroundColor: '#000000',
+          color: 'white',
+          border: '2px solid #000000'
         }}>
           <Grid container spacing={4} alignItems="center">
             <Grid item xs={12} md={6}>
-              <Typography variant="h3" fontWeight={700} sx={{ mb: 3 }}>
+              <Typography variant="h3" fontWeight={700} sx={{ mb: 3, color: '#FFFFFF' }}>
                 Need a Custom Solution?
               </Typography>
-              <Typography variant="h6" sx={{ mb: 4, opacity: 0.9 }}>
+              <Typography variant="h6" sx={{ mb: 4, color: '#E5E7EB' }}>
                 Our Enterprise plan can be tailored to meet your specific needs, 
                 no matter how complex your requirements are.
               </Typography>
@@ -519,32 +568,32 @@ export default function Pricing() {
                 <Grid item xs={12} sm={6}>
                   <Stack spacing={2}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CheckIcon />
-                      <Typography>Unlimited everything</Typography>
+                      <CheckIcon sx={{ color: '#FFFFFF' }} />
+                      <Typography sx={{ color: '#FFFFFF' }}>Unlimited everything</Typography>
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CheckIcon />
-                      <Typography>Custom integrations</Typography>
+                      <CheckIcon sx={{ color: '#FFFFFF' }} />
+                      <Typography sx={{ color: '#FFFFFF' }}>Custom integrations</Typography>
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CheckIcon />
-                      <Typography>Dedicated infrastructure</Typography>
+                      <CheckIcon sx={{ color: '#FFFFFF' }} />
+                      <Typography sx={{ color: '#FFFFFF' }}>Dedicated infrastructure</Typography>
                     </Box>
                   </Stack>
                 </Grid>
                 <Grid item xs={12} sm={6}>
                   <Stack spacing={2}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CheckIcon />
-                      <Typography>White labeling</Typography>
+                      <CheckIcon sx={{ color: '#FFFFFF' }} />
+                      <Typography sx={{ color: '#FFFFFF' }}>White labeling</Typography>
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CheckIcon />
-                      <Typography>On-premise option</Typography>
+                      <CheckIcon sx={{ color: '#FFFFFF' }} />
+                      <Typography sx={{ color: '#FFFFFF' }}>On-premise option</Typography>
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CheckIcon />
-                      <Typography>Priority development</Typography>
+                      <CheckIcon sx={{ color: '#FFFFFF' }} />
+                      <Typography sx={{ color: '#FFFFFF' }}>Priority development</Typography>
                     </Box>
                   </Stack>
                 </Grid>
@@ -557,28 +606,30 @@ export default function Pricing() {
                 size="large"
                 onClick={() => navigate('/contact')}
                 sx={{ 
-                  bgcolor: 'white',
-                  color: '#7C3AED',
+                  bgcolor: '#FFFFFF',
+                  color: '#000000',
                   px: 6,
                   py: 2,
                   fontSize: '1.1rem',
                   fontWeight: 600,
+                  border: '2px solid #FFFFFF',
                   '&:hover': { 
-                    bgcolor: '#f8fafc'
+                    bgcolor: '#F3F4F6',
+                    borderColor: '#F3F4F6'
                   }
                 }}
               >
                 Contact Sales Team
               </Button>
               
-              <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 3 }}>
+              <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 3, flexWrap: 'wrap' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <EmailIcon />
-                  <Typography variant="body2">enterprise@scanified.com</Typography>
+                  <EmailIcon sx={{ color: '#FFFFFF' }} />
+                  <Typography variant="body2" sx={{ color: '#FFFFFF' }}>enterprise@scanified.com</Typography>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <PhoneIcon />
-                  <Typography variant="body2">1-800-SCANIFY</Typography>
+                  <PhoneIcon sx={{ color: '#FFFFFF' }} />
+                  <Typography variant="body2" sx={{ color: '#FFFFFF' }}>1-800-SCANIFY</Typography>
                 </Box>
               </Box>
             </Grid>
@@ -587,7 +638,7 @@ export default function Pricing() {
 
         {/* FAQ Section */}
         <Box sx={{ mt: 12 }}>
-          <Typography variant="h4" fontWeight={700} sx={{ textAlign: 'center', mb: 6 }}>
+          <Typography variant="h4" fontWeight={700} sx={{ textAlign: 'center', mb: 6, color: '#000000' }}>
             Frequently Asked Questions
           </Typography>
           
@@ -597,13 +648,27 @@ export default function Pricing() {
                 key={index}
                 expanded={expandedFaq === `panel${index}`} 
                 onChange={handleFaqChange(`panel${index}`)}
-                sx={{ mb: 2 }}
+                sx={{ 
+                  mb: 2,
+                  border: '2px solid #000000',
+                  borderRadius: '8px !important',
+                  '&:before': {
+                    display: 'none'
+                  }
+                }}
               >
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Typography variant="h6">{faq.question}</Typography>
+                <AccordionSummary 
+                  expandIcon={<ExpandMoreIcon sx={{ color: '#000000' }} />}
+                  sx={{
+                    '& .MuiAccordionSummary-content': {
+                      my: 2
+                    }
+                  }}
+                >
+                  <Typography variant="h6" sx={{ color: '#000000', fontWeight: 600 }}>{faq.question}</Typography>
                 </AccordionSummary>
                 <AccordionDetails>
-                  <Typography>{faq.answer}</Typography>
+                  <Typography sx={{ color: '#374151' }}>{faq.answer}</Typography>
                 </AccordionDetails>
               </Accordion>
             ))}

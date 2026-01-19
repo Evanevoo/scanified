@@ -1,7 +1,27 @@
 import logger from '../utils/logger';
-import { Audio } from 'expo-av';
+import { AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Try to import Audio for iOS audio session configuration from expo-av
+let Audio: any = null;
+try {
+  // Try expo-av first (has Audio.setAudioModeAsync)
+  const avModule = require('expo-av');
+  Audio = avModule.Audio || null;
+  if (Audio) {
+    logger.log('🔊 Using expo-av Audio for iOS audio session configuration');
+  }
+} catch (e) {
+  // Fallback: try expo-audio
+  try {
+    const audioModule = require('expo-audio');
+    Audio = audioModule.Audio || audioModule.default?.Audio || null;
+  } catch (e2) {
+    logger.warn('⚠️ Could not import Audio from expo-av or expo-audio');
+  }
+}
 
 export interface SoundSettings {
   soundEnabled: boolean;
@@ -10,7 +30,7 @@ export interface SoundSettings {
 
 class SoundService {
   private static instance: SoundService;
-  private soundCache: Map<string, Audio.Sound> = new Map();
+  private soundCache: Map<string, AudioPlayer> = new Map();
   private settings: SoundSettings = {
     soundEnabled: true,
     hapticFeedback: true,
@@ -25,6 +45,22 @@ class SoundService {
 
   async initialize(): Promise<void> {
     try {
+      // Configure audio session for iOS to ensure sounds play even in silent mode
+      if (Platform.OS === 'ios' && Audio && Audio.setAudioModeAsync) {
+        try {
+          await Audio.setAudioModeAsync({
+            playsInSilentModeIOS: true,
+            staysActiveInBackground: false,
+            shouldDuckAndroid: true,
+          });
+          logger.log('🔊 iOS audio session configured for playback');
+        } catch (audioError) {
+          logger.warn('⚠️ Could not configure iOS audio session:', audioError);
+        }
+      } else if (Platform.OS === 'ios') {
+        logger.warn('⚠️ Audio API not available for iOS audio session configuration');
+      }
+      
       await this.loadSettings();
       await this.preloadSounds();
       logger.log('🔊 SoundService initialized');
@@ -65,11 +101,8 @@ class SoundService {
 
       for (const [id, source] of Object.entries(soundFiles)) {
         try {
-          const { sound } = await Audio.Sound.createAsync(source, {
-            shouldPlay: false,
-            isLooping: false,
-            volume: 0.7,
-          });
+          const sound = new AudioPlayer(source);
+          sound.volume = 0.7;
           
           this.soundCache.set(id, sound);
           logger.log(`🔊 Loaded sound: ${id}`);
@@ -87,14 +120,32 @@ class SoundService {
   async playSound(type: 'scan' | 'error' | 'duplicate' | 'notification' | 'action'): Promise<void> {
     try {
       if (this.settings.soundEnabled) {
+        // Ensure audio session is configured on iOS before playing
+        if (Platform.OS === 'ios' && Audio && Audio.setAudioModeAsync) {
+          try {
+            await Audio.setAudioModeAsync({
+              playsInSilentModeIOS: true,
+              staysActiveInBackground: false,
+              shouldDuckAndroid: true,
+            });
+          } catch (audioError) {
+            logger.warn('⚠️ Could not configure audio session before play:', audioError);
+          }
+        }
+        
         const soundId = this.getSoundId(type);
         const sound = this.soundCache.get(soundId);
         
         if (sound) {
-          // Reset position to start and play
-          await sound.setPositionAsync(0);
-          await sound.playAsync();
-          logger.log(`🔊 Played sound: ${type}`);
+          // For iOS, ensure the player is ready before playing
+          if (Platform.OS === 'ios') {
+            // Small delay to ensure player is initialized
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+          
+          // Play the sound (expo-audio AudioPlayer automatically resets to start)
+          sound.play();
+          logger.log(`🔊 Played sound: ${type} on ${Platform.OS}`);
         } else {
           logger.log(`🔊 Sound not available, using haptic: ${type}`);
           await this.playHaptic(type);
@@ -162,9 +213,9 @@ class SoundService {
   async cleanup(): Promise<void> {
     for (const [id, sound] of this.soundCache) {
       try {
-        await sound.unloadAsync();
+        sound.remove();
       } catch (error) {
-        logger.warn(`Failed to unload sound ${id}:`, error);
+        logger.warn(`Failed to remove sound ${id}:`, error);
       }
     }
     this.soundCache.clear();
