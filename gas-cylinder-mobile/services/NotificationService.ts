@@ -1,6 +1,7 @@
 import logger from '../utils/logger';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { supabase } from '../supabase';
 
@@ -49,9 +50,18 @@ export class NotificationService {
     }
 
     try {
+      // Skip push token registration in Expo Go (SDK 53+ doesn't support remote push)
+      if (Constants.appOwnership === 'expo') {
+        logger.log('📱 Running in Expo Go - skipping remote push setup');
+        logger.log('ℹ️  Local notifications still work. Use a development build for full push support.');
+        this.isInitialized = true;
+        return;
+      }
+
       // Check if device supports push notifications
       if (!Device.isDevice) {
         logger.log('Must use physical device for Push Notifications');
+        this.isInitialized = true;
         return;
       }
 
@@ -66,16 +76,29 @@ export class NotificationService {
 
       if (finalStatus !== 'granted') {
         logger.log('Failed to get push token for push notification!');
+        this.isInitialized = true;
         return;
       }
 
-      // Get the push token
-      const token = await Notifications.getExpoPushTokenAsync({
-        projectId: 'd71ec042-1fec-4186-ac3b-0ae85a6af345',
-      });
+      // Get the push token - wrap in try-catch to handle SDK 53+ Expo Go limitation
+      try {
+        const token = await Notifications.getExpoPushTokenAsync({
+          projectId: 'd71ec042-1fec-4186-ac3b-0ae85a6af345',
+        });
 
-      this.expoPushToken = token.data;
-      logger.log('Expo push token:', this.expoPushToken);
+        this.expoPushToken = token.data;
+        logger.log('Expo push token:', this.expoPushToken);
+      } catch (tokenError: any) {
+        // Handle SDK 53+ Expo Go limitation gracefully
+        if (tokenError?.message?.includes('removed from Expo Go') || 
+            tokenError?.message?.includes('development build')) {
+          logger.log('📱 Remote push notifications not available in Expo Go (SDK 53+)');
+          logger.log('ℹ️  Local notifications still work. Use a development build for full push support.');
+        } else {
+          logger.error('Error getting push token:', tokenError);
+        }
+        // Continue initialization even if push token fails - local notifications still work
+      }
 
       // Configure notification categories
       await this.setupNotificationCategories();
@@ -86,6 +109,7 @@ export class NotificationService {
       this.isInitialized = true;
     } catch (error) {
       logger.error('Error initializing notification service:', error);
+      this.isInitialized = true; // Mark as initialized to prevent retry loops
     }
   }
 

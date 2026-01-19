@@ -280,57 +280,47 @@ export default function WebScanning() {
     }
 
     // Process based on scan mode
-    // NOTE: Bottles are NOT assigned/unassigned here - only scan records are created
-    // Assignment happens later in Verification Center after approval
+    let updateData = {};
     let message = '';
 
     switch (mode) {
       case 'delivery':
-        // Just record the scan - assignment happens in Verification Center
-        message = `Scan recorded for delivery to ${customerInfo?.name || 'customer'}`;
+        updateData = {
+          status: 'delivered',
+          location: customerInfo?.name || 'Customer Location',
+          assigned_customer: customerInfo?.id || null,
+        };
+        message = `Delivered to ${customerInfo?.name || 'customer'}`;
         break;
 
       case 'pickup':
-        // Just record the scan - unassignment happens in Verification Center
-        message = 'Scan recorded for pickup';
+        updateData = {
+          status: 'picked_up',
+          location: 'In Transit',
+          assigned_customer: null,
+        };
+        message = 'Picked up from customer';
         break;
 
       case 'audit':
-        // Audit scans can update the bottle directly (non-assignment update)
-        const { error: auditUpdateError } = await supabase
-          .from('bottles')
-          .update({
-            last_audited: new Date().toISOString(),
-            audit_location: location ? `${location.latitude},${location.longitude}` : null,
-          })
-          .eq('id', asset.id)
-          .eq('organization_id', profile.organization_id);
-        
-        if (auditUpdateError) {
-          logger.warn('Failed to update audit info:', auditUpdateError);
-        }
+        updateData = {
+          last_audited: new Date().toISOString(),
+          audit_location: location ? `${location.latitude},${location.longitude}` : null,
+        };
         message = 'Audit scan completed';
         break;
 
       case 'maintenance':
-        // Maintenance scans can update the bottle directly (non-assignment update)
-        const { error: maintenanceUpdateError } = await supabase
-          .from('bottles')
-          .update({
-            status: 'maintenance',
-            last_maintenance: new Date().toISOString(),
-          })
-          .eq('id', asset.id)
-          .eq('organization_id', profile.organization_id);
-        
-        if (maintenanceUpdateError) {
-          logger.warn('Failed to update maintenance info:', maintenanceUpdateError);
-        }
+        updateData = {
+          status: 'maintenance',
+          last_maintenance: new Date().toISOString(),
+        };
         message = 'Marked for maintenance';
         break;
 
       case 'locate':
-        // Just record location scan
+        // Just update location for locate
+        updateData = {};
         message = `Located at ${asset.location || 'Unknown location'}`;
         break;
 
@@ -338,31 +328,54 @@ export default function WebScanning() {
         throw new Error('Invalid scan mode');
     }
 
-    // Create scan record (always done, regardless of mode)
+    // Update asset in database
     if (isOnline) {
-      // Create scan record - this is what will be used for verification
+      // SECURITY: Double-check organization_id to prevent cross-organization updates
+      const { error: updateError } = await supabase
+        .from('bottles')
+        .update(updateData)
+        .eq('id', asset.id)
+        .eq('organization_id', profile.organization_id);
+
+      if (updateError) {
+        throw new Error('Failed to update asset');
+      }
+
+      // Create scan record - using same fields as mobile app for sync
+      // Map web mode to mobile mode format
+      const modeMap = {
+        'delivery': 'SHIP',
+        'pickup': 'RETURN',
+        'audit': 'AUDIT',
+        'maintenance': 'MAINTENANCE',
+        'locate': 'LOCATE'
+      };
+      const mappedMode = modeMap[mode] || mode.toUpperCase();
+      
       const { error: scanError } = await supabase
         .from('bottle_scans')
         .insert({
           bottle_barcode: barcode,
-          scan_type: mode,
-          mode: mode === 'delivery' ? 'SHIP' : mode === 'pickup' ? 'RETURN' : mode.toUpperCase(),
+          mode: mappedMode, // Use 'mode' to match mobile app
           customer_id: customerInfo?.id,
+          customer_name: customerInfo?.name || null, // Add customer_name for mobile sync
           location: location ? `${location.latitude},${location.longitude}` : null,
-          notes: proofOfDelivery.notes,
           user_id: profile.id,
-          organization_id: profile.organization_id
+          organization_id: profile.organization_id,
+          order_number: deliveryInfo?.orderNumber || null, // Add order_number for grouping
+          timestamp: new Date().toISOString(), // Add timestamp for sync
+          created_at: new Date().toISOString()
         });
 
       if (scanError) {
         logger.warn('Failed to create scan record:', scanError);
-        throw new Error('Failed to create scan record');
       }
     } else {
-      // Queue for offline sync (no updateData - we don't update bottles on scan)
+      // Queue for offline sync
       setOfflineQueue(prev => [...prev, {
         barcode,
         mode,
+        updateData,
         timestamp: new Date().toISOString(),
         customerInfo,
         location,
@@ -406,17 +419,28 @@ export default function WebScanning() {
           continue;
         }
 
-        // Create scan record
+        // Create scan record - using same fields as mobile app for sync
+        const modeMap = {
+          'delivery': 'SHIP',
+          'pickup': 'RETURN',
+          'audit': 'AUDIT',
+          'maintenance': 'MAINTENANCE',
+          'locate': 'LOCATE'
+        };
+        const mappedMode = modeMap[queuedScan.mode] || queuedScan.mode.toUpperCase();
+        
         const { error: scanError } = await supabase
           .from('bottle_scans')
           .insert({
             bottle_barcode: queuedScan.barcode,
-            scan_type: queuedScan.mode,
+            mode: mappedMode, // Use 'mode' to match mobile app
             customer_id: queuedScan.customerInfo?.id,
+            customer_name: queuedScan.customerInfo?.name || null, // Add customer_name
             location: queuedScan.location ? `${queuedScan.location.latitude},${queuedScan.location.longitude}` : null,
-            notes: queuedScan.notes,
             user_id: profile.id,
             organization_id: profile.organization_id,
+            order_number: queuedScan.orderNumber || null, // Add order_number
+            timestamp: queuedScan.timestamp,
             created_at: queuedScan.timestamp
           });
 

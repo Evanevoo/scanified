@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box,
   Typography, TextField, FormControlLabel, Checkbox, Alert,
-  CircularProgress, Grid, IconButton, Chip
+  CircularProgress, Grid, IconButton, Chip, FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import { 
   Email as EmailIcon, 
@@ -29,10 +29,12 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
     period_end: new Date().toISOString().split('T')[0],
     send_email: true,
     email: customer?.email || '',
+    sender_email: '', // Selected sender email
     custom_message: '',
     territory: '',
     purchase_order: ''
   });
+  const [invoiceEmails, setInvoiceEmails] = useState([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [locationTaxRate, setLocationTaxRate] = useState(null);
@@ -71,6 +73,59 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
       } catch (error) {
         logger.error('Error loading invoice template:', error);
       }
+
+      // Load invoice emails from organization
+      const loadInvoiceEmails = async () => {
+        try {
+          const { data: orgData, error: orgError } = await supabase
+            .from('organizations')
+            .select('invoice_emails, default_invoice_email, email')
+            .eq('id', organization.id)
+            .single();
+
+          if (!orgError && orgData) {
+            // Get invoice emails array, fallback to organization.email if empty
+            let emails = [];
+            if (orgData.invoice_emails && Array.isArray(orgData.invoice_emails)) {
+              emails = orgData.invoice_emails;
+            } else if (orgData.email) {
+              emails = [orgData.email];
+            }
+            
+            // Also include user email and profile email as options
+            const allEmails = new Set(emails);
+            if (user?.email) allEmails.add(user.email);
+            if (profile?.email) allEmails.add(profile.email);
+            if (orgData.email) allEmails.add(orgData.email);
+            
+            const emailList = Array.from(allEmails).filter(Boolean);
+            setInvoiceEmails(emailList);
+            
+            // Set default sender email
+            const defaultEmail = orgData.default_invoice_email || 
+                                 orgData.email || 
+                                 user?.email || 
+                                 profile?.email || 
+                                 emailList[0] || '';
+            
+            setFormData(prev => ({
+              ...prev,
+              sender_email: defaultEmail
+            }));
+          }
+        } catch (error) {
+          logger.error('Error loading invoice emails:', error);
+          // Fallback to user/profile/organization email
+          const fallbackEmail = user?.email || profile?.email || organization?.email || '';
+          setInvoiceEmails(fallbackEmail ? [fallbackEmail] : []);
+          setFormData(prev => ({
+            ...prev,
+            sender_email: fallbackEmail
+          }));
+        }
+      };
+
+      loadInvoiceEmails();
 
       // Pre-populate customer email and address
       if (customer) {
@@ -1633,15 +1688,15 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
         
-        // Get the current user's email from Supabase auth to ensure we always have it
-        let senderEmail = user?.email || profile?.email || organization?.email;
+        // Use the selected sender email from form, with fallback
+        let senderEmail = formData.sender_email || user?.email || profile?.email || organization?.email;
         if (!senderEmail) {
           const { data: { user: authUser } } = await supabase.auth.getUser();
           senderEmail = authUser?.email;
         }
         
         if (!senderEmail) {
-          throw new Error('Unable to determine sender email. Please ensure you are logged in.');
+          throw new Error('Unable to determine sender email. Please select a sender email address.');
         }
         
         // Log request details (without full PDF base64)
@@ -1938,6 +1993,26 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
                     helperText={customer.email ? "Email from customer profile. Will be saved if changed." : "Email will be saved to customer profile."}
                     required
                   />
+                </Grid>
+                
+                <Grid item xs={12}>
+                  <FormControl fullWidth>
+                    <InputLabel>Send From Email</InputLabel>
+                    <Select
+                      value={formData.sender_email || ''}
+                      onChange={(e) => setFormData({ ...formData, sender_email: e.target.value })}
+                      label="Send From Email"
+                    >
+                      {invoiceEmails.map((email) => (
+                        <MenuItem key={email} value={email}>
+                          {email}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                    Select which email address will send the invoice. Manage invoice emails in Settings.
+                  </Typography>
                 </Grid>
                 
                 <Grid item xs={12}>

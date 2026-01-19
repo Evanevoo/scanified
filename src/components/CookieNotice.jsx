@@ -37,14 +37,22 @@ export default function CookieNotice() {
 
   // Check if user has already made a choice
   useEffect(() => {
-    const cookieConsent = localStorage.getItem('cookieConsent');
-    if (!cookieConsent) {
-      // Show banner after a short delay
+    try {
+      const cookieConsent = localStorage.getItem('cookieConsent');
+      if (!cookieConsent) {
+        // Show banner after a short delay
+        setTimeout(() => setShowBanner(true), 2000);
+      } else {
+        // Load saved preferences
+        const savedPreferences = JSON.parse(cookieConsent);
+        setPreferences(savedPreferences);
+        // Don't show banner if preferences are already saved
+        setShowBanner(false);
+      }
+    } catch (error) {
+      console.error('Error reading cookie consent:', error);
+      // If there's an error, show the banner
       setTimeout(() => setShowBanner(true), 2000);
-    } else {
-      // Load saved preferences
-      const savedPreferences = JSON.parse(cookieConsent);
-      setPreferences(savedPreferences);
     }
   }, []);
 

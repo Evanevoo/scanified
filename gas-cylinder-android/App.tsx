@@ -2,8 +2,28 @@ import React from 'react';
 import { View, Text, StyleSheet, LogBox } from 'react-native';
 
 // Silence known, harmless development warnings in Expo Go - MUST BE FIRST
+// Only suppress specific warnings that are not actionable, keep errors visible
 if (__DEV__) {
-  LogBox.ignoreAllLogs(true); // Suppress all logs in development for cleaner console
+  LogBox.ignoreLogs([
+    // React Navigation warnings
+    'Non-serializable values were found in the navigation state',
+    'Sending `onAnimatedValueUpdate` with no listeners registered',
+    // Expo warnings
+    'Constants.platform.ios.model has been deprecated',
+    'AsyncStorage has been extracted from react-native',
+    // Worklets warnings (camera/video)
+    'Worklet',
+    '[react-native-reanimated]',
+    // Metro bundler warnings
+    'Remote debugger is in a background tab',
+    // Common harmless warnings
+    'VirtualizedLists should never be nested',
+    'Possible Unhandled Promise Rejection',
+    'Setting a timer for a long period',
+    // Supabase/Network warnings
+    'Network request failed',
+    'Unable to resolve host',
+  ]);
 }
 
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -42,6 +62,7 @@ import { notificationService } from './services/NotificationService';
 import { soundService } from './services/soundService';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import UpdateModal from './components/UpdateModal';
+import SessionTimeoutWarning from './components/SessionTimeoutWarning';
 
 const Stack = createNativeStackNavigator();
 
@@ -78,7 +99,17 @@ const styles = StyleSheet.create({
 });
 
 function AppContent() {
-  const { user, profile, organization, loading, organizationLoading, authError } = useAuth();
+  const { 
+    user, 
+    profile, 
+    organization, 
+    loading, 
+    organizationLoading, 
+    authError,
+    sessionTimeoutWarning,
+    updateActivity,
+    signOut 
+  } = useAuth();
   const { updateInfo, openUpdateUrl } = useAppUpdate();
   const [showUpdateModal, setShowUpdateModal] = React.useState(false);
 
@@ -101,6 +132,15 @@ function AppContent() {
       soundService.initialize();
     }
   }, [user, profile]);
+
+  // Handle session timeout warning actions
+  const handleExtendSession = React.useCallback(() => {
+    updateActivity();
+  }, [updateActivity]);
+
+  const handleLogout = React.useCallback(async () => {
+    await signOut();
+  }, [signOut]);
   
   if (loading) {
     return <LoadingScreen />;
@@ -276,6 +316,14 @@ function AppContent() {
         }
       }}
       onDismiss={updateInfo?.isRequired ? undefined : () => setShowUpdateModal(false)}
+    />
+    
+    {/* Session Timeout Warning */}
+    <SessionTimeoutWarning
+      visible={sessionTimeoutWarning}
+      onExtendSession={handleExtendSession}
+      onLogout={handleLogout}
+      timeoutSeconds={120}
     />
     </>
   );

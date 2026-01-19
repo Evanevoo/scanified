@@ -80,13 +80,25 @@ export class NotificationService {
         return;
       }
 
-      // Get the push token
-      const token = await Notifications.getExpoPushTokenAsync({
-        projectId: 'd71ec042-1fec-4186-ac3b-0ae85a6af345',
-      });
+      // Get the push token - wrap in try-catch to handle SDK 53+ Expo Go limitation
+      try {
+        const token = await Notifications.getExpoPushTokenAsync({
+          projectId: 'd71ec042-1fec-4186-ac3b-0ae85a6af345',
+        });
 
-      this.expoPushToken = token.data;
-      logger.log('Expo push token:', this.expoPushToken);
+        this.expoPushToken = token.data;
+        logger.log('Expo push token:', this.expoPushToken);
+      } catch (tokenError: any) {
+        // Handle SDK 53+ Expo Go limitation gracefully
+        if (tokenError?.message?.includes('removed from Expo Go') || 
+            tokenError?.message?.includes('development build')) {
+          logger.log('📱 Remote push notifications not available in Expo Go (SDK 53+)');
+          logger.log('ℹ️  Local notifications still work. Use a development build for full push support.');
+        } else {
+          logger.error('Error getting push token:', tokenError);
+        }
+        // Continue initialization even if push token fails - local notifications still work
+      }
 
       // Configure notification categories
       await this.setupNotificationCategories();

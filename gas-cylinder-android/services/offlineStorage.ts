@@ -208,13 +208,14 @@ export class OfflineStorageService {
       .from('bottle_scans')
       .insert([{
         organization_id: operation.organizationId || null,
-        barcode_number: operation.data.barcode_number,
-        action: operation.data.action,
+        bottle_barcode: operation.data.barcode_number,
+        mode: operation.data.action === 'out' ? 'SHIP' : operation.data.action === 'in' ? 'RETURN' : operation.data.action?.toUpperCase() || 'SHIP',
         location: operation.data.location || null,
-        scanned_by: operation.userId || null,
+        user_id: operation.userId || null,
         order_number: operation.data.order_number || null,
         customer_name: operation.data.customer_name || null,
-        customer_id: operation.data.customer_id || null
+        customer_id: operation.data.customer_id || null,
+        product_code: operation.data.product_code || null // Include product_code for unclassified detection
       }]);
 
     if (error) {

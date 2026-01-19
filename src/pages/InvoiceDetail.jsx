@@ -32,7 +32,7 @@ export default function InvoiceDetail() {
   }, [id]);
 
   return (
-    <Box sx={{ maxWidth: { xs: '100%', md: 1400 }, mx: 'auto', mt: 6, p: 2 }}>
+    <Box maxWidth="sm" mx="auto" mt={6}>
       <Paper elevation={4} sx={{ p: 4, borderRadius: 3 }}>
         <Button variant="outlined" onClick={() => navigate(-1)} sx={{ mb: 3 }}>
           ← Back

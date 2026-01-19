@@ -1,6 +1,5 @@
 import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
-import { usageService } from './usageService';
 
 // Cache for subscription plans to avoid repeated database calls
 let cachedPlans = null;
@@ -206,26 +205,14 @@ export const subscriptionService = {
   },
 
   async getOrganizationUsage(organizationId) {
-    // Use usageService which calculates usage from actual data
-    // instead of querying a non-existent organization_usage table
-    try {
-      const usage = await usageService.getOrganizationUsage(organizationId);
-      // Transform to match expected format for backward compatibility
-      return {
-        current_users: usage.users.current,
-        max_users: usage.users.max,
-        user_usage_percent: usage.users.percentage,
-        current_customers: usage.customers.current,
-        max_customers: usage.customers.max,
-        customer_usage_percent: usage.customers.percentage,
-        current_bottles: usage.bottles.current,
-        max_bottles: usage.bottles.max,
-        bottle_usage_percent: usage.bottles.percentage
-      };
-    } catch (error) {
-      logger.error('Error getting organization usage:', error);
-      throw error;
-    }
+    const { data, error } = await supabase
+      .from('organization_usage')
+      .select('*')
+      .eq('id', organizationId)
+      .single();
+    
+    if (error) throw error;
+    return data;
   },
 
   async checkOrganizationLimits(organizationId, resourceType) {

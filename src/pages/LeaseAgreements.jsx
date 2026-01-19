@@ -387,33 +387,15 @@ export default function LeaseAgreements() {
     const start = new Date(startDate);
     const end = new Date(endDate);
     const now = new Date();
-    now.setHours(0, 0, 0, 0); // Reset to start of day for accurate comparison
 
-    // If start date is in the past (retroactive), only bill for remaining period from today forward
+    // If start date is in the past (retroactive)
     if (start < now) {
-      // For yearly rentals, calculate remaining months of the current year
-      // Use today as the billing start date (not the original start date)
-      const billingStartDate = new Date(now);
-      
-      // For annual billing, calculate from today to end of year (or end date, whichever comes first)
-      let billingEndDate;
-      if (billingFrequency === 'annual') {
-        // End of current year
-        billingEndDate = new Date(now.getFullYear(), 11, 31); // December 31 of current year
-        // If end date is before end of year, use end date
-        if (end < billingEndDate) {
-          billingEndDate = new Date(end);
-        }
-      } else {
-        // For other frequencies, use the end date
-        billingEndDate = new Date(end);
-      }
-
-      // Calculate days remaining from today to billing end date
-      const daysRemaining = Math.ceil((billingEndDate - billingStartDate) / (1000 * 60 * 60 * 24)) + 1;
+      // Calculate how many billing periods have passed
+      const daysPassed = Math.floor((now - start) / (1000 * 60 * 60 * 24));
+      const daysInYear = 365;
       
       let periodAmount = annualAmount;
-      let periodDays = 365;
+      let periodDays = daysInYear;
 
       switch (billingFrequency) {
         case 'monthly':
@@ -434,50 +416,16 @@ export default function LeaseAgreements() {
           break;
       }
 
-      // Calculate pro-rated amount for remaining period
-      // For annual: calculate remaining months of the year from today
-      let proRatedAmount = 0;
-      if (billingFrequency === 'annual') {
-        // Calculate remaining days from today to end of year, then convert to months
-        const endOfYear = new Date(now.getFullYear(), 11, 31); // December 31
-        const daysRemainingInYear = Math.ceil((endOfYear - now) / (1000 * 60 * 60 * 24)) + 1;
-        const daysInYear = 365;
-        const monthlyAmount = annualAmount / 12;
-        // Calculate months (including partial month)
-        const monthsRemaining = (daysRemainingInYear / daysInYear) * 12;
-        proRatedAmount = monthsRemaining * monthlyAmount;
-      } else {
-        // For other frequencies, calculate based on days
-        proRatedAmount = (daysRemaining / periodDays) * periodAmount;
-      }
-
-      // Calculate next billing date (start of next year for annual)
-      let nextBillingDate = new Date(billingStartDate);
-      if (billingFrequency === 'annual') {
-        nextBillingDate = new Date(now.getFullYear() + 1, 0, 1); // January 1 of next year
-      } else {
-        // Inline calculation for other frequencies
-        switch (billingFrequency) {
-          case 'monthly':
-            nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
-            break;
-          case 'quarterly':
-            nextBillingDate.setMonth(nextBillingDate.getMonth() + 3);
-            break;
-          case 'semi-annual':
-            nextBillingDate.setMonth(nextBillingDate.getMonth() + 6);
-            break;
-          default:
-            nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
-        }
-      }
+      // Calculate number of periods passed and remaining amount
+      const periodsPassed = Math.floor(daysPassed / periodDays);
+      const remainingDaysInPeriod = daysPassed % periodDays;
+      const proRatedAmount = (periodsPassed * periodAmount) + ((remainingDaysInPeriod / periodDays) * periodAmount);
 
       return {
         isRetroactive: true,
         proRatedAmount: Math.round(proRatedAmount * 100) / 100,
-        periodsPassed: 0, // Not billing for past periods
-        message: `This is a retroactive agreement. The customer should be billed ${formatCurrency(proRatedAmount)} for the remaining period from ${billingStartDate.toLocaleDateString()} to ${billingEndDate.toLocaleDateString()}.`,
-        nextBillingDate: nextBillingDate
+        periodsPassed: periodsPassed,
+        message: `This is a retroactive agreement. The customer should be billed ${formatCurrency(proRatedAmount)} for the period from ${start.toLocaleDateString()} to ${now.toLocaleDateString()}.`
       };
     }
 
@@ -837,7 +785,7 @@ export default function LeaseAgreements() {
                 <Alert severity="warning" sx={{ mb: 2 }}>
                   <strong>Retroactive Agreement Detected</strong><br/>
                   {retroactiveBilling.message}<br/>
-                  <strong>Next regular billing will occur on: {retroactiveBilling.nextBillingDate ? retroactiveBilling.nextBillingDate.toLocaleDateString() : (formData.start_date ? calculateNextBillingDate(new Date(formData.start_date), formData.billing_frequency).toLocaleDateString() : 'N/A')}</strong>
+                  <strong>Next regular billing will occur on: {formData.start_date ? calculateNextBillingDate(new Date(formData.start_date), formData.billing_frequency).toLocaleDateString() : 'N/A'}</strong>
                 </Alert>
               )}
               <Grid container spacing={2}>

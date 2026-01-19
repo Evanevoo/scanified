@@ -136,6 +136,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [customizationSettings, setCustomizationSettings] = useState<any>(null);
   const [lastScannedItemDetails, setLastScannedItemDetails] = useState<any>(null);
+  const [flashEnabled, setFlashEnabled] = useState(false);
   const lastScanRef = useRef<number>(0);
   const cameraContainerRef = useRef<any>(null);
   const scanFrameRef = useRef<any>(null);
@@ -688,12 +689,28 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     // Show what was scanned for feedback
     setLastScanAttempt(data);
     
-    // Validate cylinder serial number format first
-    const serialValidation = validateCylinderSerial(data);
-    if (!serialValidation.isValid) {
-      logger.log('📷 Barcode scanned but invalid format:', serialValidation.scannedValue);
-      logger.log('📷 Validation error:', serialValidation.error);
-      setScanFeedback(`❌ ${serialValidation.error}`);
+    // Check if this is a sales receipt barcode (starts with %) or packing slip (9 digits)
+    let validationResult: { isValid: boolean; error?: string; scannedValue?: string };
+    
+    if (data.trim().startsWith('%')) {
+      // Sales receipt format - use barcode format validation
+      logger.log('📷 Detected sales receipt barcode format (starts with %)');
+      const barcodeValidation = await validateBarcodeFormat(data);
+      validationResult = {
+        isValid: barcodeValidation.isValid,
+        error: barcodeValidation.error,
+        scannedValue: data.trim()
+      };
+    } else {
+      // Packing slip format - use cylinder serial validation (9 digits)
+      logger.log('📷 Detected packing slip barcode format (9 digits)');
+      validationResult = validateCylinderSerial(data);
+    }
+    
+    if (!validationResult.isValid) {
+      logger.log('📷 Barcode scanned but invalid format:', validationResult.scannedValue);
+      logger.log('📷 Validation error:', validationResult.error);
+      setScanFeedback(`❌ ${validationResult.error}`);
       
       // Clear feedback after 3 seconds
       setTimeout(() => {
@@ -702,7 +719,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       }, 3000);
       
       // Provide error feedback
-      await feedbackService.scanError(serialValidation.error || 'Invalid barcode format');
+      await feedbackService.scanError(validationResult.error || 'Invalid barcode format');
       processingBarcodesRef.current.delete(data);
       return;
     }
@@ -2275,6 +2292,8 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           >
             <CameraView
               style={[StyleSheet.absoluteFill, styles.camera]}
+              enableTorch={flashEnabled}
+              barcodeScannerSettings={{}}
               onBarcodeScanned={({ data, bounds }: BarcodeScanningResult) => {
                 const now = Date.now();
                 
@@ -2367,6 +2386,21 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
             }}
           >
             <Text style={styles.closeCameraText}>✕ Close</Text>
+          </TouchableOpacity>
+
+          {/* Flash Toggle Button */}
+          <TouchableOpacity
+            style={styles.flashButton}
+            onPress={() => {
+              setFlashEnabled(!flashEnabled);
+              feedbackService.quickAction('flash toggled');
+            }}
+          >
+            <Ionicons 
+              name={flashEnabled ? 'flash' : 'flash-off'} 
+              size={28} 
+              color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
+            />
           </TouchableOpacity>
 
           {/* Bottom Action Buttons - Matching Image Design */}
@@ -3044,8 +3078,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 120, // Leave space for bottom action buttons
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     alignItems: 'center',
+    paddingTop: 150, // Position scan frame at camera level
   },
   scanFrame: {
     width: 320,
@@ -3119,6 +3154,19 @@ const styles = StyleSheet.create({
   closeCameraText: {
     color: '#fff',
     fontWeight: 'bold',
+  },
+  flashButton: {
+    position: 'absolute',
+    top: 50,
+    right: 100,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 8,
+    zIndex: 1000,
+    width: 52,
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   permissionContainer: {
     flex: 1,

@@ -37,9 +37,7 @@ const CameraTest = () => {
         facing="back"
         onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
         barcodeScannerEnabled={true}
-        barcodeScannerSettings={{
-          barcodeTypes: ['qr', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 'code128']
-        }}
+        barcodeScannerSettings={{}}
       />
       <View style={styles.overlay}>
         <Text style={styles.instruction}>Point camera at barcode</Text>

@@ -57,7 +57,8 @@ export default function MainLayout({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { isDarkMode } = useTheme();
-  const { can } = usePermissions();
+  const permissions = usePermissions();
+  const { can } = permissions || { can: () => false };
   const { isOwner } = useOwnerAccess();
   const isOwnerPortal = profile?.role === 'owner' && location.pathname.startsWith('/owner-portal');
 

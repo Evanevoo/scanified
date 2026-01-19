@@ -227,18 +227,33 @@ export default function ContactUs() {
   if (submitted) {
     return (
       <Container maxWidth="md" sx={{ py: 8 }}>
-        <Card sx={{ p: 6, textAlign: 'center' }}>
-          <Typography variant="h4" fontWeight={600} sx={{ mb: 3, color: '#10B981' }}>
+        <Card sx={{ 
+          p: 6, 
+          textAlign: 'center',
+          border: '2px solid #000000',
+          borderRadius: '8px'
+        }}>
+          <Typography variant="h4" fontWeight={700} sx={{ mb: 3, color: '#000000' }}>
             {contactConfig.successMessage.title}
           </Typography>
-          <Typography variant="body1" sx={{ mb: 4, lineHeight: 1.6 }}>
+          <Typography variant="body1" sx={{ mb: 4, lineHeight: 1.6, color: '#374151' }}>
             {contactConfig.successMessage.message}
           </Typography>
           <Button
             variant="contained"
             size="large"
             onClick={() => window.location.href = '/'}
-            sx={{ textTransform: 'none', fontWeight: 600 }}
+            sx={{ 
+              textTransform: 'none', 
+              fontWeight: 600,
+              backgroundColor: '#000000',
+              color: '#FFFFFF',
+              border: '2px solid #000000',
+              '&:hover': {
+                backgroundColor: '#1F2937',
+                borderColor: '#1F2937'
+              }
+            }}
           >
             {contactConfig.successMessage.buttonText}
           </Button>
@@ -248,7 +263,7 @@ export default function ContactUs() {
   }
 
   return (
-    <Box sx={{ bgcolor: 'grey.50', minHeight: '100vh', py: 8 }}>
+    <Box sx={{ bgcolor: '#FFFFFF', minHeight: '100vh', py: 8 }}>
       <Container maxWidth="lg">
         {/* Navigation */}
         <Box sx={{ mb: 4 }}>
@@ -287,10 +302,10 @@ export default function ContactUs() {
 
         {/* Header */}
         <Box sx={{ textAlign: 'center', mb: 8 }}>
-          <Typography variant="h2" fontWeight={700} sx={{ mb: 3 }}>
+          <Typography variant="h2" fontWeight={700} sx={{ mb: 3, color: '#000000' }}>
             {contactConfig.header.title}
           </Typography>
-          <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto' }}>
+          <Typography variant="h6" sx={{ maxWidth: 600, mx: 'auto', color: '#6B7280' }}>
             {contactConfig.header.subtitle}
           </Typography>
         </Box>
@@ -298,7 +313,7 @@ export default function ContactUs() {
         <Grid container spacing={6}>
           {/* Contact Methods */}
           <Grid item xs={12} md={4}>
-            <Typography variant="h5" fontWeight={600} sx={{ mb: 4 }}>
+            <Typography variant="h5" fontWeight={700} sx={{ mb: 4, color: '#000000' }}>
               Contact Methods
             </Typography>
 
@@ -306,35 +321,39 @@ export default function ContactUs() {
               {enabledContactMethods.map((method, index) => {
                 const IconComponent = iconMap[method.icon] || BusinessIcon;
                 return (
-                  <Card key={index} sx={{ p: 3, border: '1px solid #e2e8f0' }}>
+                  <Card key={index} sx={{ 
+                    p: 3, 
+                    border: '2px solid #000000',
+                    borderRadius: '8px'
+                  }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                      <IconComponent sx={{ fontSize: 40, color: '#3B82F6' }} />
-                      <Typography variant="h6" fontWeight={600} sx={{ ml: 2 }}>
+                      <IconComponent sx={{ fontSize: 40, color: '#000000' }} />
+                      <Typography variant="h6" fontWeight={700} sx={{ ml: 2, color: '#000000' }}>
                         {method.title}
                       </Typography>
                     </Box>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    <Typography variant="body2" sx={{ mb: 2, color: '#6B7280' }}>
                       {method.description}
                     </Typography>
-                    <Typography variant="body2" fontWeight={600}>
+                    <Typography variant="body2" fontWeight={600} sx={{ color: '#000000' }}>
                       <a 
                         href={`tel:${method.contact}`} 
                         onClick={() => handlePhoneClick(method.contact)}
-                        style={{ textDecoration: 'none', color: 'inherit' }}
+                        style={{ textDecoration: 'none', color: '#000000' }}
                       >
                         📞 {method.contact}
                       </a>
                     </Typography>
-                    <Typography variant="body2" fontWeight={600}>
+                    <Typography variant="body2" fontWeight={600} sx={{ color: '#000000' }}>
                       <a 
                         href={`mailto:${method.email}`}
                         onClick={() => handleEmailClick(method.email)}
-                        style={{ textDecoration: 'none', color: 'inherit' }}
+                        style={{ textDecoration: 'none', color: '#000000' }}
                       >
                         ✉️ {method.email}
                       </a>
                     </Typography>
-                    <Typography variant="body2" color="text.secondary">
+                    <Typography variant="body2" sx={{ color: '#6B7280' }}>
                       🕒 {method.hours}
                     </Typography>
                   </Card>
@@ -343,29 +362,34 @@ export default function ContactUs() {
             </Stack>
 
             {/* Company Information */}
-            <Card sx={{ p: 3, mt: 4, border: '1px solid #e2e8f0' }}>
-              <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
+            <Card sx={{ 
+              p: 3, 
+              mt: 4, 
+              border: '2px solid #000000',
+              borderRadius: '8px'
+            }}>
+              <Typography variant="h6" fontWeight={700} sx={{ mb: 2, color: '#000000' }}>
                 Company Information
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                <LocationIcon sx={{ mr: 2, color: '#3B82F6' }} />
+                <LocationIcon sx={{ mr: 2, color: '#000000' }} />
                 <Box>
-                  <Typography variant="body2" fontWeight={600}>
+                  <Typography variant="body2" fontWeight={700} sx={{ color: '#000000' }}>
                     {contactConfig.companyInfo.name}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" sx={{ color: '#6B7280' }}>
                     {contactConfig.companyInfo.address.street}<br />
                     {contactConfig.companyInfo.address.city}
                   </Typography>
                 </Box>
               </Box>
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <BusinessIcon sx={{ mr: 2, color: '#10B981' }} />
+                <BusinessIcon sx={{ mr: 2, color: '#000000' }} />
                 <Box>
-                  <Typography variant="body2" fontWeight={600}>
+                  <Typography variant="body2" fontWeight={700} sx={{ color: '#000000' }}>
                     Business Hours
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" sx={{ color: '#6B7280' }}>
                     {contactConfig.companyInfo.businessHours.weekdays}<br />
                     {contactConfig.companyInfo.businessHours.saturday}<br />
                     {contactConfig.companyInfo.businessHours.sunday}
@@ -378,8 +402,12 @@ export default function ContactUs() {
           {/* Contact Form */}
           {contactConfig.form.enabled && (
             <Grid item xs={12} md={8}>
-              <Card sx={{ p: 4 }}>
-                <Typography variant="h5" fontWeight={600} sx={{ mb: 4 }}>
+              <Card sx={{ 
+                p: 4,
+                border: '2px solid #000000',
+                borderRadius: '8px'
+              }}>
+                <Typography variant="h5" fontWeight={700} sx={{ mb: 4, color: '#000000' }}>
                   {contactConfig.form.title}
                 </Typography>
                 
@@ -387,7 +415,7 @@ export default function ContactUs() {
                   <Grid container spacing={3}>
                     {/* Basic Information */}
                     <Grid item xs={12}>
-                      <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
+                      <Typography variant="h6" fontWeight={700} sx={{ mb: 2, color: '#000000' }}>
                         Contact Information
                       </Typography>
                     </Grid>
@@ -499,8 +527,8 @@ export default function ContactUs() {
 
                     {/* Inquiry Details */}
                     <Grid item xs={12}>
-                      <Divider sx={{ my: 2 }} />
-                      <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
+                      <Divider sx={{ my: 2, borderColor: '#E5E7EB' }} />
+                      <Typography variant="h6" fontWeight={700} sx={{ mb: 2, color: '#000000' }}>
                         Inquiry Details
                       </Typography>
                     </Grid>
@@ -569,8 +597,8 @@ export default function ContactUs() {
 
                     {/* Preferences */}
                     <Grid item xs={12}>
-                      <Divider sx={{ my: 2 }} />
-                      <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
+                      <Divider sx={{ my: 2, borderColor: '#E5E7EB' }} />
+                      <Typography variant="h6" fontWeight={700} sx={{ mb: 2, color: '#000000' }}>
                         Communication Preferences
                       </Typography>
                     </Grid>
@@ -612,7 +640,18 @@ export default function ContactUs() {
                           py: 2,
                           fontSize: '16px',
                           fontWeight: 600,
-                          textTransform: 'none'
+                          textTransform: 'none',
+                          backgroundColor: '#000000',
+                          color: '#FFFFFF',
+                          border: '2px solid #000000',
+                          '&:hover': {
+                            backgroundColor: '#1F2937',
+                            borderColor: '#1F2937'
+                          },
+                          '&:disabled': {
+                            backgroundColor: '#9CA3AF',
+                            borderColor: '#9CA3AF'
+                          }
                         }}
                       >
                         {loading ? 'Sending...' : 'Send Message'}
@@ -620,7 +659,7 @@ export default function ContactUs() {
                     </Grid>
 
                     <Grid item xs={12}>
-                      <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', display: 'block' }}>
+                      <Typography variant="caption" sx={{ textAlign: 'center', display: 'block', color: '#6B7280' }}>
                         {contactConfig.footerMessage}
                       </Typography>
                     </Grid>

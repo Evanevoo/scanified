@@ -3,8 +3,49 @@ module.exports = {
     "./index.html",
     "./src/**/*.{js,jsx,ts,tsx}",
   ],
+  darkMode: ["class"],
   theme: {
     extend: {
+      colors: {
+        background: "#FFFFFF",
+        foreground: "#111827",
+        card: {
+          DEFAULT: "#FFFFFF",
+          foreground: "#111827",
+        },
+        popover: {
+          DEFAULT: "#FFFFFF",
+          foreground: "#111827",
+        },
+        primary: {
+          DEFAULT: "#2563EB",
+          foreground: "#FFFFFF",
+        },
+        secondary: {
+          DEFAULT: "#F3F4F6",
+          foreground: "#111827",
+        },
+        muted: {
+          DEFAULT: "#F9FAFB",
+          foreground: "#6B7280",
+        },
+        accent: {
+          DEFAULT: "#F3F4F6",
+          foreground: "#111827",
+        },
+        destructive: {
+          DEFAULT: "#EF4444",
+          foreground: "#FFFFFF",
+        },
+        border: "#E5E7EB",
+        input: "#E5E7EB",
+        ring: "#2563EB",
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
+      },
       screens: {
         'xs': '475px',
         'sm': '640px',

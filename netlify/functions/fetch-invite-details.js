@@ -1,37 +1,27 @@
 const { createClient } = require('@supabase/supabase-js');
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS'
-};
+const { handlePreflight, createResponse, createErrorResponse } = require('./utils/cors');
+const { applyRateLimit } = require('./utils/rateLimit');
 
 exports.handler = async (event) => {
+  // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers: corsHeaders,
-      body: ''
-    };
+    return handlePreflight(event);
   }
 
+  // Only allow POST
   if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      headers: corsHeaders,
-      body: JSON.stringify({ error: 'Method not allowed' })
-    };
+    return createResponse(event, 405, { error: 'Method not allowed' });
+  }
+
+  // Apply rate limiting
+  const rateLimitResponse = applyRateLimit(event, 'fetch-invite', 'read');
+  if (rateLimitResponse) {
+    return rateLimitResponse;
   }
 
   try {
     if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      return {
-        statusCode: 500,
-        headers: corsHeaders,
-        body: JSON.stringify({
-          error: 'Supabase service role not configured'
-        })
-      };
+      return createErrorResponse(event, 500, 'Service configuration error');
     }
 
     const payload = JSON.parse(event.body || '{}');
@@ -40,12 +30,9 @@ exports.handler = async (event) => {
     const shouldAccept = payload.accept;
     const profilePayload = payload.profile || null;
 
-    if (!token) {
-      return {
-        statusCode: 400,
-        headers: corsHeaders,
-        body: JSON.stringify({ error: 'Missing invite token' })
-      };
+    // Validate token format
+    if (!token || typeof token !== 'string' || token.length < 10) {
+      return createResponse(event, 400, { error: 'Invalid invite token' });
     }
 
     const supabase = createClient(
@@ -63,48 +50,25 @@ exports.handler = async (event) => {
       .maybeSingle();
 
     if (error) {
-      console.error('Error fetching invite via function:', error);
-      return {
-        statusCode: 500,
-        headers: corsHeaders,
-        body: JSON.stringify({ 
-          error: 'Failed to fetch invite',
-          details: error.message || error.details || error
-        })
-      };
+      console.error('Error fetching invite:', error.code);
+      return createErrorResponse(event, 500, 'Failed to fetch invite', error);
     }
 
     if (!data) {
-      return {
-        statusCode: 404,
-        headers: corsHeaders,
-        body: JSON.stringify({ error: 'Invite not found' })
-      };
+      return createResponse(event, 404, { error: 'Invite not found' });
     }
 
     if (data.accepted_at) {
-      return {
-        statusCode: 409,
-        headers: corsHeaders,
-        body: JSON.stringify({ error: 'Invite already accepted' })
-      };
+      return createResponse(event, 409, { error: 'Invite already accepted' });
     }
 
     if (data.expires_at && new Date(data.expires_at) < new Date()) {
-      return {
-        statusCode: 410,
-        headers: corsHeaders,
-        body: JSON.stringify({ error: 'Invite expired' })
-      };
+      return createResponse(event, 410, { error: 'Invite expired' });
     }
 
     if (shouldAccept) {
       if (!profilePayload) {
-        return {
-          statusCode: 400,
-          headers: corsHeaders,
-          body: JSON.stringify({ error: 'Missing profile payload for acceptance' })
-        };
+        return createResponse(event, 400, { error: 'Missing profile data for acceptance' });
       }
 
       const { error: profileError } = await supabase
@@ -124,25 +88,12 @@ exports.handler = async (event) => {
         throw acceptError;
       }
 
-      return {
-        statusCode: 200,
-        headers: corsHeaders,
-        body: JSON.stringify({ invite: data, accepted: true })
-      };
+      return createResponse(event, 200, { invite: data, accepted: true });
     } else {
-      return {
-        statusCode: 200,
-        headers: corsHeaders,
-        body: JSON.stringify({ invite: data })
-      };
+      return createResponse(event, 200, { invite: data });
     }
   } catch (err) {
-    console.error('Unhandled error fetching invite:', err);
-    return {
-      statusCode: 500,
-      headers: corsHeaders,
-      body: JSON.stringify({ error: err.message || 'Unexpected error' })
-    };
+    return createErrorResponse(event, 500, 'Unexpected error processing invite', err);
   }
 };
 

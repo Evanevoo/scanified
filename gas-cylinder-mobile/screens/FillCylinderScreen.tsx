@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView, FlatList, SafeAreaView, Linking } from 'react-native';
 import { supabase } from '../supabase';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
@@ -36,12 +37,13 @@ export default function FillCylinderScreen() {
   const [scanned, setScanned] = useState(false);
   const [scannedAssets, setScannedAssets] = useState<ScannedAsset[]>([]);
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [flashEnabled, setFlashEnabled] = useState(false);
   const scanDelay = 1500;
 
   const handleBarcodeScanned = (event) => {
     // Only accept barcodes within the border area if boundingBox is available
     const border = {
-      top: 0.41, left: 0.05, width: 0.9, height: 0.18
+      top: 0.30, left: 0.05, width: 0.9, height: 0.18
     };
     if (event?.boundingBox) {
       const { origin, size } = event.boundingBox;
@@ -561,13 +563,24 @@ export default function FillCylinderScreen() {
               <CameraView
                 style={styles.camera}
                 facing="back"
+                enableTorch={flashEnabled}
                 onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
-                barcodeScannerSettings={{
-                  barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "codabar", "itf14"],
-                }}
+                barcodeScannerSettings={{}}
               />
               {/* Overlay border rectangle */}
               <View style={styles.scanOverlay} />
+              
+              {/* Flash Toggle Button */}
+              <TouchableOpacity
+                style={styles.flashButton}
+                onPress={() => setFlashEnabled(!flashEnabled)}
+              >
+                <Ionicons 
+                  name={flashEnabled ? 'flash' : 'flash-off'} 
+                  size={28} 
+                  color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
+                />
+              </TouchableOpacity>
             </View>
           )}
         </View>
@@ -756,9 +769,22 @@ const styles = StyleSheet.create({
   camera: {
     flex: 1,
   },
+  flashButton: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 8,
+    zIndex: 1000,
+    width: 52,
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   scanOverlay: {
     position: 'absolute',
-    top: '41%',
+    top: '30%',
     left: '5%',
     width: '90%',
     height: '18%',

@@ -163,17 +163,16 @@ export default function IndustryAnalyticsDashboard() {
     fetchQuickStats();
   }, [profile?.organization_id]);
 
-  const handleQuickAction = useCallback((action, id, barcode) => {
-    const identifier = barcode || id;
+  const handleQuickAction = useCallback((action, id) => {
     switch (action) {
       case 'view':
-        navigate(`/bottle/${identifier}`);
+        navigate(`/bottle/${id}`);
         break;
       case 'edit':
-        navigate(`/bottle/${identifier}/edit`);
+        navigate(`/bottle/${id}/edit`);
         break;
       case 'assign':
-        navigate(`/bottle/${identifier}/assign`);
+        navigate(`/bottle/${id}/assign`);
         break;
       default:
         break;
@@ -254,7 +253,7 @@ export default function IndustryAnalyticsDashboard() {
                         variant="body2" 
                         color="primary" 
                         sx={{ cursor: 'pointer' }}
-                        onClick={() => handleQuickAction('view', bottle.id, bottle.barcode_number)}
+                        onClick={() => handleQuickAction('view', bottle.id)}
                       >
                         {bottle.barcode_number}
                       </Typography>
@@ -274,13 +273,13 @@ export default function IndustryAnalyticsDashboard() {
                       <Box display="flex" gap={1}>
                         <IconButton 
                           size="small" 
-                          onClick={() => handleQuickAction('view', bottle.id, bottle.barcode_number)}
+                          onClick={() => handleQuickAction('view', bottle.id)}
                         >
                           <SearchIcon />
                         </IconButton>
                         <IconButton 
                           size="small" 
-                          onClick={() => handleQuickAction('edit', bottle.id, bottle.barcode_number)}
+                          onClick={() => handleQuickAction('edit', bottle.id)}
                         >
                           <EditIcon />
                         </IconButton>

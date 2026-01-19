@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Typography, Button, Container, Grid, Card, Stack, Divider, Avatar, Chip, Paper } from '@mui/material';
+import { Box, Typography, Button, Container, Grid, Card, Stack, Divider, Chip } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PhoneIphoneIcon from '@mui/icons-material/PhoneIphone';
@@ -7,22 +7,27 @@ import SpeedIcon from '@mui/icons-material/Speed';
 import SecurityIcon from '@mui/icons-material/Security';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import CloudSyncIcon from '@mui/icons-material/CloudSync';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
-import PeopleIcon from '@mui/icons-material/People';
-import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
-import StarIcon from '@mui/icons-material/Star';
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import LocalShipping from '@mui/icons-material/LocalShipping';
 import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../hooks/useAssetConfig';
 import AnimatedSection from '../components/AnimatedSection';
+import BackgroundParallax from '../components/BackgroundParallax';
+import ThreeVisionPanel from '../components/ThreeVisionPanel';
+import StatCard from '../components/design-system/StatCard';
+import ModernButton from '../components/design-system/ModernButton';
+import { Touch3D, Card3D, MobileButton, MobileTypography, MobileStack } from '../components/design-system';
+import { useMediaQuery, useTheme } from '@mui/material';
+
 export default function LandingPage() {
   const navigate = useNavigate();
   const { profile, organization } = useAuth();
   const { config: assetConfig } = useAssetConfig();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const features = [
     {
-      icon: <QrCodeScannerIcon sx={{ fontSize: 48, color: '#3B82F6' }} />,
+      icon: <QrCodeScannerIcon sx={{ fontSize: 48, color: 'primary.main' }} />,
       title: 'Barcode Scanning',
       description: `Scan ${assetConfig.assetTypePlural} instantly with any smartphone. No expensive hardware needed.`,
     },
@@ -53,1027 +58,869 @@ export default function LandingPage() {
     },
   ];
 
-  // Testimonials data
-  const testimonials = [
-    {
-      name: 'Sarah Johnson',
-      role: 'Operations Manager',
-      company: 'Industrial Gas Solutions',
-      text: 'This platform transformed our cylinder tracking. We went from manual spreadsheets to real-time visibility in just one day.',
-      avatar: 'SJ',
-      rating: 5
-    },
-    {
-      name: 'Mike Chen',
-      role: 'Fleet Supervisor',
-      company: 'Metro Gas Distribution',
-      text: 'Finally, a system that actually works in the field. Our drivers love the mobile scanning, and I love the real-time reports.',
-      avatar: 'MC',
-      rating: 5
-    },
-    {
-      name: 'Jennifer Martinez',
-      role: 'Business Owner',
-      company: 'Southwest Cylinder Co.',
-      text: 'Switched from legacy systems and never looked back. This is what modern software should be - simple, powerful, and affordable.',
-      avatar: 'JM',
-      rating: 5
-    }
-  ];
-
-  // Stats data
   const stats = [
-    { label: 'Active Users', value: '10K+', icon: <PeopleIcon />, color: '#3B82F6' },
-    { label: 'Assets Tracked', value: '500K+', icon: <QrCodeScannerIcon />, color: '#10B981' },
-    { label: 'Uptime', value: '99.9%', icon: <VerifiedUserIcon />, color: '#F59E0B' },
-    { label: 'Time Saved', value: '20hrs/week', icon: <TrendingUpIcon />, color: '#8B5CF6' }
+    {
+      label: `Faster ${assetConfig.assetTypePlural} audits`,
+      value: '5x',
+      icon: <SpeedIcon />,
+      color: 'primary.main',
+    },
+    {
+      label: 'Reduction in lost assets',
+      value: '40%',
+      icon: <SecurityIcon />,
+      color: '#10B981',
+    },
+    {
+      label: 'Less admin time',
+      value: '12h /wk',
+      icon: <CloudSyncIcon />,
+      color: '#F59E0B',
+    },
   ];
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-      {/* Hero Section */}
-      <Box sx={{ 
-        position: 'relative',
-        overflow: 'hidden',
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%)',
-          zIndex: 0
-        },
-        '&::after': {
-          content: '""',
-          position: 'absolute',
-          width: '600px',
-          height: '600px',
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, transparent 70%)',
-          top: '-300px',
-          right: '-300px',
-          zIndex: 0,
-          animation: 'float 20s ease-in-out infinite'
-        }
-      }}>
-        {/* 3D Floating Elements */}
-        <Box
-          sx={{
-            position: 'absolute',
-            width: '200px',
-            height: '200px',
-            top: '10%',
-            left: '5%',
-            zIndex: 0,
-            opacity: 0.1,
-            transform: 'perspective(1000px) rotateY(45deg) rotateX(15deg)',
-            animation: 'float3D 15s ease-in-out infinite',
-            '@keyframes float3D': {
-              '0%, 100%': {
-                transform: 'perspective(1000px) rotateY(45deg) rotateX(15deg) translateY(0px)',
-              },
-              '50%': {
-                transform: 'perspective(1000px) rotateY(225deg) rotateX(15deg) translateY(-30px)',
-              }
-            }
-          }}
-        >
-          <Box
-            sx={{
-              width: '100%',
-              height: '100%',
-              background: 'linear-gradient(135deg, #3B82F6, #8B5CF6)',
-              borderRadius: '20px',
-              boxShadow: '0 20px 60px rgba(59, 130, 246, 0.3)',
-              transform: 'perspective(1000px) rotateY(45deg)',
-            }}
-          />
-        </Box>
-        <Box
-          sx={{
-            position: 'absolute',
-            width: '150px',
-            height: '150px',
-            bottom: '15%',
-            right: '10%',
-            zIndex: 0,
-            opacity: 0.1,
-            transform: 'perspective(1000px) rotateY(-45deg) rotateX(-15deg)',
-            animation: 'float3DReverse 18s ease-in-out infinite',
-            '@keyframes float3DReverse': {
-              '0%, 100%': {
-                transform: 'perspective(1000px) rotateY(-45deg) rotateX(-15deg) translateY(0px)',
-              },
-              '50%': {
-                transform: 'perspective(1000px) rotateY(-225deg) rotateX(-15deg) translateY(30px)',
-              }
-            }
-          }}
-        >
-          <Box
-            sx={{
-              width: '100%',
-              height: '100%',
-              background: 'linear-gradient(135deg, #10B981, #3B82F6)',
-              borderRadius: '20px',
-              boxShadow: '0 20px 60px rgba(16, 185, 129, 0.3)',
-              transform: 'perspective(1000px) rotateY(-45deg)',
-            }}
-          />
-        </Box>
-        <style>{`
-          @keyframes float {
-            0%, 100% { transform: translate(0, 0) rotate(0deg); }
-            33% { transform: translate(30px, -30px) rotate(120deg); }
-            66% { transform: translate(-20px, 20px) rotate(240deg); }
-          }
-        `}</style>
-        <Container maxWidth="lg" sx={{ py: { xs: 8, md: 16 }, position: 'relative', zIndex: 1 }}>
-          <AnimatedSection animation="fadeInUp">
-            <Box sx={{ textAlign: 'center', mb: 8 }}>
-              <Chip 
-                label="Trusted by 1000+ businesses" 
-                color="primary" 
-                sx={{ mb: 3, py: 2, px: 1, fontSize: '0.9rem', fontWeight: 600 }}
-                icon={<VerifiedUserIcon />}
-              />
-              
-              <Typography 
-                variant="h1" 
-                fontWeight={800} 
-                sx={{ 
-                  mb: 3, 
-                  fontSize: { xs: '2.5rem', sm: '3rem', md: '4rem' },
-                  lineHeight: 1.1,
-                  background: 'linear-gradient(135deg, #3B82F6 0%, #8B5CF6 50%, #1E40AF 100%)',
-                  backgroundClip: 'text',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  letterSpacing: '-0.02em'
-                }}
-              >
-                Modern Asset Management
-                <br />
-                Made Simple
-              </Typography>
-              
-              <Typography 
-                variant="h5" 
-                color="text.secondary" 
-                sx={{ 
-                  mb: 6, 
-                  maxWidth: 800, 
-                  mx: 'auto', 
-                  lineHeight: 1.7,
-                  fontSize: { xs: '1.1rem', md: '1.25rem' },
-                  fontWeight: 400
-                }}
-              >
-                Track your {assetConfig.assetTypePlural}, manage customers, and streamline operations 
-                with our mobile-first platform. Built for modern businesses.
-              </Typography>
-              
-              <Stack 
-                direction={{ xs: 'column', sm: 'row' }} 
-                spacing={3} 
-                justifyContent="center"
-                sx={{ mb: 5 }}
-              >
-                <Button 
-                  variant="contained" 
-                  size="large"
-                  onClick={() => navigate('/create-organization')}
-                  endIcon={<ArrowForwardIcon />}
-                  sx={{ 
-                    py: 2.5, 
-                    px: 6,
-                    fontSize: '1.1rem',
-                    fontWeight: 600,
-                    textTransform: 'none',
-                    borderRadius: 3,
-                    boxShadow: '0 8px 25px rgba(59, 130, 246, 0.3)',
-                    transition: 'all 0.3s ease',
-                    '&:hover': {
-                      boxShadow: '0 12px 35px rgba(59, 130, 246, 0.5)',
-                      transform: 'translateY(-3px)',
-                    }
-                  }}
-                >
-                  Start Free Trial
-                </Button>
-                <Button 
-                  variant="outlined" 
-                  size="large"
-                  onClick={() => navigate('/login')}
-                  sx={{ 
-                    py: 2.5, 
-                    px: 6,
-                    fontSize: '1.1rem',
-                    fontWeight: 600,
-                    textTransform: 'none',
-                    borderRadius: 3,
-                    borderWidth: 2,
-                    transition: 'all 0.3s ease',
-                    '&:hover': {
-                      borderWidth: 2,
-                      transform: 'translateY(-3px)',
-                      bgcolor: 'action.hover'
-                    }
-                  }}
-                >
-                  Sign In
-                </Button>
-              </Stack>
-              
-              <Stack 
-                direction={{ xs: 'column', sm: 'row' }} 
-                spacing={2} 
-                justifyContent="center"
-                alignItems="center"
-                sx={{ mb: 6 }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <CheckCircleIcon sx={{ color: 'success.main', fontSize: 20 }} />
-                  <Typography variant="body2" color="text.secondary" fontWeight={500}>
-                    7-day free trial
-                  </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <CheckCircleIcon sx={{ color: 'success.main', fontSize: 20 }} />
-                  <Typography variant="body2" color="text.secondary" fontWeight={500}>
-                    No credit card required
-                  </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <CheckCircleIcon sx={{ color: 'success.main', fontSize: 20 }} />
-                  <Typography variant="body2" color="text.secondary" fontWeight={500}>
-                    Cancel anytime
-                  </Typography>
-                </Box>
-              </Stack>
 
-              {/* Stats Section */}
-              <AnimatedSection animation="fadeInUp" delay={0.2}>
-                <Grid container spacing={3} sx={{ mt: 4, mb: 6, perspective: '1000px' }}>
-                  {stats.map((stat, index) => (
-                    <Grid item xs={6} sm={3} key={index}>
-                      <Paper
-                        elevation={0}
-                        sx={{
-                          p: 3,
-                          textAlign: 'center',
-                          borderRadius: 3,
-                          bgcolor: 'background.paper',
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                          transformStyle: 'preserve-3d',
-                          position: 'relative',
-                          '&:hover': {
-                            transform: 'perspective(1000px) rotateY(5deg) rotateX(-5deg) translateY(-8px) scale(1.02)',
-                            boxShadow: `0 20px 40px ${stat.color}40, 0 0 0 1px ${stat.color}20`,
-                            borderColor: stat.color,
-                            '& .stat-icon': {
-                              transform: 'perspective(1000px) rotateY(0deg) rotateX(0deg) translateZ(20px)',
-                            },
-                            '& .stat-value': {
-                              transform: 'translateZ(10px)',
-                            }
-                          }
-                        }}
-                      >
-                        <Box 
-                          className="stat-icon"
-                          sx={{ 
-                            display: 'inline-flex', 
-                            p: 1.5, 
-                            borderRadius: 2, 
-                            bgcolor: `${stat.color}15`,
-                            color: stat.color,
-                            mb: 2,
-                            transition: 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                            transform: 'perspective(1000px) rotateY(0deg)',
+      {/* Hero Section - Upgraded */}
+      <Box
+        sx={{
+          position: 'relative',
+          overflow: 'hidden',
+          background: 'linear-gradient(135deg, #020617 0%, #0B1120 40%, #1D283A 100%)',
+          backgroundColor: '#020617',
+          color: 'white',
+        }}
+      >
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            background: 'radial-gradient(circle at top left, rgba(64,181,173,0.2), transparent 55%), radial-gradient(circle at bottom right, rgba(72,201,176,0.15), transparent 55%)',
+            opacity: 0.7,
+            zIndex: 0,
+          }}
+        />
+        <Box sx={{ position: 'absolute', inset: 0, zIndex: 1, opacity: 0.3 }}>
+          <BackgroundParallax color1="#40B5AD" color2="#48C9B0" />
+        </Box>
+        <Box sx={{ position: 'absolute', right: { xs: 12, md: '10%' }, top: { xs: '40%', md: '30%' }, zIndex: 3, opacity: 0.6 }}>
+          <ThreeVisionPanel />
+        </Box>
+
+        <Container
+          maxWidth="lg"
+          sx={{
+            position: 'relative',
+            zIndex: 2,
+            py: { xs: 10, md: 14 },
+          }}
+        >
+          <Grid container spacing={6} alignItems="center">
+            <Grid item xs={12} md={7}>
+              <AnimatedSection animation="fadeInUp">
+                <Stack spacing={3}>
+                  <Chip
+                    label={organization?.name ? `Used by ${organization.name}` : 'Built for modern field operations'}
+                    sx={{
+                      alignSelf: { xs: 'center', md: 'flex-start' },
+                      bgcolor: 'rgba(15,23,42,0.65)',
+                      color: 'rgba(248,250,252,0.9)',
+                      borderRadius: 999,
+                      px: 1.5,
+                      py: 0.5,
+                      border: '1px solid rgba(148,163,184,0.5)',
+                      backdropFilter: 'blur(12px)',
+                      '& .MuiChip-label': { fontSize: 12, fontWeight: 600, letterSpacing: 0.3 },
+                    }}
+                  />
+
+                  <MobileTypography
+                    variant="h1"
+                    sx={{
+                      fontSize: { xs: '2rem', sm: '3.2rem', md: '3.8rem' },
+                      lineHeight: { xs: 1.2, md: 1.15 },
+                      textAlign: { xs: 'center', md: 'left' },
+                      color: '#FFFFFF',
+                      textShadow: '0 2px 8px rgba(0,0,0,0.5), 0 0 40px rgba(0,0,0,0.3)',
+                      letterSpacing: { xs: '-0.02em', md: '-0.03em' },
+                      fontWeight: 900,
+                      mb: { xs: 2, md: 0 },
+                    }}
+                  >
+                    Modern {assetConfig.assetTypePlural} tracking
+                    {!isMobile && <br />}
+                    {isMobile && ' '}
+                    for serious operations.
+                  </MobileTypography>
+
+                  <MobileTypography
+                    variant="h6"
+                    sx={{
+                      color: '#F3F4F6',
+                      maxWidth: { xs: '100%', md: 560 },
+                      textAlign: { xs: 'center', md: 'left' },
+                      lineHeight: { xs: 1.6, md: 1.7 },
+                      textShadow: '0 1px 4px rgba(0,0,0,0.4)',
+                      fontWeight: 500,
+                      fontSize: { xs: '1rem', md: '1.25rem' },
+                      px: { xs: 1, md: 0 },
+                    }}
+                  >
+                    Replace spreadsheets and clipboards with a mobile-first platform that gives you
+                    real-time visibility into every {assetConfig.assetTypeSingular ?? 'asset'} in the field,
+                    from fill plant to customer site.
+                  </MobileTypography>
+
+                  <MobileStack
+                    direction={{ xs: 'column', sm: 'row' }}
+                    spacing={{ xs: 2, sm: 2.5 }}
+                    sx={{ justifyContent: { xs: 'center', md: 'flex-start' }, pt: 1 }}
+                  >
+                    {isMobile ? (
+                      <>
+                        <MobileButton
+                          variant="contained"
+                          fullWidth
+                          onClick={() => navigate('/create-organization')}
+                          sx={{
+                            bgcolor: 'primary.main',
+                            color: 'white',
+                            '&:hover': { bgcolor: 'primary.dark' },
                           }}
                         >
-                          {React.cloneElement(stat.icon, { sx: { fontSize: 32 } })}
-                        </Box>
-                        <Typography 
-                          className="stat-value"
-                          variant="h4" 
-                          fontWeight={700} 
-                          sx={{ 
-                            mb: 0.5, 
-                            color: stat.color,
-                            transition: 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                          Start free 7‑day trial
+                        </MobileButton>
+                        <MobileButton
+                          variant="outlined"
+                          fullWidth
+                          onClick={() => navigate('/login')}
+                          sx={{
+                            color: 'rgba(241,245,249,0.95)',
+                            borderColor: 'rgba(148,163,184,0.8)',
+                            bgcolor: 'rgba(15,23,42,0.6)',
                           }}
                         >
-                          {stat.value}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" fontWeight={500}>
-                          {stat.label}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                  ))}
-                </Grid>
+                          Sign in
+                        </MobileButton>
+                      </>
+                    ) : (
+                      <>
+                        <ModernButton
+                          showArrow
+                          onClick={() => navigate('/create-organization')}
+                        >
+                          Start free 7‑day trial
+                        </ModernButton>
+                        <ModernButton
+                          variant="outlined"
+                          onClick={() => navigate('/login')}
+                          sx={{
+                            color: 'rgba(241,245,249,0.95)',
+                            borderColor: 'rgba(148,163,184,0.8)',
+                            bgcolor: 'rgba(15,23,42,0.6)',
+                          }}
+                        >
+                          Sign in to existing account
+                        </ModernButton>
+                      </>
+                    )}
+                  </MobileStack>
+
+                  <MobileTypography
+                    variant="body2"
+                    sx={{
+                      color: '#D1D5DB',
+                      pt: 1,
+                      textAlign: { xs: 'center', md: 'left' },
+                      fontWeight: 500,
+                      textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+                      fontSize: { xs: '0.75rem', md: '0.875rem' },
+                      display: { xs: 'flex', md: 'block' },
+                      flexDirection: { xs: 'column', md: 'row' },
+                      gap: { xs: 0.5, md: 0 },
+                    }}
+                  >
+                    {isMobile ? (
+                      <>
+                        ✅ No credit card required<br />
+                        ✅ Live onboarding support<br />
+                        ✅ Cancel anytime
+                      </>
+                    ) : (
+                      '✅ No credit card required • ✅ Live onboarding support • ✅ Cancel anytime'
+                    )}
+                  </MobileTypography>
+                </Stack>
               </AnimatedSection>
+            </Grid>
 
-              {/* Getting Started Options */}
-              <AnimatedSection animation="fadeInUp" delay={0.3}>
-                <Box sx={{ 
-                  maxWidth: 900, 
-                  mx: 'auto', 
-                  p: { xs: 3, md: 5 }, 
-                  bgcolor: 'background.paper',
-                  borderRadius: 4, 
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  boxShadow: '0 4px 20px rgba(0, 0, 0, 0.05)',
-                  mb: 4,
-                  perspective: '1200px'
-                }}>
-                  <Typography variant="h5" fontWeight={700} sx={{ mb: 4, textAlign: 'center' }}>
-                    Two Ways to Get Started
+            <Grid item xs={12} md={5}>
+              <AnimatedSection animation="fadeInUp" delay={0.15}>
+                <Touch3D intensity="light">
+                  <Box
+                    sx={{
+                      p: 3,
+                      borderRadius: 4,
+                      bgcolor: 'rgba(15,23,42,0.85)',
+                      border: '1px solid rgba(148,163,184,0.35)',
+                      backdropFilter: 'blur(18px)',
+                      boxShadow:
+                        '0 20px 60px rgba(15,23,42,0.8), 0 0 0 1px rgba(148,163,184,0.3)',
+                    }}
+                  >
+                  <Typography
+                    variant="overline"
+                    sx={{ color: '#D1D5DB', letterSpacing: 1.4, fontWeight: 600 }}
+                  >
+                    Operational snapshot
                   </Typography>
-                  <Grid container spacing={4} alignItems="stretch">
-                    <Grid item xs={12} md={6}>
-                      <Card sx={{ 
-                        p: 4,
-                        height: '100%',
-                        textAlign: 'center',
-                        borderRadius: 3,
-                        border: '2px solid',
-                        borderColor: 'primary.main',
-                        bgcolor: 'primary.50',
-                        transition: 'all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                        transformStyle: 'preserve-3d',
-                        position: 'relative',
-                        '&:hover': {
-                          transform: 'perspective(1200px) rotateY(-8deg) rotateX(5deg) translateY(-8px) scale(1.03)',
-                          boxShadow: '0 20px 50px rgba(59, 130, 246, 0.3)',
-                          '& .emoji-3d': {
-                            transform: 'perspective(1200px) rotateY(0deg) rotateX(0deg) translateZ(30px) scale(1.2)',
-                          }
-                        }
-                      }}>
-                        <Typography 
-                          className="emoji-3d"
-                          variant="h4" 
-                          sx={{ 
-                            mb: 2,
-                            transition: 'transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                            display: 'inline-block',
-                            transform: 'perspective(1200px) rotateY(0deg)',
+
+                  <Typography
+                    variant="h5"
+                    fontWeight={700}
+                    sx={{ mt: 1, mb: 2, color: '#FFFFFF' }}
+                  >
+                    Every {assetConfig.assetTypeSingular ?? 'asset'} accounted for, in seconds.
+                  </Typography>
+
+                  <Grid container spacing={2.5}>
+                    <Grid item xs={12} sm={6}>
+                      <Typography
+                        variant="body2"
+                        sx={{ color: '#E5E7EB', mb: 1, fontWeight: 600 }}
+                      >
+                        Live status overview
+                      </Typography>
+                      <Stack spacing={1.2}>
+                        <Chip
+                          size="small"
+                          label="On site"
+                          sx={{
+                            bgcolor: 'rgba(34,197,94,0.12)',
+                            borderColor: 'rgba(34,197,94,0.55)',
+                            color: '#BBF7D0',
+                            borderRadius: 999,
+                            border: '1px solid',
+                            fontSize: 11,
                           }}
-                        >
-                          🏢
-                        </Typography>
-                        <Typography variant="h6" fontWeight={600} color="primary.main" sx={{ mb: 2 }}>
-                          Create Your Organization
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
-                          Start your own organization and invite team members. Perfect for business owners and managers.
-                        </Typography>
-                      </Card>
+                        />
+                        <Chip
+                          size="small"
+                          label="In transit"
+                          sx={{
+                            bgcolor: 'primary.light',
+                            borderColor: 'primary.main',
+                            opacity: 0.12,
+                            color: 'primary.contrastText',
+                            borderRadius: 999,
+                            border: '1px solid',
+                            fontSize: 11,
+                          }}
+                        />
+                        <Chip
+                          size="small"
+                          label="Due for return"
+                          sx={{
+                            bgcolor: 'rgba(249,115,22,0.12)',
+                            borderColor: 'rgba(249,115,22,0.65)',
+                            color: '#FED7AA',
+                            borderRadius: 999,
+                            border: '1px solid',
+                            fontSize: 11,
+                          }}
+                        />
+                      </Stack>
                     </Grid>
-                    <Grid item xs={12} md={6}>
-                      <Card sx={{ 
-                        p: 4,
-                        height: '100%',
-                        textAlign: 'center',
-                        borderRadius: 3,
-                        border: '2px solid',
-                        borderColor: 'success.main',
-                        bgcolor: 'success.50',
-                        transition: 'all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                        transformStyle: 'preserve-3d',
-                        position: 'relative',
-                        '&:hover': {
-                          transform: 'perspective(1200px) rotateY(8deg) rotateX(5deg) translateY(-8px) scale(1.03)',
-                          boxShadow: '0 20px 50px rgba(16, 185, 129, 0.3)',
-                          '& .emoji-3d': {
-                            transform: 'perspective(1200px) rotateY(0deg) rotateX(0deg) translateZ(30px) scale(1.2)',
-                          }
-                        }
-                      }}>
-                        <Typography 
-                          className="emoji-3d"
-                          variant="h4" 
-                          sx={{ 
-                            mb: 2,
-                            transition: 'transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                            display: 'inline-block',
-                            transform: 'perspective(1200px) rotateY(0deg)',
-                          }}
-                        >
-                          🔗
-                        </Typography>
-                        <Typography variant="h6" fontWeight={600} color="success.main" sx={{ mb: 2 }}>
-                          Join with Code/Link
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
-                          Received an invitation link or join code? Sign in to connect to your organization.
-                        </Typography>
-                      </Card>
+                    <Grid item xs={12} sm={6}>
+                      <Typography
+                        variant="body2"
+                        sx={{ color: '#E5E7EB', mb: 1, fontWeight: 600 }}
+                      >
+                        Field-ready experience
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        sx={{ color: '#F3F4F6', lineHeight: 1.6 }}
+                      >
+                        Scan barcodes, capture deliveries, and reconcile inventory from the truck,
+                        dock, or customer site in just a few taps.
+                      </Typography>
                     </Grid>
                   </Grid>
-                </Box>
+                  </Box>
+                </Touch3D>
               </AnimatedSection>
-            </Box>
-          </AnimatedSection>
+            </Grid>
+          </Grid>
         </Container>
       </Box>
 
-      {/* Key Benefits Section */}
-      <Container maxWidth="lg" sx={{ py: 8 }}>
-        <AnimatedSection animation="fadeInUp">
-          <Box sx={{ textAlign: 'center', mb: 6 }}>
-            <Typography variant="h3" fontWeight={700} sx={{ mb: 2 }}>
-              Why Choose Us?
-            </Typography>
-            <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto' }}>
-              Everything you need to manage your assets efficiently
-            </Typography>
-          </Box>
-          <Grid container spacing={4} sx={{ maxWidth: 1000, mx: 'auto', perspective: '1000px' }} alignItems="stretch">
-            <Grid item xs={12} sm={4} sx={{ display: 'flex' }}>
-              <Card sx={{ 
-                p: 4, 
-                borderRadius: 3, 
-                width: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'flex-start',
-                border: '1px solid',
-                borderColor: 'divider',
-                transition: 'all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                transformStyle: 'preserve-3d',
-                '&:hover': {
-                  transform: 'perspective(1000px) rotateY(-5deg) rotateX(3deg) translateY(-10px) scale(1.02)',
-                  boxShadow: '0 20px 40px rgba(59, 130, 246, 0.2)',
-                  borderColor: 'primary.main',
-                  '& .benefit-icon-3d': {
-                    transform: 'perspective(1000px) rotateY(0deg) rotateX(0deg) translateZ(30px) scale(1.15)',
-                  }
-                }
-              }}>
-                <Box 
-                  className="benefit-icon-3d"
-                  sx={{ 
-                    display: 'inline-flex', 
-                    p: 2, 
-                    borderRadius: 2, 
-                    bgcolor: 'primary.50',
-                    color: 'primary.main',
-                    mb: 2,
-                    width: 'fit-content',
-                    transition: 'transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                    transform: 'perspective(1000px) rotateY(0deg)',
-                  }}
+      {/* Stats + Social Proof */}
+      <Box sx={{ py: { xs: 6, md: 8 }, bgcolor: 'background.default' }}>
+        <Container maxWidth="lg">
+          <Grid container spacing={4} alignItems="center">
+            <Grid item xs={12} md={4}>
+              <AnimatedSection animation="fadeInUp">
+                <Typography variant="overline" sx={{ color: 'text.secondary', letterSpacing: 1.4 }}>
+                  Why teams switch
+                </Typography>
+                <Typography
+                  variant="h4"
+                  fontWeight={700}
+                  sx={{ mt: 1.5, mb: 1.5 }}
                 >
-                  <PhoneIphoneIcon sx={{ fontSize: 32 }} />
-                </Box>
-                <Typography variant="h6" fontWeight={600} color="primary.main" sx={{ mb: 1.5 }}>
-                  Mobile-First
+                  From firefighting to predictable operations.
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
-                  Scan and track assets from any smartphone or tablet. No expensive hardware needed.
+                <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 360 }}>
+                  Eliminate lost {assetConfig.assetTypePlural}, manual spreadsheets, and late returns with
+                  a system that keeps your whole team in sync.
                 </Typography>
-              </Card>
+              </AnimatedSection>
             </Grid>
-            <Grid item xs={12} sm={4} sx={{ display: 'flex' }}>
-              <Card sx={{ 
-                p: 4, 
-                borderRadius: 3, 
-                width: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'flex-start',
-                border: '1px solid',
-                borderColor: 'divider',
-                transition: 'all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                transformStyle: 'preserve-3d',
-                '&:hover': {
-                  transform: 'perspective(1000px) rotateY(0deg) rotateX(3deg) translateY(-10px) scale(1.02)',
-                  boxShadow: '0 20px 40px rgba(16, 185, 129, 0.2)',
-                  borderColor: 'success.main',
-                  '& .benefit-icon-3d': {
-                    transform: 'perspective(1000px) rotateY(0deg) rotateX(0deg) translateZ(30px) scale(1.15)',
-                  }
-                }
-              }}>
-                <Box 
-                  className="benefit-icon-3d"
-                  sx={{ 
-                    display: 'inline-flex', 
-                    p: 2, 
-                    borderRadius: 2, 
-                    bgcolor: 'success.50',
-                    color: 'success.main',
-                    mb: 2,
-                    width: 'fit-content',
-                    transition: 'transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                    transform: 'perspective(1000px) rotateY(0deg)',
-                  }}
-                >
-                  <CloudSyncIcon sx={{ fontSize: 32 }} />
-                </Box>
-                <Typography variant="h6" fontWeight={600} color="success.main" sx={{ mb: 1.5 }}>
-                  Real-Time Sync
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
-                  Instant updates across all devices and team members. Always stay in sync.
-                </Typography>
-              </Card>
-            </Grid>
-            <Grid item xs={12} sm={4} sx={{ display: 'flex' }}>
-              <Card sx={{ 
-                p: 4, 
-                borderRadius: 3, 
-                width: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'flex-start',
-                border: '1px solid',
-                borderColor: 'divider',
-                transition: 'all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                transformStyle: 'preserve-3d',
-                '&:hover': {
-                  transform: 'perspective(1000px) rotateY(5deg) rotateX(3deg) translateY(-10px) scale(1.02)',
-                  boxShadow: '0 20px 40px rgba(245, 158, 11, 0.2)',
-                  borderColor: 'warning.main',
-                  '& .benefit-icon-3d': {
-                    transform: 'perspective(1000px) rotateY(0deg) rotateX(0deg) translateZ(30px) scale(1.15)',
-                  }
-                }
-              }}>
-                <Box 
-                  className="benefit-icon-3d"
-                  sx={{ 
-                    display: 'inline-flex', 
-                    p: 2, 
-                    borderRadius: 2, 
-                    bgcolor: 'warning.50',
-                    color: 'warning.main',
-                    mb: 2,
-                    width: 'fit-content',
-                    transition: 'transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                    transform: 'perspective(1000px) rotateY(0deg)',
-                  }}
-                >
-                  <SpeedIcon sx={{ fontSize: 32 }} />
-                </Box>
-                <Typography variant="h6" fontWeight={600} color="warning.main" sx={{ mb: 1.5 }}>
-                  Easy Setup
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
-                  Get started in minutes with simple onboarding. No training required.
-                </Typography>
-              </Card>
+            <Grid item xs={12} md={8}>
+              <Grid container spacing={3}>
+                {stats.map((stat, index) => (
+                  <Grid item xs={12} sm={4} key={stat.label}>
+                    <StatCard
+                      label={stat.label}
+                      value={stat.value}
+                      icon={stat.icon}
+                      color={stat.color}
+                      delay={index * 0.08}
+                    />
+                  </Grid>
+                ))}
+              </Grid>
             </Grid>
           </Grid>
-        </AnimatedSection>
-      </Container>
+        </Container>
+      </Box>
+
+      {/* Mobile App Demo Section - 3rd Phone Mockup */}
+      <Box 
+        sx={{ 
+          position: 'relative',
+          overflow: 'hidden',
+          py: { xs: 10, md: 16 },
+          background: 'linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #334155 100%)',
+          color: 'white',
+        }}
+      >
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            background: 'radial-gradient(circle at 30% 50%, rgba(64,181,173,0.15), transparent 60%), radial-gradient(circle at 70% 50%, rgba(72,201,176,0.12), transparent 60%)',
+            opacity: 0.8,
+            zIndex: 0,
+          }}
+        />
+        <Container maxWidth="lg" sx={{ position: 'relative', zIndex: 1 }}>
+          <Grid container spacing={6} alignItems="center">
+            <Grid item xs={12} md={6}>
+              <AnimatedSection animation="fadeInUp">
+                <Stack spacing={3}>
+                  <Chip
+                    label="Mobile App Demo"
+                    sx={{
+                      alignSelf: { xs: 'center', md: 'flex-start' },
+                      bgcolor: 'rgba(64,181,173,0.2)',
+                      color: '#FFFFFF',
+                      borderRadius: 999,
+                      px: 2,
+                      py: 0.5,
+                      border: '1px solid rgba(64,181,173,0.5)',
+                      backdropFilter: 'blur(12px)',
+                      '& .MuiChip-label': { fontSize: 12, fontWeight: 600, letterSpacing: 0.5 },
+                    }}
+                  />
+                  <MobileTypography
+                    variant="h2"
+                    sx={{
+                      fontSize: { xs: '2rem', md: '3rem' },
+                      fontWeight: 800,
+                      textAlign: { xs: 'center', md: 'left' },
+                      color: '#FFFFFF',
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    See it in action
+                  </MobileTypography>
+                  <MobileTypography
+                    variant="h6"
+                    sx={{
+                      color: '#E2E8F0',
+                      textAlign: { xs: 'center', md: 'left' },
+                      lineHeight: 1.7,
+                      fontWeight: 400,
+                      fontSize: { xs: '1rem', md: '1.25rem' },
+                    }}
+                  >
+                    Experience the power of mobile-first asset tracking. Scan barcodes, track deliveries, 
+                    and manage your entire {assetConfig.assetTypePlural} inventory from anywhere—all from your smartphone.
+                  </MobileTypography>
+                  <Stack spacing={2} sx={{ mt: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <QrCodeScannerIcon sx={{ fontSize: 32, color: 'primary.main' }} />
+                      <Box>
+                        <Typography variant="h6" sx={{ color: '#FFFFFF', fontWeight: 600, mb: 0.5 }}>
+                          Instant Barcode Scanning
+                        </Typography>
+                        <Typography variant="body2" sx={{ color: '#CBD5E1' }}>
+                          Point and scan—works with any barcode format, even in low light with flash support
+                        </Typography>
+                      </Box>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <LocalShipping sx={{ fontSize: 32, color: '#10B981' }} />
+                      <Box>
+                        <Typography variant="h6" sx={{ color: '#FFFFFF', fontWeight: 600, mb: 0.5 }}>
+                          Real-Time Delivery Tracking
+                        </Typography>
+                        <Typography variant="body2" sx={{ color: '#CBD5E1' }}>
+                          Track deliveries, capture proof of delivery, and update status instantly
+                        </Typography>
+                      </Box>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <CloudSyncIcon sx={{ fontSize: 32, color: '#F59E0B' }} />
+                      <Box>
+                        <Typography variant="h6" sx={{ color: '#FFFFFF', fontWeight: 600, mb: 0.5 }}>
+                          Offline-First Sync
+                        </Typography>
+                        <Typography variant="body2" sx={{ color: '#CBD5E1' }}>
+                          Works offline and syncs automatically when you're back online
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Stack>
+                </Stack>
+              </AnimatedSection>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <AnimatedSection animation="fadeInUp" delay={0.2}>
+                <Box
+                  sx={{
+                    position: 'relative',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    perspective: '1000px',
+                  }}
+                >
+                  {/* Phone Mockup Container */}
+                  <Touch3D intensity="medium">
+                    <Box
+                      sx={{
+                        position: 'relative',
+                        width: { xs: 280, md: 360 },
+                        height: { xs: 560, md: 720 },
+                        borderRadius: { xs: 24, md: 32 },
+                        bgcolor: '#0F172A',
+                        border: '8px solid #1E293B',
+                        boxShadow: '0 30px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(64,181,173,0.3), inset 0 0 60px rgba(64,181,173,0.1)',
+                        overflow: 'hidden',
+                        transform: 'rotateY(-5deg) rotateX(2deg)',
+                        transition: 'transform 0.3s ease',
+                        '&:hover': {
+                          transform: 'rotateY(0deg) rotateX(0deg) scale(1.02)',
+                        },
+                      }}
+                    >
+                      {/* Phone Notch */}
+                      <Box
+                        sx={{
+                          position: 'absolute',
+                          top: 0,
+                          left: '50%',
+                          transform: 'translateX(-50%)',
+                          width: { xs: 120, md: 150 },
+                          height: { xs: 20, md: 25 },
+                          bgcolor: '#0F172A',
+                          borderRadius: '0 0 12px 12px',
+                          zIndex: 10,
+                        }}
+                      />
+                      
+                      {/* Screen Content */}
+                      <Box
+                        sx={{
+                          width: '100%',
+                          height: '100%',
+                          bgcolor: '#1E293B',
+                          borderRadius: { xs: 16, md: 24 },
+                          overflow: 'hidden',
+                          position: 'relative',
+                          mt: { xs: 1, md: 1.5 },
+                          mx: { xs: 0.5, md: 1 },
+                          mb: { xs: 0.5, md: 1 },
+                        }}
+                      >
+                        {/* App Header */}
+                        <Box
+                          sx={{
+                            bgcolor: 'primary.main',
+                            p: { xs: 2, md: 2.5 },
+                            color: 'white',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                          }}
+                        >
+                          <Typography variant="h6" sx={{ fontWeight: 700, fontSize: { xs: '0.875rem', md: '1rem' } }}>
+                            Scan {assetConfig.assetTypePlural}
+                          </Typography>
+                          <QrCodeScannerIcon sx={{ fontSize: { xs: 20, md: 24 } }} />
+                        </Box>
+                        
+                        {/* Camera View Mockup */}
+                        <Box
+                          sx={{
+                            flex: 1,
+                            bgcolor: '#0F172A',
+                            position: 'relative',
+                            height: 'calc(100% - 60px)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          {/* Scanning Frame */}
+                          <Box
+                            sx={{
+                              width: { xs: 200, md: 260 },
+                              height: { xs: 120, md: 150 },
+                              border: '3px solid',
+                              borderColor: 'primary.main',
+                              borderRadius: 3,
+                              position: 'relative',
+                              mb: 4,
+                            }}
+                          >
+                            {/* Corner Indicators */}
+                            <Box
+                              sx={{
+                                position: 'absolute',
+                                top: -3,
+                                left: -3,
+                                width: 20,
+                                height: 20,
+                                borderTop: '4px solid',
+                                borderLeft: '4px solid',
+                                borderColor: 'primary.main',
+                              }}
+                            />
+                            <Box
+                              sx={{
+                                position: 'absolute',
+                                top: -3,
+                                right: -3,
+                                width: 20,
+                                height: 20,
+                                borderTop: '4px solid',
+                                borderRight: '4px solid',
+                                borderColor: 'primary.main',
+                              }}
+                            />
+                            <Box
+                              sx={{
+                                position: 'absolute',
+                                bottom: -3,
+                                left: -3,
+                                width: 20,
+                                height: 20,
+                                borderBottom: '4px solid',
+                                borderLeft: '4px solid',
+                                borderColor: 'primary.main',
+                              }}
+                            />
+                            <Box
+                              sx={{
+                                position: 'absolute',
+                                bottom: -3,
+                                right: -3,
+                                width: 20,
+                                height: 20,
+                                borderBottom: '4px solid',
+                                borderRight: '4px solid',
+                                borderColor: 'primary.main',
+                              }}
+                            />
+                            
+                            {/* Scanning Line Animation */}
+                            <Box
+                              sx={{
+                                position: 'absolute',
+                                top: '50%',
+                                left: 0,
+                                right: 0,
+                                height: 2,
+                                bgcolor: 'primary.main',
+                                opacity: 0.8,
+                                animation: 'scanLine 2s infinite',
+                                '@keyframes scanLine': {
+                                  '0%': { transform: 'translateY(-60px)' },
+                                  '100%': { transform: 'translateY(60px)' },
+                                },
+                              }}
+                            />
+                          </Box>
+                          
+                          {/* Flash Button */}
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              top: { xs: 16, md: 20 },
+                              right: { xs: 16, md: 20 },
+                              width: { xs: 44, md: 52 },
+                              height: { xs: 44, md: 52 },
+                              borderRadius: 2,
+                              bgcolor: 'rgba(0,0,0,0.5)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              border: '1px solid rgba(255,255,255,0.2)',
+                            }}
+                          >
+                            <QrCodeScannerIcon sx={{ fontSize: { xs: 20, md: 24 }, color: '#FFD700' }} />
+                          </Box>
+                          
+                          {/* Instruction Text */}
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              color: '#E2E8F0',
+                              textAlign: 'center',
+                              px: 3,
+                              fontSize: { xs: '0.75rem', md: '0.875rem' },
+                            }}
+                          >
+                            Point camera at barcode
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </Box>
+                  </Touch3D>
+                </Box>
+              </AnimatedSection>
+            </Grid>
+          </Grid>
+        </Container>
+      </Box>
 
       {/* Features Section */}
-      <Box sx={{ bgcolor: 'grey.50', py: { xs: 8, md: 12 } }}>
+      <Box sx={{ bgcolor: 'grey.50', py: 12 }}>
         <Container maxWidth="lg">
-          <AnimatedSection animation="fadeInUp">
-            <Box sx={{ textAlign: 'center', mb: 8 }}>
-              <Typography variant="h2" fontWeight={700} sx={{ mb: 3, fontSize: { xs: '2rem', md: '2.75rem' } }}>
-                Everything You Need
-              </Typography>
-              <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto', lineHeight: 1.7 }}>
-                Powerful features designed to make asset management effortless
-              </Typography>
-            </Box>
-          </AnimatedSection>
+          <Box sx={{ textAlign: 'center', mb: 8 }}>
+            <Typography variant="h2" fontWeight={700} sx={{ mb: 3 }}>
+              Everything You Need
+            </Typography>
+            <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto' }}>
+              Powerful features designed to make asset management effortless
+            </Typography>
+          </Box>
 
-          <Grid container spacing={4} sx={{ perspective: '1000px' }}>
+          <Grid container spacing={4}>
             {features.map((feature, index) => (
               <Grid item xs={12} md={6} lg={4} key={index}>
-                <AnimatedSection animation="fadeInUp" delay={index * 0.1}>
-                  <Card sx={{ 
-                    p: 4, 
-                    height: '100%',
-                    textAlign: 'center',
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    borderRadius: 3,
-                    bgcolor: 'background.paper',
-                    transition: 'all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                    cursor: 'pointer',
-                    transformStyle: 'preserve-3d',
-                    position: 'relative',
-                    '&:hover': {
-                      transform: 'perspective(1000px) rotateY(5deg) rotateX(-5deg) translateY(-12px) scale(1.02)',
-                      boxShadow: '0 25px 50px rgba(0, 0, 0, 0.15)',
-                      borderColor: 'primary.main',
-                      '& .feature-icon-3d': {
-                        transform: 'perspective(1000px) rotateY(0deg) rotateX(0deg) translateZ(40px) scale(1.15)',
-                      },
-                      '& .feature-title-3d': {
-                        transform: 'translateZ(20px)',
-                      }
-                    }
-                  }}>
-                    <Box 
-                      className="feature-icon-3d"
-                      sx={{ 
-                        mb: 3,
-                        display: 'inline-flex',
-                        p: 2,
-                        borderRadius: 2,
-                        bgcolor: 'grey.100',
-                        transition: 'transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                        transform: 'perspective(1000px) rotateY(0deg)',
-                      }}
-                    >
-                      {feature.icon}
-                    </Box>
-                    <Typography 
-                      className="feature-title-3d"
-                      variant="h5" 
-                      fontWeight={600} 
-                      sx={{ 
-                        mb: 2,
-                        transition: 'transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                      }}
-                    >
-                      {feature.title}
-                    </Typography>
-                    <Typography color="text.secondary" sx={{ lineHeight: 1.7 }}>
-                      {feature.description}
-                    </Typography>
-                  </Card>
-                </AnimatedSection>
+                <Card3D intensity={isMobile ? 'light' : 'medium'}>
+                  <Box sx={{ mb: { xs: 2, md: 3 }, display: 'flex', justifyContent: 'center' }}>
+                    {React.cloneElement(feature.icon, {
+                      sx: { fontSize: { xs: 40, md: 48 }, ...feature.icon.props.sx }
+                    })}
+                  </Box>
+                  <MobileTypography variant="h5" fontWeight={600} sx={{ mb: { xs: 1.5, md: 2 }, textAlign: 'center' }}>
+                    {feature.title}
+                  </MobileTypography>
+                  <MobileTypography color="text.secondary" sx={{ lineHeight: { xs: 1.5, md: 1.6 }, textAlign: 'center', fontSize: { xs: '0.875rem', md: '1rem' } }}>
+                    {feature.description}
+                  </MobileTypography>
+                </Card3D>
               </Grid>
             ))}
           </Grid>
         </Container>
       </Box>
 
-      {/* Testimonials Section */}
-      <Container maxWidth="lg" sx={{ py: { xs: 8, md: 12 } }}>
-        <AnimatedSection animation="fadeInUp">
-          <Box sx={{ textAlign: 'center', mb: 8 }}>
-            <Typography variant="h2" fontWeight={700} sx={{ mb: 3, fontSize: { xs: '2rem', md: '2.75rem' } }}>
-              Loved by Businesses
-            </Typography>
-            <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto', lineHeight: 1.7 }}>
-              See what our customers are saying about their experience
-            </Typography>
-          </Box>
-        </AnimatedSection>
-
-        <Grid container spacing={4} sx={{ perspective: '1000px' }}>
-          {testimonials.map((testimonial, index) => (
-            <Grid item xs={12} md={4} key={index}>
-              <AnimatedSection animation="fadeInUp" delay={index * 0.1}>
-                <Card sx={{ 
-                  p: 4, 
-                  height: '100%',
-                  borderRadius: 3,
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  bgcolor: 'background.paper',
-                  transition: 'all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                  transformStyle: 'preserve-3d',
-                  position: 'relative',
-                  '&:hover': {
-                    transform: 'perspective(1000px) rotateY(-5deg) rotateX(3deg) translateY(-8px) scale(1.02)',
-                    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.12)',
-                    '& .avatar-3d': {
-                      transform: 'perspective(1000px) rotateY(0deg) rotateX(0deg) translateZ(25px) scale(1.1)',
-                    },
-                    '& .stars-3d': {
-                      transform: 'translateZ(15px)',
-                    }
-                  }
-                }}>
-                  <Box 
-                    className="stars-3d"
-                    sx={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      gap: 1, 
-                      mb: 3,
-                      transition: 'transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                    }}
-                  >
-                    {[...Array(testimonial.rating)].map((_, i) => (
-                      <StarIcon key={i} sx={{ color: '#FBBF24', fontSize: 20 }} />
-                    ))}
-                  </Box>
-                  <Typography variant="body1" sx={{ mb: 3, lineHeight: 1.8, fontStyle: 'italic', color: 'text.secondary' }}>
-                    "{testimonial.text}"
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Avatar 
-                      className="avatar-3d"
-                      sx={{ 
-                        bgcolor: 'primary.main', 
-                        width: 48, 
-                        height: 48,
-                        transition: 'transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                        transform: 'perspective(1000px) rotateY(0deg)',
-                      }}
-                    >
-                      {testimonial.avatar}
-                    </Avatar>
-                    <Box>
-                      <Typography variant="subtitle1" fontWeight={600}>
-                        {testimonial.name}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {testimonial.role} at {testimonial.company}
-                      </Typography>
-                    </Box>
-                  </Box>
-                </Card>
-              </AnimatedSection>
-            </Grid>
-          ))}
-        </Grid>
-
-        {/* CTA Section */}
-        <AnimatedSection animation="fadeInUp" delay={0.3}>
-          <Box sx={{ 
-            mt: 10, 
-            textAlign: 'center',
-            p: { xs: 4, md: 6 },
-            borderRadius: 4,
-            bgcolor: 'primary.main',
-            color: 'white',
-            background: 'linear-gradient(135deg, #3B82F6 0%, #1E40AF 100%)',
-            position: 'relative',
-            perspective: '1200px',
-            transformStyle: 'preserve-3d',
-            transition: 'transform 0.3s ease',
-            '&:hover': {
-              transform: 'perspective(1200px) rotateX(2deg)',
-              '& .cta-button-3d': {
-                transform: 'perspective(1200px) rotateY(0deg) rotateX(0deg) translateZ(20px) scale(1.05)',
-              }
-            }
-          }}>
-            <Typography variant="h3" fontWeight={700} sx={{ mb: 2, fontSize: { xs: '1.75rem', md: '2.5rem' } }}>
-              Ready to Get Started?
-            </Typography>
-            <Typography variant="h6" sx={{ mb: 4, opacity: 0.9, maxWidth: 600, mx: 'auto' }}>
-              Join thousands of businesses already using our platform to streamline their operations
-            </Typography>
-            <Button
-              className="cta-button-3d"
-              variant="contained"
-              size="large"
-              onClick={() => navigate('/create-organization')}
-              endIcon={<ArrowForwardIcon />}
-              sx={{
-                py: 2,
-                px: 6,
-                fontSize: '1.1rem',
-                fontWeight: 600,
-                textTransform: 'none',
-                borderRadius: 3,
-                bgcolor: 'white',
-                color: 'primary.main',
-                boxShadow: '0 8px 25px rgba(0, 0, 0, 0.2)',
-                transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                transform: 'perspective(1200px) rotateY(0deg)',
-                '&:hover': {
-                  bgcolor: 'grey.100',
-                  transform: 'perspective(1200px) rotateY(0deg) rotateX(0deg) translateZ(25px) scale(1.08)',
-                  boxShadow: '0 15px 40px rgba(0, 0, 0, 0.35)'
-                }
-              }}
-            >
-              Start Your Free Trial
-            </Button>
-          </Box>
-        </AnimatedSection>
-      </Container>
-
       {/* Footer */}
-      <Box sx={{ bgcolor: '#1F2937', color: 'white', py: { xs: 6, md: 10 } }}>
+      <Box sx={{ bgcolor: '#1F2937', color: 'white', py: 8 }}>
         <Container maxWidth="lg">
           <Grid container spacing={6}>
             <Grid item xs={12} md={4}>
-              <Typography variant="h5" fontWeight={700} sx={{ mb: 3, color: '#3B82F6' }}>
+              <Typography variant="h5" fontWeight={700} sx={{ mb: 3, color: 'primary.main' }}>
                 {assetConfig.appName}
               </Typography>
-              <Typography color="grey.400" sx={{ mb: 3, lineHeight: 1.7, fontSize: '0.95rem' }}>
+              <Typography color="grey.400" sx={{ mb: 3, lineHeight: 1.6 }}>
                 Modern asset management platform built for today's businesses. Streamline your operations with our mobile-first solution.
               </Typography>
-              <Stack direction="row" spacing={2} sx={{ mt: 3 }}>
-                <Chip 
-                  icon={<SecurityIcon sx={{ color: 'grey.300' }} />}
-                  label="Secure"
-                  sx={{ bgcolor: 'rgba(255, 255, 255, 0.1)', color: 'grey.300' }}
-                  size="small"
-                />
-                <Chip 
-                  icon={<CheckCircleIcon sx={{ color: 'grey.300' }} />}
-                  label="Cloud-Based"
-                  sx={{ bgcolor: 'rgba(255, 255, 255, 0.1)', color: 'grey.300' }}
-                  size="small"
-                />
-              </Stack>
             </Grid>
             
             <Grid item xs={12} sm={6} md={2}>
-              <Typography variant="h6" fontWeight={600} sx={{ mb: 3, color: 'white' }}>
+              <Typography variant="h6" fontWeight={600} sx={{ mb: 3 }}>
                 Product
               </Typography>
-              <Stack spacing={1.5}>
-                <Button 
-                  color="inherit" 
-                  sx={{ 
-                    justifyContent: 'flex-start', 
-                    textTransform: 'none', 
-                    color: 'grey.400', 
-                    p: 0,
-                    fontSize: '0.9rem',
-                    transition: 'all 0.2s ease',
-                    '&:hover': {
-                      color: 'white',
-                      transform: 'translateX(4px)'
-                    }
-                  }}
-                  onClick={() => navigate('/features')}
-                >
-                  Features
-                </Button>
-                <Button 
-                  color="inherit" 
-                  sx={{ 
-                    justifyContent: 'flex-start', 
-                    textTransform: 'none', 
-                    color: 'grey.400', 
-                    p: 0,
-                    fontSize: '0.9rem',
-                    transition: 'all 0.2s ease',
-                    '&:hover': {
-                      color: 'white',
-                      transform: 'translateX(4px)'
-                    }
-                  }}
-                  onClick={() => navigate('/pricing')}
-                >
-                  Pricing
-                </Button>
-                <Button 
-                  color="inherit" 
-                  sx={{ 
-                    justifyContent: 'flex-start', 
-                    textTransform: 'none', 
-                    color: 'grey.400', 
-                    p: 0,
-                    fontSize: '0.9rem',
-                    transition: 'all 0.2s ease',
-                    '&:hover': {
-                      color: 'white',
-                      transform: 'translateX(4px)'
-                    }
-                  }}
-                  onClick={() => navigate('/demo')}
-                >
-                  Demo
-                </Button>
+              <Stack spacing={1}>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/features')}
+                  >
+                    Features
+                  </Button>
+                </Touch3D>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/pricing')}
+                  >
+                    Pricing
+                  </Button>
+                </Touch3D>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/demo')}
+                  >
+                    Demo
+                  </Button>
+                </Touch3D>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/integrations')}
+                  >
+                    Integrations
+                  </Button>
+                </Touch3D>
               </Stack>
             </Grid>
             
             <Grid item xs={12} sm={6} md={2}>
-              <Typography variant="h6" fontWeight={600} sx={{ mb: 3, color: 'white' }}>
+              <Typography variant="h6" fontWeight={600} sx={{ mb: 3 }}>
                 Resources
               </Typography>
-              <Stack spacing={1.5}>
-                <Button 
-                  color="inherit" 
-                  sx={{ 
-                    justifyContent: 'flex-start', 
-                    textTransform: 'none', 
-                    color: 'grey.400', 
-                    p: 0,
-                    fontSize: '0.9rem',
-                    transition: 'all 0.2s ease',
-                    '&:hover': {
-                      color: 'white',
-                      transform: 'translateX(4px)'
-                    }
-                  }}
-                  onClick={() => navigate('/documentation')}
-                >
-                  Documentation
-                </Button>
-                <Button 
-                  color="inherit" 
-                  sx={{ 
-                    justifyContent: 'flex-start', 
-                    textTransform: 'none', 
-                    color: 'grey.400', 
-                    p: 0,
-                    fontSize: '0.9rem',
-                    transition: 'all 0.2s ease',
-                    '&:hover': {
-                      color: 'white',
-                      transform: 'translateX(4px)'
-                    }
-                  }}
-                  onClick={() => navigate('/faq')}
-                >
-                  FAQ
-                </Button>
+              <Stack spacing={1}>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/documentation')}
+                  >
+                    Documentation
+                  </Button>
+                </Touch3D>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/support')}
+                  >
+                    Help Center
+                  </Button>
+                </Touch3D>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/blog')}
+                  >
+                    Blog
+                  </Button>
+                </Touch3D>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/faq')}
+                  >
+                    FAQ
+                  </Button>
+                </Touch3D>
               </Stack>
             </Grid>
             
             <Grid item xs={12} sm={6} md={2}>
-              <Typography variant="h6" fontWeight={600} sx={{ mb: 3, color: 'white' }}>
+              <Typography variant="h6" fontWeight={600} sx={{ mb: 3 }}>
                 Company
               </Typography>
-              <Stack spacing={1.5}>
-                <Button 
-                  color="inherit" 
-                  sx={{ 
-                    justifyContent: 'flex-start', 
-                    textTransform: 'none', 
-                    color: 'grey.400', 
-                    p: 0,
-                    fontSize: '0.9rem',
-                    transition: 'all 0.2s ease',
-                    '&:hover': {
-                      color: 'white',
-                      transform: 'translateX(4px)'
-                    }
-                  }}
-                  onClick={() => navigate('/contact')}
-                >
-                  Contact
-                </Button>
-                <Button 
-                  color="inherit" 
-                  sx={{ 
-                    justifyContent: 'flex-start', 
-                    textTransform: 'none', 
-                    color: 'grey.400', 
-                    p: 0,
-                    fontSize: '0.9rem',
-                    transition: 'all 0.2s ease',
-                    '&:hover': {
-                      color: 'white',
-                      transform: 'translateX(4px)'
-                    }
-                  }}
-                  onClick={() => navigate('/reviews')}
-                >
-                  Reviews
-                </Button>
+              <Stack spacing={1}>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/about')}
+                  >
+                    About Us
+                  </Button>
+                </Touch3D>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/contact')}
+                  >
+                    Contact
+                  </Button>
+                </Touch3D>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/reviews')}
+                  >
+                    Reviews
+                  </Button>
+                </Touch3D>
               </Stack>
             </Grid>
             
             <Grid item xs={12} sm={6} md={2}>
-              <Typography variant="h6" fontWeight={600} sx={{ mb: 3, color: 'white' }}>
+              <Typography variant="h6" fontWeight={600} sx={{ mb: 3 }}>
                 Legal
               </Typography>
-              <Stack spacing={1.5}>
-                <Button 
-                  color="inherit" 
-                  sx={{ 
-                    justifyContent: 'flex-start', 
-                    textTransform: 'none', 
-                    color: 'grey.400', 
-                    p: 0,
-                    fontSize: '0.9rem',
-                    transition: 'all 0.2s ease',
-                    '&:hover': {
-                      color: 'white',
-                      transform: 'translateX(4px)'
-                    }
-                  }}
-                  onClick={() => navigate('/privacy-policy')}
-                >
-                  Privacy Policy
-                </Button>
-                <Button 
-                  color="inherit" 
-                  sx={{ 
-                    justifyContent: 'flex-start', 
-                    textTransform: 'none', 
-                    color: 'grey.400', 
-                    p: 0,
-                    fontSize: '0.9rem',
-                    transition: 'all 0.2s ease',
-                    '&:hover': {
-                      color: 'white',
-                      transform: 'translateX(4px)'
-                    }
-                  }}
-                  onClick={() => navigate('/terms-of-service')}
-                >
-                  Terms of Service
-                </Button>
+              <Stack spacing={1}>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/privacy-policy')}
+                  >
+                    Privacy Policy
+                  </Button>
+                </Touch3D>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/terms-of-service')}
+                  >
+                    Terms of Service
+                  </Button>
+                </Touch3D>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/security')}
+                  >
+                    Security
+                  </Button>
+                </Touch3D>
+                <Touch3D intensity="light">
+                  <Button 
+                    color="inherit" 
+                    sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
+                    onClick={() => navigate('/security')}
+                  >
+                    Compliance
+                  </Button>
+                </Touch3D>
               </Stack>
             </Grid>
           </Grid>
@@ -1082,74 +929,36 @@ export default function LandingPage() {
           
           <Grid container spacing={4} alignItems="center" justifyContent="space-between">
             <Grid item xs={12} md={6}>
-              <Typography color="grey.400" variant="body2" sx={{ lineHeight: 1.7 }}>
-                © {new Date().getFullYear()} {assetConfig.appName}. All rights reserved.
-              </Typography>
-              <Typography color="grey.500" variant="body2" sx={{ mt: 1 }}>
-                Built with ❤️ for modern businesses
+              <Typography color="grey.400" variant="body2">
+                © 2024 {assetConfig.appName}. All rights reserved. | Built with ❤️ for modern businesses
               </Typography>
             </Grid>
             <Grid item xs={12} md={6}>
-              <Box sx={{ 
-                display: 'flex', 
-                justifyContent: { xs: 'flex-start', md: 'flex-end' }, 
-                gap: 3,
-                flexWrap: 'wrap'
-              }}>
-                <Chip
-                  icon={<SecurityIcon sx={{ color: 'grey.400' }} />}
-                  label="Secure & Reliable"
-                  sx={{ 
-                    bgcolor: 'rgba(255, 255, 255, 0.05)', 
-                    color: 'grey.300',
-                    border: '1px solid rgba(255, 255, 255, 0.1)'
-                  }}
-                  size="small"
-                />
-                <Chip
-                  icon={<CheckCircleIcon sx={{ color: 'grey.400' }} />}
-                  label="Cloud-Based"
-                  sx={{ 
-                    bgcolor: 'rgba(255, 255, 255, 0.05)', 
-                    color: 'grey.300',
-                    border: '1px solid rgba(255, 255, 255, 0.1)'
-                  }}
-                  size="small"
-                />
+              <Box sx={{ display: 'flex', justifyContent: { xs: 'center', md: 'flex-end' }, gap: 2 }}>
+                <Typography variant="body2" color="grey.400" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <SecurityIcon sx={{ fontSize: 16 }} />
+                  Secure & Reliable
+                </Typography>
+                <Typography variant="body2" color="grey.400" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <CheckCircleIcon sx={{ fontSize: 16 }} />
+                  Cloud-Based
+                </Typography>
               </Box>
             </Grid>
           </Grid>
 
           {/* Contact Info */}
-          <Box sx={{ 
-            mt: 6, 
-            pt: 4, 
-            borderTop: 1, 
-            borderColor: 'grey.700', 
-            textAlign: 'center',
-            bgcolor: 'rgba(255, 255, 255, 0.03)',
-            borderRadius: 2,
-            p: 3
-          }}>
-            <Typography variant="h6" fontWeight={600} sx={{ mb: 2, color: 'white' }}>
+          <Box sx={{ mt: 6, pt: 4, borderTop: 1, borderColor: 'grey.700', textAlign: 'center' }}>
+            <Typography variant="body2" color="grey.400" sx={{ mb: 2 }}>
               Questions? We're here to help.
             </Typography>
-            <Stack 
-              direction={{ xs: 'column', sm: 'row' }} 
-              spacing={3} 
-              justifyContent="center" 
-              alignItems="center"
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Typography variant="body1" color="grey.300" sx={{ fontWeight: 500 }}>
-                  📧 support@scanified.com
-                </Typography>
-              </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Typography variant="body1" color="grey.300" sx={{ fontWeight: 500 }}>
-                  💬 Available for support
-                </Typography>
-              </Box>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={3} justifyContent="center" alignItems="center">
+              <Typography variant="body2" color="grey.300">
+                📧 support@scanified.com
+              </Typography>
+              <Typography variant="body2" color="grey.300">
+                💬 Available for support
+              </Typography>
             </Stack>
           </Box>
         </Container>

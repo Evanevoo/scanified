@@ -38,9 +38,7 @@ export default function SimpleCameraTest() {
               Alert.alert('Barcode Detected!', `Data: ${data}`);
               setShowCamera(false);
             }}
-            barcodeScannerSettings={{
-              barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "codabar", "itf14"],
-            }}
+            barcodeScannerSettings={{}}
           />
           <View style={styles.overlay}>
             <Text style={styles.instruction}>Align barcode within frame</Text>

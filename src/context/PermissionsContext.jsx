@@ -3,7 +3,17 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 
-const PermissionsContext = createContext();
+const PermissionsContext = createContext({
+  permissions: [],
+  can: () => false,
+  loading: true,
+  isOrgAdmin: false,
+  isAdmin: () => false,
+  isManager: () => false,
+  isUser: () => false,
+  hasRole: () => false,
+  actualRole: null
+});
 
 export function PermissionsProvider({ children }) {
   const { profile } = useAuth();
@@ -141,11 +151,27 @@ export function PermissionsProvider({ children }) {
 
   return (
     <PermissionsContext.Provider value={value}>
-      {!loading && children}
+      {children}
     </PermissionsContext.Provider>
   );
 }
 
 export const usePermissions = () => {
-  return useContext(PermissionsContext);
+  const context = useContext(PermissionsContext);
+  if (!context) {
+    // Fallback if context is not available (shouldn't happen, but safety check)
+    logger.warn('usePermissions called outside PermissionsProvider, returning default values');
+    return {
+      permissions: [],
+      can: () => false,
+      loading: true,
+      isOrgAdmin: false,
+      isAdmin: () => false,
+      isManager: () => false,
+      isUser: () => false,
+      hasRole: () => false,
+      actualRole: null
+    };
+  }
+  return context;
 };

@@ -11,11 +11,13 @@ jest.mock('expo-camera', () => ({
   useCameraPermissions: () => [null, jest.fn()],
 }));
 
-jest.mock('expo-av', () => ({
-  Audio: {
-    setAudioModeAsync: jest.fn(),
-    playAsync: jest.fn(),
-  },
+jest.mock('expo-audio', () => ({
+  AudioPlayer: jest.fn().mockImplementation(() => ({
+    volume: 1.0,
+    play: jest.fn(),
+    pause: jest.fn(),
+    remove: jest.fn(),
+  })),
 }));
 
 jest.mock('expo-local-authentication', () => ({

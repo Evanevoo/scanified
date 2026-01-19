@@ -170,17 +170,74 @@ export const validateInput = {
     return emailRegex.test(email);
   },
 
-  // Validate password strength
+  // Validate password strength with complexity requirements
   validatePassword: (password) => {
-    if (!password || password.length < 6) {
-      return { valid: false, message: 'Password must be at least 6 characters long' };
+    const errors = [];
+    
+    if (!password) {
+      return { valid: false, message: 'Password is required', errors: ['Password is required'] };
+    }
+    
+    if (password.length < 8) {
+      errors.push('Password must be at least 8 characters long');
     }
     
     if (password.length > 128) {
-      return { valid: false, message: 'Password must be less than 128 characters' };
+      errors.push('Password must be less than 128 characters');
     }
     
-    return { valid: true, message: 'Password is valid' };
+    // Check for uppercase letter
+    if (!/[A-Z]/.test(password)) {
+      errors.push('Password must contain at least one uppercase letter');
+    }
+    
+    // Check for lowercase letter
+    if (!/[a-z]/.test(password)) {
+      errors.push('Password must contain at least one lowercase letter');
+    }
+    
+    // Check for number
+    if (!/[0-9]/.test(password)) {
+      errors.push('Password must contain at least one number');
+    }
+    
+    if (errors.length > 0) {
+      return { 
+        valid: false, 
+        message: errors[0], // Return first error as main message
+        errors 
+      };
+    }
+    
+    return { valid: true, message: 'Password meets security requirements', errors: [] };
+  },
+
+  // Get password strength score (0-4)
+  getPasswordStrength: (password) => {
+    if (!password) return { score: 0, label: 'None', color: '#9CA3AF' };
+    
+    let score = 0;
+    
+    // Length checks
+    if (password.length >= 8) score++;
+    if (password.length >= 12) score++;
+    
+    // Complexity checks
+    if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score++;
+    if (/[0-9]/.test(password)) score++;
+    if (/[^A-Za-z0-9]/.test(password)) score++; // Special characters bonus
+    
+    // Cap at 4
+    score = Math.min(score, 4);
+    
+    const labels = ['Weak', 'Fair', 'Good', 'Strong', 'Very Strong'];
+    const colors = ['#EF4444', '#F59E0B', '#EAB308', '#22C55E', '#16A34A'];
+    
+    return {
+      score,
+      label: labels[score],
+      color: colors[score]
+    };
   },
 
   // Validate organization name

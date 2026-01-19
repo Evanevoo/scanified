@@ -58,104 +58,44 @@ export default function Home() {
         supabase.from('deliveries').select('id', { count: 'exact' }).eq('organization_id', organization.id).eq('status', 'pending')
       ]);
 
-      // Get active rentals count (matching rental page logic - excluding vendors)
+      // Get active rentals count - count bottles with status "rented" assigned to customers
+      // This matches the logic used in Rentals.jsx
       let activeRentalsCount = 0;
       
       try {
-        // 1. Get all active rentals (use select('*') like rental page)
+        // First, try to count from rentals table (actual rental records)
         const { data: activeRentalsData, error: rentalsQueryError } = await supabase
           .from('rentals')
           .select('*')
-          .is('rental_end_date', null);
+          .is('rental_end_date', null)
+          .eq('organization_id', organization.id);
         
-        if (rentalsQueryError) {
-          logger.error('Error fetching active rentals:', rentalsQueryError);
-          // Fallback: use simple count query
-          const { count } = await supabase
-            .from('rentals')
-            .select('*', { count: 'exact', head: true })
-            .is('rental_end_date', null)
-            .eq('organization_id', organization.id);
-          activeRentalsCount = count || 0;
-        } else {
-          // 2. Get all bottles for this organization (matching rental page exactly)
+        if (!rentalsQueryError && activeRentalsData && activeRentalsData.length > 0) {
+          // Get all bottles to verify they exist and get customer types
           const { data: allBottles, error: allBottlesError } = await supabase
             .from('bottles')
-            .select('*')
+            .select('barcode_number, assigned_customer, status, ownership')
             .eq('organization_id', organization.id);
           
-          // 2b. Get assigned bottles (matching rental page)
-          const { data: assignedBottles, error: assignedBottlesError } = await supabase
-            .from('bottles')
-            .select('*')
-            .eq('organization_id', organization.id)
-            .not('assigned_customer', 'is', null);
-          
-          if (allBottlesError || assignedBottlesError) {
-            logger.error('Error fetching bottles:', allBottlesError || assignedBottlesError);
-            activeRentalsCount = 0;
-          } else {
-            // Create bottles map (matching rental page)
+          if (!allBottlesError && allBottles) {
+            // Create bottles map for quick lookup
             const bottlesMap = (allBottles || []).reduce((map, bottle) => {
-              map[bottle.barcode_number || bottle.barcode] = bottle;
+              const barcode = bottle.barcode_number || bottle.barcode;
+              if (barcode) {
+                map[barcode] = bottle;
+              }
               return map;
             }, {});
 
-            // 3. Combine rentals with bottles (matching rental page logic exactly)
-            const allRentalData = [];
-            
-            // Add rentals that have matching bottles in this organization
-            for (const rental of activeRentalsData || []) {
+            // Filter rentals to only include those with matching bottles in this organization
+            const validRentals = (activeRentalsData || []).filter(rental => {
               const bottle = bottlesMap[rental.bottle_barcode];
-              if (bottle) {
-                allRentalData.push({
-                  ...rental,
-                  source: 'rental',
-                  bottles: bottle
-                });
-              }
-            }
+              return bottle !== undefined;
+            });
 
-            // Add bottles that are assigned but don't have rental records
-            const existingBottleBarcodes = new Set(allRentalData.map(r => r.bottle_barcode));
-            
-            for (const bottle of assignedBottles || []) {
-              const barcode = bottle.barcode_number || bottle.barcode;
-              if (barcode && !existingBottleBarcodes.has(barcode)) {
-                allRentalData.push({
-                  id: `bottle_${bottle.id}`,
-                  source: 'bottle_assignment',
-                  customer_id: bottle.assigned_customer,
-                  bottle_barcode: barcode,
-                  bottles: bottle,
-                  rental_end_date: null
-                });
-              }
-            }
-
-            // Remove duplicates (keep rental records over bottle assignments)
-            const deduplicatedData = [];
-            const seenBarcodes = new Set();
-            
-            // First pass: Add all rental records (priority)
-            for (const item of allRentalData) {
-              if (item.source === 'rental' && !seenBarcodes.has(item.bottle_barcode)) {
-                deduplicatedData.push(item);
-                seenBarcodes.add(item.bottle_barcode);
-              }
-            }
-            
-            // Second pass: Add bottle assignments only if no rental record exists
-            for (const item of allRentalData) {
-              if (item.source === 'bottle_assignment' && !seenBarcodes.has(item.bottle_barcode)) {
-                deduplicatedData.push(item);
-                seenBarcodes.add(item.bottle_barcode);
-              }
-            }
-
-            // 4. Get customer IDs and fetch customer types
+            // Get customer IDs and fetch customer types to exclude vendors
             const customerIds = Array.from(new Set(
-              deduplicatedData.map(r => r.customer_id).filter(Boolean)
+              validRentals.map(r => r.customer_id).filter(Boolean)
             ));
 
             let customersMap = {};
@@ -174,30 +114,68 @@ export default function Home() {
               }
             }
 
-            // 5. Attach customer info and filter out vendors (matching rental page exactly)
-            const rentalsWithCustomer = deduplicatedData.map(r => ({
-              ...r,
-              customer: customersMap[r.customer_id] || null
-            }));
-
-            // Filter out vendors (matching rental page logic exactly)
-            const filteredRentals = rentalsWithCustomer.filter(r => 
-              r.customer_id && 
-              r.customer &&
-              r.customer.customer_type !== 'VENDOR'  // Exclude vendors from rentals view
-            );
-
-            // Count rentals (excluding vendors) - this matches rental page's rentedToCustomers count
-            activeRentalsCount = filteredRentals.length;
-
-            logger.log('Dashboard active rentals count:', {
-              allRentalData: allRentalData.length,
-              deduplicatedData: deduplicatedData.length,
-              filteredRentals: filteredRentals.length,
-              total: activeRentalsCount
+            // Filter out vendors - only count actual customer rentals
+            const customerRentals = validRentals.filter(r => {
+              const customer = customersMap[r.customer_id];
+              return r.customer_id && customer && customer.customer_type !== 'VENDOR';
             });
+
+            activeRentalsCount = customerRentals.length;
+          } else {
+            // Fallback: count all active rentals if bottle lookup fails
+            activeRentalsCount = (activeRentalsData || []).length;
+          }
+        } else {
+          // No rental records found, count bottles with status "rented" assigned to customers
+          // This matches Rentals.jsx logic
+          const { data: assignedBottles, error: bottlesError } = await supabase
+            .from('bottles')
+            .select('assigned_customer, status, ownership')
+            .eq('organization_id', organization.id)
+            .not('assigned_customer', 'is', null)
+            .in('status', ['rented', 'RENTED']);
+          
+          if (!bottlesError && assignedBottles && assignedBottles.length > 0) {
+            // Get customer types to exclude vendors and customer-owned bottles
+            const customerIds = Array.from(new Set(
+              assignedBottles.map(b => b.assigned_customer).filter(Boolean)
+            ));
+            
+            let customerTypesMap = {};
+            if (customerIds.length > 0) {
+              const { data: customersData } = await supabase
+                .from('customers')
+                .select('CustomerListID, customer_type')
+                .eq('organization_id', organization.id)
+                .in('CustomerListID', customerIds);
+              
+              if (customersData) {
+                customerTypesMap = customersData.reduce((map, c) => {
+                  map[c.CustomerListID] = c.customer_type || 'CUSTOMER';
+                  return map;
+                }, {});
+              }
+            }
+            
+            // Count rented bottles: assigned to customers with status "rented" (excluding vendors and customer-owned)
+            activeRentalsCount = assignedBottles.filter(bottle => {
+              const customerType = customerTypesMap[bottle.assigned_customer] || 'CUSTOMER';
+              const ownershipValue = String(bottle.ownership || '').trim().toLowerCase();
+              const isCustomerOwned = ownershipValue.includes('customer') || 
+                                     ownershipValue.includes('owned') || 
+                                     ownershipValue === 'customer owned';
+              
+              return bottle.assigned_customer && 
+                     customerType === 'CUSTOMER' && 
+                     (bottle.status === 'rented' || bottle.status === 'RENTED') &&
+                     !isCustomerOwned;
+            }).length;
           }
         }
+        
+        logger.log('Dashboard active rentals count:', {
+          activeRentalsCount: activeRentalsCount
+        });
       } catch (error) {
         logger.error('Error calculating active rentals:', error);
         activeRentalsCount = 0;

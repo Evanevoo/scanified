@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState } from 'react';
+import { cn } from "@/lib/utils";
 
 const TabsContext = createContext();
 
@@ -14,17 +15,27 @@ const Tabs = ({ value, onValueChange, children, className = '', ...props }) => {
   
   return (
     <TabsContext.Provider value={{ activeTab, setActiveTab: handleTabChange }}>
-      <div className={`w-full ${className}`} {...props}>
+      <div className={cn("w-full", className)} {...props}>
         {children}
       </div>
     </TabsContext.Provider>
   );
 };
 
-const TabsList = ({ className = '', children, ...props }) => {
+const TabsList = ({ className = '', children, variant = 'default', ...props }) => {
+  const variants = {
+    default: "bg-gray-100 rounded-xl p-1.5",
+    underline: "bg-transparent border-b border-gray-200 rounded-none p-0",
+    pills: "bg-transparent gap-2 p-0"
+  };
+
   return (
     <div
-      className={`inline-flex h-10 items-center justify-center rounded-md bg-gray-100 p-1 text-gray-500 ${className}`}
+      className={cn(
+        "inline-flex items-center justify-start",
+        variants[variant] || variants.default,
+        className
+      )}
       {...props}
     >
       {children}
@@ -38,11 +49,17 @@ const TabsTrigger = ({ value, className = '', children, ...props }) => {
   
   return (
     <button
-      className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 ${
+      className={cn(
+        "inline-flex items-center justify-center whitespace-nowrap",
+        "px-4 py-2 text-sm font-semibold",
+        "transition-all duration-200 ease-out",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#40B5AD]/50 focus-visible:ring-offset-2",
+        "disabled:pointer-events-none disabled:opacity-50",
         isActive 
-          ? 'bg-white text-gray-900 shadow-sm' 
-          : 'text-gray-600 hover:text-gray-900'
-      } ${className}`}
+          ? 'bg-white text-[#40B5AD] shadow-md' 
+          : 'text-gray-600 hover:text-gray-900 hover:bg-white/50',
+        className
+      )}
       onClick={() => setActiveTab(value)}
       {...props}
     >
@@ -60,7 +77,10 @@ const TabsContent = ({ value, className = '', children, ...props }) => {
   
   return (
     <div
-      className={`mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${className}`}
+      className={cn(
+        "mt-4 animate-in fade-in-0 slide-in-from-top-1 duration-200",
+        className
+      )}
       {...props}
     >
       {children}

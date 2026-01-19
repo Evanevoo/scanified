@@ -121,23 +121,32 @@ export default function Demo() {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#FFFFFF' }}>
       {/* Header */}
-      <Box sx={{ bgcolor: 'white', borderBottom: 1, borderColor: 'divider' }}>
+      <Box sx={{ bgcolor: 'white', borderBottom: '2px solid #000000' }}>
         <Container maxWidth="lg">
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <IconButton onClick={() => navigate('/')} sx={{ color: 'primary.main' }}>
+              <IconButton onClick={() => navigate('/')} sx={{ color: '#000000' }}>
                 <BackIcon />
               </IconButton>
-              <Typography variant="h5" fontWeight={700} sx={{ color: 'primary.main' }}>
+              <Typography variant="h5" fontWeight={700} sx={{ color: '#000000' }}>
                 Scanified Demo
               </Typography>
             </Box>
             <Button
               variant="contained"
-              onClick={() => navigate('/register')}
-              sx={{ fontWeight: 600 }}
+              onClick={() => navigate('/create-organization')}
+              sx={{ 
+                fontWeight: 600,
+                backgroundColor: '#000000',
+                color: '#FFFFFF',
+                border: '2px solid #000000',
+                '&:hover': {
+                  backgroundColor: '#1F2937',
+                  borderColor: '#1F2937'
+                }
+              }}
             >
               Start Free Trial
             </Button>
@@ -148,17 +157,35 @@ export default function Demo() {
       <Container maxWidth="lg" sx={{ py: 4 }}>
         {/* Demo Overview */}
         <Box sx={{ textAlign: 'center', mb: 6 }}>
-          <Typography variant="h3" fontWeight={700} sx={{ mb: 2 }}>
+          <Typography variant="h3" fontWeight={700} sx={{ mb: 2, color: '#000000' }}>
             Interactive Demo
           </Typography>
-          <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto' }}>
+          <Typography variant="h6" sx={{ maxWidth: 600, mx: 'auto', color: '#6B7280' }}>
             Experience how Scanified transforms asset management. Try the features below to see the platform in action.
           </Typography>
         </Box>
 
         {/* Demo Tabs */}
-        <Paper sx={{ mb: 4 }}>
-          <Tabs value={activeTab} onChange={handleTabChange} sx={{ borderBottom: 1, borderColor: 'divider' }}>
+        <Paper sx={{ mb: 4, border: '2px solid #000000', borderRadius: '8px' }}>
+          <Tabs 
+            value={activeTab} 
+            onChange={handleTabChange} 
+            sx={{ 
+              borderBottom: '2px solid #000000',
+              '& .MuiTab-root': {
+                color: '#6B7280',
+                fontWeight: 600,
+                '&.Mui-selected': {
+                  color: '#000000',
+                  fontWeight: 700
+                }
+              },
+              '& .MuiTabs-indicator': {
+                backgroundColor: '#000000',
+                height: '3px'
+              }
+            }}
+          >
             <Tab label="Dashboard" icon={<DashboardIcon />} iconPosition="start" />
             <Tab label="Asset Management" icon={<InventoryIcon />} iconPosition="start" />
             <Tab label="Customer Portal" icon={<PeopleIcon />} iconPosition="start" />
@@ -171,48 +198,68 @@ export default function Demo() {
             {/* Dashboard Tab */}
             {activeTab === 0 && (
               <Box>
-                <Typography variant="h5" gutterBottom>Dashboard Overview</Typography>
-                <Typography color="text.secondary" sx={{ mb: 3 }}>
+                <Typography variant="h5" gutterBottom sx={{ color: '#000000', fontWeight: 700 }}>Dashboard Overview</Typography>
+                <Typography sx={{ mb: 3, color: '#6B7280' }}>
                   Real-time overview of your asset management operations
                 </Typography>
                 
                 <Grid container spacing={3}>
                   <Grid item xs={12} md={3}>
-                    <Card sx={{ textAlign: 'center', p: 2 }}>
-                      <Typography variant="h4" color="primary.main" fontWeight={700}>
+                    <Card sx={{ 
+                      textAlign: 'center', 
+                      p: 2,
+                      border: '2px solid #000000',
+                      borderRadius: '8px'
+                    }}>
+                      <Typography variant="h4" sx={{ color: '#000000', fontWeight: 700 }}>
                         {demoStats.totalAssets}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary">
+                      <Typography variant="body2" sx={{ color: '#6B7280' }}>
                         Total Assets
                       </Typography>
                     </Card>
                   </Grid>
                   <Grid item xs={12} md={3}>
-                    <Card sx={{ textAlign: 'center', p: 2 }}>
-                      <Typography variant="h4" color="success.main" fontWeight={700}>
+                    <Card sx={{ 
+                      textAlign: 'center', 
+                      p: 2,
+                      border: '2px solid #000000',
+                      borderRadius: '8px'
+                    }}>
+                      <Typography variant="h4" sx={{ color: '#000000', fontWeight: 700 }}>
                         {demoStats.availableAssets}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary">
+                      <Typography variant="body2" sx={{ color: '#6B7280' }}>
                         Available
                       </Typography>
                     </Card>
                   </Grid>
                   <Grid item xs={12} md={3}>
-                    <Card sx={{ textAlign: 'center', p: 2 }}>
-                      <Typography variant="h4" color="warning.main" fontWeight={700}>
+                    <Card sx={{ 
+                      textAlign: 'center', 
+                      p: 2,
+                      border: '2px solid #000000',
+                      borderRadius: '8px'
+                    }}>
+                      <Typography variant="h4" sx={{ color: '#000000', fontWeight: 700 }}>
                         {demoStats.activeDeliveries}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary">
+                      <Typography variant="body2" sx={{ color: '#6B7280' }}>
                         Active Deliveries
                       </Typography>
                     </Card>
                   </Grid>
                   <Grid item xs={12} md={3}>
-                    <Card sx={{ textAlign: 'center', p: 2 }}>
-                      <Typography variant="h4" color="info.main" fontWeight={700}>
+                    <Card sx={{ 
+                      textAlign: 'center', 
+                      p: 2,
+                      border: '2px solid #000000',
+                      borderRadius: '8px'
+                    }}>
+                      <Typography variant="h4" sx={{ color: '#000000', fontWeight: 700 }}>
                         {demoStats.totalCustomers}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary">
+                      <Typography variant="body2" sx={{ color: '#6B7280' }}>
                         Customers
                       </Typography>
                     </Card>
@@ -220,33 +267,39 @@ export default function Demo() {
                 </Grid>
 
                 <Box sx={{ mt: 4 }}>
-                  <Typography variant="h6" gutterBottom>Recent Activity</Typography>
+                  <Typography variant="h6" gutterBottom sx={{ color: '#000000', fontWeight: 700 }}>Recent Activity</Typography>
                   <List>
                     <ListItem>
                       <ListItemIcon>
-                        <QrCodeScannerIcon color="primary" />
+                        <QrCodeScannerIcon sx={{ color: '#000000' }} />
                       </ListItemIcon>
                       <ListItemText 
                         primary="CYL-005 scanned at Customer Site"
                         secondary="2 minutes ago"
+                        primaryTypographyProps={{ sx: { color: '#000000' } }}
+                        secondaryTypographyProps={{ sx: { color: '#6B7280' } }}
                       />
                     </ListItem>
                     <ListItem>
                       <ListItemIcon>
-                        <ShippingIcon color="success" />
+                        <ShippingIcon sx={{ color: '#000000' }} />
                       </ListItemIcon>
                       <ListItemText 
                         primary="Delivery completed to Industrial Supply Co."
                         secondary="15 minutes ago"
+                        primaryTypographyProps={{ sx: { color: '#000000' } }}
+                        secondaryTypographyProps={{ sx: { color: '#6B7280' } }}
                       />
                     </ListItem>
                     <ListItem>
                       <ListItemIcon>
-                        <NotificationsIcon color="warning" />
+                        <NotificationsIcon sx={{ color: '#000000' }} />
                       </ListItemIcon>
                       <ListItemText 
                         primary="Maintenance alert for CYL-003"
                         secondary="1 hour ago"
+                        primaryTypographyProps={{ sx: { color: '#000000' } }}
+                        secondaryTypographyProps={{ sx: { color: '#6B7280' } }}
                       />
                     </ListItem>
                   </List>
@@ -258,11 +311,21 @@ export default function Demo() {
             {activeTab === 1 && (
               <Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                  <Typography variant="h5">Asset Management</Typography>
+                  <Typography variant="h5" sx={{ color: '#000000', fontWeight: 700 }}>Asset Management</Typography>
                   <Button
                     variant="contained"
                     startIcon={<AddIcon />}
                     onClick={() => alert('Add new asset functionality would be available in the full version')}
+                    sx={{
+                      backgroundColor: '#000000',
+                      color: '#FFFFFF',
+                      border: '2px solid #000000',
+                      fontWeight: 600,
+                      '&:hover': {
+                        backgroundColor: '#1F2937',
+                        borderColor: '#1F2937'
+                      }
+                    }}
                   >
                     Add Asset
                   </Button>
@@ -629,7 +692,7 @@ export default function Demo() {
                 <Box sx={{ 
                   width: 200, 
                   height: 200, 
-                  border: '2px dashed #3B82F6', 
+                  border: '2px dashed #000000', 
                   borderRadius: 2,
                   display: 'flex',
                   alignItems: 'center',
@@ -645,7 +708,7 @@ export default function Demo() {
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    border: '2px solid #3B82F6',
+                    border: '2px solid #000000',
                     borderRadius: 2,
                     animation: 'pulse 1s infinite'
                   }} />

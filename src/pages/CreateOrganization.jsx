@@ -13,11 +13,13 @@ import {
   Stepper,
   Step,
   StepLabel,
-  Stack
+  Stack,
+  LinearProgress
 } from '@mui/material';
 import { CheckCircle as CheckIcon, Email as EmailIcon, ContentCopy as CopyIcon } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
+import { validateInput } from '../utils/security';
 
 export default function CreateOrganization() {
   const navigate = useNavigate();
@@ -92,8 +94,11 @@ export default function CreateOrganization() {
       if (!formData.email.trim() || !/\S+@\S+\.\S+/.test(formData.email)) {
         throw new Error('Valid email address is required');
       }
-      if (!formData.password || formData.password.length < 6) {
-        throw new Error('Password must be at least 6 characters');
+      
+      // Use security.js validation for strong passwords
+      const passwordValidation = validateInput.validatePassword(formData.password);
+      if (!passwordValidation.valid) {
+        throw new Error(passwordValidation.message);
       }
 
       // Step 1: Check if email already exists
@@ -161,14 +166,13 @@ export default function CreateOrganization() {
       // Store token in state for resending
       setVerificationToken(tokenData);
 
-      // Step 2: Store password temporarily in sessionStorage AND localStorage as backup
-      sessionStorage.setItem('pending_org_password', formData.password);
+      // Step 2: Store email and token only (NOT password - security risk)
+      // Password should never be stored in browser storage
       sessionStorage.setItem('pending_org_email', formData.email);
       sessionStorage.setItem('verification_token', tokenData);
       
-      // Also store in localStorage as backup (with expiration)
+      // Store token in localStorage as backup (with expiration)
       const expirationTime = Date.now() + (24 * 60 * 60 * 1000); // 24 hours
-      localStorage.setItem('pending_org_password', formData.password);
       localStorage.setItem('pending_org_email', formData.email);
       localStorage.setItem('verification_token', tokenData);
       localStorage.setItem('verification_expires', expirationTime.toString());
@@ -320,9 +324,9 @@ export default function CreateOrganization() {
   if (authLoading) {
     return (
       <Container maxWidth="sm" sx={{ py: 8 }}>
-        <Paper elevation={3} sx={{ p: 4, textAlign: 'center' }}>
-          <CircularProgress sx={{ mb: 2 }} />
-          <Typography variant="body2" color="text.secondary">
+        <Paper elevation={0} sx={{ p: 4, textAlign: 'center', border: '2px solid #000000', borderRadius: '8px' }}>
+          <CircularProgress sx={{ mb: 2, color: '#000000' }} />
+          <Typography variant="body2" sx={{ color: '#6B7280' }}>
             Loading...
           </Typography>
         </Paper>
@@ -334,9 +338,9 @@ export default function CreateOrganization() {
   if (user && profile && organization) {
     return (
       <Container maxWidth="sm" sx={{ py: 8 }}>
-        <Paper elevation={3} sx={{ p: 4, textAlign: 'center' }}>
-          <CircularProgress sx={{ mb: 2 }} />
-          <Typography variant="body1" color="text.secondary">
+        <Paper elevation={0} sx={{ p: 4, textAlign: 'center', border: '2px solid #000000', borderRadius: '8px' }}>
+          <CircularProgress sx={{ mb: 2, color: '#000000' }} />
+          <Typography variant="body1" sx={{ color: '#6B7280' }}>
             You already have an organization. Redirecting...
           </Typography>
         </Paper>
@@ -345,13 +349,13 @@ export default function CreateOrganization() {
   }
 
   return (
-    <Container maxWidth="sm" sx={{ py: 8 }}>
-      <Paper elevation={3} sx={{ p: 4 }}>
+    <Container maxWidth="sm" sx={{ py: 8, backgroundColor: '#FFFFFF' }}>
+      <Paper elevation={0} sx={{ p: 4, border: '2px solid #000000', borderRadius: '8px' }}>
         <Box sx={{ textAlign: 'center', mb: 4 }}>
-          <Typography variant="h4" gutterBottom fontWeight="bold">
+          <Typography variant="h4" gutterBottom sx={{ fontWeight: 700, color: '#000000' }}>
             Create Organization
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" sx={{ color: '#6B7280' }}>
             Start your free 14-day trial
           </Typography>
         </Box>
@@ -359,7 +363,23 @@ export default function CreateOrganization() {
         <Stepper activeStep={step} sx={{ mb: 4 }}>
           {steps.map((label) => (
             <Step key={label}>
-              <StepLabel>{label}</StepLabel>
+              <StepLabel sx={{ 
+                '& .MuiStepLabel-label': {
+                  color: step >= steps.indexOf(label) ? '#000000' : '#6B7280',
+                  fontWeight: step >= steps.indexOf(label) ? 600 : 400
+                },
+                '& .MuiStepIcon-root': {
+                  color: step > steps.indexOf(label) ? '#000000' : step === steps.indexOf(label) ? '#000000' : '#E5E7EB',
+                  '&.Mui-active': {
+                    color: '#000000'
+                  },
+                  '&.Mui-completed': {
+                    color: '#000000'
+                  }
+                }
+              }}>
+                {label}
+              </StepLabel>
             </Step>
           ))}
         </Stepper>
@@ -367,14 +387,25 @@ export default function CreateOrganization() {
         {error && (
           <Alert 
             severity="error" 
-            sx={{ mb: 3 }} 
+            sx={{ 
+              mb: 3,
+              border: '1px solid #EF4444',
+              backgroundColor: '#FEE2E2',
+              color: '#991B1B'
+            }} 
             onClose={() => setError('')}
             action={
               error.includes('already exists') ? (
                 <Button 
-                  color="inherit" 
                   size="small" 
                   onClick={() => window.location.href = '/login'}
+                  sx={{
+                    color: '#000000',
+                    fontWeight: 600,
+                    '&:hover': {
+                      backgroundColor: 'rgba(0, 0, 0, 0.05)'
+                    }
+                  }}
                 >
                   Sign In Instead
                 </Button>
@@ -396,6 +427,23 @@ export default function CreateOrganization() {
                 required
                 autoFocus
                 placeholder="e.g., Acme Corporation"
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': {
+                      borderColor: '#000000',
+                      borderWidth: '2px'
+                    },
+                    '&:hover fieldset': {
+                      borderColor: '#000000',
+                    },
+                    '&.Mui-focused fieldset': {
+                      borderColor: '#000000',
+                    }
+                  },
+                  '& .MuiInputLabel-root.Mui-focused': {
+                    color: '#000000'
+                  }
+                }}
               />
 
               <TextField
@@ -405,6 +453,23 @@ export default function CreateOrganization() {
                 onChange={handleChange('userName')}
                 required
                 placeholder="e.g., John Doe"
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': {
+                      borderColor: '#000000',
+                      borderWidth: '2px'
+                    },
+                    '&:hover fieldset': {
+                      borderColor: '#000000',
+                    },
+                    '&.Mui-focused fieldset': {
+                      borderColor: '#000000',
+                    }
+                  },
+                  '& .MuiInputLabel-root.Mui-focused': {
+                    color: '#000000'
+                  }
+                }}
               />
 
               <TextField
@@ -416,6 +481,23 @@ export default function CreateOrganization() {
                 required
                 placeholder="you@company.com"
                 helperText="We'll send a verification link to this email"
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': {
+                      borderColor: '#000000',
+                      borderWidth: '2px'
+                    },
+                    '&:hover fieldset': {
+                      borderColor: '#000000',
+                    },
+                    '&.Mui-focused fieldset': {
+                      borderColor: '#000000',
+                    }
+                  },
+                  '& .MuiInputLabel-root.Mui-focused': {
+                    color: '#000000'
+                  }
+                }}
               />
 
               <TextField
@@ -426,6 +508,23 @@ export default function CreateOrganization() {
                 onChange={handleChange('password')}
                 required
                 helperText="At least 6 characters"
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': {
+                      borderColor: '#000000',
+                      borderWidth: '2px'
+                    },
+                    '&:hover fieldset': {
+                      borderColor: '#000000',
+                    },
+                    '&.Mui-focused fieldset': {
+                      borderColor: '#000000',
+                    }
+                  },
+                  '& .MuiInputLabel-root.Mui-focused': {
+                    color: '#000000'
+                  }
+                }}
               />
 
               <Button
@@ -434,14 +533,40 @@ export default function CreateOrganization() {
                 size="large"
                 fullWidth
                 disabled={loading}
-                sx={{ mt: 2 }}
+                sx={{ 
+                  mt: 2,
+                  backgroundColor: '#000000',
+                  color: '#FFFFFF',
+                  fontWeight: 600,
+                  border: '2px solid #000000',
+                  '&:hover': {
+                    backgroundColor: '#1F2937',
+                    borderColor: '#1F2937',
+                  },
+                  '&:disabled': {
+                    backgroundColor: '#9CA3AF',
+                    borderColor: '#9CA3AF',
+                  }
+                }}
               >
-                {loading ? <CircularProgress size={24} /> : 'Continue'}
+                {loading ? <CircularProgress size={24} sx={{ color: '#FFFFFF' }} /> : 'Continue'}
               </Button>
 
-              <Typography variant="body2" color="text.secondary" textAlign="center">
+              <Typography variant="body2" sx={{ color: '#6B7280', textAlign: 'center' }}>
                 Already have an account?{' '}
-                <Button href="/login" sx={{ p: 0, textTransform: 'none' }}>
+                <Button 
+                  href="/login" 
+                  sx={{ 
+                    p: 0, 
+                    textTransform: 'none',
+                    color: '#000000',
+                    fontWeight: 600,
+                    '&:hover': {
+                      backgroundColor: 'transparent',
+                      textDecoration: 'underline'
+                    }
+                  }}
+                >
                   Sign in
                 </Button>
               </Typography>
@@ -451,27 +576,33 @@ export default function CreateOrganization() {
 
         {step === 1 && (
           <Box sx={{ textAlign: 'center', py: 4 }}>
-            <EmailIcon sx={{ fontSize: 80, color: 'primary.main', mb: 2 }} />
+            <EmailIcon sx={{ fontSize: 80, color: '#000000', mb: 2 }} />
             
-            <Typography variant="h6" gutterBottom>
+            <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, color: '#000000' }}>
               Check Your Email
             </Typography>
             
-            <Typography variant="body1" color="text.secondary" paragraph>
+            <Typography variant="body1" sx={{ color: '#6B7280', mb: 1 }}>
               We've sent a verification link to:
             </Typography>
             
-            <Typography variant="body1" fontWeight="bold" paragraph>
+            <Typography variant="body1" sx={{ fontWeight: 700, color: '#000000', mb: 2 }}>
               {formData.email}
             </Typography>
             
-            <Typography variant="body2" color="text.secondary" paragraph>
+            <Typography variant="body2" sx={{ color: '#6B7280', mb: 3 }}>
               Click the link in the email to verify your address and complete the setup.
               The link will expire in 24 hours.
             </Typography>
 
-            <Alert severity="info" sx={{ mt: 3, textAlign: 'left' }}>
-              <Typography variant="body2">
+            <Alert severity="info" sx={{ 
+              mt: 3, 
+              textAlign: 'left',
+              border: '1px solid #000000',
+              backgroundColor: '#F9FAFB',
+              color: '#000000'
+            }}>
+              <Typography variant="body2" sx={{ color: '#000000' }}>
                 <strong>Didn't receive the email?</strong>
                 <br />
                 • Check your spam folder
@@ -487,13 +618,37 @@ export default function CreateOrganization() {
                 variant="contained"
                 onClick={handleResendEmail}
                 disabled={resending}
-                sx={{ minWidth: 150 }}
+                sx={{ 
+                  minWidth: 150,
+                  backgroundColor: '#000000',
+                  color: '#FFFFFF',
+                  fontWeight: 600,
+                  border: '2px solid #000000',
+                  '&:hover': {
+                    backgroundColor: '#1F2937',
+                    borderColor: '#1F2937',
+                  },
+                  '&:disabled': {
+                    backgroundColor: '#9CA3AF',
+                    borderColor: '#9CA3AF',
+                  }
+                }}
               >
-                {resending ? <CircularProgress size={24} /> : 'Resend Email'}
+                {resending ? <CircularProgress size={24} sx={{ color: '#FFFFFF' }} /> : 'Resend Email'}
               </Button>
               <Button
                 variant="outlined"
                 onClick={() => window.location.href = '/login'}
+                sx={{
+                  border: '2px solid #000000',
+                  color: '#000000',
+                  fontWeight: 600,
+                  '&:hover': {
+                    backgroundColor: '#000000',
+                    color: '#FFFFFF',
+                    borderColor: '#000000',
+                  }
+                }}
               >
                 Back to Login
               </Button>
@@ -503,20 +658,30 @@ export default function CreateOrganization() {
 
         {step === 2 && (
           <Box sx={{ textAlign: 'center', py: 4 }}>
-            <CheckIcon sx={{ fontSize: 80, color: 'success.main', mb: 2 }} />
+            <CheckIcon sx={{ fontSize: 80, color: '#000000', mb: 2 }} />
             
-            <Typography variant="h6" gutterBottom>
+            <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, color: '#000000' }}>
               Email Verified!
             </Typography>
             
-            <Typography variant="body1" color="text.secondary" paragraph>
+            <Typography variant="body1" sx={{ color: '#6B7280', mb: 3 }}>
               Your organization has been created successfully.
             </Typography>
 
             <Button
               variant="contained"
               href="/login"
-              sx={{ mt: 2 }}
+              sx={{ 
+                mt: 2,
+                backgroundColor: '#000000',
+                color: '#FFFFFF',
+                fontWeight: 600,
+                border: '2px solid #000000',
+                '&:hover': {
+                  backgroundColor: '#1F2937',
+                  borderColor: '#1F2937',
+                }
+              }}
             >
               Continue to Dashboard
             </Button>

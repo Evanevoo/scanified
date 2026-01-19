@@ -22,15 +22,19 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [trialExpired, setTrialExpired] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [sessionTimeoutWarning, setSessionTimeoutWarning] = useState(false);
   const authListenerRef = useRef(null);
   const authFlowInProgressRef = useRef(false);
   const lastAuthStateRef = useRef(null);
   const previousSessionRef = useRef(null);
   const isInitialLoadRef = useRef(true);
   const inactivityTimerRef = useRef(null);
+  const warningTimerRef = useRef(null);
 
-  // 2 hours inactivity auto-logout (increased from 15 minutes)
-  const INACTIVITY_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+  // 15 minutes inactivity auto-logout
+  const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
+  // Show warning 2 minutes before logout
+  const WARNING_BEFORE_TIMEOUT_MS = 2 * 60 * 1000;
 
   // Initialize hook once
   useEffect(() => {
@@ -260,7 +264,7 @@ export const AuthProvider = ({ children }) => {
 
     // Listen for changes in auth state (login/logout)
     const { data: listener } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      (_event, session) => {
         // Check if auth listeners are disabled during tab switch
         if (window.__authListenerDisabled) {
           logger.log('Auth: Auth listener disabled during tab switch, ignoring event:', _event);
@@ -269,42 +273,32 @@ export const AuthProvider = ({ children }) => {
         
         logger.log(`Auth: Auth state changed, event: ${_event}`);
         
+        // Skip token refresh events - these don't indicate a sign-out
+        if (_event === 'TOKEN_REFRESHED') {
+          logger.log('Auth: Token refreshed, maintaining session');
+          // Update session but don't reload user/profile unnecessarily
+          if (session?.user && user && session.user.id === user.id) {
+            return; // Same user, just token refresh
+          }
+        }
+        
         // Skip if this is the initial load
         if (isInitialLoadRef.current) {
           logger.log('Auth: Initial load, skipping auth state change');
           return;
         }
         
-        // Handle token refresh errors gracefully
-        if (_event === 'TOKEN_REFRESHED') {
-          logger.log('Auth: Token refreshed successfully');
-          // Don't reload everything on token refresh - just update session reference
-          previousSessionRef.current = session;
-          return;
-        }
-        
-        // Handle token refresh failures - try to recover
-        if (_event === 'SIGNED_OUT' && session === null && user) {
-          // Token refresh might have failed - try to get current session
-          logger.warn('Auth: Signed out event but user exists, checking session...');
-          try {
-            const { data: { session: currentSession }, error } = await supabase.auth.getSession();
-            if (currentSession && !error) {
-              logger.log('Auth: Session still valid, ignoring sign out event');
-              return;
-            }
-          } catch (e) {
-            logger.error('Auth: Error checking session:', e);
-          }
-        }
-        
         // Check if this is a genuine auth state change or just a session refresh
         const currentSessionId = session?.user?.id;
         const previousSessionId = previousSessionRef.current?.user?.id;
         
-        // Handle different auth events
+        if (_event === 'SIGNED_IN' && currentSessionId === previousSessionId) {
+          logger.log('Auth: Session refresh detected, not a genuine sign-in event');
+          return;
+        }
+        
+        // Only treat as sign-out if event is explicitly SIGNED_OUT
         if (_event === 'SIGNED_OUT') {
-          // User was signed out - clear state
           logger.log('Auth: User signed out');
           setUser(null);
           setProfile(null);
@@ -314,33 +308,11 @@ export const AuthProvider = ({ children }) => {
           return;
         }
         
-        if (_event === 'SIGNED_IN' && currentSessionId === previousSessionId) {
-          logger.log('Auth: Session refresh detected, not a genuine sign-in event');
-          // Don't reload if we already have valid data
-          if (user && profile && organization && user.id === currentSessionId) {
-            logger.log('Auth: Already have valid session data, skipping reload');
-            return;
-          }
-        }
+        // Update the previous session reference
+        previousSessionRef.current = session;
         
-        // Only reload if session actually changed
-        if (currentSessionId && currentSessionId !== previousSessionId) {
-          logger.log('Auth: Session changed, reloading user data');
-          previousSessionRef.current = session;
-          setLoading(true);
-          loadUserAndProfile(session?.user);
-        } else if (!session && previousSessionId) {
-          // Session was lost
-          logger.log('Auth: Session lost');
-          setUser(null);
-          setProfile(null);
-          setOrganization(null);
-          setLoading(false);
-          previousSessionRef.current = null;
-        } else {
-          // Session refresh with same user - just update reference
-          previousSessionRef.current = session;
-        }
+        setLoading(true);
+        loadUserAndProfile(session?.user);
       }
     );
 
@@ -356,49 +328,61 @@ export const AuthProvider = ({ children }) => {
     };
   }, []);
 
-  // Auto-logout on window close and after inactivity
+  // Auto-logout after inactivity (removed window close auto-logout to prevent random sign-outs)
   useEffect(() => {
     // Helper to safely sign out without redirect loops
-    const safeSignOut = () => {
+    const safeSignOut = async () => {
       try {
         sessionStorage.setItem('skip_org_redirect_once', '1');
-      } catch (e) {}
-      try {
-        // Fire and forget
-        supabase.auth.signOut();
+        await supabase.auth.signOut();
+        // Hard navigate to login to ensure clean state
+        try { window.location.href = '/login'; } catch (e) {}
       } catch (e) {
         logger.warn('Auto sign-out error (ignored):', e);
+        // Even on error, redirect to login
+        try { window.location.href = '/login'; } catch (e2) {}
       }
     };
 
     const resetInactivityTimer = () => {
       if (!user) return; // Only track when logged in
+      
+      // Clear existing timers
       if (inactivityTimerRef.current) {
         clearTimeout(inactivityTimerRef.current);
       }
+      if (warningTimerRef.current) {
+        clearTimeout(warningTimerRef.current);
+      }
+      
+      // Hide any existing warning
+      setSessionTimeoutWarning(false);
+      
+      // Set warning timer (fires 2 minutes before logout)
+      warningTimerRef.current = setTimeout(() => {
+        setSessionTimeoutWarning(true);
+        logger.warn('Session timeout warning - user inactive');
+      }, INACTIVITY_TIMEOUT_MS - WARNING_BEFORE_TIMEOUT_MS);
+      
+      // Set logout timer
       inactivityTimerRef.current = setTimeout(() => {
+        setSessionTimeoutWarning(false);
+        logger.warn('Session timeout - signing out due to inactivity');
         safeSignOut();
-        // Hard navigate to login to ensure clean state
-        try { window.location.href = '/login'; } catch (e) {}
       }, INACTIVITY_TIMEOUT_MS);
     };
 
-    const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-    const onActivity = () => resetInactivityTimer();
-
-    const onUnload = () => {
-      // Only sign out on actual window close, not tab switches
-      // pagehide can fire when switching tabs, so we only use beforeunload
-      if (user) {
-        safeSignOut();
+    const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart', 'mousedown', 'keypress'];
+    const onActivity = () => {
+      // Only reset if warning is not showing (let user click "Stay Logged In" button)
+      if (!sessionTimeoutWarning) {
+        resetInactivityTimer();
       }
     };
 
     // Attach listeners only if user is logged in
     if (user) {
       activityEvents.forEach((evt) => window.addEventListener(evt, onActivity, { passive: true }));
-      // Only use beforeunload - pagehide fires too often (tab switches, etc.)
-      window.addEventListener('beforeunload', onUnload);
       resetInactivityTimer();
     }
 
@@ -407,10 +391,28 @@ export const AuthProvider = ({ children }) => {
         clearTimeout(inactivityTimerRef.current);
         inactivityTimerRef.current = null;
       }
+      if (warningTimerRef.current) {
+        clearTimeout(warningTimerRef.current);
+        warningTimerRef.current = null;
+      }
       activityEvents.forEach((evt) => window.removeEventListener(evt, onActivity));
-      window.removeEventListener('beforeunload', onUnload);
     };
-  }, [user]);
+  }, [user, sessionTimeoutWarning]);
+  
+  // Function to extend session (called when user clicks "Stay Logged In")
+  const extendSession = () => {
+    setSessionTimeoutWarning(false);
+    // Reset timers immediately when user extends session
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+      inactivityTimerRef.current = null;
+    }
+    if (warningTimerRef.current) {
+      clearTimeout(warningTimerRef.current);
+      warningTimerRef.current = null;
+    }
+    // The useEffect will handle resetting timers when sessionTimeoutWarning changes
+  };
 
   // Generate unique slug function
   const generateUniqueSlug = async (orgName) => {
@@ -462,6 +464,8 @@ export const AuthProvider = ({ children }) => {
     organization,
     loading,
     trialExpired,
+    sessionTimeoutWarning,
+    extendSession,
     signUp: async (email, password, name, organizationData = null) => {
       try {
         const { data, error } = await supabase.auth.signUp({
@@ -563,12 +567,19 @@ export const AuthProvider = ({ children }) => {
     },
     resetPassword: async (email) => {
       try {
+        // Use production URL for password reset links to avoid Netlify routing issues
+        const productionUrl = 'https://www.scanified.com';
+        const redirectUrl = `${productionUrl}/reset-password`;
+        
+        logger.log('Sending password reset email with redirect URL:', redirectUrl);
+        
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/reset-password`,
+          redirectTo: redirectUrl,
         });
         if (error) throw error;
         return { error: null };
       } catch (error) {
+        logger.error('Error sending password reset email:', error);
         return { error };
       }
     },
@@ -685,7 +696,7 @@ export const AuthProvider = ({ children }) => {
         logger.error('reloadUserData: Exception:', e);
       }
     },
-  }), [user, profile, organization, loading, trialExpired]);
+  }), [user, profile, organization, loading, trialExpired, sessionTimeoutWarning]);
 
   // Only log state changes when they actually change
   useEffect(() => {

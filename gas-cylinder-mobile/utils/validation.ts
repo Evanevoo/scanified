@@ -35,6 +35,71 @@ export class ValidationUtils {
     };
   }
 
+  // Strong password validation with complexity requirements
+  static passwordStrength(value: string): ValidationResult {
+    const errors: string[] = [];
+    
+    if (!value) {
+      return { isValid: false, errors: ['Password is required'] };
+    }
+    
+    if (value.length < 8) {
+      errors.push('Password must be at least 8 characters long');
+    }
+    
+    if (value.length > 128) {
+      errors.push('Password must be less than 128 characters');
+    }
+    
+    // Check for uppercase letter
+    if (!/[A-Z]/.test(value)) {
+      errors.push('Password must contain at least one uppercase letter');
+    }
+    
+    // Check for lowercase letter
+    if (!/[a-z]/.test(value)) {
+      errors.push('Password must contain at least one lowercase letter');
+    }
+    
+    // Check for number
+    if (!/[0-9]/.test(value)) {
+      errors.push('Password must contain at least one number');
+    }
+    
+    return {
+      isValid: errors.length === 0,
+      errors,
+    };
+  }
+
+  // Get password strength score for UI feedback
+  static getPasswordStrengthScore(password: string): { score: number; label: string; color: string } {
+    if (!password) return { score: 0, label: 'None', color: '#9CA3AF' };
+    
+    let score = 0;
+    
+    // Length checks
+    if (password.length >= 8) score++;
+    if (password.length >= 12) score++;
+    
+    // Complexity checks
+    if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score++;
+    if (/[0-9]/.test(password)) score++;
+    if (/[^A-Za-z0-9]/.test(password)) score++; // Special characters bonus
+    
+    // Cap at 4
+    score = Math.min(score, 4);
+    
+    const labels = ['Weak', 'Fair', 'Good', 'Strong', 'Very Strong'];
+    const colors = ['#EF4444', '#F59E0B', '#EAB308', '#22C55E', '#16A34A'];
+    
+    return {
+      score,
+      label: labels[score],
+      color: colors[score]
+    };
+  }
+
   static maxLength(value: string, max: number, fieldName: string): ValidationResult {
     const isValid = value.length <= max;
     return {
@@ -223,7 +288,10 @@ export const ValidationSchemas = {
       ValidationUtils.required(value, 'Email'),
       ValidationUtils.email(value)
     ),
-    password: (value: string) => ValidationUtils.combine(
+    // Use stronger password validation with complexity requirements
+    password: (value: string) => ValidationUtils.passwordStrength(value),
+    // Legacy simple password validation for login (existing users may have weak passwords)
+    passwordSimple: (value: string) => ValidationUtils.combine(
       ValidationUtils.required(value, 'Password'),
       ValidationUtils.minLength(value, 6, 'Password')
     ),

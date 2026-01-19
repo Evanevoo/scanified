@@ -3,10 +3,11 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { validateInput } from '../utils/security';
 import {
   Box, Card, CardContent, Typography, TextField, Button, 
   Alert, CircularProgress, Divider, Link, Dialog, DialogTitle,
-  DialogContent, DialogActions, Snackbar, IconButton
+  DialogContent, DialogActions, Snackbar, IconButton, LinearProgress
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -38,29 +39,6 @@ function LoginPage() {
       setSignupDialog(true);
     }
   }, [user]);
-
-  // Prevent backspace from navigating back when typing in input fields
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      // Only prevent backspace navigation if not in an input/textarea/contenteditable
-      if (e.key === 'Backspace' || e.keyCode === 8) {
-        const target = e.target;
-        const isInput = target.tagName === 'INPUT' || 
-                       target.tagName === 'TEXTAREA' || 
-                       target.isContentEditable;
-        
-        // If backspace is pressed outside an input field, prevent default (browser back navigation)
-        if (!isInput) {
-          e.preventDefault();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, []);
 
   useEffect(() => {
     // Simplified navigation logic
@@ -151,8 +129,12 @@ function LoginPage() {
     setResetLoading(true);
     setResetError('');
     
+    // Use production URL for password reset links to avoid Netlify routing issues
+    const productionUrl = 'https://www.scanified.com';
+    const redirectUrl = `${productionUrl}/reset-password`;
+    
     const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: redirectUrl,
     });
     
     if (error) {
@@ -449,22 +431,28 @@ function LoginPage() {
       display: 'flex', 
       alignItems: 'center', 
       justifyContent: 'center',
-      background: 'linear-gradient(135deg, #40B5AD 0%, #48C9B0 50%, #5FCDC5 100%)',
+      backgroundColor: '#FFFFFF',
       p: 3
     }}>
-      <Card sx={{ maxWidth: 400, width: '100%' }}>
+      <Card sx={{ 
+        maxWidth: 400, 
+        width: '100%',
+        border: '2px solid #000000',
+        borderRadius: '8px',
+        boxShadow: 'none'
+      }}>
         <CardContent sx={{ p: 4 }}>
           <Box sx={{ textAlign: 'center', mb: 4 }}>
-            <Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 600 }}>
+            <Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 700, color: '#000000' }}>
               Welcome Back
             </Typography>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" sx={{ color: '#6B7280' }}>
               Sign in to your account to continue
             </Typography>
           </Box>
 
           {error && (
-            <Alert severity="error" sx={{ mb: 3 }}>
+            <Alert severity="error" sx={{ mb: 3, border: '1px solid #EF4444', backgroundColor: '#FEE2E2', color: '#991B1B' }}>
               {error}
             </Alert>
           )}
@@ -479,11 +467,22 @@ function LoginPage() {
               margin="normal"
               autoComplete="email"
               autoFocus
-              onKeyDown={(e) => {
-                // Prevent backspace from navigating back when in email field
-                if (e.key === 'Backspace' || e.keyCode === 8) {
-                  // Allow normal backspace behavior in input field
-                  e.stopPropagation();
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderColor: '#000000',
+                  '& fieldset': {
+                    borderColor: '#000000',
+                    borderWidth: '2px'
+                  },
+                  '&:hover fieldset': {
+                    borderColor: '#000000',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: '#000000',
+                  }
+                },
+                '& .MuiInputLabel-root.Mui-focused': {
+                  color: '#000000'
                 }
               }}
             />
@@ -495,11 +494,22 @@ function LoginPage() {
               required
               margin="normal"
               autoComplete="current-password"
-              onKeyDown={(e) => {
-                // Prevent backspace from navigating back when in password field
-                if (e.key === 'Backspace' || e.keyCode === 8) {
-                  // Allow normal backspace behavior in input field
-                  e.stopPropagation();
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderColor: '#000000',
+                  '& fieldset': {
+                    borderColor: '#000000',
+                    borderWidth: '2px'
+                  },
+                  '&:hover fieldset': {
+                    borderColor: '#000000',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: '#000000',
+                  }
+                },
+                '& .MuiInputLabel-root.Mui-focused': {
+                  color: '#000000'
                 }
               }}
             />
@@ -510,10 +520,11 @@ function LoginPage() {
                 onClick={() => setForgotPasswordOpen(true)}
                 sx={{ 
                   cursor: 'pointer',
-                  color: '#40B5AD',
+                  color: '#000000',
+                  fontWeight: 500,
                   '&:hover': {
                     textDecoration: 'underline',
-                    color: '#2D8B85'
+                    color: '#374151'
                   }
                 }}
               >
@@ -529,28 +540,36 @@ function LoginPage() {
               disabled={loadingLocal}
               sx={{ 
                 mb: 2,
-                backgroundColor: '#40B5AD',
+                backgroundColor: '#000000',
+                color: '#FFFFFF',
+                fontWeight: 600,
+                border: '2px solid #000000',
                 '&:hover': {
-                  backgroundColor: '#2D8B85',
+                  backgroundColor: '#1F2937',
+                  borderColor: '#1F2937',
                 },
                 '&:disabled': {
                   backgroundColor: '#9CA3AF',
+                  borderColor: '#9CA3AF',
+                  color: '#FFFFFF'
                 }
               }}
             >
-              {loadingLocal ? <CircularProgress size={24} /> : 'Sign In'}
+              {loadingLocal ? <CircularProgress size={24} sx={{ color: '#FFFFFF' }} /> : 'Sign In'}
             </Button>
           </form>
 
-          <Divider sx={{ my: 3 }}>OR</Divider>
+          <Divider sx={{ my: 3, borderColor: '#E5E7EB', '&::before, &::after': { borderColor: '#E5E7EB' } }}>
+            <Typography sx={{ color: '#6B7280', px: 2 }}>OR</Typography>
+          </Divider>
 
           <Box sx={{ textAlign: 'center' }}>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
+            <Typography variant="body2" sx={{ color: '#6B7280', mb: 2 }}>
               Don't have an account?
             </Typography>
             <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
               <Button
-                variant="contained"
+                variant="outlined"
                 size="large"
                 fullWidth
                 onClick={() => {
@@ -559,20 +578,25 @@ function LoginPage() {
                 }}
                 sx={{ 
                   mb: 1,
-                  backgroundColor: '#40B5AD',
+                  backgroundColor: '#FFFFFF',
+                  color: '#000000',
+                  border: '2px solid #000000',
+                  fontWeight: 600,
                   '&:hover': {
-                    backgroundColor: '#2D8B85',
+                    backgroundColor: '#000000',
+                    color: '#FFFFFF',
+                    borderColor: '#000000',
                   }
                 }}
               >
                 Create Free Account
               </Button>
-              <Typography variant="caption" color="text.secondary" display="block" textAlign="center">
+              <Typography variant="caption" sx={{ color: '#6B7280', display: 'block', textAlign: 'center' }}>
                 Join an existing organization or start your own
               </Typography>
             </Box>
             <Box sx={{ mt: 2, textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" sx={{ color: '#6B7280' }}>
                 Already have an account? Sign in above
               </Typography>
             </Box>
@@ -587,10 +611,11 @@ function LoginPage() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 1,
-                color: '#40B5AD',
+                color: '#000000',
+                fontWeight: 500,
                 '&:hover': {
                   textDecoration: 'underline',
-                  color: '#2D8B85'
+                  color: '#374151'
                 }
               }}
             >
@@ -598,16 +623,16 @@ function LoginPage() {
                 size="small" 
                 sx={{ 
                   padding: 0,
-                  color: '#40B5AD',
+                  color: '#000000',
                   '&:hover': {
-                    color: '#2D8B85',
-                    backgroundColor: 'rgba(64, 181, 173, 0.1)'
+                    color: '#374151',
+                    backgroundColor: 'rgba(0, 0, 0, 0.05)'
                   }
                 }}
               >
                 <ArrowBackIcon />
               </IconButton>
-              <Typography variant="body2">
+              <Typography variant="body2" sx={{ color: '#000000', fontWeight: 500 }}>
                 Back to Home
               </Typography>
             </Box>
@@ -616,15 +641,26 @@ function LoginPage() {
       </Card>
 
       {/* Forgot Password Dialog */}
-      <Dialog open={forgotPasswordOpen} onClose={handleCloseForgotPassword} maxWidth="xs" fullWidth>
-        <DialogTitle>Reset Password</DialogTitle>
+      <Dialog 
+        open={forgotPasswordOpen} 
+        onClose={handleCloseForgotPassword} 
+        maxWidth="xs" 
+        fullWidth
+        PaperProps={{
+          sx: {
+            border: '2px solid #000000',
+            borderRadius: '8px'
+          }
+        }}
+      >
+        <DialogTitle sx={{ color: '#000000', fontWeight: 700 }}>Reset Password</DialogTitle>
         <form onSubmit={handleForgotPassword}>
           <DialogContent>
-            <Typography variant="body2" sx={{ mb: 2 }}>
+            <Typography variant="body2" sx={{ mb: 2, color: '#6B7280' }}>
               Enter your email address and we'll send you a link to reset your password.
             </Typography>
             {resetError && (
-              <Alert severity="error" sx={{ mb: 2 }}>
+              <Alert severity="error" sx={{ mb: 2, border: '1px solid #EF4444', backgroundColor: '#FEE2E2', color: '#991B1B' }}>
                 {resetError}
               </Alert>
             )}
@@ -636,23 +672,37 @@ function LoginPage() {
               onChange={(e) => setResetEmail(e.target.value)}
               required
               autoFocus
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  '& fieldset': {
+                    borderColor: '#000000',
+                    borderWidth: '2px'
+                  },
+                  '&:hover fieldset': {
+                    borderColor: '#000000',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: '#000000',
+                  }
+                },
+                '& .MuiInputLabel-root.Mui-focused': {
+                  color: '#000000'
+                }
+              }}
             />
           </DialogContent>
-          <DialogActions>
-            <Button onClick={handleCloseForgotPassword}>Cancel</Button>
+          <DialogActions sx={{ p: 2 }}>
+            <Button 
+              onClick={handleCloseForgotPassword}
+              color="inherit"
+            >
+              Cancel
+            </Button>
             <Button 
               type="submit" 
               variant="contained" 
+              color="primary"
               disabled={resetLoading}
-              sx={{
-                backgroundColor: '#40B5AD',
-                '&:hover': {
-                  backgroundColor: '#2D8B85',
-                },
-                '&:disabled': {
-                  backgroundColor: '#9CA3AF',
-                }
-              }}
             >
               {resetLoading ? <CircularProgress size={20} /> : 'Send Reset Link'}
             </Button>
@@ -714,9 +764,40 @@ function LoginPage() {
               value={signupData.password}
               onChange={(e) => setSignupData({ ...signupData, password: e.target.value })}
               required
-              helperText="Must be at least 6 characters"
-              sx={{ mb: 2 }}
+              helperText="Min 8 characters with uppercase, lowercase, and number"
+              sx={{ mb: 1 }}
             />
+            {/* Password Strength Indicator */}
+            {signupData.password && (
+              <Box sx={{ mb: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                  <LinearProgress 
+                    variant="determinate" 
+                    value={(validateInput.getPasswordStrength(signupData.password).score / 4) * 100}
+                    sx={{ 
+                      flexGrow: 1, 
+                      height: 6, 
+                      borderRadius: 3,
+                      bgcolor: '#e0e0e0',
+                      '& .MuiLinearProgress-bar': {
+                        bgcolor: validateInput.getPasswordStrength(signupData.password).color,
+                        borderRadius: 3
+                      }
+                    }}
+                  />
+                  <Typography 
+                    variant="caption" 
+                    sx={{ 
+                      color: validateInput.getPasswordStrength(signupData.password).color, 
+                      fontWeight: 500, 
+                      minWidth: 80 
+                    }}
+                  >
+                    {validateInput.getPasswordStrength(signupData.password).label}
+                  </Typography>
+                </Box>
+              </Box>
+            )}
             <TextField
               fullWidth
               label="Organization Name (Optional)"
@@ -735,7 +816,7 @@ function LoginPage() {
             <Button 
               type="submit" 
               variant="contained" 
-              disabled={signupLoading || !signupData.name || !signupData.email || !signupData.password || signupData.password.length < 6}
+              disabled={signupLoading || !signupData.name || !signupData.email || !signupData.password || !validateInput.validatePassword(signupData.password).valid}
               sx={{
                 backgroundColor: '#40B5AD',
                 '&:hover': {

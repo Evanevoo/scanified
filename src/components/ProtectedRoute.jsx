@@ -3,7 +3,6 @@ import React from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../hooks/useAssetConfig';
-import { supabase } from '../supabase/client';
 import LoadingSpinner from './LoadingSpinner';
 import MainLayout from './MainLayout';
 import { Alert, Box, Button, Card, CardContent, Typography, Grid } from '@mui/material';
@@ -16,8 +15,6 @@ const ProtectedRoute = ({ children }) => {
   const { config } = useAssetConfig();
   const location = useLocation();
   const navigate = useNavigate();
-  const [authCheckDelay, setAuthCheckDelay] = React.useState(false);
-  const authCheckTimeoutRef = React.useRef(null);
 
   // Log the state for debugging purposes.
   if (import.meta.env.DEV) {
@@ -33,42 +30,6 @@ const ProtectedRoute = ({ children }) => {
     });
   }
 
-  // Double-check session before redirecting (prevents false logouts during file operations)
-  React.useEffect(() => {
-    if (!loading && !user) {
-      // Give a brief delay to allow auth state to stabilize (e.g., during file operations)
-      authCheckTimeoutRef.current = setTimeout(async () => {
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (!session) {
-            // No session - confirmed logout
-            setAuthCheckDelay(true);
-            logger.log('🛡️ ProtectedRoute: No session confirmed - will redirect to login');
-          } else {
-            // Session exists but user state is null - this is a false logout, wait for auth to catch up
-            logger.log('🛡️ ProtectedRoute: Session exists but user state is null - waiting for auth state to sync');
-            setAuthCheckDelay(false);
-          }
-        } catch (error) {
-          logger.error('🛡️ ProtectedRoute: Error checking session:', error);
-          setAuthCheckDelay(true);
-        }
-      }, 200); // 200ms delay to allow auth state to stabilize
-
-      return () => {
-        if (authCheckTimeoutRef.current) {
-          clearTimeout(authCheckTimeoutRef.current);
-        }
-      };
-    } else if (user) {
-      // User exists - clear any pending delay
-      setAuthCheckDelay(false);
-      if (authCheckTimeoutRef.current) {
-        clearTimeout(authCheckTimeoutRef.current);
-      }
-    }
-  }, [loading, user]);
-
   if (loading) {
     // Show a full-page loading spinner while auth state is being determined.
     logger.log('🛡️ ProtectedRoute: LOADING - showing spinner');
@@ -76,15 +37,9 @@ const ProtectedRoute = ({ children }) => {
   }
 
   if (!user) {
-    // If no user, check if we've confirmed there's no session
-    if (authCheckDelay) {
-      // Confirmed no session - redirect to login
-      logger.log('🛡️ ProtectedRoute: NO USER (confirmed) - redirecting to login');
-      return <Navigate to="/login" replace />;
-    } else {
-      // Still checking session - show loading to prevent false redirect
-      return <LoadingSpinner />;
-    }
+    // If the user is not authenticated, redirect them to the login page.
+    logger.log('🛡️ ProtectedRoute: NO USER - redirecting to login');
+    return <Navigate to="/login" replace />;
   }
 
   if (trialExpired) {
