@@ -28,7 +28,7 @@ const FIELD_ALIASES = {
   name: ['name', 'customername', 'customer name', 'holdername', 'company', 'company name'],
   contact_details: ['contact_details', 'address', 'contact', 'contact info', 'contact information', 'address1', 'address 1', 'billtofulladdress'],
   phone: ['phone', 'phone number', 'phonenumber', 'contact phone', 'mobile', 'mobile number'],
-  email: ['email', 'email address', 'emailaddress', 'e-mail', 'e_mail', 'contact email', 'customer email', 'rentalbillemailto', 'billing email'],
+  email: ['email', 'email address', 'emailaddress', 'e-mail', 'contact email', 'customer email', 'rentalbillemailto'],
   barcode: ['barcode', 'customer_barcode', 'customer barcode', 'holderbarcode', 'customeridbarcode', 'scan code', 'scan_code'],
   address2: ['address2', 'address 2', 'billing address 2', 'shipping address line2', 'shipping address 2'],
   address3: ['address3', 'address 3', 'billing address 3', 'shipping address line3', 'shipping address 3'],
@@ -189,8 +189,8 @@ const ImportCustomerInfo = () => {
   const { profile } = useAuth(); // Add useAuth hook to get profile
 
   useEffect(() => {
-    const color = localStorage.getItem('themeColor') || 'blue-600';
-    document.documentElement.style.setProperty('--accent', colorMap[color] || colorMap['blue-600']);
+    const color = localStorage.getItem('themeColor') || 'teal-500';
+    document.documentElement.style.setProperty('--accent', colorMap[color] || colorMap['teal-500'] || '#40B5AD');
     // Theme override for Import Customers page
     const importCustomersTheme = localStorage.getItem('importCustomersTheme') || 'system';
     if (importCustomersTheme === 'light') {
@@ -279,10 +279,6 @@ const ImportCustomerInfo = () => {
       if (detectedColumns.includes('HolderStr')) initialMapping['CustomerListID'] = 'HolderStr';
       if (detectedColumns.includes('HolderName')) initialMapping['name'] = 'HolderName';
       if (detectedColumns.includes('BillToFullAddress')) initialMapping['contact_details'] = 'BillToFullAddress';
-      // Common email headers
-      if (detectedColumns.includes('RentalBillEmailTo')) initialMapping['email'] = 'RentalBillEmailTo';
-      if (detectedColumns.includes('Email')) initialMapping['email'] = 'Email';
-      if (detectedColumns.includes('Email Address')) initialMapping['email'] = 'Email Address';
       // Common barcode headers
       if (detectedColumns.includes('Customer Barcode')) initialMapping['barcode'] = 'Customer Barcode';
       if (detectedColumns.includes('Barcode')) initialMapping['barcode'] = 'Barcode';
@@ -409,11 +405,19 @@ const ImportCustomerInfo = () => {
       
       // Filter out invalid entries and detect duplicates within import data
       const seenCustomers = new Set();
+      const seenBarcodes = new Map(); // Track barcodes (case-insensitive) -> customer
       const validCustomers = [];
+      
+      // Helper to normalize barcode for comparison (case-insensitive)
+      const normalizeBarcode = (barcode) => {
+        if (!barcode) return '';
+        return barcode.toString().trim().toLowerCase();
+      };
       
       for (const customer of preview) {
         const customerName = customer.name || '';
         const customerId = customer.CustomerListID || '';
+        const customerBarcode = normalizeBarcode(customer.barcode);
         
         if (!customerName.trim() && !customerId.trim()) {
           invalidCustomers.push('Empty name and ID');
@@ -428,6 +432,16 @@ const ImportCustomerInfo = () => {
         if (seenCustomers.has(duplicateKey)) {
           duplicateCustomers.push(`${customerName} (${customerId}) - duplicate within import file`);
           continue;
+        }
+        
+        // Check for duplicate barcodes (case-insensitive)
+        if (customerBarcode) {
+          if (seenBarcodes.has(customerBarcode)) {
+            const existingCustomer = seenBarcodes.get(customerBarcode);
+            duplicateCustomers.push(`${customerName} (${customerId}) - duplicate barcode "${customer.barcode}" already used by ${existingCustomer.name} (${existingCustomer.CustomerListID})`);
+            continue;
+          }
+          seenBarcodes.set(customerBarcode, { name: customerName, CustomerListID: customerId });
         }
         
         seenCustomers.add(duplicateKey);
@@ -446,106 +460,85 @@ const ImportCustomerInfo = () => {
         const existingCustomer = existingCustomerMap[key];
         
         if (existingCustomer) {
-          // Update existing customer with new info (merge/update fields when new data is provided)
+          // Always update existing customer with new info from import file
           const updateData = {};
           let hasUpdates = false;
           
-          // Helper to check if new value is "more complete" than existing
-          const isMoreComplete = (newVal, existingVal) => {
-            if (!newVal) return false;
-            if (!existingVal) return true;
-            // If new value is longer or has more content, consider it more complete
-            const newTrimmed = String(newVal).trim();
-            const existingTrimmed = String(existingVal).trim();
-            return newTrimmed.length > existingTrimmed.length && newTrimmed.length > 0;
-          };
-          
-          // Update fields if new data is provided (not just when missing)
-          // Prefer new data if it's more complete, otherwise keep existing
-          if (customer.contact_details) {
-            if (isMoreComplete(customer.contact_details, existingCustomer.contact_details) || !existingCustomer.contact_details) {
-              updateData.contact_details = customer.contact_details.trim();
-              hasUpdates = true;
-            }
+          // Update all fields if new data is provided (always use new data, don't check if more complete)
+          if (customer.contact_details !== undefined && customer.contact_details !== null && customer.contact_details !== '') {
+            updateData.contact_details = customer.contact_details.trim() || null;
+            hasUpdates = true;
           }
-          if (customer.address2) {
-            if (isMoreComplete(customer.address2, existingCustomer.address2) || !existingCustomer.address2) {
-              updateData.address2 = customer.address2.trim();
-              hasUpdates = true;
-            }
+          if (customer.address2 !== undefined && customer.address2 !== null && customer.address2 !== '') {
+            updateData.address2 = customer.address2.trim() || null;
+            hasUpdates = true;
           }
-          if (customer.address3) {
-            if (isMoreComplete(customer.address3, existingCustomer.address3) || !existingCustomer.address3) {
-              updateData.address3 = customer.address3.trim();
-              hasUpdates = true;
-            }
+          if (customer.address3 !== undefined && customer.address3 !== null && customer.address3 !== '') {
+            updateData.address3 = customer.address3.trim() || null;
+            hasUpdates = true;
           }
-          if (customer.address4) {
-            if (isMoreComplete(customer.address4, existingCustomer.address4) || !existingCustomer.address4) {
-              updateData.address4 = customer.address4.trim();
-              hasUpdates = true;
-            }
+          if (customer.address4 !== undefined && customer.address4 !== null && customer.address4 !== '') {
+            updateData.address4 = customer.address4.trim() || null;
+            hasUpdates = true;
           }
-          if (customer.address5) {
-            if (isMoreComplete(customer.address5, existingCustomer.address5) || !existingCustomer.address5) {
-              updateData.address5 = customer.address5.trim();
-              hasUpdates = true;
-            }
+          if (customer.address5 !== undefined && customer.address5 !== null && customer.address5 !== '') {
+            updateData.address5 = customer.address5.trim() || null;
+            hasUpdates = true;
           }
-          if (customer.city) {
-            if (isMoreComplete(customer.city, existingCustomer.city) || !existingCustomer.city) {
-              updateData.city = customer.city.trim();
-              hasUpdates = true;
-            }
+          if (customer.city !== undefined && customer.city !== null && customer.city !== '') {
+            updateData.city = customer.city.trim() || null;
+            hasUpdates = true;
           }
-          if (customer.postal_code) {
-            if (isMoreComplete(customer.postal_code, existingCustomer.postal_code) || !existingCustomer.postal_code) {
-              updateData.postal_code = customer.postal_code.trim();
-              hasUpdates = true;
-            }
+          if (customer.postal_code !== undefined && customer.postal_code !== null && customer.postal_code !== '') {
+            updateData.postal_code = customer.postal_code.trim() || null;
+            hasUpdates = true;
           }
-          if (customer.phone) {
-            if (isMoreComplete(customer.phone, existingCustomer.phone) || !existingCustomer.phone) {
-              updateData.phone = customer.phone.trim();
-              hasUpdates = true;
-            }
+          if (customer.phone !== undefined && customer.phone !== null && customer.phone !== '') {
+            updateData.phone = customer.phone.trim() || null;
+            hasUpdates = true;
           }
-          if (customer.email) {
-            const newEmail = customer.email.trim().toLowerCase();
-            if (newEmail && (!existingCustomer.email || newEmail !== existingCustomer.email.toLowerCase())) {
-              updateData.email = newEmail;
-              hasUpdates = true;
-            }
+          if (customer.email !== undefined && customer.email !== null && customer.email !== '') {
+            updateData.email = customer.email.trim() || null;
+            hasUpdates = true;
           }
-          if (customer.barcode) {
-            const newBarcode = (customer.barcode || '').toString().trim();
-            if (newBarcode && newBarcode !== existingCustomer.barcode) {
+          if (customer.barcode !== undefined && customer.barcode !== null && customer.barcode !== '') {
+            const newBarcode = customer.barcode.toString().trim();
+            if (newBarcode) {
               updateData.barcode = newBarcode;
               hasUpdates = true;
             }
           }
           
           // Always update name if provided (in case of slight variations)
-          if (customer.name && customer.name.trim() !== existingCustomer.name) {
+          if (customer.name && customer.name.trim()) {
             updateData.name = customer.name.trim();
             hasUpdates = true;
           }
           
-          if (hasUpdates) {
-            customersToUpdate.push({
-              CustomerListID: existingCustomer.CustomerListID,
-              updateData,
-              displayName: `${customerName} (${customerId})`
-            });
-          } else {
-            duplicateCustomers.push(`${customerName} (${customerId}) - already exists with complete info`);
-          }
+          // Always add to update list if customer exists (even if no field changes detected)
+          // This ensures we still update the customer record timestamp
+          customersToUpdate.push({
+            CustomerListID: existingCustomer.CustomerListID,
+            updateData: hasUpdates ? updateData : { name: customer.name.trim() }, // At minimum update name
+            displayName: `${customerName} (${customerId})`
+          });
           continue;
         }
         
         // Prepare customer data for new customers
         // Normalize CustomerListID to lowercase (remove trailing letters for consistency)
         const normalizedId = normalizeId(customerId) || generateCustomerId();
+        // Determine location from city or use default
+        const city = (customer.city || '').trim().toUpperCase();
+        let location = 'SASKATOON'; // Default
+        if (city.includes('REGINA')) location = 'REGINA';
+        else if (city.includes('CHILLIWACK')) location = 'CHILLIWACK';
+        else if (city.includes('PRINCE GEORGE') || city.includes('PRINCE_GEORGE')) location = 'PRINCE_GEORGE';
+        else if (city.includes('SASKATOON')) location = 'SASKATOON';
+        
+        // Normalize barcode (case-insensitive storage, but preserve original case)
+        const normalizedBarcode = customer.barcode ? customer.barcode.toString().trim() : null;
+        
         const customerData = {
           CustomerListID: normalizedId,
           name: customerName.trim(),
@@ -557,8 +550,9 @@ const ImportCustomerInfo = () => {
           city: (customer.city || '').trim() || null,
           postal_code: (customer.postal_code || '').trim() || null,
           phone: (customer.phone || '').trim() || null,
-          email: (customer.email || '').trim().toLowerCase() || null,
-          barcode: (customer.barcode || '').toString().trim() || null,
+          email: (customer.email || '').trim() || null,
+          barcode: normalizedBarcode,
+          location: location,
           organization_id: profile.organization_id
         };
         
@@ -593,60 +587,132 @@ const ImportCustomerInfo = () => {
       if (customersToProcess.length > 0) {
         logger.log(`Importing ${customersToProcess.length} new customers...`);
         
-        // Use upsert to handle duplicate key conflicts gracefully
-        const { data: insertData, error: insertError } = await supabase
-          .from('customers')
-          .upsert(customersToProcess, {
-            onConflict: 'organization_id,CustomerListID',
-            ignoreDuplicates: false
-          });
+        // Check for barcode conflicts before inserting (case-insensitive)
+        const barcodesToCheck = customersToProcess
+          .filter(c => c.barcode)
+          .map(c => c.barcode.toLowerCase().trim());
         
-        if (insertError) {
-          logger.error('Insert error:', insertError);
+        if (barcodesToCheck.length > 0) {
+          // Fetch all customers with matching barcodes (case-insensitive)
+          const { data: allCustomers, error: allCustomersError } = await supabase
+            .from('customers')
+            .select('barcode, CustomerListID, name')
+            .eq('organization_id', profile.organization_id)
+            .not('barcode', 'is', null);
           
-          // If it's a constraint violation, try individual inserts to identify the problem
-          if (insertError.code === '23505' || insertError.message.includes('duplicate key')) {
-            logger.log('Constraint violation detected, trying individual inserts...');
+          if (!allCustomersError && allCustomers) {
+            // Filter to find matches (case-insensitive)
+            const existingBarcodes = allCustomers.filter(c => {
+              const existingBarcodeNorm = (c.barcode || '').toString().toLowerCase().trim();
+              return barcodesToCheck.includes(existingBarcodeNorm);
+            });
             
-            let successCount = 0;
-            let conflictCount = 0;
-            const conflictCustomers = [];
-            
-            for (const customer of customersToProcess) {
-              try {
-                const { error: singleInsertError } = await supabase
-                  .from('customers')
-                  .insert([customer]);
-                
-                if (singleInsertError) {
-                  if (singleInsertError.code === '23505' || singleInsertError.message.includes('duplicate key')) {
-                    conflictCount++;
-                    conflictCustomers.push(`${customer.name} (${customer.CustomerListID})`);
-                    logger.log(`Conflict: ${customer.name} (${customer.CustomerListID})`);
-                  } else {
-                    throw singleInsertError;
+            if (existingBarcodes.length > 0) {
+              // Remove customers with duplicate barcodes from insert list
+              const existingBarcodeSet = new Set(existingBarcodes.map(c => (c.barcode || '').toString().toLowerCase().trim()).filter(Boolean));
+              const filteredCustomers = [];
+              const barcodeConflicts = [];
+              
+              for (const customer of customersToProcess) {
+                if (customer.barcode) {
+                  const normalizedBarcode = customer.barcode.toLowerCase().trim();
+                  if (existingBarcodeSet.has(normalizedBarcode)) {
+                    const existing = existingBarcodes.find(c => (c.barcode || '').toString().toLowerCase().trim() === normalizedBarcode);
+                    barcodeConflicts.push(`${customer.name} (${customer.CustomerListID}) - barcode "${customer.barcode}" already used by ${existing?.name || 'another customer'}`);
+                    // Try to update the existing customer instead
+                    const { error: updateError } = await supabase
+                      .from('customers')
+                    .update({
+                      name: customer.name,
+                      contact_details: customer.contact_details,
+                      address2: customer.address2,
+                      address3: customer.address3,
+                      address4: customer.address4,
+                      address5: customer.address5,
+                      city: customer.city,
+                      postal_code: customer.postal_code,
+                      phone: customer.phone,
+                      email: customer.email
+                    })
+                      .ilike('barcode', customer.barcode)
+                      .eq('organization_id', profile.organization_id);
+                    
+                    if (!updateError) {
+                      importedCount++;
+                      logger.log(`Updated customer by barcode: ${customer.name}`);
+                    }
+                    continue;
                   }
-                } else {
-                  successCount++;
                 }
-              } catch (err) {
-                logger.error(`Error inserting ${customer.name}:`, err);
-                conflictCount++;
-                conflictCustomers.push(`${customer.name} (${customer.CustomerListID})`);
+                filteredCustomers.push(customer);
               }
+              
+              if (barcodeConflicts.length > 0) {
+                duplicateCustomers.push(...barcodeConflicts);
+              }
+              
+              customersToProcess.length = 0;
+              customersToProcess.push(...filteredCustomers);
             }
+          }
+        }
+        
+        // Use upsert to handle duplicate key conflicts gracefully
+        if (customersToProcess.length > 0) {
+          const { data: insertData, error: insertError } = await supabase
+            .from('customers')
+            .upsert(customersToProcess, {
+              onConflict: 'organization_id,CustomerListID',
+              ignoreDuplicates: false
+            });
+          
+          if (insertError) {
+            logger.error('Insert error:', insertError);
             
-            importedCount = successCount;
-            duplicateCustomers.push(...conflictCustomers.map(name => `${name} - duplicate CustomerListID`));
-            
-            if (successCount > 0) {
-              logger.log(`Successfully imported ${successCount} customers, ${conflictCount} conflicts resolved`);
+            // If it's a constraint violation, try individual inserts to identify the problem
+            if (insertError.code === '23505' || insertError.message.includes('duplicate key')) {
+              logger.log('Constraint violation detected, trying individual inserts...');
+              
+              let successCount = 0;
+              let conflictCount = 0;
+              const conflictCustomers = [];
+              
+              for (const customer of customersToProcess) {
+                try {
+                  const { error: singleInsertError } = await supabase
+                    .from('customers')
+                    .insert([customer]);
+                  
+                  if (singleInsertError) {
+                    if (singleInsertError.code === '23505' || singleInsertError.message.includes('duplicate key')) {
+                      conflictCount++;
+                      conflictCustomers.push(`${customer.name} (${customer.CustomerListID})`);
+                      logger.log(`Conflict: ${customer.name} (${customer.CustomerListID})`);
+                    } else {
+                      throw singleInsertError;
+                    }
+                  } else {
+                    successCount++;
+                  }
+                } catch (err) {
+                  logger.error(`Error inserting ${customer.name}:`, err);
+                  conflictCount++;
+                  conflictCustomers.push(`${customer.name} (${customer.CustomerListID})`);
+                }
+              }
+              
+              importedCount += successCount;
+              duplicateCustomers.push(...conflictCustomers.map(name => `${name} - duplicate CustomerListID`));
+              
+              if (successCount > 0) {
+                logger.log(`Successfully imported ${successCount} customers, ${conflictCount} conflicts resolved`);
+              }
+            } else {
+              throw new Error(`Import error: ${insertError.message}`);
             }
           } else {
-            throw new Error(`Import error: ${insertError.message}`);
+            importedCount += customersToProcess.length;
           }
-        } else {
-          importedCount = customersToProcess.length;
         }
       }
       
@@ -654,11 +720,18 @@ const ImportCustomerInfo = () => {
       
       // Prepare result message
       let message = `Import complete! `;
+      const updatedCount = customersToUpdate.length;
       if (importedCount > 0) {
         message += `Imported ${importedCount} new customers. `;
       }
-      if (duplicateCustomers.length > 0) {
-        message += `Skipped ${duplicateCustomers.length} duplicate customers. `;
+      if (updatedCount > 0) {
+        message += `Updated ${updatedCount} existing customers. `;
+      }
+      if (duplicateCustomers.length > 0 && duplicateCustomers.length > updatedCount) {
+        const skippedDuplicates = duplicateCustomers.length - updatedCount;
+        if (skippedDuplicates > 0) {
+          message += `Skipped ${skippedDuplicates} duplicate customers. `;
+        }
       }
       if (invalidCustomers.length > 0) {
         message += `Skipped ${invalidCustomers.length} invalid entries. `;
@@ -857,6 +930,7 @@ const ImportCustomerInfo = () => {
                     <th style={{ padding: '8px', textAlign: 'left', border: '1px solid #ddd' }}>Customer ID</th>
                     <th style={{ padding: '8px', textAlign: 'left', border: '1px solid #ddd' }}>Name</th>
                     <th style={{ padding: '8px', textAlign: 'left', border: '1px solid #ddd' }}>Contact</th>
+                    <th style={{ padding: '8px', textAlign: 'left', border: '1px solid #ddd' }}>Email</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -865,11 +939,12 @@ const ImportCustomerInfo = () => {
                       <td style={{ padding: '8px', border: '1px solid #ddd' }}>{customer.CustomerListID}</td>
                       <td style={{ padding: '8px', border: '1px solid #ddd' }}>{customer.name}</td>
                       <td style={{ padding: '8px', border: '1px solid #ddd' }}>{customer.contact_details}</td>
+                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>{customer.email}</td>
                     </tr>
                   ))}
                   {preview.length > 10 && (
                     <tr>
-                      <td colSpan={3} style={{ padding: '8px', textAlign: 'center', border: '1px solid #ddd', fontStyle: 'italic' }}>
+                      <td colSpan={4} style={{ padding: '8px', textAlign: 'center', border: '1px solid #ddd', fontStyle: 'italic' }}>
                         ... and {preview.length - 10} more customers
                       </td>
                     </tr>

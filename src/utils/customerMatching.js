@@ -244,7 +244,10 @@ export async function batchFindCustomers(customers, organizationId = null) {
         logger.error(`Error in batch customer lookup (chunk ${Math.floor(i / CHUNK_SIZE) + 1}):`, error);
       } else if (data) {
         for (const customer of data) {
-          const key = `${customer.CustomerListID}_${customer.name}`;
+          // Use normalized ID+name+barcode for uniqueness
+          const normalizedId = normalizeCustomerId(customer.CustomerListID || '');
+          const normalizedBarcode = (customer.barcode || '').toString().toLowerCase().trim();
+          const key = `${normalizedId}_${(customer.name || '').toLowerCase()}_${normalizedBarcode}`;
           if (!seenCustomerKeys.has(key)) {
             seenCustomerKeys.add(key);
             allExistingCustomers.push(customer);
@@ -279,7 +282,9 @@ export async function batchFindCustomers(customers, organizationId = null) {
         logger.log(`Pattern matching not available, using exact matches only`);
       } else if (data) {
         for (const customer of data) {
-          const key = `${customer.CustomerListID}_${customer.name}`;
+          const normalizedId = normalizeCustomerId(customer.CustomerListID || '');
+          const normalizedBarcode = (customer.barcode || '').toString().toLowerCase().trim();
+          const key = `${normalizedId}_${(customer.name || '').toLowerCase()}_${normalizedBarcode}`;
           if (!seenCustomerKeys.has(key)) {
             seenCustomerKeys.add(key);
             allExistingCustomers.push(customer);
@@ -312,7 +317,9 @@ export async function batchFindCustomers(customers, organizationId = null) {
       } else if (data) {
         // Only add if not already in allExistingCustomers (avoid duplicates)
         for (const customer of data) {
-          const key = `${customer.CustomerListID}_${customer.name}`;
+          const normalizedId = normalizeCustomerId(customer.CustomerListID || '');
+          const normalizedBarcode = (customer.barcode || '').toString().toLowerCase().trim();
+          const key = `${normalizedId}_${(customer.name || '').toLowerCase()}_${normalizedBarcode}`;
           if (!seenCustomerKeys.has(key)) {
             seenCustomerKeys.add(key);
             allExistingCustomers.push(customer);
@@ -324,11 +331,62 @@ export async function batchFindCustomers(customers, organizationId = null) {
     }
   }
   
+  // Also fetch by barcodes (case-insensitive) to catch duplicates
+  const barcodesToCheck = new Set();
+  for (const customer of customers) {
+    if (customer.barcode) {
+      const normalizedBarcode = customer.barcode.toString().toLowerCase().trim();
+      if (normalizedBarcode) {
+        barcodesToCheck.add(normalizedBarcode);
+      }
+    }
+  }
+  
+  if (barcodesToCheck.size > 0) {
+    const barcodeArray = Array.from(barcodesToCheck);
+    for (let i = 0; i < barcodeArray.length; i += CHUNK_SIZE) {
+      const chunk = barcodeArray.slice(i, i + CHUNK_SIZE);
+      const orConditions = chunk.map(barcode => {
+        return `barcode.ilike.${barcode}`;
+      });
+      
+      try {
+        const { data, error } = await supabase
+          .from('customers')
+          .select('CustomerListID, name, contact_details, phone, address2, address3, address4, address5, city, postal_code, barcode')
+          .eq('organization_id', organizationId)
+          .or(orConditions.join(','));
+        
+        if (!error && data) {
+          for (const customer of data) {
+            const normalizedId = normalizeCustomerId(customer.CustomerListID || '');
+            const normalizedBarcode = (customer.barcode || '').toString().toLowerCase().trim();
+            const key = `${normalizedId}_${(customer.name || '').toLowerCase()}_${normalizedBarcode}`;
+            if (!seenCustomerKeys.has(key)) {
+              seenCustomerKeys.add(key);
+              allExistingCustomers.push(customer);
+            }
+          }
+        }
+      } catch (err) {
+        logger.error(`Error fetching customer chunk by barcode:`, err);
+      }
+    }
+  }
+  
   // Create lookup map with enhanced matching
   const customerMap = {};
   
   for (const customer of customers) {
     const key = `${customer.CustomerListID || ''}_${customer.name || ''}`;
+    
+    // Normalize barcode for comparison
+    const normalizeBarcode = (barcode) => {
+      if (!barcode) return '';
+      return barcode.toString().trim().toLowerCase();
+    };
+    
+    const customerBarcodeNorm = normalizeBarcode(customer.barcode);
     
     // Find matching existing customer with multiple strategies
     const found = allExistingCustomers?.find(existing => {
@@ -341,14 +399,22 @@ export async function batchFindCustomers(customers, organizationId = null) {
         }
       }
       
-      // Strategy 2: Exact name match (case-insensitive)
+      // Strategy 2: Barcode match (case-insensitive)
+      if (customerBarcodeNorm && existing.barcode) {
+        const existingBarcodeNorm = normalizeBarcode(existing.barcode);
+        if (customerBarcodeNorm && existingBarcodeNorm && customerBarcodeNorm === existingBarcodeNorm) {
+          return true;
+        }
+      }
+      
+      // Strategy 3: Exact name match (case-insensitive)
       if (customer.name && existing.name) {
         if (existing.name.toLowerCase().trim() === customer.name.toLowerCase().trim()) {
           return true;
         }
       }
       
-      // Strategy 3: Name similarity (fuzzy match for slight variations)
+      // Strategy 4: Name similarity (fuzzy match for slight variations)
       if (customer.name && existing.name) {
         const customerNameNorm = customer.name.toLowerCase().replace(/[^a-z0-9]/g, '');
         const existingNameNorm = existing.name.toLowerCase().replace(/[^a-z0-9]/g, '');
