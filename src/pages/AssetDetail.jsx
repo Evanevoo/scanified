@@ -737,8 +737,16 @@ export default function AssetDetail() {
               Status
             </Typography>
             <Chip 
-              label={asset.status || 'available'} 
+              label={
+                asset.status === 'filled' ? 'Full' :
+                asset.status === 'empty' ? 'Empty' :
+                asset.status === 'rented' ? 'Rented' :
+                asset.status === 'available' ? 'Available' :
+                asset.status || 'Unknown'
+              }
               color={
+                asset.status === 'filled' ? 'success' :
+                asset.status === 'empty' ? 'warning' :
                 asset.status === 'rented' ? 'success' :
                 asset.status === 'available' ? 'default' :
                 asset.status === 'maintenance' ? 'warning' :
@@ -1084,6 +1092,8 @@ export default function AssetDetail() {
                   label="Status"
                 >
                   <MenuItem value="available">Available</MenuItem>
+                  <MenuItem value="filled">Full</MenuItem>
+                  <MenuItem value="empty">Empty</MenuItem>
                   <MenuItem value="rented">Rented</MenuItem>
                   <MenuItem value="maintenance">Maintenance</MenuItem>
                   <MenuItem value="retired">Retired</MenuItem>

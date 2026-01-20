@@ -54,7 +54,7 @@ export default function EditCylinderScreen() {
           setCustomersLoading(false);
         });
     }
-  }, [step, profile]);
+  }, [step, profile?.organization_id]); // Use profile?.organization_id instead of whole profile object to prevent infinite loops
 
   // Fetch bottles for barcode suggestions
   React.useEffect(() => {
@@ -70,7 +70,7 @@ export default function EditCylinderScreen() {
           }
         });
     }
-  }, [profile]);
+  }, [profile?.organization_id]); // Use profile?.organization_id instead of whole profile object to prevent infinite loops
 
   // Set initial owner fields when cylinder is loaded
   React.useEffect(() => {

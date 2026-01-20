@@ -1,15 +1,24 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, Alert, Linking } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, Alert, Linking, ScrollView, Platform } from 'react-native';
 import { supabase } from '../supabase';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
+import { Picker } from '@react-native-picker/picker';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigation } from '@react-navigation/native';
+import { useTheme } from '../context/ThemeContext';
+import logger from '../utils/logger';
+
+interface Location {
+  id: string;
+  name: string;
+}
 
 export default function LocateCylinderScreen() {
   const { config: assetConfig } = useAssetConfig();
   const { profile } = useAuth();
+  const { colors } = useTheme();
   const navigation = useNavigation();
   const [barcode, setBarcode] = useState('');
   const [serial, setSerial] = useState('');
@@ -21,6 +30,12 @@ export default function LocateCylinderScreen() {
   const [scanned, setScanned] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
   const scanDelay = 1500;
+  
+  // Location selection
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState<string>('');
+  const [loadingLocations, setLoadingLocations] = useState(false);
+  const [updatingLocation, setUpdatingLocation] = useState(false);
 
   const handleBarCodeScanned = (event: any) => {
     const border = { top: 0.30, left: 0.05, width: 0.9, height: 0.18 };
@@ -44,8 +59,40 @@ export default function LocateCylinderScreen() {
     fetchAsset(event.data, 'barcode');
   };
 
+  // Fetch locations on mount
+  useEffect(() => {
+    const fetchLocations = async () => {
+      if (!profile?.organization_id) {
+        setLoadingLocations(false);
+        return;
+      }
+
+      setLoadingLocations(true);
+      try {
+        const { data, error } = await supabase
+          .from('locations')
+          .select('id, name')
+          .eq('organization_id', profile.organization_id)
+          .order('name');
+
+        if (error) {
+          logger.error('Error fetching locations:', error);
+          setLocations([]);
+        } else {
+          setLocations(data || []);
+        }
+      } catch (err) {
+        logger.error('Error fetching locations:', err);
+        setLocations([]);
+      }
+      setLoadingLocations(false);
+    };
+
+    fetchLocations();
+  }, [profile?.organization_id]);
+
   const fetchAsset = async (value: string, mode: 'barcode' | 'serial') => {
-    if (!profile?.organization_id && !authLoading) {
+    if (!profile?.organization_id) {
       setError('Organization not found');
       return;
     }
@@ -53,6 +100,7 @@ export default function LocateCylinderScreen() {
     setLoading(true);
     setError('');
     setAsset(null);
+    setSelectedLocation(''); // Reset location selection
     
     // Simple query - bottles table already has customer_name field
     let query = supabase
@@ -70,12 +118,60 @@ export default function LocateCylinderScreen() {
       return;
     }
     setAsset(data);
+    // Set initial location if asset has a location
+    if (data.location) {
+      // Try to find matching location by name
+      const matchingLocation = locations.find(loc => 
+        loc.name.toUpperCase() === data.location.toUpperCase().replace(/_/g, ' ')
+      );
+      if (matchingLocation) {
+        setSelectedLocation(matchingLocation.id);
+      }
+    }
+  };
+
+  const handleUpdateLocation = async () => {
+    if (!asset || !selectedLocation) {
+      setError('Please select a location');
+      return;
+    }
+
+    setUpdatingLocation(true);
+    setError('');
+
+    try {
+      const selectedLocationName = locations.find(loc => loc.id === selectedLocation)?.name || '';
+      
+      const { error: updateError } = await supabase
+        .from('bottles')
+        .update({
+          location: selectedLocationName.toUpperCase().replace(/\s+/g, '_'),
+          last_location_update: new Date().toISOString(),
+          days_at_location: 0 // Reset days when location changes
+        })
+        .eq('id', asset.id)
+        .eq('organization_id', profile.organization_id);
+
+      if (updateError) {
+        logger.error('Error updating location:', updateError);
+        setError('Failed to update location. Please try again.');
+      } else {
+        // Refresh asset data
+        await fetchAsset(asset.barcode_number || asset.serial_number, asset.barcode_number ? 'barcode' : 'serial');
+        Alert.alert('Success', 'Location updated successfully');
+      }
+    } catch (err) {
+      logger.error('Error updating location:', err);
+      setError('Failed to update location. Please try again.');
+    } finally {
+      setUpdatingLocation(false);
+    }
   };
 
   return (
     <View style={styles.container}>
       <Text style={styles.instructionText}>
-        Enter or scan a barcode or serial number to locate {assetConfig.assetDisplayName?.toLowerCase() || 'asset'} details
+        Enter or scan a barcode or serial number to search for {assetConfig.assetDisplayName?.toLowerCase() || 'asset'} details
       </Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
         <TextInput
@@ -106,7 +202,7 @@ export default function LocateCylinderScreen() {
         }}
         disabled={loading}
       >
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Locate</Text>}
+        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Search</Text>}
       </TouchableOpacity>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {asset && (
@@ -116,8 +212,61 @@ export default function LocateCylinderScreen() {
           <Text style={styles.detailsLabel}>Serial: <Text style={styles.detailsValue}>{asset.serial_number}</Text></Text>
           <Text style={styles.detailsLabel}>Type: <Text style={styles.detailsValue}>{asset.group_name}</Text></Text>
           <Text style={styles.detailsLabel}>Status: <Text style={styles.detailsValue}>{asset.status || 'Unknown'}</Text></Text>
-          <Text style={styles.detailsLabel}>Location: <Text style={styles.detailsValue}>{asset.customer_name || 'Warehouse'}</Text></Text>
+          <Text style={styles.detailsLabel}>Current Location: <Text style={styles.detailsValue}>
+            {asset.location ? asset.location.replace(/_/g, ' ') : 'Not set'}
+          </Text></Text>
           <Text style={styles.detailsLabel}>Assigned To: <Text style={styles.detailsValue}>{asset.customer_name || 'N/A'}</Text></Text>
+          
+          {/* Location Update Section */}
+          <View style={styles.locationUpdateSection}>
+            <Text style={styles.locationUpdateTitle}>Update Location</Text>
+            {loadingLocations ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color="#40B5AD" />
+                <Text style={styles.loadingText}>Loading locations...</Text>
+              </View>
+            ) : locations.length === 0 ? (
+              <Text style={styles.emptyText}>No locations available. Please add locations in the web dashboard.</Text>
+            ) : (
+              <>
+                <View style={styles.pickerContainer}>
+                  <Picker
+                    selectedValue={selectedLocation}
+                    onValueChange={(itemValue) => {
+                      logger.log('Location selected:', itemValue);
+                      setSelectedLocation(itemValue);
+                    }}
+                    style={styles.picker}
+                    dropdownIconColor="#6B7280"
+                  >
+                    <Picker.Item label="-- Select Location --" value="" />
+                    {locations.map(location => (
+                      <Picker.Item 
+                        key={location.id} 
+                        label={location.name} 
+                        value={location.id} 
+                      />
+                    ))}
+                  </Picker>
+                </View>
+                
+                {selectedLocation && (
+                  <TouchableOpacity
+                    style={styles.updateButton}
+                    onPress={handleUpdateLocation}
+                    disabled={updatingLocation}
+                    activeOpacity={0.8}
+                  >
+                    {updatingLocation ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.updateButtonText}>Update Location</Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </>
+            )}
+          </View>
         </View>
       )}
       {/* Scanner Modal */}
@@ -186,6 +335,7 @@ export default function LocateCylinderScreen() {
           )}
         </View>
       </Modal>
+
     </View>
   );
 }
@@ -341,5 +491,58 @@ const styles = StyleSheet.create({
     color: '#374151',
     fontSize: 24,
     fontWeight: 'bold',
+  },
+  locationUpdateSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+  },
+  locationUpdateTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    color: '#222',
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+  },
+  loadingText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  emptyText: {
+    fontSize: 14,
+    textAlign: 'center',
+    paddingVertical: 12,
+    color: '#6B7280',
+  },
+  pickerContainer: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  picker: {
+    height: Platform.OS === 'ios' ? 200 : 50,
+    width: '100%',
+  },
+  updateButton: {
+    borderRadius: 10,
+    padding: 14,
+    alignItems: 'center',
+    backgroundColor: '#40B5AD',
+    marginTop: 8,
+  },
+  updateButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 }); 

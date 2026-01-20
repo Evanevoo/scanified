@@ -81,25 +81,33 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   
   // Force component to re-render when organization changes
   const [refreshKey, setRefreshKey] = useState(0);
+  const prevOrgIdRef = React.useRef<string | null>(null);
   
   // Debug organization data and force re-render
   useEffect(() => {
-    if (organization) {
-      logger.log('🔍 EnhancedScanScreen - Organization data:', {
-        id: organization.id,
-        name: organization.name,
-        app_name: organization.app_name,
-        allFields: organization,
-        displayAppName: organization?.app_name || organization?.name || 'Scanified'
-      });
+    const orgId = organization?.id || null;
+    
+    // Only update if organization ID actually changed
+    if (orgId !== prevOrgIdRef.current) {
+      prevOrgIdRef.current = orgId;
       
-      // Force component re-render when organization data changes
-      setRefreshKey(prev => prev + 1);
-      logger.log('🔄 Forcing component refresh due to organization data change');
-    } else {
-      logger.log('🔍 EnhancedScanScreen - No organization data available');
+      if (organization) {
+        logger.log('🔍 EnhancedScanScreen - Organization data:', {
+          id: organization.id,
+          name: organization.name,
+          app_name: organization.app_name,
+          allFields: organization,
+          displayAppName: organization?.app_name || organization?.name || 'Scanified'
+        });
+        
+        // Force component re-render when organization data changes
+        setRefreshKey(prev => prev + 1);
+        logger.log('🔄 Forcing component refresh due to organization data change');
+      } else {
+        logger.log('🔍 EnhancedScanScreen - No organization data available');
+      }
     }
-  }, [organization]);
+  }, [organization?.id]); // Use organization?.id instead of whole object to prevent infinite loops
   const { settings } = useSettings();
   
   // State
@@ -412,7 +420,9 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
 
   // Countdown timer for scanning readiness
   useEffect(() => {
-    if (isScanning && !scanningReady) {
+    if (isScanning) {
+      // Reset scanning ready state when scanning starts
+      setScanningReady(false);
       setScanningCountdown(3); // Start with 3 second countdown
       
       const countdownInterval = setInterval(() => {
@@ -427,11 +437,12 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       }, 1000);
       
       return () => clearInterval(countdownInterval);
-    } else if (!isScanning) {
+    } else {
+      // Reset when scanning stops
       setScanningReady(false);
       setScanningCountdown(0);
     }
-  }, [isScanning, scanningReady]);
+  }, [isScanning]); // Removed scanningReady from dependencies to prevent infinite loop
 
   // Update scan frame rectangle when scanning starts
   useEffect(() => {
@@ -2293,8 +2304,15 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
             <CameraView
               style={[StyleSheet.absoluteFill, styles.camera]}
               enableTorch={flashEnabled}
+              barcodeScannerEnabled={isScanning && !loading}
               barcodeScannerSettings={{}}
               onBarcodeScanned={({ data, bounds }: BarcodeScanningResult) => {
+                // Don't process scans until ready or if loading
+                if (!scanningReady || loading) {
+                  logger.log('📷 Scanner not ready yet, ignoring scan');
+                  return;
+                }
+                
                 const now = Date.now();
                 
                 if (!data || typeof data !== 'string') {

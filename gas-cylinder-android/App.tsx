@@ -34,6 +34,7 @@ import { SettingsProvider } from './context/SettingsContext';
 import { AssetProvider } from './context/AssetContext';
 import { useAuth } from './hooks/useAuth';
 import LoadingScreen from './components/LoadingScreen';
+import logger from './utils/logger';
 
 // Import all screens
 import HomeScreen from './screens/HomeScreen';
@@ -131,7 +132,7 @@ function AppContent() {
       // Initialize sound service
       soundService.initialize();
     }
-  }, [user, profile]);
+  }, [user?.id, profile?.organization_id]); // Use stable primitives instead of objects to prevent infinite loops
 
   // Handle session timeout warning actions
   const handleExtendSession = React.useCallback(() => {
@@ -141,6 +142,20 @@ function AppContent() {
   const handleLogout = React.useCallback(async () => {
     await signOut();
   }, [signOut]);
+
+  // Track navigation activity to prevent session timeout during active use
+  // MUST be defined before any early returns to follow Rules of Hooks
+  const handleNavigationStateChange = React.useCallback(() => {
+    try {
+      // User navigated - update activity to prevent timeout
+      if (user) {
+        updateActivity();
+      }
+    } catch (error) {
+      // Silently handle errors in activity tracking - don't crash app
+      logger.warn('Error updating activity on navigation:', error);
+    }
+  }, [user, updateActivity]);
   
   if (loading) {
     return <LoadingScreen />;
@@ -185,7 +200,7 @@ function AppContent() {
 
   return (
     <>
-      <NavigationContainer>
+      <NavigationContainer onStateChange={handleNavigationStateChange}>
         <Stack.Navigator>
           {!user ? (
           <Stack.Screen 
@@ -233,12 +248,12 @@ function AppContent() {
             <Stack.Screen 
               name="LocateCylinder" 
               component={LocateCylinderScreen}
-              options={{ title: 'Locate Cylinder' }}
+              options={{ title: 'Search Cylinder' }}
             />
             <Stack.Screen 
               name="FillCylinder" 
               component={FillCylinderScreen}
-              options={{ title: 'Fill Cylinder' }}
+              options={{ title: 'Locate Cylinder' }}
             />
             <Stack.Screen 
               name="AddCylinder" 

@@ -47,6 +47,7 @@ import { TableSkeleton, CardSkeleton } from '../components/SmoothLoading';
 import { AssetTransferService } from '../services/assetTransferService';
 import { useAuth } from '../hooks/useAuth';
 import DNSConversionDialog from '../components/DNSConversionDialog';
+import BarcodeDisplay from '../components/BarcodeDisplay';
 
 // Helper to check if a string looks like an address
 function looksLikeAddress(str) {
@@ -586,9 +587,36 @@ export default function CustomerDetail() {
                 helperText="Scanned code used on mobile; leading % will be stripped automatically"
               />
             ) : (
-              <Typography variant="body1" fontFamily="monospace" sx={{ mb: 2 }}>
-                {customer.barcode || <em style={{ color: '#888' }}>No barcode set</em>}
-              </Typography>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="body1" fontFamily="monospace" sx={{ mb: 1 }}>
+                  {customer.barcode || <em style={{ color: '#888' }}>No barcode set</em>}
+                </Typography>
+                {customer.barcode && (
+                  <Box 
+                    sx={{ 
+                      mt: 2, 
+                      p: 2, 
+                      backgroundColor: '#fff', 
+                      border: '1px solid #e0e0e0', 
+                      borderRadius: 1,
+                      display: 'flex',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <BarcodeDisplay
+                      value={customer.barcode.replace(/^%/, '')}
+                      format="CODE128"
+                      width={2}
+                      height={80}
+                      displayValue={true}
+                      fontSize={14}
+                      margin={5}
+                      background="#ffffff"
+                      lineColor="#000000"
+                    />
+                  </Box>
+                )}
+              </Box>
             )}
             <Typography variant="body2" color="text.secondary">Email</Typography>
             {editing ? (

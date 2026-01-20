@@ -1,5 +1,47 @@
 /* Responsive Design Utilities for Gas Cylinder App */
 
+/* Print Styles for High-Quality Barcode Printing */
+@media print {
+  /* Ensure barcodes print at high quality */
+  svg[data-barcode] {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+  
+  /* High-quality barcode rendering */
+  .barcode-container,
+  [class*="barcode"] {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    page-break-inside: avoid;
+  }
+  
+  /* Ensure SVG barcodes maintain quality */
+  svg {
+    vector-effect: non-scaling-stroke;
+    shape-rendering: crispEdges;
+  }
+  
+  /* Hide non-essential elements when printing */
+  .no-print {
+    display: none !important;
+  }
+  
+  /* Optimize page layout for labels */
+  @page {
+    margin: 0.5cm;
+    size: letter;
+  }
+  
+  /* Ensure good contrast for barcodes */
+  body {
+    background: white !important;
+    color: black !important;
+  }
+}
+
 /* Tablet-specific styles (768px - 1024px) */
 @media (min-width: 768px) and (max-width: 1024px) {
   /* Sidebar width is handled by MainLayout component */

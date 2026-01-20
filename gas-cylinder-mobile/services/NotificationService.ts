@@ -5,19 +5,30 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { supabase } from '../supabase';
 
+// Helper to check if running in Expo Go
+const isExpoGo = () => {
+  return Constants.appOwnership === 'expo' || 
+         Constants.executionEnvironment === 'storeClient' ||
+         __DEV__ && !Constants.appOwnership;
+};
+
 // Configure notification behavior (skip in Expo Go for Android SDK 53+)
-try {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
-  });
-} catch (error) {
-  // Expo Go limitation - remote push not supported in SDK 53+
-  // Local notifications still work, but this prevents startup error
-  logger.log('ℹ️  Notification handler setup skipped (likely Expo Go limitation)');
+if (!isExpoGo()) {
+  try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
+    });
+  } catch (error) {
+    // Expo Go limitation - remote push not supported in SDK 53+
+    // Local notifications still work, but this prevents startup error
+    logger.log('ℹ️  Notification handler setup skipped (likely Expo Go limitation)');
+  }
+} else {
+  logger.log('📱 Running in Expo Go - notification handler setup skipped');
 }
 
 export interface NotificationData {
@@ -51,9 +62,11 @@ export class NotificationService {
 
     try {
       // Skip push token registration in Expo Go (SDK 53+ doesn't support remote push)
-      if (Constants.appOwnership === 'expo') {
+      if (isExpoGo()) {
         logger.log('📱 Running in Expo Go - skipping remote push setup');
         logger.log('ℹ️  Local notifications still work. Use a development build for full push support.');
+        // Still set up local notification listeners for Expo Go
+        this.setupNotificationListeners();
         this.isInitialized = true;
         return;
       }
@@ -100,8 +113,14 @@ export class NotificationService {
         // Continue initialization even if push token fails - local notifications still work
       }
 
-      // Configure notification categories
-      await this.setupNotificationCategories();
+      // Configure notification categories (skip in Expo Go)
+      if (!isExpoGo()) {
+        try {
+          await this.setupNotificationCategories();
+        } catch (error) {
+          logger.log('ℹ️  Notification categories setup skipped (Expo Go limitation)');
+        }
+      }
 
       // Set up notification listeners
       this.setupNotificationListeners();

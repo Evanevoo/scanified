@@ -75,7 +75,7 @@ export default function LocateCylinderScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.instructionText}>
-        Enter or scan a barcode or serial number to locate {assetConfig.assetDisplayName?.toLowerCase() || 'asset'} details
+        Enter or scan a barcode or serial number to search for {assetConfig.assetDisplayName?.toLowerCase() || 'asset'} details
       </Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
         <TextInput
@@ -106,7 +106,7 @@ export default function LocateCylinderScreen() {
         }}
         disabled={loading}
       >
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Locate</Text>}
+        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Search</Text>}
       </TouchableOpacity>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {asset && (
