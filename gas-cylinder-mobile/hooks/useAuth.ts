@@ -33,8 +33,8 @@ interface Organization {
 }
 
 // Session timeout settings
-const SESSION_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes of inactivity
-const SESSION_WARNING_MS = 2 * 60 * 1000; // Show warning 2 minutes before timeout
+const SESSION_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes of inactivity (increased from 15)
+const SESSION_WARNING_MS = 5 * 60 * 1000; // Show warning 5 minutes before timeout
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
@@ -52,6 +52,13 @@ export function useAuth() {
   const timeoutTimerRef = useRef<NodeJS.Timeout | null>(null);
   const warningTimerRef = useRef<NodeJS.Timeout | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const updateActivityRef = useRef<() => void>();
+  const userRef = useRef<User | null>(null); // Track user in ref to avoid circular deps
+
+  // Keep userRef in sync with user state
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   // Sign out function
   const handleSignOut = useCallback(async () => {
@@ -66,7 +73,7 @@ export function useAuth() {
     }
   }, []);
 
-  // Reset timeout timers
+  // Reset timeout timers - uses ref to avoid circular dependencies
   const resetTimeoutTimers = useCallback(() => {
     // Clear existing timers
     if (timeoutTimerRef.current) {
@@ -76,8 +83,8 @@ export function useAuth() {
       clearTimeout(warningTimerRef.current);
     }
 
-    // Only set timers if user is logged in
-    if (user) {
+    // Only set timers if user is logged in (use ref to avoid dep cycle)
+    if (userRef.current) {
       // Set warning timer
       warningTimerRef.current = setTimeout(() => {
         setSessionTimeoutWarning(true);
@@ -90,14 +97,24 @@ export function useAuth() {
         handleSignOut();
       }, SESSION_TIMEOUT_MS);
     }
-  }, [user, handleSignOut]);
+  }, [handleSignOut]); // Removed user from deps - using userRef instead
 
   // Update last activity timestamp
   const updateActivity = useCallback(() => {
-    lastActivityRef.current = Date.now();
-    setSessionTimeoutWarning(false);
-    resetTimeoutTimers();
+    try {
+      lastActivityRef.current = Date.now();
+      setSessionTimeoutWarning(false);
+      resetTimeoutTimers();
+    } catch (error) {
+      // Don't crash if activity update fails
+      logger.warn('Error updating activity:', error);
+    }
   }, [resetTimeoutTimers]);
+
+  // Store latest updateActivity in ref to avoid dependency issues
+  useEffect(() => {
+    updateActivityRef.current = updateActivity;
+  }, [updateActivity]);
 
   // Check trial expiration
   const checkTrialExpiration = useCallback((org: Organization) => {
@@ -133,12 +150,14 @@ export function useAuth() {
       if (appStateRef.current === 'background' && nextAppState === 'active') {
         // App came to foreground - check if session should be timed out
         const inactiveTime = Date.now() - lastActivityRef.current;
-        if (user && inactiveTime > SESSION_TIMEOUT_MS) {
-          logger.warn('⚠️ Session expired while app was in background');
+        if (userRef.current && inactiveTime > SESSION_TIMEOUT_MS) {
+          // Only log out if inactive for more than timeout period
+          logger.warn(`⚠️ Session expired while app was in background (inactive: ${Math.round(inactiveTime / 60000)} minutes)`);
           handleSignOut();
-        } else {
-          // Reset activity and timers
-          updateActivity();
+        } else if (userRef.current) {
+          // Reset activity and timers - user is back, extend session
+          logger.log('📱 App resumed - extending session');
+          updateActivityRef.current?.();
         }
       } else if (nextAppState === 'background') {
         // App going to background - clear timers to save battery
@@ -154,7 +173,7 @@ export function useAuth() {
     return () => {
       subscription?.remove();
     };
-  }, [user, handleSignOut, updateActivity]);
+  }, [handleSignOut]); // Removed user and updateActivity from dependencies to prevent infinite loop
 
   // Initial auth check
   useEffect(() => {
@@ -168,17 +187,37 @@ export function useAuth() {
           setAuthError('Authentication timeout - please restart the app');
         }, 15000); // 15 second timeout
 
-        const { data: { session } } = await supabase.auth.getSession();
-        setUser(session?.user || null);
-        setAuthError(null);
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
-        if (session?.user) {
-          updateActivity();
+        if (sessionError) {
+          logger.error('❌ Error getting session:', sessionError);
+          // Don't log out on session fetch errors - might be temporary network issue
+          // Only set error if it's a critical failure
+          if (sessionError.message?.includes('JWT') || sessionError.message?.includes('expired')) {
+            setAuthError('Session expired - please log in again');
+            setUser(null);
+          } else {
+            // Temporary error - keep user logged in if we have a cached session
+            logger.warn('⚠️ Session fetch error, but keeping user logged in:', sessionError.message);
+          }
+        } else {
+          setUser(session?.user || null);
+          setAuthError(null);
+          
+          if (session?.user) {
+            updateActivityRef.current?.();
+          }
         }
       } catch (error) {
         logger.error('❌ Error getting session:', error);
-        setUser(null);
-        setAuthError('Authentication failed - please restart the app');
+        // Don't automatically log out on errors - might be network issues
+        // Only clear user if it's a critical auth error
+        if (error instanceof Error && (error.message?.includes('JWT') || error.message?.includes('token'))) {
+          setAuthError('Authentication failed - please log in again');
+          setUser(null);
+        } else {
+          logger.warn('⚠️ Non-critical session error, keeping user logged in');
+        }
       } finally {
         clearTimeout(timeoutId);
         setLoading(false);
@@ -193,8 +232,8 @@ export function useAuth() {
         if (_event === 'TOKEN_REFRESHED') {
           logger.log('Auth: Token refreshed, maintaining session');
           // Update activity on token refresh to keep session alive
-          if (session?.user && user && session.user.id === user.id) {
-            updateActivity();
+          if (session?.user && userRef.current && session.user.id === userRef.current.id) {
+            updateActivityRef.current?.();
             return; // Same user, just token refresh
           }
         }
@@ -216,16 +255,26 @@ export function useAuth() {
         setAuthError(null);
         
         if (session?.user) {
-          updateActivity();
+          updateActivityRef.current?.();
         } else {
           // Clear timers if no session
           if (timeoutTimerRef.current) clearTimeout(timeoutTimerRef.current);
           if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error('❌ Error in auth state change:', error);
-        setUser(null);
-        setAuthError('Authentication state change failed');
+        // Don't log out on errors - might be temporary network issues
+        // Only set error if it's a critical auth failure
+        if (error?.message?.includes('JWT') || error?.message?.includes('token')) {
+          logger.warn('⚠️ Token error detected, but not logging out - may be temporary');
+        }
+        // Don't set user to null on errors - keep user logged in
+        // Don't crash the app - just log the error
+        try {
+          // setAuthError('Authentication state change failed');
+        } catch (e) {
+          // Silently handle any errors
+        }
       }
     });
     
@@ -235,7 +284,7 @@ export function useAuth() {
       if (timeoutTimerRef.current) clearTimeout(timeoutTimerRef.current);
       if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
     };
-  }, [updateActivity, user]);
+  }, []); // Empty deps - only run once on mount, use refs inside callback to avoid stale closures
 
   // Load profile and organization
   useEffect(() => {

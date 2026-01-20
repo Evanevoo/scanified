@@ -35,16 +35,16 @@ const getQuickActions = (config) => [
     color: '#F59E0B' // Orange
   },
   {
-    title: `Locate ${config?.assetDisplayName || 'Cylinder'}`,
+    title: `Search ${config?.assetDisplayName || 'Cylinder'}`,
     subtitle: `Find ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} location`,
     icon: '🔍',
     action: 'LocateCylinder',
     color: '#8B5CF6' // Purple
   },
   {
-    title: `Fill ${config?.assetDisplayName || 'Cylinder'}`,
-    subtitle: `Mark ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} as filled`,
-    icon: '⛽',
+    title: `Locate ${config?.assetDisplayName || 'Cylinder'}`,
+    subtitle: `Mark ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} status and location`,
+    icon: '📍',
     action: 'FillCylinder',
     color: '#EF4444' // Red
   },

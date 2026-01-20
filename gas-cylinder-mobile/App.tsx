@@ -145,6 +145,26 @@ function AppContent() {
     await signOut();
   }, [signOut]);
 
+  // Track navigation activity to prevent session timeout during active use
+  // MUST be defined before any early returns to follow Rules of Hooks
+  // Use ref pattern to avoid dependency on updateActivity which changes frequently
+  const updateActivityRef = React.useRef(updateActivity);
+  React.useEffect(() => {
+    updateActivityRef.current = updateActivity;
+  }, [updateActivity]);
+
+  const handleNavigationStateChange = React.useCallback(() => {
+    try {
+      // User navigated - update activity to prevent timeout
+      if (user) {
+        updateActivityRef.current();
+      }
+    } catch (error) {
+      // Silently handle errors in activity tracking - don't crash app
+      logger.warn('Error updating activity on navigation:', error);
+    }
+  }, [user]); // Removed updateActivity from dependencies to prevent infinite loop
+
   // Initialize services when user is authenticated
   React.useEffect(() => {
     if (user && profile?.organization_id) {
@@ -233,6 +253,7 @@ function AppContent() {
   return (
     <>
       <NavigationContainer
+        onStateChange={handleNavigationStateChange}
         key={user ? 'authenticated' : 'unauthenticated'}
       >
         <Stack.Navigator
@@ -287,12 +308,12 @@ function AppContent() {
             <Stack.Screen 
               name="LocateCylinder" 
               component={LocateCylinderScreen}
-              options={{ title: 'Locate Cylinder' }}
+              options={{ title: 'Search Cylinder' }}
             />
             <Stack.Screen 
               name="FillCylinder" 
               component={FillCylinderScreen}
-              options={{ title: 'Fill Cylinder' }}
+              options={{ title: 'Locate Cylinder' }}
             />
             <Stack.Screen 
               name="AddCylinder" 

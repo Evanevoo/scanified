@@ -23,6 +23,7 @@ import * as XLSX from 'xlsx';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../hooks/useAssetConfig';
+import BarcodeDisplay from '../components/BarcodeDisplay';
 
 export default function BarcodeGenerator() {
   const { profile, organization } = useAuth();
@@ -1170,16 +1171,31 @@ export default function BarcodeGenerator() {
                 {generatedBarcodes.slice(0, 50).map((barcode, index) => (
                   <TableRow key={index}>
                     <TableCell>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        <Typography variant="body2" fontFamily="monospace">
-                          {barcode.barcode_number}
-                        </Typography>
-                        <IconButton
-                          size="small"
-                          onClick={() => copyToClipboard(barcode.barcode_number)}
-                        >
-                          <CopyIcon fontSize="small" />
-                        </IconButton>
+                      <Box display="flex" alignItems="center" gap={1} flexDirection="column">
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <Typography variant="body2" fontFamily="monospace">
+                            {barcode.barcode_number}
+                          </Typography>
+                          <IconButton
+                            size="small"
+                            onClick={() => copyToClipboard(barcode.barcode_number)}
+                          >
+                            <CopyIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                        <Box sx={{ mt: 1, backgroundColor: '#fff', p: 1, borderRadius: 1, border: '1px solid #e0e0e0' }}>
+                          <BarcodeDisplay
+                            value={barcode.barcode_number}
+                            format="CODE128"
+                            width={1.5}
+                            height={50}
+                            displayValue={false}
+                            fontSize={12}
+                            margin={2}
+                            background="#ffffff"
+                            lineColor="#000000"
+                          />
+                        </Box>
                       </Box>
                     </TableCell>
                     <TableCell>
@@ -1303,6 +1319,97 @@ export default function BarcodeGenerator() {
       {activeTab === 2 && renderExcelUpload()}
       
       {renderResults()}
+
+      {/* Preview/Print Dialog */}
+      <Dialog 
+        open={previewDialog} 
+        onClose={() => setPreviewDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          Print Barcode Labels
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            {generatedBarcodes.length} barcode(s) ready to print
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            <Typography variant="body2">
+              <strong>Printing Tips:</strong>
+            </Typography>
+            <Typography variant="body2" component="ul" sx={{ mt: 1, pl: 2 }}>
+              <li>Use high-quality paper (at least 80gsm)</li>
+              <li>Print at 300 DPI or higher for best scan quality</li>
+              <li>Ensure good contrast (black bars on white background)</li>
+              <li>Keep barcodes flat and avoid creases or smudges</li>
+              <li>Test scan before printing large batches</li>
+            </Typography>
+          </Alert>
+          
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mt: 2 }}>
+            {generatedBarcodes.map((barcode, index) => (
+              <Card key={index} variant="outlined" sx={{ p: 2 }}>
+                <Grid container spacing={2} alignItems="center">
+                  <Grid item xs={12} md={8}>
+                    <Typography variant="h6" gutterBottom>
+                      {barcode.barcode_number}
+                    </Typography>
+                    {barcode.serial_number && (
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        Serial: {barcode.serial_number}
+                      </Typography>
+                    )}
+                    {barcode.customer_name && (
+                      <Typography variant="body2" color="text.secondary">
+                        Customer: {barcode.customer_name}
+                      </Typography>
+                    )}
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Box 
+                      sx={{ 
+                        display: 'flex', 
+                        justifyContent: 'center',
+                        backgroundColor: '#fff',
+                        p: 2,
+                        border: '1px solid #e0e0e0',
+                        borderRadius: 1
+                      }}
+                    >
+                      <BarcodeDisplay
+                        value={barcode.barcode_number}
+                        format="CODE128"
+                        width={2}
+                        height={80}
+                        displayValue={true}
+                        fontSize={16}
+                        margin={5}
+                        background="#ffffff"
+                        lineColor="#000000"
+                      />
+                    </Box>
+                  </Grid>
+                </Grid>
+              </Card>
+            ))}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPreviewDialog(false)}>
+            Close
+          </Button>
+          <Button 
+            variant="contained" 
+            startIcon={<PrintIcon />}
+            onClick={() => {
+              window.print();
+            }}
+          >
+            Print All Labels
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

@@ -163,7 +163,7 @@ const correctOCRErrors = (scanned: string): string => {
   return corrected;
 };
 
-// Check if barcode is within scan rectangle bounds - More lenient
+// Check if barcode is within scan rectangle bounds - matches visual border
 const isBarcodeInScanArea = (bounds: any): boolean => {
   if (!bounds) {
     logger.log('📍 No bounds provided, allowing scan');
@@ -174,32 +174,71 @@ const isBarcodeInScanArea = (bounds: any): boolean => {
   const screenWidth = Dimensions.get('window').width;
   const screenHeight = Dimensions.get('window').height;
   
-  // More lenient scan area (90% of screen)
-  const scanAreaWidth = screenWidth * 0.9;
-  const scanAreaHeight = screenHeight * 0.5;
-  const scanAreaLeft = (screenWidth - scanAreaWidth) / 2;
-  const scanAreaTop = (screenHeight - scanAreaHeight) / 2;
-  const scanAreaRight = scanAreaLeft + scanAreaWidth;
-  const scanAreaBottom = scanAreaTop + scanAreaHeight;
+  // Match the actual visual scan frame dimensions (from styles.scanFrame)
+  const scanFrameWidth = 320;
+  const scanFrameHeight = 150;
+  const scanFramePaddingTop = 150; // From cameraOverlay paddingTop
   
-  // Check if barcode center is within scan area
-  const barcodeX = bounds.origin?.x + (bounds.size?.width / 2) || 0;
-  const barcodeY = bounds.origin?.y + (bounds.size?.height / 2) || 0;
+  // Calculate scan frame position (centered horizontally, positioned from top)
+  const scanAreaLeft = (screenWidth - scanFrameWidth) / 2;
+  const scanAreaTop = scanFramePaddingTop;
+  const scanAreaRight = scanAreaLeft + scanFrameWidth;
+  const scanAreaBottom = scanAreaTop + scanFrameHeight;
+  
+  // Bounds are in camera coordinates (0-1 normalized or pixels)
+  // We need to convert to screen coordinates
+  // Camera bounds origin is typically normalized (0-1) or in camera pixel space
+  const barcodeX = bounds.origin?.x || 0;
+  const barcodeY = bounds.origin?.y || 0;
+  const barcodeWidth = bounds.size?.width || 0;
+  const barcodeHeight = bounds.size?.height || 0;
+  
+  // Calculate barcode center
+  const barcodeCenterX = barcodeX + (barcodeWidth / 2);
+  const barcodeCenterY = barcodeY + (barcodeHeight / 2);
+  
+  // Check if bounds are normalized (0-1) or in pixels
+  // If normalized, convert to screen coordinates
+  // Camera typically provides normalized coordinates (0-1)
+  const isNormalized = barcodeX <= 1 && barcodeY <= 1 && barcodeWidth <= 1 && barcodeHeight <= 1;
+  
+  let screenBarcodeX: number;
+  let screenBarcodeY: number;
+  
+  if (isNormalized) {
+    // Convert normalized coordinates to screen coordinates
+    // Camera view typically fills the screen, so we use screen dimensions
+    screenBarcodeX = barcodeCenterX * screenWidth;
+    screenBarcodeY = barcodeCenterY * screenHeight;
+  } else {
+    // Already in pixel coordinates, use directly
+    screenBarcodeX = barcodeCenterX;
+    screenBarcodeY = barcodeCenterY;
+  }
+  
+  // Add small tolerance (10% of frame size) for easier scanning
+  const toleranceX = scanFrameWidth * 0.1;
+  const toleranceY = scanFrameHeight * 0.1;
   
   const isInArea = (
-    barcodeX >= scanAreaLeft &&
-    barcodeX <= scanAreaRight &&
-    barcodeY >= scanAreaTop &&
-    barcodeY <= scanAreaBottom
+    screenBarcodeX >= (scanAreaLeft - toleranceX) &&
+    screenBarcodeX <= (scanAreaRight + toleranceX) &&
+    screenBarcodeY >= (scanAreaTop - toleranceY) &&
+    screenBarcodeY <= (scanAreaBottom + toleranceY)
   );
   
   logger.log('📍 Barcode position check:', {
     barcodeX,
     barcodeY,
-    scanAreaLeft,
-    scanAreaTop,
-    scanAreaRight,
-    scanAreaBottom,
+    barcodeCenterX,
+    barcodeCenterY,
+    screenBarcodeX,
+    screenBarcodeY,
+    isNormalized,
+    scanAreaLeft: scanAreaLeft - toleranceX,
+    scanAreaTop: scanAreaTop - toleranceY,
+    scanAreaRight: scanAreaRight + toleranceX,
+    scanAreaBottom: scanAreaBottom + toleranceY,
     isInArea
   });
   
@@ -595,9 +634,17 @@ export default function ScanCylindersScreen() {
       return;
     }
     
+    // Check if this is a sales receipt barcode (starts with %) - auto-detect and handle
+    let effectiveTarget = scannerTarget;
     if (!scannerTarget) {
-      logger.log('❌ No scanner target set');
-      return;
+      if (barcode.startsWith('%')) {
+        // Sales receipt barcode detected - automatically treat as customer scan
+        logger.log('📋 Sales receipt barcode detected (starts with %), treating as customer scan');
+        effectiveTarget = 'customer';
+      } else {
+        logger.log('❌ No scanner target set and barcode is not a sales receipt');
+        return;
+      }
     }
     
     // Clear any existing cooldown
@@ -632,8 +679,41 @@ export default function ScanCylindersScreen() {
       if (scannerTarget === 'customer') {
         logger.log('👤 Setting customer search:', data);
         
-        // Check if the scanned barcode matches any existing customer
-        let scannedBarcode = normalizeBarcode(data);
+        // Check if this is a sales receipt barcode (starts with %)
+        // Sales receipt format: %XXXXXXXX-YYYYYYYYYYZ where XXXXXXXXX is the customer ID
+        let scannedBarcode = data.trim();
+        let extractedCustomerId: string | null = null;
+        
+        if (scannedBarcode.startsWith('%')) {
+          // This is a sales receipt barcode - extract the customer ID portion
+          // Pattern: %[8 hex chars]-[10 digits][optional letter]
+          const salesReceiptPattern = /^%([0-9A-Fa-f]{8})-[0-9]{10}[A-Za-z]?$/;
+          const match = scannedBarcode.match(salesReceiptPattern);
+          
+          if (match && match[1]) {
+            // Extract the customer ID (first 8 hex characters)
+            extractedCustomerId = match[1].toUpperCase();
+            logger.log(`📋 Detected sales receipt barcode, extracted customer ID: ${extractedCustomerId}`);
+            scannedBarcode = extractedCustomerId; // Use extracted ID for matching
+          } else {
+            // Try without the % prefix
+            const withoutPrefix = scannedBarcode.replace(/^%/, '');
+            const patternWithoutPrefix = /^([0-9A-Fa-f]{8})-[0-9]{10}[A-Za-z]?$/;
+            const matchWithoutPrefix = withoutPrefix.match(patternWithoutPrefix);
+            
+            if (matchWithoutPrefix && matchWithoutPrefix[1]) {
+              extractedCustomerId = matchWithoutPrefix[1].toUpperCase();
+              logger.log(`📋 Detected sales receipt barcode (no %), extracted customer ID: ${extractedCustomerId}`);
+              scannedBarcode = extractedCustomerId;
+            } else {
+              // Not a valid sales receipt format, normalize normally
+              scannedBarcode = normalizeBarcode(data);
+            }
+          }
+        } else {
+          // Not a sales receipt, normalize normally
+          scannedBarcode = normalizeBarcode(data);
+        }
         
         // Apply OCR error correction to handle scanner misreads
         const correctedBarcode = correctOCRErrors(scannedBarcode);
@@ -727,10 +807,14 @@ export default function ScanCylindersScreen() {
           }
           
           // Strategy 1b: Match against stored barcode field (if exists)
-          if (storedBarcode && storedBarcode.toLowerCase() === scannedBarcode.toLowerCase()) {
-            logger.log('✅ Match found: Exact match (stored barcode)');
-            potentialMatches.push({ customer, score: 100, strategy: 'exact_stored' });
-            return;
+          // Normalize stored barcode to remove % prefix before comparing
+          if (storedBarcode) {
+            const normalizedStoredBarcode = normalizeBarcode(storedBarcode);
+            if (normalizedStoredBarcode.toLowerCase() === scannedBarcode.toLowerCase()) {
+              logger.log('✅ Match found: Exact match (stored barcode)');
+              potentialMatches.push({ customer, score: 100, strategy: 'exact_stored' });
+              return;
+            }
           }
           
           // Strategy 2: Fully normalized match (removes ALL special characters) - High priority (score: 90)

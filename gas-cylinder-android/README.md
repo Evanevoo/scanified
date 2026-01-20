@@ -18,10 +18,10 @@ A professional iOS mobile application for gas cylinder management, built with Ex
 - **Home**: Main dashboard with quick actions
 - **Scan Cylinders**: Barcode scanning for cylinders
 - **Edit Cylinder**: Modify cylinder information
-- **Locate Cylinder**: Find cylinder locations
+- **Search Cylinder**: Find cylinder locations
 - **Add Cylinder**: Add new cylinders to the system
 - **History**: View scan history
-- **Fill Cylinder**: Update cylinder status
+- **Locate Cylinder**: Mark cylinder status and location
 - **Settings**: App configuration and user management
 - **Customer Details**: View and manage customer information
 

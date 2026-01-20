@@ -21,7 +21,7 @@ export default function CylinderDetailsScreen() {
 
   useEffect(() => {
     const fetchDetails = async () => {
-      if (!profile?.organization_id && !authLoading) {
+      if (!profile?.organization_id) {
         setError('Organization not found');
         setLoading(false);
         return;
@@ -149,7 +149,26 @@ export default function CylinderDetailsScreen() {
         
         <View style={styles.infoRow}>
           <Text style={[styles.label, { color: colors.text }]}>Status:</Text>
-          <Text style={[styles.value, { color: colors.textSecondary }]}>{cylinder.status || 'Unknown'}</Text>
+          <View style={styles.statusContainer}>
+            <View style={[
+              styles.statusBadge,
+              {
+                backgroundColor: cylinder.status === 'filled' ? '#22C55E' :
+                                 cylinder.status === 'empty' ? '#F59E0B' :
+                                 cylinder.status === 'rented' ? '#3B82F6' :
+                                 cylinder.status === 'available' ? '#6B7280' :
+                                 '#9CA3AF',
+              }
+            ]}>
+              <Text style={styles.statusBadgeText}>
+                {cylinder.status === 'filled' ? 'Full' :
+                 cylinder.status === 'empty' ? 'Empty' :
+                 cylinder.status === 'rented' ? 'Rented' :
+                 cylinder.status === 'available' ? 'Available' :
+                 cylinder.status || 'Unknown'}
+              </Text>
+            </View>
+          </View>
         </View>
       </View>
 
@@ -373,5 +392,22 @@ const styles = StyleSheet.create({
   actionButtonText: {
     fontSize: 16,
     fontWeight: '600',
+  },
+  statusContainer: {
+    flex: 2,
+    alignItems: 'flex-end',
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  statusBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
   },
 });

@@ -33,8 +33,8 @@ interface Organization {
 }
 
 // Session timeout settings
-const SESSION_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes of inactivity
-const SESSION_WARNING_MS = 2 * 60 * 1000; // Show warning 2 minutes before timeout
+const SESSION_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes of inactivity (increased from 15)
+const SESSION_WARNING_MS = 5 * 60 * 1000; // Show warning 5 minutes before timeout
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
@@ -52,6 +52,13 @@ export function useAuth() {
   const timeoutTimerRef = useRef<NodeJS.Timeout | null>(null);
   const warningTimerRef = useRef<NodeJS.Timeout | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const userRef = useRef<User | null>(null); // Track user in ref to avoid circular deps
+  const updateActivityRef = useRef<() => void>();
+
+  // Keep userRef in sync with user state
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   // Sign out function
   const handleSignOut = useCallback(async () => {
@@ -66,7 +73,7 @@ export function useAuth() {
     }
   }, []);
 
-  // Reset timeout timers
+  // Reset timeout timers - uses ref to avoid circular dependencies
   const resetTimeoutTimers = useCallback(() => {
     // Clear existing timers
     if (timeoutTimerRef.current) {
@@ -76,8 +83,8 @@ export function useAuth() {
       clearTimeout(warningTimerRef.current);
     }
 
-    // Only set timers if user is logged in
-    if (user) {
+    // Only set timers if user is logged in (use ref to avoid dep cycle)
+    if (userRef.current) {
       // Set warning timer
       warningTimerRef.current = setTimeout(() => {
         setSessionTimeoutWarning(true);
@@ -90,14 +97,24 @@ export function useAuth() {
         handleSignOut();
       }, SESSION_TIMEOUT_MS);
     }
-  }, [user, handleSignOut]);
+  }, [handleSignOut]); // Removed user from deps - using userRef instead
 
   // Update last activity timestamp
   const updateActivity = useCallback(() => {
-    lastActivityRef.current = Date.now();
-    setSessionTimeoutWarning(false);
-    resetTimeoutTimers();
+    try {
+      lastActivityRef.current = Date.now();
+      setSessionTimeoutWarning(false);
+      resetTimeoutTimers();
+    } catch (error) {
+      // Don't crash if activity update fails
+      logger.warn('Error updating activity:', error);
+    }
   }, [resetTimeoutTimers]);
+
+  // Store latest updateActivity in ref to avoid dependency issues
+  useEffect(() => {
+    updateActivityRef.current = updateActivity;
+  }, [updateActivity]);
 
   // Check trial expiration
   const checkTrialExpiration = useCallback((org: Organization) => {
@@ -133,12 +150,14 @@ export function useAuth() {
       if (appStateRef.current === 'background' && nextAppState === 'active') {
         // App came to foreground - check if session should be timed out
         const inactiveTime = Date.now() - lastActivityRef.current;
-        if (user && inactiveTime > SESSION_TIMEOUT_MS) {
-          logger.warn('⚠️ Session expired while app was in background');
+        if (userRef.current && inactiveTime > SESSION_TIMEOUT_MS) {
+          // Only log out if inactive for more than timeout period
+          logger.warn(`⚠️ Session expired while app was in background (inactive: ${Math.round(inactiveTime / 60000)} minutes)`);
           handleSignOut();
-        } else {
-          // Reset activity and timers
-          updateActivity();
+        } else if (userRef.current) {
+          // Reset activity and timers - user is back, extend session
+          logger.log('📱 App resumed - extending session');
+          updateActivityRef.current?.();
         }
       } else if (nextAppState === 'background') {
         // App going to background - clear timers to save battery
@@ -154,49 +173,70 @@ export function useAuth() {
     return () => {
       subscription?.remove();
     };
-  }, [user, handleSignOut, updateActivity]);
+  }, [handleSignOut]); // Removed updateActivity from dependencies to prevent infinite loop
 
-  // Initial auth check
+  // Initial auth check - runs only once on mount
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
+    let mounted = true;
     
     const getUser = async () => {
       try {
         timeoutId = setTimeout(() => {
           logger.warn('⚠️ Auth loading timeout - forcing completion');
-          setLoading(false);
-          setAuthError('Authentication timeout - please restart the app');
+          if (mounted) {
+            setLoading(false);
+            setAuthError('Authentication timeout - please restart the app');
+          }
         }, 10000);
 
-        const { data: { session } } = await supabase.auth.getSession();
-        setUser(session?.user || null);
-        setAuthError(null);
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
-        if (session?.user) {
-          updateActivity();
+        if (mounted) {
+          if (sessionError) {
+            logger.error('❌ Error getting session:', sessionError);
+            // Don't log out on session fetch errors - might be temporary network issue
+            // Only set error if it's a critical failure
+            if (sessionError.message?.includes('JWT') || sessionError.message?.includes('expired')) {
+              setAuthError('Session expired - please log in again');
+              setUser(null);
+            } else {
+              // Temporary error - keep user logged in if we have a cached session
+              logger.warn('⚠️ Session fetch error, but keeping user logged in:', sessionError.message);
+            }
+          } else {
+            setUser(session?.user || null);
+            setAuthError(null);
+          }
         }
       } catch (error) {
         logger.error('❌ Error getting session:', error);
-        setUser(null);
-        setAuthError('Authentication failed - please restart the app');
+        // Don't automatically log out on errors - might be network issues
+        // Only clear user if it's a critical auth error
+        if (mounted && error instanceof Error && (error.message?.includes('JWT') || error.message?.includes('token'))) {
+          setAuthError('Authentication failed - please log in again');
+          setUser(null);
+        } else {
+          logger.warn('⚠️ Non-critical session error, keeping user logged in');
+        }
       } finally {
         clearTimeout(timeoutId);
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     };
     
     getUser();
     
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      
       try {
         // Skip token refresh events - these don't indicate a sign-out
         if (_event === 'TOKEN_REFRESHED') {
           logger.log('Auth: Token refreshed, maintaining session');
-          // Update activity on token refresh to keep session alive
-          if (session?.user && user && session.user.id === user.id) {
-            updateActivity();
-            return; // Same user, just token refresh
-          }
+          return; // Just ignore token refresh, don't update state
         }
         
         // Only treat as sign-out if event is explicitly SIGNED_OUT
@@ -212,121 +252,156 @@ export function useAuth() {
           return;
         }
         
-        setUser(session?.user || null);
-        setAuthError(null);
+        // For SIGNED_IN or other events, update user if actually changed
+        const newUser = session?.user || null;
+        const currentUserId = userRef.current?.id;
+        const newUserId = newUser?.id;
         
-        if (session?.user) {
-          updateActivity();
-        } else {
-          // Clear timers if no session
-          if (timeoutTimerRef.current) clearTimeout(timeoutTimerRef.current);
-          if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+        // Only update if user actually changed
+        if (currentUserId !== newUserId) {
+          setUser(newUser);
+          setAuthError(null);
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error('❌ Error in auth state change:', error);
-        setUser(null);
-        setAuthError('Authentication state change failed');
+        // Don't log out on errors - might be temporary network issues
+        // Only set error if it's a critical auth failure
+        if (error?.message?.includes('JWT') || error?.message?.includes('token')) {
+          logger.warn('⚠️ Token error detected, but not logging out - may be temporary');
+        }
+        // Don't set user to null on errors - keep user logged in
+        // Don't crash the app - just log the error
+        try {
+          // setAuthError('Authentication state change failed');
+        } catch (e) {
+          // Silently handle any errors
+        }
       }
     });
     
     return () => {
+      mounted = false;
       clearTimeout(timeoutId);
       listener.subscription.unsubscribe();
       if (timeoutTimerRef.current) clearTimeout(timeoutTimerRef.current);
       if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
     };
-  }, [updateActivity, user]);
+  }, []); // Empty deps - only run once on mount
 
-  // Load profile and organization
+  // Load profile and organization when user ID changes
   useEffect(() => {
-    if (user) {
-      setOrganizationLoading(true);
-      
-      supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single()
-        .then(({ data: profileData, error: profileError }) => {
-          try {
-            if (profileError) {
-              logger.error('Error fetching profile:', profileError);
-              setProfile(null);
-              setOrganization(null);
-              setOrganizationLoading(false);
-            } else if (profileData) {
-              logger.log('Profile loaded successfully:', {
-                id: profileData.id,
-                email: profileData.email,
-                organization_id: profileData.organization_id,
-                role: profileData.role
-              });
-              setProfile(profileData);
-              
-              if (profileData.organization_id) {
-                supabase
-                  .from('organizations')
-                  .select('*')
-                  .eq('id', profileData.organization_id)
-                  .maybeSingle()
-                  .then(({ data: orgData, error: orgError }) => {
-                    try {
-                      if (orgError) {
-                        logger.error('Error fetching organization:', orgError);
-                        setOrganization(null);
-                      } else if (orgData) {
-                        if (orgData.deleted_at) {
-                          logger.error('❌ Organization is DELETED!');
-                          setOrganization(null);
-                          setAuthError('Your organization has been deleted. Please contact your administrator.');
-                        } else {
-                          logger.log('Organization loaded successfully:', orgData.name);
-                          setOrganization(orgData);
-                          checkTrialExpiration(orgData);
-                        }
-                      } else {
-                        logger.error('Organization not found');
-                        setOrganization(null);
-                      }
-                    } catch (error) {
-                      logger.error('❌ Error processing organization data:', error);
-                      setOrganization(null);
-                    } finally {
-                      setOrganizationLoading(false);
-                    }
-                  })
-                  .catch(error => {
-                    logger.error('❌ Error in organization query:', error);
-                    setOrganization(null);
-                    setOrganizationLoading(false);
-                  });
-              } else {
-                logger.log('Profile has no organization_id');
-                setOrganization(null);
-                setOrganizationLoading(false);
-              }
-            }
-          } catch (error) {
-            logger.error('❌ Error processing profile data:', error);
-            setProfile(null);
-            setOrganization(null);
-            setOrganizationLoading(false);
-          }
-        })
-        .catch(error => {
-          logger.error('❌ Error in profile query:', error);
-          setProfile(null);
-          setOrganization(null);
-          setOrganizationLoading(false);
-        });
-    } else {
+    const userId = user?.id;
+    
+    if (!userId) {
       setProfile(null);
       setOrganization(null);
       setOrganizationLoading(false);
       setTrialExpired(false);
       setTrialDaysRemaining(null);
+      return;
     }
-  }, [user, checkTrialExpiration]);
+    
+    let mounted = true;
+    setOrganizationLoading(true);
+    
+    supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single()
+      .then(({ data: profileData, error: profileError }) => {
+        if (!mounted) return;
+        
+        try {
+          if (profileError) {
+            logger.error('Error fetching profile:', profileError);
+            setProfile(null);
+            setOrganization(null);
+            setOrganizationLoading(false);
+          } else if (profileData) {
+            logger.log('Profile loaded successfully:', {
+              id: profileData.id,
+              email: profileData.email,
+              organization_id: profileData.organization_id,
+              role: profileData.role
+            });
+            setProfile(profileData);
+            
+            if (profileData.organization_id) {
+              supabase
+                .from('organizations')
+                .select('*')
+                .eq('id', profileData.organization_id)
+                .maybeSingle()
+                .then(({ data: orgData, error: orgError }) => {
+                  if (!mounted) return;
+                  
+                  try {
+                    if (orgError) {
+                      logger.error('Error fetching organization:', orgError);
+                      setOrganization(null);
+                    } else if (orgData) {
+                      if (orgData.deleted_at) {
+                        logger.error('❌ Organization is DELETED!');
+                        setOrganization(null);
+                        setAuthError('Your organization has been deleted. Please contact your administrator.');
+                      } else {
+                        logger.log('Organization loaded successfully:', orgData.name);
+                        setOrganization(orgData);
+                        checkTrialExpiration(orgData);
+                      }
+                    } else {
+                      logger.error('Organization not found');
+                      setOrganization(null);
+                    }
+                  } catch (error) {
+                    logger.error('❌ Error processing organization data:', error);
+                    setOrganization(null);
+                  } finally {
+                    if (mounted) setOrganizationLoading(false);
+                  }
+                })
+                .catch(error => {
+                  if (!mounted) return;
+                  logger.error('❌ Error in organization query:', error);
+                  setOrganization(null);
+                  setOrganizationLoading(false);
+                });
+            } else {
+              logger.log('Profile has no organization_id');
+              setOrganization(null);
+              setOrganizationLoading(false);
+            }
+          }
+        } catch (error) {
+          logger.error('❌ Error processing profile data:', error);
+          if (mounted) {
+            setProfile(null);
+            setOrganization(null);
+            setOrganizationLoading(false);
+          }
+        }
+      })
+      .catch(error => {
+        if (!mounted) return;
+        logger.error('❌ Error in profile query:', error);
+        setProfile(null);
+        setOrganization(null);
+        setOrganizationLoading(false);
+      });
+    
+    return () => {
+      mounted = false;
+    };
+  }, [user?.id, checkTrialExpiration]); // Use user?.id instead of user object to prevent infinite loops
+
+  // Start activity tracking when user is authenticated
+  useEffect(() => {
+    if (user?.id) {
+      // Initialize activity tracking for authenticated user
+      updateActivity();
+    }
+  }, [user?.id]); // Only run when user ID changes, not when updateActivity changes
 
   return { 
     user, 

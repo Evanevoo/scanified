@@ -2332,8 +2332,15 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
             <CameraView
               style={[StyleSheet.absoluteFill, styles.camera]}
               enableTorch={flashEnabled}
+              barcodeScannerEnabled={isScanning && !loading}
               barcodeScannerSettings={{}}
               onBarcodeScanned={({ data, bounds }: BarcodeScanningResult) => {
+                // Don't process scans until ready or if loading
+                if (!scanningReady || loading) {
+                  logger.log('📷 Scanner not ready yet, ignoring scan');
+                  return;
+                }
+                
                 const now = Date.now();
                 
                 if (!data || typeof data !== 'string') {
