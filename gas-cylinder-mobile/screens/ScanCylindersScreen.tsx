@@ -1,11 +1,9 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Modal, Dimensions, Alert, Linking } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Modal, Dimensions, Alert, Linking, Platform as RNPlatform, Pressable } from 'react-native';
 import { supabase } from '../supabase';
 import { useNavigation } from '@react-navigation/native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
-import SimpleCameraTest from '../SimpleCameraTest';
 import { useTheme } from '../context/ThemeContext';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
@@ -14,6 +12,10 @@ import { Customer } from '../types';
 import { FormatValidationService } from '../services/FormatValidationService';
 import { Platform } from '../utils/platform';
 import { feedbackService } from '../services/feedbackService';
+import Constants from 'expo-constants';
+
+// Use ML Kit for free professional barcode scanning
+import MLKitScanner from '../components/MLKitScanner';
 
 const { width, height } = Dimensions.get('window');
 
@@ -135,6 +137,10 @@ const correctOCRErrors = (scanned: string): string => {
     }
   }
   
+  // Check if this is a hex customer ID pattern (8 hex digits like "800005BE")
+  // If so, don't convert hex letters (A-F) to numbers
+  const isHexCustomerId = /^[0-9A-F]{8}$/.test(corrected);
+  
   // Apply single-character corrections for ambiguous characters
   // Only correct if it makes sense in context (e.g., O in numeric context → 0)
   const numericContext = /[0-9]/.test(corrected);
@@ -144,11 +150,15 @@ const correctOCRErrors = (scanned: string): string => {
     corrected = corrected.replace(/[ODQ]/g, '0');
     corrected = corrected.replace(/[Il|]/g, '1');
     corrected = corrected.replace(/[SZ]/g, '5');
-    corrected = corrected.replace(/[B]/g, '8');
-    corrected = corrected.replace(/[G]/g, '6');
-    // Additional OCR errors for hex-like patterns
-    corrected = corrected.replace(/E/g, '5'); // E often misread as 5
-    corrected = corrected.replace(/F/g, '7'); // F often misread as 7
+    
+    // Only convert B, G, E, F to numbers if NOT a hex customer ID
+    // Hex customer IDs like "800005BE" should keep their hex letters
+    if (!isHexCustomerId) {
+      corrected = corrected.replace(/[B]/g, '8');
+      corrected = corrected.replace(/[G]/g, '6');
+      corrected = corrected.replace(/E/g, '5'); // E often misread as 5
+      corrected = corrected.replace(/F/g, '7'); // F often misread as 7
+    }
   }
   
   // Handle trailing letter corrections (B→A, etc.) in customer ID context
@@ -394,7 +404,7 @@ export default function ScanCylindersScreen() {
   const { profile, loading: authLoading } = useAuth();
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scannerTarget, setScannerTarget] = useState<'customer' | 'order' | null>(null);
-  const [permission, requestPermission] = useCameraPermissions();
+  // Expo Camera permissions removed - Vision Camera handles its own permissions
   const [scanned, setScanned] = useState(false);
   const [scannerEnabled, setScannerEnabled] = useState(true);
   const scanDelay = 1500; // ms
@@ -403,11 +413,14 @@ export default function ScanCylindersScreen() {
   const [showOrderScan, setShowOrderScan] = useState(false);
   const [showSimpleTest, setShowSimpleTest] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
+  // Using Expo Camera for iOS
+  const [focusTrigger, setFocusTrigger] = useState(0); // Used to trigger autofocus on tap
   
   // Track last scanned barcode and timestamp to prevent rapid duplicate scans
   const lastScannedBarcodeRef = React.useRef<string | null>(null);
   const lastScanTimeRef = React.useRef<number>(0);
   const scanCooldownRef = React.useRef<NodeJS.Timeout | null>(null);
+  const cameraRef = useRef<any>(null);
 
 
   useEffect(() => {
@@ -463,9 +476,13 @@ export default function ScanCylindersScreen() {
 
 
   useEffect(() => {
+    // Only reset scanned state when scanner opens, not when it closes
+    // This prevents allowing re-scans immediately after closing
     if (scannerVisible) {
       setScanned(false);
+      setScannerEnabled(true);
     }
+    // When scanner closes, keep scanned state as-is to prevent immediate re-scans
   }, [scannerVisible]);
 
   // Load order number format and set max length
@@ -532,17 +549,63 @@ export default function ScanCylindersScreen() {
   }, [orderNumber, profile?.organization_id]);
 
   // Validate customer barcode when search changes
+  // Customer barcodes are in format: %800005BE-1578330321A (sales receipt format)
+  // Pattern: % + 8 hex characters + hyphen + 10 digits + optional letter
   useEffect(() => {
     const validateCustomer = async () => {
       if (search.trim() && !selectedCustomer) {
-        const validation = await validateBarcode(search, profile?.organization_id || '');
-        setCustomerBarcodeError(validation.isValid ? '' : validation.error || '');
+        const trimmed = search.trim();
+        
+        // Customer barcode format: %[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?
+        // Examples: %800005BE-1578330321A, %80000635-1596735793A
+        const salesReceiptPattern = /^%[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?$/i;
+        
+        // Also accept without % prefix (in case scanner doesn't capture it)
+        const withoutPrefixPattern = /^[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?$/i;
+        
+        // Also accept hex ID only (8 hex characters) - for manual entry
+        const hexIdPattern = /^[0-9A-Fa-f]{8}$/i;
+        
+        if (salesReceiptPattern.test(trimmed) || withoutPrefixPattern.test(trimmed) || hexIdPattern.test(trimmed)) {
+          // Valid customer barcode format
+          setCustomerBarcodeError('');
+        } else {
+          // Check for basic invalid characters
+          const basicPattern = /^[A-Za-z0-9\-_*%\.\s]+$/;
+          if (!basicPattern.test(trimmed)) {
+            setCustomerBarcodeError('Barcode contains invalid characters. Only letters, numbers, and basic symbols are allowed.');
+          } else {
+            // Valid characters but wrong format - provide helpful message
+            setCustomerBarcodeError('Customer barcode should be in format: %XXXXXXXX-YYYYYYYYYYZ (e.g., %800005BE-1578330321A)');
+          }
+        }
       } else {
         setCustomerBarcodeError('');
       }
     };
     validateCustomer();
   }, [search, selectedCustomer, profile?.organization_id]);
+
+  // Log scanner state when camera is opened
+  useEffect(() => {
+    if (showCustomerScan) {
+      const scannerState = {
+        scannerEnabled,
+        scanned,
+      };
+      logger.log('📷 SCANNER STATE:', scannerState);
+      if (scanned) {
+        logger.warn('⚠️ Scanner marked as already scanned, resetting...');
+        setScanned(false);
+        setScannerEnabled(true); // Re-enable scanner when resetting scanned state
+      }
+      // Ensure scanner is enabled when customer scan screen opens
+      if (!scannerEnabled && !scanned) {
+        logger.warn('⚠️ Scanner is disabled but should be enabled, re-enabling...');
+        setScannerEnabled(true);
+      }
+    }
+  }, [showCustomerScan, scannerEnabled, scanned]);
   
   // Cleanup scan cooldown on unmount
   useEffect(() => {
@@ -560,6 +623,13 @@ export default function ScanCylindersScreen() {
     return () => {
       feedbackService.cleanup();
     };
+  }, []);
+
+  // Log camera preference on iOS
+  useEffect(() => {
+    if (RNPlatform.OS === 'ios') {
+      logger.log('📷 iOS: Using Expo Camera for barcode scanning');
+    }
   }, []);
 
   const filteredCustomers = (() => {
@@ -604,45 +674,146 @@ export default function ScanCylindersScreen() {
     return uniqueMatches;
   })();
 
-  const handleBarcodeScanned = async (event: any) => {
-    const data = event?.data || event;
-    const type = event?.type || 'unknown';
+  // Search for customer by name (for OCR text recognition)
+  const searchCustomerByName = async (possibleNames: string[]): Promise<Customer | null> => {
+    if (!profile?.organization_id || possibleNames.length === 0) {
+      return null;
+    }
+
+    try {
+      logger.log('🔍 OCR: Searching for customers by names:', possibleNames);
+      
+      // Try each possible name until we find a match
+      for (const name of possibleNames) {
+        if (!name || name.length < 3) continue;
+        
+        // Search for customer with matching name (case-insensitive)
+        const { data: customers, error } = await supabase
+          .from('customers')
+          .select('CustomerListID, name, barcode')
+          .eq('organization_id', profile.organization_id)
+          .ilike('name', `%${name}%`)
+          .limit(1);
+
+        if (error) {
+          logger.error('OCR customer search error:', error);
+          continue;
+        }
+
+        if (customers && customers.length > 0) {
+          const found = customers[0];
+          logger.log('✅ OCR: Found customer:', found.name);
+          return found;
+        }
+      }
+
+      logger.log('❌ OCR: No customer found for any of the names');
+      return null;
+    } catch (error) {
+      logger.error('Error in searchCustomerByName:', error);
+      return null;
+    }
+  };
+
+  // Handle OCR text found - automatically select customer if found
+  const handleTextFound = async (text: string, possibleNames: string[]) => {
+    logger.log('📝 OCR: Text found, searching for customers...');
     
+    const foundCustomer = await searchCustomerByName(possibleNames);
+    
+    if (foundCustomer) {
+      logger.log('✅ OCR: Customer found, selecting:', foundCustomer.name);
+      setSelectedCustomer(foundCustomer);
+      setSearch(foundCustomer.CustomerListID || foundCustomer.name);
+      setCustomerBarcodeError('');
+      // Close scanner after finding customer
+      setShowCustomerScan(false);
+      setScannerVisible(false);
+      setScannerTarget(null);
+      // Provide feedback
+      await feedbackService.scanSuccess();
+    } else {
+      logger.log('⚠️ OCR: No customer found, showing in search');
+      // If no customer found, add first name to search
+      if (possibleNames.length > 0) {
+        setSearch(possibleNames[0]);
+      }
+    }
+  };
+
+  const handleBarcodeScanned = async (event: any) => {
+    // Support: string directly, or { data }, or { raw } (expo-camera / MLKit)
+    const data = typeof event === 'string'
+      ? event
+      : (typeof event?.data === 'string' ? event.data : (typeof event?.raw === 'string' ? event.raw : null));
+    const type = (typeof event === 'object' && event?.type) ? event.type : 'unknown';
+
     if (__DEV__) {
       logger.debug('🔍 Barcode scanned:', { type, data, scanned, scannerTarget });
     }
-    
+
     if (!data || typeof data !== 'string') {
-      logger.log('❌ Invalid barcode data:', data);
+      logger.log('❌ Invalid barcode data:', typeof event, event);
       return;
     }
-    
-    const barcode = data.trim();
+
+    // Clean the barcode - remove leading/trailing asterisks only (keep % for customer format)
+    let cleanedBarcode = data.trim().replace(/^\*+|\*+$/g, '');
+
+    if (!cleanedBarcode) {
+      logger.log('📷 Empty barcode after cleaning');
+      return;
+    }
+
+    const barcode = cleanedBarcode;
+
+    // Direct navigation logic - only for cylinder barcodes (e.g. 9 digits)
+    // Customer barcodes (%XXXXXXXX-YYYYYYYYYYZ) stay on this screen
+    try {
+      if (profile?.organization_id) {
+        const formats = await FormatValidationService.getOrganizationFormats(profile.organization_id);
+        const cylinderPattern = formats.cylinder_serial_format?.pattern || '^[0-9]{9}$';
+        const cylinderRegex = new RegExp(cylinderPattern);
+        const isCylinder = cylinderRegex.test(cleanedBarcode);
+
+        logger.log('🔍 Barcode analysis:', { cleanedBarcode, isCylinder, cylinderPattern });
+
+        if (isCylinder) {
+          logger.log('✅ Cylinder barcode detected, navigating to CylinderDetails');
+          setShowCustomerScan(false);
+          setShowOrderScan(false);
+          setScannerVisible(false);
+          setScannerTarget(null);
+          navigation.navigate('CylinderDetails', { barcode: cleanedBarcode });
+          return;
+        }
+      }
+    } catch (error) {
+      logger.error('❌ Error in direct navigation logic:', error);
+    }
+
+    // handleBarcodeScanned is only used by the customer scanner; default to customer
+    let effectiveTarget = scannerTarget || 'customer';
     
     // Prevent duplicate scans of the same barcode
     const now = Date.now();
     const timeSinceLastScan = now - lastScanTimeRef.current;
-    const MIN_SCAN_INTERVAL = 2000; // Minimum 2 seconds between scans
     
-    if (barcode === lastScannedBarcodeRef.current && timeSinceLastScan < MIN_SCAN_INTERVAL) {
-      logger.log('⚠️ Duplicate scan detected, ignoring (too soon)');
-      return;
-    }
+    // Determine scan interval based on context
+    // For customer scans (especially sales receipt barcodes), use shorter interval for industrial machine scanning
+    const isCustomerScan = effectiveTarget === 'customer' || barcode.startsWith('%');
+    const MIN_SCAN_INTERVAL = isCustomerScan ? 200 : 2000; // 200ms for customer scans, 2s for others
     
+    // Block duplicate scans more aggressively
     if (scanned) {
       logger.log('⚠️ Already processing scan, ignoring');
       return;
     }
     
-    // Check if this is a sales receipt barcode (starts with %) - auto-detect and handle
-    let effectiveTarget = scannerTarget;
-    if (!scannerTarget) {
-      if (barcode.startsWith('%')) {
-        // Sales receipt barcode detected - automatically treat as customer scan
-        logger.log('📋 Sales receipt barcode detected (starts with %), treating as customer scan');
-        effectiveTarget = 'customer';
-      } else {
-        logger.log('❌ No scanner target set and barcode is not a sales receipt');
+    // Block if same barcode was scanned recently (even if not currently processing)
+    if (barcode === lastScannedBarcodeRef.current) {
+      if (timeSinceLastScan < 3000) { // Block same barcode for 3 seconds
+        logger.log('⚠️ Duplicate scan detected, ignoring (same barcode too soon)');
         return;
       }
     }
@@ -654,19 +825,19 @@ export default function ScanCylindersScreen() {
     
     // Set scanned immediately to prevent duplicate scans
     setScanned(true);
-    setScannerEnabled(false); // Disable scanner temporarily
+    setScannerEnabled(false); // Disable scanner immediately
     lastScannedBarcodeRef.current = barcode;
     lastScanTimeRef.current = now;
     
-    // Reset scanned state and re-enable scanner after cooldown period
-    scanCooldownRef.current = setTimeout(() => {
-      setScanned(false);
-      setScannerEnabled(true);
-      // Clear the last scanned barcode after a longer period to allow re-scanning the same barcode
-      setTimeout(() => {
-        lastScannedBarcodeRef.current = null;
-      }, 5000); // Allow same barcode to be scanned again after 5 seconds
-    }, MIN_SCAN_INTERVAL);
+    // For customer scans, use a longer cooldown to prevent rapid re-scans
+    // Don't set a cooldown timer here - we'll handle it after processing completes
+    // This prevents the timer from resetting scanned state while we're still processing
+    
+    // Close scanner immediately after scan - this screen only allows one scan at a time
+    setShowCustomerScan(false);
+    setShowOrderScan(false);
+    setScannerVisible(false);
+    setScannerTarget(null);
     
     // Add a small delay to allow the UI to update
     setTimeout(async () => {
@@ -676,38 +847,78 @@ export default function ScanCylindersScreen() {
       logger.log('✅ Skipping validation - accepting barcode:', data);
 
       // Apply the scanned data based on target
-      if (scannerTarget === 'customer') {
+      if (effectiveTarget === 'customer') {
         logger.log('👤 Setting customer search:', data);
         
-        // Check if this is a sales receipt barcode (starts with %)
+        // Check if this is a sales receipt barcode (starts with % or wrapped in asterisks)
         // Sales receipt format: %XXXXXXXX-YYYYYYYYYYZ where XXXXXXXXX is the customer ID
+        // Pattern: 8 hex chars + dash + 10 digits + optional letter
         let scannedBarcode = data.trim();
         let extractedCustomerId: string | null = null;
         
-        if (scannedBarcode.startsWith('%')) {
-          // This is a sales receipt barcode - extract the customer ID portion
-          // Pattern: %[8 hex chars]-[10 digits][optional letter]
-          const salesReceiptPattern = /^%([0-9A-Fa-f]{8})-[0-9]{10}[A-Za-z]?$/;
-          const match = scannedBarcode.match(salesReceiptPattern);
+        // Check for sales receipt: must have % OR be clearly wrapped in asterisks
+        // This prevents regular customer barcodes from being incorrectly treated as sales receipts
+        const hasPercent = scannedBarcode.startsWith('%') || scannedBarcode.includes('%');
+        // Only treat as wrapped if it starts AND ends with asterisk (clear sales receipt format)
+        const isWrappedInAsterisks = scannedBarcode.startsWith('*') && scannedBarcode.endsWith('*');
+        
+        // Only treat as sales receipt if it has % OR is wrapped in asterisks
+        const isSalesReceipt = hasPercent || isWrappedInAsterisks;
+        
+        if (isSalesReceipt) {
+          // This is a sales receipt barcode - handle formats like:
+          // %800005BE-1578330321A or *%800005BE-1578330321A*
+          // Customer ID format: 800005BE-1578330321A (8 hex + dash + 10 digits + 1 letter)
           
-          if (match && match[1]) {
-            // Extract the customer ID (first 8 hex characters)
-            extractedCustomerId = match[1].toUpperCase();
-            logger.log(`📋 Detected sales receipt barcode, extracted customer ID: ${extractedCustomerId}`);
-            scannedBarcode = extractedCustomerId; // Use extracted ID for matching
+          // First, clean up the barcode (remove asterisks and %)
+          let cleanedBarcode = scannedBarcode.replace(/^[*%]+/, '').replace(/[*%]+$/, '');
+          
+          logger.log(`🧹 Cleaned barcode: "${cleanedBarcode}"`);
+          
+          // Try to extract the full customer ID format: 800005BE-1578330321A
+          // Pattern: 8 hex chars + dash + 10 digits + optional letter
+          const fullCustomerIdPattern = /^([0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?)$/;
+          const fullMatch = cleanedBarcode.match(fullCustomerIdPattern);
+          
+          if (fullMatch && fullMatch[1]) {
+            // Full customer ID format found - use it directly for exact matching
+            extractedCustomerId = fullMatch[1].toUpperCase();
+            logger.log(`📋 Detected full customer ID format: ${extractedCustomerId}`);
+            scannedBarcode = extractedCustomerId; // Use full ID for matching
           } else {
-            // Try without the % prefix
-            const withoutPrefix = scannedBarcode.replace(/^%/, '');
-            const patternWithoutPrefix = /^([0-9A-Fa-f]{8})-[0-9]{10}[A-Za-z]?$/;
-            const matchWithoutPrefix = withoutPrefix.match(patternWithoutPrefix);
+            // Try pattern with % prefix still in place
+            const withPercentPattern = /^%([0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?)$/;
+            const withPercentMatch = scannedBarcode.match(withPercentPattern);
             
-            if (matchWithoutPrefix && matchWithoutPrefix[1]) {
-              extractedCustomerId = matchWithoutPrefix[1].toUpperCase();
-              logger.log(`📋 Detected sales receipt barcode (no %), extracted customer ID: ${extractedCustomerId}`);
+            if (withPercentMatch && withPercentMatch[1]) {
+              extractedCustomerId = withPercentMatch[1].toUpperCase();
+              logger.log(`📋 Detected full customer ID (with % prefix): ${extractedCustomerId}`);
               scannedBarcode = extractedCustomerId;
             } else {
-              // Not a valid sales receipt format, normalize normally
-              scannedBarcode = normalizeBarcode(data);
+              // Try to extract just the first 8 hex characters (prefix) as fallback
+              const prefixPattern = /^%?([0-9A-Fa-f]{8})-[0-9]{10}[A-Za-z]?$/;
+              const prefixMatch = cleanedBarcode.match(prefixPattern);
+              
+              if (prefixMatch && prefixMatch[1]) {
+                // Extract the customer ID prefix (first 8 hex characters)
+                extractedCustomerId = prefixMatch[1].toUpperCase();
+                logger.log(`📋 Detected sales receipt barcode, extracted customer ID prefix: ${extractedCustomerId}`);
+                scannedBarcode = extractedCustomerId; // Use extracted prefix for matching
+              } else {
+                // Try pattern without % prefix
+                const withoutPrefix = cleanedBarcode.replace(/^%/, '');
+                const patternWithoutPrefix = /^([0-9A-Fa-f]{8})-[0-9]{10}[A-Za-z]?$/;
+                const matchWithoutPrefix = withoutPrefix.match(patternWithoutPrefix);
+                
+                if (matchWithoutPrefix && matchWithoutPrefix[1]) {
+                  extractedCustomerId = matchWithoutPrefix[1].toUpperCase();
+                  logger.log(`📋 Detected sales receipt barcode (no %), extracted customer ID: ${extractedCustomerId}`);
+                  scannedBarcode = extractedCustomerId;
+                } else {
+                  // Not a valid sales receipt format, normalize normally
+                  scannedBarcode = normalizeBarcode(data);
+                }
+              }
             }
           }
         } else {
@@ -748,23 +959,59 @@ export default function ScanCylindersScreen() {
         const scannedWithDashes = normalizeWithDashes(scannedBarcode);
         const scannedLoose = normalizeLoose(scannedBarcode);
         
-        // Debug logging (only in development)
-        if (__DEV__) {
-          logger.debug('🔍 CUSTOMER BARCODE SCAN DEBUG');
-          logger.debug('📱 Raw scanned data:', data);
-          logger.debug('🧹 After normalization:', scannedBarcode);
-          logger.debug('👥 Total customers to search:', customers.length);
-          logger.debug('🏢 Current organization:', customers[0]?.organization_id || 'N/A');
-        }
+        // Debug logging
+        logger.log('🔍 CUSTOMER BARCODE SCAN DEBUG');
+        logger.log('📱 Raw scanned data:', data);
+        logger.log('📋 Extracted customer ID:', extractedCustomerId);
+        logger.log('🧹 After normalization:', scannedBarcode);
+        logger.log('🔢 Scanned normalized:', scannedNormalized);
+        logger.log('👥 Total customers to search:', customers.length);
+        logger.log('🏢 Current organization:', customers[0]?.organization_id || 'N/A');
         
         // Collect all potential matches with their match quality scores
         // This prevents always returning the first customer in the array
         const potentialMatches: Array<{ customer: any; score: number; strategy: string }> = [];
         
-        customers.forEach(customer => {
+        // If we have a full extracted customer ID (with dash), check for exact matches first
+        // This is much faster than checking every customer with prefix matches
+        if (extractedCustomerId && extractedCustomerId.includes('-')) {
+          for (const customer of customers) {
+            if (!customer.CustomerListID) continue;
+            
+            // Check exact match with full customer ID first
+            if (customer.CustomerListID.toUpperCase() === extractedCustomerId.toUpperCase()) {
+              logger.log(`✅ Match found: Exact match with full extracted ID - "${extractedCustomerId}" === "${customer.CustomerListID}"`);
+              potentialMatches.push({ customer, score: 100, strategy: 'exact_full' });
+              break; // Found exact match, no need to check further
+            }
+            
+            // Check stored barcode for exact match
+            const storedBarcode = customer.barcode || customer.customer_barcode;
+            if (storedBarcode) {
+              const normalizedStored = normalizeBarcode(storedBarcode);
+              if (normalizedStored.toUpperCase() === extractedCustomerId.toUpperCase()) {
+                logger.log(`✅ Match found: Exact match (stored barcode with full ID) - "${extractedCustomerId}" === "${normalizedStored}"`);
+                potentialMatches.push({ customer, score: 100, strategy: 'exact_stored_full' });
+                break; // Found exact match, no need to check further
+              }
+            }
+          }
+          
+          // If we found an exact match, skip all the other matching strategies
+          if (potentialMatches.length > 0 && potentialMatches[0].score === 100) {
+            // Exact match found, use it
+          } else {
+            // No exact match found, continue with other strategies below
+            potentialMatches.length = 0; // Clear the array
+          }
+        }
+        
+        // If no exact match was found, continue with other matching strategies
+        if (potentialMatches.length === 0) {
+          // Use a for loop instead of forEach to allow early exit
+          for (const customer of customers) {
           if (!customer.CustomerListID) {
-            logger.log(`⏭️ Skipping customer "${customer.name}" - no CustomerListID`);
-            return;
+            continue; // Skip customers without CustomerListID
           }
           
           // Try matching against CustomerListID directly
@@ -786,89 +1033,139 @@ export default function ScanCylindersScreen() {
             storedBarcodeLoose = normalizeLoose(normalizedStored);
           }
           
-          // Log each customer barcode for debugging
-          logger.log(`\n🔍 Checking customer "${customer.name}"`);
-          logger.log(`   📱 Stored CustomerListID: "${customer.CustomerListID}"`);
-          logger.log(`   🧹 After normalization: "${customerBarcode}"`);
-          logger.log(`   🔢 Fully normalized: "${customerNormalized}"`);
-          logger.log(`   ➖ With dashes: "${customerWithDashes}"`);
-          logger.log(`   🧩 Loose: "${customerLoose}"`);
-          if (storedBarcode) {
-            logger.log(`   📦 Stored barcode: "${storedBarcode}"`);
-            logger.log(`   📦 Stored normalized: "${storedBarcodeNormalized}"`);
-          }
-          logger.log(`   📊 Comparing to scanned: "${scannedNormalized}"`);
-          
           // Strategy 1: Exact match (case insensitive) - Highest priority (score: 100)
+          // Check both the scanned barcode and the full customer ID format
           if (customerBarcode.toLowerCase() === scannedBarcode.toLowerCase()) {
-            logger.log('✅ Match found: Exact match (CustomerListID)');
+            logger.log(`✅ Match found: Exact match (CustomerListID) - "${scannedBarcode}" === "${customerBarcode}"`);
             potentialMatches.push({ customer, score: 100, strategy: 'exact' });
-            return;
+            // Early exit for exact matches - no need to check further
+            break;
           }
           
-          // Strategy 1b: Match against stored barcode field (if exists)
-          // Normalize stored barcode to remove % prefix before comparing
-          if (storedBarcode) {
-            const normalizedStoredBarcode = normalizeBarcode(storedBarcode);
-            if (normalizedStoredBarcode.toLowerCase() === scannedBarcode.toLowerCase()) {
-              logger.log('✅ Match found: Exact match (stored barcode)');
-              potentialMatches.push({ customer, score: 100, strategy: 'exact_stored' });
-              return;
+          // Strategy 1a: If we extracted a full customer ID, try exact match with that
+          if (extractedCustomerId && extractedCustomerId.includes('-')) {
+            // Full customer ID format was extracted (e.g., "800005BE-1578330321A")
+            if (customerBarcode.toLowerCase() === extractedCustomerId.toLowerCase()) {
+              logger.log(`✅ Match found: Exact match with full extracted ID - "${extractedCustomerId}" === "${customerBarcode}"`);
+              potentialMatches.push({ customer, score: 100, strategy: 'exact_full' });
+              break;
             }
           }
           
-          // Strategy 2: Fully normalized match (removes ALL special characters) - High priority (score: 90)
+          // Strategy 1b: Match against stored barcode field (if exists)
+          // Normalize stored barcode to remove % prefix and asterisks before comparing
+          if (storedBarcode) {
+            const normalizedStoredBarcode = normalizeBarcode(storedBarcode);
+            if (normalizedStoredBarcode.toLowerCase() === scannedBarcode.toLowerCase()) {
+              logger.log(`✅ Match found: Exact match (stored barcode) - "${scannedBarcode}" === "${normalizedStoredBarcode}"`);
+              potentialMatches.push({ customer, score: 100, strategy: 'exact_stored' });
+              // Early exit for exact matches
+              break;
+            }
+            // Also check if full extracted ID matches stored barcode
+            if (extractedCustomerId && extractedCustomerId.includes('-')) {
+              if (normalizedStoredBarcode.toLowerCase() === extractedCustomerId.toLowerCase()) {
+                logger.log(`✅ Match found: Exact match (stored barcode with full ID) - "${extractedCustomerId}" === "${normalizedStoredBarcode}"`);
+                potentialMatches.push({ customer, score: 100, strategy: 'exact_stored_full' });
+                break;
+              }
+            }
+          }
+          
+          // Strategy 2: Sales receipt prefix match - Check if scanned barcode (from sales receipt) matches start of customer ID
+          // This handles cases where sales receipt barcode extracts 8 hex chars that match the start of full customer ID
+          // Example: Scanned "800005BE" should match customer ID "800005BE-1578330321A" or "800005BE1578330321A"
+          if (extractedCustomerId) {
+            // This is a sales receipt scan - check if extracted ID matches start of customer ID
+            // Use the extracted customer ID directly (not the normalized scanned barcode) for more accurate matching
+            const extractedNormalized = normalizeForMatching(extractedCustomerId);
+            
+            // Only log if there's a potential match, not for every customer
+            // Check if extracted ID matches start of customer ID
+            const customerIdStart = customerNormalized.slice(0, extractedNormalized.length);
+            if (customerIdStart === extractedNormalized && extractedNormalized.length >= 6) {
+              logger.log(`✅ Match found: Sales receipt prefix match - "${extractedNormalized}" matches start of "${customerNormalized}"`);
+              potentialMatches.push({ customer, score: 95, strategy: 'sales_receipt_prefix' });
+              continue;
+            }
+            
+            // Also check if extracted ID is contained anywhere in the customer ID (in case format is different)
+            if (customerNormalized.includes(extractedNormalized) && extractedNormalized.length >= 6) {
+              const matchPosition = customerNormalized.indexOf(extractedNormalized);
+              logger.log(`✅ Match found: Sales receipt contained match - "${extractedNormalized}" found at position ${matchPosition} in "${customerNormalized}"`);
+              potentialMatches.push({ customer, score: 90, strategy: 'sales_receipt_contained' });
+              continue;
+            }
+            
+            // Also check stored barcode
+            if (storedBarcodeNormalized) {
+              const storedStart = storedBarcodeNormalized.slice(0, extractedNormalized.length);
+              if (storedStart === extractedNormalized && extractedNormalized.length >= 6) {
+                logger.log(`✅ Match found: Sales receipt prefix match (stored barcode) - "${extractedNormalized}" matches start of "${storedBarcodeNormalized}"`);
+                potentialMatches.push({ customer, score: 95, strategy: 'sales_receipt_prefix_stored' });
+                continue;
+              }
+              // Check if extracted ID is contained in stored barcode
+              if (storedBarcodeNormalized.includes(extractedNormalized) && extractedNormalized.length >= 6) {
+                logger.log(`✅ Match found: Sales receipt contained match (stored barcode) - "${extractedNormalized}" found in "${storedBarcodeNormalized}"`);
+                potentialMatches.push({ customer, score: 90, strategy: 'sales_receipt_contained_stored' });
+                continue;
+              }
+            }
+          }
+          
+          // Strategy 3: Fully normalized match (removes ALL special characters) - High priority (score: 90)
           if (customerNormalized === scannedNormalized) {
-            logger.log('✅ Match found: Normalized match (CustomerListID)');
+            if (__DEV__) logger.debug('✅ Match found: Normalized match (CustomerListID)');
             potentialMatches.push({ customer, score: 90, strategy: 'normalized' });
-            return;
+            continue;
           }
           
           if (storedBarcodeNormalized && storedBarcodeNormalized === scannedNormalized) {
-            logger.log('✅ Match found: Normalized match (stored barcode)');
+            if (__DEV__) logger.debug('✅ Match found: Normalized match (stored barcode)');
             potentialMatches.push({ customer, score: 90, strategy: 'normalized_stored' });
-            return;
+            continue;
           }
           
-          // Strategy 3: Match with dashes preserved - High priority (score: 85)
+          // Strategy 4: Match with dashes preserved - High priority (score: 85)
           if (customerWithDashes === scannedWithDashes) {
-            logger.log('✅ Match found: Dashes match (CustomerListID)');
+            if (__DEV__) logger.debug('✅ Match found: Dashes match (CustomerListID)');
             potentialMatches.push({ customer, score: 85, strategy: 'dashes' });
-            return;
+            continue;
           }
           
           if (storedBarcodeWithDashes && storedBarcodeWithDashes === scannedWithDashes) {
-            logger.log('✅ Match found: Dashes match (stored barcode)');
+            if (__DEV__) logger.debug('✅ Match found: Dashes match (stored barcode)');
             potentialMatches.push({ customer, score: 85, strategy: 'dashes_stored' });
-            return;
+            continue;
           }
           
-          // Strategy 4: Loose match (removes spaces, dashes, underscores) - Medium priority (score: 80)
+          // Strategy 5: Loose match (removes spaces, dashes, underscores) - Medium priority (score: 80)
           if (customerLoose === scannedLoose) {
-            logger.log('✅ Match found: Loose match (CustomerListID)');
+            if (__DEV__) logger.debug('✅ Match found: Loose match (CustomerListID)');
             potentialMatches.push({ customer, score: 80, strategy: 'loose' });
-            return;
+            continue;
           }
           
           if (storedBarcodeLoose && storedBarcodeLoose === scannedLoose) {
-            logger.log('✅ Match found: Loose match (stored barcode)');
+            if (__DEV__) logger.debug('✅ Match found: Loose match (stored barcode)');
             potentialMatches.push({ customer, score: 80, strategy: 'loose_stored' });
-            return;
+            continue;
           }
           
-          // Strategy 5: Handle common barcode variations (A/a endings) - Medium priority (score: 75)
+          // Strategy 6: Handle common barcode variations (A/a endings) - Medium priority (score: 75)
           if (scannedBarcode.length > 1 && customerBarcode.length > 1) {
             const baseScanned = scannedBarcode.slice(0, -1);
             const baseCustomer = customerBarcode.slice(0, -1);
             
             if (baseScanned.toLowerCase() === baseCustomer.toLowerCase()) {
-              logger.log('✅ Match found: Base match (without last character)');
+              if (__DEV__) logger.debug('✅ Match found: Base match (without last character)');
               potentialMatches.push({ customer, score: 75, strategy: 'base' });
-              return;
+              continue;
             }
           }
           
-          // Strategy 6: Strict partial match - Only if lengths are similar and match is substantial (score: 50)
+          // Strategy 7: Strict partial match - Only if lengths are similar and match is substantial (score: 50)
           // Only match if the shorter string is at least 80% of the longer string's length
           const minLength = Math.min(customerNormalized.length, scannedNormalized.length);
           const maxLength = Math.max(customerNormalized.length, scannedNormalized.length);
@@ -876,65 +1173,66 @@ export default function ScanCylindersScreen() {
           
           if (lengthRatio >= 0.8 && minLength >= 4) {
             if (customerNormalized.includes(scannedNormalized) || scannedNormalized.includes(customerNormalized)) {
-              logger.log('✅ Match found: Strict partial match (length ratio >= 0.8)');
+              if (__DEV__) logger.debug('✅ Match found: Strict partial match (length ratio >= 0.8)');
               potentialMatches.push({ customer, score: 50, strategy: 'partial' });
-              return;
+              continue;
             }
           }
           
-          // Strategy 7: Substring match - Check if scanned barcode is a significant substring of customer ID (score: 40)
+          // Strategy 8: Substring match - Check if scanned barcode is a significant substring of customer ID (score: 40)
           // Useful for partial barcodes like "8ef0321A" matching "1578330321A"
           if (scannedNormalized.length >= 6) { // At least 6 characters for substring match
             // Check if scanned is contained in customer ID (anywhere)
             if (customerNormalized.includes(scannedNormalized)) {
               const matchRatio = scannedNormalized.length / customerNormalized.length;
               if (matchRatio >= 0.3) { // At least 30% of the customer ID (lowered for better matching)
-                logger.log(`✅ Match found: Substring match (${Math.round(matchRatio * 100)}% of customer ID)`);
+                if (__DEV__) logger.debug(`✅ Match found: Substring match (${Math.round(matchRatio * 100)}% of customer ID)`);
                 potentialMatches.push({ customer, score: 40, strategy: 'substring' });
-                return;
+                continue;
               }
             }
             // Check if scanned matches the END of customer ID (common for partial scans) - Higher priority
             const customerEnd = customerNormalized.slice(-scannedNormalized.length);
             if (customerEnd === scannedNormalized) {
-              logger.log('✅ Match found: End substring match (scanned matches end of customer ID)');
+              if (__DEV__) logger.debug('✅ Match found: End substring match (scanned matches end of customer ID)');
               potentialMatches.push({ customer, score: 45, strategy: 'end_substring' });
-              return;
+              continue;
             }
             // Check if scanned matches the START of customer ID
             const customerStart = customerNormalized.slice(0, scannedNormalized.length);
             if (customerStart === scannedNormalized) {
-              logger.log('✅ Match found: Start substring match (scanned matches start of customer ID)');
+              if (__DEV__) logger.debug('✅ Match found: Start substring match (scanned matches start of customer ID)');
               potentialMatches.push({ customer, score: 45, strategy: 'start_substring' });
-              return;
+              continue;
             }
             // Check if scanned is a substring of stored barcode
             if (storedBarcodeNormalized && storedBarcodeNormalized.includes(scannedNormalized)) {
               const matchRatio = scannedNormalized.length / storedBarcodeNormalized.length;
               if (matchRatio >= 0.3) {
-                logger.log(`✅ Match found: Substring match in stored barcode (${Math.round(matchRatio * 100)}%)`);
+                if (__DEV__) logger.debug(`✅ Match found: Substring match in stored barcode (${Math.round(matchRatio * 100)}%)`);
                 potentialMatches.push({ customer, score: 40, strategy: 'substring_stored' });
-                return;
+                continue;
               }
             }
             // Check if scanned matches end of stored barcode
             if (storedBarcodeNormalized) {
               const storedEnd = storedBarcodeNormalized.slice(-scannedNormalized.length);
               if (storedEnd === scannedNormalized) {
-                logger.log('✅ Match found: End substring match in stored barcode');
+                if (__DEV__) logger.debug('✅ Match found: End substring match in stored barcode');
                 potentialMatches.push({ customer, score: 45, strategy: 'end_substring_stored' });
-                return;
+                continue;
               }
               // Check if scanned matches start of stored barcode
               const storedStart = storedBarcodeNormalized.slice(0, scannedNormalized.length);
               if (storedStart === scannedNormalized) {
-                logger.log('✅ Match found: Start substring match in stored barcode');
+                if (__DEV__) logger.debug('✅ Match found: Start substring match in stored barcode');
                 potentialMatches.push({ customer, score: 45, strategy: 'start_substring_stored' });
-                return;
+                continue;
               }
             }
           }
-        });
+          }
+        }
         
         // Sort matches by score (highest first) and return the best match
         potentialMatches.sort((a, b) => b.score - a.score);
@@ -1035,7 +1333,10 @@ export default function ScanCylindersScreen() {
             );
           }
           
-          setScanned(false);
+          // Scanner already closed above - keep it closed
+          // User must manually reopen to scan again
+          setScanned(true);
+          setScannerEnabled(false);
           return;
         }
         
@@ -1043,37 +1344,40 @@ export default function ScanCylindersScreen() {
         logger.log('✅ Customer found:', matchingCustomer.name);
         setSearch(normalizeBarcode(matchingCustomer.CustomerListID || data));
         setSelectedCustomer(matchingCustomer);
-        setShowCustomerScan(false);
-        setScannerVisible(false);
-        setScannerTarget(null);
+        
+        // Scanner already closed above - keep it closed
+        // Reset scanned state to allow rescanning if needed
+        setScanned(false);
+        setScannerEnabled(true);
+        
+        // Clear any existing cooldown timer
+        if (scanCooldownRef.current) {
+          clearTimeout(scanCooldownRef.current);
+          scanCooldownRef.current = null;
+        }
         
         // No sound feedback for customer scanning
-        
-        // Show success feedback
-        Alert.alert(
-          'Customer Found!',
-          `Successfully scanned customer: ${matchingCustomer.name}`,
-          [{ text: 'OK' }]
-        );
-      } else if (scannerTarget === 'order') {
+        // No alert - just show success message inline
+      } else if (effectiveTarget === 'order') {
         logger.log('📦 Setting order number:', data);
         setOrderNumber(data);
-        setShowOrderScan(false);
-        setScannerVisible(false);
-        setScannerTarget(null);
+        // Scanner already closed above - keep it closed
+        setScanned(false);
+        setScannerEnabled(true);
+      } else {
+        // No match or other case - scanner already closed, keep it closed
+        setScanned(true);
+        setScannerEnabled(false);
       }
-      
-      // Reset scanned state after a delay
-      setTimeout(() => setScanned(false), 2000);
       
     } catch (error) {
       logger.error('❌ Error processing barcode scan:', error);
       setScanned(false);
       
       const errorMessage = 'Failed to process barcode. Please try again.';
-      if (scannerTarget === 'customer') {
+      if (effectiveTarget === 'customer') {
         setCustomerBarcodeError(errorMessage);
-      } else if (scannerTarget === 'order') {
+      } else if (effectiveTarget === 'order') {
         setOrderError(errorMessage);
       }
       
@@ -1087,69 +1391,36 @@ export default function ScanCylindersScreen() {
 
   const openScanner = async (target: 'customer' | 'order') => {
     logger.log('📷 Opening scanner for target:', target);
-    logger.log('📷 Current permission status:', permission?.granted);
+    // Vision Camera handles its own permissions internally
     
-    try {
-      // Check if permission is still loading
-      if (!permission) {
-        logger.log('📷 Permission still loading, waiting...');
-        Alert.alert(
-          'Camera Loading',
-          'Camera permissions are still loading. Please wait a moment and try again.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-      
-      if (!permission.granted) {
-        logger.log('📷 Requesting camera permission...');
-        const result = await requestPermission();
-        logger.log('📷 Permission request result:', result);
-        if (!result.granted) {
-          Alert.alert(
-            'Camera Permission Required',
-            'Please allow camera access to scan barcodes.',
-            [{ text: 'OK' }]
-          );
-          return;
-        }
-      }
-      
-      logger.log('📷 Setting up scanner for target:', target);
-      
-      // Clear any existing errors
-      setCustomerBarcodeError('');
-      setOrderError('');
-      
-      // Reset states
-      setScanned(false);
-      setScannerTarget(target);
-      
-      logger.log('🎯 Scanner target set to:', target);
-      
-      // Open the appropriate scanner modal
-      if (target === 'customer') {
-        logger.log('📷 Opening customer scanner modal');
-        logger.log('📷 Customers loaded:', customers.length);
-        logger.log('📷 Customer barcodes:', customers.map(c => c.barcode).filter(Boolean));
-        setShowCustomerScan(true);
-      } else {
-        logger.log('📷 Opening order scanner modal');
-        setShowOrderScan(true);
-      }
-      
-      setScannerVisible(true);
-      logger.log('📷 Scanner setup complete');
-      logger.log('📷 showCustomerScan will be:', target === 'customer');
-      
-    } catch (error) {
-      logger.error('❌ Error opening scanner:', error);
-      Alert.alert(
-        'Scanner Error',
-        'Failed to open camera scanner. Please try again.',
-        [{ text: 'OK' }]
-      );
+    logger.log('📷 Setting up scanner for target:', target);
+    
+    // Clear any existing errors
+    setCustomerBarcodeError('');
+    setOrderError('');
+    
+    // Reset states when manually opening scanner
+    setScanned(false);
+    setScannerEnabled(true);
+    lastScannedBarcodeRef.current = null;
+    setScannerTarget(target);
+    
+    logger.log('🎯 Scanner target set to:', target);
+    
+    // Open the appropriate scanner modal
+    if (target === 'customer') {
+      logger.log('📷 Opening customer scanner modal');
+      logger.log('📷 Customers loaded:', customers.length);
+      logger.log('📷 Customer barcodes:', customers.map(c => c.barcode).filter(Boolean));
+      setShowCustomerScan(true);
+    } else {
+      logger.log('📷 Opening order scanner modal');
+      setShowOrderScan(true);
     }
+    
+    setScannerVisible(true);
+    logger.log('📷 Scanner setup complete');
+    logger.log('📷 showCustomerScan will be:', target === 'customer');
   };
 
   const canProceed = selectedCustomer && orderNumber.trim() && !orderError && !customerBarcodeError;
@@ -1172,10 +1443,9 @@ export default function ScanCylindersScreen() {
           {/* Header */}
           <View style={styles.header}>
             <Text style={[styles.title, { color: colors.text }]}>
-              Scan {assetConfig.assetDisplayNamePlural}
+              Delivery
             </Text>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              Select customer and enter order details to begin scanning
             </Text>
           </View>
 
@@ -1192,7 +1462,7 @@ export default function ScanCylindersScreen() {
                     color: colors.text 
                   }
                 ]}
-                placeholder={assetConfig?.orderNumberFormat?.description || "Enter order number"}
+                placeholder="Enter order number"
                 placeholderTextColor={colors.textSecondary}
                 value={orderNumber}
                 onChangeText={setOrderNumber}
@@ -1204,7 +1474,7 @@ export default function ScanCylindersScreen() {
                   styles.scanButton, 
                   { 
                     backgroundColor: colors.primary,
-                    opacity: permission?.granted ? 1 : 0.6
+                    opacity: 1
                   }
                 ]}
                 onPress={() => openScanner('order')}
@@ -1214,16 +1484,7 @@ export default function ScanCylindersScreen() {
             </View>
             {orderError ? (
               <Text style={[styles.errorText, { color: colors.error }]}>{orderError}</Text>
-            ) : assetConfig?.orderNumberFormat?.examples?.length > 0 ? (
-              <Text style={[styles.helperText, { color: colors.textSecondary }]}>
-                Examples: {assetConfig.orderNumberFormat.examples.slice(0, 2).join(', ')}
-              </Text>
             ) : null}
-            {!permission?.granted && (
-              <Text style={[styles.helperText, { color: colors.warning || '#F59E0B' }]}>
-                Tap the camera button to grant permission
-              </Text>
-            )}
           </View>
 
           {/* Customer Selection */}
@@ -1236,10 +1497,10 @@ export default function ScanCylindersScreen() {
                   { 
                     backgroundColor: colors.surface, 
                     borderColor: customerBarcodeError ? colors.error : colors.border,
-                    color: colors.text 
+                    color: colors.text
                   }
                 ]}
-                placeholder={assetConfig?.barcodeFormat?.description || "Search customer or scan barcode"}
+                placeholder="Enter customer ID"
                 placeholderTextColor={colors.textSecondary}
                 value={selectedCustomer ? selectedCustomer.name : search}
                 onChangeText={(text) => {
@@ -1253,12 +1514,11 @@ export default function ScanCylindersScreen() {
                   styles.scanButton, 
                   { 
                     backgroundColor: colors.primary,
-                    opacity: permission?.granted ? 1 : 0.6
+                    opacity: 1
                   }
                 ]}
                 onPress={() => {
                   logger.log('📷 Customer scan button pressed');
-                  logger.log('📷 Permission granted:', permission?.granted);
                   logger.log('📷 Scanner target:', scannerTarget);
                   openScanner('customer');
                 }}
@@ -1268,20 +1528,23 @@ export default function ScanCylindersScreen() {
             </View>
             {customerBarcodeError ? (
               <Text style={[styles.errorText, { color: colors.error }]}>{customerBarcodeError}</Text>
-            ) : selectedCustomer && selectedCustomer.barcode === search ? (
-              <Text style={[styles.successText, { color: colors.success || '#10B981' }]}>
-                ✅ Customer found via barcode scan: {selectedCustomer.name}
-              </Text>
-            ) : assetConfig?.barcodeFormat?.examples?.length > 0 ? (
-              <Text style={[styles.helperText, { color: colors.textSecondary }]}>
-                Barcode examples: {assetConfig.barcodeFormat.examples.slice(0, 2).join(', ')}
-              </Text>
+            ) : selectedCustomer ? (
+              <View style={styles.customerSuccessContainer}>
+                <Text style={[styles.successText, { color: colors.success || '#10B981' }]}>
+                  ✅ Customer: {selectedCustomer.name}
+                </Text>
+                <TouchableOpacity
+                  style={styles.rescanButton}
+                  onPress={() => {
+                    setSelectedCustomer(null);
+                    setSearch('');
+                    openScanner('customer');
+                  }}
+                >
+                  <Text style={[styles.rescanButtonText, { color: colors.primary }]}>Rescan</Text>
+                </TouchableOpacity>
+              </View>
             ) : null}
-            {!permission?.granted && (
-              <Text style={[styles.helperText, { color: colors.warning || '#F59E0B' }]}>
-                Tap the camera button to grant permission
-              </Text>
-            )}
           </View>
 
           {/* Customer List */}
@@ -1371,128 +1634,46 @@ export default function ScanCylindersScreen() {
         </>
       )}
 
-      {/* Camera Scanner - Customer */}
+      {/* Scanbot - Customer Scanner */}
       {showCustomerScan && (
-        <View style={styles.fullscreenWrapper}>
-          {logger.log('📷 RENDERING CAMERA VIEW - showCustomerScan is true')}
-          <CameraView
-            style={styles.fullscreenCamera}
-            facing="back"
-            enableTorch={flashEnabled}
-            barcodeScannerEnabled={scannerEnabled}
-            barcodeScannerSettings={{}}
-            onBarcodeScanned={({ data, bounds }) => {
-              // Check if barcode is within scan area (if bounds are available)
-              if (bounds && !isBarcodeInScanArea(bounds)) {
-                logger.log('📷 Customer barcode outside scan area, ignoring');
-                return;
-              }
-
-              // Don't process if scanner is disabled or already processing
-              if (!scannerEnabled || scanned) {
-                return;
-              }
-
-              const barcode = data.trim();
-              if (barcode) {
-                logger.debug('📷 BARCODE DETECTED:', barcode);
-                // Use the main handleBarcodeScanned function to prevent duplicates
-                handleBarcodeScanned({ data: barcode, type: 'camera' });
-              }
-            }}
-          />
-          
-          {/* Camera Overlay - Matching EnhancedScanScreen */}
-          <View
-            style={styles.cameraOverlay}
-            pointerEvents="none"
-          >
-            <View
-              style={styles.scanFrame}
-              pointerEvents="none"
-            />
-            <Text style={styles.scanInstructions} pointerEvents="none">
-              Point camera at customer barcode
-            </Text>
-          </View>
-          
-          {/* Close Button - Separate from overlay to ensure it works */}
-          <TouchableOpacity
-            style={styles.closeCameraButton}
-            onPress={() => {
-              setShowCustomerScan(false);
-            }}
-          >
-            <Text style={styles.closeCameraText}>✕ Close</Text>
-          </TouchableOpacity>
-
-          {/* Flash Toggle Button */}
-          <TouchableOpacity
-            style={styles.flashButton}
-            onPress={() => {
-              setFlashEnabled(!flashEnabled);
-              feedbackService.quickAction('flash toggled');
-            }}
-          >
-            <Ionicons 
-              name={flashEnabled ? 'flash' : 'flash-off'} 
-              size={28} 
-              color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
-            />
-          </TouchableOpacity>
-        </View>
+        <MLKitScanner
+          onBarcodeScanned={(data: string, result?: { format: string; confidence: number }) => {
+            const s = typeof data === 'string' ? data : '';
+            if (!s || !s.trim()) return;
+            logger.log('📷 MLKit: Customer barcode scanned:', s.substring(0, 30) + (s.length > 30 ? '…' : ''), result?.format);
+            handleBarcodeScanned({ data: s.trim(), type: 'scanbot' });
+          }}
+          onTextFound={handleTextFound}
+          enabled={scannerEnabled && !scanned}
+          onClose={() => {
+            setShowCustomerScan(false);
+            setScannerVisible(false);
+            setScannerTarget(null);
+          }}
+          title="Scan Customer Barcode"
+          subtitle="Point camera at customer barcode or name"
+        />
       )}
 
-      {/* Camera Scanner - Order */}
+      {/* Scanbot - Order Scanner */}
       {showOrderScan && (
-        <View style={styles.fullscreenWrapper}>
-          <CameraView
-            style={styles.fullscreenCamera}
-            facing="back"
-            enableTorch={flashEnabled}
-            barcodeScannerEnabled={scannerEnabled}
-            barcodeScannerSettings={{}}
-            onBarcodeScanned={({ data, bounds }) => {
-              logger.log('📷 Raw order barcode event:', data, 'bounds:', bounds);
-              
-              // Check if barcode is within scan area (if bounds are available)
-              if (bounds && !isBarcodeInScanArea(bounds)) {
-                logger.log('📷 Order barcode outside scan area, ignoring');
-                return;
-              }
-              
-              const barcode = data.trim();
-              if (barcode) {
-                logger.log('📷 Order barcode detected:', barcode);
-                setOrderNumber(barcode);
-                setShowOrderScan(false);
-              }
-            }}
-          />
-          <View style={styles.scanRectangle} />
-          <View style={styles.scanAreaOverlay} />
-          <TouchableOpacity 
-            style={styles.closeButton} 
-            onPress={() => setShowOrderScan(false)}
-          >
-            <Text style={styles.closeButtonText}>✕ Close</Text>
-          </TouchableOpacity>
-          
-          {/* Flash Toggle Button */}
-          <TouchableOpacity
-            style={styles.flashButton}
-            onPress={() => {
-              setFlashEnabled(!flashEnabled);
-              feedbackService.quickAction('flash toggled');
-            }}
-          >
-            <Ionicons 
-              name={flashEnabled ? 'flash' : 'flash-off'} 
-              size={28} 
-              color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
-            />
-          </TouchableOpacity>
-        </View>
+        <MLKitScanner
+          onBarcodeScanned={(data: string, result?: { format: string; confidence: number }) => {
+            logger.log('📷 MLKit: Order barcode scanned:', data, result?.format);
+            const barcode = data.trim();
+            if (barcode) {
+              logger.log('📷 MLKit: Order barcode detected:', barcode);
+              setOrderNumber(barcode);
+              setShowOrderScan(false);
+            }
+          }}
+          enabled={scannerEnabled && !scanned}
+          onClose={() => {
+            setShowOrderScan(false);
+          }}
+          title="Scan Order Number"
+          subtitle="Point camera at order barcode"
+        />
       )}
     </View>
   );
@@ -1568,6 +1749,20 @@ const styles = StyleSheet.create({
   successText: {
     fontSize: 14,
     marginTop: 4,
+    fontWeight: '600',
+  },
+  customerSuccessContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  rescanButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  rescanButtonText: {
+    fontSize: 14,
     fontWeight: '600',
   },
   helperText: {
@@ -1829,6 +2024,20 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     padding: 12,
     borderRadius: 8,
+  },
+  scannerToggleButton: {
+    position: 'absolute',
+    bottom: 100,
+    left: 20,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    padding: 12,
+    borderRadius: 8,
+    zIndex: 1000,
+  },
+  scannerToggleText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   closeCameraText: {
     color: '#fff',

@@ -1,7 +1,35 @@
 import logger from '../utils/logger';
-import { AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Asset } from 'expo-asset';
+
+// Import AudioPlayer - same approach as feedbackService.ts
+// In Expo Go, this may not be available, so we'll handle errors gracefully
+// expo-audio SDK 53+ uses createAudioPlayer() instead of AudioPlayer class
+let createAudioPlayer: any = null;
+let setAudioModeAsync: any = null;
+
+try {
+  // Use the new expo-audio API (SDK 53+)
+  const audioModule = require('expo-audio');
+  createAudioPlayer = audioModule.createAudioPlayer;
+  setAudioModeAsync = audioModule.setAudioModeAsync;
+  
+  console.log('🔊 [SoundService] expo-audio module loaded');
+  console.log('🔊 [SoundService] Available exports:', Object.keys(audioModule).join(', '));
+  
+  if (!createAudioPlayer) {
+    console.warn('⚠️ [SoundService] createAudioPlayer not found in expo-audio module');
+    logger.warn('⚠️ createAudioPlayer not found in expo-audio module');
+    logger.log('🔊 Available exports:', Object.keys(audioModule).join(', '));
+  } else {
+    console.log('✅ [SoundService] createAudioPlayer loaded from expo-audio');
+    logger.log('✅ createAudioPlayer loaded from expo-audio');
+  }
+} catch (error: any) {
+  console.warn('⚠️ [SoundService] Could not import expo-audio - sounds will use haptic feedback only:', error);
+  logger.warn('⚠️ Could not import expo-audio - sounds will use haptic feedback only:', error?.message || error);
+}
 
 export interface SoundSettings {
   soundEnabled: boolean;
@@ -10,7 +38,7 @@ export interface SoundSettings {
 
 class SoundService {
   private static instance: SoundService;
-  private soundCache: Map<string, AudioPlayer> = new Map();
+  private soundCache: Map<string, any> = new Map(); // Changed from AudioPlayer to any since it's now a player object
   private settings: SoundSettings = {
     soundEnabled: true,
     hapticFeedback: true,
@@ -25,10 +53,36 @@ class SoundService {
 
   async initialize(): Promise<void> {
     try {
+      console.log('🔊 [SoundService] Initializing...');
+      logger.log('🔊 [SoundService] Initializing...');
+      
+      // Configure audio mode for Android (required for sound playback)
+      if (setAudioModeAsync) {
+        try {
+          await setAudioModeAsync({
+            playsInSilentMode: true,
+            interruptionMode: 'mixWithOthers',
+            staysActiveInBackground: false,
+          });
+          console.log('🔊 [SoundService] Audio mode configured for Android');
+          logger.log('🔊 Audio mode configured for Android in SoundService');
+        } catch (audioModeError) {
+          console.warn('⚠️ [SoundService] Could not configure audio mode:', audioModeError);
+          logger.warn('⚠️ Could not configure audio mode:', audioModeError);
+          // Continue anyway - might work without it
+        }
+      } else {
+        console.warn('⚠️ [SoundService] setAudioModeAsync not available - audio mode not configured');
+        logger.warn('⚠️ setAudioModeAsync not available - audio mode not configured');
+      }
+      
       await this.loadSettings();
+      console.log('🔊 [SoundService] Settings loaded, preloading sounds...');
       await this.preloadSounds();
-      logger.log('🔊 SoundService initialized');
+      console.log('🔊 [SoundService] Initialization complete');
+      logger.log('🔊 SoundService initialized on Android');
     } catch (error) {
+      console.error('❌ [SoundService] Failed to initialize:', error);
       logger.error('❌ Failed to initialize SoundService:', error);
     }
   }
@@ -54,53 +108,195 @@ class SoundService {
 
   private async preloadSounds(): Promise<void> {
     try {
-      // Load actual MP3 files from assets
-      const soundFiles = {
-        scan_success: require('../assets/sounds/scan_success.mp3'),
-        scan_error: require('../assets/sounds/scan_error.mp3'),
-        scan_duplicate: require('../assets/sounds/scan_duplicate.mp3'),
-        notification: require('../assets/sounds/sync_success.mp3'),
-        action: require('../assets/sounds/button_press.mp3'),
-      };
+      console.log('🔊 [SoundService] Starting preloadSounds...');
+      console.log('🔊 [SoundService] createAudioPlayer available?', !!createAudioPlayer);
+      
+      // Skip sound loading if createAudioPlayer is not available (e.g., Expo Go)
+      if (!createAudioPlayer) {
+        console.warn('⚠️ [SoundService] createAudioPlayer not available - skipping sound preload. Will use haptic feedback only.');
+        logger.warn('⚠️ createAudioPlayer not available - skipping sound preload. Will use haptic feedback only.');
+        return;
+      }
+      
+      // Load only the sound files that actually exist in assets/sounds folder
+      // Available: button_press.mp3, scan_error.mp3, scan_beep.mp3
+      const soundFiles: Record<string, any> = {};
+      
+      // Try to load each sound file, but continue if any fail
+      const soundsToLoad = [
+        { id: 'scan_error', path: '../assets/sounds/scan_error.mp3' },
+        { id: 'action', path: '../assets/sounds/button_press.mp3' },
+        { id: 'scan_success', path: '../assets/sounds/scan_beep.mp3' }, // New scanning sound
+        { id: 'scan_duplicate', path: '../assets/sounds/scan_error.mp3' },
+        { id: 'notification', path: '../assets/sounds/button_press.mp3' },
+      ];
 
-      for (const [id, source] of Object.entries(soundFiles)) {
+      console.log('🔊 [SoundService] Preloading sounds on Android...');
+      logger.log('🔊 Preloading sounds on Android...');
+      let loadedCount = 0;
+      let failedCount = 0;
+
+      for (const { id, path } of soundsToLoad) {
         try {
-          const sound = new AudioPlayer(source);
-          sound.volume = 0.7;
+          console.log(`🔊 [SoundService] Attempting to load sound: ${id} from ${path}`);
+          logger.log(`🔊 Attempting to load sound: ${id} from ${path}`);
           
-          this.soundCache.set(id, sound);
-          logger.log(`🔊 Loaded sound: ${id}`);
-        } catch (error) {
-          logger.warn(`⚠️ Could not load sound ${id}, will use haptic only:`, error);
+          // Check if createAudioPlayer is available
+          if (!createAudioPlayer) {
+            console.warn(`⚠️ [SoundService] createAudioPlayer not available, skipping sound: ${id}`);
+            logger.warn(`⚠️ createAudioPlayer not available, skipping sound: ${id}`);
+            failedCount++;
+            continue;
+          }
+          
+          const source = require('../assets/sounds/scan_error.mp3'); // Default fallback
+          let audioSource: any;
+          
+          // Try to load the specific file
+          try {
+            if (path.includes('button_press')) {
+              audioSource = require('../assets/sounds/button_press.mp3');
+            } else if (path.includes('scan_beep')) {
+              audioSource = require('../assets/sounds/scan_beep.mp3');
+            } else {
+              audioSource = require('../assets/sounds/scan_error.mp3');
+            }
+          } catch (reqError) {
+            console.warn(`⚠️ [SoundService] Could not require ${path}, using fallback`);
+            logger.warn(`⚠️ Could not require ${path}, using fallback`);
+            audioSource = source;
+          }
+          
+          // On Android, use Asset to ensure proper URI resolution
+          try {
+            const asset = Asset.fromModule(audioSource);
+            await asset.downloadAsync();
+            audioSource = asset.localUri || asset.uri;
+            console.log(`🔊 [SoundService] Android: Using asset URI for ${id}: ${audioSource}`);
+            logger.log(`🔊 Android: Using asset URI for ${id}: ${audioSource}`);
+          } catch (assetError: any) {
+            console.warn(`⚠️ [SoundService] Could not get asset URI for ${id}, using require() directly:`, assetError?.message);
+            logger.warn(`⚠️ Could not get asset URI for ${id}, using require() directly:`, assetError?.message);
+            // Fall back to using require() directly
+          }
+          
+          // Create audio player using createAudioPlayer() function
+          try {
+            console.log(`🔊 [SoundService] Creating audio player for ${id}...`);
+            // Use createAudioPlayer() instead of new AudioPlayer()
+            const player = createAudioPlayer(audioSource);
+            
+            // Set volume (if supported)
+            if (player.volume !== undefined) {
+              player.volume = 0.9;
+            }
+            
+            this.soundCache.set(id, player);
+            loadedCount++;
+            console.log(`✅ [SoundService] Successfully loaded sound: ${id}`);
+            logger.log(`🔊 Successfully loaded sound: ${id}`);
+          } catch (playerError: any) {
+            console.error(`❌ [SoundService] Failed to create audio player for ${id}:`, playerError);
+            throw new Error(`Failed to create audio player: ${playerError?.message || playerError}`);
+          }
+        } catch (error: any) {
+          failedCount++;
+          console.warn(`⚠️ [SoundService] Could not load sound ${id}, will use haptic only:`, error);
+          logger.warn(`⚠️ Could not load sound ${id}, will use haptic only:`, error?.message || error);
+          // Set null in cache to indicate we tried but failed
+          this.soundCache.set(id, null as any);
         }
       }
       
-      logger.log('🔊 Sounds preloaded successfully');
-    } catch (error) {
-      logger.error('❌ Failed to preload sounds:', error);
+      console.log(`🔊 [SoundService] Sound preload complete: ${loadedCount} loaded, ${failedCount} failed on Android`);
+      logger.log(`🔊 Sound preload complete: ${loadedCount} loaded, ${failedCount} failed on Android`);
+      
+      if (loadedCount === 0) {
+        console.warn('⚠️ [SoundService] No sounds were loaded successfully. All sound playback will fall back to haptic feedback.');
+        logger.warn('⚠️ No sounds were loaded successfully. All sound playback will fall back to haptic feedback.');
+      } else {
+        console.log(`✅ [SoundService] Android sound system ready with ${loadedCount} sounds`);
+        logger.log(`✅ Android sound system ready with ${loadedCount} sounds`);
+      }
+    } catch (error: any) {
+      console.error('❌ [SoundService] Failed to preload sounds:', error);
+      logger.error('❌ Failed to preload sounds:', error?.message || error);
     }
   }
 
   async playSound(type: 'scan' | 'error' | 'duplicate' | 'notification' | 'action'): Promise<void> {
     try {
+      console.log(`🔊 [SoundService] playSound called with type: ${type}`);
+      logger.log(`🔊 playSound called with type: ${type}`);
+      
       if (this.settings.soundEnabled) {
         const soundId = this.getSoundId(type);
+        console.log(`🔊 [SoundService] Mapped to soundId: ${soundId}`);
+        logger.log(`🔊 Mapped to soundId: ${soundId}`);
         const sound = this.soundCache.get(soundId);
         
+        console.log(`🔊 [SoundService] Sound cache lookup: ${soundId} -> ${sound ? 'found' : 'NOT FOUND'}`);
+        console.log(`🔊 [SoundService] Cache size: ${this.soundCache.size}, Keys: ${Array.from(this.soundCache.keys()).join(', ')}`);
+        logger.log(`🔊 Sound cache lookup: ${soundId} -> ${sound ? 'found' : 'NOT FOUND'}`);
+        logger.log(`🔊 Cache size: ${this.soundCache.size}, Keys: ${Array.from(this.soundCache.keys()).join(', ')}`);
+        
         if (sound) {
-          // Play the sound (expo-audio AudioPlayer automatically resets to start)
-          sound.play();
-          logger.log(`🔊 Played sound: ${type}`);
+          try {
+            console.log(`🔊 [SoundService] Attempting to play sound: ${soundId}`);
+            logger.log(`🔊 Attempting to play sound: ${soundId}`);
+            
+            // For Android, ensure audio mode is set before playing
+            if (setAudioModeAsync) {
+              try {
+                await setAudioModeAsync({
+                  playsInSilentMode: true,
+                  interruptionMode: 'mixWithOthers',
+                  staysActiveInBackground: false,
+                });
+                console.log('🔊 [SoundService] Audio mode set successfully');
+                logger.log('🔊 Audio mode set successfully');
+              } catch (audioModeError) {
+                console.warn('⚠️ [SoundService] Could not set audio mode before play:', audioModeError);
+                logger.warn('⚠️ Could not set audio mode before play:', audioModeError);
+              }
+            } else {
+              console.warn('⚠️ [SoundService] setAudioModeAsync not available');
+              logger.warn('⚠️ setAudioModeAsync not available');
+            }
+            
+            // Ensure volume is set
+            sound.volume = 0.9;
+            console.log(`🔊 [SoundService] Volume set to 0.9, calling sound.play()`);
+            logger.log(`🔊 Volume set to 0.9, calling sound.play()`);
+            
+            // On Android, AudioPlayer.play() should automatically reset to beginning
+            // No need for seekTo/pause as it causes issues
+            sound.play();
+            console.log(`✅ [SoundService] Sound played successfully: ${type} (${soundId}) on Android`);
+            logger.log(`✅ Sound played successfully: ${type} (${soundId}) on Android`);
+            return; // Successfully played, exit early
+          } catch (playError: any) {
+            console.error(`⚠️ [SoundService] Error playing sound ${type} (${soundId}):`, playError);
+            logger.warn(`⚠️ Error playing sound ${type} (${soundId}):`, playError?.message || playError);
+            logger.warn(`⚠️ Play error details:`, JSON.stringify(playError, null, 2));
+            // Fall through to haptic
+          }
         } else {
-          logger.log(`🔊 Sound not available, using haptic: ${type}`);
-          await this.playHaptic(type);
+          console.log(`🔊 [SoundService] Sound not available (${soundId}), using haptic: ${type}`);
+          logger.log(`🔊 Sound not available (${soundId}), using haptic: ${type}`);
         }
+        
+        // Fallback to haptic if sound failed or not available
+        console.log(`🔊 [SoundService] Falling back to haptic for: ${type}`);
+        await this.playHaptic(type);
       } else {
+        console.log(`🔊 [SoundService] Sound disabled, using haptic: ${type}`);
         logger.log(`🔊 Sound disabled, using haptic: ${type}`);
         await this.playHaptic(type);
       }
-    } catch (error) {
-      logger.log(`🔊 Sound failed, using haptic: ${type}`, error);
+    } catch (error: any) {
+      console.error(`🔊 [SoundService] Sound failed, using haptic: ${type}`, error);
+      logger.log(`🔊 Sound failed, using haptic: ${type}`, error?.message || error);
       await this.playHaptic(type);
     }
   }

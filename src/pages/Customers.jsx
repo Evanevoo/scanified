@@ -4,7 +4,7 @@ import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination, Chip, IconButton,
-  Dialog, DialogTitle, DialogContent, DialogActions
+  Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -12,6 +12,7 @@ import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useAuth } from '../hooks/useAuth';
+import { SearchInputWithIcon } from '../components/ui/search-input-with-icon';
 
 // Remove CustomersErrorBoundary and replace with a FallbackComponent
 function CustomersErrorFallback({ error, resetErrorBoundary }) {
@@ -560,33 +561,25 @@ function Customers({ profile }) {
           <Typography variant="h4" fontWeight={800} color="#1976d2" sx={{ mb: 2 }}>Customer Management</Typography>
           
           <Box display="flex" gap={2} alignItems="center" mb={3}>
-            <Box display="flex" alignItems="center" sx={{ maxWidth: 450 }}>
-              <TextField
+            <Box display="flex" alignItems="center" sx={{ maxWidth: 450, flex: 1 }}>
+              <SearchInputWithIcon
                 placeholder="Search customers by name, ID, or contact..."
                 value={searchInput}
-                onChange={handleSearchChange}
-                onKeyPress={handleSearchKeyPress}
-                fullWidth
-                size="medium"
+                onChange={(e) => {
+                  setSearchInput(e.target.value);
+                  setPage(1);
+                }}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') {
+                    setDebouncedSearch(e.target.value);
+                  }
+                }}
+                onClear={() => {
+                  setSearchInput('');
+                  setDebouncedSearch('');
+                }}
+                className="w-full"
               />
-              <IconButton 
-                onClick={() => handleSearch(searchInput)}
-                color="primary"
-                sx={{ ml: 1 }}
-                title="Search (or press Enter)"
-              >
-                <SearchIcon />
-              </IconButton>
-              {searchInput && (
-                <IconButton 
-                  onClick={handleClearSearch}
-                  color="secondary"
-                  sx={{ ml: 0.5 }}
-                  title="Clear search"
-                >
-                  <ClearIcon />
-                </IconButton>
-              )}
             </Box>
             <FormControl size="small" sx={{ minWidth: 150 }}>
               <Select

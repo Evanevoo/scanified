@@ -1,11 +1,12 @@
-// Load environment variables from .env file (if it exists)
+// Load environment variables from .env (project root, then app folder)
 require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
 
 module.exports = {
   expo: {
     name: "Scanified",
     slug: "gas-cylinder-mobile",
-    version: "1.0.20",
+    version: "1.0.29",
     orientation: "portrait",
     icon: "./assets/app-icon.png",
     userInterfaceStyle: "automatic",
@@ -19,7 +20,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.evanevoo.scanifiedmobile",
-      buildNumber: "75",
+      buildNumber: "87",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSCameraUsageDescription: "Scanified uses your camera to scan asset barcodes for inventory management and tracking purposes.",
@@ -37,20 +38,38 @@ module.exports = {
       usesAppleSignIn: true,
       associatedDomains: [
         "applinks:jtfucttzaswmqqhmmhfb.supabase.co",
-        "webcredentials:jtfucttzaswmqqhfb.supabase.co"
+        "webcredentials:jtfucttzaswmqqhmmhfb.supabase.co"
       ]
     },
     plugins: [
+      [
+        "expo-build-properties",
+        {
+          ios: {
+            deploymentTarget: "17.0"
+          }
+        }
+      ],
       [
         "expo-camera",
         {
           cameraPermission: "Scanified uses your camera to scan asset barcodes for inventory management and tracking purposes."
         }
       ],
+      [
+        "react-native-scanbot-barcode-scanner-sdk",
+        {
+          iOSCameraUsageDescription: "Scanified uses your camera to scan barcodes for inventory and receipts.",
+          androidCameraPermission: true,
+          androidCameraFeature: true,
+          mavenURLs: true
+        }
+      ],
       "expo-apple-authentication",
       "expo-notifications"
     ],
     extra: {
+      SCANBOT_SDK_LICENSE_KEY: process.env.SCANBOT_SDK_LICENSE_KEY || "",
       // Read from environment variables for local development, or use template variables for EAS builds
       // Falls back to hardcoded values if env vars not set (for local dev only)
       EXPO_PUBLIC_SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL || "https://jtfucttzaswmqqhmmhfb.supabase.co",

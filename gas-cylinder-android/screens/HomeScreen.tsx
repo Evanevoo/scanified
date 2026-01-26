@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, TextInput, ActivityIndicator, Modal, Dimensions, Alert } from 'react-native';
 import { supabase } from '../supabase';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../hooks/useAuth';
@@ -10,65 +10,22 @@ import { Platform } from '../utils/platform';
 import { soundService } from '../services/soundService';
 import { StatCard, ModernCard, MobileCard, MobileButton } from '../components/design-system';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useCameraPermissions } from 'expo-camera';
+import { Ionicons } from '@expo/vector-icons';
+import { Pressable } from 'react-native';
+import ExpoCameraScanner from '../components/ExpoCameraScanner';
+import { FormatValidationService } from '../services/FormatValidationService';
 
-// Quick Actions Configuration - will be updated with dynamic terms
-const getQuickActions = (config) => [
-  {
-    title: `Scan ${config?.assetDisplayNamePlural || 'Cylinders'}`,
-    subtitle: 'Scan for shipping or returns',
-    icon: '📷',
-    action: 'ScanCylinders',
-    color: '#3B82F6' // Modern Blue
-  },
-  {
-    title: `Add ${config?.assetDisplayName || 'Cylinder'}`,
-    subtitle: `Add new ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} to inventory`,
-    icon: '➕',
-    action: 'AddCylinder',
-    color: '#10B981' // Green
-  },
-  {
-    title: `Edit ${config?.assetDisplayName || 'Cylinder'}`,
-    subtitle: `Modify ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} details`,
-    icon: '✏️',
-    action: 'EditCylinder',
-    color: '#F59E0B' // Orange
-  },
-  {
-    title: `Search ${config?.assetDisplayName || 'Cylinder'}`,
-    subtitle: `Find ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} location`,
-    icon: '🔍',
-    action: 'LocateCylinder',
-    color: '#8B5CF6' // Purple
-  },
-  {
-    title: `Locate ${config?.assetDisplayName || 'Cylinder'}`,
-    subtitle: `Mark ${config?.assetDisplayName?.toLowerCase() || 'cylinder'} status and location`,
-    icon: '📍',
-    action: 'FillCylinder',
-    color: '#EF4444' // Red
-  },
-  {
-    title: 'History',
-    subtitle: 'View scan history',
-    icon: '📊',
-    action: 'History',
-    color: '#06B6D4' // Cyan
-  },
-  {
-    title: 'Analytics',
-    subtitle: 'View performance metrics',
-    icon: '📈',
-    action: 'Analytics',
-    color: '#8B5CF6' // Purple
-  },
-  {
-    title: 'Data Health',
-    subtitle: 'Monitor sync status',
-    icon: '💾',
-    action: 'DataHealth',
-    color: '#10B981' // Green
-  }
+const { width, height } = Dimensions.get('window');
+
+// Quick Actions Configuration
+const getQuickActions = () => [
+  { title: 'Delivery', icon: '📷', action: 'ScanCylinders', color: '#3B82F6' },
+  { title: 'Add', icon: '➕', action: 'AddCylinder', color: '#10B981' },
+  { title: 'Edit', icon: '✏️', action: 'EditCylinder', color: '#F59E0B' },
+  { title: 'Locate', icon: '📍', action: 'FillCylinder', color: '#EF4444' },
+  { title: 'History', icon: '📊', action: 'History', color: '#06B6D4' },
+  { title: 'Analytics', icon: '📈', action: 'Analytics', color: '#8B5CF6' },
 ];
 
 export default function HomeScreen() {
@@ -86,6 +43,9 @@ export default function HomeScreen() {
     todayScans: 0,
     unreadScans: 0
   });
+  const [showScanner, setShowScanner] = useState(false);
+  const [scanned, setScanned] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
 
   useEffect(() => {
     if (search.length > 0) {
@@ -122,17 +82,13 @@ export default function HomeScreen() {
 
     setLoadingCustomers(true);
     try {
-      // Search by name only (most reliable)
+      // Search by name - substring match (characters appear in order anywhere in name)
+      const searchTerm = search.trim();
       let nameQuery = supabase
         .from('customers')
         .select('CustomerListID, name, barcode, contact_details')
-        .eq('organization_id', profile.organization_id);
-      
-      if (search.trim().length === 1) {
-        nameQuery = nameQuery.ilike('name', `${search.trim()}%`);
-      } else {
-        nameQuery = nameQuery.ilike('name', `%${search.trim()}%`);
-      }
+        .eq('organization_id', profile.organization_id)
+        .ilike('name', `%${searchTerm}%`);
       
       logger.log('🔍 Executing name query...');
       const nameResult = await nameQuery.limit(10);
@@ -140,13 +96,14 @@ export default function HomeScreen() {
       
       let allCustomers = nameResult.data || [];
       
-      // Try barcode search if barcode column exists
+      // Try barcode search if barcode column exists - substring match
+      // Search for pattern containing searchTerm anywhere (e.g., if user types "6", find "*6*" or "*6001*")
       try {
         let barcodeQuery = supabase
           .from('customers')
           .select('CustomerListID, name, barcode, contact_details')
           .eq('organization_id', profile.organization_id)
-          .ilike('barcode', `%${search.trim()}%`);
+          .ilike('barcode', `%${searchTerm}%`);
         
         logger.log('🔍 Executing barcode query...');
         const barcodeResult = await barcodeQuery.limit(10);
@@ -212,12 +169,33 @@ export default function HomeScreen() {
 
     setLoadingBottles(true);
     try {
-      const { data: assets, error } = await supabase
+      // Search by barcode_number or serial_number - substring match (characters appear in order)
+      const searchTerm = search.trim();
+      
+      // Search by barcode_number
+      const { data: barcodeAssets, error: barcodeError } = await supabase
         .from('bottles')
         .select('barcode_number, serial_number, assigned_customer, customer_name, product_code, description')
         .eq('organization_id', profile.organization_id)
-        .ilike('barcode_number', `%${search.trim()}%`)
+        .ilike('barcode_number', `%${searchTerm}%`)
         .limit(5);
+      
+      // Search by serial_number
+      const { data: serialAssets, error: serialError } = await supabase
+        .from('bottles')
+        .select('barcode_number, serial_number, assigned_customer, customer_name, product_code, description')
+        .eq('organization_id', profile.organization_id)
+        .ilike('serial_number', `%${searchTerm}%`)
+        .limit(5);
+      
+      // Combine results and remove duplicates
+      const allAssets = [...(barcodeAssets || []), ...(serialAssets || [])];
+      const uniqueAssets = allAssets.filter((asset, index, self) =>
+        index === self.findIndex((a) => a.barcode_number === asset.barcode_number && a.serial_number === asset.serial_number)
+      );
+      
+      const assets = uniqueAssets.slice(0, 5);
+      const error = barcodeError || serialError;
       
       logger.log('🔍 Bottle query result:', { data: assets, error });
       
@@ -310,9 +288,6 @@ export default function HomeScreen() {
       case 'EditCylinder':
         navigation.navigate('EditCylinder');
         break;
-      case 'LocateCylinder':
-        navigation.navigate('LocateCylinder');
-        break;
       case 'History':
         navigation.navigate('History');
         break;
@@ -321,9 +296,6 @@ export default function HomeScreen() {
         break;
       case 'Analytics':
         navigation.navigate('Analytics');
-        break;
-      case 'DataHealth':
-        navigation.navigate('DataHealth');
         break;
       default:
         logger.log('Unknown action:', action);
@@ -349,7 +321,9 @@ export default function HomeScreen() {
               <Text style={styles.welcomeText}>
                 Welcome back{profile?.full_name ? `, ${profile.full_name}` : ''}!
               </Text>
-              <Text style={styles.appName}>{assetConfig.appName}</Text>
+              <Text style={styles.appName} numberOfLines={1} ellipsizeMode="tail">
+                {organization?.app_name || organization?.name || assetConfig.appName}
+              </Text>
             </View>
             <View style={styles.headerActions}>
               <TouchableOpacity 
@@ -373,31 +347,6 @@ export default function HomeScreen() {
           </View>
         </LinearGradient>
 
-        {/* Stats Cards */}
-        <View style={styles.statsContainer}>
-          <View style={styles.statCardWrapper}>
-            <StatCard
-              label="Total Scans"
-              value={stats.totalScans}
-              color={colors.primary}
-            />
-          </View>
-          <View style={styles.statCardWrapper}>
-            <StatCard
-              label="Today"
-              value={stats.todayScans}
-              color="#10B981"
-            />
-          </View>
-          <View style={styles.statCardWrapper}>
-            <StatCard
-              label="Unread"
-              value={stats.unreadScans}
-              color="#F59E0B"
-            />
-          </View>
-        </View>
-
         {/* Search Bar */}
         <View style={styles.searchContainer}>
           <ModernCard elevated={false} style={styles.searchBarCard}>
@@ -410,6 +359,38 @@ export default function HomeScreen() {
                 value={search}
                 onChangeText={setSearch}
               />
+              {search.length > 0 && (
+                <TouchableOpacity
+                  style={styles.clearButton}
+                  accessibilityLabel="Clear search"
+                  accessibilityHint="Clear the search input"
+                  onPress={() => setSearch('')}
+                >
+                  <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={[styles.scanButton, { backgroundColor: colors.primary }]}
+                accessibilityLabel="Scan barcode"
+                accessibilityHint="Open barcode scanner"
+                onPress={async () => {
+                  if (!permission) {
+                    return;
+                  }
+                  if (!permission.granted) {
+                    const result = await requestPermission();
+                    if (!result.granted) {
+                      Alert.alert('Camera Permission Required', 'Please allow camera access to scan barcodes.');
+                      return;
+                    }
+                  }
+                  logger.log('📷 Opening scanner from HomeScreen (Android)');
+                  setShowScanner(true);
+                  setScanned(false);
+                }}
+              >
+                <Ionicons name="camera" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
             </View>
           </ModernCard>
         </View>
@@ -463,7 +444,7 @@ export default function HomeScreen() {
         <View style={styles.quickActionsContainer}>
           <Text style={[styles.sectionTitle, { color: colors.text, fontWeight: '800' }]}>Quick Actions</Text>
           <View style={styles.actionsGrid}>
-            {getQuickActions(assetConfig).map((action, index) => (
+            {getQuickActions().map((action, index) => (
               <MobileCard
                 key={index}
                 onPress={() => handleQuickAction(action.action)}
@@ -475,12 +456,115 @@ export default function HomeScreen() {
                   <Text style={styles.actionIconText}>{action.icon}</Text>
                 </View>
                 <Text style={[styles.actionTitle, { color: colors.text, fontWeight: '700' }]}>{action.title}</Text>
-                <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>{action.subtitle}</Text>
               </MobileCard>
             ))}
           </View>
         </View>
       </ScrollView>
+
+      {/* Barcode Scanner Modal */}
+      <Modal visible={showScanner} animationType="slide" transparent={false}>
+        <ExpoCameraScanner
+          onBarcodeScanned={async (data) => {
+            if (scanned || !data) return;
+            
+            logger.log('📷 Barcode scanned in HomeScreen:', data);
+            setScanned(true);
+            
+            // Clean the barcode - remove leading/trailing asterisks
+            let cleanedBarcode = data.trim().replace(/^\*+|\*+$/g, '');
+            
+            if (!cleanedBarcode) {
+              logger.log('📷 Empty barcode after cleaning');
+              setScanned(false);
+              return;
+            }
+            
+            setShowScanner(false);
+            
+            // Determine if this is a customer (sales receipt with %) or cylinder (9 digits)
+            // Use FormatValidationService to check formats
+            try {
+              if (!profile?.organization_id) {
+                logger.log('❌ No organization ID, falling back to search');
+                setSearch(cleanedBarcode);
+                setTimeout(() => {
+                  searchCustomers();
+                  searchBottles();
+                }, 100);
+                return;
+              }
+              
+              const formats = await FormatValidationService.getOrganizationFormats(profile.organization_id);
+              
+              // Check if it's a sales receipt barcode (starts with %)
+              const isSalesReceipt = cleanedBarcode.startsWith('%');
+              
+              // Check if it matches cylinder format (9 digits); accept after normalizing O→0, I→1, etc.
+              const cylinderPattern = formats.cylinder_serial_format?.pattern || '^[0-9]{9}$';
+              const cylinderRegex = new RegExp(cylinderPattern);
+              const letterToDigit: Record<string, string> = { O: '0', o: '0', I: '1', l: '1', L: '1', S: '5', s: '5', Z: '2', z: '2', B: '8', b: '8', G: '6', g: '6' };
+              const normalizedForCylinder = cleanedBarcode.replace(/./g, (c) => letterToDigit[c] ?? c);
+              const digitsOnly = normalizedForCylinder.replace(/[^0-9]/g, '');
+              const isCylinder = cylinderRegex.test(cleanedBarcode) || digitsOnly.length === 9;
+              const cylinderBarcode = digitsOnly.length === 9 ? digitsOnly : cleanedBarcode;
+              
+              logger.log('🔍 Barcode analysis:', {
+                cleanedBarcode,
+                isSalesReceipt,
+                isCylinder,
+                cylinderPattern
+              });
+              
+              if (isSalesReceipt) {
+                // Sales receipt - find customer by barcode or CustomerListID (PostgreSQL uses % for LIKE, not *)
+                logger.log('🔍 Searching for customer with barcode/ID:', cleanedBarcode);
+                const pattern = `%${cleanedBarcode}%`;
+                const { data: customer } = await supabase
+                  .from('customers')
+                  .select('CustomerListID')
+                  .eq('organization_id', profile.organization_id)
+                  .or(`barcode.ilike.${pattern},CustomerListID.ilike.${pattern}`)
+                  .limit(1)
+                  .single();
+                
+                if (customer) {
+                  logger.log('✅ Found customer, navigating to CustomerDetails');
+                  navigation.navigate('CustomerDetails', { customerId: customer.CustomerListID });
+                  return;
+                }
+              } else if (isCylinder) {
+                // Cylinder barcode - navigate directly to cylinder details (use canonical 9-digit form)
+                logger.log('✅ Cylinder barcode detected, navigating to CylinderDetails');
+                navigation.navigate('CylinderDetails', { barcode: cylinderBarcode });
+                return;
+              }
+              
+              // Fallback: search for both
+              logger.log('🔍 No direct match, performing search');
+              setSearch(cleanedBarcode);
+              setTimeout(() => {
+                searchCustomers();
+                searchBottles();
+              }, 100);
+            } catch (error) {
+              logger.error('❌ Error processing barcode:', error);
+              // Fallback to search
+              setSearch(cleanedBarcode);
+              setTimeout(() => {
+                searchCustomers();
+                searchBottles();
+              }, 100);
+            }
+          }}
+          enabled={!scanned}
+          onClose={() => {
+            setShowScanner(false);
+            setScanned(false);
+          }}
+          target="customer"
+        />
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -514,10 +598,11 @@ const styles = StyleSheet.create({
     opacity: 0.95,
   },
   appName: {
-    fontSize: 28,
-    fontWeight: '800',
-    marginTop: 4,
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 2,
     color: '#ffffff',
+    opacity: 0.95,
   },
   headerActions: {
     flexDirection: 'row',
@@ -584,6 +669,103 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
   },
+  clearButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
+  },
+  scanButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  fullscreenWrapper: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullscreenCamera: {
+    width: width,
+    height: height,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+  },
+  cameraOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 120,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    paddingTop: 150,
+  },
+  scanFrame: {
+    width: 320,
+    height: 150,
+    borderWidth: 2,
+    borderColor: '#fff',
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+  },
+  closeCameraButton: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 8,
+  },
+  closeCameraText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  flashButton: {
+    position: 'absolute',
+    top: 50,
+    right: 100,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 8,
+    zIndex: 1000,
+    width: 52,
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomControls: {
+    position: 'absolute',
+    bottom: 120,
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 25,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    zIndex: 1001,
+  },
+  zoomButton: {
+    padding: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginHorizontal: 12,
+    minWidth: 50,
+    textAlign: 'center',
+  },
   searchResults: {
     marginHorizontal: 20,
     marginBottom: 24,
@@ -638,29 +820,24 @@ const styles = StyleSheet.create({
   },
   actionCard: {
     width: Platform.OS === 'ios' && Platform.isPad ? '31%' : '48%',
-    padding: Platform.OS === 'ios' && Platform.isPad ? 24 : 20,
+    padding: Platform.OS === 'ios' && Platform.isPad ? 16 : 14,
     alignItems: 'center',
     marginBottom: 0,
   },
   actionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   actionIconText: {
-    fontSize: 24,
+    fontSize: 20,
   },
   actionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  actionSubtitle: {
     fontSize: 12,
+    fontWeight: '600',
     textAlign: 'center',
   },
 }); 

@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator,
 import { supabase } from '../supabase';
 import { Picker } from '@react-native-picker/picker';
 import { useTheme } from '../context/ThemeContext';
-import ScanArea from '../components/ScanArea';
+import MLKitScanner from '../components/MLKitScanner';
 import { useAuth } from '../hooks/useAuth';
 import { CylinderLimitService } from '../services/CylinderLimitService';
 import { useAssetConfig } from '../context/AssetContext';
@@ -397,19 +397,18 @@ export default function AddCylinderScreen() {
         visible={scannerVisible}
         onRequestClose={() => setScannerVisible(false)}
         animationType="slide"
-        transparent={false}
+        transparent={true}
       >
-        <View style={styles.modalOverlay}>
-          <ScanArea
-            onScanned={(scannedBarcode) => {
-              setBarcode(scannedBarcode);
-              setScannerVisible(false);
-            }}
-            label="SCAN HERE"
-            hideScanningLine={Platform.OS === 'ios'}
-            onClose={() => setScannerVisible(false)}
-          />
-        </View>
+        <MLKitScanner
+          onBarcodeScanned={(scannedBarcode) => {
+            setBarcode(scannedBarcode);
+            setScannerVisible(false);
+          }}
+          onClose={() => setScannerVisible(false)}
+          enabled={scannerVisible}
+          title="Scan Barcode"
+          subtitle="Scan cylinder barcode to add"
+        />
       </Modal>
 
       {/* Gas Type Picker Modal */}

@@ -7,7 +7,7 @@ import { usePermissions } from '../context/PermissionsContext';
 import { useTheme } from '../context/ThemeContext';
 import { ListItem, ListItemButton, ListItemIcon, ListItemText, TextField, InputAdornment } from '@mui/material';
 import {
-  List, Divider, Box, Typography, Collapse, Chip, IconButton, Tooltip
+  List, Divider, Box, Typography, Collapse, Chip, IconButton, Tooltip, Avatar
 } from '@mui/material';
 import {
   Dashboard, People, Inventory, LocalShipping, Schedule, Receipt, 
@@ -33,6 +33,7 @@ const collapsedWidth = 72;
 const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   const { profile, organization } = useAuth();
   const { organizationColors } = useTheme();
+  const primaryColor = organizationColors?.primary || '#FF6B35';
   
   // CRITICAL: Check profile BEFORE calling any other hooks to avoid hook inconsistency
   if (!profile) return null;
@@ -116,7 +117,16 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
     if (onClose) onClose();
   };
 
-  const isActive = (path) => location.pathname === path;
+  // Map paths to match dashboard route
+  const normalizePath = (path) => {
+    if (path === '/dashboard') return '/home';
+    return path;
+  };
+
+  const isActive = (path) => {
+    const normalizedPath = normalizePath(path);
+    return location.pathname === normalizedPath || location.pathname.startsWith(normalizedPath + '/');
+  };
 
   // Helper function to normalize role for case-insensitive comparison
   const normalizeRole = (role) => {
@@ -271,6 +281,7 @@ borderColor: 'divider',
       icon: <LocalShipping />,
       items: [
         { title: 'Deliveries', path: '/deliveries', icon: <LocalShipping />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Bottles for Day', path: '/bottles-for-day', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
         { title: 'Rentals', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
         { title: 'Scanned Orders', path: '/scanned-orders', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Lease Agreements', path: '/lease-agreements', icon: <WorkIcon />, roles: ['admin', 'manager'] },
@@ -332,107 +343,11 @@ borderColor: 'divider',
     <Box sx={{ 
       overflow: 'auto', 
       height: '100%',
-      backgroundColor: 'background.default',
-      borderRight: '1px solid',
-      borderRightColor: 'divider'
+      display: 'flex',
+      flexDirection: 'column',
+      backgroundColor: '#F5F5F5', // Light gray background like in the image
+      borderRight: 'none'
     }}>
-        {/* Collapse Toggle */}
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: isCollapsed ? 'center' : 'flex-end', 
-          p: 2, 
-          borderBottom: '1px solid',
-          borderBottomColor: 'divider',
-          backgroundColor: 'background.paper',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-        }}>
-          <Tooltip title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-            <IconButton 
-              onClick={onToggleCollapse}
-              size="small"
-              sx={{
-                backgroundColor: isCollapsed ? 'primary.main' : 'background.default',
-                color: isCollapsed ? 'white' : 'text.secondary',
-                borderRadius: 2,
-                border: '1px solid',
-                borderColor: 'divider',
-                '&:hover': {
-                  backgroundColor: isCollapsed ? 'primary.dark' : 'action.hover',
-                  transform: 'scale(1.05)',
-                  transition: 'all 0.2s ease'
-                }
-              }}
-            >
-              {isCollapsed ? <ChevronRight /> : <ChevronLeft />}
-            </IconButton>
-          </Tooltip>
-        </Box>
-
-        {/* Organization Info */}
-        {organization && (
-          <Box sx={{ 
-            p: isCollapsed ? 1.5 : 2.5, 
-            borderBottom: '1px solid #e1e5e9', 
-            backgroundColor: 'background.paper',
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: isCollapsed ? 'center' : 'flex-start',
-            gap: isCollapsed ? 0 : 2,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-          }}>
-            {organization.logo_url ? (
-              <img 
-                key={organization.logo_url}
-                src={organization.logo_url} 
-                alt="Org Logo" 
-                style={{ 
-                  height: isCollapsed ? 28 : 36, 
-                  width: isCollapsed ? 28 : 36, 
-                  objectFit: 'contain', 
-                  borderRadius: 8, 
-                  background: '#fff', 
-                  border: '2px solid',
-borderColor: 'divider',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                }}
-                onError={(e) => {
-                  logger.error('Failed to load logo:', organization.logo_url);
-                  e.target.style.display = 'none';
-                }}
-              />
-            ) : (
-              <Box 
-                sx={{ 
-                  height: isCollapsed ? 28 : 36, 
-                  width: isCollapsed ? 28 : 36, 
-                  borderRadius: 8, 
-                  background: `linear-gradient(135deg, ${organizationColors?.primary || '#40B5AD'} 0%, ${organizationColors?.secondary || '#48C9B0'} 100%)`,
-                  border: '2px solid',
-borderColor: 'divider',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#fff',
-                  fontSize: isCollapsed ? '12px' : '14px',
-                  fontWeight: 'bold',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                }}
-              >
-                {organization.name?.charAt(0)?.toUpperCase() || '?'}
-              </Box>
-            )}
-            {!isCollapsed && (
-              <Box sx={{ minWidth: 0 }}>
-                <Typography variant="subtitle2" color="primary" noWrap sx={{ fontWeight: 600, fontSize: '14px' }}>
-                  {organization.name}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: '12px' }}>
-                  {getRoleDisplayName(actualRole)} • {profile?.full_name}
-                </Typography>
-              </Box>
-            )}
-          </Box>
-        )}
 
         {/* Search */}
         {!isCollapsed && (
@@ -510,140 +425,149 @@ borderColor: 'divider',
         )}
 
         {/* Menu Sections */}
-        <List sx={{ py: 0 }}>
-          {Object.entries(filteredSections).map(([sectionKey, section], sectionIndex) => (
-            <React.Fragment key={sectionKey}>
-              {/* Section Divider */}
-              {sectionIndex > 0 && <Divider />}
-              
-              {/* Section Header */}
-              <ListItem disablePadding>
-                <ListItemButton
-                  onClick={() => !isCollapsed && toggleSection(sectionKey)}
-                  sx={{ 
-                    py: 1.5,
-                    px: 2,
-                    backgroundColor: 'background.default',
-                    borderBottom: '1px solid #e1e5e9',
-                    borderRadius: 0,
-                    '&:hover': {
-                      backgroundColor: 'action.hover',
-                      transform: 'translateX(2px)',
-                      transition: 'all 0.2s ease'
-                    }
-                  }}
-                >
-                  <ListItemIcon sx={{ minWidth: isCollapsed ? 'auto' : 40 }}>
-                    <Tooltip title={isCollapsed ? section.title : ''} placement="right">
-                      <Box sx={{ 
-                        color: 'primary.main',
-                        fontSize: '20px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}>
-                        {section.icon}
-                      </Box>
-                    </Tooltip>
-                  </ListItemIcon>
-                  {!isCollapsed && (
-                    <>
-                      <ListItemText 
-                        primary={section.title}
-                        primaryTypographyProps={{ 
-                          variant: 'body2', 
-                          fontWeight: 700,
-                          color: '#495057',
-                          fontSize: '13px',
+        <Box sx={{ flex: 1, overflow: 'auto' }}>
+            {Object.entries(filteredSections).map(([sectionKey, section], sectionIndex) => (
+              <React.Fragment key={sectionKey}>
+                {/* Section Header */}
+                {!isCollapsed && (
+                  <ListItem disablePadding>
+                    <Box sx={{ 
+                      px: 2.5, 
+                      py: 1,
+                      width: '100%'
+                    }}>
+                      <Typography 
+                        variant="caption" 
+                        sx={{ 
+                          color: '#6B7280',
+                          fontSize: '11px',
+                          fontWeight: 600,
                           letterSpacing: '0.5px',
                           textTransform: 'uppercase'
                         }}
-                      />
-                      <Box sx={{ 
-                        color: '#6c757d',
-                        transition: 'transform 0.2s ease',
-                        transform: sections[sectionKey] ? 'rotate(180deg)' : 'rotate(0deg)'
-                      }}>
-                        {sections[sectionKey] ? <ExpandLess /> : <ExpandMore />}
-                      </Box>
-                    </>
-                  )}
-                </ListItemButton>
-              </ListItem>
-
-              {/* Section Items */}
-              <Collapse in={isCollapsed || sections[sectionKey]} timeout="auto" unmountOnExit>
+                      >
+                        {section.title}
+                      </Typography>
+                    </Box>
+                  </ListItem>
+                )}
+                
+                {/* Section Items */}
                 <List component="div" disablePadding>
-                  {section.items.map((item, index) => (
-                    <React.Fragment key={item.path}>
-                      <ListItem disablePadding>
+                  {section.items.map((item) => {
+                    const active = isActive(item.path);
+                    return (
+                      <ListItem key={item.path} disablePadding>
                         <ListItemButton
-                          selected={isActive(item.path)}
+                          selected={active}
                           onClick={() => handleNavigation(item.path)}
                           sx={{
-                            pl: isCollapsed ? 1.5 : 3.5,
-                            py: 1.2,
-                            px: 2,
-                            borderBottom: index < section.items.length - 1 ? '1px solid' : 'none',
-borderBottomColor: index < section.items.length - 1 ? 'divider' : 'transparent',
-                            borderRadius: 0,
-                            backgroundColor: isActive(item.path) ? 'primary.light' : 'transparent',
-                            borderLeft: isActive(item.path) ? '4px solid' : '4px solid transparent',
-                            borderLeftColor: isActive(item.path) ? 'primary.main' : 'transparent',
+                            py: 1.25,
+                            px: 2.5,
+                            borderRadius: 2,
+                            mx: 1,
+                            mb: 0.5,
+                            backgroundColor: active ? primaryColor : 'transparent',
+                            color: active ? '#fff' : '#111',
                             transition: 'all 0.2s ease',
                             '&:hover': {
-                              backgroundColor: isActive(item.path) ? 'primary.light' : 'background.default',
-                              transform: 'translateX(4px)',
-                              borderLeft: '4px solid',
-                              borderLeftColor: 'primary.main',
-                              boxShadow: '0 2px 8px rgba(64, 181, 173, 0.15)'
+                              backgroundColor: active ? primaryColor : 'rgba(0,0,0,0.05)',
                             },
                             '&.Mui-selected': {
-                              backgroundColor: 'primary.light',
-                              borderLeft: '4px solid',
-                              borderLeftColor: 'primary.main',
+                              backgroundColor: primaryColor,
+                              color: '#fff',
                               '&:hover': {
-                                backgroundColor: 'primary.light',
-                                transform: 'translateX(4px)',
+                                backgroundColor: primaryColor,
                               },
                             },
                           }}
                         >
-                          <ListItemIcon sx={{ minWidth: isCollapsed ? 'auto' : 40 }}>
-                            <Tooltip title={isCollapsed ? item.title : ''} placement="right">
-                              <Box sx={{ 
-                                color: isActive(item.path) ? 'primary.main' : 'text.secondary',
-                                fontSize: '18px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                transition: 'color 0.2s ease'
-                              }}>
-                                {item.icon}
-                              </Box>
-                            </Tooltip>
+                          <ListItemIcon sx={{ minWidth: 36 }}>
+                            <Box sx={{ 
+                              color: active ? '#fff' : '#6B7280',
+                              fontSize: '20px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}>
+                              {item.icon}
+                            </Box>
                           </ListItemIcon>
                           {!isCollapsed && (
                             <ListItemText 
                               primary={item.title}
                               primaryTypographyProps={{
                                 variant: 'body2',
-                                fontWeight: isActive(item.path) ? 600 : 500,
-                                color: isActive(item.path) ? '#495057' : '#6c757d',
-                                fontSize: '14px',
-                                transition: 'all 0.2s ease'
+                                fontWeight: active ? 600 : 500,
+                                color: active ? '#fff' : '#111',
+                                fontSize: '14px'
                               }}
                             />
                           )}
+                          {active && !isCollapsed && (
+                            <Box sx={{ 
+                              width: 4, 
+                              height: 4, 
+                              borderRadius: '50%', 
+                              backgroundColor: '#fff',
+                              ml: 1
+                            }} />
+                          )}
                         </ListItemButton>
                       </ListItem>
-                    </React.Fragment>
-                  ))}
+                    );
+                  })}
                 </List>
-              </Collapse>
-            </React.Fragment>
-          ))}
-        </List>
+              </React.Fragment>
+            ))}
+        </Box>
+
+        {/* User Profile Section at Bottom */}
+        {!isCollapsed && profile && (
+          <Box sx={{ 
+            p: 2,
+            borderTop: '1px solid #E5E7EB',
+            backgroundColor: '#F5F5F5',
+            mt: 'auto'
+          }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Avatar 
+                sx={{ 
+                  width: 36, 
+                  height: 36, 
+                  bgcolor: '#D1D5DB',
+                  color: '#6B7280',
+                  fontSize: '14px'
+                }}
+              >
+                {profile?.full_name?.charAt(0)?.toUpperCase() || 'U'}
+              </Avatar>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="body2" sx={{ fontWeight: 600, color: '#111', fontSize: '14px' }}>
+                  {profile?.full_name || 'User'}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#6B7280', fontSize: '12px' }}>
+                  {getRoleDisplayName(actualRole)}
+                </Typography>
+              </Box>
+              <IconButton 
+                size="small"
+                onClick={() => {
+                  supabase.auth.signOut();
+                  navigate('/login');
+                }}
+                sx={{ 
+                  color: '#6B7280',
+                  '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' }
+                }}
+              >
+                <Box component="svg" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M12 10V12C12 13.1046 11.1046 14 10 14H4C2.89543 14 2 13.1046 2 12V4C2 2.89543 2.89543 2 4 2H10C11.1046 2 12 2.89543 12 4V6M8 10L10 8M10 8L8 6M10 8H4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </Box>
+              </IconButton>
+            </Box>
+          </Box>
+        )}
     </Box>
   );
 };

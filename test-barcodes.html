@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScanEZ Test Barcodes - CODE128</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .barcode-container {
+            background: white;
+            padding: 30px;
+            margin: 20px 0;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .barcode-label {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+        }
+        .barcode-number {
+            font-size: 24px;
+            font-weight: 700;
+            color: #2563eb;
+            margin-bottom: 20px;
+            font-family: 'Courier New', monospace;
+        }
+        svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .instructions {
+            background: #e0f2fe;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #2563eb;
+        }
+        .instructions h3 {
+            margin-top: 0;
+            color: #1e40af;
+        }
+        .instructions ol {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        .instructions li {
+            margin: 8px 0;
+            color: #334155;
+        }
+        .tip {
+            background: #fef3c7;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #f59e0b;
+        }
+        .tip strong {
+            color: #92400e;
+        }
+        @media print {
+            body {
+                background: white;
+            }
+            .instructions, .tip {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 ScanEZ Test Barcodes</h1>
+    <p class="subtitle">Multiple formats - Test ALL barcode types</p>
+
+    <div class="instructions">
+        <h3>📱 How to Test ScanEZ:</h3>
+        <ol>
+            <li>Open this page on a computer or tablet screen</li>
+            <li>Open the gas cylinder app on your Android phone</li>
+            <li>Tap the 📷 camera button to open ScanEZ scanner</li>
+            <li>Point your phone camera at any barcode below</li>
+            <li>The scanner should detect it automatically with the "ScanEZ" border</li>
+        </ol>
+    </div>
+
+    <div class="tip">
+        <strong>💡 Tip:</strong> Make sure your screen brightness is high and the barcode fills most of the camera view for best results.
+    </div>
+
+    <!-- CODE128 - Cylinder Barcodes -->
+    <div class="barcode-container">
+        <div class="barcode-label">CODE128 - Cylinder #1</div>
+        <div class="barcode-number">123456789</div>
+        <svg id="barcode1"></svg>
+    </div>
+
+    <div class="barcode-container">
+        <div class="barcode-label">CODE128 - Cylinder #2</div>
+        <div class="barcode-number">987654321</div>
+        <svg id="barcode2"></svg>
+    </div>
+
+    <!-- CODE39 -->
+    <div class="barcode-container">
+        <div class="barcode-label">CODE39</div>
+        <div class="barcode-number">*ABC123*</div>
+        <svg id="barcode3"></svg>
+    </div>
+
+    <!-- EAN13 -->
+    <div class="barcode-container">
+        <div class="barcode-label">EAN13</div>
+        <div class="barcode-number">5901234123457</div>
+        <svg id="barcode4"></svg>
+    </div>
+
+    <!-- UPC-A -->
+    <div class="barcode-container">
+        <div class="barcode-label">UPC-A</div>
+        <div class="barcode-number">012345678905</div>
+        <svg id="barcode5"></svg>
+    </div>
+
+    <!-- QR Code -->
+    <div class="barcode-container">
+        <div class="barcode-label">QR Code</div>
+        <div class="barcode-number">TEST-QR-CODE-DATA</div>
+        <canvas id="qrcode"></canvas>
+    </div>
+
+    <div class="instructions">
+        <h3>🔍 What to Look For:</h3>
+        <ol>
+            <li><strong>ScanEZ Border:</strong> White border with "ScanEZ" text at the bottom</li>
+            <li><strong>Log Messages:</strong> Should see "9-digit cylinder barcode detected!" in logs</li>
+            <li><strong>Navigation:</strong> Should navigate to CylinderDetails screen automatically</li>
+            <li><strong>Format Detection:</strong> Should detect as CODE128 format</li>
+        </ol>
+    </div>
+
+    <div class="tip">
+        <strong>🐛 Debugging:</strong> If scanning doesn't work, check the terminal logs for:
+        <ul style="margin: 10px 0; padding-left: 20px;">
+            <li>"📷 ScanEZ: handleBarcodeScanned called" - Scanner is active</li>
+            <li>"✅ 9-digit cylinder barcode detected!" - Barcode recognized</li>
+            <li>"✅ Barcode accepted" - Scan processed successfully</li>
+        </ul>
+    </div>
+
+    <script>
+        // Generate CODE128 barcodes
+        JsBarcode("#barcode1", "123456789", {
+            format: "CODE128",
+            width: 3,
+            height: 100,
+            displayValue: true,
+            fontSize: 20,
+            margin: 20
+        });
+
+        JsBarcode("#barcode2", "987654321", {
+            format: "CODE128",
+            width: 3,
+            height: 100,
+            displayValue: true,
+            fontSize: 20,
+            margin: 20
+        });
+
+        // CODE39
+        JsBarcode("#barcode3", "*ABC123*", {
+            format: "CODE39",
+            width: 2,
+            height: 80,
+            displayValue: true,
+            fontSize: 18,
+            margin: 20
+        });
+
+        // EAN13
+        JsBarcode("#barcode4", "5901234123457", {
+            format: "EAN13",
+            width: 2,
+            height: 80,
+            displayValue: true,
+            fontSize: 18,
+            margin: 20
+        });
+
+        // UPC-A
+        JsBarcode("#barcode5", "012345678905", {
+            format: "UPC",
+            width: 2,
+            height: 80,
+            displayValue: true,
+            fontSize: 18,
+            margin: 20
+        });
+
+        // QR Code
+        QRCode.toCanvas(document.getElementById('qrcode'), 'TEST-QR-CODE-DATA', {
+            width: 200,
+            margin: 2
+        });
+    </script>
+</body>
+</html>

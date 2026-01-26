@@ -50,6 +50,7 @@ import {
   FormControlLabel,
   Switch
 } from '@mui/material';
+import { SearchInputWithIcon } from '../components/ui/search-input-with-icon';
 import {
   Assignment as AuditIcon,
   Add as AddIcon,
@@ -57,7 +58,6 @@ import {
   Delete as DeleteIcon,
   Check as CheckIcon,
   Close as CloseIcon,
-  Search as SearchIcon,
   Inventory as InventoryIcon,
   LocationOn as LocationIcon,
   People as PeopleIcon,
@@ -726,18 +726,12 @@ export default function AuditManagement() {
           <CardContent>
             <Grid container spacing={2} alignItems="center">
               <Grid item xs={12} md={4}>
-                <TextField
-                  fullWidth
+                <SearchInputWithIcon
                   placeholder="Search audits..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <SearchIcon />
-                      </InputAdornment>
-                    ),
-                  }}
+                  onClear={() => setSearchTerm('')}
+                  className="w-full"
                 />
               </Grid>
               <Grid item xs={12} md={3}>

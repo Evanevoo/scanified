@@ -1,15 +1,40 @@
 import logger from '../utils/logger';
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Linking, ScrollView } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Linking, ScrollView, Pressable, Modal, Dimensions, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
+import MLKitScanner from '../components/MLKitScanner';
 import { Picker } from '@react-native-picker/picker';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
+
+const { width, height } = Dimensions.get('window');
+
+interface Customer {
+  CustomerListID: string;
+  name: string;
+}
+
+interface Location {
+  id: string;
+  name: string;
+  province?: string;
+}
+
+interface Cylinder {
+  id: string;
+  barcode_number: string;
+  serial_number?: string;
+  owner_type?: string;
+  owner_id?: string;
+  owner_name?: string;
+  assigned_customer?: string;
+  location?: string;
+  ownership?: string;
+}
 
 export default function EditCylinderScreen() {
   const { config: assetConfig } = useAssetConfig();
@@ -17,26 +42,38 @@ export default function EditCylinderScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { colors } = useTheme();
-  const [step, setStep] = useState(1);
-  const [barcode, setBarcode] = useState('');
+  // Initialize step based on whether barcode is provided in route params
+  const routeBarcode = (route.params as any)?.barcode;
+  const [step, setStep] = useState(routeBarcode ? 2 : 1); // Start at step 2 if barcode provided
+  const [barcode, setBarcode] = useState(routeBarcode || '');
   const [serial, setSerial] = useState('');
-  const [cylinder, setCylinder] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [cylinder, setCylinder] = useState<Cylinder | null>(null);
+  const [loading, setLoading] = useState(!!routeBarcode); // Show loading if barcode provided
   const [error, setError] = useState('');
   const [scanned, setScanned] = useState(false);
   const [scannerVisible, setScannerVisible] = useState(false);
-  const [permission, requestPermission] = useCameraPermissions();
-  const [flashEnabled, setFlashEnabled] = useState(false);
-  const [ownerType, setOwnerType] = useState('organization');
+  
+  const [ownerType, setOwnerType] = useState<'organization' | 'customer' | 'external'>('organization');
   const [ownerCustomerId, setOwnerCustomerId] = useState('');
   const [ownerName, setOwnerName] = useState('');
-  const [customers, setCustomers] = useState([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [customersLoading, setCustomersLoading] = useState(false);
   const [customersError, setCustomersError] = useState('');
-  const [locations, setLocations] = useState([]);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [locationsLoading, setLocationsLoading] = useState(false);
   const [locationsError, setLocationsError] = useState('');
   const [selectedLocation, setSelectedLocation] = useState('');
+  const [selectedLocationName, setSelectedLocationName] = useState('');
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
+  const [ownerTypePickerVisible, setOwnerTypePickerVisible] = useState(false);
+  const [customerPickerVisible, setCustomerPickerVisible] = useState(false);
+  const [ownershipValues, setOwnershipValues] = useState<{ id: string; value: string }[]>([]);
+  const [ownershipValuesLoading, setOwnershipValuesLoading] = useState(false);
+  const [selectedOwnership, setSelectedOwnership] = useState('');
+  const [ownershipPickerVisible, setOwnershipPickerVisible] = useState(false);
+  const [bottles, setBottles] = useState<{ barcode_number: string }[]>([]);
+  const [barcodeSuggestions, setBarcodeSuggestions] = useState<{ barcode_number: string }[]>([]);
+  const [showBarcodeSuggestions, setShowBarcodeSuggestions] = useState(false);
 
   // Fetch customers and locations when cylinder is loaded (step 2)
   React.useEffect(() => {
@@ -83,8 +120,63 @@ export default function EditCylinderScreen() {
           }
           setLocationsLoading(false);
         });
+
+      setOwnershipValuesLoading(true);
+      supabase
+        .from('ownership_values')
+        .select('id, value')
+        .eq('organization_id', profile.organization_id)
+        .order('value')
+        .then(async ({ data, error }) => {
+          if (!error && data && data.length > 0) {
+            setOwnershipValues(data.map((item) => ({ id: item.id, value: item.value })));
+          } else {
+            const { data: bottlesData } = await supabase
+              .from('bottles')
+              .select('ownership')
+              .eq('organization_id', profile.organization_id)
+              .not('ownership', 'is', null)
+              .not('ownership', 'eq', '');
+            const unique = [...new Set((bottlesData || []).map((b) => b.ownership).filter(Boolean))].sort();
+            setOwnershipValues(unique.map((v) => ({ id: v, value: v })));
+          }
+          setOwnershipValuesLoading(false);
+        });
     }
   }, [step, profile]);
+
+  // Fetch bottles for barcode suggestions
+  React.useEffect(() => {
+    if (profile?.organization_id) {
+      supabase
+        .from('bottles')
+        .select('barcode_number')
+        .eq('organization_id', profile.organization_id)
+        .order('barcode_number')
+        .then(({ data, error }) => {
+          if (!error && data) setBottles(data);
+        });
+    }
+  }, [profile?.organization_id]);
+
+  // Filter barcode suggestions when typing in step 1
+  React.useEffect(() => {
+    if (barcode.trim() && bottles.length > 0 && step === 1) {
+      const searchText = barcode.toLowerCase();
+      const filtered = bottles
+        .filter(b =>
+          b.barcode_number &&
+          b.barcode_number.toLowerCase().includes(searchText) &&
+          b.barcode_number.toLowerCase() !== searchText
+        )
+        .slice(0, 5);
+      setBarcodeSuggestions(filtered);
+      setShowBarcodeSuggestions(filtered.length > 0);
+    } else {
+      setBarcodeSuggestions([]);
+      setShowBarcodeSuggestions(false);
+    }
+  }, [barcode, bottles, step]);
 
   // Initialize barcode from route params if provided
   React.useEffect(() => {
@@ -101,43 +193,43 @@ export default function EditCylinderScreen() {
     if (cylinder) {
       setBarcode(cylinder.barcode_number || barcode);
       setSerial(cylinder.serial_number || serial);
-      setOwnerType(cylinder?.owner_type || 'organization');
+      const ownerTypeValue = cylinder?.owner_type;
+      if (ownerTypeValue === 'organization' || ownerTypeValue === 'customer' || ownerTypeValue === 'external') {
+        setOwnerType(ownerTypeValue);
+      } else {
+        setOwnerType('organization');
+      }
       setOwnerCustomerId(cylinder?.owner_id || '');
       setOwnerName(cylinder?.owner_name || '');
       setSelectedLocation(cylinder?.location || '');
+      setSelectedLocationName(cylinder?.location || '');
+      setSelectedOwnership(cylinder?.ownership || '');
     }
   }, [cylinder]);
 
   const scanDelay = 1500; // ms
 
   // Step 1: Scan or enter barcode
-  const handleBarcodeScanned = (event) => {
-    // Only accept barcodes within the border area if boundingBox is available
-    const border = {
-      top: 0.30, left: 0.05, width: 0.9, height: 0.18
-    };
-    if (event?.boundingBox) {
-      const { origin, size } = event.boundingBox;
-      const centerX = origin.x + size.width / 2;
-      const centerY = origin.y + size.height / 2;
-      if (
-        centerX < border.left ||
-        centerX > border.left + border.width ||
-        centerY < border.top ||
-        centerY > border.top + border.height
-      ) {
-        // Barcode is outside the border, ignore
-        return;
-      }
+  // Step 2: Scan new barcode for editing
+  const handleBarcodeScanned = (event: any) => {
+    const data = typeof event === 'string' ? event : event?.data;
+    if (!data) {
+      logger.log('⚠️ No barcode data received');
+      return;
     }
+    
+    logger.log('📷 Barcode scanned:', data);
     setScanned(true);
     setTimeout(() => setScanned(false), scanDelay);
-    setBarcode(event.data);
+    setBarcode(data);
     setScannerVisible(false);
-    fetchCylinder(event.data);
+    // In step 1, fetch the cylinder. In step 2, just update the barcode field.
+    if (step === 1) {
+      fetchCylinder(data);
+    }
   };
 
-  const fetchCylinder = async (barcodeValue) => {
+  const fetchCylinder = async (barcodeValue: string) => {
     setLoading(true);
     setError('');
     setCylinder(null);
@@ -182,17 +274,18 @@ export default function EditCylinderScreen() {
       setError('Serial number already exists on another cylinder.');
       return;
     }
-    // Update cylinder with ownership fields and location
-    const updateFields = { 
-      barcode, 
+    // Update cylinder with ownership fields and location (bottles table uses barcode_number, not barcode)
+    const updateFields: Record<string, unknown> = { 
+      barcode_number: barcode, 
       serial_number: serial,
-      location: selectedLocation 
+      location: selectedLocationName || selectedLocation || null
     };
     if (ownerType === 'organization') {
       updateFields.owner_type = 'organization';
       updateFields.owner_id = null;
       updateFields.owner_name = '';
       updateFields.assigned_customer = null;
+      updateFields.ownership = selectedOwnership || null;
     } else if (ownerType === 'customer') {
       updateFields.owner_type = 'customer';
       updateFields.owner_id = ownerCustomerId;
@@ -211,7 +304,8 @@ export default function EditCylinderScreen() {
       .eq('id', cylinder?.id);
     setLoading(false);
     if (updateError) {
-      setError(`Failed to update ${assetConfig?.assetDisplayName?.toLowerCase() || 'asset'}.`);
+      setError(updateError.message || `Failed to update ${assetConfig?.assetDisplayName?.toLowerCase() || 'asset'}.`);
+      logger.log('❌ EditCylinder update error:', updateError);
     } else {
       Alert.alert('Success', `${assetConfig?.assetDisplayName || 'Asset'} updated successfully!`);
       setStep(1);
@@ -221,42 +315,60 @@ export default function EditCylinderScreen() {
     }
   };
 
-  // Get current ownership display text
-  const getCurrentOwnershipText = () => {
-    if (!cylinder) return 'Not set';
-    if (cylinder.owner_type === 'organization') return 'Organization';
-    if (cylinder.owner_type === 'customer') {
-      const customerName = cylinder.owner_name || 
-        (cylinder.assigned_customer && customers.find(c => c.CustomerListID === cylinder.assigned_customer)?.name) ||
-        cylinder.assigned_customer;
-      return customerName ? `Customer: ${customerName}` : 'Customer (not specified)';
-    }
-    if (cylinder.owner_type === 'external') {
-      return cylinder.owner_name ? `External: ${cylinder.owner_name}` : 'External (not specified)';
-    }
-    return cylinder.ownership || 'Not set';
-  };
-
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          Edit {assetConfig?.assetDisplayName || 'Cylinder'}
+        </Text>
+        <View style={styles.headerRight} />
+      </View>
+
       {step === 1 && (
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <Text style={[styles.stepTitle, { color: colors.primary }]}>Scan or Enter Cylinder Barcode</Text>
-          <View style={styles.inputRow}>
-            <TextInput
-              style={[styles.input, { flex: 1, backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-              placeholder="Enter barcode"
-              placeholderTextColor={colors.textSecondary}
-              value={barcode}
-              onChangeText={setBarcode}
-              autoCapitalize="none"
-            />
-            <TouchableOpacity 
-              style={[styles.scanButton, { backgroundColor: colors.primary }]} 
-              onPress={() => setScannerVisible(true)}
-            >
-              <Text style={{ fontSize: 22 }}>📷</Text>
-            </TouchableOpacity>
+          <View style={{ position: 'relative' }}>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={[styles.input, { flex: 1, backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                placeholder="Enter barcode"
+                placeholderTextColor={colors.textSecondary}
+                value={barcode}
+                onChangeText={setBarcode}
+                autoCapitalize="none"
+              />
+              <TouchableOpacity 
+                style={[styles.scanButton, { backgroundColor: colors.primary }]} 
+                onPress={() => setScannerVisible(true)}
+              >
+                <Text style={{ fontSize: 22 }}>📷</Text>
+              </TouchableOpacity>
+            </View>
+            {showBarcodeSuggestions && barcodeSuggestions.length > 0 && (
+              <View style={[styles.suggestionsContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <ScrollView style={{ maxHeight: 150 }}>
+                  {barcodeSuggestions.map((bottle, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={[styles.suggestionItem, { borderBottomColor: colors.border }]}
+                      onPress={() => {
+                        setBarcode(bottle.barcode_number);
+                        setShowBarcodeSuggestions(false);
+                      }}
+                    >
+                      <Text style={[styles.suggestionText, { color: colors.text }]}>{bottle.barcode_number}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
           </View>
           <TouchableOpacity
             style={[styles.nextButton, { backgroundColor: colors.primary }]}
@@ -268,19 +380,35 @@ export default function EditCylinderScreen() {
           {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
         </ScrollView>
       )}
+      {step === 2 && loading && !cylinder && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.text }]}>Loading cylinder details...</Text>
+        </View>
+      )}
       {step === 2 && cylinder && (
-        <ScrollView contentContainerStyle={{ paddingTop: 20, paddingBottom: 20 }}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.primary }]}>Basic Information</Text>
             
             <View style={styles.inputGroup}>
               <Text style={[styles.inputLabel, { color: colors.text }]}>Barcode</Text>
-              <TextInput
-                style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-                value={barcode}
-                onChangeText={setBarcode}
-                autoCapitalize="none"
-              />
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={[styles.input, { flex: 1, backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                  value={barcode}
+                  onChangeText={setBarcode}
+                  autoCapitalize="none"
+                  placeholder="Enter barcode"
+                  placeholderTextColor={colors.textSecondary}
+                />
+                <TouchableOpacity 
+                  style={[styles.scanButton, { backgroundColor: colors.primary }]} 
+                  onPress={() => setScannerVisible(true)}
+                >
+                  <Text style={{ fontSize: 22 }}>📷</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.inputGroup}>
@@ -306,44 +434,101 @@ export default function EditCylinderScreen() {
               ) : locationsError ? (
                 <Text style={[styles.error, { color: colors.error }]}>{locationsError}</Text>
               ) : (
-                <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Picker
-                    selectedValue={selectedLocation}
-                    onValueChange={setSelectedLocation}
-                    style={[styles.picker, { color: colors.text }]}
-                  >
-                    <Picker.Item label="Select a location..." value="" color={colors.textSecondary} />
-                    {locations.map(location => (
-                      <Picker.Item 
-                        key={location.id} 
-                        label={`${location.name} (${location.province})`} 
-                        value={location.name.toUpperCase()}
-                        color={colors.text}
-                      />
-                    ))}
-                  </Picker>
-                </View>
+                <TouchableOpacity 
+                  style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  onPress={() => setLocationPickerVisible(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.pickerButtonText, { color: selectedLocationName ? colors.text : colors.textSecondary }]}>
+                    {selectedLocationName || 'Select a location...'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
               )}
             </View>
           </View>
+
+          {/* Location Picker Modal */}
+          <Modal
+            visible={locationPickerVisible}
+            transparent={true}
+            animationType="slide"
+            onRequestClose={() => setLocationPickerVisible(false)}
+          >
+            <Pressable 
+              style={styles.modalOverlay}
+              onPress={() => setLocationPickerVisible(false)}
+            >
+              <View style={[styles.pickerModal, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
+                <View style={[styles.pickerModalHeader, { borderBottomColor: colors.border }]}>
+                  <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Location</Text>
+                  <TouchableOpacity onPress={() => setLocationPickerVisible(false)}>
+                    <Text style={[styles.pickerModalClose, { color: colors.primary }]}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <ScrollView style={styles.pickerModalScroll}>
+                  {locations.map((location) => (
+                    <TouchableOpacity
+                      key={location.id}
+                      style={[styles.pickerModalItem, { borderBottomColor: colors.border }]}
+                      onPress={() => {
+                        setSelectedLocation(location.name.toUpperCase());
+                        setSelectedLocationName(`${location.name} (${location.province})`);
+                        setLocationPickerVisible(false);
+                      }}
+                    >
+                      <Text style={[styles.pickerModalItemText, { color: colors.text }]}>
+                        {location.name} ({location.province})
+                      </Text>
+                      {selectedLocation === location.name.toUpperCase() && (
+                        <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </Pressable>
+          </Modal>
           
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.primary }]}>Ownership</Text>
             
             <View style={styles.inputGroup}>
               <Text style={[styles.inputLabel, { color: colors.text }]}>Owner Type</Text>
-              <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Picker
-                  selectedValue={ownerType}
-                  onValueChange={setOwnerType}
-                  style={[styles.picker, { color: colors.text }]}
-                >
-                  <Picker.Item label="Organization" value="organization" color={colors.text} />
-                  <Picker.Item label="Customer" value="customer" color={colors.text} />
-                  <Picker.Item label="External Company" value="external" color={colors.text} />
-                </Picker>
-              </View>
+              <TouchableOpacity 
+                style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={() => setOwnerTypePickerVisible(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.pickerButtonText, { color: colors.text }]}>
+                  {ownerType === 'organization' ? 'Organization' : ownerType === 'customer' ? 'Customer' : 'External Company'}
+                </Text>
+                <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
             </View>
+
+            {ownerType === 'organization' && (
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>Ownership</Text>
+                {ownershipValuesLoading ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="small" color={colors.primary} />
+                    <Text style={[styles.loadingText, { color: colors.text }]}>Loading ownership options...</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity 
+                    style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    onPress={() => setOwnershipPickerVisible(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.pickerButtonText, { color: selectedOwnership ? colors.text : colors.textSecondary }]}>
+                      {selectedOwnership || 'Select ownership...'}
+                    </Text>
+                    <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
 
             {ownerType === 'customer' && (
               <View style={styles.inputGroup}>
@@ -356,18 +541,16 @@ export default function EditCylinderScreen() {
                 ) : customersError ? (
                   <Text style={[styles.error, { color: colors.error }]}>{customersError}</Text>
                 ) : (
-                  <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                    <Picker
-                      selectedValue={ownerCustomerId}
-                      onValueChange={setOwnerCustomerId}
-                      style={[styles.picker, { color: colors.text }]}
-                    >
-                      <Picker.Item label="Select a customer..." value="" color={colors.textSecondary} />
-                      {customers.map(c => (
-                        <Picker.Item key={c.CustomerListID} label={c.name} value={c.CustomerListID} color={colors.text} />
-                      ))}
-                    </Picker>
-                  </View>
+                  <TouchableOpacity 
+                    style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    onPress={() => setCustomerPickerVisible(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.pickerButtonText, { color: ownerCustomerId ? colors.text : colors.textSecondary }]}>
+                      {ownerCustomerId ? customers.find(c => c.CustomerListID === ownerCustomerId)?.name || 'Select a customer...' : 'Select a customer...'}
+                    </Text>
+                    <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
+                  </TouchableOpacity>
                 )}
               </View>
             )}
@@ -385,15 +568,6 @@ export default function EditCylinderScreen() {
                 />
               </View>
             )}
-
-            <View style={styles.inputGroup}>
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Current Ownership</Text>
-              <View style={[styles.currentOwnershipDisplay, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Text style={[styles.currentOwnershipText, { color: colors.textSecondary }]}>
-                  {getCurrentOwnershipText()}
-                </Text>
-              </View>
-            </View>
           </View>
 
           <TouchableOpacity
@@ -410,78 +584,157 @@ export default function EditCylinderScreen() {
           {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
         </ScrollView>
       )}
-      {loading && step === 1 && <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 20 }} />}
-      {/* Scanner Modal */}
-      {scannerVisible && (
-        <View style={styles.scannerModal}>
-          {/* Close Button */}
-          <TouchableOpacity 
-            style={styles.scannerCloseButton}
-            onPress={() => setScannerVisible(false)}
-          >
-            <Text style={styles.scannerCloseIcon}>✕</Text>
-          </TouchableOpacity>
-          
-          {!permission ? (
-            <Text style={{ color: '#fff' }}>Requesting camera permission...</Text>
-          ) : !permission.granted ? (
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ color: '#fff', marginBottom: 16 }}>Camera access is required to scan barcodes</Text>
-              <TouchableOpacity onPress={async () => {
-                const result = await requestPermission();
-                if (!result.granted && result.canAskAgain === false) {
-                  Alert.alert(
-                    'Camera Permission',
-                    'Please enable camera access in your device settings to use the scanner.',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Open Settings', onPress: () => Linking.openSettings() }
-                    ]
-                  );
-                }
-              }} style={{ backgroundColor: colors.primary, padding: 16, borderRadius: 10 }}>
-                <Text style={{ color: colors.surface, fontWeight: 'bold' }}>Continue</Text>
+      {/* Scanbot Scanner Modal */}
+      <Modal visible={scannerVisible} animationType="slide" transparent={false}>
+        <MLKitScanner
+          onBarcodeScanned={(data: string, result?: { format: string; confidence: number }) => {
+            if (!scanned && data) {
+              logger.log('📷 MLKit: Barcode scanned in EditCylinderScreen:', data, result?.format);
+              handleBarcodeScanned(data);
+            }
+          }}
+          enabled={!scanned && scannerVisible}
+          onClose={() => {
+            setScannerVisible(false);
+            setScanned(false);
+          }}
+          title="Scan Cylinder Barcode"
+          subtitle="Point camera at barcode"
+        />
+      </Modal>
+
+      {/* Owner Type Picker Modal */}
+      <Modal
+        visible={ownerTypePickerVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setOwnerTypePickerVisible(false)}
+      >
+        <Pressable 
+          style={styles.modalOverlay}
+          onPress={() => setOwnerTypePickerVisible(false)}
+        >
+          <View style={[styles.pickerModal, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
+            <View style={[styles.pickerModalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Owner Type</Text>
+              <TouchableOpacity onPress={() => setOwnerTypePickerVisible(false)}>
+                <Text style={[styles.pickerModalClose, { color: colors.primary }]}>Done</Text>
               </TouchableOpacity>
             </View>
-          ) : (
-            <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
-              <CameraView
-                style={{ width: '100%', height: '100%' }}
-                facing="back"
-                enableTorch={flashEnabled}
-                onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
-                barcodeScannerEnabled={true}
-                barcodeScannerSettings={{}}
-              />
-              {/* Overlay border rectangle */}
-              <View style={{
-                position: 'absolute',
-                top: '30%',
-                left: '5%',
-                width: '90%',
-                height: '18%',
-                borderWidth: 3,
-                borderColor: colors.primary,
-                borderRadius: 18,
-                backgroundColor: 'rgba(0,0,0,0.0)',
-                zIndex: 10,
-              }} />
-              
-              {/* Flash Toggle Button */}
+            <ScrollView style={styles.pickerModalScroll}>
+              {[
+                { label: 'Organization', value: 'organization' },
+                { label: 'Customer', value: 'customer' },
+                { label: 'External Company', value: 'external' }
+              ].map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[styles.pickerModalItem, { borderBottomColor: colors.border }]}
+                  onPress={() => {
+                    setOwnerType(option.value as 'organization' | 'customer' | 'external');
+                    setOwnerTypePickerVisible(false);
+                  }}
+                >
+                  <Text style={[styles.pickerModalItemText, { color: colors.text }]}>
+                    {option.label}
+                  </Text>
+                  {ownerType === option.value && (
+                    <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Customer Picker Modal */}
+      <Modal
+        visible={customerPickerVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setCustomerPickerVisible(false)}
+      >
+        <Pressable 
+          style={styles.modalOverlay}
+          onPress={() => setCustomerPickerVisible(false)}
+        >
+          <View style={[styles.pickerModal, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
+            <View style={[styles.pickerModalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Customer</Text>
+              <TouchableOpacity onPress={() => setCustomerPickerVisible(false)}>
+                <Text style={[styles.pickerModalClose, { color: colors.primary }]}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.pickerModalScroll}>
+              {customers.map((customer) => (
+                <TouchableOpacity
+                  key={customer.CustomerListID}
+                  style={[styles.pickerModalItem, { borderBottomColor: colors.border }]}
+                  onPress={() => {
+                    setOwnerCustomerId(customer.CustomerListID);
+                    setCustomerPickerVisible(false);
+                  }}
+                >
+                  <Text style={[styles.pickerModalItemText, { color: colors.text }]}>
+                    {customer.name}
+                  </Text>
+                  {ownerCustomerId === customer.CustomerListID && (
+                    <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Ownership Picker Modal (when Owner Type is Organization) */}
+      <Modal
+        visible={ownershipPickerVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setOwnershipPickerVisible(false)}
+      >
+        <Pressable 
+          style={styles.modalOverlay}
+          onPress={() => setOwnershipPickerVisible(false)}
+        >
+          <View style={[styles.pickerModal, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
+            <View style={[styles.pickerModalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Ownership</Text>
+              <TouchableOpacity onPress={() => setOwnershipPickerVisible(false)}>
+                <Text style={[styles.pickerModalClose, { color: colors.primary }]}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.pickerModalScroll}>
               <TouchableOpacity
-                style={styles.flashButton}
-                onPress={() => setFlashEnabled(!flashEnabled)}
+                style={[styles.pickerModalItem, { borderBottomColor: colors.border }]}
+                onPress={() => {
+                  setSelectedOwnership('');
+                  setOwnershipPickerVisible(false);
+                }}
               >
-                <Ionicons 
-                  name={flashEnabled ? 'flash' : 'flash-off'} 
-                  size={28} 
-                  color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
-                />
+                <Text style={[styles.pickerModalItemText, { color: colors.textSecondary }]}>(None)</Text>
+                {!selectedOwnership && <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>}
               </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      )}
+              {ownershipValues.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.pickerModalItem, { borderBottomColor: colors.border }]}
+                  onPress={() => {
+                    setSelectedOwnership(item.value);
+                    setOwnershipPickerVisible(false);
+                  }}
+                >
+                  <Text style={[styles.pickerModalItemText, { color: colors.text }]}>{item.value}</Text>
+                  {selectedOwnership === item.value && <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -490,10 +743,38 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  backButton: {
+    padding: 8,
+    marginLeft: -8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 8,
+  },
+  headerRight: {
+    width: 40, // Same width as back button to center title
+  },
   scrollContent: {
     padding: 20,
     paddingTop: 20,
     paddingBottom: 40,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
   },
   stepTitle: {
     fontSize: 18,
@@ -539,26 +820,9 @@ const styles = StyleSheet.create({
     height: 56,
     width: '100%',
   },
-  loadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-    borderRadius: 12,
-  },
   loadingText: {
     fontWeight: '600',
     marginLeft: 8,
-  },
-  currentOwnershipDisplay: {
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    minHeight: 56,
-    justifyContent: 'center',
-  },
-  currentOwnershipText: {
-    fontSize: 16,
   },
   nextButton: {
     paddingVertical: 18,
@@ -593,10 +857,54 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 100,
   },
-  flashButton: {
+  fullscreenWrapper: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullscreenCamera: {
+    width: width,
+    height: height,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+  },
+  cameraOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 120,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    paddingTop: 150,
+  },
+  scanFrame: {
+    width: 320,
+    height: 150,
+    borderWidth: 2,
+    borderColor: '#fff',
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+  },
+  closeCameraButton: {
     position: 'absolute',
     top: 50,
     right: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 8,
+    zIndex: 1000,
+  },
+  closeCameraText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  flashButton: {
+    position: 'absolute',
+    top: 50,
+    right: 100,
     backgroundColor: 'rgba(0,0,0,0.5)',
     padding: 12,
     borderRadius: 8,
@@ -605,6 +913,32 @@ const styles = StyleSheet.create({
     height: 52,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  cameraLoadingText: {
+    color: '#fff',
+    fontSize: 18,
+    textAlign: 'center',
+    marginTop: 100,
+  },
+  errorText: {
+    color: '#ff6b6b',
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 20,
+    padding: 10,
+  },
+  settingsButton: {
+    backgroundColor: '#007AFF',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 20,
+    marginHorizontal: 20,
+  },
+  settingsButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
   scannerCloseButton: {
     position: 'absolute',
@@ -633,5 +967,88 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 14,
+  },
+  suggestionsContainer: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 4,
+    maxHeight: 150,
+    zIndex: 1000,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  suggestionItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+  },
+  suggestionText: {
+    fontSize: 14,
+  },
+  // Picker Modal styles
+  pickerButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+    minHeight: 50,
+  },
+  pickerButtonText: {
+    fontSize: 16,
+    flex: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  pickerModal: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+    minHeight: 300,
+  },
+  pickerModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+  },
+  pickerModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  pickerModalClose: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  pickerModalScroll: {
+    maxHeight: 400,
+  },
+  pickerModalItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+  },
+  pickerModalItemText: {
+    fontSize: 16,
+    flex: 1,
+  },
+  pickerModalCheck: {
+    fontSize: 18,
+    fontWeight: 'bold',
   },
 }); 

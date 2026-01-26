@@ -54,6 +54,7 @@ export default function CylinderDetailsScreen() {
       setCylinder(cyl);
       
       // Fetch customer info if cylinder is assigned to a customer
+      // Check both assigned_customer and customer_name fields
       if (cyl.assigned_customer) {
         const { data: cust, error: custErr } = await supabase
           .from('customers')
@@ -67,7 +68,15 @@ export default function CylinderDetailsScreen() {
         if (!custErr && cust) {
           logger.log('✅ Customer found:', cust.name);
           setCustomer(cust);
+        } else if (cyl.customer_name) {
+          // Fallback: Use customer_name from bottle if customer lookup fails
+          logger.log('⚠️ Customer lookup failed, using customer_name from bottle:', cyl.customer_name);
+          setCustomer({ name: cyl.customer_name, CustomerListID: cyl.assigned_customer || '' });
         }
+      } else if (cyl.customer_name) {
+        // If no assigned_customer but customer_name exists, use it
+        logger.log('📋 Using customer_name from bottle:', cyl.customer_name);
+        setCustomer({ name: cyl.customer_name, CustomerListID: '' });
       }
       
       setLoading(false);
@@ -170,6 +179,27 @@ export default function CylinderDetailsScreen() {
             </View>
           </View>
         </View>
+        
+        {customer && (
+          <View style={styles.infoRow}>
+            <Text style={[styles.label, { color: colors.text }]}>
+              {cylinder.status === 'rented' ? 'Rented To:' : 'Assigned To:'}
+            </Text>
+            <Text style={[styles.value, { color: colors.textSecondary, fontWeight: cylinder.status === 'rented' ? '600' : '400' }]}>
+              {customer.name}
+            </Text>
+          </View>
+        )}
+        {!customer && cylinder.customer_name && (
+          <View style={styles.infoRow}>
+            <Text style={[styles.label, { color: colors.text }]}>
+              {cylinder.status === 'rented' ? 'Rented To:' : 'Assigned To:'}
+            </Text>
+            <Text style={[styles.value, { color: colors.textSecondary, fontWeight: cylinder.status === 'rented' ? '600' : '400' }]}>
+              {cylinder.customer_name}
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* Location Information */}
@@ -195,11 +225,15 @@ export default function CylinderDetailsScreen() {
       {/* Customer Assignment */}
       {customer && (
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.primary }]}>Assigned Customer</Text>
+          <Text style={[styles.sectionTitle, { color: colors.primary }]}>
+            {cylinder.status === 'rented' ? 'Currently Rented To' : 'Assigned Customer'}
+          </Text>
           
           <View style={styles.infoRow}>
             <Text style={[styles.label, { color: colors.text }]}>Customer Name:</Text>
-            <Text style={[styles.value, { color: colors.textSecondary }]}>{customer.name}</Text>
+            <Text style={[styles.value, { color: colors.textSecondary, fontWeight: cylinder.status === 'rented' ? '600' : '400' }]}>
+              {customer.name}
+            </Text>
           </View>
           
           <View style={styles.infoRow}>

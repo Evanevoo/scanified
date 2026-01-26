@@ -363,6 +363,24 @@ export default function SettingsScreen() {
           />
         </View>
 
+        {/* Testing */}
+        <SectionHeader title="TESTING" />
+        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <SettingItem
+            title="Enhanced Scanner Tests"
+            subtitle="Test enterprise-grade scanner features"
+            onPress={() => navigation.navigate('EnhancedScannerTest')}
+            rightComponent={<Text style={styles.chevron}>›</Text>}
+          />
+          <SettingItem
+            title="Scanbot SDK Test"
+            subtitle="Code 39 packing slips & sales receipts"
+            onPress={() => navigation.navigate('ScanbotTest')}
+            rightComponent={<Text style={styles.chevron}>›</Text>}
+            showBorder={false}
+          />
+        </View>
+
         {/* Support & Info */}
         <SectionHeader title="SUPPORT & INFO" />
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>

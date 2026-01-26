@@ -2,17 +2,47 @@ import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, 
-  Modal, Alert, ScrollView, FlatList, SafeAreaView, Linking, Vibration 
+  Modal, Alert, ScrollView, FlatList, SafeAreaView, Linking, Vibration, TextInput, Pressable, Dimensions 
 } from 'react-native';
 import { supabase } from '../supabase';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
+import Constants from 'expo-constants';
 import { useTheme } from '../context/ThemeContext';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
 import { useSettings } from '../context/SettingsContext';
 import { feedbackService } from '../services/feedbackService';
+import { soundService } from '../services/soundService';
+
+// Check if Vision Camera is available (requires native modules)
+let visionCameraAvailable = false;
+let VisionCameraScanner: any = null;
+
+// Only check for Vision Camera if not in Expo Go
+const isExpoGo = Constants.executionEnvironment === 'storeClient' || Constants.appOwnership === 'expo';
+const { width, height } = Dimensions.get('window');
+
+if (!isExpoGo) {
+  try {
+    require('react-native-vision-camera');
+    visionCameraAvailable = true;
+    
+    try {
+      VisionCameraScanner = require('../components/VisionCameraScanner').default;
+      logger.log('✅ Vision Camera scanner available');
+    } catch (error) {
+      logger.log('⚠️ VisionCameraScanner component not available:', error);
+      visionCameraAvailable = false;
+    }
+  } catch (error) {
+    logger.log('⚠️ Vision Camera not available (requires native build)');
+    visionCameraAvailable = false;
+  }
+} else {
+  logger.log('ℹ️ Running in Expo Go - Vision Camera not available (requires native build)');
+}
 
 interface Location {
   id: string;
@@ -26,10 +56,11 @@ interface ScannedBottle {
   gas_type?: string;
   group_name?: string;
   previousStatus?: string;
+  previousLocation?: string;
   scannedAt: Date;
 }
 
-type StatusType = 'empty' | 'filled';
+type StatusType = 'empty' | 'full';
 
 export default function FillCylinderScreen() {
   const { colors } = useTheme();
@@ -56,7 +87,13 @@ export default function FillCylinderScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
   const [lastScannedBarcode, setLastScannedBarcode] = useState<string>('');
+  const [cameraZoom, setCameraZoom] = useState(0); // Zoom level (0 = no zoom, max 2x)
+  const [focusTrigger, setFocusTrigger] = useState(0); // Used to trigger autofocus on tap
   const lastScanTimeRef = useRef<number>(0);
+  const lastScannedBarcodeRef = useRef<string>('');
+  const scanCooldownRef = useRef<NodeJS.Timeout | null>(null);
+  const [manualEntryVisible, setManualEntryVisible] = useState(false);
+  const [manualEntryBarcode, setManualEntryBarcode] = useState('');
   
   // Submission
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -65,9 +102,11 @@ export default function FillCylinderScreen() {
 
   // Fetch locations on mount
   useEffect(() => {
+    let isMounted = true;
+    
     const fetchLocations = async () => {
       if (!profile?.organization_id) {
-        setLoadingLocations(false);
+        if (isMounted) setLoadingLocations(false);
         return;
       }
 
@@ -78,6 +117,8 @@ export default function FillCylinderScreen() {
           .eq('organization_id', profile.organization_id)
           .order('name');
 
+        if (!isMounted) return; // Component unmounted, don't update state
+
         if (error) {
           logger.error('Error fetching locations:', error);
           setLocations([]);
@@ -86,12 +127,17 @@ export default function FillCylinderScreen() {
         }
       } catch (err) {
         logger.error('Error fetching locations:', err);
-        setLocations([]);
+        if (isMounted) setLocations([]);
+      } finally {
+        if (isMounted) setLoadingLocations(false);
       }
-      setLoadingLocations(false);
     };
 
     fetchLocations();
+    
+    return () => {
+      isMounted = false;
+    };
   }, [profile?.organization_id]);
 
   // Initialize feedback service
@@ -165,9 +211,58 @@ export default function FillCylinderScreen() {
     setLastScannedBarcode('');
   };
 
+  // Check if barcode is within the visual scan frame
+  const isBarcodeInScanArea = (bounds: any): boolean => {
+    if (!bounds) return true; // Allow if no bounds
+    
+    const scanFrameWidth = 320;
+    const scanFrameHeight = 150;
+    const scanFrameTop = 150;
+    
+    const scanAreaLeft = (width - scanFrameWidth) / 2;
+    const scanAreaTop = scanFrameTop;
+    const scanAreaRight = scanAreaLeft + scanFrameWidth;
+    const scanAreaBottom = scanAreaTop + scanFrameHeight;
+    
+    const barcodeX = bounds.origin?.x || bounds.x || 0;
+    const barcodeY = bounds.origin?.y || bounds.y || 0;
+    const barcodeWidth = bounds.size?.width || bounds.width || 0;
+    const barcodeHeight = bounds.size?.height || bounds.height || 0;
+    
+    const barcodeCenterX = barcodeX + (barcodeWidth / 2);
+    const barcodeCenterY = barcodeY + (barcodeHeight / 2);
+    
+    let screenBarcodeX: number;
+    let screenBarcodeY: number;
+    
+    if (barcodeCenterX <= 1 && barcodeCenterY <= 1) {
+      screenBarcodeX = barcodeCenterX * width;
+      screenBarcodeY = barcodeCenterY * height;
+    } else {
+      screenBarcodeX = barcodeCenterX;
+      screenBarcodeY = barcodeCenterY;
+    }
+    
+    const toleranceX = scanFrameWidth * 0.1;
+    const toleranceY = scanFrameHeight * 0.1;
+    
+    return (
+      screenBarcodeX >= (scanAreaLeft - toleranceX) &&
+      screenBarcodeX <= (scanAreaRight + toleranceX) &&
+      screenBarcodeY >= (scanAreaTop - toleranceY) &&
+      screenBarcodeY <= (scanAreaBottom + toleranceY)
+    );
+  };
+
   const handleBarcodeScanned = async (event: any) => {
     const barcode = event?.data?.trim();
     if (!barcode) return;
+
+    // Filter by bounds to ensure barcode is within visual scan frame
+    if (event?.bounds && !isBarcodeInScanArea(event.bounds)) {
+      logger.log('📷 Barcode outside scan area, ignoring');
+      return;
+    }
 
     // Prevent duplicate scans within 1.5 seconds (rapid duplicate prevention)
     const now = Date.now();
@@ -187,6 +282,11 @@ export default function FillCylinderScreen() {
     setLastScannedBarcode(barcode);
     lastScanTimeRef.current = now;
     setIsProcessing(true);
+
+    // Play scan sound
+    soundService.playSound('scan').catch(err => {
+      logger.warn('⚠️ Could not play scan sound:', err);
+    });
 
     try {
       // Look up the bottle in the database - include customer fields
@@ -214,7 +314,7 @@ export default function FillCylinderScreen() {
       }
 
       // Check if scanning as "full" and bottle is still at a customer
-      if (selectedStatus === 'filled') {
+      if (selectedStatus === 'full') {
         const isAtCustomer = bottleData.assigned_customer || bottleData.customer_name;
         
         // If bottle has a customer assignment, show warning
@@ -249,7 +349,11 @@ export default function FillCylinderScreen() {
 
     } catch (err) {
       logger.error('Error processing scan:', err);
-      await feedbackService.provideFeedback('error', { message: 'Scan failed' });
+      try {
+        await feedbackService.provideFeedback('error', { message: 'Scan failed' });
+      } catch (feedbackErr) {
+        logger.warn('Error providing feedback:', feedbackErr);
+      }
       setError('Error processing scan');
       setIsProcessing(false);
     }
@@ -263,6 +367,7 @@ export default function FillCylinderScreen() {
       gas_type: bottleData.gas_type,
       group_name: bottleData.group_name,
       previousStatus: bottleData.status,
+      previousLocation: bottleData.location,
       scannedAt: new Date()
     };
 
@@ -295,74 +400,147 @@ export default function FillCylinderScreen() {
       return;
     }
 
+    if (!selectedStatus) {
+      setError('Please select a status (Full or Empty)');
+      return;
+    }
+
+    if (!selectedLocation) {
+      setError('Please select a location');
+      return;
+    }
+
+    if (!profile?.organization_id) {
+      setError('Organization not found. Please log out and log back in.');
+      return;
+    }
+
     setIsSubmitting(true);
     setError('');
     setSuccess('');
+    
+    // Track if component is still mounted
+    let isMounted = true;
 
     try {
       let successCount = 0;
       let errorCount = 0;
+      let fillRecordFailures = 0;
+      const errorMessages: string[] = [];
 
       for (const bottle of scannedBottles) {
         try {
-          // First, get current bottle data to preserve fill_count
+          // First, get current bottle data to preserve organization_id
           const { data: currentBottle, error: fetchError } = await supabase
             .from('bottles')
-            .select('fill_count, organization_id')
+            .select('organization_id')
             .eq('id', bottle.id)
             .single();
 
           if (fetchError) {
             logger.error(`Failed to fetch bottle ${bottle.barcode_number}:`, fetchError);
+            errorMessages.push(`${bottle.barcode_number}: ${fetchError.message || 'Not found'}`);
+            errorCount++;
+            continue;
+          }
+
+          if (!currentBottle?.organization_id) {
+            logger.error(`Bottle ${bottle.barcode_number} has no organization_id`);
+            errorMessages.push(`${bottle.barcode_number}: Missing organization`);
             errorCount++;
             continue;
           }
 
           // Update bottle status and location
-          const updateData: any = {
-            status: selectedStatus,
-            location: selectedLocation, // This is the location ID
-            last_location_update: new Date().toISOString()
-          };
-
-          // If marking as filled, also update fill count and last filled date
-          if (selectedStatus === 'filled') {
-            updateData.last_filled_date = new Date().toISOString();
-            updateData.fill_count = (currentBottle?.fill_count || 0) + 1;
+          // Location should be stored as name (uppercase with underscores), not ID
+          // Ensure we always have a valid location name - if selectedLocationName is empty, look it up from locations array
+          let locationName = selectedLocationName;
+          if (!locationName && selectedLocation) {
+            const foundLocation = locations.find(l => l.id === selectedLocation);
+            locationName = foundLocation?.name || '';
+            logger.log(`🔍 Looked up location: ID=${selectedLocation}, Name=${locationName}`);
           }
-
-          // Ensure organization_id is included for RLS
-          if (currentBottle?.organization_id) {
-            updateData.organization_id = currentBottle.organization_id;
-          }
-
-          const { error: updateError } = await supabase
-            .from('bottles')
-            .update(updateData)
-            .eq('id', bottle.id)
-            .eq('organization_id', profile?.organization_id || currentBottle?.organization_id);
-
-          if (updateError) {
-            logger.error(`Failed to update ${bottle.barcode_number}:`, updateError);
-            logger.error('Update data was:', updateData);
+          
+          // Validate that we have a location name (should always be set if location was selected)
+          if (!locationName || locationName.trim() === '') {
+            logger.error(`❌ Location name is missing for location ID: ${selectedLocation}`);
+            logger.error(`   selectedLocationName: "${selectedLocationName}"`);
+            logger.error(`   selectedLocation: "${selectedLocation}"`);
+            logger.error(`   locations array length: ${locations.length}`);
+            errorMessages.push(`${bottle.barcode_number}: Location name is missing`);
             errorCount++;
             continue;
           }
+          
+          const formattedLocation = locationName.toUpperCase().replace(/\s+/g, '_');
+          logger.log(`📍 Updating bottle ${bottle.barcode_number} location: "${locationName}" -> "${formattedLocation}"`);
+          
+          const updateData: any = {
+            status: selectedStatus,
+            location: formattedLocation,
+            last_location_update: new Date().toISOString()
+          };
 
-          // Create a status change record for tracking
-          try {
-            await supabase
-              .from('cylinder_fills')
-              .insert({
-                cylinder_id: bottle.id,
-                barcode_number: bottle.barcode_number,
-                fill_date: new Date().toISOString(),
-                filled_by: 'mobile_app',
-                notes: `Bulk ${selectedStatus === 'filled' ? 'fill' : 'empty'} at ${selectedLocationName}`
-              });
-          } catch (fillErr) {
+          // When marking as full or empty, clear customer assignment since bottles are at in-house locations
+          // Note: last_filled_date and fill_count columns may not exist in all databases
+          // If you need fill tracking, add these columns to your database schema:
+          // - last_filled_date (timestamp)
+          // - fill_count (integer)
+          if (selectedStatus === 'full') {
+            // Clear customer assignment - full bottles are at in-house locations
+            updateData.assigned_customer = null;
+            updateData.customer_name = null;
+            // updateData.last_filled_date = new Date().toISOString();
+            // updateData.fill_count = (currentBottle?.fill_count || 0) + 1;
+          } else if (selectedStatus === 'empty') {
+            // Clear customer assignment - empty bottles are returned to in-house locations
+            updateData.assigned_customer = null;
+            updateData.customer_name = null;
+          }
+
+          logger.log(`💾 Updating bottle ${bottle.barcode_number} with data:`, JSON.stringify(updateData, null, 2));
+          
+          const { data: updatedBottle, error: updateError } = await supabase
+            .from('bottles')
+            .update(updateData)
+            .eq('id', bottle.id)
+            .eq('organization_id', profile.organization_id)
+            .select('location, status');
+
+          if (updateError) {
+            logger.error(`❌ Failed to update ${bottle.barcode_number}:`, updateError);
+            logger.error('Update data was:', updateData);
+            logger.error('Organization ID:', profile.organization_id);
+            errorMessages.push(`${bottle.barcode_number}: ${updateError.message || 'Update failed'}`);
+            errorCount++;
+            continue;
+          }
+          
+          if (updatedBottle && updatedBottle.length > 0) {
+            logger.log(`✅ Successfully updated bottle ${bottle.barcode_number}`);
+            logger.log(`   New location: "${updatedBottle[0].location}"`);
+            logger.log(`   New status: "${updatedBottle[0].status}"`);
+          } else {
+            logger.warn(`⚠️ Update succeeded but no data returned for bottle ${bottle.barcode_number}`);
+          }
+
+          // Create a status change record for tracking (enables cancel/revert, Bottles for Day, and Movement History)
+          const { error: fillErr } = await supabase
+            .from('cylinder_fills')
+            .insert({
+              cylinder_id: bottle.id,
+              barcode_number: bottle.barcode_number,
+              fill_date: new Date().toISOString(),
+              filled_by: 'mobile_app',
+              notes: `Bulk ${selectedStatus === 'full' ? 'fill' : 'empty'} at ${selectedLocationName}`,
+              organization_id: profile.organization_id,
+              fill_type: selectedStatus,
+              previous_status: bottle.previousStatus ?? null,
+              previous_location: bottle.previousLocation ?? null
+            });
+          if (fillErr) {
             logger.warn(`Could not create fill record for ${bottle.barcode_number}:`, fillErr);
-            // Non-critical, continue
+            fillRecordFailures++;
           }
 
           successCount++;
@@ -372,36 +550,59 @@ export default function FillCylinderScreen() {
         }
       }
 
+      if (!isMounted) return; // Component unmounted, don't update state
+
       setIsSubmitting(false);
 
       if (successCount > 0) {
-        const statusText = selectedStatus === 'filled' ? 'Full' : 'Empty';
-        setSuccess(`Successfully marked ${successCount} ${assetConfig?.assetTypePlural || 'bottles'} as ${statusText}${errorCount > 0 ? ` (${errorCount} failed)` : ''}`);
+        const statusText = selectedStatus === 'full' ? 'Full' : 'Empty';
+        const fillWarn = fillRecordFailures > 0 ? `\n\n${fillRecordFailures} could not be recorded in Movement History. Ensure the cylinder_fills migration has been run.` : '';
+        if (isMounted) {
+          setSuccess(`Successfully marked ${successCount} ${assetConfig?.assetTypePlural || 'bottles'} as ${statusText}${errorCount > 0 ? ` (${errorCount} failed)` : ''}${fillRecordFailures > 0 ? `. ${fillRecordFailures} not recorded in history.` : ''}`);
+        }
         
         Alert.alert(
           'Success!',
-          `${successCount} ${assetConfig?.assetTypePlural || 'bottles'} marked as ${statusText} at ${selectedLocationName}${errorCount > 0 ? `\n${errorCount} failed` : ''}`,
+          `${successCount} ${assetConfig?.assetTypePlural || 'bottles'} marked as ${statusText} at ${selectedLocationName}${errorCount > 0 ? `\n${errorCount} failed` : ''}${fillWarn}`,
           [
-            { text: 'Scan More', onPress: () => setScannedBottles([]) },
-            { text: 'Done', onPress: resetAll }
+            { text: 'Scan More', onPress: () => isMounted && setScannedBottles([]) },
+            { text: 'Done', onPress: () => isMounted && resetAll() }
           ]
         );
         
-        feedbackService.success('Bulk update complete');
+        await feedbackService.batchComplete(successCount);
       } else {
         const errorMsg = `Failed to update any bottles. ${errorCount > 0 ? `All ${errorCount} updates failed.` : 'Please check your connection and try again.'}`;
-        setError(errorMsg);
-        feedbackService.error('Update failed');
+        const detailedError = errorMessages.length > 0 ? `\n\nErrors:\n${errorMessages.slice(0, 5).join('\n')}${errorMessages.length > 5 ? `\n...and ${errorMessages.length - 5} more` : ''}` : '';
+        if (isMounted) {
+          setError(errorMsg + detailedError);
+        }
+        await feedbackService.provideFeedback('error', { message: 'Update failed' });
         Alert.alert(
           'Update Failed',
-          errorMsg,
+          errorMsg + detailedError,
           [{ text: 'OK' }]
         );
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (!isMounted) return; // Component unmounted, don't update state
+      
       setIsSubmitting(false);
-      setError('An error occurred during submission');
-      feedbackService.error('Submission error');
+      const errorMessage = err?.message || 'An error occurred during submission';
+      logger.error('Submission error:', err);
+      setError(`Error: ${errorMessage}`);
+      
+      try {
+        await feedbackService.provideFeedback('error', { message: 'Submission error' });
+      } catch (feedbackErr) {
+        logger.warn('Error providing feedback:', feedbackErr);
+      }
+      
+      Alert.alert(
+        'Submission Error',
+        errorMessage,
+        [{ text: 'OK' }]
+      );
     }
   };
 
@@ -528,26 +729,26 @@ export default function FillCylinderScreen() {
           style={[
             styles.statusOption,
             { 
-              backgroundColor: selectedStatus === 'filled' ? '#22C55E' : colors.surface,
-              borderColor: selectedStatus === 'filled' ? '#22C55E' : colors.border
+              backgroundColor: selectedStatus === 'full' ? '#22C55E' : colors.surface,
+              borderColor: selectedStatus === 'full' ? '#22C55E' : colors.border
             }
           ]}
-          onPress={() => handleStatusSelect('filled')}
+          onPress={() => handleStatusSelect('full')}
         >
           <Ionicons 
             name="cube" 
             size={48} 
-            color={selectedStatus === 'filled' ? '#fff' : '#22C55E'} 
+            color={selectedStatus === 'full' ? '#fff' : '#22C55E'} 
           />
           <Text style={[
             styles.statusOptionText, 
-            { color: selectedStatus === 'filled' ? '#fff' : colors.text }
+            { color: selectedStatus === 'full' ? '#fff' : colors.text }
           ]}>
             Full
           </Text>
           <Text style={[
             styles.statusOptionSubtext, 
-            { color: selectedStatus === 'filled' ? '#fff' : colors.textSecondary }
+            { color: selectedStatus === 'full' ? '#fff' : colors.textSecondary }
           ]}>
             Mark as filled/ready
           </Text>
@@ -567,7 +768,7 @@ export default function FillCylinderScreen() {
         <View>
           <Text style={[styles.stepTitle, { color: colors.text }]}>Scan {assetConfig?.assetTypePlural || 'Bottles'}</Text>
           <Text style={[styles.stepSubtitle, { color: colors.textSecondary }]}>
-            Scan multiple {assetConfig?.assetTypePlural || 'bottles'} to mark as {selectedStatus === 'filled' ? 'Full' : 'Empty'}
+            Scan multiple {assetConfig?.assetTypePlural || 'bottles'} to mark as {selectedStatus === 'full' ? 'Full' : 'Empty'}
           </Text>
         </View>
         <View style={[styles.countBadge, { backgroundColor: colors.primary }]}>
@@ -584,12 +785,12 @@ export default function FillCylinderScreen() {
         <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
         <View style={styles.summaryItem}>
           <Ionicons 
-            name={selectedStatus === 'filled' ? 'cube' : 'cube-outline'} 
+            name={selectedStatus === 'full' ? 'cube' : 'cube-outline'} 
             size={16} 
-            color={selectedStatus === 'filled' ? '#22C55E' : '#F59E0B'} 
+            color={selectedStatus === 'full' ? '#22C55E' : '#F59E0B'} 
           />
           <Text style={[styles.summaryItemText, { color: colors.text }]}>
-            {selectedStatus === 'filled' ? 'Full' : 'Empty'}
+            {selectedStatus === 'full' ? 'Full' : 'Empty'}
           </Text>
         </View>
       </View>
@@ -604,6 +805,17 @@ export default function FillCylinderScreen() {
           <Text style={styles.scanButtonText}>
             {scannedBottles.length > 0 ? 'Scan More' : 'Start Scanning'}
           </Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Manual Entry Option */}
+      {!scannerVisible && (
+        <TouchableOpacity
+          style={[styles.manualEntryButton, { borderColor: colors.border }]}
+          onPress={() => setManualEntryVisible(true)}
+        >
+          <Ionicons name="keypad-outline" size={20} color={colors.text} />
+          <Text style={[styles.manualEntryText, { color: colors.text }]}>Enter Barcode Manually</Text>
         </TouchableOpacity>
       )}
 
@@ -700,7 +912,7 @@ export default function FillCylinderScreen() {
               <>
                 <Ionicons name="checkmark-circle" size={24} color="#fff" />
                 <Text style={styles.submitButtonText}>
-                  Save: Mark {scannedBottles.length} as {selectedStatus === 'filled' ? 'Full' : 'Empty'}
+                  Save: Mark {scannedBottles.length} as {selectedStatus === 'full' ? 'Full' : 'Empty'}
                 </Text>
               </>
             )}
@@ -758,95 +970,142 @@ export default function FillCylinderScreen() {
         transparent={false}
         onRequestClose={() => setScannerVisible(false)}
       >
-        <View style={styles.scannerContainer}>
-          <CameraView
-            style={styles.camera}
-            facing="back"
-            enableTorch={flashEnabled}
-            barcodeScannerSettings={{}}
-            onBarcodeScanned={handleBarcodeScanned}
-          />
-
-          {/* Scanner Overlay */}
-          <View style={styles.scannerOverlay}>
-            {/* Top dark area */}
-            <View style={styles.overlayTop}>
-              <SafeAreaView>
-                <View style={styles.scannerHeader}>
-                  <TouchableOpacity
-                    style={styles.closeButton}
-                    onPress={() => {
-                      setScannerVisible(false);
-                      // If no bottles scanned, go back to step 2
-                      if (scannedBottles.length === 0) {
-                        setCurrentStep(2);
-                      }
-                    }}
-                  >
-                    <Ionicons name="close" size={28} color="#fff" />
-                  </TouchableOpacity>
-                  <View style={styles.scannerInfo}>
-                    <Text style={styles.scannerTitle}>Scan {assetConfig?.assetTypePlural || 'Bottles'}</Text>
-                    <Text style={styles.scannerSubtitle}>
-                      {selectedLocationName} • {selectedStatus === 'filled' ? 'Full' : 'Empty'}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.flashButton}
-                    onPress={() => setFlashEnabled(!flashEnabled)}
-                  >
-                    <Ionicons 
-                      name={flashEnabled ? 'flash' : 'flash-off'} 
-                      size={24} 
-                      color={flashEnabled ? '#FFD700' : '#fff'} 
-                    />
-                  </TouchableOpacity>
-                </View>
-              </SafeAreaView>
-            </View>
-
-            {/* Scan frame area */}
-            <View style={styles.scanFrameContainer}>
-              <View style={styles.scanFrameSide} />
-              <View style={styles.scanFrame}>
-                <View style={[styles.scanCorner, styles.scanCornerTL]} />
-                <View style={[styles.scanCorner, styles.scanCornerTR]} />
-                <View style={[styles.scanCorner, styles.scanCornerBL]} />
-                <View style={[styles.scanCorner, styles.scanCornerBR]} />
+        <View style={styles.fullscreenWrapper}>
+          <>
+            <Pressable 
+              style={styles.fullscreenCamera}
+              onPress={(event) => {
+                // Tap to focus - Android Expo Camera handles this automatically
+              }}
+            >
+                <CameraView
+                  style={StyleSheet.absoluteFill}
+                  facing="back"
+                  enableTorch={flashEnabled}
+                  zoom={cameraZoom}
+                  barcodeScannerSettings={{
+                    barcodeTypes: ['code128', 'code39', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14', 'qr', 'aztec', 'datamatrix', 'pdf417'],
+                    regionOfInterest: {
+                      x: (width - 320) / 2 / width,
+                      y: 150 / height,
+                      width: 320 / width,
+                      height: 150 / height,
+                    },
+                  }}
+                  onBarcodeScanned={scannerVisible && !isProcessing ? (event: any) => {
+                    handleBarcodeScanned(event);
+                  } : undefined}
+                />
+              </Pressable>
+              {/* Camera overlay - same as HomeScreen */}
+              <View style={styles.cameraOverlay} pointerEvents="none">
+                <View style={styles.scanFrame} pointerEvents="none" />
               </View>
-              <View style={styles.scanFrameSide} />
-            </View>
-
-
-            {/* Bottom area with count */}
-            <View style={styles.overlayBottom}>
-              {isProcessing && (
-                <View style={styles.processingIndicator}>
-                  <ActivityIndicator color="#fff" size="small" />
-                  <Text style={styles.processingText}>Processing...</Text>
-                </View>
-              )}
-              
-              <View style={[styles.scannedCountCard, { backgroundColor: colors.primary }]}>
-                <Ionicons name="cube-outline" size={28} color="#fff" />
-                <Text style={styles.scannedCountText}>
-                  {scannedBottles.length} {scannedBottles.length === 1 ? 'Bottle' : 'Bottles'} Scanned
-                </Text>
-              </View>
-
-              {lastScannedBarcode && (
-                <Text style={styles.lastScannedText}>
-                  Last: {lastScannedBarcode}
-                </Text>
-              )}
-
               <TouchableOpacity
-                style={styles.doneButton}
-                onPress={() => setScannerVisible(false)}
+                style={styles.closeCameraButton}
+                onPress={() => {
+                  setScannerVisible(false);
+                  if (scannedBottles.length === 0) setCurrentStep(2);
+                }}
               >
-                <Text style={styles.doneButtonText}>
-                  {scannedBottles.length > 0 ? 'Done Scanning' : 'Close Scanner'}
-                </Text>
+                <Text style={styles.closeCameraText}>✕ Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.scannerFlashButton}
+                onPress={() => setFlashEnabled(!flashEnabled)}
+              >
+                <Ionicons name={flashEnabled ? 'flash' : 'flash-off'} size={28} color={flashEnabled ? '#FFD700' : '#FFFFFF'} />
+              </TouchableOpacity>
+
+              {/* Zoom Controls */}
+              <View style={styles.zoomControls}>
+                <TouchableOpacity
+                  style={styles.zoomButton}
+                  onPress={() => {
+                    setCameraZoom(Math.max(0, cameraZoom - 0.1));
+                  }}
+                >
+                  <Ionicons name="remove-outline" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+                <Text style={styles.zoomText}>{Math.round((1 + cameraZoom) * 100)}%</Text>
+                <TouchableOpacity
+                  style={styles.zoomButton}
+                  onPress={() => {
+                    setCameraZoom(Math.min(2, cameraZoom + 0.1));
+                  }}
+                >
+                  <Ionicons name="add-outline" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Locate-specific bottom bar */}
+              <View style={styles.locateBottomBar} pointerEvents="box-none">
+                {isProcessing && (
+                  <View style={styles.processingIndicator}>
+                    <ActivityIndicator color="#fff" size="small" />
+                    <Text style={styles.processingText}>Processing...</Text>
+                  </View>
+                )}
+                <View style={[styles.scannedCountCard, { backgroundColor: colors.primary }]}>
+                  <Ionicons name="cube-outline" size={28} color="#fff" />
+                  <Text style={styles.scannedCountText}>
+                    {scannedBottles.length} {scannedBottles.length === 1 ? 'Bottle' : 'Bottles'} Scanned
+                  </Text>
+                </View>
+                {lastScannedBarcode ? <Text style={styles.lastScannedText}>Last: {lastScannedBarcode}</Text> : null}
+                <TouchableOpacity style={styles.doneButton} onPress={() => setScannerVisible(false)}>
+                  <Text style={styles.doneButtonText}>{scannedBottles.length > 0 ? 'Done Scanning' : 'Close Scanner'}</Text>
+                </TouchableOpacity>
+              </View>
+          </>
+        </View>
+      </Modal>
+
+      {/* Manual Entry Modal */}
+      <Modal
+        visible={manualEntryVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setManualEntryVisible(false);
+          setManualEntryBarcode('');
+        }}
+      >
+        <View style={styles.manualEntryModalOverlay}>
+          <View style={[styles.manualEntryModal, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.manualEntryTitle, { color: colors.text }]}>Enter Barcode</Text>
+            <TextInput
+              style={[styles.manualEntryInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.text }]}
+              placeholder="Enter barcode number"
+              placeholderTextColor={colors.textSecondary}
+              value={manualEntryBarcode}
+              onChangeText={setManualEntryBarcode}
+              autoCapitalize="none"
+              autoFocus={true}
+              keyboardType="default"
+            />
+            <View style={styles.manualEntryButtons}>
+              <TouchableOpacity
+                style={[styles.manualEntryCancelButton, { borderColor: colors.border }]}
+                onPress={() => {
+                  setManualEntryVisible(false);
+                  setManualEntryBarcode('');
+                }}
+              >
+                <Text style={[styles.manualEntryButtonText, { color: colors.text }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.manualEntrySubmitButton, { backgroundColor: colors.primary }]}
+                onPress={() => {
+                  if (manualEntryBarcode && manualEntryBarcode.trim()) {
+                    handleBarcodeScanned({ data: manualEntryBarcode.trim() });
+                    setManualEntryVisible(false);
+                    setManualEntryBarcode('');
+                  }
+                }}
+                disabled={!manualEntryBarcode || !manualEntryBarcode.trim()}
+              >
+                <Text style={styles.manualEntryButtonText}>Add</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1193,103 +1452,109 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 
-  // Scanner Modal
-  scannerContainer: {
+  // Scanner Modal - same layout as HomeScreen
+  fullscreenWrapper: {
     flex: 1,
     backgroundColor: '#000',
-  },
-  camera: {
-    flex: 1,
-  },
-  scannerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  overlayTop: {
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingBottom: 20,
-  },
-  scannerHeader: {
-    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 8,
   },
-  closeButton: {
-    padding: 8,
+  fullscreenCamera: {
+    width: width,
+    height: height,
+    position: 'absolute',
+    top: 0,
+    left: 0,
   },
-  scannerInfo: {
+  cameraOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 120,
+    justifyContent: 'flex-start',
     alignItems: 'center',
-    flex: 1,
-  },
-  scannerTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  scannerSubtitle: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 14,
-    marginTop: 4,
-  },
-  flashButton: {
-    padding: 8,
-  },
-  
-  // Scan Frame
-  scanFrameContainer: {
-    flexDirection: 'row',
-    flex: 1,
-  },
-  scanFrameSide: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingTop: 150,
   },
   scanFrame: {
-    width: 280,
+    width: 320,
     height: 150,
-    position: 'relative',
+    borderWidth: 2,
+    borderColor: '#fff',
+    borderRadius: 8,
+    backgroundColor: 'transparent',
   },
-  scanCorner: {
+  closeCameraButton: {
     position: 'absolute',
-    width: 30,
-    height: 30,
-    borderColor: '#22C55E',
+    top: 50,
+    right: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 8,
+    zIndex: 1000,
   },
-  scanCornerTL: {
-    top: 0,
-    left: 0,
-    borderTopWidth: 4,
-    borderLeftWidth: 4,
-    borderTopLeftRadius: 8,
+  closeCameraText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
-  scanCornerTR: {
-    top: 0,
-    right: 0,
-    borderTopWidth: 4,
-    borderRightWidth: 4,
-    borderTopRightRadius: 8,
+  scannerFlashButton: {
+    position: 'absolute',
+    top: 50,
+    right: 100,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 8,
+    zIndex: 1000,
+    width: 52,
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  scanCornerBL: {
+  zoomControls: {
+    position: 'absolute',
+    bottom: 180,
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 25,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    zIndex: 1001,
+  },
+  zoomButton: {
+    padding: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginHorizontal: 12,
+    minWidth: 50,
+    textAlign: 'center',
+  },
+  locateBottomBar: {
+    position: 'absolute',
     bottom: 0,
     left: 0,
-    borderBottomWidth: 4,
-    borderLeftWidth: 4,
-    borderBottomLeftRadius: 8,
-  },
-  scanCornerBR: {
-    bottom: 0,
     right: 0,
-    borderBottomWidth: 4,
-    borderRightWidth: 4,
-    borderBottomRightRadius: 8,
-  },
-
-  overlayBottom: {
     backgroundColor: 'rgba(0,0,0,0.6)',
     paddingTop: 20,
     paddingBottom: 40,
     alignItems: 'center',
+  },
+  scannerToggleButton: {
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: 8,
+    borderRadius: 8,
+    marginTop: 12,
+  },
+  scannerToggleText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   processingIndicator: {
     flexDirection: 'row',
@@ -1337,5 +1602,68 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  manualEntryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  manualEntryText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  manualEntryModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  manualEntryModal: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 16,
+    padding: 24,
+  },
+  manualEntryTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  manualEntryInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 14,
+    fontSize: 16,
+    marginBottom: 20,
+  },
+  manualEntryButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  manualEntryCancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  manualEntrySubmitButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  manualEntryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import { AudioPlayer } from 'expo-audio';
+import { AudioPlayer, setAudioModeAsync } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
 import { customizationService } from './customizationService';
@@ -18,6 +18,9 @@ export type FeedbackType =
   | 'warning'          // Warning notification
   | 'info'            // Information notification
   | 'start_batch'      // Starting batch mode
+  | 'batch_progress'   // Batch scanning progress (light haptic)
+  | 'low_confidence'   // Low confidence scan detected
+  | 'multi_barcode'    // Multiple barcodes detected
   | 'quick_action';    // Quick action performed
 
 export interface FeedbackSettings {
@@ -48,8 +51,17 @@ class FeedbackService {
       // Initialize customization service
       await customizationService.initialize();
       
-      // Note: expo-audio handles audio session configuration automatically
-      // No need to manually configure audio mode
+      // Configure audio mode for Android (required for sound playback)
+      try {
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          interruptionMode: 'mixWithOthers',
+        });
+        logger.log('🔊 Audio mode configured for Android');
+      } catch (audioModeError) {
+        logger.warn('⚠️ Could not configure audio mode:', audioModeError);
+        // Continue anyway - might work without it
+      }
 
       // Preload sound effects
       await this.preloadSounds();
@@ -68,9 +80,9 @@ class FeedbackService {
     logger.log('🔊 Preloading sound files...');
     
     const soundFiles = {
-      success: require('../assets/sounds/scan_success.mp3'), // Store scanner beep sound
+      success: require('../assets/sounds/scan_beep.mp3'), // New scanning beep sound
       error: require('../assets/sounds/scan_error.mp3'),
-      duplicate: require('../assets/sounds/scan_duplicate.mp3'), // Duplicate scan sound
+      duplicate: require('../assets/sounds/scan_duplicate_error.mp3'), // Custom duplicate error sound
       batch_complete: require('../assets/sounds/sync_success.mp3'),
       warning: require('../assets/sounds/scan_error.mp3'), // Use error sound for warnings
       info: require('../assets/sounds/button_press.mp3'),
@@ -163,6 +175,15 @@ class FeedbackService {
         case 'start_batch':
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
           break;
+        case 'batch_progress':
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          break;
+        case 'low_confidence':
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          break;
+        case 'multi_barcode':
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          break;
         case 'quick_action':
           await Haptics.selectionAsync();
           break;
@@ -183,12 +204,77 @@ class FeedbackService {
       return;
     }
 
+    // Ensure service is initialized
+    if (!this.isInitialized) {
+      logger.log('🔊 FeedbackService not initialized, initializing now...');
+      await this.initialize();
+    }
+
+    // Ensure audio mode is configured (Android requirement)
     try {
-      // Get the sound file source
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        interruptionMode: 'mixWithOthers',
+      });
+    } catch (audioModeError) {
+      logger.debug('⚠️ Could not reconfigure audio mode (may already be set):', audioModeError);
+    }
+
+    try {
+      // On Android, use soundService for duplicate and batch_complete so these reliably play
+      // (expo-audio preload/fallback can be unreliable on some devices)
+      if (Platform.OS === 'android' && (type === 'duplicate' || type === 'batch_complete')) {
+        try {
+          await soundService.initialize();
+          await soundService.playSound(type === 'duplicate' ? 'duplicate' : 'notification');
+          return;
+        } catch (androidSoundErr) {
+          logger.warn('🔊 Android soundService for duplicate/batch_complete failed, trying default path:', androidSoundErr);
+        }
+      }
+
+      // First, try to use preloaded sound (more reliable on Android)
+      const preloadedPlayer = this.sounds[type];
+      if (preloadedPlayer) {
+        try {
+          logger.log(`🔊 Attempting to play preloaded sound for type: ${type}, volume: ${this.settings.volume}`);
+          // Reset and play the preloaded sound
+          // On Android, we need to seek to start before playing
+          preloadedPlayer.volume = this.settings.volume;
+          try {
+            // Stop any current playback first (Android requirement)
+            try {
+              preloadedPlayer.pause();
+            } catch (pauseError) {
+              // Ignore pause errors
+            }
+            // Reset playback position to start (required on Android)
+            preloadedPlayer.seekTo(0);
+            logger.log(`🔊 Reset playback position to 0`);
+          } catch (seekError) {
+            // seekTo might not be available, continue anyway
+            logger.debug('seekTo not available, continuing');
+          }
+          preloadedPlayer.play();
+          logger.log(`🔊 Called play() on preloaded sound for type: ${type}`);
+          // Give it a moment to start
+          await new Promise(resolve => setTimeout(resolve, 100));
+          logger.log(`🔊 Preloaded sound should be playing now for type: ${type}`);
+          return;
+        } catch (preloadError) {
+          logger.warn(`⚠️ Error playing preloaded sound ${type}:`, preloadError);
+          logger.warn(`⚠️ Preload error details:`, JSON.stringify(preloadError));
+          // Continue to fallback
+        }
+      } else {
+        logger.log(`⚠️ No preloaded player found for type: ${type}`);
+      }
+
+      // Fallback: Get the sound file source and create new player
       const soundFiles: { [key: string]: any } = {
-        success: require('../assets/sounds/scan_success.mp3'),
+        success: require('../assets/sounds/scan_beep.mp3'),
         error: require('../assets/sounds/scan_error.mp3'),
-        duplicate: require('../assets/sounds/scan_duplicate.mp3'),
+        duplicate: require('../assets/sounds/scan_duplicate_error.mp3'), // Custom duplicate error sound
         batch_complete: require('../assets/sounds/sync_success.mp3'),
         warning: require('../assets/sounds/scan_error.mp3'),
         info: require('../assets/sounds/button_press.mp3'),
@@ -201,11 +287,24 @@ class FeedbackService {
         logger.log(`⚠️ No sound file found for type: ${type}`);
       } else {
         try {
-          // Create a new player instance for each play to ensure it works
+          logger.log(`🔊 Creating new AudioPlayer for fallback sound type: ${type}`);
+          // Create a new player instance as fallback
           const player = new AudioPlayer(soundSource);
           player.volume = this.settings.volume;
+          logger.log(`🔊 Set volume to ${this.settings.volume}`);
+          try {
+            // Reset playback position to start (required on Android)
+            player.seekTo(0);
+            logger.log(`🔊 Reset playback position to 0 in fallback`);
+          } catch (seekError) {
+            // seekTo might not be available, continue anyway
+            logger.debug('seekTo not available in fallback, continuing');
+          }
           player.play();
-          logger.log(`🔊 Playing sound for type: ${type}`);
+          logger.log(`🔊 Called play() on fallback sound for type: ${type}`);
+          // Give it a moment to start
+          await new Promise(resolve => setTimeout(resolve, 100));
+          logger.log(`🔊 Fallback sound should be playing now for type: ${type}`);
           
           // Clean up after sound finishes (approximately)
           setTimeout(() => {
@@ -219,6 +318,7 @@ class FeedbackService {
           return;
         } catch (playError) {
           logger.warn(`⚠️ Error creating/playing sound ${type}:`, playError);
+          logger.warn(`⚠️ Play error details:`, JSON.stringify(playError));
           // Continue to fallback
         }
       }
@@ -248,9 +348,18 @@ class FeedbackService {
       }
 
       try {
+        logger.log(`🔊 Trying soundService fallback for type: ${type} -> ${soundServiceType}`);
+        // Ensure soundService is initialized
+        try {
+          await soundService.initialize();
+        } catch (initError) {
+          logger.warn(`⚠️ Could not initialize soundService:`, initError);
+        }
         await soundService.playSound(soundServiceType);
+        logger.log(`🔊 soundService played sound successfully`);
         return;
       } catch (soundServiceError) {
+        logger.warn(`⚠️ soundService fallback failed:`, soundServiceError);
         // Continue to next fallback
       }
 
@@ -302,10 +411,8 @@ class FeedbackService {
     // Play haptic feedback
     await this.playHaptic(type);
 
-    // Play sound effect (skip sound for duplicate scans)
-    if (type !== 'duplicate') {
-      await this.playSound(type);
-    }
+    // Play sound effect (including duplicate scans)
+    await this.playSound(type);
 
     // Provide voice feedback
     if (this.settings.voiceEnabled) {
@@ -340,6 +447,18 @@ class FeedbackService {
         
         case 'start_batch':
           voiceMessage = 'Batch mode started. Begin scanning';
+          break;
+        
+        case 'batch_progress':
+          voiceMessage = count ? `${count} items scanned` : 'Progress';
+          break;
+        
+        case 'low_confidence':
+          voiceMessage = 'Low confidence scan';
+          break;
+        
+        case 'multi_barcode':
+          voiceMessage = `${count || 2} barcodes detected`;
           break;
         
         case 'quick_action':
@@ -378,6 +497,18 @@ class FeedbackService {
 
   async quickAction(message?: string) {
     await this.provideFeedback('quick_action', { message });
+  }
+
+  async batchProgress(count?: number) {
+    await this.provideFeedback('batch_progress', { count });
+  }
+
+  async lowConfidence() {
+    await this.provideFeedback('low_confidence');
+  }
+
+  async multiBarcodeDetected(count: number) {
+    await this.provideFeedback('multi_barcode', { count });
   }
 
   /**

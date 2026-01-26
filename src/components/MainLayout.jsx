@@ -26,6 +26,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import SettingsIcon from '@mui/icons-material/SettingsOutlined';
 import LogoutIcon from '@mui/icons-material/LogoutOutlined';
 import SearchIcon from '@mui/icons-material/Search';
+import NotificationsIcon from '@mui/icons-material/Notifications';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { useTheme } from '../context/ThemeContext';
@@ -39,6 +40,8 @@ import { useAssetConfig } from '../hooks/useAssetConfig';
 import TextField from '@mui/material/TextField';
 import Sidebar from './Sidebar';
 import InputAdornment from '@mui/material/InputAdornment';
+import Paper from '@mui/material/Paper';
+import { SearchInputWithIcon } from './ui/search-input-with-icon';
 
 
 const drawerWidth = 280;
@@ -47,6 +50,8 @@ const collapsedWidth = 72;
 export default function MainLayout({ children }) {
   const { profile, organization, signOut } = useAuth();
   const { config: assetConfig } = useAssetConfig();
+  const { organizationColors } = useTheme();
+  const primaryColor = organizationColors?.primary || '#FF6B35';
   const [integrationsOpen, setIntegrationsOpen] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -299,204 +304,151 @@ export default function MainLayout({ children }) {
           minHeight: 64,
         }}
       >
-        <Toolbar sx={{ minHeight: 64, px: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-            {/* Logo and Company Name */}
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-              {organization?.logo_url && (
+        <Toolbar sx={{ minHeight: 64, px: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', gap: 2 }}>
+          {/* Logo and Company Name */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+            <Box 
+              sx={{ 
+                height: 40, 
+                width: 40, 
+                borderRadius: 2, 
+                background: organization?.logo_url ? 'transparent' : primaryColor,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#fff',
+                fontSize: '20px',
+                fontWeight: 'bold',
+                flexShrink: 0,
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                overflow: 'hidden',
+                position: 'relative'
+              }}
+            >
+              {organization?.logo_url ? (
                 <img 
-                  key={organization.logo_url}
                   src={organization.logo_url} 
-                  alt="Org Logo" 
+                  alt="Logo" 
                   style={{ 
-                    height: 32, 
-                    width: 32, 
+                    width: '100%', 
+                    height: '100%', 
                     objectFit: 'contain', 
-                    borderRadius: 4, 
-                    background: '#fff', 
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    marginRight: 12
-                  }} 
+                    borderRadius: 2 
+                  }}
                   onError={(e) => {
-                    logger.error('Failed to load logo in header:', organization.logo_url);
                     e.target.style.display = 'none';
                   }}
-                  onLoad={() => {
-                    logger.log('Logo loaded successfully in header:', organization.logo_url);
-                  }}
                 />
+              ) : (
+                organization?.name?.charAt(0)?.toUpperCase() || 'W'
               )}
-              <Typography
-                variant="h5"
-                component="div"
-                sx={{ fontFamily: 'Inter, Montserrat, Arial, sans-serif', fontWeight: 900, color: '#111', letterSpacing: '-0.01em', fontSize: '1.5rem', cursor: 'pointer', lineHeight: 1 }}
-                onClick={() => navigate(profile?.role === 'owner' ? '/owner-portal' : '/home')}
-                title="Go to Home"
-              >
-                {assetConfig.appName}
-              </Typography>
             </Box>
-            
+            <Typography variant="h6" sx={{ fontWeight: 700, color: '#111', fontSize: '18px', display: { xs: 'none', sm: 'block' } }}>
+              {organization?.name || 'WeldCor'}
+            </Typography>
+          </Box>
+
+          {/* Right Section: Navigation Tabs, Search Bar, and Icons */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, justifyContent: 'flex-end' }}>
             {/* Navigation Links */}
-            <Box sx={{ display: 'flex', gap: 0.5 }}>
-              {topNavLinks.map(link => (
-                <Button
-                  key={link.label}
-                  onClick={() => navigate(link.to)}
-                  sx={{
-                    color: location.pathname === link.to ? '#1976d2' : '#111',
-                    fontWeight: 700,
-                    fontFamily: 'Inter, Montserrat, Arial, sans-serif',
+            {topNavLinks.length > 0 && (
+              <Box sx={{ display: 'flex', gap: 0 }}>
+                {topNavLinks.map(link => (
+                  <Button
+                    key={link.label}
+                    onClick={() => navigate(link.to)}
+                    sx={{
+                    color: location.pathname === link.to ? primaryColor : '#111',
+                    fontWeight: location.pathname === link.to ? 700 : 500,
+                    fontFamily: 'Inter, sans-serif',
                     fontSize: '0.875rem',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
+                    textTransform: 'none',
                     px: 2,
                     py: 1,
                     minHeight: 48,
                     borderRadius: 0,
-                    borderBottom: location.pathname === link.to ? '2.5px solid #1976d2' : '2.5px solid transparent',
-                    transition: 'color 0.2s, border-bottom 0.2s',
+                    borderBottom: location.pathname === link.to ? `2px solid ${primaryColor}` : '2px solid transparent',
+                    transition: 'all 0.2s',
                     '&:hover': {
-                      color: '#1976d2',
-                      backgroundColor: 'rgba(25,118,210,0.07)',
+                      color: primaryColor,
+                      backgroundColor: 'transparent',
                     },
-                  }}
-                >
-                  {link.label}
-                </Button>
-              ))}
-            </Box>
-          </Box>
-          
-          {/* Right Section: Search, Settings, Logout */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, height: 48 }}>
-            {/* Search Bar */}
-            <Box sx={{ width: 400, position: 'relative', display: 'flex', alignItems: 'center', transform: 'translateY(5px)' }} ref={searchRef}>
-            <TextField
-              placeholder={
-                isOwner && location.pathname.startsWith('/owner-portal') 
-                  ? "Search organizations..." 
-                  : "Search customers, bottles..."
-              }
-              size="small"
-              variant="outlined"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onFocus={() => setShowSuggestions(true)}
-              sx={{
-                background: 'rgba(255,255,255,0.9)',
-                borderRadius: '20px',
-                color: '#1976d2',
-                width: '100%',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-                margin: 0,
-                verticalAlign: 'middle',
-                transform: 'translateY(5px)',
-                '& .MuiOutlinedInput-root': {
-                  borderRadius: '20px',
-                  background: 'rgba(255,255,255,0.9)',
-                  color: '#1976d2',
-                  fontWeight: 500,
-                  height: 36,
-                  margin: 0,
-                  padding: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  '& fieldset': {
-                    borderColor: 'rgba(255,255,255,0.3)',
-                    margin: 0,
-                    padding: 0,
-                  },
-                  '&:hover fieldset': {
-                    borderColor: 'rgba(255,255,255,0.5)',
-                  },
-                  '&.Mui-focused fieldset': {
-                    borderColor: 'white',
-                    boxShadow: '0 0 0 2px rgba(255,255,255,0.2)',
-                  },
-                  '& .MuiInputAdornment-root': {
-                    height: 36,
-                    maxHeight: 36,
-                    margin: '0 !important',
-                    padding: '0 !important',
-                  },
-                  '& .MuiInputAdornment-root .MuiSvgIcon-root': {
-                    color: '#1976d2',
-                    fontSize: 18,
-                  },
-                },
-                '& .MuiOutlinedInput-input': {
-                  padding: '8px 12px 8px 0',
-                  color: '#1976d2',
-                  fontWeight: 500,
-                  fontSize: '0.9rem',
-                  height: 'auto',
-                  lineHeight: 1.5,
-                  margin: 0,
-                },
-                '& .MuiFormControl-root': {
-                  margin: 0,
-                },
-              }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon sx={{ color: '#1976d2', fontSize: 18 }} />
-                  </InputAdornment>
-                ),
-              }}
-            />
-            {showSuggestions && suggestions.length > 0 && (
-              <Box sx={{
-                position: 'absolute',
-                top: '100%',
-                left: 0,
-                right: 0,
-                bgcolor: 'white',
-                borderRadius: 2,
-                boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-                zIndex: 1000,
-                mt: 1,
-                maxHeight: 300,
-                overflow: 'auto',
-                border: '1px solid #e0e0e0'
-              }}>
-                {suggestions.map((item, index) => (
-                  <Box
-                    key={`${item.type}-${item.id}`}
-                    onClick={() => handleSelectSuggestion(item)}
-                    sx={{
-                      p: 2,
-                      cursor: 'pointer',
-                      borderBottom: index < suggestions.length - 1 ? '1px solid #f0f0f0' : 'none',
-                      '&:hover': {
-                        bgcolor: '#f5f5f5'
-                      }
                     }}
                   >
-                    <Typography variant="body2" sx={{ fontWeight: 600, color: '#1976d2' }}>
-                      {item.label}
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: '#666' }}>
-                      {item.type === 'customer' ? 'Customer' : item.type === 'organization' ? 'Organization' : 'Bottle'} • {item.sub}
-                    </Typography>
-                  </Box>
+                    {link.label}
+                  </Button>
                 ))}
               </Box>
             )}
+            
+            {/* Search Bar - Next to Navigation Buttons */}
+            <Box sx={{ width: '100%', maxWidth: 400, position: 'relative' }} ref={searchRef}>
+              <SearchInputWithIcon
+                placeholder="Search customers, bottles, orders..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setShowSuggestions(true);
+                }}
+                onFocus={() => {
+                  if (suggestions.length > 0) {
+                    setShowSuggestions(true);
+                  }
+                }}
+                className="w-full"
+              />
+              {showSuggestions && suggestions.length > 0 && (
+                <Paper
+                  sx={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    mt: 1,
+                    maxHeight: 400,
+                    overflow: 'auto',
+                    zIndex: 1300,
+                    boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                    borderRadius: 2,
+                  }}
+                >
+                  <List dense>
+                    {suggestions.map((suggestion, index) => (
+                      <ListItem key={index} disablePadding>
+                        <ListItemButton
+                          onClick={() => handleSelectSuggestion(suggestion)}
+                          sx={{
+                            '&:hover': {
+                              backgroundColor: '#F3F4F6',
+                            },
+                          }}
+                        >
+                          <ListItemText
+                            primary={
+                              <Typography sx={{ fontWeight: 600, color: '#111' }}>
+                                {suggestion.label}
+                              </Typography>
+                            }
+                            secondary={
+                              <Typography sx={{ fontSize: '0.75rem', color: '#6B7280' }}>
+                                {suggestion.type === 'customer' ? 'Customer' : suggestion.type === 'organization' ? 'Organization' : 'Bottle'} • {suggestion.sub}
+                              </Typography>
+                            }
+                          />
+                        </ListItemButton>
+                      </ListItem>
+                    ))}
+                  </List>
+                </Paper>
+              )}
             </Box>
             
             {/* Icon Buttons */}
-            <IconButton sx={{ color: '#111', width: 36, height: 36, '&:hover': { backgroundColor: 'rgba(25,118,210,0.07)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
-              <SettingsIcon />
+            <IconButton sx={{ color: '#111', width: 40, height: 40, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' } }} aria-label="Notifications">
+              <NotificationsIcon />
             </IconButton>
-            <IconButton 
-              sx={{ color: '#111', width: 36, height: 36, '&:hover': { backgroundColor: 'rgba(25,118,210,0.07)' } }} 
-              onClick={handleLogout} 
-              aria-label="Logout"
-              disabled={logoutLoading}
-            >
-              {logoutLoading ? <CircularProgress size={18} /> : <LogoutIcon />}
+            <IconButton sx={{ color: '#111', width: 40, height: 40, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
+              <SettingsIcon />
             </IconButton>
           </Box>
         </Toolbar>

@@ -17,6 +17,10 @@ import logger from './utils/logger';
 // Silence known, harmless development warnings - MUST BE BEFORE OTHER IMPORTS USE THEM
 if (__DEV__) {
   LogBox.ignoreLogs([
+    // Expo Notifications SDK 53+ Expo Go limitation (expected behavior)
+    'expo-notifications: Android Push notifications',
+    'removed from Expo Go',
+    'Use a development build instead',
     // React Navigation warnings
     'Non-serializable values were found in the navigation state',
     'Sending `onAnimatedValueUpdate` with no listeners registered',
@@ -47,20 +51,25 @@ import CylinderDetailsScreen from './screens/CylinderDetailsScreen';
 import CustomerDetailsScreen from './screens/CustomerDetailsScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import LoginScreen from './LoginScreen';
-import LocateCylinderScreen from './screens/LocateCylinderScreen';
 import FillCylinderScreen from './screens/FillCylinderScreen';
 import AddCylinderScreen from './screens/AddCylinderScreen';
-import TrackAboutStyleScanScreen from './screens/TrackAboutStyleScanScreen';
 import CustomizationScreen from './screens/CustomizationScreen';
 import OrganizationJoinScreen from './screens/OrganizationJoinScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import RecentScansScreen from './screens/RecentScansScreen';
 import SupportTicketScreen from './screens/SupportTicketScreen';
+import ScanbotTestScreen from './screens/ScanbotTestScreen';
 import UserManagementScreen from './screens/UserManagementScreen';
 import DriverDashboard from './screens/DriverDashboard';
 import AnalyticsScreen from './screens/AnalyticsScreen';
-import DataHealthScreen from './screens/DataHealthScreen';
 import NotificationSettingsScreen from './screens/NotificationSettingsScreen';
+// Enhanced Scanner Test Screens
+import EnhancedScannerTestScreen from './screens/EnhancedScannerTestScreen';
+import TestSingleScanScreen from './screens/TestSingleScanScreen';
+import TestBatchScanScreen from './screens/TestBatchScanScreen';
+import TestConcurrentScanScreen from './screens/TestConcurrentScanScreen';
+import TestPerformanceScreen from './screens/TestPerformanceScreen';
+import ScannerSettingsScreen from './screens/ScannerSettingsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -112,10 +121,15 @@ function AppContent() {
   const [showUpdateModal, setShowUpdateModal] = React.useState(false);
   const [organizationLoadTimeout, setOrganizationLoadTimeout] = React.useState(false);
 
-  // Show update modal when update is available
+  // Show update modal when update is available (with delay to avoid interrupting app startup)
   React.useEffect(() => {
     if (updateInfo?.hasUpdate) {
-      setShowUpdateModal(true);
+      // Delay showing the modal by 2 seconds to allow app to finish loading
+      const timeout = setTimeout(() => {
+        setShowUpdateModal(true);
+      }, 2000);
+      
+      return () => clearTimeout(timeout);
     }
   }, [updateInfo]);
 
@@ -168,9 +182,18 @@ function AppContent() {
   // Initialize services when user is authenticated
   React.useEffect(() => {
     if (user && profile?.organization_id) {
-      // Initialize notification service
+      // Initialize notification service (gracefully handle Expo Go limitations)
       notificationService.initialize().then(() => {
         notificationService.registerDevice(user.id, profile.organization_id);
+      }).catch((error) => {
+        // Suppress Expo Go SDK 53+ warning about remote push notifications
+        if (error?.message?.includes('removed from Expo Go') || 
+            error?.message?.includes('development build')) {
+          // This is expected in Expo Go - local notifications still work
+          logger.log('📱 Notification service: Remote push not available in Expo Go (expected)');
+        } else {
+          logger.error('Error initializing notification service:', error);
+        }
       });
       
       // Initialize sound service
@@ -278,7 +301,7 @@ function AppContent() {
             <Stack.Screen 
               name="ScanCylinders" 
               component={ScanCylindersScreen}
-              options={{ title: 'Scan Cylinders' }}
+              options={{ title: 'Scan Customer Number' }}
             />
             <Stack.Screen 
               name="EnhancedScan" 
@@ -288,7 +311,7 @@ function AppContent() {
             <Stack.Screen 
               name="EditCylinder" 
               component={EditCylinderScreen}
-              options={{ title: 'Edit Cylinder' }}
+              options={{ title: 'Edit Cylinder', headerShown: false }}
             />
             <Stack.Screen 
               name="CylinderDetails" 
@@ -306,11 +329,6 @@ function AppContent() {
               options={{ title: 'Settings' }}
             />
             <Stack.Screen 
-              name="LocateCylinder" 
-              component={LocateCylinderScreen}
-              options={{ title: 'Search Cylinder' }}
-            />
-            <Stack.Screen 
               name="FillCylinder" 
               component={FillCylinderScreen}
               options={{ title: 'Locate Cylinder' }}
@@ -319,11 +337,6 @@ function AppContent() {
               name="AddCylinder" 
               component={AddCylinderScreen}
               options={{ title: 'Add Cylinder' }}
-            />
-            <Stack.Screen 
-              name="TrackAboutStyleScan" 
-              component={TrackAboutStyleScanScreen}
-              options={{ title: 'Track & Scan' }}
             />
             <Stack.Screen 
               name="Customization" 
@@ -366,14 +379,50 @@ function AppContent() {
               options={{ title: 'Analytics' }}
             />
             <Stack.Screen 
-              name="DataHealth" 
-              component={DataHealthScreen}
-              options={{ title: 'Data Health' }}
-            />
-            <Stack.Screen 
               name="NotificationSettings" 
               component={NotificationSettingsScreen}
               options={{ title: 'Notifications' }}
+            />
+            <Stack.Screen 
+              name="ScanbotTest" 
+              component={ScanbotTestScreen}
+              options={{ title: 'Scanbot SDK Test' }}
+            />
+            {/* Enhanced Scanner Test Screens */}
+            <Stack.Screen 
+              name="EnhancedScannerTest" 
+              component={EnhancedScannerTestScreen}
+              options={{ title: 'Enhanced Scanner Tests', headerShown: false }}
+            />
+            <Stack.Screen 
+              name="TestSingleScan" 
+              component={TestSingleScanScreen}
+              options={{ title: 'Single Scan Test', headerShown: false }}
+            />
+            <Stack.Screen 
+              name="TestBatchScan" 
+              component={TestBatchScanScreen}
+              options={{ title: 'Batch Scan Test', headerShown: false }}
+            />
+            <Stack.Screen 
+              name="TestConcurrentScan" 
+              component={TestConcurrentScanScreen}
+              options={{ title: 'Concurrent Scan Test', headerShown: false }}
+            />
+            <Stack.Screen 
+              name="TestImageProcessing" 
+              component={TestSingleScanScreen}
+              options={{ title: 'Image Processing Test', headerShown: false }}
+            />
+            <Stack.Screen 
+              name="TestPerformance" 
+              component={TestPerformanceScreen}
+              options={{ title: 'Performance Monitor', headerShown: false }}
+            />
+            <Stack.Screen 
+              name="TestScannerSettings" 
+              component={ScannerSettingsScreen}
+              options={{ title: 'Scanner Settings' }}
             />
           </>
         )}

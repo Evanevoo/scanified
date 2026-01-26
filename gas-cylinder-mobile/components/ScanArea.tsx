@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Vibration, TouchableOpacity, ActivityIndicator, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Vibration, TouchableOpacity, ActivityIndicator, Dimensions, Pressable } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
 interface ScanAreaProps {
@@ -23,7 +23,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   style, 
   barcodePreview,
   validationPattern = /^\d{9}$/,
-  enableRegionOfInterest = true,
+  enableRegionOfInterest = false,
   scanDelay = 500,
   onClose,
   hideScanningLine = false, // Default to false to maintain existing behavior
@@ -34,6 +34,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   const [error, setError] = useState('');
   const [pendingBarcode, setPendingBarcode] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [focusTrigger, setFocusTrigger] = useState(0); // Used to trigger autofocus on tap
   const holdTimeout = useRef<NodeJS.Timeout | null>(null);
   const scanCooldown = useRef<NodeJS.Timeout | null>(null);
 
@@ -202,15 +203,34 @@ const ScanArea: React.FC<ScanAreaProps> = ({
             </View>
           ) : (
             <>
-              <CameraView
+              <Pressable
                 style={styles.camera}
-                facing="back"
-                onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
-                barcodeScannerEnabled={true}
-                barcodeScannerSettings={{
-                  ...(regionOfInterest && { regionOfInterest })
+                onPress={(event) => {
+                  // Trigger autofocus on tap by toggling autofocus prop
+                  setFocusTrigger(prev => {
+                    const newValue = prev + 1;
+                    // Toggle autofocus to trigger refocus
+                    setTimeout(() => setFocusTrigger(newValue + 1), 50);
+                    return newValue;
+                  });
                 }}
-              />
+              >
+                <CameraView
+                  style={StyleSheet.absoluteFill}
+                  facing="back"
+                  autofocus="on"
+                  active={true}
+                  mode="picture"
+                  onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+                  barcodeScannerEnabled={true}
+                  barcodeScannerSettings={{
+                    // OPTIMIZED FOR 1D BARCODES ON PAPER (2025-01-24)
+                    // Removed 2D types (qr, aztec, datamatrix, pdf417) to reduce false positives
+                    barcodeTypes: ['code128', 'code39', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14'],
+                    ...(regionOfInterest && { regionOfInterest })
+                  }}
+                />
+              </Pressable>
               
               {/* Enhanced scanning overlay */}
               {enableRegionOfInterest && (
@@ -312,7 +332,7 @@ const styles = StyleSheet.create({
   },
   scanningFrame: {
     position: 'absolute',
-    top: '20%', // Moved up from 35% to camera level
+    top: '15%', // Moved up to camera lens level
     left: '50%',
     transform: [{ translateX: -160 }], // Center 320px width
     width: 320,

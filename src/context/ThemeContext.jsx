@@ -210,6 +210,14 @@ export const ThemeProvider = ({ children }) => {
     secondary: '#48C9B0'
   });
 
+  // Initialize CSS variables on mount
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.style.setProperty('--primary-color', '#40B5AD');
+      document.documentElement.style.setProperty('--secondary-color', '#48C9B0');
+    }
+  }, []);
+
   // Load user-specific accent color and organization colors when user changes
   useEffect(() => {
     const loadUserAccentColor = async () => {
@@ -267,15 +275,31 @@ export const ThemeProvider = ({ children }) => {
   // Load organization colors when organization changes
   useEffect(() => {
     if (organization) {
+      const primary = organization.primary_color || '#40B5AD';
+      const secondary = organization.secondary_color || '#48C9B0';
       setOrganizationColors({
-        primary: organization.primary_color || '#40B5AD',
-        secondary: organization.secondary_color || '#48C9B0'
+        primary,
+        secondary
       });
+      
+      // Set CSS variables for dynamic theming
+      if (typeof document !== 'undefined') {
+        document.documentElement.style.setProperty('--primary-color', primary);
+        document.documentElement.style.setProperty('--secondary-color', secondary);
+      }
     } else {
+      const defaultPrimary = '#40B5AD';
+      const defaultSecondary = '#48C9B0';
       setOrganizationColors({
-        primary: '#40B5AD',
-        secondary: '#48C9B0'
+        primary: defaultPrimary,
+        secondary: defaultSecondary
       });
+      
+      // Set CSS variables for dynamic theming
+      if (typeof document !== 'undefined') {
+        document.documentElement.style.setProperty('--primary-color', defaultPrimary);
+        document.documentElement.style.setProperty('--secondary-color', defaultSecondary);
+      }
     }
   }, [organization]);
 

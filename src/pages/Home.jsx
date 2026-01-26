@@ -2,6 +2,7 @@ import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
+import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -13,21 +14,17 @@ import {
 import {
   People, Inventory, LocalShipping, Receipt, Analytics,
   AdminPanelSettings, Settings, TrendingUp, Warning,
-  CheckCircle, Schedule, Notifications, Add as AddIcon,
+  CheckCircle, Schedule, Notifications as NotificationsIcon, Add as AddIcon,
   Edit as EditIcon, Refresh as RefreshIcon, Dashboard as DashboardIcon,
   Work as WorkIcon, Security as SecurityIcon
 } from '@mui/icons-material';
-import { useTheme } from '../context/ThemeContext';
-import { Touch3D, Card3D, MobileCard, MobileButton, MobileGrid, MobileStack, MobileTypography } from '../components/design-system';
 
 export default function Home() {
   const { profile, organization } = useAuth();
   const { can, isAdmin, isManager, isUser } = usePermissions();
-  const { getTheme } = useTheme();
+  const { organizationColors } = useTheme();
+  const primaryColor = organizationColors?.primary || '#FF6B35';
   const navigate = useNavigate();
-  
-  // Get the current theme colors
-  const currentTheme = getTheme().palette;
   
   const [stats, setStats] = useState({
     customers: 0,
@@ -203,19 +200,45 @@ export default function Home() {
       }
 
       // Recent activity for all users
+      // Try to get audit logs first, then fall back to recent deliveries/customer updates
       try {
+        // First try audit_logs
         const activityRes = await supabase
           .from('audit_logs')
-          .select('action, table_name, created_at, user_id, profiles(full_name)')
+          .select('action, table_name, created_at, user_id, profiles(full_name), details')
           .eq('organization_id', organization.id)
           .order('created_at', { ascending: false })
           .limit(5);
 
-        if (activityRes.data) {
-          setRecentActivity(activityRes.data);
+        if (activityRes.data && activityRes.data.length > 0) {
+          setRecentActivity(activityRes.data.map(log => ({
+            action: log.action || 'Action',
+            table_name: log.table_name || (log.details?.table || 'System'),
+            created_at: log.created_at,
+            profiles: log.profiles
+          })));
+        } else {
+          // Fallback: Get recent deliveries as activity
+          const deliveriesRes = await supabase
+            .from('deliveries')
+            .select('id, status, delivery_date, customer_id, customers(name), created_at, profiles(full_name)')
+            .eq('organization_id', organization.id)
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+          if (deliveriesRes.data && deliveriesRes.data.length > 0) {
+            setRecentActivity(deliveriesRes.data.map(delivery => ({
+              action: 'Delivery',
+              table_name: delivery.customers?.name || 'Customer',
+              created_at: delivery.created_at || delivery.delivery_date,
+              profiles: delivery.profiles || { full_name: 'System' }
+            })));
+          } else {
+            setRecentActivity([]);
+          }
         }
       } catch (error) {
-        logger.log('Audit logs not available yet:', error);
+        logger.log('Recent activity not available:', error);
         setRecentActivity([]);
       }
 
@@ -286,7 +309,7 @@ export default function Home() {
         title: 'Customers', 
         value: stats.customers, 
         icon: <People />, 
-        color: currentTheme.primary.main,
+        color: primaryColor,
         onClick: () => {
           logger.log('🔄 Navigating to /customers');
           navigate('/customers');
@@ -296,7 +319,7 @@ export default function Home() {
         title: 'Cylinders', 
         value: stats.cylinders, 
         icon: <Inventory />, 
-        color: currentTheme.secondary.main,
+        color: primaryColor,
         onClick: () => {
           logger.log('🔄 Navigating to /inventory');
           navigate('/inventory');
@@ -306,7 +329,7 @@ export default function Home() {
         title: 'Active Rentals', 
         value: stats.activeRentals, 
         icon: <Schedule />, 
-        color: currentTheme.success.main,
+        color: primaryColor,
         onClick: () => {
           logger.log('🔄 Navigating to /rentals');
           navigate('/rentals');
@@ -316,7 +339,7 @@ export default function Home() {
         title: 'Pending Deliveries', 
         value: stats.pendingDeliveries, 
         icon: <LocalShipping />, 
-        color: currentTheme.warning.main,
+        color: primaryColor,
         onClick: () => {
           logger.log('🔄 Navigating to /deliveries');
           navigate('/deliveries');
@@ -330,7 +353,7 @@ export default function Home() {
           title: 'Overdue Invoices', 
           value: stats.overdueInvoices, 
           icon: <Warning />, 
-          color: currentTheme.error.main,
+          color: '#EF4444',
           onClick: () => {
             logger.log('🔄 Navigating to /billing (invoices not available)');
             navigate('/billing');
@@ -340,7 +363,7 @@ export default function Home() {
           title: 'Total Users', 
           value: stats.totalUsers, 
           icon: <AdminPanelSettings />, 
-          color: currentTheme.info.main,
+          color: primaryColor,
           onClick: () => {
             logger.log('🔄 Navigating to Settings Team tab');
             navigate('/settings?tab=team');
@@ -356,6 +379,7 @@ export default function Home() {
   const quickActions = getQuickActions();
   const statCards = getStatCards();
 
+
   if (loading) {
     return (
       <Box sx={{ p: 3 }}>
@@ -366,66 +390,49 @@ export default function Home() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: 4, backgroundColor: '#fff', minHeight: '100vh' }}>
       {/* Welcome Section */}
-      <Paper sx={{ p: 3, mb: 3, background: `linear-gradient(135deg, ${currentTheme.primary.main} 0%, ${currentTheme.secondary.main} 100%)`, color: 'white' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Box>
-            <Typography variant="h4" sx={{ fontWeight: 'bold', mb: 1 }}>
-              {welcomeMessage.title}
-            </Typography>
-            <Typography variant="body1" sx={{ opacity: 0.9, mb: 2 }}>
-              {welcomeMessage.subtitle}
-            </Typography>
-            <Chip 
-              label={welcomeMessage.chip.label} 
-              sx={{ 
-                backgroundColor: 'rgba(255,255,255,0.2)', 
-                color: 'white',
-                fontWeight: 'bold'
-              }} 
-            />
-          </Box>
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <Tooltip title="Refresh Dashboard">
-              <IconButton onClick={fetchDashboardData} sx={{ color: 'white' }}>
-                <RefreshIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        </Box>
-      </Paper>
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4" sx={{ fontWeight: 700, color: '#111', mb: 1, fontSize: '2rem' }}>
+          {welcomeMessage.title}
+        </Typography>
+        <Typography variant="body1" sx={{ color: '#6B7280', fontSize: '1rem' }}>
+          {welcomeMessage.subtitle}
+        </Typography>
+      </Box>
 
       {/* Statistics Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid container spacing={3} sx={{ mb: 4 }}>
         {statCards.map((card, index) => (
           <Grid item xs={12} sm={6} md={4} lg={2} key={index}>
-            <Touch3D intensity="medium">
-              <Card 
-                onClick={card.onClick}
-                sx={{ 
-                  height: '100%', 
-                  background: `linear-gradient(135deg, ${card.color} 0%, ${card.color}CC 100%)`,
-                  color: 'white',
-                  cursor: 'pointer',
-                }}>
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Box>
-                      <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
-                        {card.value}
-                      </Typography>
-                      <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                        {card.title}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ opacity: 0.8 }}>
-                      {card.icon}
-                    </Box>
+            <Card 
+              onClick={card.onClick}
+              sx={{ 
+                height: '100%', 
+                backgroundColor: '#fff',
+                borderRadius: 3,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+                  transform: 'translateY(-2px)'
+                }
+              }}>
+              <CardContent sx={{ p: 3 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="caption" sx={{ color: '#6B7280', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    {card.title}
+                  </Typography>
+                  <Box sx={{ color: card.color || primaryColor, opacity: 0.8 }}>
+                    {card.icon}
                   </Box>
-                </CardContent>
-              </Card>
-            </Touch3D>
+                </Box>
+                <Typography variant="h3" sx={{ fontWeight: 700, color: '#111', fontSize: '2rem' }}>
+                  {card.value}
+                </Typography>
+              </CardContent>
+            </Card>
           </Grid>
         ))}
       </Grid>
@@ -476,37 +483,57 @@ export default function Home() {
 
         {/* Recent Activity */}
         <Grid item xs={12} md={4}>
-          <Card3D intensity="light" sx={{ height: '100%' }}>
-            <CardContent>
-              <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Notifications color="primary" />
+          <Card sx={{ height: '100%', p: 3, borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+              <NotificationsIcon sx={{ color: '#9333EA', fontSize: '20px' }} />
+              <Typography variant="h6" sx={{ fontWeight: 600, color: '#111', fontSize: '1.125rem' }}>
                 Recent Activity
               </Typography>
-              {recentActivity.length > 0 ? (
-                <List dense>
-                  {recentActivity.map((activity, index) => (
-                    <ListItem key={index} sx={{ px: 0 }}>
-                      <ListItemIcon sx={{ minWidth: 40 }}>
-                        <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main' }}>
-                          {activity.profiles?.full_name?.charAt(0) || '?'}
-                        </Avatar>
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={`${activity.action} ${activity.table_name}`}
-                        secondary={`${activity.profiles?.full_name || 'Unknown'} • ${new Date(activity.created_at).toLocaleDateString()}`}
-                        primaryTypographyProps={{ variant: 'body2' }}
-                        secondaryTypographyProps={{ variant: 'caption' }}
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-              ) : (
-                <Typography variant="body2" color="text.secondary">
-                  No recent activity to display.
+            </Box>
+            {recentActivity.length > 0 ? (
+              <List dense>
+                {recentActivity.map((activity, index) => (
+                  <ListItem key={index} sx={{ px: 0, py: 1.5 }}>
+                    <ListItemIcon sx={{ minWidth: 40 }}>
+                      <Avatar sx={{ width: 32, height: 32, bgcolor: primaryColor, fontSize: '12px' }}>
+                        {activity.profiles?.full_name?.charAt(0) || '?'}
+                      </Avatar>
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={`${activity.action} ${activity.table_name}`}
+                      secondary={`${activity.profiles?.full_name || 'Unknown'} • ${new Date(activity.created_at).toLocaleDateString()}`}
+                      primaryTypographyProps={{ variant: 'body2', fontWeight: 500, color: '#111' }}
+                      secondaryTypographyProps={{ variant: 'caption', color: '#6B7280' }}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            ) : (
+              <Box sx={{ textAlign: 'center', py: 6 }}>
+                <Box 
+                  component="svg" 
+                  width="80" 
+                  height="80" 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  sx={{ 
+                    color: '#D1D5DB', 
+                    mb: 2, 
+                    mx: 'auto',
+                    display: 'block',
+                    opacity: 0.4
+                  }}
+                >
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
+                  <line x1="12" y1="12" x2="12" y2="8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  <line x1="12" y1="12" x2="16" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </Box>
+                <Typography variant="body2" sx={{ color: '#6B7280', fontSize: '0.875rem' }}>
+                  No recent activity to display. Activities will appear here once they occur.
                 </Typography>
-              )}
-            </CardContent>
-          </Card3D>
+              </Box>
+            )}
+          </Card>
         </Grid>
       </Grid>
 
@@ -514,9 +541,9 @@ export default function Home() {
       {isAdmin() && stats.overdueInvoices > 0 && (
         <Alert 
           severity="warning" 
-          sx={{ mt: 3 }}
+          sx={{ mt: 3, borderRadius: 2 }}
           action={
-            <Button color="inherit" size="small" onClick={() => navigate('/invoices')}>
+            <Button color="inherit" size="small" onClick={() => navigate('/billing')}>
               View Invoices
             </Button>
           }
