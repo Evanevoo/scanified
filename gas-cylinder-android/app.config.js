@@ -5,7 +5,7 @@ module.exports = {
   expo: {
     name: "Scanified Android",
     slug: "gas-cylinder-android",
-    version: "1.0.14",
+    version: "1.0.29",
     orientation: "portrait",
     icon: "./assets/app-icon.png",
     userInterfaceStyle: "automatic",
@@ -23,7 +23,7 @@ module.exports = {
         backgroundColor: "#FFFFFF"
       },
       package: "com.evanevoo.scanifiedandroid",
-      versionCode: 31,
+      versionCode: 85,
       permissions: [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
@@ -36,7 +36,25 @@ module.exports = {
           cameraPermission: "Scanified uses your camera to scan asset barcodes for inventory management and tracking purposes."
         }
       ],
-      "expo-font"
+      [
+        "react-native-vision-camera",
+        {
+          cameraPermissionText: "Scanified needs access to your Camera to scan barcodes.",
+          enableMicrophonePermission: false
+        }
+      ],
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          android: {
+            minSdkVersion: 24,
+            compileSdkVersion: 34,
+            targetSdkVersion: 34,
+            buildToolsVersion: "34.0.0"
+          }
+        }
+      ]
     ],
     extra: {
       // Read from environment variables for local development, or use template variables for EAS builds

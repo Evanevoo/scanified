@@ -1,15 +1,19 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView, FlatList } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView, FlatList, Pressable, Dimensions } from 'react-native';
 import { supabase } from '../supabase';
 import { Picker } from '@react-native-picker/picker';
 import { useTheme } from '../context/ThemeContext';
-import ScanArea from '../components/ScanArea';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../hooks/useAuth';
 import { CylinderLimitService } from '../services/CylinderLimitService';
 import { useAssetConfig } from '../context/AssetContext';
 import { Platform } from '../utils/platform';
 import { useNavigation } from '@react-navigation/native';
+import { soundService } from '../services/soundService';
+
+const { width, height } = Dimensions.get('window');
 
 interface GasType {
   id: number;
@@ -55,6 +59,79 @@ export default function AddCylinderScreen() {
   const [addingOwner, setAddingOwner] = useState(false);
   const [newOwnerName, setNewOwnerName] = useState('');
   const [scannerVisible, setScannerVisible] = useState(false);
+  const [scanned, setScanned] = useState(false);
+  const [flashEnabled, setFlashEnabled] = useState(false);
+  const [cameraZoom, setCameraZoom] = useState(0);
+  const [permission, requestPermission] = useCameraPermissions();
+  const cameraRef = useRef<CameraView>(null);
+
+  const handleBarcodeScanned = (event: { data?: string; bounds?: any }) => {
+    if (scanned || !event?.data) return;
+    
+    // Filter by bounds to ensure barcode is within visual scan frame
+    if (event.bounds && !isBarcodeInScanArea(event.bounds)) {
+      logger.log('📷 Barcode outside scan area, ignoring');
+      return;
+    }
+    
+    const barcode = event.data.trim().replace(/^\*+|\*+$/g, '');
+    if (barcode) {
+      // Play scan sound
+      soundService.playSound('scan').catch(err => {
+        logger.warn('⚠️ Could not play scan sound:', err);
+      });
+      
+      setBarcode(barcode);
+      setScanned(true);
+      setScannerVisible(false);
+      setTimeout(() => setScanned(false), 1000);
+    }
+  };
+
+  // Check if barcode is within the visual scan frame
+  const isBarcodeInScanArea = (bounds: any): boolean => {
+    if (!bounds) return true; // Allow if no bounds
+    
+    const screenWidth = width;
+    const screenHeight = height;
+    const scanFrameWidth = 320;
+    const scanFrameHeight = 150;
+    const scanFrameTop = 150;
+    
+    const scanAreaLeft = (screenWidth - scanFrameWidth) / 2;
+    const scanAreaTop = scanFrameTop;
+    const scanAreaRight = scanAreaLeft + scanFrameWidth;
+    const scanAreaBottom = scanAreaTop + scanFrameHeight;
+    
+    const barcodeX = bounds.origin?.x || bounds.x || 0;
+    const barcodeY = bounds.origin?.y || bounds.y || 0;
+    const barcodeWidth = bounds.size?.width || bounds.width || 0;
+    const barcodeHeight = bounds.size?.height || bounds.height || 0;
+    
+    const barcodeCenterX = barcodeX + (barcodeWidth / 2);
+    const barcodeCenterY = barcodeY + (barcodeHeight / 2);
+    
+    let screenBarcodeX: number;
+    let screenBarcodeY: number;
+    
+    if (barcodeCenterX <= 1 && barcodeCenterY <= 1) {
+      screenBarcodeX = barcodeCenterX * screenWidth;
+      screenBarcodeY = barcodeCenterY * screenHeight;
+    } else {
+      screenBarcodeX = barcodeCenterX;
+      screenBarcodeY = barcodeCenterY;
+    }
+    
+    const toleranceX = scanFrameWidth * 0.1;
+    const toleranceY = scanFrameHeight * 0.1;
+    
+    return (
+      screenBarcodeX >= (scanAreaLeft - toleranceX) &&
+      screenBarcodeX <= (scanAreaRight + toleranceX) &&
+      screenBarcodeY >= (scanAreaTop - toleranceY) &&
+      screenBarcodeY <= (scanAreaBottom + toleranceY)
+    );
+  };
 
   useEffect(() => {
     const fetchGasTypes = async () => {
@@ -407,23 +484,103 @@ export default function AddCylinderScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Scanner Modal */}
+      {/* Scanner Modal - same layout as other screens */}
       <Modal
         visible={scannerVisible}
         onRequestClose={() => setScannerVisible(false)}
         animationType="slide"
         transparent={false}
       >
-        <View style={styles.modalOverlay}>
-          <ScanArea
-            onScanned={(scannedBarcode) => {
-              setBarcode(scannedBarcode);
-              setScannerVisible(false);
-            }}
-            label="SCAN HERE"
-            hideScanningLine={Platform.OS === 'ios'}
-            onClose={() => setScannerVisible(false)}
-          />
+        <View style={styles.fullscreenWrapper}>
+          {!permission ? (
+            <View style={styles.centerContent}>
+              <ActivityIndicator size="large" color="#fff" />
+              <Text style={styles.statusText}>Requesting camera permission...</Text>
+            </View>
+          ) : !permission.granted ? (
+            <View style={styles.centerContent}>
+              <Text style={styles.statusText}>Camera permission required</Text>
+              <TouchableOpacity onPress={requestPermission} style={styles.permissionButton}>
+                <Text style={styles.buttonText}>Continue</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.closeCameraButton} onPress={() => setScannerVisible(false)}>
+                <Text style={styles.closeCameraText}>✕ Close</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <Pressable
+                style={styles.fullscreenCamera}
+                onPress={() => {
+                  // Tap to focus - Android Expo Camera handles this automatically
+                }}
+              >
+                <CameraView
+                  ref={cameraRef}
+                  style={StyleSheet.absoluteFill}
+                  facing="back"
+                  enableTorch={flashEnabled}
+                  zoom={cameraZoom}
+                  barcodeScannerSettings={{
+                    barcodeTypes: ['code128', 'code39', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14', 'qr', 'aztec', 'datamatrix', 'pdf417'],
+                    regionOfInterest: {
+                      x: (width - 320) / 2 / width,
+                      y: 150 / height,
+                      width: 320 / width,
+                      height: 150 / height,
+                    },
+                  }}
+                  onBarcodeScanned={scanned ? undefined : (event: any) => {
+                    handleBarcodeScanned(event);
+                  }}
+                />
+              </Pressable>
+              
+              {/* Camera Overlay - same as HomeScreen */}
+              <View style={styles.cameraOverlay} pointerEvents="none">
+                <View style={styles.scanFrame} pointerEvents="none" />
+              </View>
+              
+              <TouchableOpacity
+                style={styles.closeCameraButton}
+                onPress={() => setScannerVisible(false)}
+              >
+                <Text style={styles.closeCameraText}>✕ Close</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.flashButton}
+                onPress={() => setFlashEnabled(!flashEnabled)}
+              >
+                <Ionicons 
+                  name={flashEnabled ? 'flash' : 'flash-off'} 
+                  size={28} 
+                  color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
+                />
+              </TouchableOpacity>
+
+              {/* Zoom Controls */}
+              <View style={styles.zoomControls}>
+                <TouchableOpacity
+                  style={styles.zoomButton}
+                  onPress={() => {
+                    setCameraZoom(Math.max(0, cameraZoom - 0.1));
+                  }}
+                >
+                  <Ionicons name="remove-outline" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+                <Text style={styles.zoomText}>{Math.round((1 + cameraZoom) * 100)}%</Text>
+                <TouchableOpacity
+                  style={styles.zoomButton}
+                  onPress={() => {
+                    setCameraZoom(Math.min(2, cameraZoom + 0.1));
+                  }}
+                >
+                  <Ionicons name="add-outline" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </View>
       </Modal>
     </ScrollView>
@@ -557,6 +714,111 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  fullscreenWrapper: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullscreenCamera: {
+    width: width,
+    height: height,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+  },
+  cameraOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 120,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    paddingTop: 150,
+  },
+  scanFrame: {
+    width: 320,
+    height: 150,
+    borderWidth: 2,
+    borderColor: '#fff',
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+  },
+  closeCameraButton: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 8,
+    zIndex: 1000,
+  },
+  closeCameraText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  flashButton: {
+    position: 'absolute',
+    top: 50,
+    right: 100,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 8,
+    zIndex: 1000,
+    width: 52,
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomControls: {
+    position: 'absolute',
+    bottom: 120,
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 25,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    zIndex: 1000,
+  },
+  zoomButton: {
+    padding: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginHorizontal: 12,
+    minWidth: 50,
+    textAlign: 'center',
+  },
+  centerContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.8)',
+  },
+  statusText: {
+    color: '#fff',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  permissionButton: {
+    backgroundColor: '#3B82F6',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   modalContent: {
     backgroundColor: '#fff',

@@ -148,6 +148,7 @@ const IntegrationsPage = lazy(() => import('./pages/Integrations'));
 const BottleManagement = lazy(() => import('./pages/BottleManagement'));
 const AssetDetail = lazy(() => import('./pages/AssetDetail'));
 const Assets = lazy(() => import('./pages/Assets'));
+const BottlesForDay = lazy(() => import('./pages/BottlesForDay'));
 const SupportCenter = lazy(() => import('./pages/SupportCenter'));
 const OrganizationAnalytics = lazy(() => import('./pages/OrganizationAnalytics'));
 const OrganizationTools = lazy(() => import('./pages/OrganizationTools'));
@@ -304,6 +305,11 @@ function AppContent() {
                     <Route path="/locations" element={<Locations />} />
                     <Route path="/assets" element={<Assets />} />
                     <Route path="/inventory" element={<Assets />} />
+                    <Route path="/bottles-for-day" element={
+                      <Suspense fallback={<LoadingSpinner />}>
+                        <BottlesForDay />
+                      </Suspense>
+                    } />
                     <Route path="/deliveries" element={<DeliveryTracking />} />
                     <Route path="/delivery-management" element={<DeliveryTracking />} />
                     <Route path="/delivery-tracking" element={<DeliveryTracking />} />

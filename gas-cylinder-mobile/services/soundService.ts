@@ -3,6 +3,7 @@ import { AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Asset } from 'expo-asset';
 
 // Try to import Audio for iOS audio session configuration from expo-av
 let Audio: any = null;
@@ -90,30 +91,76 @@ class SoundService {
 
   private async preloadSounds(): Promise<void> {
     try {
-      // Load actual MP3 files from assets
-      const soundFiles = {
-        scan_success: require('../assets/sounds/scan_success.mp3'),
-        scan_error: require('../assets/sounds/scan_error.mp3'),
-        scan_duplicate: require('../assets/sounds/scan_duplicate.mp3'),
-        notification: require('../assets/sounds/sync_success.mp3'),
-        action: require('../assets/sounds/button_press.mp3'),
-      };
+      // Load only the sound files that actually exist in assets/sounds folder
+      // Available: button_press.mp3, scan_error.mp3, scan_beep.mp3
+      const soundsToLoad = [
+        { id: 'scan_error', path: '../assets/sounds/scan_error.mp3' },
+        { id: 'action', path: '../assets/sounds/button_press.mp3' },
+        { id: 'scan_success', path: '../assets/sounds/scan_beep.mp3' }, // New scanning sound
+        { id: 'scan_duplicate', path: '../assets/sounds/scan_error.mp3' },
+        { id: 'notification', path: '../assets/sounds/button_press.mp3' },
+      ];
 
-      for (const [id, source] of Object.entries(soundFiles)) {
+      logger.log(`🔊 Preloading sounds on ${Platform.OS}...`);
+      let loadedCount = 0;
+      let failedCount = 0;
+
+      for (const { id, path } of soundsToLoad) {
         try {
-          const sound = new AudioPlayer(source);
-          sound.volume = 0.7;
+          logger.log(`🔊 Attempting to load sound: ${id} from ${path}`);
+          
+          // Load the appropriate sound file
+          let source;
+          try {
+            if (path.includes('button_press')) {
+              source = require('../assets/sounds/button_press.mp3');
+            } else if (path.includes('scan_beep')) {
+              source = require('../assets/sounds/scan_beep.mp3');
+            } else {
+              source = require('../assets/sounds/scan_error.mp3');
+            }
+          } catch (reqError) {
+            logger.warn(`⚠️ Could not require ${path}, skipping`);
+            continue;
+          }
+          
+          // On iOS, try using Asset.fromModule to get proper URI
+          let audioSource = source;
+          if (Platform.OS === 'ios') {
+            try {
+              const asset = Asset.fromModule(source);
+              await asset.downloadAsync();
+              audioSource = asset.localUri || asset.uri;
+              logger.log(`🔊 iOS: Using asset URI for ${id}: ${audioSource}`);
+            } catch (assetError: any) {
+              logger.warn(`⚠️ Could not get asset URI for ${id}, using require() directly:`, assetError?.message);
+              // Fall back to using require() directly
+            }
+          }
+          
+          const sound = new AudioPlayer(audioSource);
+          sound.volume = 0.8;
           
           this.soundCache.set(id, sound);
-          logger.log(`🔊 Loaded sound: ${id}`);
-        } catch (error) {
-          logger.warn(`⚠️ Could not load sound ${id}, will use haptic only:`, error);
+          loadedCount++;
+          logger.log(`🔊 Successfully loaded sound: ${id}`);
+        } catch (error: any) {
+          failedCount++;
+          logger.warn(`⚠️ Could not load sound ${id}, will use haptic only:`, error?.message || error);
+          // Set null in cache to indicate we tried but failed
+          this.soundCache.set(id, null as any);
         }
       }
       
-      logger.log('🔊 Sounds preloaded successfully');
-    } catch (error) {
-      logger.error('❌ Failed to preload sounds:', error);
+      logger.log(`🔊 Sound preload complete: ${loadedCount} loaded, ${failedCount} failed on ${Platform.OS}`);
+      
+      if (loadedCount === 0) {
+        logger.warn('⚠️ No sounds were loaded successfully. All sound playback will fall back to haptic feedback.');
+      } else {
+        logger.log(`✅ ${Platform.OS} sound system ready with ${loadedCount} sounds`);
+      }
+    } catch (error: any) {
+      logger.error('❌ Failed to preload sounds:', error?.message || error);
     }
   }
 
@@ -137,19 +184,27 @@ class SoundService {
         const sound = this.soundCache.get(soundId);
         
         if (sound) {
-          // For iOS, ensure the player is ready before playing
-          if (Platform.OS === 'ios') {
-            // Small delay to ensure player is initialized
-            await new Promise(resolve => setTimeout(resolve, 50));
+          try {
+            // For iOS, ensure the player is ready before playing
+            if (Platform.OS === 'ios') {
+              // Small delay to ensure player is initialized
+              await new Promise(resolve => setTimeout(resolve, 50));
+            }
+            
+            // Play the sound (expo-audio AudioPlayer automatically resets to start)
+            sound.play();
+            logger.log(`🔊 Played sound: ${type} (${soundId}) on ${Platform.OS}`);
+            return; // Successfully played, exit early
+          } catch (playError: any) {
+            logger.warn(`⚠️ Error playing sound ${type} (${soundId}):`, playError?.message || playError);
+            // Fall through to haptic
           }
-          
-          // Play the sound (expo-audio AudioPlayer automatically resets to start)
-          sound.play();
-          logger.log(`🔊 Played sound: ${type} on ${Platform.OS}`);
         } else {
-          logger.log(`🔊 Sound not available, using haptic: ${type}`);
-          await this.playHaptic(type);
+          logger.log(`🔊 Sound not available (${soundId}), using haptic: ${type}`);
         }
+        
+        // Fallback to haptic if sound failed or not available
+        await this.playHaptic(type);
       } else {
         logger.log(`🔊 Sound disabled, using haptic: ${type}`);
         await this.playHaptic(type);

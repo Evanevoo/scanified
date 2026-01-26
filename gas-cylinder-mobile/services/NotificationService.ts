@@ -78,13 +78,25 @@ export class NotificationService {
         return;
       }
 
-      // Request permissions
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
+      // Request permissions (skip in Expo Go to avoid SDK 53+ warnings)
+      let finalStatus = 'undetermined';
+      try {
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        finalStatus = existingStatus;
 
-      if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
+        if (existingStatus !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+      } catch (permError: any) {
+        // Handle SDK 53+ Expo Go limitation for permissions
+        if (permError?.message?.includes('removed from Expo Go') || 
+            permError?.message?.includes('development build')) {
+          logger.log('📱 Notification permissions not available in Expo Go (SDK 53+)');
+          this.isInitialized = true;
+          return;
+        }
+        throw permError;
       }
 
       if (finalStatus !== 'granted') {

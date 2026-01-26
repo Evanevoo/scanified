@@ -5,6 +5,10 @@ import { View, Text, StyleSheet, LogBox } from 'react-native';
 // Only suppress specific warnings that are not actionable, keep errors visible
 if (__DEV__) {
   LogBox.ignoreLogs([
+    // Expo Notifications SDK 53+ Expo Go limitation (expected behavior)
+    'expo-notifications: Android Push notifications',
+    'removed from Expo Go',
+    'Use a development build instead',
     // React Navigation warnings
     'Non-serializable values were found in the navigation state',
     'Sending `onAnimatedValueUpdate` with no listeners registered',
@@ -45,7 +49,6 @@ import CylinderDetailsScreen from './screens/CylinderDetailsScreen';
 import CustomerDetailsScreen from './screens/CustomerDetailsScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import LoginScreen from './LoginScreen';
-import LocateCylinderScreen from './screens/LocateCylinderScreen';
 import FillCylinderScreen from './screens/FillCylinderScreen';
 import AddCylinderScreen from './screens/AddCylinderScreen';
 import TrackAboutStyleScanScreen from './screens/TrackAboutStyleScanScreen';
@@ -57,7 +60,6 @@ import SupportTicketScreen from './screens/SupportTicketScreen';
 import UserManagementScreen from './screens/UserManagementScreen';
 import DriverDashboard from './screens/DriverDashboard';
 import AnalyticsScreen from './screens/AnalyticsScreen';
-import DataHealthScreen from './screens/DataHealthScreen';
 import NotificationSettingsScreen from './screens/NotificationSettingsScreen';
 import { notificationService } from './services/NotificationService';
 import { soundService } from './services/soundService';
@@ -114,10 +116,15 @@ function AppContent() {
   const { updateInfo, openUpdateUrl } = useAppUpdate();
   const [showUpdateModal, setShowUpdateModal] = React.useState(false);
 
-  // Show update modal when update is available
+  // Show update modal when update is available (with delay to avoid interrupting app startup)
   React.useEffect(() => {
     if (updateInfo?.hasUpdate) {
-      setShowUpdateModal(true);
+      // Delay showing the modal by 2 seconds to allow app to finish loading
+      const timeout = setTimeout(() => {
+        setShowUpdateModal(true);
+      }, 2000);
+      
+      return () => clearTimeout(timeout);
     }
   }, [updateInfo]);
 
@@ -125,8 +132,18 @@ function AppContent() {
   React.useEffect(() => {
     if (user && profile?.organization_id) {
       // Initialize notification service
+      // Initialize notification service (gracefully handle Expo Go limitations)
       notificationService.initialize().then(() => {
         notificationService.registerDevice(user.id, profile.organization_id);
+      }).catch((error) => {
+        // Suppress Expo Go SDK 53+ warning about remote push notifications
+        if (error?.message?.includes('removed from Expo Go') || 
+            error?.message?.includes('development build')) {
+          // This is expected in Expo Go - local notifications still work
+          console.log('📱 Notification service: Remote push not available in Expo Go (expected)');
+        } else {
+          console.error('Error initializing notification service:', error);
+        }
       });
       
       // Initialize sound service
@@ -218,7 +235,7 @@ function AppContent() {
             <Stack.Screen 
               name="ScanCylinders" 
               component={ScanCylindersScreen}
-              options={{ title: 'Scan Cylinders' }}
+              options={{ title: 'Scan Customer Number' }}
             />
             <Stack.Screen 
               name="EnhancedScan" 
@@ -228,7 +245,7 @@ function AppContent() {
             <Stack.Screen 
               name="EditCylinder" 
               component={EditCylinderScreen}
-              options={{ title: 'Edit Cylinder' }}
+              options={{ title: 'Edit Cylinder', headerShown: false }}
             />
             <Stack.Screen 
               name="CylinderDetails" 
@@ -244,11 +261,6 @@ function AppContent() {
               name="Settings" 
               component={SettingsScreen}
               options={{ title: 'Settings' }}
-            />
-            <Stack.Screen 
-              name="LocateCylinder" 
-              component={LocateCylinderScreen}
-              options={{ title: 'Search Cylinder' }}
             />
             <Stack.Screen 
               name="FillCylinder" 
@@ -304,11 +316,6 @@ function AppContent() {
               name="Analytics" 
               component={AnalyticsScreen}
               options={{ title: 'Analytics' }}
-            />
-            <Stack.Screen 
-              name="DataHealth" 
-              component={DataHealthScreen}
-              options={{ title: 'Data Health' }}
             />
             <Stack.Screen 
               name="NotificationSettings" 

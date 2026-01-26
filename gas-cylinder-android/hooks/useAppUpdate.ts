@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Platform, Linking, Alert } from 'react-native';
+import { Platform, Linking, Alert, AppState, AppStateStatus } from 'react-native';
 import Constants from 'expo-constants';
 import { supabase } from '../supabase';
 import logger from '../utils/logger';
@@ -98,7 +98,18 @@ export function useAppUpdate() {
       checkForUpdate();
     }, 24 * 60 * 60 * 1000);
     
-    return () => clearInterval(interval);
+    // Listen for app state changes to check when app comes to foreground
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active') {
+        // Check for updates when app comes to foreground
+        checkForUpdate();
+      }
+    });
+    
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
   }, []);
 
   const openUpdateUrl = async () => {

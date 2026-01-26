@@ -2,9 +2,10 @@ import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, Text, TouchableOpacity, StyleSheet, Modal, 
-  Dimensions, Alert, SafeAreaView, TextInput, Linking 
+  Dimensions, Alert, SafeAreaView, TextInput, Linking, Pressable 
 } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
+import Constants from 'expo-constants';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../hooks/useAuth';
 import { OfflineStorageService } from '../services/offlineStorage';
@@ -12,6 +13,33 @@ import { feedbackService } from '../services/feedbackService';
 import { customizationService } from '../services/customizationService';
 import { supabase } from '../supabase';
 import * as Haptics from 'expo-haptics';
+
+// Check if Vision Camera is available (requires native modules)
+let visionCameraAvailable = false;
+let VisionCameraScanner: any = null;
+
+// Only check for Vision Camera if not in Expo Go
+const isExpoGo = Constants.executionEnvironment === 'storeClient' || Constants.appOwnership === 'expo';
+
+if (!isExpoGo) {
+  try {
+    require('react-native-vision-camera');
+    visionCameraAvailable = true;
+    
+    try {
+      VisionCameraScanner = require('../components/VisionCameraScanner').default;
+      logger.log('✅ Vision Camera scanner available');
+    } catch (error) {
+      logger.log('⚠️ VisionCameraScanner component not available:', error);
+      visionCameraAvailable = false;
+    }
+  } catch (error) {
+    logger.log('⚠️ Vision Camera not available (requires native build)');
+    visionCameraAvailable = false;
+  }
+} else {
+  logger.log('ℹ️ Running in Expo Go - Vision Camera not available (requires native build)');
+}
 
 const { width, height } = Dimensions.get('window');
 
@@ -37,6 +65,8 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
   const [lastScannedItemDetails, setLastScannedItemDetails] = useState<any>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [isFlashlightOn, setIsFlashlightOn] = useState(false);
+  const [useVisionCamera, setUseVisionCamera] = useState(false);
+  const [focusTrigger, setFocusTrigger] = useState(0); // Used to trigger autofocus on tap
   
 
   useEffect(() => {
@@ -55,6 +85,7 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
   }, [permission]);
 
   const handleBarcodeScanned = async ({ data }: { data: string }) => {
+    if (isScanning) return;
     await handleBarcodeScannedWithAction({ data }, selectedAction);
   };
 
@@ -255,25 +286,63 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
 
       {/* Camera View */}
       <View style={styles.cameraContainer}>
-        <CameraView
-          style={styles.camera}
-          onBarcodeScanned={handleBarcodeScanned}
-          barcodeScannerSettings={{}}
-          enableTorch={isFlashlightOn}
-        />
-        
-        {/* Scanning Frame Overlay */}
-        <View style={styles.scanningFrame}>
-          <View style={styles.scanningBox} />
-          <Text style={styles.scanditLabel}>SCANDIT</Text>
-        </View>
-        
-        {/* Detected Info Box */}
-        {lastScannedItemDetails && (
-          <View style={styles.detectedInfoBox}>
-            <Text style={styles.detectedBarcode}>{lastScannedItemDetails.barcode}</Text>
-            <Text style={styles.detectedProduct}>{lastScannedItemDetails.product_code || 'Unknown'}</Text>
-          </View>
+        {useVisionCamera && visionCameraAvailable && VisionCameraScanner ? (
+          <VisionCameraScanner
+            onBarcodeScanned={(data: string) => {
+              if (!isScanning && data) {
+                logger.log('📷 Vision Camera barcode scanned:', data);
+                handleBarcodeScanned({ data });
+              }
+            }}
+            enabled={!isScanning}
+            onClose={() => {
+              setUseVisionCamera(false);
+            }}
+            target="customer"
+          />
+        ) : (
+          <>
+            <Pressable
+              style={styles.camera}
+              onPress={(event) => {
+                // Trigger autofocus on tap by toggling autofocus prop
+                setFocusTrigger(prev => {
+                  const newValue = prev + 1;
+                  // Toggle autofocus to trigger refocus
+                  setTimeout(() => setFocusTrigger(newValue + 1), 50);
+                  return newValue;
+                });
+                feedbackService.quickAction('focus');
+              }}
+            >
+              <CameraView
+                style={StyleSheet.absoluteFill}
+                facing="back"
+                autofocus="on"
+                mode="video"
+                barcodeScannerEnabled={true}
+                onBarcodeScanned={handleBarcodeScanned}
+                barcodeScannerSettings={{
+                  barcodeTypes: ['code39', 'code128', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14', 'qr', 'aztec', 'datamatrix', 'pdf417'],
+                }}
+                enableTorch={isFlashlightOn}
+              />
+            </Pressable>
+            
+            {/* Scanning Frame Overlay */}
+            <View style={styles.scanningFrame}>
+              <View style={styles.scanningBox} />
+              <Text style={styles.scanditLabel}>SCANDIT</Text>
+            </View>
+            
+            {/* Detected Info Box */}
+            {lastScannedItemDetails && (
+              <View style={styles.detectedInfoBox}>
+                <Text style={styles.detectedBarcode}>{lastScannedItemDetails.barcode}</Text>
+                <Text style={styles.detectedProduct}>{lastScannedItemDetails.product_code || 'Unknown'}</Text>
+              </View>
+            )}
+          </>
         )}
       </View>
 
@@ -329,6 +398,19 @@ export default function TrackAboutStyleScanScreen({ route }: { route?: any }) {
             {isFlashlightOn ? 'FLASH ON' : 'FLASH OFF'}
           </Text>
         </TouchableOpacity>
+        
+        {/* Vision Camera Toggle Button */}
+        {visionCameraAvailable && VisionCameraScanner && !useVisionCamera && (
+          <TouchableOpacity 
+            style={styles.scannerToggleButton}
+            onPress={() => {
+              setUseVisionCamera(true);
+              logger.log('📷 Switched to Vision Camera');
+            }}
+          >
+            <Text style={styles.scannerToggleText}>🔍 Vision</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Manual Entry Modal */}
@@ -596,6 +678,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   flashlightIcon: {
+    fontSize: 10,
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  scannerToggleButton: {
+    width: 50,
+    height: 50,
+    backgroundColor: '#333',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+  },
+  scannerToggleText: {
     fontSize: 10,
     color: '#fff',
     fontWeight: 'bold',

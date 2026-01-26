@@ -14,6 +14,7 @@ import {
 } from '@mui/material';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { SearchInputWithIcon } from '../components/ui/search-input-with-icon';
 import {
   History as HistoryIcon,
   Close as CloseIcon,
@@ -4416,20 +4417,12 @@ export default function ImportApprovals() {
       {/* Enhanced Filters and Controls */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
-          <TextField
+          <SearchInputWithIcon
             placeholder="Search Records"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            size="small"
-            InputProps={{
-              startAdornment: <SearchIcon />
-            }}
-            sx={{
-              minWidth: 200,
-              '& .MuiOutlinedInput-root': {
-                height: 40, // Match the height of other controls
-              }
-            }}
+            onClear={() => setSearch('')}
+            className="min-w-[300px]"
           />
           <FormControl size="small" sx={{ minWidth: 120 }}>
             <InputLabel>Status</InputLabel>

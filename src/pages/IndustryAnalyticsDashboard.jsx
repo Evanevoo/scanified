@@ -45,6 +45,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useDebounce, useOptimizedFetch, usePagination } from '../utils/performance';
 import { FadeIn, SlideIn, StatsSkeleton, TableSkeleton, SmoothButton } from '../components/SmoothLoading';
 import { useNavigate } from 'react-router-dom';
+import { SearchInputWithIcon } from '../components/ui/search-input-with-icon';
 
 export default function IndustryAnalyticsDashboard() {
   const { profile } = useAuth();
@@ -457,19 +458,12 @@ export default function IndustryAnalyticsDashboard() {
             <Typography variant="h6" gutterBottom>
               Quick Search
             </Typography>
-            <TextField
-              fullWidth
+            <SearchInputWithIcon
               placeholder="Search by barcode, serial number, or customer..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon />
-                  </InputAdornment>
-                ),
-              }}
-              sx={{ mb: 2 }}
+              onClear={() => setSearchTerm('')}
+              className="w-full"
             />
             {debouncedSearch && <QuickSearchResults />}
           </CardContent>

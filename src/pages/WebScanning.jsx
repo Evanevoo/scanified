@@ -38,6 +38,7 @@ import {
   Badge,
   InputAdornment
 } from '@mui/material';
+import { SearchInputWithIcon } from '../components/ui/search-input-with-icon';
 import {
   QrCodeScanner as ScanIcon,
   Add as AddIcon,
@@ -45,7 +46,6 @@ import {
   Delete as DeleteIcon,
   Check as CheckIcon,
   Close as CloseIcon,
-  Search as SearchIcon,
   Inventory as InventoryIcon,
   LocalShipping as DeliveryIcon,
   Assignment as AssignmentIcon,
@@ -859,18 +859,12 @@ export default function WebScanning() {
               <Typography variant="h6">
                 All Scan Results ({scannedItems.length})
               </Typography>
-              <TextField
-                size="small"
+              <SearchInputWithIcon
                 placeholder="Search scans..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  )
-                }}
+                onClear={() => setSearchTerm('')}
+                className="min-w-[300px]"
               />
             </Box>
             

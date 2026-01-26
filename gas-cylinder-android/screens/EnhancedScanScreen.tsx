@@ -2,12 +2,43 @@ import logger from '../utils/logger';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   View, Text, TextInput, TouchableOpacity, Pressable, StyleSheet, FlatList, 
-  ActivityIndicator, Modal, Dimensions, Alert, SafeAreaView, ScrollView, Linking 
+  ActivityIndicator, Modal, Dimensions, Alert, SafeAreaView, ScrollView, Linking, Vibration 
 } from 'react-native';
 import { supabase } from '../supabase';
 import { useNavigation } from '@react-navigation/native';
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
+
+// Use ML Kit for professional barcode scanning with OCR fallback
+import MLKitScanner from '../components/MLKitScanner';
+
+// Check if Vision Camera is available (requires native modules)
+let visionCameraAvailable = false;
+let VisionCameraScanner: any = null;
+
+// Only check for Vision Camera if not in Expo Go
+const isExpoGo = Constants.executionEnvironment === 'storeClient' || Constants.appOwnership === 'expo';
+
+if (!isExpoGo) {
+  try {
+    require('react-native-vision-camera');
+    visionCameraAvailable = true;
+    
+    try {
+      VisionCameraScanner = require('../components/VisionCameraScanner').default;
+      logger.log('✅ Vision Camera scanner available');
+    } catch (error) {
+      logger.log('⚠️ VisionCameraScanner component not available:', error);
+      visionCameraAvailable = false;
+    }
+  } catch (error) {
+    logger.log('⚠️ Vision Camera not available (requires native build)');
+    visionCameraAvailable = false;
+  }
+} else {
+  logger.log('ℹ️ Running in Expo Go - Vision Camera not available (requires native build)');
+}
 import { useTheme } from '../context/ThemeContext';
 import { useAssetConfig } from '../context/AssetContext';
 import { useSettings } from '../context/SettingsContext';
@@ -144,9 +175,13 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [customizationSettings, setCustomizationSettings] = useState<any>(null);
   const [lastScannedItemDetails, setLastScannedItemDetails] = useState<any>(null);
+  const [ocrFoundCustomer, setOcrFoundCustomer] = useState<{name: string, id: string} | null>(null);
   const [flashEnabled, setFlashEnabled] = useState(false);
+  const [useVisionCamera, setUseVisionCamera] = useState(false); // Toggle for Vision Camera scanner
+  const [cameraZoom, setCameraZoom] = useState(0); // Zoom level (0 = no zoom, max 2x)
   const lastScanRef = useRef<number>(0);
   const cameraContainerRef = useRef<any>(null);
+  const cameraRef = useRef<any>(null);
   const scanFrameRef = useRef<any>(null);
   const [scanFrameRect, setScanFrameRect] = useState<{
     left: number;
@@ -560,28 +595,60 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     return isInFallbackArea;
   };
 
-  // Validate cylinder serial number format - ONLY 9 digits
-  const validateCylinderSerial = (barcode: string): { isValid: boolean; error?: string; scannedValue?: string } => {
+  // Normalize cylinder barcode: fix common scanner/OCR letter→digit mix-ups (O→0, I→1, etc.)
+  // so cylinder serials (9 digits) still scan when the reader returns letters.
+  const normalizeCylinderBarcode = (raw: string): string => {
+    if (!raw || !raw.trim()) return raw;
+    let s = raw.trim().replace(/^\*+|\*+$/g, '');
+    // Apply common misreads only in numeric-looking context
+    const letterToDigit: Record<string, string> = {
+      'O': '0', 'o': '0', 'D': '0', 'Q': '0',
+      'I': '1', 'l': '1', '|': '1', 'L': '1',
+      'S': '5', 's': '5',
+      'Z': '2', 'z': '2',
+      'B': '8', 'b': '8',
+      'G': '6', 'g': '6',
+    };
+    let normalized = '';
+    for (let i = 0; i < s.length; i++) {
+      normalized += letterToDigit[s[i]] ?? s[i];
+    }
+    const digitsOnly = normalized.replace(/[^0-9]/g, '');
+    if (digitsOnly.length === 9) return digitsOnly;
+    return s;
+  };
+
+  // Validate cylinder serial number format - ONLY 9 digits; accept after normalizing letter→digit
+  const validateCylinderSerial = (barcode: string): { isValid: boolean; error?: string; scannedValue?: string; canonicalBarcode?: string } => {
     if (!barcode || !barcode.trim()) {
       return { isValid: false, error: 'Empty barcode' };
     }
 
-    const trimmed = barcode.trim();
+    const trimmed = barcode.trim().replace(/^\*+|\*+$/g, '');
+    const normalized = normalizeCylinderBarcode(trimmed);
+    const digitsOnly = trimmed.replace(/[^0-9]/g, '');
+    const normalizedDigits = normalized.replace(/[^0-9]/g, '');
     
-    // Always return what was scanned for user feedback
     const result = { scannedValue: trimmed };
-    
-    // Cylinders are ONLY 9 digits - nothing else!
     const nineDigitPattern = /^[0-9]{9}$/;
     
     if (nineDigitPattern.test(trimmed)) {
-      return { ...result, isValid: true };
+      return { ...result, isValid: true, canonicalBarcode: trimmed };
+    }
+    if (nineDigitPattern.test(digitsOnly)) {
+      return { ...result, isValid: true, canonicalBarcode: digitsOnly };
+    }
+    if (nineDigitPattern.test(normalized)) {
+      return { ...result, isValid: true, canonicalBarcode: normalized };
+    }
+    if (nineDigitPattern.test(normalizedDigits)) {
+      return { ...result, isValid: true, canonicalBarcode: normalizedDigits };
     }
     
     return { 
       ...result,
       isValid: false, 
-      error: `Invalid cylinder serial number. Expected: exactly 9 digits (e.g., 123456789)\nScanned: ${trimmed}` 
+      error: `Invalid cylinder serial. Expected 9 digits (e.g. 123456789). Scanned: ${trimmed}${normalized !== trimmed ? ` (normalized: ${normalized})` : ''}` 
     };
   };
 
@@ -616,13 +683,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     return { isValid: true };
   };
 
-  // Check if barcode is in scan frame region
-  const isBarcodeInScanRegion = (barcode: string): boolean => {
-    // For now, we'll assume all detected barcodes are in region
-    // In a more advanced implementation, you could use the barcode's position
-    // from the camera's detection results
-    return true;
-  };
+  // No separate "scan region by barcode" — use isBarcodeInScanArea(bounds) in the camera callback instead.
 
   // Look up item details by barcode
   const lookupItemDetails = async (barcode: string) => {
@@ -666,6 +727,61 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     } catch (error) {
       logger.error('Error in lookupItemDetails:', error);
       return null;
+    }
+  };
+
+  // Search for customer by name (OCR fallback)
+  const searchCustomerByName = async (possibleNames: string[]): Promise<{name: string, id: string} | null> => {
+    if (!organization?.id || possibleNames.length === 0) {
+      return null;
+    }
+
+    try {
+      logger.log('🔍 OCR: Searching for customers by names:', possibleNames);
+      
+      // Try each possible name until we find a match
+      for (const name of possibleNames) {
+        if (!name || name.length < 3) continue;
+        
+        // Search for customer with matching name (case-insensitive)
+        const { data: customers, error } = await supabase
+          .from('customers')
+          .select('CustomerListID, name')
+          .eq('organization_id', organization.id)
+          .ilike('name', `%${name}%`)
+          .limit(1);
+
+        if (error) {
+          logger.error('OCR customer search error:', error);
+          continue;
+        }
+
+        if (customers && customers.length > 0) {
+          const found = customers[0];
+          logger.log('✅ OCR: Found customer:', found.name);
+          return { name: found.name, id: found.CustomerListID };
+        }
+      }
+
+      logger.log('❌ OCR: No customer found for any of the names');
+      return null;
+    } catch (error) {
+      logger.error('Error in searchCustomerByName:', error);
+      return null;
+    }
+  };
+
+  // Handle OCR text found
+  const handleTextFound = async (rawText: string, possibleNames: string[]) => {
+    logger.log('📝 OCR: Text found, searching for customers...');
+    
+    const foundCustomer = await searchCustomerByName(possibleNames);
+    
+    if (foundCustomer) {
+      setOcrFoundCustomer(foundCustomer);
+      // Provide feedback
+      await feedbackService.scanSuccess();
+      logger.log('📝 OCR: Customer found:', foundCustomer.name);
     }
   };
 
@@ -735,30 +851,39 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       return;
     }
 
-    // Check if barcode is in scan region (future enhancement)
-    if (!isBarcodeInScanRegion(data)) {
-      logger.log('📷 Barcode not in scan region');
-      setScanFeedback('📍 Point camera directly at barcode');
-      setTimeout(() => setScanFeedback(''), 2000);
-      processingBarcodesRef.current.delete(data);
-      return;
-    }
+    // Use canonical barcode for cylinders (9-digit form) so DB lookups and duplicate checks use the same value
+    const effectiveBarcode = (validationResult as { canonicalBarcode?: string }).canonicalBarcode ?? data;
 
     // Show processing feedback
     setScanFeedback('🔍 Processing barcode...');
     
     const now = Date.now();
     
-    // Check if barcode was already scanned in this session
-    const existingScanIndex = scannedItems.findIndex(item => item.barcode === data);
+    // Check if barcode was already scanned in this session (use canonical form for cylinders)
+    const existingScanIndex = scannedItems.findIndex(item => item.barcode === effectiveBarcode);
     if (existingScanIndex !== -1) {
       const existingScan = scannedItems[existingScanIndex];
       
       // If scanning with the same action, it's a duplicate
       if (existingScan.action === selectedAction) {
         logger.log('⚠️ Duplicate scan detected in current session:', data);
-        setScanFeedback(`⚠️ Already scanned as ${selectedAction === 'out' ? 'SHIP' : 'RETURN'}: ${data}`);
-        setDuplicates(prev => [...prev, data]);
+        
+        // Ignore the scan - don't process it
+        // Clear processing flag immediately
+        processingBarcodesRef.current.delete(data);
+        
+        // Vibrate device
+        Vibration.vibrate([0, 200, 100, 200]);
+        
+        // Play custom duplicate error sound
+        try {
+          await feedbackService.scanDuplicate(data);
+        } catch (soundError) {
+          logger.warn('⚠️ Error playing duplicate sound:', soundError);
+        }
+        
+        // Show on-screen message (not popup)
+        setScanFeedback(`Barcode "${data}" already scanned`);
         
         // Clear feedback after 5 seconds
         setTimeout(() => {
@@ -776,18 +901,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           timestamp: Date.now(),
         });
         
-        // Provide duplicate feedback
-        await feedbackService.scanDuplicate(data);
-        
-        // Show alert for duplicate
-        Alert.alert(
-          'Duplicate Scan',
-          `Barcode ${data} was already scanned as ${selectedAction === 'out' ? 'SHIP' : 'RETURN'} in this session.`,
-          [{ text: 'OK' }]
-        );
-        
-        // Clear processing flag
-        processingBarcodesRef.current.delete(data);
+        // Don't add to duplicates list or show alert - just ignore and return
         return;
       } else {
         // Different action - update the existing scan instead of adding duplicate
@@ -825,13 +939,13 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       }
     }
     
-    // Check if barcode exists in the system
+    // Check if barcode exists in the system (use canonical barcode for lookup)
     try {
-      logger.log('🔍 Checking if barcode exists in system:', data);
+      logger.log('🔍 Checking if barcode exists in system:', effectiveBarcode);
       const { data: existingBottle, error: bottleError } = await supabase
         .from('bottles')
         .select('id, barcode_number, serial_number, type, description, status')
-        .or(`barcode_number.eq.${data},serial_number.eq.${data}`)
+        .or(`barcode_number.eq.${effectiveBarcode},serial_number.eq.${effectiveBarcode}`)
         .eq('organization_id', organization?.id)
         .maybeSingle();
       
@@ -841,8 +955,8 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       }
       
       if (!existingBottle) {
-        logger.log('❌ Barcode not found in system:', data);
-        setScanFeedback(`❌ Not in system: ${data}`);
+        logger.log('❌ Barcode not found in system:', effectiveBarcode);
+        setScanFeedback(`❌ Not in system: ${effectiveBarcode}`);
         
         // Clear feedback after 5 seconds
         setTimeout(() => {
@@ -856,7 +970,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         // Show detailed alert
         Alert.alert(
           'Barcode Not Found',
-          `Barcode ${data} is not registered in the system.\n\nPlease verify the barcode or add it to the system before scanning.`,
+          `Barcode ${effectiveBarcode} is not registered in the system.\n\nPlease verify the barcode or add it to the system before scanning.`,
           [{ text: 'OK' }]
         );
         processingBarcodesRef.current.delete(data);
@@ -905,11 +1019,11 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       // Format validation disabled - using basic validation only
       logger.log('🔍 Using basic validation (FormatValidationService disabled)');
       
-      // For cylinders, use the original 9-digit barcode directly
-      logger.log('📷 Using cylinder serial number for lookup:', data);
+      // For cylinders, use canonical 9-digit barcode for lookup and storage
+      logger.log('📷 Using cylinder serial number for lookup:', effectiveBarcode);
       
       logger.log('🔍 Calling processScan...');
-      await processScan(data);
+      await processScan(effectiveBarcode);
       logger.log('🔍 processScan completed');
       
       // Note: Scan feedback with count is now set inside processScan's setScannedItems callback
@@ -925,14 +1039,14 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       logger.log('🔍 Keeping scan feedback visible for debugging');
       
       // Provide haptic/audio success feedback
-      await feedbackService.scanSuccess(data);
+      await feedbackService.scanSuccess(effectiveBarcode);
       
       // Send local notification for successful scan (Expo Go/dev build)
       await notificationService.sendLocalNotification({
         title: 'Scan successful',
-        body: `Barcode ${data} processed`,
+        body: `Barcode ${effectiveBarcode} processed`,
         categoryId: 'scan_complete',
-        data: { barcode: data }
+        data: { barcode: effectiveBarcode }
       });
       
       // Don't show alert in non-batch mode - just show feedback to keep camera open
@@ -957,7 +1071,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       // Add a dummy scan to show something happened
       const failedScan: ScanResult = {
         id: `failed_${Date.now()}`,
-        barcode: data,
+        barcode: effectiveBarcode,
         timestamp: Date.now(),
         action: selectedAction,
         synced: false,
@@ -1512,6 +1626,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     
     setBatchMode(false);
     setIsScanning(false);
+    setOcrFoundCustomer(null);
     
     // Record batch statistics
     await statsService.recordBatch({
@@ -2196,46 +2311,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 paddingVertical: styles.welcomeSection.paddingVertical * getDynamicStyles().spacingMultiplier
               }
             ]}>
-              {/* Last Scanned Item Details */}
-              {lastScannedItemDetails && (
-                <View style={[styles.lastScannedItem, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                  <Text style={[styles.lastScannedItemTitle, { color: theme.text }]}>
-                    📦 Last Scanned Item
-                  </Text>
-                  <Text style={[styles.lastScannedItemBarcode, { color: theme.primary }]}>
-                    {lastScannedItemDetails.barcode}
-                  </Text>
-                  <Text style={[styles.lastScannedItemType, { color: theme.textSecondary }]}>
-                    Type: {lastScannedItemDetails.type === 'bottle' ? 'Gas Bottle' : 'Gas Cylinder'}
-                  </Text>
-                  {lastScannedItemDetails.description && (
-                    <Text style={[styles.lastScannedItemDescription, { color: theme.textSecondary }]}>
-                      {lastScannedItemDetails.description}
-                    </Text>
-                  )}
-                  {lastScannedItemDetails.gasType && (
-                    <Text style={[styles.lastScannedItemGasType, { color: theme.textSecondary }]}>
-                      Gas: {lastScannedItemDetails.gasType}
-                    </Text>
-                  )}
-                  {lastScannedItemDetails.size && (
-                    <Text style={[styles.lastScannedItemSize, { color: theme.textSecondary }]}>
-                      Size: {lastScannedItemDetails.size}
-                    </Text>
-                  )}
-                  {lastScannedItemDetails.status && (
-                    <Text style={[styles.lastScannedItemStatus, { color: theme.textSecondary }]}>
-                      Status: {lastScannedItemDetails.status}
-                    </Text>
-                  )}
-                  {lastScannedItemDetails.customerName && (
-                    <Text style={[styles.lastScannedItemCustomer, { color: theme.textSecondary }]}>
-                      Customer: {lastScannedItemDetails.customerName}
-                    </Text>
-                  )}
-                </View>
-              )}
-              
               {/* Customization Indicator */}
               {customizationSettings && (
                 <View style={styles.customizationIndicator}>
@@ -2301,12 +2376,68 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
             ref={cameraContainerRef}
             onLayout={updateScanFrameRect}
           >
-            <CameraView
-              style={[StyleSheet.absoluteFill, styles.camera]}
-              enableTorch={flashEnabled}
-              barcodeScannerEnabled={isScanning && !loading}
-              barcodeScannerSettings={{}}
-              onBarcodeScanned={({ data, bounds }: BarcodeScanningResult) => {
+            {useVisionCamera && visionCameraAvailable && VisionCameraScanner ? (
+              <VisionCameraScanner
+                onBarcodeScanned={(data) => {
+                  logger.log('📷 Vision Camera barcode scanned:', data);
+                  if (!scanningReady || loading) {
+                    logger.log('📷 Scanner not ready yet, ignoring scan');
+                    return;
+                  }
+                  
+                  const now = Date.now();
+                  
+                  if (!data || typeof data !== 'string') {
+                    return;
+                  }
+                  
+                  // Debounce: Ignore if same barcode scanned within last 2 seconds
+                  if (data === lastScannedBarcodeRef.current && (now - lastScannedTimeRef.current) < 2000) {
+                    logger.log('📷 Ignoring duplicate scan (debounce):', data);
+                    return;
+                  }
+                  
+                  // Update last scanned info immediately to prevent rapid re-scans
+                  lastScannedBarcodeRef.current = data;
+                  lastScannedTimeRef.current = now;
+                  
+                  // Clear any existing cooldown timer
+                  if (scanCooldownRef.current) {
+                    clearTimeout(scanCooldownRef.current);
+                  }
+                  
+                  // Process the scanned barcode
+                  handleBarcodeScanned(data);
+                }}
+                enabled={isScanning && !loading && scanningReady}
+                onClose={() => {
+                  setIsScanning(false);
+                  setUseVisionCamera(false);
+                  setOcrFoundCustomer(null);
+                }}
+                target="order"
+              />
+            ) : (
+              <>
+                <Pressable
+                  style={[StyleSheet.absoluteFill, styles.camera]}
+                  onPress={() => {
+                    // Tap to focus - match ScanCylindersScreen/ExpoCameraScanner; Android handles autofocus
+                    feedbackService.quickAction('focus');
+                  }}
+                >
+                  <CameraView
+                    ref={cameraRef}
+                    style={StyleSheet.absoluteFill}
+                    facing="back"
+                    autofocus="off"
+                    zoom={cameraZoom}
+                    enableTorch={flashEnabled}
+                    barcodeScannerEnabled={isScanning && !loading}
+                    barcodeScannerSettings={{
+                      barcodeTypes: ['code39', 'code128', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14', 'qr', 'aztec', 'datamatrix', 'pdf417'],
+                    }}
+                    onBarcodeScanned={({ data, bounds }: BarcodeScanningResult) => {
                 // Don't process scans until ready or if loading
                 if (!scanningReady || loading) {
                   logger.log('📷 Scanner not ready yet, ignoring scan');
@@ -2319,15 +2450,15 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                   return;
                 }
                 
-                // Debounce: Ignore if same barcode scanned within last 2 seconds
-                if (data === lastScannedBarcodeRef.current && (now - lastScannedTimeRef.current) < 2000) {
-                  logger.log('📷 Ignoring duplicate scan (debounce):', data);
+                // Enforce scan area: only accept barcodes within the scan frame
+                if (bounds && !isBarcodeInScanArea(bounds)) {
+                  logger.log('📷 Barcode outside scan area, ignoring');
                   return;
                 }
                 
-                // Check if barcode is within scan area (if bounds are available)
-                if (bounds && !isBarcodeInScanArea(bounds)) {
-                  logger.log('📷 Enhanced scan barcode outside scan area, ignoring');
+                // Debounce: Ignore if same barcode scanned within last 2 seconds
+                if (data === lastScannedBarcodeRef.current && (now - lastScannedTimeRef.current) < 2000) {
+                  logger.log('📷 Ignoring duplicate scan (debounce):', data);
                   return;
                 }
                 
@@ -2361,6 +2492,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 Alert.alert('Camera Error', 'Failed to start camera: ' + error.message);
               }}
             />
+            </Pressable>
             
             <View
               style={styles.cameraOverlay}
@@ -2375,12 +2507,8 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
               />
               {(
                 <>
-                  <Text style={styles.scanInstructions} pointerEvents="none">
-                    Point camera at gas cylinder barcode
-                  </Text>
-                  
-                  {/* Scan Feedback */}
-                  {scanFeedback && (
+                  {/* Scan Feedback - Hide when bottle details are shown */}
+                  {scanFeedback && !lastScannedItemDetails && (
                     <View style={styles.scanFeedbackContainer}>
                       <Text style={styles.scanFeedbackText}>{scanFeedback}</Text>
                       {lastScanAttempt && (
@@ -2393,33 +2521,139 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 </>
               )}
             </View>
-          </View>
-          
-          {/* Close Button - Separate from overlay to ensure it works */}
-          <TouchableOpacity
-            style={styles.closeCameraButton}
-            onPress={() => {
-              logger.log('Close button pressed');
-              setIsScanning(false);
-            }}
-          >
-            <Text style={styles.closeCameraText}>✕ Close</Text>
-          </TouchableOpacity>
+            
+            {/* Close Button - Separate from overlay to ensure it works */}
+            <TouchableOpacity
+              style={styles.closeCameraButton}
+              onPress={() => {
+                logger.log('Close button pressed');
+                setIsScanning(false);
+                setOcrFoundCustomer(null);
+              }}
+            >
+              <Text style={styles.closeCameraText}>✕ Close</Text>
+            </TouchableOpacity>
 
-          {/* Flash Toggle Button */}
-          <TouchableOpacity
-            style={styles.flashButton}
-            onPress={() => {
-              setFlashEnabled(!flashEnabled);
-              feedbackService.quickAction('flash toggled');
-            }}
-          >
-            <Ionicons 
-              name={flashEnabled ? 'flash' : 'flash-off'} 
-              size={28} 
-              color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
-            />
-          </TouchableOpacity>
+            {/* Scanner Toggle Button - Only show when Vision Camera is available */}
+            {visionCameraAvailable && VisionCameraScanner && (
+              <TouchableOpacity
+                style={styles.scannerToggleButton}
+                onPress={() => {
+                  setUseVisionCamera(!useVisionCamera);
+                  logger.log('📷 Scanner switched to:', useVisionCamera ? 'Expo Camera' : 'Vision Camera');
+                }}
+              >
+                <Text style={styles.scannerToggleText}>
+                  {useVisionCamera ? '📷 Use Expo Camera' : '🔍 Use Vision Camera'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Flash Toggle Button */}
+            <TouchableOpacity
+              style={styles.flashButton}
+              onPress={() => {
+                setFlashEnabled(!flashEnabled);
+                feedbackService.quickAction('flash toggled');
+              }}
+            >
+              <Ionicons 
+                name={flashEnabled ? 'flash' : 'flash-off'} 
+                size={28} 
+                color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
+              />
+            </TouchableOpacity>
+
+            {/* Zoom Controls */}
+            <View style={styles.zoomControls}>
+              <TouchableOpacity
+                style={styles.zoomButton}
+                onPress={() => {
+                  setCameraZoom(Math.max(0, cameraZoom - 0.1));
+                  feedbackService.quickAction('zoom out');
+                }}
+              >
+                <Ionicons name="remove-outline" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+              <Text style={styles.zoomText}>{Math.round((1 + cameraZoom) * 100)}%</Text>
+              <TouchableOpacity
+                style={styles.zoomButton}
+                onPress={() => {
+                  // Max zoom: 2x for better far barcode scanning
+                  setCameraZoom(Math.min(2, cameraZoom + 0.1));
+                  feedbackService.quickAction('zoom in');
+                }}
+              >
+                <Ionicons name="add-outline" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+              </>
+            )}
+          </View>
+
+          {/* Scanned Bottle Details - Centered in Middle */}
+          {lastScannedItemDetails && (
+            <View style={styles.scannerBottleDetails} pointerEvents="none">
+              <View style={styles.scannerBottleCard}>
+                <Text style={styles.scannerBottleBarcode}>
+                  {lastScannedItemDetails.barcode}
+                </Text>
+                {lastScannedItemDetails.description && (
+                  <Text style={styles.scannerBottleDescription}>
+                    {lastScannedItemDetails.description}
+                  </Text>
+                )}
+                <View style={styles.scannerBottleInfo}>
+                  {lastScannedItemDetails.gasType && (
+                    <Text style={styles.scannerBottleInfoText}>
+                      {lastScannedItemDetails.gasType}
+                    </Text>
+                  )}
+                  {lastScannedItemDetails.size && lastScannedItemDetails.size !== 'Unknown' && (
+                    <Text style={styles.scannerBottleInfoText}>
+                      Size: {lastScannedItemDetails.size}
+                    </Text>
+                  )}
+                </View>
+                <Text style={styles.scannerBottleAction}>
+                  {selectedAction === 'in' ? '✓ RETURNED' : '✓ SHIPPED'}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* OCR Found Customer Display */}
+          {ocrFoundCustomer && !lastScannedItemDetails && (
+            <View style={styles.scannerBottleDetails} pointerEvents="box-none">
+              <TouchableOpacity 
+                style={styles.ocrCustomerCard}
+                onPress={() => {
+                  logger.log('OCR customer selected:', ocrFoundCustomer.name);
+                  setOcrFoundCustomer(null);
+                  Alert.alert(
+                    'Customer Found',
+                    `Found: ${ocrFoundCustomer.name}\n\nWould you like to assign scans to this customer?`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { 
+                        text: 'Use Customer', 
+                        onPress: () => {
+                          setCustomerName(ocrFoundCustomer.name);
+                        }
+                      }
+                    ]
+                  );
+                }}
+              >
+                <Ionicons name="person" size={24} color="#FFF" />
+                <View style={styles.ocrCustomerInfo}>
+                  <Text style={styles.ocrCustomerLabel}>Customer Found via OCR</Text>
+                  <Text style={styles.ocrCustomerName}>{ocrFoundCustomer.name}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#FFF" />
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Bottom Action Buttons - Matching Image Design */}
           <View style={[styles.cameraBottomActions, { zIndex: 1000 }]}>
@@ -2507,7 +2741,11 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           </View>
 
           {/* Scanned Items List */}
-          <ScrollView style={styles.scannedItemsList}>
+          <ScrollView 
+            style={styles.scannedItemsList}
+            contentContainerStyle={styles.scannedItemsListContent}
+            showsVerticalScrollIndicator={true}
+          >
             {scannedItems.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={[styles.emptyStateText, { color: theme.textSecondary }]}>
@@ -3186,6 +3424,45 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  zoomControls: {
+    position: 'absolute',
+    top: 100,
+    left: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 25,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    zIndex: 1001,
+  },
+  zoomButton: {
+    padding: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginHorizontal: 12,
+    minWidth: 50,
+    textAlign: 'center',
+  },
+  scannerToggleButton: {
+    position: 'absolute',
+    bottom: 100,
+    left: 20,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    padding: 12,
+    borderRadius: 8,
+    zIndex: 1000,
+  },
+  scannerToggleText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   permissionContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -3822,7 +4099,10 @@ const styles = StyleSheet.create({
   },
   scannedItemsList: {
     flex: 1,
+  },
+  scannedItemsListContent: {
     padding: 16,
+    paddingBottom: 32,
   },
   emptyState: {
     flex: 1,
@@ -4028,9 +4308,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 16,
     paddingVertical: 20,
-    backgroundColor: '#fff',
     borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
+    borderTopColor: 'transparent',
     gap: 16,
   },
   actionIndicator: {
@@ -4043,13 +4322,16 @@ const styles = StyleSheet.create({
   actionIndicatorText: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#40B5AD',
+    color: '#FFF',
     backgroundColor: 'transparent',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#40B5AD',
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   cameraActionButton: {
     flex: 1,
@@ -4075,8 +4357,11 @@ const styles = StyleSheet.create({
   cameraActionButtonLabel: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#374151',
+    color: '#FFF',
     marginBottom: 4,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   cameraActionButtonLabelSelected: {
     color: '#40B5AD',
@@ -4085,7 +4370,10 @@ const styles = StyleSheet.create({
   cameraActionButtonCount: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: '#FFF',
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   cameraActionButtonCountSelected: {
     color: '#40B5AD',
@@ -4094,6 +4382,79 @@ const styles = StyleSheet.create({
   cameraActionButtonIcon: {
     fontSize: 16,
     marginTop: 4,
+  },
+  
+  // Scanned Bottle Details - Centered in Scanner
+  scannerBottleDetails: {
+    position: 'absolute',
+    top: '45%',
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+    zIndex: 500,
+  },
+  scannerBottleCard: {
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    borderRadius: 16,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#40B5AD',
+    minWidth: 260,
+  },
+  scannerBottleBarcode: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#40B5AD',
+    fontFamily: 'monospace',
+    marginBottom: 8,
+  },
+  scannerBottleDescription: {
+    fontSize: 14,
+    color: '#FFF',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  scannerBottleInfo: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 8,
+  },
+  scannerBottleInfoText: {
+    fontSize: 12,
+    color: '#AAA',
+  },
+  scannerBottleAction: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+    marginTop: 4,
+  },
+  
+  // OCR Customer Card
+  ocrCustomerCard: {
+    backgroundColor: 'rgba(255, 165, 0, 0.9)',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minWidth: 260,
+    borderWidth: 2,
+    borderColor: '#FFA500',
+  },
+  ocrCustomerInfo: {
+    flex: 1,
+  },
+  ocrCustomerLabel: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: 2,
+  },
+  ocrCustomerName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFF',
   },
   
   // Manual Entry Modal

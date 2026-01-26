@@ -2,12 +2,17 @@ import logger from '../utils/logger';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   View, Text, TextInput, TouchableOpacity, Pressable, StyleSheet, FlatList, 
-  ActivityIndicator, Modal, Dimensions, Alert, SafeAreaView, ScrollView, Linking 
+  ActivityIndicator, Modal, Dimensions, Alert, SafeAreaView, ScrollView, Linking, Vibration 
 } from 'react-native';
 import { supabase } from '../supabase';
 import { useNavigation } from '@react-navigation/native';
-import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
+import { useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
+
+// Use ML Kit for free professional barcode scanning
+import MLKitScanner from '../components/MLKitScanner';
+
 import { useTheme } from '../context/ThemeContext';
 import { useAssetConfig } from '../context/AssetContext';
 import { useSettings } from '../context/SettingsContext';
@@ -35,6 +40,8 @@ import Animated, {
 } from 'react-native-reanimated';
 
 const { width, height } = Dimensions.get('window');
+// Determine if device has a small screen (iPhone SE, iPhone 12 mini, etc.)
+const isSmallScreen = height < 800;
 
 interface ScanResult {
   id: string;
@@ -105,8 +112,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   // State
   const [scannedItems, setScannedItems] = useState<ScanResult[]>([]);
   const [isScanning, setIsScanning] = useState(false);
-  const [scanningReady, setScanningReady] = useState(false);
-  const [scanningCountdown, setScanningCountdown] = useState(0);
   
   // Track currently processing barcodes to prevent race conditions
   const processingBarcodesRef = useRef<Set<string>>(new Set());
@@ -136,9 +141,12 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [customizationSettings, setCustomizationSettings] = useState<any>(null);
   const [lastScannedItemDetails, setLastScannedItemDetails] = useState<any>(null);
+  const [ocrFoundCustomer, setOcrFoundCustomer] = useState<{name: string, id: string} | null>(null);
   const [flashEnabled, setFlashEnabled] = useState(false);
+  const [cameraZoom, setCameraZoom] = useState(0); // Zoom level (0 = no zoom, max 2x)
   const lastScanRef = useRef<number>(0);
   const cameraContainerRef = useRef<any>(null);
+  const cameraRef = useRef<any>(null);
   const scanFrameRef = useRef<any>(null);
   const [scanFrameRect, setScanFrameRect] = useState<{
     left: number;
@@ -156,7 +164,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   const lastScannedTimeRef = useRef<number>(0);
   const scanCooldownRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Camera permissions
+  // Camera permissions (for permission UI)
   const [permission, requestPermission] = useCameraPermissions();
 
   const updateScanFrameRect = useCallback(() => {
@@ -424,29 +432,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     loadSyncStatus();
   }, []);
 
-  // Countdown timer for scanning readiness
-  useEffect(() => {
-    if (isScanning && !scanningReady) {
-      setScanningCountdown(3); // Start with 3 second countdown
-      
-      const countdownInterval = setInterval(() => {
-        setScanningCountdown(prev => {
-          if (prev <= 1) {
-            setScanningReady(true);
-            clearInterval(countdownInterval);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-      
-      return () => clearInterval(countdownInterval);
-    } else if (!isScanning) {
-      setScanningReady(false);
-      setScanningCountdown(0);
-    }
-  }, [isScanning, scanningReady]);
-
   // Update scan frame rectangle when scanning starts
   useEffect(() => {
     if (!isScanning) {
@@ -627,6 +612,28 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     return true;
   };
 
+  // Extract size from description (e.g., "argon bottle - size 300" -> "300")
+  const extractSizeFromDescription = (description: string | null | undefined): string | null => {
+    if (!description) return null;
+    
+    // Try to match patterns like "size 300", "size: 300", "size-300", etc.
+    const sizePatterns = [
+      /size\s*[:\-]?\s*(\d+)/i,           // "size 300", "size: 300", "size-300"
+      /size\s+(\d+)/i,                     // "size 300"
+      /\(size\s*[:\-]?\s*(\d+)\)/i,       // "(size 300)"
+      /\b(\d+)\s*(?:cu\.?ft|cuft|cf|liter|l|kg|lb|pound)/i, // "300 cu ft", "300L", etc.
+    ];
+    
+    for (const pattern of sizePatterns) {
+      const match = description.match(pattern);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+    
+    return null;
+  };
+
   // Look up item details by barcode
   const lookupItemDetails = async (barcode: string) => {
     try {
@@ -637,28 +644,60 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         return null;
       }
 
-      // Try to find the item in bottles table with basic columns only
+      // Try to find the item in bottles table
       const { data: bottleData, error: bottleError } = await supabase
         .from('bottles')
-        .select('barcode_number, product_code, description, status, location')
+        .select('barcode_number, product_code, description, status, location, size, gas_type')
         .eq('barcode_number', barcode)
         .eq('organization_id', organization.id)
         .maybeSingle();
 
       if (bottleError) {
         logger.error('Error looking up bottle:', bottleError);
+        // If error mentions 'size' or 'gas_type', try without those columns as fallback
+        if (bottleError.message?.includes('size') || bottleError.message?.includes('gas_type')) {
+          logger.warn('Size or gas_type column not available, trying fallback query...');
+          const { data: fallbackData, error: fallbackError } = await supabase
+            .from('bottles')
+            .select('barcode_number, product_code, description, status, location')
+            .eq('barcode_number', barcode)
+            .eq('organization_id', organization.id)
+            .maybeSingle();
+          
+          if (fallbackError) {
+            logger.error('Fallback query also failed:', fallbackError);
+            return null;
+          }
+          
+          if (fallbackData) {
+            // Try to extract size from description if available
+            const extractedSize = extractSizeFromDescription(fallbackData.description);
+            return {
+              type: 'bottle' as const,
+              barcode: fallbackData.barcode_number,
+              productCode: fallbackData.product_code,
+              description: fallbackData.description,
+              gasType: fallbackData.product_code,
+              size: extractedSize || undefined,
+              status: fallbackData.status,
+              location: fallbackData.location
+            };
+          }
+        }
         return null;
       }
 
       if (bottleData) {
         logger.log('Found bottle details:', bottleData);
+        // Extract size from description if size column is null/empty
+        const size = bottleData.size || extractSizeFromDescription(bottleData.description);
         return {
           type: 'bottle' as const,
           barcode: bottleData.barcode_number,
           productCode: bottleData.product_code,
           description: bottleData.description,
-          gasType: bottleData.product_code, // Use product_code as gas type fallback
-          size: 'Unknown', // Default since size column doesn't exist
+          gasType: bottleData.gas_type || bottleData.product_code,
+          size: size || undefined,
           status: bottleData.status,
           location: bottleData.location
         };
@@ -672,17 +711,64 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     }
   };
 
+  // Search for customer by name (OCR fallback)
+  const searchCustomerByName = async (possibleNames: string[]): Promise<{name: string, id: string} | null> => {
+    if (!organization?.id || possibleNames.length === 0) {
+      return null;
+    }
+
+    try {
+      logger.log('🔍 OCR: Searching for customers by names:', possibleNames);
+      
+      // Try each possible name until we find a match
+      for (const name of possibleNames) {
+        if (!name || name.length < 3) continue;
+        
+        // Search for customer with matching name (case-insensitive)
+        const { data: customers, error } = await supabase
+          .from('customers')
+          .select('CustomerListID, name')
+          .eq('organization_id', organization.id)
+          .ilike('name', `%${name}%`)
+          .limit(1);
+
+        if (error) {
+          logger.error('OCR customer search error:', error);
+          continue;
+        }
+
+        if (customers && customers.length > 0) {
+          const found = customers[0];
+          logger.log('✅ OCR: Found customer:', found.name);
+          return { name: found.name, id: found.CustomerListID };
+        }
+      }
+
+      logger.log('❌ OCR: No customer found for any of the names');
+      return null;
+    } catch (error) {
+      logger.error('Error in searchCustomerByName:', error);
+      return null;
+    }
+  };
+
+  // Handle OCR text found
+  const handleTextFound = async (rawText: string, possibleNames: string[]) => {
+    logger.log('📝 OCR: Text found, searching for customers...');
+    
+    const foundCustomer = await searchCustomerByName(possibleNames);
+    
+    if (foundCustomer) {
+      setOcrFoundCustomer(foundCustomer);
+      // Provide feedback
+      await feedbackService.scanSuccess();
+      logger.log('📝 OCR: Customer found:', foundCustomer.name);
+    }
+  };
+
   // Handle barcode scan
   const handleBarcodeScan = async (data: string) => {
     logger.log('📷 EnhancedScanScreen barcode detected:', data);
-    logger.log('📷 Scanning ready state:', scanningReady);
-    logger.log('📷 Countdown:', scanningCountdown);
-    
-    // Don't process scans until countdown is finished
-    if (!scanningReady) {
-      logger.log('📷 Skipping scan - countdown still active');
-      return;
-    }
     
     if (!data || loading) {
       logger.log('📷 Skipping scan - no data or loading');
@@ -741,7 +827,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     // Check if barcode is in scan region (future enhancement)
     if (!isBarcodeInScanRegion(data)) {
       logger.log('📷 Barcode not in scan region');
-      setScanFeedback('📍 Point camera directly at barcode');
+      setScanFeedback(' ');
       setTimeout(() => setScanFeedback(''), 2000);
       return;
     }
@@ -759,8 +845,23 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       // If scanning with the same action, it's a duplicate
       if (existingScan.action === selectedAction) {
         logger.log('⚠️ Duplicate scan detected in current session:', data);
-        setScanFeedback(`⚠️ Already scanned as ${selectedAction === 'out' ? 'SHIP' : 'RETURN'}: ${data}`);
-        setDuplicates(prev => [...prev, data]);
+        
+        // Ignore the scan - don't process it
+        // Clear processing flag immediately
+        processingBarcodesRef.current.delete(data);
+        
+        // Vibrate device
+        Vibration.vibrate([0, 200, 100, 200]);
+        
+        // Play custom duplicate error sound
+        try {
+          await feedbackService.scanDuplicate(data);
+        } catch (soundError) {
+          logger.warn('⚠️ Error playing duplicate sound:', soundError);
+        }
+        
+        // Show on-screen message (not popup)
+        setScanFeedback(`Barcode "${data}" already scanned`);
         
         // Clear feedback after 5 seconds
         setTimeout(() => {
@@ -778,18 +879,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           timestamp: Date.now(),
         });
         
-        // Provide duplicate feedback
-        await feedbackService.scanDuplicate(data);
-        
-        // Show alert for duplicate
-        Alert.alert(
-          'Duplicate Scan',
-          `Barcode ${data} was already scanned as ${selectedAction === 'out' ? 'SHIP' : 'RETURN'} in this session.`,
-          [{ text: 'OK' }]
-        );
-        
-        // Clear processing flag
-        processingBarcodesRef.current.delete(data);
+        // Don't add to duplicates list or show alert - just ignore and return
         return;
       } else {
         // Different action - update the existing scan instead of adding duplicate
@@ -2321,140 +2411,128 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         )}
       </View>
 
-      {/* Camera Modal */}
+      {/* Camera Modal - Using ML Kit Scanner */}
       <Modal visible={isScanning} animationType="slide" transparent={true}>
         <View style={styles.cameraModal}>
-          <View
-            style={styles.cameraWrapper}
-            ref={cameraContainerRef}
-            onLayout={updateScanFrameRect}
-          >
-            <CameraView
-              style={[StyleSheet.absoluteFill, styles.camera]}
-              enableTorch={flashEnabled}
-              barcodeScannerEnabled={isScanning && !loading}
-              barcodeScannerSettings={{}}
-              onBarcodeScanned={({ data, bounds }: BarcodeScanningResult) => {
-                // Don't process scans until ready or if loading
-                if (!scanningReady || loading) {
-                  logger.log('📷 Scanner not ready yet, ignoring scan');
-                  return;
-                }
-                
-                const now = Date.now();
-                
-                if (!data || typeof data !== 'string') {
-                  return;
-                }
-                
-                // Debounce: Ignore if same barcode scanned within last 2 seconds
-                if (data === lastScannedBarcodeRef.current && (now - lastScannedTimeRef.current) < 2000) {
-                  logger.log('📷 Ignoring duplicate scan (debounce):', data);
-                  return;
-                }
-                
-                // Check if barcode is within scan area (if bounds are available)
-                if (bounds && !isBarcodeInScanArea(bounds)) {
-                  logger.log('📷 Enhanced scan barcode outside scan area, ignoring');
-                  return;
-                }
-                
-                // Update last scanned info immediately to prevent rapid re-scans
-                // This prevents the camera from triggering multiple times
-                lastScannedBarcodeRef.current = data;
-                lastScannedTimeRef.current = now;
-                
-                // Clear any existing cooldown timer
-                if (scanCooldownRef.current) {
-                  clearTimeout(scanCooldownRef.current);
-                }
-                
-                // Set cooldown to prevent re-scanning for 2 seconds
-                scanCooldownRef.current = setTimeout(() => {
-                  lastScannedBarcodeRef.current = '';
-                  lastScannedTimeRef.current = 0;
-                }, 2000);
-                
-                logger.log('📷 Processing barcode scan:', data);
-                // Call handleBarcodeScan - it will check processingBarcodesRef to prevent duplicates
-                handleBarcodeScan(data);
-              }}
-              onCameraReady={() => {
-                logger.log('📷 Camera is ready and active');
-                logger.log('📷 Camera ready - should be detecting barcodes now');
-                updateScanFrameRect();
-              }}
-              onMountError={(error) => {
-                logger.error('❌ Camera mount error:', error);
-                Alert.alert('Camera Error', 'Failed to start camera: ' + error.message);
-              }}
-            />
-            
-            <View
-              style={styles.cameraOverlay}
-              pointerEvents="none"
-              onLayout={updateScanFrameRect}
-            >
-              <View
-                ref={scanFrameRef}
-                style={styles.scanFrame}
-                pointerEvents="none"
-                onLayout={updateScanFrameRect}
-              />
-              {(
-                <>
-                  <Text style={styles.scanInstructions} pointerEvents="none">
-                    Point camera at gas cylinder barcode
-                  </Text>
-                  
-                  {/* Scan Feedback */}
-                  {scanFeedback && (
-                    <View style={styles.scanFeedbackContainer}>
-                      <Text style={styles.scanFeedbackText}>{scanFeedback}</Text>
-                      {lastScanAttempt && (
-                        <Text style={styles.lastScanText}>
-                          Scanned: {lastScanAttempt}
-                        </Text>
-                      )}
-                    </View>
-                  )}
-                </>
-              )}
-            </View>
-          </View>
-          
-          {/* Close Button - Separate from overlay to ensure it works */}
-          <TouchableOpacity
-            style={styles.closeCameraButton}
-            onPress={() => {
-              logger.log('Close button pressed');
+          <MLKitScanner
+            onBarcodeScanned={(data: string, result?: { format: string; confidence: number }) => {
+              if (!data || typeof data !== 'string') {
+                return;
+              }
+              
+              const now = Date.now();
+              
+              // Debounce: Ignore if same barcode scanned within last 2 seconds
+              if (data === lastScannedBarcodeRef.current && (now - lastScannedTimeRef.current) < 2000) {
+                logger.log('📷 MLKit: Ignoring duplicate scan (debounce):', data);
+                return;
+              }
+              
+              // Update last scanned info immediately to prevent rapid re-scans
+              lastScannedBarcodeRef.current = data;
+              lastScannedTimeRef.current = now;
+              
+              // Clear any existing cooldown timer
+              if (scanCooldownRef.current) {
+                clearTimeout(scanCooldownRef.current);
+              }
+              
+              // Set cooldown to prevent re-scanning for 2 seconds
+              scanCooldownRef.current = setTimeout(() => {
+                lastScannedBarcodeRef.current = '';
+                lastScannedTimeRef.current = 0;
+              }, 2000);
+              
+              logger.log('📷 MLKit: Processing barcode scan:', data, 'Format:', result?.format);
+              // Clear OCR customer when barcode is scanned
+              setOcrFoundCustomer(null);
+              // Call handleBarcodeScan - it will check processingBarcodesRef to prevent duplicates
+              handleBarcodeScan(data);
+            }}
+            enabled={isScanning && !loading}
+            onClose={() => {
+              logger.log('📷 MLKit: Scanner closed');
               setIsScanning(false);
+              setOcrFoundCustomer(null);
             }}
-          >
-            <Text style={styles.closeCameraText}>✕ Close</Text>
-          </TouchableOpacity>
+            batchMode={batchMode}
+            title={selectedAction === 'in' ? 'Scan to RETURN' : 'Scan to SHIP'}
+            subtitle=""
+            onTextFound={handleTextFound}
+          />
 
-          {/* Flash Toggle Button */}
-          <TouchableOpacity
-            style={styles.flashButton}
-            onPress={() => {
-              setFlashEnabled(!flashEnabled);
-              feedbackService.quickAction('flash toggled');
-            }}
-          >
-            <Ionicons 
-              name={flashEnabled ? 'flash' : 'flash-off'} 
-              size={28} 
-              color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
-            />
-          </TouchableOpacity>
+          {/* Scanned Bottle Details - Centered in Middle */}
+          {lastScannedItemDetails && (
+            <View style={styles.scannerBottleDetails} pointerEvents="none">
+              <View style={styles.scannerBottleCard}>
+                <Text style={styles.scannerBottleBarcode}>
+                  {lastScannedItemDetails.barcode}
+                </Text>
+                {lastScannedItemDetails.description && (
+                  <Text style={styles.scannerBottleDescription}>
+                    {lastScannedItemDetails.description}
+                  </Text>
+                )}
+                <View style={styles.scannerBottleInfo}>
+                  {lastScannedItemDetails.gasType && (
+                    <Text style={styles.scannerBottleInfoText}>
+                      {lastScannedItemDetails.gasType}
+                    </Text>
+                  )}
+                  {lastScannedItemDetails.size && (
+                    <Text style={styles.scannerBottleInfoText}>
+                      Size: {lastScannedItemDetails.size}
+                    </Text>
+                  )}
+                </View>
+                <Text style={styles.scannerBottleAction}>
+                  {selectedAction === 'in' ? '✓ RETURNED' : '✓ SHIPPED'}
+                </Text>
+              </View>
+            </View>
+          )}
 
-          {/* Bottom Action Buttons - Matching Image Design */}
+          {/* OCR Found Customer Display */}
+          {ocrFoundCustomer && !lastScannedItemDetails && (
+            <View style={styles.scannerBottleDetails} pointerEvents="box-none">
+              <TouchableOpacity 
+                style={styles.ocrCustomerCard}
+                onPress={() => {
+                  // When tapped, navigate to customer or use customer info
+                  logger.log('OCR customer selected:', ocrFoundCustomer.name);
+                  setOcrFoundCustomer(null);
+                  // Could navigate to customer or fill in customer field
+                  Alert.alert(
+                    'Customer Found',
+                    `Found: ${ocrFoundCustomer.name}\n\nWould you like to assign scans to this customer?`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { 
+                        text: 'Use Customer', 
+                        onPress: () => {
+                          setCustomerName(ocrFoundCustomer.name);
+                        }
+                      }
+                    ]
+                  );
+                }}
+              >
+                <Ionicons name="person" size={24} color="#FFF" />
+                <View style={styles.ocrCustomerInfo}>
+                  <Text style={styles.ocrCustomerLabel}>Customer Found via OCR</Text>
+                  <Text style={styles.ocrCustomerName}>{ocrFoundCustomer.name}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#FFF" />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Bottom Action Buttons - Transparent */}
           <View style={[styles.cameraBottomActions, { zIndex: 1000 }]}>
             {/* Action Selection Indicator */}
             <View style={styles.actionIndicator}>
               <Text style={styles.actionIndicatorText}>
-                {selectedAction === 'in' ? '🔄 RETURN Mode' : '📦 SHIP Mode'}
+                {selectedAction === 'in' ? '🔄 RETURN' : '📦 SHIP'}
               </Text>
             </View>
             
@@ -2532,7 +2610,11 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           </View>
 
           {/* Scanned Items List */}
-          <ScrollView style={styles.scannedItemsList}>
+          <ScrollView 
+            style={styles.scannedItemsList}
+            contentContainerStyle={styles.scannedItemsListContent}
+            showsVerticalScrollIndicator={true}
+          >
             {scannedItems.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={[styles.emptyStateText, { color: theme.textSecondary }]}>
@@ -2811,29 +2893,29 @@ const styles = StyleSheet.create({
   purpleHeader: {
     backgroundColor: '#40B5AD',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: height < 800 ? 8 : 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   headerTitle: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: height < 800 ? 16 : 18,
     fontWeight: 'bold',
   },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: height < 800 ? 12 : 16,
   },
   timeText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: height < 800 ? 14 : 16,
     fontWeight: '500',
   },
   doneText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: height < 800 ? 14 : 16,
     fontWeight: 'bold',
   },
   doneButton: {
@@ -2879,10 +2961,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   scanInstructions: {
-    fontSize: 16,
+    fontSize: height < 800 ? 14 : 16,
     color: '#6B7280',
     textAlign: 'center',
-    marginBottom: 32,
+    marginBottom: height < 800 ? 24 : 32,
   },
   cameraButton: {
     backgroundColor: '#40B5AD',
@@ -2905,17 +2987,17 @@ const styles = StyleSheet.create({
   bottomActions: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingVertical: 20,
+    paddingVertical: height < 800 ? 12 : 20,
     backgroundColor: 'transparent',
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
-    gap: 16,
+    gap: height < 800 ? 12 : 16,
   },
   actionButton: {
     flex: 1,
     backgroundColor: 'transparent',
     borderRadius: 12,
-    padding: 16,
+    padding: height < 800 ? 10 : 16,
     alignItems: 'center',
     borderWidth: 2,
     borderColor: 'transparent',
@@ -2928,19 +3010,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   actionButtonLabel: {
-    fontSize: 14,
+    fontSize: height < 800 ? 12 : 14,
     fontWeight: 'bold',
     color: '#374151',
-    marginBottom: 4,
+    marginBottom: height < 800 ? 2 : 4,
   },
   actionButtonCount: {
-    fontSize: 32,
+    fontSize: height < 800 ? 24 : 32,
     fontWeight: 'bold',
     color: '#1F2937',
   },
   actionButtonIcon: {
-    fontSize: 16,
-    marginTop: 4,
+    fontSize: height < 800 ? 14 : 16,
+    marginTop: height < 800 ? 2 : 4,
   },
   
   header: {
@@ -2997,20 +3079,20 @@ const styles = StyleSheet.create({
   },
   manualContainer: {
     backgroundColor: '#fff',
-    padding: 16,
+    padding: height < 800 ? 12 : 16,
     marginTop: 8,
   },
   inputRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: height < 800 ? 6 : 8,
   },
   barcodeInput: {
     flex: 1,
     borderWidth: 1,
     borderColor: '#d1d5db',
     borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
+    padding: height < 800 ? 10 : 12,
+    fontSize: height < 800 ? 14 : 16,
     backgroundColor: '#fff',
   },
   manualButton: {
@@ -3110,14 +3192,14 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    bottom: 120, // Leave space for bottom action buttons
+    bottom: height < 800 ? 100 : 120, // Leave space for bottom action buttons (smaller on small screens)
     justifyContent: 'flex-start',
     alignItems: 'center',
-    paddingTop: 150, // Position scan frame at camera level
+    paddingTop: height < 800 ? 120 : 150, // Position scan frame at camera level (adjusted for small screens)
   },
   scanFrame: {
-    width: 320,
-    height: 150,
+    width: height < 800 ? 280 : 320,
+    height: height < 800 ? 130 : 150,
     borderWidth: 2,
     borderColor: '#fff',
     borderRadius: 8,
@@ -3135,10 +3217,10 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
   scanFeedbackContainer: {
-    marginTop: 16,
+    marginTop: height < 800 ? 12 : 16,
     backgroundColor: 'rgba(0,0,0,0.9)',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: height < 800 ? 16 : 20,
+    paddingVertical: height < 800 ? 12 : 16,
     borderRadius: 12,
     alignItems: 'center',
     maxWidth: '95%',
@@ -3152,10 +3234,10 @@ const styles = StyleSheet.create({
   },
   scanFeedbackText: {
     color: '#fff',
-    fontSize: 20,
+    fontSize: height < 800 ? 16 : 20,
     fontWeight: 'bold',
     textAlign: 'center',
-    marginBottom: 4,
+    marginBottom: height < 800 ? 2 : 4,
     textShadowColor: 'rgba(0,0,0,0.5)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 3,
@@ -3191,6 +3273,45 @@ const styles = StyleSheet.create({
     height: 52,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  zoomControls: {
+    position: 'absolute',
+    bottom: 120,
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 25,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    zIndex: 1000,
+  },
+  zoomButton: {
+    padding: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginHorizontal: 12,
+    minWidth: 50,
+    textAlign: 'center',
+  },
+  scannerToggleButton: {
+    position: 'absolute',
+    bottom: 100,
+    left: 20,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    padding: 12,
+    borderRadius: 8,
+    zIndex: 1000,
+  },
+  scannerToggleText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   permissionContainer: {
     flex: 1,
@@ -3518,8 +3639,8 @@ const styles = StyleSheet.create({
   },
   quickActionButton: {
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: height < 800 ? 6 : 8,
+    paddingHorizontal: height < 800 ? 8 : 12,
     borderRadius: 6,
     alignItems: 'center',
   },
@@ -3828,7 +3949,10 @@ const styles = StyleSheet.create({
   },
   scannedItemsList: {
     flex: 1,
+  },
+  scannedItemsListContent: {
     padding: 16,
+    paddingBottom: 32,
   },
   emptyState: {
     flex: 1,
@@ -4024,24 +4148,22 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // Camera Bottom Actions
+  // Camera Bottom Actions - Transparent
   cameraBottomActions: {
-    backgroundColor: 'transparent',
     position: 'absolute',
-    bottom: 0,
+    bottom: 30,
     left: 0,
     right: 0,
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-    gap: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: 'transparent',
+    gap: 20,
+    justifyContent: 'center',
   },
   actionIndicator: {
     position: 'absolute',
-    top: -40,
+    top: -50,
     left: 0,
     right: 0,
     alignItems: 'center',
@@ -4049,57 +4171,136 @@ const styles = StyleSheet.create({
   actionIndicatorText: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#40B5AD',
+    color: '#FFF',
     backgroundColor: 'transparent',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#40B5AD',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    overflow: 'hidden',
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   cameraActionButton: {
     flex: 1,
-    backgroundColor: 'transparent',
-    borderRadius: 12,
-    padding: 16,
+    maxWidth: 140,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    borderRadius: 16,
+    padding: 14,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: 'transparent',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   cameraActionButtonSelected: {
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(64, 181, 173, 0.3)',
     borderColor: '#40B5AD',
     borderWidth: 3,
   },
   cameraShipButton: {
-    backgroundColor: 'transparent',
-    borderColor: '#40B5AD',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
   },
   cameraActionButtonContent: {
     alignItems: 'center',
   },
   cameraActionButtonLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 'bold',
-    color: '#374151',
-    marginBottom: 4,
+    color: '#FFF',
+    marginBottom: 2,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   cameraActionButtonLabelSelected: {
     color: '#40B5AD',
     fontWeight: '900',
   },
   cameraActionButtonCount: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: '#FFF',
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   cameraActionButtonCountSelected: {
     color: '#40B5AD',
     fontWeight: '900',
   },
   cameraActionButtonIcon: {
-    fontSize: 16,
+    fontSize: 14,
+  },
+  // Scanned Bottle Details - Centered in Scanner
+  scannerBottleDetails: {
+    position: 'absolute',
+    top: '45%',
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+    zIndex: 500,
+  },
+  scannerBottleCard: {
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    borderRadius: 16,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#40B5AD',
+    minWidth: 260,
+  },
+  scannerBottleBarcode: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#40B5AD',
+    fontFamily: 'monospace',
+    marginBottom: 8,
+  },
+  scannerBottleDescription: {
+    fontSize: 14,
+    color: '#FFF',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  scannerBottleInfo: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 8,
+  },
+  scannerBottleInfoText: {
+    fontSize: 12,
+    color: '#AAA',
+  },
+  scannerBottleAction: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#4CAF50',
     marginTop: 4,
+  },
+  
+  // OCR Customer Card
+  ocrCustomerCard: {
+    backgroundColor: 'rgba(255, 165, 0, 0.9)',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minWidth: 260,
+    borderWidth: 2,
+    borderColor: '#FFA500',
+  },
+  ocrCustomerInfo: {
+    flex: 1,
+  },
+  ocrCustomerLabel: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: 2,
+  },
+  ocrCustomerName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFF',
   },
   
   // Manual Entry Modal
@@ -4123,43 +4324,43 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   manualActionSelection: {
-    marginBottom: 20,
+    marginBottom: height < 800 ? 12 : 20,
   },
   manualActionLabel: {
-    fontSize: 16,
+    fontSize: height < 800 ? 14 : 16,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: height < 800 ? 8 : 12,
     textAlign: 'center',
   },
   manualActionButtons: {
     flexDirection: 'row',
-    gap: 12,
+    gap: height < 800 ? 8 : 12,
   },
   manualActionButton: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: height < 800 ? 8 : 12,
+    paddingHorizontal: height < 800 ? 12 : 16,
     borderRadius: 8,
     borderWidth: 2,
     alignItems: 'center',
   },
   manualActionButtonText: {
-    fontSize: 14,
+    fontSize: height < 800 ? 12 : 14,
     fontWeight: '600',
   },
   manualEntryActions: {
     flexDirection: 'row',
-    gap: 12,
+    gap: height < 800 ? 8 : 12,
   },
   manualEntryActionButton: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: height < 800 ? 10 : 12,
     borderRadius: 8,
     alignItems: 'center',
   },
   manualEntryActionButtonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: height < 800 ? 14 : 16,
     fontWeight: 'bold',
   },
   cameraWrapper: {

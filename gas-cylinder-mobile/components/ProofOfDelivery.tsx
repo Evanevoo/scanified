@@ -10,7 +10,8 @@ import {
   Alert,
   ScrollView,
   Image,
-  Dimensions
+  Dimensions,
+  Pressable
 } from 'react-native';
 import { Platform } from '../utils/platform';
 import { Camera, CameraView, useCameraPermissions } from 'expo-camera';
@@ -71,6 +72,7 @@ export default function ProofOfDelivery({
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [locationPermission, setLocationPermission] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [focusTrigger, setFocusTrigger] = useState(0); // Used to trigger autofocus on tap
   
   const cameraRef = useRef<CameraView>(null);
   const signaturePaths = useRef<any[]>([]);
@@ -552,12 +554,27 @@ export default function ProofOfDelivery({
       >
         <View style={styles.cameraContainer}>
           {cameraPermission?.granted ? (
-            <CameraView
-              ref={cameraRef}
+            <Pressable
               style={styles.camera}
-              facing="back"
-              barcodeScannerEnabled={true}
+              onPress={(event) => {
+                // Trigger autofocus on tap by toggling autofocus prop
+                setFocusTrigger(prev => {
+                  const newValue = prev + 1;
+                  // Toggle autofocus to trigger refocus
+                  setTimeout(() => setFocusTrigger(newValue + 1), 50);
+                  return newValue;
+                });
+              }}
             >
+              <CameraView
+                ref={cameraRef}
+                style={StyleSheet.absoluteFill}
+                facing="back"
+                autofocus="on"
+                active={showCamera}
+                mode="picture"
+                barcodeScannerEnabled={true}
+              >
               <View style={styles.cameraOverlay}>
                 <TouchableOpacity
                   style={styles.closeCamera}
@@ -575,6 +592,7 @@ export default function ProofOfDelivery({
                 </View>
               </View>
             </CameraView>
+            </Pressable>
           ) : (
             <View style={styles.permissionContainer}>
               <Text style={styles.permissionText}>

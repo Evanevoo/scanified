@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Vibration, TouchableOpacity, ActivityIndicator, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Vibration, TouchableOpacity, ActivityIndicator, Dimensions, Pressable } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
 interface ScanAreaProps {
@@ -23,7 +23,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   style, 
   barcodePreview,
   validationPattern = /^\d{9}$/,
-  enableRegionOfInterest = true,
+  enableRegionOfInterest = false,
   scanDelay = 500,
   onClose,
   hideScanningLine = false, // Default to false to maintain existing behavior
@@ -34,6 +34,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   const [error, setError] = useState('');
   const [pendingBarcode, setPendingBarcode] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [focusTrigger, setFocusTrigger] = useState(0); // Used to trigger autofocus on tap
   const holdTimeout = useRef<NodeJS.Timeout | null>(null);
   const scanCooldown = useRef<NodeJS.Timeout | null>(null);
 
@@ -202,12 +203,30 @@ const ScanArea: React.FC<ScanAreaProps> = ({
             </View>
           ) : (
             <>
-              <CameraView
+              <Pressable
                 style={styles.camera}
-                facing="back"
-                onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
-                barcodeScannerEnabled={true}
-              />
+                onPress={(event) => {
+                  // Tap to focus - Android Expo Camera handles this automatically
+                }}
+              >
+                <CameraView
+                  style={StyleSheet.absoluteFill}
+                  facing="back"
+                  barcodeScannerSettings={{
+                    barcodeTypes: ['code128', 'code39', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14', 'qr', 'aztec', 'datamatrix', 'pdf417'],
+                    // If region of interest is enabled, restrict scanning to the visual frame
+                    ...(enableRegionOfInterest ? {
+                      regionOfInterest: {
+                        x: 0.1, // 10% from left (matches scanningFrame position)
+                        y: 0.2, // 20% from top (matches scanningFrame top: '20%')
+                        width: 0.8, // 80% width (matches scanningFrame width: 320px ≈ 80% of screen)
+                        height: 0.3, // 30% height (matches scanningFrame height: 150px ≈ 30% of screen)
+                      },
+                    } : {}),
+                  }}
+                  onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+                />
+              </Pressable>
               
               {/* Enhanced scanning overlay */}
               {enableRegionOfInterest && (
