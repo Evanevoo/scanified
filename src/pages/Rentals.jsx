@@ -361,19 +361,18 @@ function RentalsImproved() {
              (bottleId && existingBottleIds.has(bottleId)));
         
         if (!alreadyInRentals) {
-          // Get customer-specific pricing or use default
+          // New/extra bottle: default to monthly until admin switches to yearly (one lease per bottle)
           const customerPricing = pricingMap[bottle.assigned_customer];
-          let rentalAmount = 15; // Default rate
-          let rentalType = 'monthly';
+          let rentalAmount = 10; // Default rate
+          const rentalType = 'monthly';
           
           if (customerPricing) {
             if (customerPricing.fixed_rate_override) {
               rentalAmount = customerPricing.fixed_rate_override;
             } else if (customerPricing.discount_percent > 0) {
-              // Apply discount to base rate (assuming base rate is $15)
-              rentalAmount = 15 * (1 - customerPricing.discount_percent / 100);
+              // Apply discount to base rate (default $10/month)
+              rentalAmount = 10 * (1 - customerPricing.discount_percent / 100);
             }
-            rentalType = customerPricing.rental_period || 'monthly';
           }
           
           // Get location-specific tax rate
@@ -534,7 +533,7 @@ function RentalsImproved() {
 
       logger.log('Combined rental data:', deduplicatedData.length);
 
-      // 5. Fetch active lease agreements first to get their customer IDs
+      // 5. Fetch active lease agreements (per-bottle and customer-level)
       const { data: leaseAgreements, error: leaseError } = await supabase
         .from('lease_agreements')
         .select('*')
@@ -544,6 +543,11 @@ function RentalsImproved() {
       if (leaseError) {
         logger.error('Error fetching lease agreements:', leaseError);
       }
+
+      // Per-bottle lease map: bottle_id -> agreement (one lease per bottle)
+      const leaseByBottleId = (leaseAgreements || [])
+        .filter(a => a.bottle_id)
+        .reduce((map, a) => { map[a.bottle_id] = a; return map; }, {});
 
       // 6. Get customers with their types (with fallback) - include lease agreement customers
       const customerIds = Array.from(new Set([
@@ -585,89 +589,29 @@ function RentalsImproved() {
 
       logger.log('Customers found:', Object.keys(customersMap).length);
 
-      // 7. Process lease agreements and include them as yearly rentals
-      if (leaseAgreements && leaseAgreements.length > 0) {
-        logger.log('Found lease agreements:', leaseAgreements.length);
-        
-        // Convert lease agreements to rental format for yearly billing
-        for (const agreement of leaseAgreements) {
-          // Check if billing_frequency indicates yearly (could be 'annual', 'yearly', 'annually', or 'semi-annual')
-          // Note: 'semi-annual' is also considered yearly for rental purposes
+      // 7. Apply per-bottle lease: only mark a rental as yearly if it has lease_agreement_id or its bottle has a lease (one lease per bottle)
+      // New/extra bottles default to monthly until admin switches to yearly.
+      if (leaseByBottleId && Object.keys(leaseByBottleId).length > 0) {
+        logger.log('Applying per-bottle leases:', Object.keys(leaseByBottleId).length);
+      }
+      for (const rental of deduplicatedData) {
+        const bottleId = rental.bottle_id || rental.bottles?.id;
+        const agreementFromBottle = bottleId ? leaseByBottleId[bottleId] : null;
+        const agreementFromRental = rental.lease_agreement_id && (leaseAgreements || []).find(a => a.id === rental.lease_agreement_id);
+        const agreement = agreementFromBottle || agreementFromRental;
+        if (agreement) {
           const billingFreq = (agreement.billing_frequency || '').toLowerCase();
-          const isYearly = billingFreq === 'annual' || 
-                          billingFreq === 'yearly' || 
-                          billingFreq === 'annually' ||
-                          billingFreq === 'semi-annual';
-          
+          const isYearly = billingFreq === 'annual' || billingFreq === 'yearly' || billingFreq === 'annually' || billingFreq === 'semi-annual';
           if (isYearly) {
-            // Get customer for this agreement - try both customer_id and customer_name as keys
-            let customer = customersMap[agreement.customer_id];
-            
-            // If not found by customer_id, try to find by customer_name
-            if (!customer && agreement.customer_name) {
-              customer = Object.values(customersMap).find(c => 
-                c.name === agreement.customer_name || 
-                c.CustomerListID === agreement.customer_name
-              );
-            }
-            
-            // If still not found, create a placeholder customer object
-            if (!customer && agreement.customer_id) {
-              customer = { 
-                CustomerListID: agreement.customer_id, 
-                name: agreement.customer_name || agreement.customer_id,
-                customer_type: 'CUSTOMER'
-              };
-              // Add to customersMap so it's available later
-              customersMap[agreement.customer_id] = customer;
-            }
-            
-            if (customer) {
-              // Calculate monthly equivalent from annual amount
-              const monthlyAmount = (agreement.annual_amount || 0) / 12;
-              
-              // Create a virtual rental entry for the lease agreement
-              // Use a special ID format to distinguish from regular rentals
-              const leaseRentalId = `lease_${agreement.id}`;
-              
-              // Check if we already have rentals for this customer
-              const existingCustomerRentals = deduplicatedData.filter(r => r.customer_id === agreement.customer_id);
-              
-              // If customer has no existing rentals, create a placeholder
-              // Otherwise, we'll mark existing rentals as yearly
-              if (existingCustomerRentals.length === 0) {
-                deduplicatedData.push({
-                  id: leaseRentalId,
-                  source: 'lease_agreement',
-                  customer_id: agreement.customer_id,
-                  bottle_barcode: null, // Lease agreements don't have specific bottles
-                  bottle_id: null,
-                  bottles: null,
-                  rental_start_date: agreement.start_date?.split('T')[0] || new Date().toISOString().split('T')[0],
-                  rental_end_date: agreement.end_date?.split('T')[0] || null,
-                  rental_amount: monthlyAmount,
-                  rental_type: 'yearly', // Mark as yearly
-                  tax_code: 'GST+PST',
-                  tax_rate: agreement.tax_rate || 0.11,
-                  location: agreement.asset_locations?.[0] || 'SASKATOON',
-                  lease_agreement_id: agreement.id,
-                  lease_agreement: agreement
-                });
-              } else {
-                // Update existing rentals for this customer to be yearly
-                existingCustomerRentals.forEach(rental => {
-                  rental.rental_type = 'yearly';
-                  rental.lease_agreement_id = agreement.id;
-                  rental.lease_agreement = agreement;
-                  // Update rental amount if needed
-                  if (monthlyAmount > 0) {
-                    rental.rental_amount = monthlyAmount;
-                  }
-                });
-              }
+            rental.rental_type = 'yearly';
+            rental.lease_agreement_id = agreement.id;
+            rental.lease_agreement = agreement;
+            if ((agreement.annual_amount || 0) > 0) {
+              rental.rental_amount = agreement.annual_amount / 12;
             }
           }
         }
+        // If rental came from DB without lease_agreement_id and bottle has no per-bottle lease, keep rental_type as-is (default monthly for new bottles)
       }
 
       // 7. Attach customer info to each rental
@@ -778,9 +722,8 @@ function RentalsImproved() {
       // - Assigned bottles with status "available" or customer-owned
       const inHouseTotal = unassignedBottles + bottlesWithVendors + assignedBottlesAvailable;
       
-      // Calculate revenue from actual rental records (for display purposes)
-      const customerRentals = filteredRentals.filter(r => r.source === 'rental');
-      const totalRevenue = customerRentals.reduce((sum, rental) => {
+      // Calculate monthly revenue from all displayed rentals (DB records + bottle assignments)
+      const totalRevenue = filteredRentals.reduce((sum, rental) => {
         const baseAmount = rental.rental_amount || 0;
         const taxAmount = baseAmount * (rental.tax_rate || 0);
         return sum + baseAmount + taxAmount;
@@ -1609,7 +1552,7 @@ function RentalsImproved() {
         </Table>
       </TableContainer>
 
-      {/* Edit Customer Rentals Dialog */}
+      {/* Edit Customer Rentals Dialog - per-bottle: each bottle has its own Monthly/Yearly (one lease per bottle) */}
       <Dialog
         open={editDialog.open}
         onClose={() => setEditDialog({ open: false, customer: null, rentals: [] })}
@@ -1624,49 +1567,58 @@ function RentalsImproved() {
                 {editDialog.customer.name} ({editDialog.customer.CustomerListID})
               </Typography>
               <Typography variant="body2" color="text.secondary" gutterBottom>
-                {editDialog.rentals?.length || 0} assets currently assigned
+                Each bottle has its own rental type. New/extra bottles default to monthly until switched to yearly.
               </Typography>
 
-              <Grid container spacing={3} sx={{ mt: 1 }}>
-                <Grid item xs={12} sm={6}>
-                  <FormControl fullWidth>
-                    <InputLabel>Rental Type</InputLabel>
-                    <Select
-                      value={editDialog.rental_type || 'monthly'}
-                      onChange={(e) => setEditDialog(prev => ({
-                        ...prev,
-                        rental_type: e.target.value
-                      }))}
-                      label="Rental Type"
-                    >
-                      <MenuItem value="monthly">Monthly</MenuItem>
-                      <MenuItem value="yearly">Yearly</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Grid>
+              <Grid container spacing={2} sx={{ mt: 1 }}>
+                {editDialog.rentals?.map((rental) => {
+                  const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || rental.bottle_barcode || rental.id;
+                  const rentalType = rental.rental_type || 'monthly';
+                  return (
+                    <Grid item xs={12} key={rental.id}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                        <Typography variant="body2" sx={{ minWidth: 120 }}>
+                          {barcode || 'Bottle'}
+                        </Typography>
+                        <FormControl size="small" sx={{ minWidth: 140 }}>
+                          <InputLabel>Rental Type</InputLabel>
+                          <Select
+                            value={rentalType}
+                            onChange={(e) => setEditDialog(prev => ({
+                              ...prev,
+                              rentals: prev.rentals.map(r => r.id === rental.id ? { ...r, rental_type: e.target.value } : r)
+                            }))}
+                            label="Rental Type"
+                          >
+                            <MenuItem value="monthly">Monthly</MenuItem>
+                            <MenuItem value="yearly">Yearly</MenuItem>
+                          </Select>
+                        </FormControl>
+                        {rentalType === 'yearly' && rental.lease_agreement_id && (
+                          <Chip size="small" label="Lease linked" color="success" />
+                        )}
+                      </Box>
+                    </Grid>
+                  );
+                })}
+              </Grid>
 
+              <Grid container spacing={3} sx={{ mt: 2 }}>
                 <Grid item xs={12} sm={6}>
                   <TextField
                     fullWidth
-                    label="Rental Rate ($)"
+                    label="Rental Rate ($) – shared"
                     type="number"
-                    value={editDialog.rental_amount || 10}
-                    onChange={(e) => setEditDialog(prev => ({
-                      ...prev,
-                      rental_amount: e.target.value
-                    }))}
+                    value={editDialog.rental_amount ?? editDialog.rentals?.[0]?.rental_amount ?? 10}
+                    onChange={(e) => setEditDialog(prev => ({ ...prev, rental_amount: e.target.value }))}
                   />
                 </Grid>
-
                 <Grid item xs={12} sm={6}>
                   <FormControl fullWidth>
                     <InputLabel>Tax Code</InputLabel>
                     <Select
-                      value={editDialog.tax_code || 'GST+PST'}
-                      onChange={(e) => setEditDialog(prev => ({
-                        ...prev,
-                        tax_code: e.target.value
-                      }))}
+                      value={editDialog.tax_code ?? editDialog.rentals?.[0]?.tax_code ?? 'GST+PST'}
+                      onChange={(e) => setEditDialog(prev => ({ ...prev, tax_code: e.target.value }))}
                       label="Tax Code"
                     >
                       <MenuItem value="GST">GST Only</MenuItem>
@@ -1676,16 +1628,12 @@ function RentalsImproved() {
                     </Select>
                   </FormControl>
                 </Grid>
-
                 <Grid item xs={12} sm={6}>
                   <FormControl fullWidth>
                     <InputLabel>Location</InputLabel>
                     <Select
-                      value={editDialog.location || 'SASKATOON'}
-                      onChange={(e) => setEditDialog(prev => ({
-                        ...prev,
-                        location: e.target.value
-                      }))}
+                      value={editDialog.location ?? editDialog.rentals?.[0]?.location ?? 'SASKATOON'}
+                      onChange={(e) => setEditDialog(prev => ({ ...prev, location: e.target.value }))}
                       label="Location"
                     >
                       {locations.map((location) => (
@@ -1714,38 +1662,106 @@ function RentalsImproved() {
           </Button>
           <Button
             variant="contained"
+            disabled={updatingRentals}
             onClick={async () => {
               try {
-                // Update all rentals for this customer
-                const { error } = await supabase
-                  .from('rentals')
-                  .update({
-                    rental_type: editDialog.rental_type,
-                    rental_amount: editDialog.rental_amount,
-                    tax_code: editDialog.tax_code,
-                    location: editDialog.location
-                  })
-                  .eq('customer_id', editDialog.customer.CustomerListID);
+                setUpdatingRentals(true);
+                const customerId = editDialog.customer.CustomerListID;
+                const customerName = editDialog.customer.name;
+                const sharedAmount = editDialog.rental_amount ?? editDialog.rentals?.[0]?.rental_amount ?? 10;
+                const sharedTaxCode = editDialog.tax_code ?? editDialog.rentals?.[0]?.tax_code ?? 'GST+PST';
+                const sharedLocation = editDialog.location ?? editDialog.rentals?.[0]?.location ?? 'SASKATOON';
 
-                if (error) {
-                  logger.error('Error updating rentals:', error);
-                  alert('Error updating rentals: ' + error.message);
-                  return;
+                for (const rental of editDialog.rentals || []) {
+                  // Skip bottle-only entries that don't have a rentals table row yet
+                  const rentalId = rental.id;
+                  if (typeof rentalId === 'string' && rentalId.startsWith('bottle_')) continue;
+
+                  const newType = rental.rental_type || 'monthly';
+                  const bottleId = rental.bottle_id || rental.bottles?.id;
+                  let leaseAgreementId = rental.lease_agreement_id || null;
+
+                  if (newType === 'yearly' && !leaseAgreementId && bottleId) {
+                    // Create a per-bottle yearly lease for this rental
+                    const { data: numberData, error: numberError } = await supabase
+                      .rpc('generate_agreement_number', { org_id: organization?.id });
+                    if (numberError) {
+                      logger.error('Error generating agreement number:', numberError);
+                      alert('Error creating lease: ' + numberError.message);
+                      setUpdatingRentals(false);
+                      return;
+                    }
+                    const startDate = new Date();
+                    const endDate = new Date();
+                    endDate.setFullYear(endDate.getFullYear() + 1);
+                    const annualAmount = Math.round(parseFloat(sharedAmount) * 12 * 100) / 100;
+                    const nextBilling = new Date();
+                    nextBilling.setFullYear(nextBilling.getFullYear() + 1);
+                    const { data: newLease, error: insertLeaseError } = await supabase
+                      .from('lease_agreements')
+                      .insert({
+                        organization_id: organization?.id,
+                        customer_id: customerId,
+                        customer_name: customerName,
+                        agreement_number: numberData,
+                        title: 'Annual Lease Agreement (per bottle)',
+                        start_date: startDate.toISOString().split('T')[0],
+                        end_date: endDate.toISOString().split('T')[0],
+                        annual_amount: annualAmount,
+                        billing_frequency: 'annual',
+                        payment_terms: 'Net 30',
+                        tax_rate: 0.11,
+                        bottle_id: bottleId,
+                        status: 'active',
+                        next_billing_date: nextBilling.toISOString().split('T')[0],
+                        created_by: profile?.id,
+                        updated_by: profile?.id,
+                      })
+                      .select('id')
+                      .single();
+                    if (insertLeaseError) {
+                      logger.error('Error creating lease agreement:', insertLeaseError);
+                      alert('Error creating lease: ' + insertLeaseError.message);
+                      setUpdatingRentals(false);
+                      return;
+                    }
+                    leaseAgreementId = newLease?.id;
+                  } else if (newType === 'monthly') {
+                    leaseAgreementId = null;
+                  }
+
+                  const { error } = await supabase
+                    .from('rentals')
+                    .update({
+                      rental_type: newType,
+                      lease_agreement_id: leaseAgreementId,
+                      rental_amount: sharedAmount,
+                      tax_code: sharedTaxCode,
+                      location: sharedLocation,
+                    })
+                    .eq('id', rentalId);
+
+                  if (error) {
+                    logger.error('Error updating rental:', error);
+                    alert('Error updating rental: ' + error.message);
+                    setUpdatingRentals(false);
+                    return;
+                  }
                 }
 
-                logger.log('Successfully updated rentals for customer:', editDialog.customer?.CustomerListID);
+                logger.log('Successfully updated rentals for customer:', customerId);
                 setEditDialog({ open: false, customer: null, rentals: [] });
-                // Refresh data
                 await fetchRentals();
-                // Show success message
                 alert(`Successfully updated rental settings for ${editDialog.customer?.name}`);
               } catch (error) {
                 logger.error('Error updating rentals:', error);
                 alert('Error updating rentals: ' + error.message);
+              } finally {
+                setUpdatingRentals(false);
               }
             }}
           >
-            {updatingRentals ? 'Updating...' : 'Update All Rentals'}
+            {updatingRentals ? 'Updating...' : 'Save'}
           </Button>
         </DialogActions>
       </Dialog>

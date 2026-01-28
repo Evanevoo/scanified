@@ -189,18 +189,13 @@ export default function BulkRentalPricingManager() {
       );
     }
 
-    // Filter by rental period
+    // Filter by custom pricing (yearly vs monthly is in Lease Agreements, not here)
     if (sortByPeriod !== 'all') {
       filtered = filtered.filter(customer => {
         const currentPricing = customerPricing.find(p => p.customer_id === customer.CustomerListID);
-        
-        if (sortByPeriod === 'no-pricing') {
-          return !currentPricing;
-        } else {
-          // Check if customer has pricing with the specific rental period
-          const customerPeriod = currentPricing?.rental_period || 'monthly';
-          return currentPricing && customerPeriod === sortByPeriod;
-        }
+        if (sortByPeriod === 'no-pricing') return !currentPricing;
+        if (sortByPeriod === 'with-pricing') return !!currentPricing;
+        return true;
       });
     }
 
@@ -224,41 +219,54 @@ export default function BulkRentalPricingManager() {
       
       const pricingRecords = selectedCustomers.map(customerId => ({
         organization_id: organization.id,
-        customer_id: customerId, // This should be CustomerListID, not UUID
+        customer_id: customerId,
         discount_percent: bulkPricing.discountPercent,
         markup_percent: bulkPricing.markupPercent,
         fixed_rate_override: bulkPricing.fixedRateOverride || null,
-        rental_period: bulkPricing.rentalPeriod, // monthly or yearly
+        rental_period: 'monthly', // Single source of truth for yearly is Lease Agreements
         effective_date: bulkPricing.effectiveDate,
         expiry_date: bulkPricing.expiryDate || null,
         is_active: true,
-        notes: `Bulk pricing applied on ${new Date().toLocaleDateString()} (${bulkPricing.rentalPeriod})`
+        notes: `Bulk pricing applied on ${new Date().toLocaleDateString()}`
       }));
 
       logger.log('Pricing records to insert:', pricingRecords);
 
-      // Delete existing pricing for selected customers
-      logger.log('Deleting existing pricing for customers:', selectedCustomers);
-      const { error: deleteError } = await supabase
-        .from('customer_pricing')
-        .delete()
-        .eq('organization_id', organization.id)
-        .in('customer_id', selectedCustomers);
+      // Delete existing pricing in batches to avoid URL length limit (400 Bad Request with large .in() lists)
+      const BATCH_SIZE = 50;
+      const customerChunks = [];
+      for (let i = 0; i < selectedCustomers.length; i += BATCH_SIZE) {
+        customerChunks.push(selectedCustomers.slice(i, i + BATCH_SIZE));
+      }
+      logger.log('Deleting existing pricing in', customerChunks.length, 'batches');
+      for (const chunk of customerChunks) {
+        const { error: deleteError } = await supabase
+          .from('customer_pricing')
+          .delete()
+          .eq('organization_id', organization.id)
+          .in('customer_id', chunk);
 
-      if (deleteError) {
-        logger.error('Error deleting existing pricing:', deleteError);
-        throw new Error(`Failed to delete existing pricing: ${deleteError.message || deleteError.details || 'Unknown error'}`);
+        if (deleteError) {
+          logger.error('Error deleting existing pricing:', deleteError);
+          throw new Error(`Failed to delete existing pricing: ${deleteError.message || deleteError.details || 'Unknown error'}`);
+        }
       }
 
-      // Insert new pricing records
-      logger.log('Inserting new pricing records...');
-      const { error } = await supabase
-        .from('customer_pricing')
-        .insert(pricingRecords);
+      // Insert new pricing records in batches to avoid request size limits
+      const insertChunks = [];
+      for (let i = 0; i < pricingRecords.length; i += BATCH_SIZE) {
+        insertChunks.push(pricingRecords.slice(i, i + BATCH_SIZE));
+      }
+      logger.log('Inserting new pricing records in', insertChunks.length, 'batches');
+      for (const chunk of insertChunks) {
+        const { error } = await supabase
+          .from('customer_pricing')
+          .insert(chunk);
 
-      if (error) {
-        logger.error('Error inserting pricing records:', error);
-        throw error;
+        if (error) {
+          logger.error('Error inserting pricing records:', error);
+          throw error;
+        }
       }
 
       // Reload data
@@ -452,21 +460,8 @@ export default function BulkRentalPricingManager() {
               type="number"
               value={bulkPricing.fixedRateOverride}
               onChange={(e) => setBulkPricing(prev => ({ ...prev, fixedRateOverride: e.target.value }))}
-              helperText={`Fixed ${bulkPricing.rentalPeriod} rate (overrides tier pricing)`}
+              helperText="Fixed rate per month (overrides tier pricing). Yearly vs monthly is set in Lease Agreements."
             />
-          </Grid>
-          
-          <Grid item xs={12} md={6}>
-            <FormControl fullWidth>
-              <InputLabel>Rental Period</InputLabel>
-              <Select
-                value={bulkPricing.rentalPeriod}
-                onChange={(e) => setBulkPricing(prev => ({ ...prev, rentalPeriod: e.target.value }))}
-              >
-                <MenuItem value="monthly">Monthly</MenuItem>
-                <MenuItem value="yearly">Yearly</MenuItem>
-              </Select>
-            </FormControl>
           </Grid>
           
           <Grid item xs={12} md={6}>
@@ -539,49 +534,18 @@ export default function BulkRentalPricingManager() {
           
           <Grid item xs={12} md={6}>
             <FormControl fullWidth>
-              <InputLabel>Filter by Rental Period</InputLabel>
+              <InputLabel>Filter</InputLabel>
               <Select
                 value={sortByPeriod}
                 onChange={(e) => setSortByPeriod(e.target.value)}
               >
                 <MenuItem value="all">All Customers ({customers.length})</MenuItem>
-                <MenuItem value="monthly">Monthly Rentals ({customerPricing.filter(p => p.rental_period === 'monthly').length})</MenuItem>
-                <MenuItem value="yearly">Yearly Rentals ({customerPricing.filter(p => p.rental_period === 'yearly').length})</MenuItem>
-                <MenuItem value="no-pricing">No Custom Pricing ({customers.length - customerPricing.length})</MenuItem>
+                <MenuItem value="with-pricing">With custom pricing ({customerPricing.length})</MenuItem>
+                <MenuItem value="no-pricing">No custom pricing ({customers.length - customerPricing.length})</MenuItem>
               </Select>
             </FormControl>
           </Grid>
         </Grid>
-        
-        {/* Debug Info */}
-        <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
-          <Typography variant="body2" color="text.secondary">
-            <strong>Debug Info:</strong> Showing {filteredCustomers.length} of {customers.length} customers
-            {searchTerm && ` (filtered by "${searchTerm}")`}
-            {sortByPeriod !== 'all' && ` (filtered by ${sortByPeriod})`}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            <strong>Pricing Records:</strong> {customerPricing.length} total
-            {customerPricing.length > 0 && (
-              <>
-                {' • '}
-                Monthly: {customerPricing.filter(p => (p.rental_period || 'monthly') === 'monthly').length}
-                {' • '}
-                Yearly: {customerPricing.filter(p => p.rental_period === 'yearly').length}
-              </>
-            )}
-          </Typography>
-          {customerPricing.length === 0 && (
-            <Button 
-              size="small" 
-              variant="outlined" 
-              onClick={createTestPricingData}
-              sx={{ mt: 1 }}
-            >
-              Create Test Pricing Data
-            </Button>
-          )}
-        </Box>
       </Paper>
 
       {/* Customer Selection */}
@@ -643,7 +607,7 @@ export default function BulkRentalPricingManager() {
                           />
                           {currentPricing.fixed_rate_override && (
                             <Chip 
-                              label={`$${currentPricing.fixed_rate_override}/${currentPricing.rental_period || 'month'}`} 
+                              label={`$${currentPricing.fixed_rate_override}/month`} 
                               size="small" 
                               color="info"
                             />
@@ -699,7 +663,7 @@ export default function BulkRentalPricingManager() {
                       </Typography>
                       {pricing.fixed_rate_override && (
                         <Typography variant="body2" color="text.secondary">
-                          Fixed Rate: ${pricing.fixed_rate_override}/{pricing.rental_period || 'month'}
+                          Fixed Rate: ${pricing.fixed_rate_override}/month
                         </Typography>
                       )}
                       <Typography variant="body2" color="text.secondary">
@@ -714,62 +678,14 @@ export default function BulkRentalPricingManager() {
         )}
       </Paper>
 
-      {/* Yearly Rental Customers Section */}
+      {/* Single source of truth: Lease Agreements for yearly vs monthly */}
       <Paper sx={{ p: 3, mt: 3 }}>
         <Typography variant="h6" gutterBottom>
-          Yearly Rental Customers
+          Rental period (monthly vs yearly)
         </Typography>
-        
-        {(() => {
-          const yearlyCustomers = customerPricing.filter(p => p.rental_period === 'yearly');
-          return yearlyCustomers.length === 0 ? (
-            <Alert severity="info">
-              No yearly rental customers configured. Use the rental period selector above to set up yearly pricing.
-            </Alert>
-          ) : (
-            <Grid container spacing={2}>
-              {yearlyCustomers.map((pricing) => {
-                // Find customer name manually since we can't join
-                const customer = customers.find(c => c.CustomerListID === pricing.customer_id);
-                return (
-                  <Grid item xs={12} md={6} key={pricing.id}>
-                    <Card variant="outlined" sx={{ borderColor: 'primary.main', borderWidth: 2 }}>
-                      <CardContent>
-                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                          <Chip 
-                            label="YEARLY" 
-                            size="small" 
-                            color="primary" 
-                            sx={{ mr: 1, fontWeight: 'bold' }}
-                          />
-                          <Typography variant="subtitle1" gutterBottom sx={{ mb: 0 }}>
-                            {customer?.name || `Customer ID: ${pricing.customer_id}`}
-                          </Typography>
-                        </Box>
-                        <Typography variant="body2" color="text.secondary">
-                          Discount: {pricing.discount_percent}%
-                        </Typography>
-                        {pricing.fixed_rate_override && (
-                          <Typography variant="body2" color="text.secondary">
-                            Fixed Rate: ${pricing.fixed_rate_override}/year
-                          </Typography>
-                        )}
-                        <Typography variant="body2" color="text.secondary">
-                          Effective: {new Date(pricing.effective_date).toLocaleDateString()}
-                        </Typography>
-                        {pricing.expiry_date && (
-                          <Typography variant="body2" color="text.secondary">
-                            Expires: {new Date(pricing.expiry_date).toLocaleDateString()}
-                          </Typography>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                );
-              })}
-            </Grid>
-          );
-        })()}
+        <Alert severity="info">
+          <strong>Single source of truth:</strong> Monthly vs yearly is set in <strong>Lease Agreements</strong> (and on the Rentals page when you switch a bottle to yearly). This page is for <strong>discounts and fixed rates only</strong>.
+        </Alert>
       </Paper>
     </Box>
   );

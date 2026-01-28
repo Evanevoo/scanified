@@ -62,6 +62,7 @@ export default function LeaseAgreements() {
   const [dialogMode, setDialogMode] = useState('view'); // 'view', 'add', 'edit'
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [customers, setCustomers] = useState([]);
+  const [customerBottles, setCustomerBottles] = useState([]); // bottles assigned to selected customer (for assign-to-bottle)
   const [billingHistory, setBillingHistory] = useState([]);
   const [retroactiveBilling, setRetroactiveBilling] = useState({ isRetroactive: false, proRatedAmount: 0, message: '' });
   const [stats, setStats] = useState({
@@ -71,7 +72,7 @@ export default function LeaseAgreements() {
     expiringThisMonth: 0
   });
 
-  // Form state for adding/editing agreements
+  // Form state for adding/editing agreements (bottle_id = per-bottle lease, null = customer-level)
   const [formData, setFormData] = useState({
     customer_id: '',
     customer_name: '',
@@ -90,7 +91,8 @@ export default function LeaseAgreements() {
     asset_locations: [],
     max_asset_count: '',
     billing_contact_email: '',
-    billing_address: ''
+    billing_address: '',
+    bottle_id: null
   });
 
   useEffect(() => {
@@ -121,7 +123,7 @@ export default function LeaseAgreements() {
     try {
       const { data, error } = await supabase
         .from('lease_agreements')
-        .select('*')
+        .select('*, bottles:bottle_id(barcode_number)')
         .eq('organization_id', profile.organization_id)
         .order('created_at', { ascending: false });
 
@@ -147,6 +149,27 @@ export default function LeaseAgreements() {
       setCustomers(data || []);
     } catch (error) {
       logger.error('Error fetching customers:', error);
+    }
+  };
+
+  // Fetch bottles assigned to the selected customer (for Assign to bottle)
+  const fetchCustomerBottles = async (customerId) => {
+    if (!customerId || !profile?.organization_id) {
+      setCustomerBottles([]);
+      return;
+    }
+    try {
+      const { data, error } = await supabase
+        .from('bottles')
+        .select('id, barcode_number')
+        .eq('organization_id', profile.organization_id)
+        .eq('assigned_customer', customerId)
+        .order('barcode_number');
+      if (error) throw error;
+      setCustomerBottles(data || []);
+    } catch (error) {
+      logger.error('Error fetching customer bottles:', error);
+      setCustomerBottles([]);
     }
   };
 
@@ -212,7 +235,8 @@ export default function LeaseAgreements() {
       asset_locations: [],
       max_asset_count: '',
       billing_contact_email: '',
-      billing_address: ''
+      billing_address: '',
+      bottle_id: null
     });
     setDialogMode('add');
     setDialogOpen(true);
@@ -229,6 +253,7 @@ export default function LeaseAgreements() {
     setSelectedAgreement(agreement);
     setDialogMode('edit');
     setDialogOpen(true);
+    fetchCustomerBottles(agreement.customer_id);
   };
 
   const handleViewAgreement = (agreement) => {
@@ -240,12 +265,15 @@ export default function LeaseAgreements() {
 
   const handleSaveAgreement = async () => {
     try {
+      // Build payload: include bottle_id for per-bottle leases, omit joined "bottles" object
+      const { bottles: _bottles, ...formDataForDb } = formData;
       const agreementData = {
-        ...formData,
+        ...formDataForDb,
         organization_id: profile.organization_id,
         annual_amount: parseFloat(formData.annual_amount) || 0,
         tax_rate: parseFloat(formData.tax_rate) || 0,
         max_asset_count: parseInt(formData.max_asset_count) || null,
+        bottle_id: formData.bottle_id || null,
         created_by: profile.id,
         updated_by: profile.id
       };
@@ -333,7 +361,7 @@ export default function LeaseAgreements() {
         agreement.billing_frequency
       );
 
-      // Create new agreement
+      // Create new agreement (preserve per-bottle lease: copy bottle_id so renewed agreement stays for same bottle)
       const renewedAgreement = {
         organization_id: profile.organization_id,
         customer_id: agreement.customer_id,
@@ -355,6 +383,7 @@ export default function LeaseAgreements() {
         max_asset_count: agreement.max_asset_count,
         billing_contact_email: agreement.billing_contact_email,
         billing_address: agreement.billing_address,
+        bottle_id: agreement.bottle_id || null,
         status: 'active',
         next_billing_date: nextBillingDate.toISOString().split('T')[0],
         created_by: profile.id,
@@ -620,6 +649,7 @@ export default function LeaseAgreements() {
             <TableRow>
               <TableCell>Agreement #</TableCell>
               <TableCell>Customer</TableCell>
+              <TableCell>Bottle</TableCell>
               <TableCell>Start Date</TableCell>
               <TableCell>End Date</TableCell>
               <TableCell>Annual Amount</TableCell>
@@ -633,6 +663,7 @@ export default function LeaseAgreements() {
               <TableRow key={agreement.id}>
                 <TableCell>{agreement.agreement_number}</TableCell>
                 <TableCell>{agreement.customer_name}</TableCell>
+                <TableCell>{agreement.bottle_id ? (Array.isArray(agreement.bottles) ? agreement.bottles[0]?.barcode_number : agreement.bottles?.barcode_number) ?? agreement.bottle_id : '—'}</TableCell>
                 <TableCell>{formatDate(agreement.start_date)}</TableCell>
                 <TableCell>{formatDate(agreement.end_date)}</TableCell>
                 <TableCell>{formatCurrency(agreement.annual_amount)}</TableCell>
@@ -720,6 +751,12 @@ export default function LeaseAgreements() {
                       <Typography variant="subtitle2">Customer</Typography>
                       <Typography variant="body1" mb={2}>{selectedAgreement?.customer_name}</Typography>
                     </Grid>
+                    {selectedAgreement?.bottle_id && (
+                      <Grid item xs={12} md={6}>
+                        <Typography variant="subtitle2">Bottle (per-bottle lease)</Typography>
+                        <Typography variant="body1" mb={2}>{Array.isArray(selectedAgreement?.bottles) ? selectedAgreement.bottles[0]?.barcode_number : selectedAgreement?.bottles?.barcode_number ?? selectedAgreement.bottle_id}</Typography>
+                      </Grid>
+                    )}
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2">Start Date</Typography>
                       <Typography variant="body1" mb={2}>{formatDate(selectedAgreement?.start_date)}</Typography>
@@ -796,11 +833,14 @@ export default function LeaseAgreements() {
                       value={formData.customer_id}
                       onChange={(e) => {
                         const customer = customers.find(c => c.CustomerListID === e.target.value);
+                        const newCustomerId = e.target.value;
                         setFormData({
                           ...formData,
-                          customer_id: e.target.value,
-                          customer_name: customer?.name || ''
+                          customer_id: newCustomerId,
+                          customer_name: customer?.name || '',
+                          bottle_id: null
                         });
+                        fetchCustomerBottles(newCustomerId);
                       }}
                       label="Customer"
                     >
@@ -812,6 +852,28 @@ export default function LeaseAgreements() {
                     </Select>
                   </FormControl>
                 </Grid>
+                {formData.customer_id && (
+                  <Grid item xs={12} md={6}>
+                    <FormControl fullWidth>
+                      <InputLabel>Assign to bottle</InputLabel>
+                      <Select
+                        value={formData.bottle_id || ''}
+                        onChange={(e) => setFormData({ ...formData, bottle_id: e.target.value || null })}
+                        label="Assign to bottle"
+                      >
+                        <MenuItem value="">None – customer-level agreement</MenuItem>
+                        {customerBottles.map((bottle) => (
+                          <MenuItem key={bottle.id} value={bottle.id}>
+                            {bottle.barcode_number || bottle.id}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                        Optional: assign this lease to one bottle (per-bottle lease). Leave as None for a customer-level agreement.
+                      </Typography>
+                    </FormControl>
+                  </Grid>
+                )}
                 <Grid item xs={12} md={6}>
                   <TextField
                     fullWidth
