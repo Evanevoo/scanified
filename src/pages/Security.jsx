@@ -197,7 +197,7 @@ export default function Security() {
             <Typography variant="h2" fontWeight={700} gutterBottom>
               Security & Compliance
             </Typography>
-            <Typography variant="h5" sx={{ mb: 4, opacity: 0.9, maxWidth: 700, mx: 'auto' }}>
+            <Typography variant="h5" sx={{ mb: 4, opacity: 0.9, width: '100%' }}>
               Your data security is our top priority. Learn about our comprehensive security measures and compliance standards.
             </Typography>
             <Stack direction="row" spacing={4} justifyContent="center">
@@ -224,7 +224,7 @@ export default function Security() {
           <Typography variant="h3" fontWeight={700} textAlign="center" gutterBottom>
             Security Features
           </Typography>
-          <Typography variant="h6" color="text.secondary" textAlign="center" sx={{ mb: 6, maxWidth: 600, mx: 'auto' }}>
+          <Typography variant="h6" color="text.secondary" textAlign="center" sx={{ mb: 6, width: '100%' }}>
             Comprehensive security measures to protect your data and ensure business continuity
           </Typography>
           
@@ -274,7 +274,7 @@ export default function Security() {
           <Typography variant="h3" fontWeight={700} textAlign="center" gutterBottom>
             Certifications & Compliance
           </Typography>
-          <Typography variant="h6" color="text.secondary" textAlign="center" sx={{ mb: 6, maxWidth: 600, mx: 'auto' }}>
+          <Typography variant="h6" color="text.secondary" textAlign="center" sx={{ mb: 6, width: '100%' }}>
             We maintain the highest standards of security and compliance
           </Typography>
           
@@ -314,7 +314,7 @@ export default function Security() {
           <Typography variant="h3" fontWeight={700} textAlign="center" gutterBottom>
             Security Policies
           </Typography>
-          <Typography variant="h6" color="text.secondary" textAlign="center" sx={{ mb: 6, maxWidth: 600, mx: 'auto' }}>
+          <Typography variant="h6" color="text.secondary" textAlign="center" sx={{ mb: 6, width: '100%' }}>
             Transparent policies governing how we handle and protect your data
           </Typography>
           
@@ -345,11 +345,11 @@ export default function Security() {
           <Typography variant="h3" fontWeight={700} textAlign="center" gutterBottom>
             Security FAQs
           </Typography>
-          <Typography variant="h6" color="text.secondary" textAlign="center" sx={{ mb: 6, maxWidth: 600, mx: 'auto' }}>
+          <Typography variant="h6" color="text.secondary" textAlign="center" sx={{ mb: 6, width: '100%' }}>
             Common questions about our security practices
           </Typography>
           
-          <Box sx={{ maxWidth: 800, mx: 'auto' }}>
+          <Box sx={{ width: '100%' }}>
             {faqs.map((faq, index) => (
               <Accordion key={index}>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>

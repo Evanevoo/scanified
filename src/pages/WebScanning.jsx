@@ -294,10 +294,11 @@ export default function WebScanning() {
         break;
 
       case 'pickup':
+        // Mark as empty immediately - return scans update bottle status before import approval
+        // Don't unassign customer here - verification will handle that (matches mobile behavior)
         updateData = {
-          status: 'picked_up',
-          location: 'In Transit',
-          assigned_customer: null,
+          status: 'empty',
+          location: 'Warehouse',
         };
         message = 'Picked up from customer';
         break;

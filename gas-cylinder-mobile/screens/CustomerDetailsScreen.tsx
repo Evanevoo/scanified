@@ -1,24 +1,45 @@
 import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
-import { useRoute } from '@react-navigation/native';
+import { useRoute, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../hooks/useAuth';
+import { useTheme } from '../context/ThemeContext';
+import { useAssetConfig } from '../context/AssetContext';
+import { Ionicons } from '@expo/vector-icons';
+import { ModernCard } from '../components/design-system';
 
 export default function CustomerDetailsScreen() {
+  const insets = useSafeAreaInsets();
   const route = useRoute();
-  const { customerId } = route.params as { customerId: string };
+  const navigation = useNavigation();
+  const scrollPaddingBottom = Platform.OS === 'ios' ? insets.bottom + 24 : Math.max(insets.bottom, 24) + 24;
+  const params = (route?.params ?? {}) as { customerId?: string };
+  const customerId = params.customerId ?? '';
   const { profile } = useAuth();
+  const { colors } = useTheme();
+  const { config: assetConfig } = useAssetConfig();
   const [customer, setCustomer] = useState<any>(null);
   const [cylinders, setCylinders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
+    let isMounted = true;
     const fetchDetails = async () => {
-      if (!profile?.organization_id && !authLoading) {
-        setError('Organization not found');
-        setLoading(false);
+      if (!customerId) {
+        if (isMounted) {
+          setError('No customer specified');
+          setLoading(false);
+        }
+        return;
+      }
+      if (!profile?.organization_id) {
+        if (isMounted) {
+          setError('Organization not found');
+          setLoading(false);
+        }
         return;
       }
 
@@ -27,58 +48,72 @@ export default function CustomerDetailsScreen() {
 
       setLoading(true);
       setError('');
-      
-      // Fetch customer info for the current organization
+
       const { data: cust, error: custErr } = await supabase
         .from('customers')
         .select('*')
         .eq('CustomerListID', customerId)
         .eq('organization_id', profile.organization_id)
         .single();
-      
+
       logger.log('🔍 Customer query result:', { data: cust, error: custErr });
-      
+
       if (custErr || !cust) {
         logger.log('❌ Customer not found:', custErr);
-        setError('Customer not found.');
-        setLoading(false);
+        if (isMounted) {
+          setError('Customer not found.');
+          setLoading(false);
+        }
         return;
       }
-      
+
       logger.log('✅ Customer found:', cust.name);
-      setCustomer(cust);
-      
-      // Fetch cylinders rented by this customer for the current organization
+      if (isMounted) setCustomer(cust);
+
       const { data, error } = await supabase
         .from('bottles')
         .select('*')
         .eq('organization_id', profile.organization_id)
         .eq('assigned_customer', customerId);
-        
+
       logger.log('🔍 Cylinders query result:', { data, error });
-      
+
       if (error) {
         logger.log('❌ Error fetching cylinders:', error);
-        setError('Error fetching cylinders.');
-        setLoading(false);
+        if (isMounted) {
+          setError('Error fetching cylinders.');
+          setLoading(false);
+        }
         return;
       }
-      
+
       logger.log('✅ Found cylinders:', data?.length || 0);
-      setCylinders(data || []);
-      setLoading(false);
+      if (isMounted) {
+        setCylinders(data || []);
+        setLoading(false);
+      }
     };
     fetchDetails();
+    return () => { isMounted = false; };
   }, [customerId, profile]);
 
   if (loading) {
-    return <View style={styles.center}><ActivityIndicator size="large" color="#2563eb" /></View>;
+    return (
+      <View style={[styles.center, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading customer...</Text>
+      </View>
+    );
   }
   if (error) {
-    return <View style={styles.center}><Text style={styles.error}>{error}</Text></View>;
+    return (
+      <View style={[styles.center, { backgroundColor: colors.background }]}>
+        <Ionicons name="alert-circle-outline" size={48} color={colors.error} style={{ marginBottom: 12 }} />
+        <Text style={[styles.error, { color: colors.error }]}>{error}</Text>
+      </View>
+    );
   }
 
-  // Build full address from all address fields
   const addressParts = [
     customer.address,
     customer.address2,
@@ -91,23 +126,84 @@ export default function CustomerDetailsScreen() {
   const fullAddress = addressParts.join(', ');
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>{customer.name}</Text>
-      <Text style={styles.label}>Barcode: <Text style={styles.value}>{customer.barcode}</Text></Text>
-      <Text style={styles.label}>Contact: <Text style={styles.value}>{customer.contact_details}</Text></Text>
-      <Text style={styles.label}>Phone: <Text style={styles.value}>{customer.phone}</Text></Text>
-      <Text style={styles.label}>Address: <Text style={styles.value}>{fullAddress}</Text></Text>
-      <Text style={styles.sectionTitle}>Currently Renting</Text>
+    <ScrollView
+      style={{ backgroundColor: colors.background }}
+      contentContainerStyle={[styles.container, { paddingBottom: scrollPaddingBottom, backgroundColor: colors.background }]}
+      showsVerticalScrollIndicator={false}
+    >
+      <ModernCard elevated style={styles.headerCard}>
+        <Text style={[styles.title, { color: colors.primary }]} numberOfLines={2}>
+          {customer.name}
+        </Text>
+        {customer.barcode ? (
+          <Text style={[styles.barcodeLabel, { color: colors.textSecondary }]}>
+            Barcode: {customer.barcode}
+          </Text>
+        ) : null}
+      </ModernCard>
+
+      <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>CONTACT</Text>
+      <ModernCard elevated={false} style={styles.infoCard}>
+        {customer.contact_details ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="person-outline" size={20} color={colors.primary} style={styles.infoIcon} />
+            <Text style={[styles.value, { color: colors.text }]}>{customer.contact_details}</Text>
+          </View>
+        ) : null}
+        {customer.phone ? (
+          <View style={styles.infoRow}>
+            <Ionicons name="call-outline" size={20} color={colors.primary} style={styles.infoIcon} />
+            <Text style={[styles.value, { color: colors.text }]}>{customer.phone}</Text>
+          </View>
+        ) : null}
+        {!customer.contact_details && !customer.phone && (
+          <Text style={[styles.value, { color: colors.textSecondary }]}>No contact details</Text>
+        )}
+      </ModernCard>
+
+      {fullAddress ? (
+        <>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>ADDRESS</Text>
+          <ModernCard elevated={false} style={styles.infoCard}>
+            <View style={styles.infoRow}>
+              <Ionicons name="location-outline" size={20} color={colors.primary} style={styles.infoIcon} />
+              <Text style={[styles.value, { color: colors.text }]}>{fullAddress}</Text>
+            </View>
+          </ModernCard>
+        </>
+      ) : null}
+
+      <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+        {assetConfig?.assetDisplayNamePlural?.toUpperCase() || 'CYLINDERS'} RENTED
+      </Text>
       {cylinders.length === 0 ? (
-        <Text style={styles.value}>No cylinders currently rented.</Text>
+        <ModernCard elevated={false} style={styles.emptyCard}>
+          <Ionicons name="flask-outline" size={32} color={colors.textSecondary} style={{ marginBottom: 8 }} />
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+            No {assetConfig?.assetDisplayNamePlural?.toLowerCase() || 'cylinders'} currently rented.
+          </Text>
+        </ModernCard>
       ) : (
         cylinders.map((cyl, idx) => (
-          <View key={cyl.barcode_number + idx} style={styles.cylinderBox}>
-            <Text style={styles.cylinderLabel}>Barcode: <Text style={styles.cylinderValue}>{cyl.barcode_number}</Text></Text>
-            <Text style={styles.cylinderLabel}>Serial: <Text style={styles.cylinderValue}>{cyl.serial_number}</Text></Text>
-            <Text style={styles.cylinderLabel}>Gas Type: <Text style={styles.cylinderValue}>{cyl.group_name}</Text></Text>
-            <Text style={styles.cylinderLabel}>Status: <Text style={styles.cylinderValue}>{cyl.status || 'Unknown'}</Text></Text>
-          </View>
+          <ModernCard
+            key={cyl.barcode_number + idx}
+            onPress={() => navigation.navigate('CylinderDetails', { barcode: cyl.barcode_number })}
+            elevated
+            style={styles.cylinderCard}
+          >
+            <View style={styles.cylinderRow}>
+              <View style={[styles.cylinderIconWrap, { backgroundColor: colors.primary + '20' }]}>
+                <Ionicons name="barcode-outline" size={20} color={colors.primary} />
+              </View>
+              <View style={styles.cylinderContent}>
+                <Text style={[styles.cylinderBarcode, { color: colors.text }]}>{cyl.barcode_number}</Text>
+                <Text style={[styles.cylinderMeta, { color: colors.textSecondary }]}>
+                  Serial: {cyl.serial_number} • {cyl.group_name || '—'} • {cyl.status || 'Unknown'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </View>
+          </ModernCard>
         ))
       )}
     </ScrollView>
@@ -116,60 +212,88 @@ export default function CustomerDetailsScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    padding: 24,
-    backgroundColor: '#F8FAFC',
+    padding: 20,
   },
   center: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8FAFC',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+  },
+  headerCard: {
+    marginBottom: 20,
+    alignItems: 'center',
   },
   title: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#2563eb',
-    marginBottom: 12,
     textAlign: 'center',
-  },
-  label: {
-    fontWeight: 'bold',
-    color: '#222',
     marginBottom: 4,
   },
-  value: {
-    fontWeight: 'normal',
-    color: '#444',
+  barcodeLabel: {
+    fontSize: 14,
   },
   sectionTitle: {
-    fontWeight: 'bold',
-    fontSize: 18,
-    color: '#2563eb',
-    marginTop: 18,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+    marginTop: 8,
+  },
+  infoCard: {
     marginBottom: 8,
   },
-  cylinderBox: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  infoIcon: {
+    marginRight: 12,
+  },
+  value: {
+    flex: 1,
+    fontSize: 16,
+  },
+  emptyCard: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 16,
+  },
+  cylinderCard: {
     marginBottom: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
   },
-  cylinderLabel: {
-    fontWeight: 'bold',
-    color: '#2563eb',
-    marginBottom: 2,
+  cylinderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  cylinderValue: {
-    fontWeight: 'normal',
-    color: '#444',
+  cylinderIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  cylinderContent: {
+    flex: 1,
+  },
+  cylinderBarcode: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cylinderMeta: {
+    fontSize: 14,
+    marginTop: 2,
   },
   error: {
-    color: '#ff5a1f',
     fontSize: 16,
     textAlign: 'center',
   },
-}); 
+});

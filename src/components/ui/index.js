@@ -10,5 +10,4 @@ export { Calendar } from './calendar';
 export { SearchInput } from './search-input';
 export { GooeySearchBar } from './animated-search-bar';
 export { SearchInputWithIcon } from './search-input-with-icon';
-export { Input } from './input';
 export { Label } from './label'; 

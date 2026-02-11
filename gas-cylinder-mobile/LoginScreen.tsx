@@ -22,6 +22,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { useAuth } from './hooks/useAuth';
 import { useNavigation } from '@react-navigation/native';
+import { useTheme } from './context/ThemeContext';
 
 const translations = {
   en: {
@@ -67,6 +68,7 @@ export default function LoginScreen() {
   const [biometricType, setBiometricType] = useState<'face' | 'touch' | 'unknown'>('unknown');
   const [language, setLanguage] = useState<'en' | 'es'>('en');
   const { user, organization, organizationLoading } = useAuth();
+  const { colors } = useTheme();
   const t = translations[language];
 
   useEffect(() => {
@@ -194,11 +196,17 @@ export default function LoginScreen() {
     }
     setResetting(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+      // Use same redirect as web app so reset link opens the correct page (and Supabase accepts the request)
+      const redirectUrl = 'https://www.scanified.com/reset-password';
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: redirectUrl,
+      });
       if (error) throw error;
-      Alert.alert('Password Reset', 'A password reset email has been sent if the email exists.');
-    } catch (err) {
-      Alert.alert('Error', err.message);
+      Alert.alert('Password Reset', 'A password reset email has been sent if the email exists. Check your inbox and spam folder.');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unable to send reset email. Please try again or use the website to reset your password.';
+      logger.error('Forgot password error:', err);
+      Alert.alert('Error', message);
     }
     setResetting(false);
   };
@@ -300,7 +308,7 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView 
-      style={styles.container} 
+      style={[styles.container, { backgroundColor: colors.background }]} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView 
@@ -365,7 +373,7 @@ export default function LoginScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Email Address</Text>
               <TextInput
-                style={[styles.input, emailError && styles.inputError]}
+                style={[styles.input, emailError && [styles.inputError, { borderColor: colors.error, backgroundColor: colors.error + '18' }]]}
                 value={email}
                 onChangeText={handleEmailChange}
                 placeholder="Enter your email"
@@ -375,14 +383,14 @@ export default function LoginScreen() {
                 autoComplete="email"
                 editable={!isLoading}
               />
-              {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
+              {emailError ? <Text style={[styles.errorText, { color: colors.error }]}>{emailError}</Text> : null}
             </View>
             
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Password</Text>
               <View style={styles.passwordContainer}>
                 <TextInput
-                  style={[styles.input, styles.passwordInput, passwordError && styles.inputError]}
+                  style={[styles.input, styles.passwordInput, passwordError && [styles.inputError, { borderColor: colors.error, backgroundColor: colors.error + '18' }]]}
                   value={password}
                   onChangeText={handlePasswordChange}
                   placeholder="Enter your password"
@@ -404,7 +412,7 @@ export default function LoginScreen() {
                   />
                 </TouchableOpacity>
               </View>
-              {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
+              {passwordError ? <Text style={[styles.errorText, { color: colors.error }]}>{passwordError}</Text> : null}
             </View>
 
             {/* Form Options */}
@@ -472,7 +480,6 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
   },
   scrollContainer: {
     flexGrow: 1,
@@ -588,11 +595,9 @@ const styles = StyleSheet.create({
     paddingRight: 48,
   },
   inputError: {
-    borderColor: '#EF4444',
-    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
   },
   errorText: {
-    color: '#EF4444',
     fontSize: 14,
     marginTop: 8,
   },

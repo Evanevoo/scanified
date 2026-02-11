@@ -1,6 +1,7 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Modal, Dimensions, Alert, Linking, Pressable } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Modal, Dimensions, Alert, Linking, Pressable, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
 import { useNavigation } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -12,10 +13,11 @@ import { useAuth } from '../hooks/useAuth';
 import ScanOverlay from '../components/ScanOverlay';
 import { Customer } from '../types';
 import { FormatValidationService } from '../services/FormatValidationService';
-import { Platform } from '../utils/platform';
 import { feedbackService } from '../services/feedbackService';
 import { soundService } from '../services/soundService';
 import Constants from 'expo-constants';
+
+import ScanArea from '../components/ScanArea';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient' || Constants.appOwnership === 'expo';
 
@@ -65,25 +67,34 @@ const normalizeBarcode = (value: string): string => {
 
 // Correct common OCR errors in scanned barcodes
 // Handles common misreads: O→0, I→1, S→5, Z→2, etc.
+// For sales receipt format (8 hex - 10 digits - letter), only applies trailing letter fix to avoid corrupting hex IDs
 const correctOCRErrors = (scanned: string): string => {
   if (!scanned) return scanned;
   
-  // Common OCR error mappings
+  let corrected = scanned.toUpperCase();
+  
+  // Sales receipt / hex customer ID: %XXXXXXXX-YYYYYYYYYYZ or 8 hex chars (800005BE)
+  // Do NOT apply aggressive corrections - hex chars (B,E,F etc.) are valid and get corrupted
+  const cleanedForCheck = corrected.replace(/[*%]/g, '');
+  const salesReceiptPattern = /^[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?$/;
+  const hexOnlyPattern = /^[0-9A-Fa-f]{8}$/;
+  if (hexOnlyPattern.test(cleanedForCheck)) {
+    return corrected; // 8 hex chars - no corrections, avoid corrupting B,E,F
+  }
+  if (salesReceiptPattern.test(cleanedForCheck)) {
+    // Only trailing letter fix (B→A, I→A at end - common misreads)
+    corrected = corrected.replace(/B$/, 'A').replace(/I$/, 'A').replace(/1$/, 'A');
+    return corrected;
+  }
+  
+  // Common OCR error mappings (unused - kept for reference)
   const ocrCorrections: { [key: string]: string } = {
-    // Letter to number corrections
     'O': '0', 'o': '0', 'D': '0', 'Q': '0',
     'I': '1', 'l': '1', '|': '1',
     'S': '5', 's': '5',
     'Z': '2', 'z': '2',
     'B': '8', 'b': '8',
     'G': '6', 'g': '6',
-    // Number to letter corrections (less common but possible)
-    '0': 'O', // Only if context suggests it should be a letter
-    '1': 'I',
-    '5': 'S',
-    '2': 'Z',
-    '8': 'B',
-    '6': 'G',
   };
   
   // Common multi-character OCR errors
@@ -118,8 +129,6 @@ const correctOCRErrors = (scanned: string): string => {
       return match[0];
     }},
   ];
-  
-  let corrected = scanned.toUpperCase();
   
   // Remove special characters that are likely OCR errors
   corrected = corrected.replace(/[+*%]/g, '');
@@ -393,6 +402,7 @@ const validateOrderNumber = async (orderNumber: string, organizationId: string):
 };
 
 export default function ScanCylindersScreen() {
+  const insets = useSafeAreaInsets();
   const [search, setSearch] = useState('');
   const [orderNumber, setOrderNumber] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -404,6 +414,7 @@ export default function ScanCylindersScreen() {
   const [orderNumberMaxLength, setOrderNumberMaxLength] = useState<number>(20);
   const navigation = useNavigation();
   const { colors } = useTheme();
+  const listPaddingBottom = Platform.OS === 'android' ? Math.max(insets.bottom, 24) + 24 : insets.bottom + 16;
   const { config: assetConfig } = useAssetConfig();
   const { profile, loading: authLoading } = useAuth();
   const [scannerVisible, setScannerVisible] = useState(false);
@@ -652,6 +663,44 @@ export default function ScanCylindersScreen() {
     return uniqueMatches;
   })();
 
+  // Search for customer by name (for OCR text recognition - customer names only)
+  const searchCustomerByName = async (possibleNames: string[]): Promise<Customer | null> => {
+    if (!profile?.organization_id || possibleNames.length === 0) return null;
+    try {
+      logger.log('🔍 OCR: Searching for customers by names:', possibleNames);
+      for (const name of possibleNames) {
+        if (!name || name.length < 3) continue;
+        const { data: customers, error } = await supabase
+          .from('customers')
+          .select('CustomerListID, name, barcode')
+          .eq('organization_id', profile.organization_id)
+          .ilike('name', `%${name}%`)
+          .limit(1);
+        if (error) { logger.error('OCR customer search error:', error); continue; }
+        if (customers?.length) {
+          logger.log('✅ OCR: Found customer:', customers[0].name);
+          return customers[0];
+        }
+      }
+      logger.log('❌ OCR: No customer found for any of the names');
+      return null;
+    } catch (err) {
+      logger.error('Error in searchCustomerByName:', err);
+      return null;
+    }
+  };
+
+  const handleCustomerFound = (customer: { name: string; id: string }) => {
+    logger.log('✅ OCR: Customer found in system:', customer.name);
+    setSelectedCustomer({ ...customer, CustomerListID: customer.id });
+    setSearch(customer.id || customer.name);
+    setCustomerBarcodeError('');
+    setShowCustomerScan(false);
+    setScannerVisible(false);
+    setScannerTarget(null);
+    feedbackService.scanSuccess();
+  };
+
   const handleBarcodeScanned = async (event: any) => {
     const data = typeof event === 'string'
       ? event
@@ -677,10 +726,12 @@ export default function ScanCylindersScreen() {
     logger.log('🔍 Barcode cleaning:', { original: data, cleaned: cleanedBarcode, digitsOnly, length: digitsOnly.length });
 
     // Direct navigation logic - ONLY for cylinder barcodes (e.g. 9 digits)
-    // This MUST happen BEFORE duplicate checks and scanner closing
-    // Customer barcodes (%XXXXXXXX-YYYYYYYYYYZ) stay on this screen
+    // Skip when scanning for customer - customer IDs can be 8-10 digits and must not navigate away
+    const explicitTarget = (typeof event === 'object' && event?.target) ? event.target : null;
+    const isCustomerScanContext = explicitTarget === 'customer' || scannerTarget === 'customer';
+
     try {
-      if (profile?.organization_id) {
+      if (profile?.organization_id && !isCustomerScanContext) {
         const formats = await FormatValidationService.getOrganizationFormats(profile.organization_id);
         const cylinderPattern = formats.cylinder_serial_format?.pattern || '^[0-9]{9}$';
         const cylinderRegex = new RegExp(cylinderPattern);
@@ -718,7 +769,7 @@ export default function ScanCylindersScreen() {
     }
 
     const barcode = cleanedBarcode;
-    let effectiveTarget = scannerTarget || 'customer';
+    let effectiveTarget = explicitTarget || scannerTarget || 'customer';
     
     // Prevent duplicate scans of the same barcode
     const now = Date.now();
@@ -841,11 +892,14 @@ export default function ScanCylindersScreen() {
           scannedBarcode = normalizeBarcode(data);
         }
         
-        // Apply OCR error correction to handle scanner misreads
-        const correctedBarcode = correctOCRErrors(scannedBarcode);
-        if (correctedBarcode !== scannedBarcode) {
-          logger.log(`🔧 OCR correction: "${scannedBarcode}" → "${correctedBarcode}"`);
-          scannedBarcode = correctedBarcode;
+        // Apply OCR error correction on iOS only - Android hardware scanner is accurate;
+        // OCR correction on Android was causing random/autocorrected barcodes
+        if (Platform.OS === 'ios') {
+          const correctedBarcode = correctOCRErrors(scannedBarcode);
+          if (correctedBarcode !== scannedBarcode) {
+            logger.log(`🔧 OCR correction: "${scannedBarcode}" → "${correctedBarcode}"`);
+            scannedBarcode = correctedBarcode;
+          }
         }
         
         // Multiple normalization strategies for comprehensive matching
@@ -1543,6 +1597,7 @@ export default function ScanCylindersScreen() {
           ) : (
             <FlatList
               data={filteredCustomers}
+              contentContainerStyle={{ paddingBottom: listPaddingBottom }}
               keyExtractor={(item) => item.CustomerListID}
               renderItem={({ item }) => (
                 <TouchableOpacity
@@ -1605,242 +1660,44 @@ export default function ScanCylindersScreen() {
 
       {/* Camera Scanner - Customer */}
       {showCustomerScan && (
-        <View style={styles.fullscreenWrapper}>
-          {logger.log('📷 RENDERING CAMERA VIEW - showCustomerScan is true')}
-          <Pressable
-            style={styles.fullscreenCamera}
-            onPress={(event) => {
-              // Tap to focus - Android Expo Camera handles this automatically
-              feedbackService.quickAction('focus');
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+        <ScanArea
+            searchCustomerByName={async (names) => {
+              const c = await searchCustomerByName(names);
+              return c ? { name: c.name, id: c.CustomerListID } : null;
             }}
-          >
-            <CameraView
-              ref={cameraRef}
-              style={StyleSheet.absoluteFill}
-              facing="back"
-              enableTorch={flashEnabled}
-              zoom={cameraZoom}
-              barcodeScannerSettings={{
-                // Focus on 1D barcode types for paper receipts/documents
-                // Removed 2D types (qr, aztec, datamatrix, pdf417) to reduce false positives from text
-                barcodeTypes: ['code128', 'code39', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14'],
-                // Remove regionOfInterest to scan full frame - better for 1D barcodes on paper
-                // regionOfInterest can cause issues with alignment and miss barcodes
-              }}
-              onCameraReady={() => {
-                logger.log('📷 Camera is ready!');
-                logger.log('📷 Running in:', isExpoGo ? 'EXPO GO' : 'PRODUCTION BUILD');
-                logger.log('📷 Scanner enabled:', scannerEnabled && !scanned && permission?.granted);
-                logger.log('📷 Permission:', permission?.granted ? 'GRANTED' : 'DENIED');
-                logger.log('📷 Scanner state:', { scannerEnabled, scanned, permissionGranted: permission?.granted });
-                logger.log('📷 Barcode types enabled: 1D only (code128, code39, codabar, ean13, ean8, upc_a, upc_e, code93, itf14)');
-                
-                // Warn if in Expo Go as barcode scanning may have limitations
-                if (isExpoGo) {
-                  logger.log('⚠️ Running in Expo Go - barcode scanning may have limitations. For best results, use a development build.');
-                }
-              }}
-              onBarcodeScanned={scannerEnabled && !scanned && permission?.granted ? ({ data, bounds }) => {
-                logger.log('📷 RAW BARCODE EVENT RECEIVED:', { 
-                  data: data?.substring(0, 50), 
-                  dataLength: data?.length,
-                  bounds, 
-                  scannerEnabled, 
-                  scanned, 
-                  scannerTarget,
-                  permissionGranted: permission?.granted,
-                  isExpoGo: isExpoGo
-                });
-                
-                // In Expo Go, log more details for debugging
-                if (isExpoGo) {
-                  logger.log('📷 Expo Go: Full barcode data:', data);
-                  logger.log('📷 Expo Go: Bounds:', JSON.stringify(bounds));
-                }
-                
-                // Skip bounds filtering for 1D barcodes on paper - they can be anywhere on the document
-                // Bounds filtering was causing missed scans for paper receipts
-                // if (bounds && !isBarcodeInScanArea(bounds)) {
-                //   logger.log('📷 Customer barcode outside scan area, ignoring');
-                //   return;
-                // }
-                
-                // Don't process if scanner is disabled or already processing
-                // Match the exact condition used for barcodeScannerEnabled prop
-                if (!scannerEnabled || scanned || !permission?.granted) {
-                  logger.log('📷 Scanner disabled or already processing:', { scannerEnabled, scanned, permissionGranted: permission?.granted });
-                  return;
-                }
-                
-                const barcode = data?.trim();
-                if (!barcode) {
-                  logger.log('📷 No barcode data in event');
-                  return;
-                }
-                
-                // Validate barcode - reject if it looks like random text/numbers
-                // 1D barcodes typically have minimum length and contain alphanumeric characters
-                // Reject very short codes (< 3 chars) or very long codes (> 50 chars) that might be OCR errors
-                if (barcode.length < 3 || barcode.length > 50) {
-                  logger.log('📷 Rejected: Invalid barcode length:', barcode.length);
-                  return;
-                }
-                
-                // Reject if it's just numbers and too short (likely OCR error from random text)
-                // But allow longer numeric codes (like 9-digit cylinder IDs)
-                if (/^\d+$/.test(barcode) && barcode.length < 6) {
-                  logger.log('📷 Rejected: Too short numeric code (likely OCR error):', barcode);
-                  return;
-                }
-                
-                logger.log('📷 BARCODE DETECTED:', barcode, 'Type:', typeof barcode, 'Length:', barcode.length);
-                logger.log('📷 Available customers:', customers.length);
-                
-                // Play scan sound
-                soundService.playSound('scan').catch(err => {
-                  logger.warn('⚠️ Could not play scan sound:', err);
-                });
-                
-                // Use the main handleBarcodeScanned function to prevent duplicates
-                handleBarcodeScanned({ data: barcode, type: 'camera' });
-              } : undefined}
-            />
-          </Pressable>
-          
-          {/* Camera Overlay - Matching EnhancedScanScreen */}
-          <View
-            style={styles.cameraOverlay}
-            pointerEvents="none"
-          >
-            <View
-              style={styles.scanFrame}
-              pointerEvents="none"
-            />
-          </View>
-          
-          {/* Close Button - Separate from overlay to ensure it works */}
-          <TouchableOpacity
-            style={styles.closeCameraButton}
-            onPress={() => {
-              setShowCustomerScan(false);
+            onCustomerFound={handleCustomerFound}
+            onScanned={(data: string) => {
+              const barcode = data?.trim();
+              if (!barcode) return;
+              // Pass all barcodes to handleBarcodeScanned - customer IDs can be 8-10 digits
+              // or sales receipt format; filtering here caused valid scans to be dropped
+              handleBarcodeScanned({ data: barcode, type: 'camera', target: 'customer' });
             }}
-          >
-            <Text style={styles.closeCameraText}>✕ Close</Text>
-          </TouchableOpacity>
-
-          {/* Flash Toggle Button */}
-          <TouchableOpacity
-            style={styles.flashButton}
-            onPress={() => {
-              setFlashEnabled(!flashEnabled);
-              feedbackService.quickAction('flash toggled');
-            }}
-          >
-            <Ionicons 
-              name={flashEnabled ? 'flash' : 'flash-off'} 
-              size={28} 
-              color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
-            />
-          </TouchableOpacity>
-
-          {/* Zoom Controls */}
-          <View style={styles.zoomControls}>
-            <TouchableOpacity
-              style={styles.zoomButton}
-              onPress={() => {
-                setCameraZoom(Math.max(0, cameraZoom - 0.1));
-                feedbackService.quickAction('zoom out');
-              }}
-            >
-              <Ionicons name="remove-outline" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-            <Text style={styles.zoomText}>{Math.round((1 + cameraZoom) * 100)}%</Text>
-            <TouchableOpacity
-              style={styles.zoomButton}
-              onPress={() => {
-                // Increased max zoom to 2x for better far barcode scanning
-                setCameraZoom(Math.min(2, cameraZoom + 0.1));
-                feedbackService.quickAction('zoom in');
-              }}
-            >
-              <Ionicons name="add-outline" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
+            onClose={() => setShowCustomerScan(false)}
+            label="Scan customer barcode"
+            validationPattern={/^[\dA-Za-z\-%]+$/}
+            style={{ flex: 1 }}
+          />
         </View>
       )}
 
       {/* Camera Scanner - Order */}
       {showOrderScan && (
-        <View style={styles.fullscreenWrapper}>
-          <Pressable
-            style={styles.fullscreenCamera}
-            onPress={(event) => {
-              // Tap to focus - Android Expo Camera handles this automatically
-              feedbackService.quickAction('focus');
-            }}
-          >
-            <CameraView
-              ref={cameraRef}
-              style={StyleSheet.absoluteFill}
-              facing="back"
-              enableTorch={flashEnabled}
-              zoom={cameraZoom}
-              barcodeScannerSettings={{
-                barcodeTypes: ['code128', 'code39', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14', 'qr', 'aztec', 'datamatrix', 'pdf417'],
-                regionOfInterest: {
-                  x: (width - 320) / 2 / width,
-                  y: 150 / height,
-                  width: 320 / width,
-                  height: 150 / height,
-                },
-              }}
-              onBarcodeScanned={scannerEnabled && !scanned && permission?.granted ? ({ data, bounds }) => {
-                logger.log('📷 Raw order barcode event:', data, 'bounds:', bounds);
-                
-                // Filter by bounds to ensure barcode is within visual scan frame
-                if (bounds && !isBarcodeInScanArea(bounds)) {
-                  logger.log('📷 Order barcode outside scan area, ignoring');
-                  return;
-                }
-                
-                const barcode = data.trim();
-                if (barcode) {
-                  logger.log('📷 Order barcode detected:', barcode);
-                  
-                  // Play scan sound
-                  soundService.playSound('scan').catch(err => {
-                    logger.warn('⚠️ Could not play scan sound:', err);
-                  });
-                  
-                  setOrderNumber(barcode);
-                  setShowOrderScan(false);
-                }
-              } : undefined}
-            />
-          </Pressable>
-          <View style={styles.scanRectangle} />
-          <View style={styles.scanAreaOverlay} />
-          <TouchableOpacity 
-            style={styles.closeButton} 
-            onPress={() => setShowOrderScan(false)}
-          >
-            <Text style={styles.closeButtonText}>✕ Close</Text>
-          </TouchableOpacity>
-          
-          {/* Flash Toggle Button */}
-          <TouchableOpacity
-            style={styles.flashButton}
-            onPress={() => {
-              setFlashEnabled(!flashEnabled);
-              feedbackService.quickAction('flash toggled');
-            }}
-          >
-            <Ionicons 
-              name={flashEnabled ? 'flash' : 'flash-off'} 
-              size={28} 
-              color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
-            />
-          </TouchableOpacity>
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+        <ScanArea
+          onScanned={(data: string) => {
+            const barcode = data?.trim();
+            if (barcode) {
+              setOrderNumber(barcode);
+              setShowOrderScan(false);
+            }
+          }}
+          onClose={() => setShowOrderScan(false)}
+          label="Scan order number"
+          validationPattern={/^[\dA-Za-z\-%]+$/}
+          style={{ flex: 1 }}
+        />
         </View>
       )}
     </View>

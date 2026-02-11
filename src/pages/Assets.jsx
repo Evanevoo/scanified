@@ -257,80 +257,52 @@ export default function Assets() {
   });
 
   // Get all unique gas types from the bottles table - these are the gas assets inside the bottles
+  // Group by product_code when present so the same code (e.g. BOX300-16PK) always stays in one row
   const assetTypes = useMemo(() => {
     const assetMap = new Map();
-    
-    bottles.forEach(bottle => {
-      // Use description as primary categorization (it contains the gas type)
-      // Fallback to product_code, then gas_type, then type
+
+    function cleanedLabel(bottle) {
       let gasType = bottle.description || bottle.product_code || bottle.gas_type || bottle.type;
-      
-      // Clean up the gas type name
       if (gasType) {
-        // Remove common prefixes/suffixes to get cleaner gas type names
         gasType = gasType
-          .replace(/^AVIATOR\s+/i, '') // Remove "AVIATOR" prefix
-          .replace(/\s+BOTTLE.*$/i, '') // Remove "BOTTLE" suffix and everything after
-          .replace(/\s+ASSET.*$/i, '') // Remove "ASSET" suffix and everything after
-          .replace(/\s+SIZE\s+\d+.*$/i, '') // Remove "SIZE 250" etc
-          .replace(/\s+-\s+SIZE\s+\d+.*$/i, '') // Remove "- SIZE 250" etc
-          .replace(/\s+ASSETS.*$/i, '') // Remove "ASSETS" suffix
+          .replace(/^AVIATOR\s+/i, '')
+          .replace(/\s+BOTTLE.*$/i, '')
+          .replace(/\s+ASSET.*$/i, '')
+          .replace(/\s+SIZE\s+\d+.*$/i, '')
+          .replace(/\s+-\s+SIZE\s+\d+.*$/i, '')
+          .replace(/\s+ASSETS.*$/i, '')
           .trim();
-        
-        // If it's still too generic, use the original description
         if (gasType.length < 3) {
           gasType = bottle.description || bottle.product_code || bottle.gas_type || bottle.type;
         }
       }
-      
-      if (gasType && gasType !== 'Unknown' && gasType !== 'N/A') {
-        // Group by gas type AND product code to separate different product codes (e.g., BAR300 vs BAR125)
-        // Use product code as primary grouping key if available, otherwise use gas type
-        const groupingKey = bottle.product_code && bottle.product_code.trim() 
-          ? `${gasType}_${bottle.product_code.trim()}`
-          : gasType;
-        
-        if (!assetMap.has(groupingKey)) {
-          assetMap.set(groupingKey, []);
-        }
-        assetMap.get(groupingKey).push(bottle);
-      } else {
-        // Include bottles with empty/unknown gas type in a special category
-        // Still group by product code if available
-        const fallbackType = gasType || 'Unknown Gas Type';
-        const groupingKey = bottle.product_code && bottle.product_code.trim()
-          ? `${fallbackType}_${bottle.product_code.trim()}`
-          : fallbackType;
-        
-        if (!assetMap.has(groupingKey)) {
-          assetMap.set(groupingKey, []);
-        }
-        assetMap.get(groupingKey).push(bottle);
+      return gasType || 'Unknown Gas Type';
+    }
+
+    bottles.forEach(bottle => {
+      const hasProductCode = bottle.product_code && bottle.product_code.trim();
+      const normalizedCode = hasProductCode ? bottle.product_code.trim() : null;
+
+      // Group by product_code when present so BOX300-16PK is always one row regardless of description/gas_type
+      const groupingKey = normalizedCode || cleanedLabel(bottle);
+
+      if (!assetMap.has(groupingKey)) {
+        assetMap.set(groupingKey, []);
       }
+      assetMap.get(groupingKey).push(bottle);
     });
-    
+
     return Array.from(assetMap.entries()).map(([groupingKey, bottlesOfType]) => {
-      // Extract gas type from grouping key (format: "GasType_ProductCode" or just "GasType")
-      // For "ARGON_BAR300", extract "ARGON"
-      // For "ARGON", keep "ARGON"
-      let gasType = groupingKey;
-      if (groupingKey.includes('_')) {
-        // Split by underscore and take all parts except the last one (product code)
-        const parts = groupingKey.split('_');
-        gasType = parts.slice(0, -1).join('_');
-      }
-      
+      const sample = bottlesOfType[0];
+      const displayLabel = sample?.product_code?.trim() || cleanedLabel(sample) || groupingKey;
       return {
-        gasType,
+        gasType: displayLabel,
         bottles: bottlesOfType
       };
     }).sort((a, b) => {
-      // Sort by gas type first, then by product code
-      const gasCompare = a.gasType.localeCompare(b.gasType);
-      if (gasCompare !== 0) return gasCompare;
-      const aProductCode = a.bottles[0]?.product_code || '';
-      const bProductCode = b.bottles[0]?.product_code || '';
-      return aProductCode.localeCompare(bProductCode);
+      const aLabel = a.gasType;
+      const bLabel = b.gasType;
+      return (aLabel || '').localeCompare(bLabel || '');
     });
   }, [bottles]);
 

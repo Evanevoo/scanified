@@ -163,7 +163,7 @@ export default function OrganizationBackup() {
   };
 
   return (
-    <Box sx={{ p: 3, maxWidth: 800, mx: 'auto' }}>
+    <Box sx={{ p: 3, width: '100%' }}>
       <Typography variant="h4" fontWeight={800} color="primary" mb={3}>
         <BackupIcon sx={{ mr: 2, verticalAlign: 'middle' }} />
         Organization Backup & Security

@@ -4,7 +4,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
 import { Ionicons } from '@expo/vector-icons';
-import MLKitScanner from '../components/MLKitScanner';
+import ScanArea from '../components/ScanArea';
 import { Picker } from '@react-native-picker/picker';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
@@ -43,7 +43,7 @@ export default function EditCylinderScreen() {
   const route = useRoute();
   const { colors } = useTheme();
   // Initialize step based on whether barcode is provided in route params
-  const routeBarcode = (route.params as any)?.barcode;
+  const routeBarcode = (route?.params as any)?.barcode;
   const [step, setStep] = useState(routeBarcode ? 2 : 1); // Start at step 2 if barcode provided
   const [barcode, setBarcode] = useState(routeBarcode || '');
   const [serial, setSerial] = useState('');
@@ -74,6 +74,33 @@ export default function EditCylinderScreen() {
   const [bottles, setBottles] = useState<{ barcode_number: string }[]>([]);
   const [barcodeSuggestions, setBarcodeSuggestions] = useState<{ barcode_number: string }[]>([]);
   const [showBarcodeSuggestions, setShowBarcodeSuggestions] = useState(false);
+
+  const searchCustomerByName = async (possibleNames: string[]): Promise<{ name: string; id: string } | null> => {
+    if (!profile?.organization_id || possibleNames.length === 0) return null;
+    try {
+      for (const name of possibleNames) {
+        if (!name || name.length < 3) continue;
+        const { data: customers } = await supabase
+          .from('customers')
+          .select('CustomerListID, name')
+          .eq('organization_id', profile.organization_id)
+          .ilike('name', `%${name}%`)
+          .limit(1);
+        if (customers && customers.length > 0) {
+          const found = customers[0];
+          return { name: found.name, id: found.CustomerListID };
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleOcrCustomerFound = (customer: { name: string; id: string }) => {
+    setScannerVisible(false);
+    navigation.navigate('CustomerDetails', { customerId: customer.id });
+  };
 
   // Fetch customers and locations when cylinder is loaded (step 2)
   React.useEffect(() => {
@@ -180,7 +207,7 @@ export default function EditCylinderScreen() {
 
   // Initialize barcode from route params if provided
   React.useEffect(() => {
-    const routeBarcode = (route.params as any)?.barcode;
+    const routeBarcode = (route?.params as any)?.barcode;
     if (routeBarcode) {
       setBarcode(routeBarcode);
       fetchCylinder(routeBarcode);
@@ -584,23 +611,27 @@ export default function EditCylinderScreen() {
           {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
         </ScrollView>
       )}
-      {/* Scanbot Scanner Modal */}
+      {/* Scanner Modal */}
       <Modal visible={scannerVisible} animationType="slide" transparent={false}>
-        <MLKitScanner
-          onBarcodeScanned={(data: string, result?: { format: string; confidence: number }) => {
-            if (!scanned && data) {
-              logger.log('📷 MLKit: Barcode scanned in EditCylinderScreen:', data, result?.format);
-              handleBarcodeScanned(data);
-            }
-          }}
-          enabled={!scanned && scannerVisible}
-          onClose={() => {
-            setScannerVisible(false);
-            setScanned(false);
-          }}
-          title="Scan Cylinder Barcode"
-          subtitle="Point camera at barcode"
-        />
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+          <ScanArea
+            searchCustomerByName={searchCustomerByName}
+            onCustomerFound={handleOcrCustomerFound}
+            onScanned={(data: string) => {
+              if (!scanned && data) {
+                logger.log('📷 Barcode scanned in EditCylinderScreen:', data);
+                handleBarcodeScanned(data);
+              }
+            }}
+            onClose={() => {
+              setScannerVisible(false);
+              setScanned(false);
+            }}
+            label="Scan cylinder barcode"
+            validationPattern={/^[\dA-Za-z\-%]+$/}
+            style={{ flex: 1 }}
+          />
+        </View>
       </Modal>
 
       {/* Owner Type Picker Modal */}

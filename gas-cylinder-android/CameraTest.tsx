@@ -1,10 +1,23 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
 const CameraTest = () => {
   const [permission, requestPermission] = useCameraPermissions();
+  const [cameraReady, setCameraReady] = useState(false); // Defer mount to prevent Android crash
   const [scanned, setScanned] = useState(false);
+  const [cameraZoom, setCameraZoom] = useState(0);
+  const [flashEnabled, setFlashEnabled] = useState(false);
+
+  // Defer CameraView mount (prevents Android crash) - must be before any returns
+  useEffect(() => {
+    if (!permission?.granted) {
+      setCameraReady(false);
+      return;
+    }
+    const t = setTimeout(() => setCameraReady(true), 400);
+    return () => clearTimeout(t);
+  }, [permission?.granted]);
 
   const handleBarcodeScanned = ({ data }: { data: string }) => {
     if (scanned) return;
@@ -30,17 +43,54 @@ const CameraTest = () => {
     );
   }
 
+  if (!cameraReady) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color="#fff" />
+        <Text style={styles.loadingText}>Starting camera...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <CameraView
         style={styles.camera}
         facing="back"
+        zoom={cameraZoom}
+        autofocus="on"
+        enableTorch={flashEnabled}
         onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
         barcodeScannerEnabled={true}
       />
+      <View style={styles.cameraControls}>
+        <TouchableOpacity
+          style={[styles.controlButton, flashEnabled && styles.controlButtonActive]}
+          onPress={() => setFlashEnabled((v) => !v)}
+        >
+          <Text style={styles.controlIcon}>{flashEnabled ? '🔦' : '💡'}</Text>
+        </TouchableOpacity>
+        <View style={styles.zoomRow}>
+          <TouchableOpacity
+            style={styles.zoomBtn}
+            onPress={() => setCameraZoom((z) => Math.max(0, z - 0.25))}
+          >
+            <Text style={styles.zoomBtnText}>−</Text>
+          </TouchableOpacity>
+          <Text style={styles.zoomLabel}>{Math.round(cameraZoom * 100)}%</Text>
+          <TouchableOpacity
+            style={styles.zoomBtn}
+            onPress={() => setCameraZoom((z) => Math.min(1, z + 0.25))}
+          >
+            <Text style={styles.zoomBtnText}>+</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
       <View style={styles.overlay}>
         <Text style={styles.instruction}>Align barcode within frame</Text>
       </View>
+      {/* Scan border - old camera view style */}
+      <View style={styles.scanFrame} pointerEvents="none" />
     </View>
   );
 };
@@ -53,6 +103,56 @@ const styles = StyleSheet.create({
   camera: {
     flex: 1,
   },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 16,
+    marginTop: 12,
+  },
+  scanFrame: {
+    position: 'absolute',
+    top: '25%',
+    left: '50%',
+    transform: [{ translateX: -160 }],
+    width: 320,
+    height: 150,
+    borderWidth: 2,
+    borderColor: '#fff',
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+  },
+  cameraControls: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  controlButton: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    padding: 12,
+    alignSelf: 'flex-start',
+  },
+  controlButtonActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.8)',
+  },
+  controlIcon: { fontSize: 20 },
+  zoomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+  },
+  zoomBtn: { padding: 8 },
+  zoomBtnText: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  zoomLabel: { color: '#fff', fontSize: 12, minWidth: 36, textAlign: 'center' },
   overlay: {
     position: 'absolute',
     top: 50,

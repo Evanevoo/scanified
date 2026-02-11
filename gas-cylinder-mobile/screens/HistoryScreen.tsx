@@ -5,10 +5,10 @@ import { supabase } from '../supabase';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
 import { Ionicons } from '@expo/vector-icons';
+import { formatDateTimeLocal } from '../utils/dateUtils';
 
-function formatDate(dateStr) {
-  const d = new Date(dateStr);
-  return d.toLocaleString();
+function formatDate(dateStr: string) {
+  return formatDateTimeLocal(dateStr);
 }
 
 interface GroupedOrder {

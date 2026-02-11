@@ -160,7 +160,7 @@ export default function Demo() {
           <Typography variant="h3" fontWeight={700} sx={{ mb: 2, color: '#000000' }}>
             Interactive Demo
           </Typography>
-          <Typography variant="h6" sx={{ maxWidth: 600, mx: 'auto', color: '#6B7280' }}>
+          <Typography variant="h6" sx={{ width: '100%', color: '#6B7280' }}>
             Experience how Scanified transforms asset management. Try the features below to see the platform in action.
           </Typography>
         </Box>

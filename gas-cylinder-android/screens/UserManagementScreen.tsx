@@ -8,8 +8,11 @@ import {
   Alert,
   ActivityIndicator,
   RefreshControl,
+  Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
+import { formatDateLocal } from '../utils/dateUtils';
 import { supabase } from '../supabase';
 
 interface User {
@@ -22,7 +25,9 @@ interface User {
 }
 
 export default function UserManagementScreen() {
+  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const listPaddingBottom = Platform.OS === 'android' ? Math.max(insets.bottom, 24) + 24 : insets.bottom + 16;
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -146,7 +151,7 @@ export default function UserManagementScreen() {
             {item.role.toUpperCase()}
           </Text>
           <Text style={[styles.userDate, { color: colors.textSecondary }]}>
-            Joined: {new Date(item.created_at).toLocaleDateString()}
+            Joined: {formatDateLocal(item.created_at)}
           </Text>
         </View>
       </View>
@@ -195,7 +200,7 @@ export default function UserManagementScreen() {
         data={users}
         renderItem={renderUser}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={[styles.listContainer, { paddingBottom: listPaddingBottom }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

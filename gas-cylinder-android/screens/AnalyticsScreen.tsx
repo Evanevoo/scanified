@@ -6,13 +6,15 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Platform,
   ActivityIndicator,
   RefreshControl,
   Dimensions,
   Alert
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
+import { formatDateLocal } from '../utils/dateUtils';
 import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../context/AssetContext';
 import { supabase } from '../supabase';
@@ -46,8 +48,10 @@ interface AnalyticsData {
 }
 
 export default function AnalyticsScreen() {
+  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { user, profile, organization } = useAuth();
+  const scrollPaddingBottom = Platform.OS === 'android' ? Math.max(insets.bottom, 24) + 24 : insets.bottom + 24;
   const { config: assetConfig } = useAssetConfig();
   
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
@@ -286,7 +290,7 @@ export default function AnalyticsScreen() {
     } else if (diffDays < 7) {
       return `${diffDays}d ago`;
     } else {
-      return date.toLocaleDateString();
+      return formatDateLocal(dateString);
     }
   };
 
@@ -356,6 +360,7 @@ export default function AnalyticsScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView
         style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: scrollPaddingBottom }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }

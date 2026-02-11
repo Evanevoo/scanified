@@ -71,7 +71,7 @@ export default function AssetHistoryLookup() {
       </Box>
 
       {/* Search Card */}
-      <Card variant="outlined" sx={{ maxWidth: 600, mx: 'auto' }}>
+      <Card variant="outlined" sx={{ width: '100%' }}>
         <CardContent sx={{ p: 4 }}>
           <Box sx={{ textAlign: 'center', mb: 3 }}>
             <HistoryIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />

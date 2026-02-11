@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
+import { formatDateLocal } from '../utils/dateUtils';
 import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../context/AssetContext';
 import { supabase } from '../supabase';
@@ -286,7 +287,7 @@ export default function AnalyticsScreen() {
     } else if (diffDays < 7) {
       return `${diffDays}d ago`;
     } else {
-      return date.toLocaleDateString();
+      return formatDateLocal(dateString);
     }
   };
 

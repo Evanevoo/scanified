@@ -6,7 +6,7 @@ module.exports = {
   expo: {
     name: "Scanified",
     slug: "gas-cylinder-mobile",
-    version: "1.0.29",
+    version: "1.0.41",
     orientation: "portrait",
     icon: "./assets/app-icon.png",
     userInterfaceStyle: "automatic",
@@ -20,7 +20,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.evanevoo.scanifiedmobile",
-      buildNumber: "87",
+      buildNumber: "99",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSCameraUsageDescription: "Scanified uses your camera to scan asset barcodes for inventory management and tracking purposes.",
@@ -56,20 +56,10 @@ module.exports = {
           cameraPermission: "Scanified uses your camera to scan asset barcodes for inventory management and tracking purposes."
         }
       ],
-      [
-        "react-native-scanbot-barcode-scanner-sdk",
-        {
-          iOSCameraUsageDescription: "Scanified uses your camera to scan barcodes for inventory and receipts.",
-          androidCameraPermission: true,
-          androidCameraFeature: true,
-          mavenURLs: true
-        }
-      ],
       "expo-apple-authentication",
       "expo-notifications"
     ],
     extra: {
-      SCANBOT_SDK_LICENSE_KEY: process.env.SCANBOT_SDK_LICENSE_KEY || "",
       // Read from environment variables for local development, or use template variables for EAS builds
       // Falls back to hardcoded values if env vars not set (for local dev only)
       EXPO_PUBLIC_SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL || "https://jtfucttzaswmqqhmmhfb.supabase.co",

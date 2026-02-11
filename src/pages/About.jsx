@@ -361,7 +361,7 @@ export default function About() {
           <Typography variant="h2" fontWeight={700} sx={{ mb: 3 }}>
             {pageData.story.title}
           </Typography>
-          <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 800, mx: 'auto' }}>
+          <Typography variant="h6" color="text.secondary" sx={{ width: '100%' }}>
             {pageData.story.description}
           </Typography>
         </Box>
@@ -419,7 +419,7 @@ export default function About() {
             <Typography variant="h2" fontWeight={700} sx={{ mb: 3 }}>
               Our Values
             </Typography>
-            <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto' }}>
+            <Typography variant="h6" color="text.secondary" sx={{ width: '100%' }}>
               These core values guide everything we do, from product development to customer support.
             </Typography>
           </Box>
@@ -471,7 +471,7 @@ export default function About() {
           <Typography variant="h2" fontWeight={700} sx={{ mb: 3 }}>
             Meet Our Team
           </Typography>
-          <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto' }}>
+          <Typography variant="h6" color="text.secondary" sx={{ width: '100%' }}>
             Passionate professionals dedicated to revolutionizing asset management.
           </Typography>
         </Box>

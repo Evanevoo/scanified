@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
+import { useTheme } from './context/ThemeContext';
 
 const translations = {
   en: {
@@ -51,6 +52,7 @@ const translations = {
 };
 
 export default function LoginScreen() {
+  const { colors } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -150,11 +152,16 @@ export default function LoginScreen() {
     }
     setResetting(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+      const redirectUrl = 'https://www.scanified.com/reset-password';
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: redirectUrl,
+      });
       if (error) throw error;
-      Alert.alert('Password Reset', 'A password reset email has been sent if the email exists.');
-    } catch (err) {
-      Alert.alert('Error', err.message);
+      Alert.alert('Password Reset', 'A password reset email has been sent if the email exists. Check your inbox and spam folder.');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unable to send reset email. Please try again or use the website to reset your password.';
+      logger.error('Forgot password error:', err);
+      Alert.alert('Error', message);
     }
     setResetting(false);
   };
@@ -216,7 +223,7 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView 
-      style={styles.container} 
+      style={[styles.container, { backgroundColor: colors.background }]} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView 

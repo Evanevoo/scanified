@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
-import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Button, Grid, List, ListItem, ListItemText, Divider, Alert, Chip, IconButton, Tooltip, Card, CardContent, CardHeader, Accordion, AccordionSummary, AccordionDetails, Badge } from '@mui/material';
+import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Button, Grid, List, ListItem, ListItemText, Divider, Alert, Chip, IconButton, Tooltip, Card, CardContent, CardHeader, Accordion, AccordionSummary, AccordionDetails, Badge, Dialog, DialogTitle, DialogContent, DialogActions, TextField, FormControl, InputLabel, Select, MenuItem, Checkbox } from '@mui/material';
 import { ExpandMore as ExpandMoreIcon, Person as PersonIcon, Receipt as ReceiptIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon } from '@mui/icons-material';
 import { CardSkeleton } from '../components/SmoothLoading';
 
@@ -94,6 +94,22 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const [newLocation, setNewLocation] = useState('');
   const [scannedBottles, setScannedBottles] = useState([]);
   const [returnedBottles, setReturnedBottles] = useState([]);
+  const [unassignedDeliveredBarcodes, setUnassignedDeliveredBarcodes] = useState([]);
+  const [unassignedReturnedBarcodes, setUnassignedReturnedBarcodes] = useState([]);
+  const [assignBottleDialog, setAssignBottleDialog] = useState({ open: false, barcode: null, section: null });
+  const [bottleTypes, setBottleTypes] = useState({ types: [], groupNames: [] });
+  const [assignBottleForm, setAssignBottleForm] = useState({ type: '', group_name: '', description: '' });
+  const [assignBottleSaving, setAssignBottleSaving] = useState(false);
+  const [refreshScannedBottlesTrigger, setRefreshScannedBottlesTrigger] = useState(0);
+  
+  // Asset Options state
+  const [selectedAssets, setSelectedAssets] = useState(new Set()); // Track selected barcodes
+  const [switchModeDialog, setSwitchModeDialog] = useState({ open: false });
+  const [detachAssetsDialog, setDetachAssetsDialog] = useState({ open: false });
+  const [attachBarcodeDialog, setAttachBarcodeDialog] = useState({ open: false, barcode: '', mode: 'SHIP' });
+  const [reclassifyDialog, setReclassifyDialog] = useState({ open: false, newType: '', newGroup: '' });
+  const [moveOrderDialog, setMoveOrderDialog] = useState({ open: false, newOrderNumber: '' });
+  const [assetActionSaving, setAssetActionSaving] = useState(false);
 
   // Get filter parameters from URL
   const filterInvoiceNumber = searchParams.get('order') || searchParams.get('invoiceNumber');
@@ -156,6 +172,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         }
         
         // Create a mock import record structure for scanned-only data
+        // "Uploaded At" = when scanning started = earliest scan time (oldest created_at)
+        const createdAtValues = scans.map(s => s.created_at).filter(Boolean);
+        const uploadedAt = createdAtValues.length
+          ? createdAtValues.reduce((a, b) => (a < b ? a : b))
+          : (scans[0].created_at || new Date().toISOString());
         const mockRecord = {
           id: invoiceNumber,
           data: {
@@ -174,12 +195,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             summary: {
               total_rows: scans.length,
               uploaded_by: scans[0].user_id || 'scanner',
-              uploaded_at: scans[0].created_at || new Date().toISOString()
+              uploaded_at: uploadedAt
             }
           },
           uploaded_by: scans[0].user_id || 'scanner',
+          uploaded_at: uploadedAt,
           status: 'scanned_only',
-          created_at: scans[0].created_at || new Date().toISOString(),
+          created_at: uploadedAt,
           is_scanned_only: true
         };
         
@@ -686,15 +708,47 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         
         setScannedBottles(deliveredBottles);
         setReturnedBottles(returnedBottlesList);
+        // Barcodes scanned but not in bottles table = unassigned assets (admin assigns type in Import Approvals)
+        const knownDeliveredBarcodes = new Set((deliveredBottles || []).map(b => b.barcode_number));
+        const knownReturnedBarcodes = new Set((returnedBottlesList || []).map(b => b.barcode_number));
+        setUnassignedDeliveredBarcodes(Array.from(deliveredBarcodes).filter(b => !knownDeliveredBarcodes.has(b)));
+        setUnassignedReturnedBarcodes(Array.from(returnedBarcodes).filter(b => !knownReturnedBarcodes.has(b)));
       } catch (error) {
         logger.error('Error fetching scanned bottles:', error);
         setScannedBottles([]);
         setReturnedBottles([]);
+        setUnassignedDeliveredBarcodes([]);
+        setUnassignedReturnedBarcodes([]);
       }
     }
     
     fetchScannedBottles();
-  }, [importRecord, organization, filterInvoiceNumber]);
+  }, [importRecord, organization, filterInvoiceNumber, refreshScannedBottlesTrigger]);
+
+  // Fetch bottle types/groups when Assign to type dialog opens (for dropdowns)
+  useEffect(() => {
+    if (!assignBottleDialog.open || !organization?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('bottles')
+          .select('type, group_name')
+          .eq('organization_id', organization.id);
+        if (error) {
+          logger.error('Error fetching bottle types:', error);
+          return;
+        }
+        if (cancelled) return;
+        const types = [...new Set((data || []).map(b => b.type).filter(Boolean))].sort();
+        const groupNames = [...new Set((data || []).map(b => b.group_name).filter(Boolean))].sort();
+        setBottleTypes({ types, groupNames });
+      } catch (e) {
+        logger.error('Error loading bottle types:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [assignBottleDialog.open, organization?.id]);
 
   // Fetch customers for the change customer modal
   useEffect(() => {
@@ -1495,8 +1549,415 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
   // Handle asset actions
   const handleAssetAction = (action) => {
-    setActionMessage(`${action} - Feature coming soon!`);
-    setTimeout(() => setActionMessage(''), 3000);
+    // Get order number from import record
+    const orderNumber = importRecord?.data?.order_number || 
+                       importRecord?.data?.reference_number || 
+                       filterInvoiceNumber ||
+                       (invoiceNumber && invoiceNumber.startsWith('scanned_') ? invoiceNumber.replace('scanned_', '') : null);
+    
+    switch (action) {
+      case 'Switch Deliver / Return':
+        if (selectedAssets.size === 0) {
+          setActionMessage('Please select at least one asset to switch');
+          setTimeout(() => setActionMessage(''), 3000);
+          return;
+        }
+        setSwitchModeDialog({ open: true });
+        break;
+      case 'Detach Assets':
+        if (selectedAssets.size === 0) {
+          setActionMessage('Please select at least one asset to detach');
+          setTimeout(() => setActionMessage(''), 3000);
+          return;
+        }
+        setDetachAssetsDialog({ open: true });
+        break;
+      case 'Attach by Barcode or by Serial #':
+        setAttachBarcodeDialog({ open: true, barcode: '', mode: 'SHIP' });
+        break;
+      case 'Attach Not-Scanned Assets':
+        setAttachBarcodeDialog({ open: true, barcode: '', mode: 'SHIP' });
+        break;
+      case 'Reclassify Assets':
+        if (selectedAssets.size === 0) {
+          setActionMessage('Please select at least one asset to reclassify');
+          setTimeout(() => setActionMessage(''), 3000);
+          return;
+        }
+        setReclassifyDialog({ open: true, newType: '', newGroup: '' });
+        break;
+      case 'Change Asset Properties':
+        if (selectedAssets.size === 0) {
+          setActionMessage('Please select at least one asset to change properties');
+          setTimeout(() => setActionMessage(''), 3000);
+          return;
+        }
+        setReclassifyDialog({ open: true, newType: '', newGroup: '' });
+        break;
+      case 'Replace Incorrect Asset':
+        if (selectedAssets.size !== 1) {
+          setActionMessage('Please select exactly one asset to replace');
+          setTimeout(() => setActionMessage(''), 3000);
+          return;
+        }
+        setAttachBarcodeDialog({ open: true, barcode: '', mode: 'REPLACE', replacingBarcode: Array.from(selectedAssets)[0] });
+        break;
+      case 'Move to Another Sales Order':
+        if (selectedAssets.size === 0) {
+          setActionMessage('Please select at least one asset to move');
+          setTimeout(() => setActionMessage(''), 3000);
+          return;
+        }
+        setMoveOrderDialog({ open: true, newOrderNumber: '' });
+        break;
+      default:
+        setActionMessage(`${action} - Feature not yet implemented`);
+        setTimeout(() => setActionMessage(''), 3000);
+    }
+  };
+
+  // Toggle asset selection
+  const toggleAssetSelection = (barcode) => {
+    setSelectedAssets(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(barcode)) {
+        newSet.delete(barcode);
+      } else {
+        newSet.add(barcode);
+      }
+      return newSet;
+    });
+  };
+
+  // Select all assets
+  const selectAllAssets = () => {
+    const allBarcodes = new Set();
+    scannedBottles.forEach(b => b.barcode_number && allBarcodes.add(b.barcode_number));
+    returnedBottles.forEach(b => b.barcode_number && allBarcodes.add(b.barcode_number));
+    unassignedDeliveredBarcodes.forEach(b => allBarcodes.add(b));
+    unassignedReturnedBarcodes.forEach(b => allBarcodes.add(b));
+    setSelectedAssets(allBarcodes);
+  };
+
+  // Clear all selections
+  const clearAssetSelection = () => {
+    setSelectedAssets(new Set());
+  };
+
+  // Switch mode (Deliver <-> Return)
+  const handleSwitchMode = async () => {
+    if (selectedAssets.size === 0 || !organization?.id) return;
+    
+    setAssetActionSaving(true);
+    const orderNumber = importRecord?.data?.order_number || 
+                       importRecord?.data?.reference_number || 
+                       filterInvoiceNumber ||
+                       (invoiceNumber && invoiceNumber.startsWith('scanned_') ? invoiceNumber.replace('scanned_', '') : null);
+    
+    try {
+      const barcodeArray = Array.from(selectedAssets);
+      let successCount = 0;
+      
+      for (const barcode of barcodeArray) {
+        // Find current mode for this barcode
+        const isCurrentlyDelivered = scannedBottles.some(b => b.barcode_number === barcode) || 
+                                     unassignedDeliveredBarcodes.includes(barcode);
+        const newMode = isCurrentlyDelivered ? 'RETURN' : 'SHIP';
+        
+        // Update in bottle_scans
+        const { error: bottleScansError } = await supabase
+          .from('bottle_scans')
+          .update({ mode: newMode })
+          .eq('organization_id', organization.id)
+          .eq('bottle_barcode', barcode)
+          .eq('order_number', orderNumber);
+        
+        if (bottleScansError) {
+          logger.error(`Error updating bottle_scans for ${barcode}:`, bottleScansError);
+        }
+        
+        // Also update in scans table
+        const { error: scansError } = await supabase
+          .from('scans')
+          .update({ mode: newMode, action: newMode === 'SHIP' ? 'out' : 'in' })
+          .eq('organization_id', organization.id)
+          .eq('barcode_number', barcode)
+          .eq('order_number', orderNumber);
+        
+        if (scansError) {
+          logger.error(`Error updating scans for ${barcode}:`, scansError);
+        }
+        
+        successCount++;
+      }
+      
+      setActionMessage(`Successfully switched ${successCount} asset(s)`);
+      setSwitchModeDialog({ open: false });
+      setSelectedAssets(new Set());
+      setRefreshScannedBottlesTrigger(prev => prev + 1);
+    } catch (error) {
+      logger.error('Error switching mode:', error);
+      setActionMessage(`Error: ${error.message}`);
+    } finally {
+      setAssetActionSaving(false);
+      setTimeout(() => setActionMessage(''), 3000);
+    }
+  };
+
+  // Detach assets from order
+  const handleDetachAssets = async () => {
+    if (selectedAssets.size === 0 || !organization?.id) return;
+    
+    setAssetActionSaving(true);
+    const orderNumber = importRecord?.data?.order_number || 
+                       importRecord?.data?.reference_number || 
+                       filterInvoiceNumber ||
+                       (invoiceNumber && invoiceNumber.startsWith('scanned_') ? invoiceNumber.replace('scanned_', '') : null);
+    
+    try {
+      const barcodeArray = Array.from(selectedAssets);
+      let successCount = 0;
+      
+      for (const barcode of barcodeArray) {
+        // Delete from bottle_scans
+        const { error: bottleScansError } = await supabase
+          .from('bottle_scans')
+          .delete()
+          .eq('organization_id', organization.id)
+          .eq('bottle_barcode', barcode)
+          .eq('order_number', orderNumber);
+        
+        if (bottleScansError) {
+          logger.error(`Error deleting from bottle_scans for ${barcode}:`, bottleScansError);
+        }
+        
+        // Also delete from scans table
+        const { error: scansError } = await supabase
+          .from('scans')
+          .delete()
+          .eq('organization_id', organization.id)
+          .eq('barcode_number', barcode)
+          .eq('order_number', orderNumber);
+        
+        if (scansError) {
+          logger.error(`Error deleting from scans for ${barcode}:`, scansError);
+        }
+        
+        successCount++;
+      }
+      
+      setActionMessage(`Successfully detached ${successCount} asset(s)`);
+      setDetachAssetsDialog({ open: false });
+      setSelectedAssets(new Set());
+      setRefreshScannedBottlesTrigger(prev => prev + 1);
+    } catch (error) {
+      logger.error('Error detaching assets:', error);
+      setActionMessage(`Error: ${error.message}`);
+    } finally {
+      setAssetActionSaving(false);
+      setTimeout(() => setActionMessage(''), 3000);
+    }
+  };
+
+  // Attach barcode to order
+  const handleAttachBarcode = async () => {
+    if (!attachBarcodeDialog.barcode?.trim() || !organization?.id) {
+      setActionMessage('Please enter a barcode');
+      setTimeout(() => setActionMessage(''), 3000);
+      return;
+    }
+    
+    setAssetActionSaving(true);
+    const orderNumber = importRecord?.data?.order_number || 
+                       importRecord?.data?.reference_number || 
+                       filterInvoiceNumber ||
+                       (invoiceNumber && invoiceNumber.startsWith('scanned_') ? invoiceNumber.replace('scanned_', '') : null);
+    const customerName = importRecord?.data?.customer_name || filterCustomerName || '';
+    const customerId = importRecord?.data?.customer_id || filterCustomerId || null;
+    
+    try {
+      const barcode = attachBarcodeDialog.barcode.trim();
+      const mode = attachBarcodeDialog.mode === 'REPLACE' ? 'SHIP' : attachBarcodeDialog.mode;
+      
+      // If replacing, first detach the old barcode
+      if (attachBarcodeDialog.mode === 'REPLACE' && attachBarcodeDialog.replacingBarcode) {
+        await supabase
+          .from('bottle_scans')
+          .delete()
+          .eq('organization_id', organization.id)
+          .eq('bottle_barcode', attachBarcodeDialog.replacingBarcode)
+          .eq('order_number', orderNumber);
+        
+        await supabase
+          .from('scans')
+          .delete()
+          .eq('organization_id', organization.id)
+          .eq('barcode_number', attachBarcodeDialog.replacingBarcode)
+          .eq('order_number', orderNumber);
+      }
+      
+      // Insert into bottle_scans
+      const { error: bottleScansError } = await supabase
+        .from('bottle_scans')
+        .insert([{
+          organization_id: organization.id,
+          bottle_barcode: barcode,
+          order_number: orderNumber,
+          customer_name: customerName,
+          customer_id: customerId,
+          mode: mode,
+          timestamp: new Date().toISOString(),
+          created_at: new Date().toISOString()
+        }]);
+      
+      if (bottleScansError) {
+        throw bottleScansError;
+      }
+      
+      // Also insert into scans table
+      const { error: scansError } = await supabase
+        .from('scans')
+        .insert([{
+          organization_id: organization.id,
+          barcode_number: barcode,
+          order_number: orderNumber,
+          customer_name: customerName,
+          customer_id: customerId,
+          mode: mode,
+          action: mode === 'SHIP' ? 'out' : 'in',
+          status: 'pending',
+          created_at: new Date().toISOString()
+        }]);
+      
+      if (scansError) {
+        logger.warn('Warning: Failed to insert into scans table:', scansError);
+      }
+      
+      const message = attachBarcodeDialog.mode === 'REPLACE' 
+        ? `Successfully replaced asset with ${barcode}`
+        : `Successfully attached ${barcode} to order`;
+      setActionMessage(message);
+      setAttachBarcodeDialog({ open: false, barcode: '', mode: 'SHIP' });
+      setSelectedAssets(new Set());
+      setRefreshScannedBottlesTrigger(prev => prev + 1);
+    } catch (error) {
+      logger.error('Error attaching barcode:', error);
+      setActionMessage(`Error: ${error.message}`);
+    } finally {
+      setAssetActionSaving(false);
+      setTimeout(() => setActionMessage(''), 3000);
+    }
+  };
+
+  // Reclassify selected assets
+  const handleReclassifyAssets = async () => {
+    if (selectedAssets.size === 0 || !organization?.id) return;
+    if (!reclassifyDialog.newType?.trim()) {
+      setActionMessage('Please select a new type');
+      setTimeout(() => setActionMessage(''), 3000);
+      return;
+    }
+    
+    setAssetActionSaving(true);
+    
+    try {
+      const barcodeArray = Array.from(selectedAssets);
+      let successCount = 0;
+      
+      for (const barcode of barcodeArray) {
+        // Update the bottle record
+        const updateData = {
+          type: reclassifyDialog.newType.trim(),
+        };
+        if (reclassifyDialog.newGroup?.trim()) {
+          updateData.group_name = reclassifyDialog.newGroup.trim();
+        }
+        
+        const { error } = await supabase
+          .from('bottles')
+          .update(updateData)
+          .eq('organization_id', organization.id)
+          .eq('barcode_number', barcode);
+        
+        if (error) {
+          logger.error(`Error updating bottle ${barcode}:`, error);
+        } else {
+          successCount++;
+        }
+      }
+      
+      setActionMessage(`Successfully reclassified ${successCount} asset(s)`);
+      setReclassifyDialog({ open: false, newType: '', newGroup: '' });
+      setSelectedAssets(new Set());
+      setRefreshScannedBottlesTrigger(prev => prev + 1);
+    } catch (error) {
+      logger.error('Error reclassifying assets:', error);
+      setActionMessage(`Error: ${error.message}`);
+    } finally {
+      setAssetActionSaving(false);
+      setTimeout(() => setActionMessage(''), 3000);
+    }
+  };
+
+  // Move assets to another order
+  const handleMoveToOrder = async () => {
+    if (selectedAssets.size === 0 || !organization?.id) return;
+    if (!moveOrderDialog.newOrderNumber?.trim()) {
+      setActionMessage('Please enter a new order number');
+      setTimeout(() => setActionMessage(''), 3000);
+      return;
+    }
+    
+    setAssetActionSaving(true);
+    const currentOrderNumber = importRecord?.data?.order_number || 
+                              importRecord?.data?.reference_number || 
+                              filterInvoiceNumber ||
+                              (invoiceNumber && invoiceNumber.startsWith('scanned_') ? invoiceNumber.replace('scanned_', '') : null);
+    const newOrderNumber = moveOrderDialog.newOrderNumber.trim();
+    
+    try {
+      const barcodeArray = Array.from(selectedAssets);
+      let successCount = 0;
+      
+      for (const barcode of barcodeArray) {
+        // Update in bottle_scans
+        const { error: bottleScansError } = await supabase
+          .from('bottle_scans')
+          .update({ order_number: newOrderNumber })
+          .eq('organization_id', organization.id)
+          .eq('bottle_barcode', barcode)
+          .eq('order_number', currentOrderNumber);
+        
+        if (bottleScansError) {
+          logger.error(`Error updating bottle_scans for ${barcode}:`, bottleScansError);
+        }
+        
+        // Also update in scans table
+        const { error: scansError } = await supabase
+          .from('scans')
+          .update({ order_number: newOrderNumber })
+          .eq('organization_id', organization.id)
+          .eq('barcode_number', barcode)
+          .eq('order_number', currentOrderNumber);
+        
+        if (scansError) {
+          logger.error(`Error updating scans for ${barcode}:`, scansError);
+        }
+        
+        successCount++;
+      }
+      
+      setActionMessage(`Successfully moved ${successCount} asset(s) to order ${newOrderNumber}`);
+      setMoveOrderDialog({ open: false, newOrderNumber: '' });
+      setSelectedAssets(new Set());
+      setRefreshScannedBottlesTrigger(prev => prev + 1);
+    } catch (error) {
+      logger.error('Error moving assets:', error);
+      setActionMessage(`Error: ${error.message}`);
+    } finally {
+      setAssetActionSaving(false);
+      setTimeout(() => setActionMessage(''), 3000);
+    }
   };
 
   if (loading) return (
@@ -1710,7 +2171,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                     </Typography>
                   </Grid>
                   <Grid item xs={12} sm={6} md={3}>
-                    <Typography variant="subtitle2" color="text.secondary">Uploaded At</Typography>
+                    <Typography variant="subtitle2" color="text.secondary">Scan time (local)</Typography>
                     <Typography variant="body2" sx={{ 
                       p: 1, 
                       bgcolor: 'white', 
@@ -1718,7 +2179,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                       border: '1px solid #ddd',
                       boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)'
                     }}>
-                      {new Date(importRecord.uploaded_at).toLocaleString()}
+                      {(() => {
+                        const raw = importRecord.uploaded_at ?? importRecord.created_at ?? importRecord?.data?.summary?.uploaded_at;
+                        if (raw == null || raw === '') return '—';
+                        const d = new Date(raw);
+                        return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+                      })()}
                     </Typography>
                   </Grid>
                 </Grid>
@@ -1737,12 +2203,29 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 </Alert>
               )}
 
-              {/* Delivered Assets - Show Scanned Bottles */}
+              {/* Delivered Assets - Show Scanned Bottles + Unassigned (scanned but not in bottles table) */}
+              {/* Selection Controls */}
+              <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Button size="small" variant="outlined" onClick={selectAllAssets}>
+                  Select All
+                </Button>
+                <Button size="small" variant="outlined" onClick={clearAssetSelection} disabled={selectedAssets.size === 0}>
+                  Clear Selection
+                </Button>
+                {selectedAssets.size > 0 && (
+                  <Chip 
+                    label={`${selectedAssets.size} asset(s) selected`} 
+                    color="primary" 
+                    size="small"
+                  />
+                )}
+              </Box>
+
               <Typography variant="h6" fontWeight={700} mb={2} color="var(--text-main)" sx={{ 
                 borderBottom: '1px solid var(--divider)', 
                 pb: 1
               }}>
-                Delivered Assets ({scannedBottles.length})
+                Delivered Assets ({scannedBottles.length + unassignedDeliveredBarcodes.length})
               </Typography>
               <Paper sx={{ 
                 mb: 4, 
@@ -1757,6 +2240,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                       backgroundColor: '#f8f9fa',
                       borderBottom: '3px solid #333'
                     }}>
+                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed', width: 50 }}>Select</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Category</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Group</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Type</TableCell>
@@ -1764,13 +2248,14 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Description</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Ownership</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Barcode</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Serial Number</TableCell>
+                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Serial Number</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {scannedBottles.length === 0 ? (
+                    {scannedBottles.length === 0 && unassignedDeliveredBarcodes.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} align="center" sx={{ 
+                        <TableCell colSpan={10} align="center" sx={{ 
                           py: 4, 
                           color: 'text.secondary',
                           border: '2px dashed #e0e6ed',
@@ -1779,88 +2264,25 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                           No delivered assets found.
                         </TableCell>
                       </TableRow>
-                    ) : scannedBottles.map((bottle, i) => {
-                      const rowKey = bottle.barcode_number || `bottle_${i}`;
-                      return (
-                        <TableRow key={rowKey} sx={{ 
-                          backgroundColor: i % 2 === 0 ? '#ffffff' : '#f8f9fa',
-                          '&:hover': { backgroundColor: '#f0f0f0' },
-                          borderBottom: '1px solid #e0e6ed'
-                        }}>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.category || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.group_name || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.type || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
-                            <Chip label={bottle.product_code || ''} size="small" variant="outlined" sx={{ 
-                              border: '2px solid #333',
-                              fontWeight: 600,
-                              bgcolor: 'white',
-                              color: 'black'
-                            }} />
-                          </TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.description || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.ownership || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.barcode_number || ''}</TableCell>
-                          <TableCell>{bottle.serial_number || ''}</TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </Paper>
-
-              {/* Returned Assets */}
-              <Typography variant="h6" fontWeight={700} mb={2} color="var(--text-main)" sx={{ 
-                borderBottom: '1px solid var(--divider)', 
-                pb: 1
-              }}>
-                Returned Assets ({returnedBottles.length + returned.length})
-              </Typography>
-              <Paper sx={{ 
-                borderRadius: 2, 
-                overflow: 'hidden',
-                border: '1px solid var(--divider)',
-                boxShadow: '0 2px 8px 0 rgba(16,24,40,0.04)'
-              }}>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow sx={{ 
-                      backgroundColor: '#f8f9fa',
-                      borderBottom: '3px solid #333'
-                    }}>
-                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Category</TableCell>
-                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Group</TableCell>
-                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Type</TableCell>
-                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Product Code</TableCell>
-                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Description</TableCell>
-                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Ownership</TableCell>
-                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Barcode</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Serial Number</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {returnedBottles.length === 0 && returned.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={8} align="center" sx={{ 
-                          py: 4, 
-                          color: 'text.secondary',
-                          border: '2px dashed #e0e6ed',
-                          bgcolor: '#fafbfc'
-                        }}>
-                          No returned assets found.
-                        </TableCell>
-                      </TableRow>
                     ) : (
                       <>
-                        {/* Show scanned returned bottles first */}
-                        {returnedBottles.map((bottle, i) => {
-                          const rowKey = bottle.barcode_number || `returned_bottle_${i}`;
+                        {scannedBottles.map((bottle, i) => {
+                          const rowKey = bottle.barcode_number || `bottle_${i}`;
+                          const isSelected = bottle.barcode_number && selectedAssets.has(bottle.barcode_number);
                           return (
                             <TableRow key={rowKey} sx={{ 
-                              backgroundColor: i % 2 === 0 ? '#ffffff' : '#f8f9fa',
-                              '&:hover': { backgroundColor: '#f0f0f0' },
+                              backgroundColor: isSelected ? '#e3f2fd' : (i % 2 === 0 ? '#ffffff' : '#f8f9fa'),
+                              '&:hover': { backgroundColor: isSelected ? '#bbdefb' : '#f0f0f0' },
                               borderBottom: '1px solid #e0e6ed'
                             }}>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
+                                <Checkbox 
+                                  checked={isSelected}
+                                  onChange={() => bottle.barcode_number && toggleAssetSelection(bottle.barcode_number)}
+                                  size="small"
+                                  disabled={!bottle.barcode_number}
+                                />
+                              </TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.category || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.group_name || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.type || ''}</TableCell>
@@ -1875,43 +2297,442 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.description || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.ownership || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.barcode_number || ''}</TableCell>
-                              <TableCell>{bottle.serial_number || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.serial_number || ''}</TableCell>
+                              <TableCell />
+                            </TableRow>
+                          );
+                        })}
+                        {unassignedDeliveredBarcodes.map((barcode, i) => {
+                          const isSelected = selectedAssets.has(barcode);
+                          return (
+                            <TableRow key={`unassigned_delivered_${barcode}`} sx={{ 
+                              backgroundColor: isSelected ? '#e3f2fd' : '#FEF3C7',
+                              borderBottom: '1px solid #e0e6ed'
+                            }}>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
+                                <Checkbox 
+                                  checked={isSelected}
+                                  onChange={() => toggleAssetSelection(barcode)}
+                                  size="small"
+                                />
+                              </TableCell>
+                              <TableCell colSpan={3} sx={{ borderRight: '1px solid #e0e6ed', fontWeight: 600, color: '#92400E' }}>Unassigned asset</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} />
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} colSpan={2}>Scanned barcode not in system – assign type below</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{barcode}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} />
+                              <TableCell>
+                                <Button size="small" variant="contained" color="primary" onClick={() => { setAssignBottleForm({ type: '', group_name: '', description: '' }); setAssignBottleDialog({ open: true, barcode, section: 'delivered' }); }}>
+                                  Assign to type
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </>
+                    )}
+                  </TableBody>
+                </Table>
+              </Paper>
+
+              {/* Returned Assets */}
+              <Typography variant="h6" fontWeight={700} mb={2} color="var(--text-main)" sx={{ 
+                borderBottom: '1px solid var(--divider)', 
+                pb: 1
+              }}>
+                Returned Assets ({returnedBottles.length + returned.length + unassignedReturnedBarcodes.length})
+              </Typography>
+              <Paper sx={{ 
+                borderRadius: 2, 
+                overflow: 'hidden',
+                border: '1px solid var(--divider)',
+                boxShadow: '0 2px 8px 0 rgba(16,24,40,0.04)'
+              }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow sx={{ 
+                      backgroundColor: '#f8f9fa',
+                      borderBottom: '3px solid #333'
+                    }}>
+                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed', width: 50 }}>Select</TableCell>
+                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Category</TableCell>
+                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Group</TableCell>
+                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Type</TableCell>
+                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Product Code</TableCell>
+                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Description</TableCell>
+                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Ownership</TableCell>
+                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Barcode</TableCell>
+                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Serial Number</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {returnedBottles.length === 0 && returned.length === 0 && unassignedReturnedBarcodes.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={10} align="center" sx={{ 
+                          py: 4, 
+                          color: 'text.secondary',
+                          border: '2px dashed #e0e6ed',
+                          bgcolor: '#fafbfc'
+                        }}>
+                          No returned assets found.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      <>
+                        {/* Show scanned returned bottles first */}
+                        {returnedBottles.map((bottle, i) => {
+                          const rowKey = bottle.barcode_number || `returned_bottle_${i}`;
+                          const isSelected = bottle.barcode_number && selectedAssets.has(bottle.barcode_number);
+                          return (
+                            <TableRow key={rowKey} sx={{ 
+                              backgroundColor: isSelected ? '#e3f2fd' : (i % 2 === 0 ? '#ffffff' : '#f8f9fa'),
+                              '&:hover': { backgroundColor: isSelected ? '#bbdefb' : '#f0f0f0' },
+                              borderBottom: '1px solid #e0e6ed'
+                            }}>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
+                                <Checkbox 
+                                  checked={isSelected}
+                                  onChange={() => bottle.barcode_number && toggleAssetSelection(bottle.barcode_number)}
+                                  size="small"
+                                  disabled={!bottle.barcode_number}
+                                />
+                              </TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.category || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.group_name || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.type || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
+                                <Chip label={bottle.product_code || ''} size="small" variant="outlined" sx={{ 
+                                  border: '2px solid #333',
+                                  fontWeight: 600,
+                                  bgcolor: 'white',
+                                  color: 'black'
+                                }} />
+                              </TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.description || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.ownership || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.barcode_number || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.serial_number || ''}</TableCell>
+                              <TableCell />
                             </TableRow>
                           );
                         })}
                         {/* Then show returned items from invoice data */}
                         {returned.map((row, i) => {
-                      const assetInfo = getAssetInfo(row.product_code);
-                      return (
-                        <TableRow key={i} sx={{ 
-                          backgroundColor: i % 2 === 0 ? '#ffffff' : '#f8f9fa',
-                          '&:hover': { backgroundColor: '#f0f0f0' },
-                          borderBottom: '1px solid #e0e6ed'
-                        }}>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.category || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.group || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.type || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
-                            <Chip label={row.product_code} size="small" variant="outlined" sx={{ 
-                              border: '2px solid #333',
-                              fontWeight: 600,
-                              bgcolor: 'white',
-                              color: 'black'
-                            }} />
-                          </TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.description || row.description || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.ownership || ''}</TableCell>
-                          <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.barcode || ''}</TableCell>
-                          <TableCell>{row.serial_number || ''}</TableCell>
-                        </TableRow>
-                      );
-                    })}
+                          const assetInfo = getAssetInfo(row.product_code);
+                          const isSelected = row.barcode && selectedAssets.has(row.barcode);
+                          return (
+                            <TableRow key={i} sx={{ 
+                              backgroundColor: isSelected ? '#e3f2fd' : (i % 2 === 0 ? '#ffffff' : '#f8f9fa'),
+                              '&:hover': { backgroundColor: isSelected ? '#bbdefb' : '#f0f0f0' },
+                              borderBottom: '1px solid #e0e6ed'
+                            }}>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
+                                <Checkbox 
+                                  checked={isSelected}
+                                  onChange={() => row.barcode && toggleAssetSelection(row.barcode)}
+                                  size="small"
+                                  disabled={!row.barcode}
+                                />
+                              </TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.category || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.group || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.type || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
+                                <Chip label={row.product_code} size="small" variant="outlined" sx={{ 
+                                  border: '2px solid #333',
+                                  fontWeight: 600,
+                                  bgcolor: 'white',
+                                  color: 'black'
+                                }} />
+                              </TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.description || row.description || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.ownership || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.barcode || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.serial_number || ''}</TableCell>
+                              <TableCell />
+                            </TableRow>
+                          );
+                        })}
+                        {unassignedReturnedBarcodes.map((barcode, i) => {
+                          const isSelected = selectedAssets.has(barcode);
+                          return (
+                            <TableRow key={`unassigned_returned_${barcode}`} sx={{ 
+                              backgroundColor: isSelected ? '#e3f2fd' : '#FEF3C7',
+                              borderBottom: '1px solid #e0e6ed'
+                            }}>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
+                                <Checkbox 
+                                  checked={isSelected}
+                                  onChange={() => toggleAssetSelection(barcode)}
+                                  size="small"
+                                />
+                              </TableCell>
+                              <TableCell colSpan={3} sx={{ borderRight: '1px solid #e0e6ed', fontWeight: 600, color: '#92400E' }}>Unassigned asset</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} />
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} colSpan={2}>Scanned barcode not in system – assign type below</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{barcode}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} />
+                              <TableCell>
+                                <Button size="small" variant="contained" color="primary" onClick={() => { setAssignBottleForm({ type: '', group_name: '', description: '' }); setAssignBottleDialog({ open: true, barcode, section: 'returned' }); }}>
+                                  Assign to type
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </>
                     )}
                   </TableBody>
                 </Table>
               </Paper>
             </Grid>
+
+            {/* Assign to type dialog for unassigned scanned barcodes */}
+            <Dialog open={assignBottleDialog.open} onClose={() => setAssignBottleDialog({ open: false, barcode: null, section: null })} maxWidth="sm" fullWidth>
+              <DialogTitle>Assign barcode to type</DialogTitle>
+              <DialogContent>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  This barcode was scanned during delivery but is not in the system. Create a bottle record and assign a type so it appears in the order.
+                </Typography>
+                <TextField label="Barcode" value={assignBottleDialog.barcode || ''} fullWidth sx={{ mb: 2 }} InputProps={{ readOnly: true }} />
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>Type</InputLabel>
+                  <Select value={assignBottleForm.type} label="Type" onChange={(e) => setAssignBottleForm(prev => ({ ...prev, type: e.target.value }))}>
+                    <MenuItem value="">Select type...</MenuItem>
+                    {(bottleTypes.types || []).map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>Group</InputLabel>
+                  <Select value={assignBottleForm.group_name} label="Group" onChange={(e) => setAssignBottleForm(prev => ({ ...prev, group_name: e.target.value }))}>
+                    <MenuItem value="">Select group (optional)</MenuItem>
+                    {(bottleTypes.groupNames || []).map((g) => <MenuItem key={g} value={g}>{g}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <TextField label="Description (optional)" value={assignBottleForm.description} fullWidth onChange={(e) => setAssignBottleForm(prev => ({ ...prev, description: e.target.value }))} />
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setAssignBottleDialog({ open: false, barcode: null, section: null })}>Cancel</Button>
+                <Button 
+                  variant="contained" 
+                  onClick={async () => {
+                    if (!assignBottleDialog.barcode || !organization?.id) return;
+                    if (!assignBottleForm.type?.trim()) {
+                      setActionMessage('Please select a type');
+                      setTimeout(() => setActionMessage(''), 3000);
+                      return;
+                    }
+                    setAssignBottleSaving(true);
+                    try {
+                      const { error } = await supabase.from('bottles').insert([{
+                        barcode_number: assignBottleDialog.barcode,
+                        organization_id: organization.id,
+                        type: assignBottleForm.type.trim(),
+                        group_name: assignBottleForm.group_name?.trim() || null,
+                        description: assignBottleForm.description?.trim() || null,
+                        status: 'in_stock',
+                      }]);
+                      if (error) throw error;
+                      setActionMessage('Bottle created successfully. Refreshing list...');
+                      setAssignBottleDialog({ open: false, barcode: null, section: null });
+                      setRefreshScannedBottlesTrigger(prev => prev + 1);
+                    } catch (e) {
+                      logger.error('Error creating bottle:', e);
+                      setActionMessage(e?.message || 'Failed to create bottle');
+                    } finally {
+                      setAssignBottleSaving(false);
+                      setTimeout(() => setActionMessage(''), 4000);
+                    }
+                  }} 
+                  disabled={assignBottleSaving}
+                >
+                  {assignBottleSaving ? 'Saving...' : 'Save'}
+                </Button>
+              </DialogActions>
+            </Dialog>
+
+            {/* Switch Deliver/Return Dialog */}
+            <Dialog open={switchModeDialog.open} onClose={() => setSwitchModeDialog({ open: false })} maxWidth="sm" fullWidth>
+              <DialogTitle>Switch Deliver / Return</DialogTitle>
+              <DialogContent>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  This will switch the selected assets between Delivered and Returned status.
+                </Typography>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  {selectedAssets.size} asset(s) selected
+                </Alert>
+                <Typography variant="body2">
+                  Assets currently marked as <strong>Delivered</strong> will become <strong>Returned</strong>, and vice versa.
+                </Typography>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setSwitchModeDialog({ open: false })}>Cancel</Button>
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  onClick={handleSwitchMode}
+                  disabled={assetActionSaving}
+                >
+                  {assetActionSaving ? 'Switching...' : 'Switch Mode'}
+                </Button>
+              </DialogActions>
+            </Dialog>
+
+            {/* Detach Assets Dialog */}
+            <Dialog open={detachAssetsDialog.open} onClose={() => setDetachAssetsDialog({ open: false })} maxWidth="sm" fullWidth>
+              <DialogTitle>Detach Assets</DialogTitle>
+              <DialogContent>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  This will remove the selected assets from this order. The scan records will be deleted.
+                </Typography>
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  {selectedAssets.size} asset(s) will be detached
+                </Alert>
+                <Typography variant="body2" color="error">
+                  This action cannot be undone. The assets will need to be re-scanned to attach them to any order.
+                </Typography>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setDetachAssetsDialog({ open: false })}>Cancel</Button>
+                <Button 
+                  variant="contained" 
+                  color="error"
+                  onClick={handleDetachAssets}
+                  disabled={assetActionSaving}
+                >
+                  {assetActionSaving ? 'Detaching...' : 'Detach Assets'}
+                </Button>
+              </DialogActions>
+            </Dialog>
+
+            {/* Attach by Barcode Dialog */}
+            <Dialog open={attachBarcodeDialog.open} onClose={() => setAttachBarcodeDialog({ open: false, barcode: '', mode: 'SHIP' })} maxWidth="sm" fullWidth>
+              <DialogTitle>
+                {attachBarcodeDialog.mode === 'REPLACE' ? 'Replace Asset' : 'Attach Asset by Barcode'}
+              </DialogTitle>
+              <DialogContent>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  {attachBarcodeDialog.mode === 'REPLACE' 
+                    ? `Enter the barcode of the asset to replace ${attachBarcodeDialog.replacingBarcode}`
+                    : 'Enter a barcode or serial number to attach to this order.'
+                  }
+                </Typography>
+                <TextField 
+                  label="Barcode / Serial Number" 
+                  value={attachBarcodeDialog.barcode} 
+                  onChange={(e) => setAttachBarcodeDialog(prev => ({ ...prev, barcode: e.target.value }))}
+                  fullWidth 
+                  sx={{ mb: 2 }}
+                  autoFocus
+                />
+                {attachBarcodeDialog.mode !== 'REPLACE' && (
+                  <FormControl fullWidth sx={{ mb: 2 }}>
+                    <InputLabel>Mode</InputLabel>
+                    <Select 
+                      value={attachBarcodeDialog.mode} 
+                      label="Mode"
+                      onChange={(e) => setAttachBarcodeDialog(prev => ({ ...prev, mode: e.target.value }))}
+                    >
+                      <MenuItem value="SHIP">Delivered (SHIP)</MenuItem>
+                      <MenuItem value="RETURN">Returned (RETURN)</MenuItem>
+                    </Select>
+                  </FormControl>
+                )}
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setAttachBarcodeDialog({ open: false, barcode: '', mode: 'SHIP' })}>Cancel</Button>
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  onClick={handleAttachBarcode}
+                  disabled={assetActionSaving || !attachBarcodeDialog.barcode?.trim()}
+                >
+                  {assetActionSaving ? 'Attaching...' : (attachBarcodeDialog.mode === 'REPLACE' ? 'Replace' : 'Attach')}
+                </Button>
+              </DialogActions>
+            </Dialog>
+
+            {/* Reclassify Assets Dialog */}
+            <Dialog open={reclassifyDialog.open} onClose={() => setReclassifyDialog({ open: false, newType: '', newGroup: '' })} maxWidth="sm" fullWidth>
+              <DialogTitle>Reclassify Assets</DialogTitle>
+              <DialogContent>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Change the type and/or group of the selected assets.
+                </Typography>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  {selectedAssets.size} asset(s) selected
+                </Alert>
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>New Type</InputLabel>
+                  <Select 
+                    value={reclassifyDialog.newType} 
+                    label="New Type"
+                    onChange={(e) => setReclassifyDialog(prev => ({ ...prev, newType: e.target.value }))}
+                  >
+                    <MenuItem value="">Select type...</MenuItem>
+                    {(bottleTypes.types || []).map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>New Group (optional)</InputLabel>
+                  <Select 
+                    value={reclassifyDialog.newGroup} 
+                    label="New Group (optional)"
+                    onChange={(e) => setReclassifyDialog(prev => ({ ...prev, newGroup: e.target.value }))}
+                  >
+                    <MenuItem value="">Keep current group</MenuItem>
+                    {(bottleTypes.groupNames || []).map((g) => <MenuItem key={g} value={g}>{g}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setReclassifyDialog({ open: false, newType: '', newGroup: '' })}>Cancel</Button>
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  onClick={handleReclassifyAssets}
+                  disabled={assetActionSaving || !reclassifyDialog.newType?.trim()}
+                >
+                  {assetActionSaving ? 'Reclassifying...' : 'Reclassify'}
+                </Button>
+              </DialogActions>
+            </Dialog>
+
+            {/* Move to Another Order Dialog */}
+            <Dialog open={moveOrderDialog.open} onClose={() => setMoveOrderDialog({ open: false, newOrderNumber: '' })} maxWidth="sm" fullWidth>
+              <DialogTitle>Move to Another Sales Order</DialogTitle>
+              <DialogContent>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Move the selected assets to a different sales order.
+                </Typography>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  {selectedAssets.size} asset(s) selected
+                </Alert>
+                <TextField 
+                  label="New Order Number" 
+                  value={moveOrderDialog.newOrderNumber} 
+                  onChange={(e) => setMoveOrderDialog(prev => ({ ...prev, newOrderNumber: e.target.value }))}
+                  fullWidth 
+                  sx={{ mb: 2 }}
+                  autoFocus
+                />
+                <Typography variant="body2" color="text.secondary">
+                  The assets will be moved from the current order to the new order number.
+                </Typography>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setMoveOrderDialog({ open: false, newOrderNumber: '' })}>Cancel</Button>
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  onClick={handleMoveToOrder}
+                  disabled={assetActionSaving || !moveOrderDialog.newOrderNumber?.trim()}
+                >
+                  {assetActionSaving ? 'Moving...' : 'Move Assets'}
+                </Button>
+              </DialogActions>
+            </Dialog>
 
             {/* Right: Record/Asset Options */}
             <Grid item xs={12} md={3}>

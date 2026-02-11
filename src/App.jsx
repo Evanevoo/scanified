@@ -82,6 +82,7 @@ import Reviews from './pages/Reviews';
 import CookieNotice from './components/CookieNotice';
 import NavigationBar from './components/NavigationBar';
 import SessionTimeoutWarning from './components/SessionTimeoutWarning';
+import NotificationLayer from './components/NotificationLayer';
 import Demo from './pages/Demo';
 import ParticleTextDemo from './pages/ParticleTextDemo';
 import Features from './pages/Features';
@@ -111,9 +112,8 @@ const Rentals = lazy(() => import('./pages/Rentals'));
 const LeaseAgreements = lazy(() => import('./pages/LeaseAgreements'));
 const IndustryAnalyticsDashboard = lazy(() => import('./pages/IndustryAnalyticsDashboard'));
 const WebScanning = lazy(() => import('./pages/WebScanning'));
-const DeliveryTracking = lazy(() => import('./pages/DeliveryTracking'));
-const AuditManagement = lazy(() => import('./pages/AuditManagement'));
 const Favorites = lazy(() => import('./pages/Favorites'));
+const RecentCylinders = lazy(() => import('./pages/RecentCylinders'));
 const CustomReports = lazy(() => import('./pages/CustomReports'));
 const AllAssetsReport = lazy(() => import('./pages/management-reports/AllAssetsReport'));
 const AssetTypeChangesReport = lazy(() => import('./pages/management-reports/AssetTypeChangesReport'));
@@ -150,7 +150,6 @@ const AssetDetail = lazy(() => import('./pages/AssetDetail'));
 const Assets = lazy(() => import('./pages/Assets'));
 const BottlesForDay = lazy(() => import('./pages/BottlesForDay'));
 const SupportCenter = lazy(() => import('./pages/SupportCenter'));
-const OrganizationAnalytics = lazy(() => import('./pages/OrganizationAnalytics'));
 const OrganizationTools = lazy(() => import('./pages/OrganizationTools'));
 const MaintenanceWorkflows = lazy(() => import('./pages/MaintenanceWorkflows'));
 const RouteOptimization = lazy(() => import('./pages/RouteOptimization'));
@@ -310,17 +309,12 @@ function AppContent() {
                         <BottlesForDay />
                       </Suspense>
                     } />
-                    <Route path="/deliveries" element={<DeliveryTracking />} />
-                    <Route path="/delivery-management" element={<DeliveryTracking />} />
-                    <Route path="/delivery-tracking" element={<DeliveryTracking />} />
                     <Route path="/rentals" element={<Rentals />} />
                     <Route path="/lease-agreements" element={<LeaseAgreements />} />
                     <Route path="/industry-analytics" element={<IndustryAnalyticsDashboard />} />
                     <Route path="/web-scanning" element={<WebScanning />} />
-                    <Route path="/audit-management" element={<AuditManagement />} />
                     <Route path="/favorites" element={<Favorites />} />
                     <Route path="/custom-reports" element={<CustomReports />} />
-                    <Route path="/delivery-management" element={<DeliveryTracking />} />
                     <Route path="/truck-reconciliation" element={<TruckReconciliation />} />
                     <Route path="/workflow-automation" element={<WorkflowAutomation />} />
                     <Route path="/route-optimization" element={<RouteOptimization />} />
@@ -385,7 +379,7 @@ function AppContent() {
                     } />
                     <Route path="/payments" element={<CustomerPayments />} />
                     <Route path="/support" element={<SupportCenter />} />
-                    <Route path="/organization-analytics" element={<OrganizationAnalytics />} />
+                    <Route path="/recent-cylinders" element={<RecentCylinders />} />
                     <Route path="/organization-tools" element={
                       <RoleProtectedRoute allowedRoles={['admin', 'manager', 'user']}>
                         <OrganizationTools />
@@ -517,57 +511,59 @@ function AppContent() {
                   } />
                 </Routes>
               </div>
-              <Toaster 
-                position="top-right"
-                toastOptions={{
-                  duration: 5000,
-                  style: {
-                    background: 'var(--mui-palette-background-paper, #363636)',
-                    color: 'var(--mui-palette-text-primary, #fff)',
-                  },
-                  success: {
-                    duration: 3000,
-                    iconTheme: {
-                      primary: '#10B981',
-                      secondary: '#fff',
+              <NotificationLayer>
+                <Toaster 
+                  position="top-right"
+                  toastOptions={{
+                    duration: 5000,
+                    style: {
+                      background: 'var(--mui-palette-background-paper, #363636)',
+                      color: 'var(--mui-palette-text-primary, #fff)',
                     },
-                  },
-                  error: {
-                    duration: 4000,
-                    iconTheme: {
-                      primary: '#EF4444',
-                      secondary: '#fff',
+                    success: {
+                      duration: 3000,
+                      iconTheme: {
+                        primary: '#10B981',
+                        secondary: '#fff',
+                      },
                     },
-                  },
-                }}
-              />
-              {/* Global Snackbar - MOVED TO TOP RIGHT */}
-              <Snackbar
-                open={globalSnackbar.open}
-                autoHideDuration={4000}
-                onClose={() => setGlobalSnackbar({ ...globalSnackbar, open: false })}
-                anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
-                sx={{ 
-                  zIndex: 9999999,
-                  position: 'fixed',
-                  top: '80px !important',
-                  right: '20px !important',
-                  '& .MuiSnackbar-root': {
+                    error: {
+                      duration: 4000,
+                      iconTheme: {
+                        primary: '#EF4444',
+                        secondary: '#fff',
+                      },
+                    },
+                  }}
+                />
+                {/* Global Snackbar - MOVED TO TOP RIGHT */}
+                <Snackbar
+                  open={globalSnackbar.open}
+                  autoHideDuration={4000}
+                  onClose={() => setGlobalSnackbar({ ...globalSnackbar, open: false })}
+                  anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+                  sx={{ 
                     zIndex: 9999999,
                     position: 'fixed',
                     top: '80px !important',
-                    right: '20px !important'
-                  }
-                }}
-              >
-                <Alert onClose={() => setGlobalSnackbar({ ...globalSnackbar, open: false })} severity={globalSnackbar.severity} sx={{ width: '100%' }}>
-                  {globalSnackbar.message}
-                </Alert>
-              </Snackbar>
-              {/* Global Cookie Notice */}
-              <CookieNotice />
-              {/* Session Timeout Warning */}
-              <SessionTimeoutWarning />
+                    right: '20px !important',
+                    '& .MuiSnackbar-root': {
+                      zIndex: 9999999,
+                      position: 'fixed',
+                      top: '80px !important',
+                      right: '20px !important'
+                    }
+                  }}
+                >
+                  <Alert onClose={() => setGlobalSnackbar({ ...globalSnackbar, open: false })} severity={globalSnackbar.severity} sx={{ width: '100%' }}>
+                    {globalSnackbar.message}
+                  </Alert>
+                </Snackbar>
+                {/* Global Cookie Notice */}
+                <CookieNotice />
+                {/* Session Timeout Warning */}
+                <SessionTimeoutWarning />
+              </NotificationLayer>
             </Router>
           </ThemeProvider>
         </PermissionsProvider>

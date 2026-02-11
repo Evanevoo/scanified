@@ -58,9 +58,7 @@ import OrganizationJoinScreen from './screens/OrganizationJoinScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import RecentScansScreen from './screens/RecentScansScreen';
 import SupportTicketScreen from './screens/SupportTicketScreen';
-import ScanbotTestScreen from './screens/ScanbotTestScreen';
 import UserManagementScreen from './screens/UserManagementScreen';
-import DriverDashboard from './screens/DriverDashboard';
 import AnalyticsScreen from './screens/AnalyticsScreen';
 import NotificationSettingsScreen from './screens/NotificationSettingsScreen';
 // Enhanced Scanner Test Screens
@@ -369,11 +367,6 @@ function AppContent() {
               options={{ title: 'User Management' }}
             />
             <Stack.Screen 
-              name="DriverDashboard" 
-              component={DriverDashboard}
-              options={{ title: 'Driver Dashboard' }}
-            />
-            <Stack.Screen 
               name="Analytics" 
               component={AnalyticsScreen}
               options={{ title: 'Analytics' }}
@@ -382,11 +375,6 @@ function AppContent() {
               name="NotificationSettings" 
               component={NotificationSettingsScreen}
               options={{ title: 'Notifications' }}
-            />
-            <Stack.Screen 
-              name="ScanbotTest" 
-              component={ScanbotTestScreen}
-              options={{ title: 'Scanbot SDK Test' }}
             />
             {/* Enhanced Scanner Test Screens */}
             <Stack.Screen 

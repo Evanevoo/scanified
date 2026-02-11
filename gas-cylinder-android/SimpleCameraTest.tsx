@@ -1,12 +1,15 @@
 import logger from './utils/logger';
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, Alert, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, Alert, StyleSheet, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
 export default function SimpleCameraTest() {
   const [permission, requestPermission] = useCameraPermissions();
   const [showCamera, setShowCamera] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false); // Defer mount to prevent Android crash
   const [scannedData, setScannedData] = useState('');
+  const [cameraZoom, setCameraZoom] = useState(0);
+  const [flashEnabled, setFlashEnabled] = useState(false);
 
   const openCamera = async () => {
     if (!permission?.granted) {
@@ -19,6 +22,16 @@ export default function SimpleCameraTest() {
     setShowCamera(true);
   };
 
+  // Defer CameraView mount (prevents Android crash)
+  useEffect(() => {
+    if (!showCamera || !permission?.granted) {
+      setCameraReady(false);
+      return;
+    }
+    const t = setTimeout(() => setCameraReady(true), 400);
+    return () => clearTimeout(t);
+  }, [showCamera, permission?.granted]);
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Simple Camera Test</Text>
@@ -27,11 +40,19 @@ export default function SimpleCameraTest() {
         <TouchableOpacity style={styles.button} onPress={openCamera}>
           <Text style={styles.buttonText}>Open Camera</Text>
         </TouchableOpacity>
+      ) : !cameraReady ? (
+        <View style={[styles.cameraContainer, styles.centerContent]}>
+          <ActivityIndicator size="large" color="#007AFF" />
+          <Text style={styles.loadingText}>Starting camera...</Text>
+        </View>
       ) : (
         <View style={styles.cameraContainer}>
           <CameraView
             style={styles.camera}
             facing="back"
+            zoom={cameraZoom}
+            enableTorch={flashEnabled}
+            autofocus="on"
             onBarcodeScanned={({ data }) => {
               logger.log('🎯 SIMPLE TEST - Barcode detected:', data);
               setScannedData(data);
@@ -40,11 +61,34 @@ export default function SimpleCameraTest() {
             }}
             barcodeScannerSettings={{}}
           />
+          <View style={styles.cameraControls}>
+            <TouchableOpacity
+              style={[styles.controlButton, flashEnabled && styles.controlButtonActive]}
+              onPress={() => setFlashEnabled((v) => !v)}
+            >
+              <Text style={styles.controlIcon}>{flashEnabled ? '🔦' : '💡'}</Text>
+            </TouchableOpacity>
+            <View style={styles.zoomRow}>
+              <TouchableOpacity
+                style={styles.zoomBtn}
+                onPress={() => setCameraZoom((z) => Math.max(0, z - 0.25))}
+              >
+                <Text style={styles.zoomBtnText}>−</Text>
+              </TouchableOpacity>
+              <Text style={styles.zoomLabel}>{Math.round(cameraZoom * 100)}%</Text>
+              <TouchableOpacity
+                style={styles.zoomBtn}
+                onPress={() => setCameraZoom((z) => Math.min(1, z + 0.25))}
+              >
+                <Text style={styles.zoomBtnText}>+</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={styles.controlButton} onPress={() => setShowCamera(false)}>
+              <Text style={styles.controlIcon}>✕</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.overlay}>
             <Text style={styles.instruction}>Align barcode within frame</Text>
-            <TouchableOpacity style={styles.closeButton} onPress={() => setShowCamera(false)}>
-              <Text style={styles.closeButtonText}>Close</Text>
-            </TouchableOpacity>
           </View>
         </View>
       )}
@@ -83,9 +127,47 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
   },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666',
+  },
   camera: {
     flex: 1,
   },
+  cameraControls: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  controlButton: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    padding: 12,
+    alignSelf: 'flex-start',
+  },
+  controlButtonActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.8)',
+  },
+  controlIcon: { fontSize: 20 },
+  zoomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+  },
+  zoomBtn: { padding: 8 },
+  zoomBtnText: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  zoomLabel: { color: '#fff', fontSize: 12, minWidth: 36, textAlign: 'center' },
   overlay: {
     position: 'absolute',
     top: 0,
@@ -104,17 +186,6 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
     marginBottom: 20,
-  },
-  closeButton: {
-    backgroundColor: 'rgba(255,0,0,0.8)',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  closeButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
   result: {
     marginTop: 20,

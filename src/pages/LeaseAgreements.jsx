@@ -1,5 +1,8 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useDebounce } from '../utils/performance';
+import { toCsv, downloadFile, getNextAgreementNumbers } from '../utils/invoiceUtils';
 import {
   Box,
   Typography,
@@ -18,6 +21,8 @@ import {
   FormControl,
   InputLabel,
   Chip,
+  FormControlLabel,
+  Checkbox,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -52,10 +57,13 @@ import { StatsSkeleton, TableSkeleton } from '../components/SmoothLoading';
 
 export default function LeaseAgreements() {
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const [agreements, setAgreements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearch = useDebounce(searchTerm, 300);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [activeTab, setActiveTab] = useState(0);
   const [tabValue, setTabValue] = useState(0);
   const [selectedAgreement, setSelectedAgreement] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -92,16 +100,65 @@ export default function LeaseAgreements() {
     max_asset_count: '',
     billing_contact_email: '',
     billing_address: '',
-    bottle_id: null
+    bottle_id: null,
+    applyToAllBottles: false
   });
+
+  const fetchAgreements = async () => {
+    const { data, error } = await supabase
+      .from('lease_agreements')
+      .select('*, bottles:bottle_id(barcode_number)')
+      .eq('organization_id', profile.organization_id)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    setAgreements(data || []);
+  };
+
+  const fetchCustomers = async () => {
+    const { data, error } = await supabase
+      .from('customers')
+      .select('CustomerListID, name')
+      .eq('organization_id', profile.organization_id)
+      .order('name');
+    if (error) throw error;
+    setCustomers(data || []);
+  };
+
+  const fetchStats = async () => {
+    const { data, error } = await supabase
+      .from('lease_agreements')
+      .select('*')
+      .eq('organization_id', profile.organization_id);
+    if (error) throw error;
+    const list = data || [];
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    setStats({
+      totalAgreements: list.length,
+      activeAgreements: list.filter((a) => a.status === 'active').length,
+      totalAnnualValue: list.reduce((sum, a) => sum + (parseFloat(a.annual_amount) || 0), 0),
+      expiringThisMonth: list.filter(
+        (a) =>
+          a.status === 'active' &&
+          a.end_date &&
+          new Date(a.end_date) >= startOfMonth &&
+          new Date(a.end_date) <= endOfMonth
+      ).length,
+    });
+  };
 
   useEffect(() => {
     if (profile?.organization_id) {
-      fetchAgreements();
-      fetchCustomers();
-      fetchStats();
+      setLoading(true);
+      Promise.all([fetchAgreements(), fetchCustomers(), fetchStats()])
+        .catch((error) => {
+          logger.error('Error loading:', error);
+          setSnackbar({ open: true, message: 'Error loading agreements', severity: 'error' });
+        })
+        .finally(() => setLoading(false));
     }
-  }, [profile]);
+  }, [profile?.organization_id]);
 
   // Calculate retroactive billing when form dates/amounts change
   useEffect(() => {
@@ -117,40 +174,6 @@ export default function LeaseAgreements() {
       setRetroactiveBilling({ isRetroactive: false, proRatedAmount: 0, message: '' });
     }
   }, [formData.start_date, formData.end_date, formData.annual_amount, formData.billing_frequency, dialogMode]);
-
-  const fetchAgreements = async () => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('lease_agreements')
-        .select('*, bottles:bottle_id(barcode_number)')
-        .eq('organization_id', profile.organization_id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setAgreements(data || []);
-    } catch (error) {
-      logger.error('Error fetching agreements:', error);
-      setSnackbar({ open: true, message: 'Error loading agreements', severity: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchCustomers = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('customers')
-        .select('CustomerListID, name')
-        .eq('organization_id', profile.organization_id)
-        .order('name');
-
-      if (error) throw error;
-      setCustomers(data || []);
-    } catch (error) {
-      logger.error('Error fetching customers:', error);
-    }
-  };
 
   // Fetch bottles assigned to the selected customer (for Assign to bottle)
   const fetchCustomerBottles = async (customerId) => {
@@ -170,34 +193,6 @@ export default function LeaseAgreements() {
     } catch (error) {
       logger.error('Error fetching customer bottles:', error);
       setCustomerBottles([]);
-    }
-  };
-
-  const fetchStats = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('lease_agreements')
-        .select('*')
-        .eq('organization_id', profile.organization_id);
-
-      if (error) throw error;
-
-      const now = new Date();
-      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
-
-      const stats = {
-        totalAgreements: data.length,
-        activeAgreements: data.filter(a => a.status === 'active').length,
-        totalAnnualValue: data.reduce((sum, a) => sum + (parseFloat(a.annual_amount) || 0), 0),
-        expiringThisMonth: data.filter(a => 
-          a.status === 'active' && 
-          new Date(a.end_date) <= nextMonth
-        ).length
-      };
-
-      setStats(stats);
-    } catch (error) {
-      logger.error('Error fetching stats:', error);
     }
   };
 
@@ -236,7 +231,8 @@ export default function LeaseAgreements() {
       max_asset_count: '',
       billing_contact_email: '',
       billing_address: '',
-      bottle_id: null
+      bottle_id: null,
+      applyToAllBottles: false
     });
     setDialogMode('add');
     setDialogOpen(true);
@@ -248,7 +244,8 @@ export default function LeaseAgreements() {
       start_date: agreement.start_date?.split('T')[0] || '',
       end_date: agreement.end_date?.split('T')[0] || '',
       asset_types: agreement.asset_types || [],
-      asset_locations: agreement.asset_locations || []
+      asset_locations: agreement.asset_locations || [],
+      applyToAllBottles: false
     });
     setSelectedAgreement(agreement);
     setDialogMode('edit');
@@ -259,50 +256,73 @@ export default function LeaseAgreements() {
   const handleViewAgreement = (agreement) => {
     setSelectedAgreement(agreement);
     setDialogMode('view');
+    setTabValue(0);
     setDialogOpen(true);
     fetchBillingHistory(agreement.id);
   };
 
   const handleSaveAgreement = async () => {
     try {
-      // Build payload: include bottle_id for per-bottle leases, omit joined "bottles" object
-      const { bottles: _bottles, ...formDataForDb } = formData;
-      const agreementData = {
+      if (!formData.customer_id) {
+        setSnackbar({ open: true, message: 'Please select a customer', severity: 'warning' });
+        return;
+      }
+      if (!formData.start_date || !formData.start_date.trim()) {
+        setSnackbar({ open: true, message: 'Start date is required', severity: 'warning' });
+        return;
+      }
+      const startDate = new Date(formData.start_date);
+      if (Number.isNaN(startDate.getTime())) {
+        setSnackbar({ open: true, message: 'Please enter a valid start date', severity: 'warning' });
+        return;
+      }
+      if (dialogMode === 'add' && !formData.applyToAllBottles && !formData.bottle_id) {
+        setSnackbar({ open: true, message: 'Please select a bottle or "Apply to all bottles"', severity: 'warning' });
+        return;
+      }
+
+      const { bottles: _bottles, applyToAllBottles: _applyAll, ...formDataForDb } = formData;
+      const baseData = {
         ...formDataForDb,
         organization_id: profile.organization_id,
         annual_amount: parseFloat(formData.annual_amount) || 0,
         tax_rate: parseFloat(formData.tax_rate) || 0,
         max_asset_count: parseInt(formData.max_asset_count) || null,
-        bottle_id: formData.bottle_id || null,
         created_by: profile.id,
         updated_by: profile.id
       };
 
       if (dialogMode === 'add') {
-        // Generate agreement number
-        const { data: numberData, error: numberError } = await supabase
-          .rpc('generate_agreement_number', { org_id: profile.organization_id });
+        const applyToAll = formData.applyToAllBottles; // One customer-level lease covering all bottles
 
-        if (numberError) throw numberError;
-        agreementData.agreement_number = numberData;
+        const [agreementNumber] = await getNextAgreementNumbers(profile.organization_id, 1);
+        if (!agreementNumber) throw new Error('Failed to reserve agreement number');
 
-        // Calculate next billing date
-        const nextBillingDate = calculateNextBillingDate(
-          new Date(formData.start_date),
-          formData.billing_frequency
-        );
-        agreementData.next_billing_date = nextBillingDate.toISOString().split('T')[0];
+        const nextBillingDate = calculateNextBillingDate(startDate, formData.billing_frequency);
+        const nextBillingStr = nextBillingDate.toISOString().split('T')[0];
 
-        const { error } = await supabase
-          .from('lease_agreements')
-          .insert([agreementData]);
+        const insertRow = {
+          ...baseData,
+          agreement_number: agreementNumber,
+          bottle_id: applyToAll ? null : formData.bottle_id || null, // null = customer-level lease
+          next_billing_date: nextBillingStr
+        };
 
+        const { error } = await supabase.from('lease_agreements').insert(insertRow);
         if (error) throw error;
-        setSnackbar({ open: true, message: 'Agreement created successfully', severity: 'success' });
+        setSnackbar({
+          open: true,
+          message: applyToAll
+            ? (customerBottles.length > 0
+                ? `Created customer-level lease covering all ${customerBottles.length} bottle${customerBottles.length !== 1 ? 's' : ''}`
+                : 'Created customer-level lease agreement')
+            : 'Agreement created successfully',
+          severity: 'success'
+        });
       } else {
         const { error } = await supabase
           .from('lease_agreements')
-          .update(agreementData)
+          .update({ ...baseData, bottle_id: formData.bottle_id || null })
           .eq('id', selectedAgreement.id);
 
         if (error) throw error;
@@ -350,10 +370,8 @@ export default function LeaseAgreements() {
       newEndDate.setFullYear(newEndDate.getFullYear() + 1); // One year lease
 
       // Generate new agreement number
-      const { data: numberData, error: numberError } = await supabase
-        .rpc('generate_agreement_number', { org_id: profile.organization_id });
-
-      if (numberError) throw numberError;
+      const [numberData] = await getNextAgreementNumbers(profile.organization_id, 1);
+      if (!numberData) throw new Error('Failed to generate agreement number');
 
       // Calculate next billing date
       const nextBillingDate = calculateNextBillingDate(
@@ -493,12 +511,23 @@ export default function LeaseAgreements() {
     }
   };
 
-  const filteredAgreements = agreements.filter(agreement => {
-    const matchesSearch = agreement.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         agreement.agreement_number?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || agreement.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const filteredAgreements = useMemo(() => {
+    const term = debouncedSearch.toLowerCase();
+    const byTab = activeTab === 0 ? null : activeTab === 1 ? 'active' : activeTab === 2 ? 'expired' : activeTab === 3 ? 'renewed' : null;
+    const status = byTab || statusFilter;
+    return agreements.filter((agreement) => {
+      const bottleBarcode = agreement.bottle_id
+        ? (Array.isArray(agreement.bottles) ? agreement.bottles[0]?.barcode_number : agreement.bottles?.barcode_number) ?? ''
+        : '';
+      const matchesSearch =
+        !term ||
+        agreement.customer_name?.toLowerCase().includes(term) ||
+        agreement.agreement_number?.toLowerCase().includes(term) ||
+        (typeof bottleBarcode === 'string' && bottleBarcode.toLowerCase().includes(term));
+      const matchesStatus = status === 'all' || agreement.status === status;
+      return matchesSearch && matchesStatus;
+    });
+  }, [agreements, debouncedSearch, statusFilter, activeTab]);
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-US', {
@@ -509,6 +538,30 @@ export default function LeaseAgreements() {
 
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString();
+  };
+
+  const getBottleDisplay = (agreement) => {
+    if (!agreement.bottle_id) return '—';
+    const barcode = Array.isArray(agreement.bottles) ? agreement.bottles[0]?.barcode_number : agreement.bottles?.barcode_number;
+    return barcode ?? agreement.bottle_id;
+  };
+
+  const exportToCSV = () => {
+    const cols = ['Agreement #', 'Customer', 'Customer ID', 'Bottle', 'Start Date', 'End Date', 'Annual Amount', 'Billing Frequency', 'Status'];
+    const rows = filteredAgreements.map((a) => ({
+      'Agreement #': a.agreement_number,
+      Customer: a.customer_name,
+      'Customer ID': a.customer_id,
+      Bottle: getBottleDisplay(a),
+      'Start Date': a.start_date,
+      'End Date': a.end_date,
+      'Annual Amount': a.annual_amount,
+      'Billing Frequency': a.billing_frequency,
+      Status: a.status,
+    }));
+    if (rows.length === 0) return;
+    const csv = toCsv(rows, cols);
+    downloadFile(csv, `lease_agreements_${new Date().toISOString().slice(0, 10)}.csv`);
   };
 
   if (loading) {
@@ -538,13 +591,14 @@ export default function LeaseAgreements() {
         <Typography variant="h4" gutterBottom>
           Lease Agreements
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={handleAddAgreement}
-        >
-          New Agreement
-        </Button>
+        <Box display="flex" gap={2}>
+          <Button variant="outlined" startIcon={<DownloadIcon />} onClick={exportToCSV} disabled={filteredAgreements.length === 0}>
+            Export CSV
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={handleAddAgreement}>
+            New Agreement
+          </Button>
+        </Box>
       </Box>
 
       {/* Stats Cards */}
@@ -611,10 +665,20 @@ export default function LeaseAgreements() {
         </Grid>
       </Grid>
 
+      {/* Quick Tabs */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+        <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)}>
+          <Tab label={`All (${agreements.length})`} />
+          <Tab label={`Active (${stats.activeAgreements})`} />
+          <Tab label={`Expired (${agreements.filter((a) => a.status === 'expired').length})`} />
+          <Tab label={`Renewed (${agreements.filter((a) => a.status === 'renewed').length})`} />
+        </Tabs>
+      </Box>
+
       {/* Filters */}
       <Box display="flex" gap={2} mb={3}>
         <TextField
-          placeholder="Search agreements..."
+          placeholder="Search by customer, agreement #, or bottle..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           InputProps={{
@@ -624,7 +688,7 @@ export default function LeaseAgreements() {
               </InputAdornment>
             ),
           }}
-          sx={{ minWidth: 300 }}
+          sx={{ minWidth: 320 }}
         />
         <FormControl sx={{ minWidth: 150 }}>
           <InputLabel>Status</InputLabel>
@@ -638,6 +702,7 @@ export default function LeaseAgreements() {
             <MenuItem value="expired">Expired</MenuItem>
             <MenuItem value="cancelled">Cancelled</MenuItem>
             <MenuItem value="draft">Draft</MenuItem>
+            <MenuItem value="renewed">Renewed</MenuItem>
           </Select>
         </FormControl>
       </Box>
@@ -659,11 +724,42 @@ export default function LeaseAgreements() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {filteredAgreements.map((agreement) => (
+            {filteredAgreements.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
+                  <Typography color="text.secondary">
+                    {agreements.length === 0
+                      ? 'No lease agreements yet. Click "New Agreement" to create one.'
+                      : 'No agreements match your filters.'}
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            ) : (
+              filteredAgreements.map((agreement) => (
               <TableRow key={agreement.id}>
                 <TableCell>{agreement.agreement_number}</TableCell>
-                <TableCell>{agreement.customer_name}</TableCell>
-                <TableCell>{agreement.bottle_id ? (Array.isArray(agreement.bottles) ? agreement.bottles[0]?.barcode_number : agreement.bottles?.barcode_number) ?? agreement.bottle_id : '—'}</TableCell>
+                <TableCell>
+                  <Typography
+                    component="span"
+                    sx={{ cursor: 'pointer', color: 'primary.main', '&:hover': { textDecoration: 'underline' } }}
+                    onClick={() => navigate(`/customer/${agreement.customer_id}`)}
+                  >
+                    {agreement.customer_name}
+                  </Typography>
+                </TableCell>
+                <TableCell>
+                  {agreement.bottle_id ? (
+                    <Typography
+                      component="span"
+                      sx={{ cursor: 'pointer', color: 'primary.main', '&:hover': { textDecoration: 'underline' } }}
+                      onClick={() => navigate(`/bottle/${agreement.bottle_id}`)}
+                    >
+                      {getBottleDisplay(agreement)}
+                    </Typography>
+                  ) : (
+                    '—'
+                  )}
+                </TableCell>
                 <TableCell>{formatDate(agreement.start_date)}</TableCell>
                 <TableCell>{formatDate(agreement.end_date)}</TableCell>
                 <TableCell>{formatCurrency(agreement.annual_amount)}</TableCell>
@@ -716,7 +812,7 @@ export default function LeaseAgreements() {
                   </Box>
                 </TableCell>
               </TableRow>
-            ))}
+            )))}
           </TableBody>
         </Table>
       </TableContainer>
@@ -749,12 +845,26 @@ export default function LeaseAgreements() {
                     </Grid>
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2">Customer</Typography>
-                      <Typography variant="body1" mb={2}>{selectedAgreement?.customer_name}</Typography>
+                      <Typography
+                        variant="body1"
+                        mb={2}
+                        sx={{ cursor: 'pointer', color: 'primary.main', '&:hover': { textDecoration: 'underline' } }}
+                        onClick={() => selectedAgreement?.customer_id && (setDialogOpen(false), navigate(`/customer/${selectedAgreement.customer_id}`))}
+                      >
+                        {selectedAgreement?.customer_name}
+                      </Typography>
                     </Grid>
                     {selectedAgreement?.bottle_id && (
                       <Grid item xs={12} md={6}>
                         <Typography variant="subtitle2">Bottle (per-bottle lease)</Typography>
-                        <Typography variant="body1" mb={2}>{Array.isArray(selectedAgreement?.bottles) ? selectedAgreement.bottles[0]?.barcode_number : selectedAgreement?.bottles?.barcode_number ?? selectedAgreement.bottle_id}</Typography>
+                        <Typography
+                          variant="body1"
+                          mb={2}
+                          sx={{ cursor: 'pointer', color: 'primary.main', '&:hover': { textDecoration: 'underline' } }}
+                          onClick={() => { setDialogOpen(false); navigate(`/bottle/${selectedAgreement.bottle_id}`); }}
+                        >
+                          {getBottleDisplay(selectedAgreement)}
+                        </Typography>
                       </Grid>
                     )}
                     <Grid item xs={12} md={6}>
@@ -783,6 +893,11 @@ export default function LeaseAgreements() {
               {tabValue === 1 && (
                 <Box pt={2}>
                   <Typography variant="h6" mb={2}>Billing History</Typography>
+                  {billingHistory.length === 0 ? (
+                    <Typography color="text.secondary" sx={{ py: 4 }}>
+                      No billing history recorded yet.
+                    </Typography>
+                  ) : (
                   <TableContainer>
                     <Table size="small">
                       <TableHead>
@@ -813,6 +928,7 @@ export default function LeaseAgreements() {
                       </TableBody>
                     </Table>
                   </TableContainer>
+                  )}
                 </Box>
               )}
             </Box>
@@ -838,7 +954,8 @@ export default function LeaseAgreements() {
                           ...formData,
                           customer_id: newCustomerId,
                           customer_name: customer?.name || '',
-                          bottle_id: null
+                          bottle_id: null,
+                          applyToAllBottles: false
                         });
                         fetchCustomerBottles(newCustomerId);
                       }}
@@ -853,26 +970,53 @@ export default function LeaseAgreements() {
                   </FormControl>
                 </Grid>
                 {formData.customer_id && (
-                  <Grid item xs={12} md={6}>
-                    <FormControl fullWidth>
-                      <InputLabel>Assign to bottle</InputLabel>
-                      <Select
-                        value={formData.bottle_id || ''}
-                        onChange={(e) => setFormData({ ...formData, bottle_id: e.target.value || null })}
-                        label="Assign to bottle"
-                      >
-                        <MenuItem value="">None – customer-level agreement</MenuItem>
-                        {customerBottles.map((bottle) => (
-                          <MenuItem key={bottle.id} value={bottle.id}>
-                            {bottle.barcode_number || bottle.id}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                        Optional: assign this lease to one bottle (per-bottle lease). Leave as None for a customer-level agreement.
-                      </Typography>
-                    </FormControl>
-                  </Grid>
+                  <>
+                    {dialogMode === 'add' && customerBottles.length > 0 && (
+                      <Grid item xs={12}>
+                        <FormControlLabel
+                          control={
+                            <Checkbox
+                              checked={formData.applyToAllBottles || false}
+                              onChange={(e) =>
+                                setFormData({
+                                  ...formData,
+                                  applyToAllBottles: e.target.checked,
+                                  bottle_id: e.target.checked ? null : formData.bottle_id
+                                })
+                              }
+                            />
+                          }
+                          label={
+                            <Typography>
+                              Apply to all bottles ({customerBottles.length} bottle{customerBottles.length !== 1 ? 's' : ''}) — creates one customer-level lease covering all bottles
+                            </Typography>
+                          }
+                        />
+                      </Grid>
+                    )}
+                    {(!formData.applyToAllBottles || dialogMode === 'edit') && (
+                      <Grid item xs={12} md={6}>
+                        <FormControl fullWidth>
+                          <InputLabel>Assign to bottle</InputLabel>
+                          <Select
+                            value={formData.bottle_id || ''}
+                            onChange={(e) => setFormData({ ...formData, bottle_id: e.target.value || null })}
+                            label="Assign to bottle"
+                          >
+                            <MenuItem value="">None – customer-level agreement</MenuItem>
+                            {customerBottles.map((bottle) => (
+                              <MenuItem key={bottle.id} value={bottle.id}>
+                                {bottle.barcode_number || bottle.id}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                            Optional: assign this lease to one bottle (per-bottle lease). Leave as None for a customer-level agreement.
+                          </Typography>
+                        </FormControl>
+                      </Grid>
+                    )}
+                  </>
                 )}
                 <Grid item xs={12} md={6}>
                   <TextField

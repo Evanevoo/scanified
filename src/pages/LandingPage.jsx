@@ -717,7 +717,7 @@ export default function LandingPage() {
             <Typography variant="h2" fontWeight={700} sx={{ mb: 3 }}>
               Everything You Need
             </Typography>
-            <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto' }}>
+            <Typography variant="h6" color="text.secondary" sx={{ width: '100%' }}>
               Powerful features designed to make asset management effortless
             </Typography>
           </Box>

@@ -1,12 +1,20 @@
 import logger from '../utils/logger';
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useFocusEffect } from '@react-navigation/native';
+import { useTheme } from '../context/ThemeContext';
+import { Ionicons } from '@expo/vector-icons';
+import { ModernCard } from '../components/design-system';
+import { formatDateTimeLocal } from '../utils/dateUtils';
 
 export default function RecentScansScreen() {
+  const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const { profile, organization, loading: authLoading } = useAuth();
+  const listPaddingBottom = Platform.OS === 'ios' ? insets.bottom + 16 : Math.max(insets.bottom, 24) + 24;
   const [scans, setScans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -142,42 +150,59 @@ export default function RecentScansScreen() {
   }, [fetchScans]);
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Recent Synced Scans</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Text style={[styles.title, { color: colors.primary }]}>Recent Synced Scans</Text>
       {organization ? (
         <>
-          <Text style={styles.organizationName}>Organization: {organization.name}</Text>
-          <Text style={styles.orgId}>Org ID: {organization.id}</Text>
+          <Text style={[styles.organizationName, { color: colors.primary }]}>Organization: {organization.name}</Text>
+          <Text style={[styles.orgId, { color: colors.textSecondary }]}>Org ID: {organization.id}</Text>
         </>
       ) : profile?.organization_id ? (
-        <Text style={styles.orgId}>Org ID: {profile.organization_id} (Loading organization details...)</Text>
+        <Text style={[styles.orgId, { color: colors.textSecondary }]}>Org ID: {profile.organization_id} (Loading organization details...)</Text>
       ) : null}
       {loading ? (
-        <ActivityIndicator size="large" color="#2563eb" style={{ marginTop: 40 }} />
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading scans...</Text>
+        </View>
       ) : error ? (
-        <Text style={styles.error}>{error}</Text>
+        <View style={styles.emptyState}>
+          <Ionicons name="alert-circle-outline" size={40} color={colors.error} />
+          <Text style={[styles.error, { color: colors.error }]}>{error}</Text>
+        </View>
       ) : scans.length === 0 ? (
-        <Text style={styles.empty}>No recent scans found.</Text>
+        <View style={styles.emptyState}>
+          <Ionicons name="barcode-outline" size={40} color={colors.textSecondary} />
+          <Text style={[styles.empty, { color: colors.textSecondary }]}>No recent scans found.</Text>
+        </View>
       ) : (
         <FlatList
           data={scans}
+          contentContainerStyle={{ paddingBottom: listPaddingBottom, paddingHorizontal: 4 }}
           keyExtractor={item => item.id.toString()}
           renderItem={({ item }) => (
-            <View style={styles.scanItem}>
-              <Text style={styles.scanBarcode}>Barcode: {item.bottle_barcode}</Text>
-              <Text style={styles.scanOrder}>Order: {item.order_number}</Text>
-              <Text style={styles.scanCustomer}>Customer: {item.customer_name || '-'}</Text>
-              <Text style={styles.scanTime}>{new Date(item.created_at).toLocaleString()}</Text>
-            </View>
+            <ModernCard elevated={false} style={styles.scanItem}>
+              <View style={styles.scanRow}>
+                <View style={[styles.scanIconWrap, { backgroundColor: colors.primary + '20' }]}>
+                  <Ionicons name="barcode-outline" size={20} color={colors.primary} />
+                </View>
+                <View style={styles.scanContent}>
+                  <Text style={[styles.scanBarcode, { color: colors.primary }]}>Barcode: {item.bottle_barcode || item.barcode_number}</Text>
+                  <Text style={[styles.scanOrder, { color: colors.text }]}>Order: {item.order_number}</Text>
+                  <Text style={[styles.scanCustomer, { color: colors.textSecondary }]}>Customer: {item.customer_name || '-'}</Text>
+                  <Text style={[styles.scanTime, { color: colors.textSecondary }]}>{formatDateTimeLocal(item.created_at)}</Text>
+                </View>
+              </View>
+            </ModernCard>
           )}
-          ListEmptyComponent={!error ? <Text style={{ color: '#888', textAlign: 'center', marginTop: 24 }}>No recent scans found.</Text> : null}
+          ListEmptyComponent={!error ? <Text style={[styles.empty, { color: colors.textSecondary, textAlign: 'center', marginTop: 24 }]}>No recent scans found.</Text> : null}
           style={{ marginTop: 12 }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={['#2563eb']}
-              tintColor="#2563eb"
+              colors={[colors.primary]}
+              tintColor={colors.primary}
             />
           }
         />
@@ -189,67 +214,78 @@ export default function RecentScansScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
     padding: 24,
   },
   title: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#2563eb',
     marginBottom: 18,
     textAlign: 'center',
   },
+  loadingWrap: {
+    marginTop: 40,
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+  },
+  emptyState: {
+    marginTop: 40,
+    alignItems: 'center',
+  },
   scanItem: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
     marginBottom: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
+  },
+  scanRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  scanIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  scanContent: {
+    flex: 1,
   },
   scanBarcode: {
     fontWeight: 'bold',
-    color: '#2563eb',
     fontSize: 16,
   },
   scanOrder: {
-    color: '#222',
     fontSize: 15,
     marginTop: 2,
   },
   scanCustomer: {
-    color: '#666',
     fontSize: 14,
     marginTop: 2,
   },
   scanTime: {
-    color: '#aaa',
     fontSize: 13,
     marginTop: 4,
   },
   error: {
-    color: '#ff5a1f',
-    marginTop: 40,
+    marginTop: 12,
     textAlign: 'center',
+    fontSize: 16,
   },
   empty: {
-    color: '#888',
-    marginTop: 40,
+    marginTop: 12,
     textAlign: 'center',
     fontSize: 16,
   },
   organizationName: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#2563eb',
     marginBottom: 4,
     textAlign: 'center',
   },
   orgId: {
     fontSize: 12,
-    color: '#666',
     marginBottom: 12,
     textAlign: 'center',
   },

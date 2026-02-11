@@ -222,7 +222,7 @@ export default function TenantBackupRestore() {
   }
 
   return (
-    <Box sx={{ p: 3, maxWidth: 1400, mx: 'auto' }}>
+    <Box sx={{ p: 3, width: '100%' }}>
       <Typography variant="h4" fontWeight={700} color="primary" gutterBottom>
         <BackupIcon sx={{ mr: 2, verticalAlign: 'middle' }} />
         Tenant Backup & Restore

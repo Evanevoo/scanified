@@ -382,18 +382,17 @@ const BottleManagement = () => {
 
 
 
-          // Get locations for status determination
-
+          // Get locations from the Locations page/table. Only values that match one of these count as a location.
           const { data: locations } = await supabase
-
             .from('locations')
-
-            .select('name')
-
+            .select('name, id')
             .eq('organization_id', organization.id);
 
-
-
+          // Build set of valid location values (name and id, normalized) for "is this a location?" checks
+          const validLocationValues = new Set([
+            ...(locations?.map(loc => (loc.name || '').toLowerCase().trim()).filter(Boolean) || []),
+            ...(locations?.map(loc => (loc.id || '').toString().toLowerCase().trim()).filter(Boolean) || [])
+          ]);
           const locationNames = locations?.map(loc => loc.name.toLowerCase()) || [];
 
 
@@ -510,11 +509,14 @@ const BottleManagement = () => {
 
           jsonData.forEach((row, rowIndex) => {
 
-            // IMPORTANT: Check if Branch is a location name first, before treating it as customer
-            // Known facility/location names should NOT be treated as customers
+            // Only values that match a location from the Locations page count as a location.
             const branchValue = getColumnValue(row, ['Branch', 'branch']) || '';
-            const knownLocations = ['saskatoon', 'regina', 'chilliwack', 'prince george', 'prince_george', 'warehouse', 'facility', 'depot', 'yard'];
-            const isLocationName = knownLocations.some(loc => branchValue.toLowerCase().includes(loc.toLowerCase()));
+            const branchNorm = branchValue.toLowerCase().trim();
+            const isLocationName = validLocationValues.size > 0 && (
+              validLocationValues.has(branchNorm) ||
+              validLocationValues.has(branchNorm.replace(/\s+/g, '-')) ||
+              validLocationValues.has(branchNorm.replace(/\s+/g, '_'))
+            );
             
             // If Branch is a location name, use it as location only, not as customer
             // Otherwise, check Branch and other columns for customer information
@@ -529,7 +531,20 @@ const BottleManagement = () => {
             
             // Get location - prefer Location column, but if Branch is a location name, use that
             const locationColumn = getColumnValue(row, ['Location', 'location']) || '';
-            const location = locationColumn || (isLocationName ? branchValue.toUpperCase() : '');
+            let location = locationColumn || (isLocationName ? branchValue.toUpperCase() : '');
+
+            // Only treat Location column as a location if it matches one of the locations from the Locations page.
+            // If it doesn't match but contains "Name (ID)", it's a customer stored in the wrong column.
+            const locColumnNorm = (locationColumn || '').toLowerCase().trim();
+            const locationColumnIsValidLocation = validLocationValues.size > 0 && (
+              validLocationValues.has(locColumnNorm) ||
+              validLocationValues.has(locColumnNorm.replace(/\s+/g, '-')) ||
+              validLocationValues.has(locColumnNorm.replace(/\s+/g, '_'))
+            );
+            if ((!customerName || !String(customerName).trim()) && locationColumn && !locationColumnIsValidLocation && /\([^)]+\)\s*$/.test(String(locationColumn))) {
+              customerName = String(locationColumn).trim();
+              location = ''; // It's a customer, not a location; clear it.
+            }
 
             // Extract CustomerListID from customer name if it's in brackets: "Name (ID)"
             // Also check for separate CustomerListID column
@@ -666,10 +681,12 @@ const BottleManagement = () => {
 
               description: (() => {
                 const value = getColumnValue(row, ['Item Description', 'item_description', 'ItemDescription', 'Description', 'description', 'Desc', 'desc']);
-                if (rowIndex === 0 && !value) {
+                const productCode = getColumnValue(row, ['Item', 'item', 'Product Code', 'product_code', 'ProductCode', 'Product', 'product']);
+                const desc = (value && String(value).trim()) ? value : (productCode && String(productCode).trim()) ? productCode : '';
+                if (rowIndex === 0 && !desc) {
                   console.warn('⚠️ BOTTLE UPLOAD: description is empty for first row. Available keys:', Object.keys(row));
                 }
-                return value;
+                return desc;
               })(),
 
               gas_type: gasType,
@@ -959,7 +976,7 @@ const BottleManagement = () => {
           // Check for existing bottles to prevent duplicates (by barcode only)
           // Also check for duplicates WITHIN the upload batch itself
 
-          const bottleBarcodes = bottlesToInsert.map(b => b.barcode_number).filter(b => b && b.trim() !== '');
+          const bottleBarcodes = bottlesToInsert.map(b => b.barcode_number != null ? String(b.barcode_number).trim() : '').filter(b => b !== '');
 
           logger.log(`Checking for duplicates by barcode only: ${bottleBarcodes.length} barcodes`);
           logger.log(`Total bottles to check: ${bottlesToInsert.length}`);
@@ -1013,21 +1030,21 @@ const BottleManagement = () => {
           };
 
           bottlesToInsert.forEach((bottle, index) => {
-            const barcode = bottle.barcode_number?.trim();
-            const serial = bottle.serial_number?.trim();
+            // Normalize barcode to string (CSV may give number) for consistent duplicate check
+            const barcode = bottle.barcode_number != null ? String(bottle.barcode_number).trim() : '';
+            const serial = bottle.serial_number != null ? String(bottle.serial_number).trim() : (bottle.serial_number?.trim?.() ?? '');
             
             // Only check for duplicates if we have a VALID barcode (not placeholder values)
-            // Serial numbers are NOT checked for duplicates
+            // Rows without valid barcode are still allowed – they're inserted (avoids blocking uploads when column name differs)
             const hasValidBarcode = isValidIdentifier(barcode);
             
             if (!hasValidBarcode) {
-              // No valid barcode - can't check for duplicates, so allow it
               newBottles.push(bottle);
               logger.log(`Allowing bottle without valid barcode (row ${index + 1}): Barcode="${barcode || 'N/A'}", Serial="${serial || 'N/A'}"`);
               return;
             }
             
-            // First check: Is this a duplicate WITHIN the upload batch? (by barcode only)
+            // First check: Is this a duplicate WITHIN the upload batch? (by barcode only, normalized)
             const isDuplicateInBatch = seenBarcodesInBatch.has(barcode);
             
             if (isDuplicateInBatch) {
@@ -1041,9 +1058,9 @@ const BottleManagement = () => {
               return; // Skip this bottle
             }
             
-            // Second check: Does this bottle already exist in the database? (by barcode only)
+            // Second check: Does this bottle already exist in the database? (by barcode only, normalized string)
             const hasExistingBarcode = existingBottles.some(existing => {
-              const existingBarcode = existing.barcode_number?.trim();
+              const existingBarcode = existing.barcode_number != null ? String(existing.barcode_number).trim() : '';
               return existingBarcode && isValidIdentifier(existingBarcode) && existingBarcode === barcode;
             });
             
@@ -1190,11 +1207,15 @@ const BottleManagement = () => {
 
           gas_type: editingBottle.gas_type,
 
-          status: editingBottle.status
+          status: editingBottle.status,
+
+          updated_at: new Date().toISOString()
 
         })
 
-        .eq('id', editingBottle.id);
+        .eq('id', editingBottle.id)
+
+        .eq('organization_id', organization?.id);
 
 
 

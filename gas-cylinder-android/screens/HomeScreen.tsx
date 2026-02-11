@@ -1,6 +1,8 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, TextInput, ActivityIndicator, Modal, Dimensions, Alert } from 'react-native';
+import { Platform as RNPlatform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../hooks/useAuth';
@@ -8,29 +10,32 @@ import { useAssetConfig } from '../context/AssetContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Platform } from '../utils/platform';
 import { soundService } from '../services/soundService';
-import { StatCard, ModernCard, MobileCard, MobileButton } from '../components/design-system';
+import { ModernCard, MobileCard } from '../components/design-system';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable } from 'react-native';
-import ExpoCameraScanner from '../components/ExpoCameraScanner';
+import ScanArea from '../components/ScanArea';
 import { FormatValidationService } from '../services/FormatValidationService';
+import { getStartOfTodayISO, getEndOfTodayISO } from '../utils/dateUtils';
 
 const { width, height } = Dimensions.get('window');
 
-// Quick Actions Configuration
+// Quick Actions Configuration (Ionicons names for design system)
 const getQuickActions = () => [
-  { title: 'Delivery', icon: '📷', action: 'ScanCylinders', color: '#3B82F6' },
-  { title: 'Add', icon: '➕', action: 'AddCylinder', color: '#10B981' },
-  { title: 'Edit', icon: '✏️', action: 'EditCylinder', color: '#F59E0B' },
-  { title: 'Locate', icon: '📍', action: 'FillCylinder', color: '#EF4444' },
-  { title: 'History', icon: '📊', action: 'History', color: '#06B6D4' },
-  { title: 'Analytics', icon: '📈', action: 'Analytics', color: '#8B5CF6' },
+  { title: 'Delivery', iconName: 'camera' as const, action: 'ScanCylinders', color: '#3B82F6' },
+  { title: 'Add', iconName: 'add' as const, action: 'AddCylinder', color: '#10B981' },
+  { title: 'Edit', iconName: 'pencil' as const, action: 'EditCylinder', color: '#F59E0B' },
+  { title: 'Locate', iconName: 'location' as const, action: 'FillCylinder', color: '#EF4444' },
+  { title: 'History', iconName: 'time' as const, action: 'History', color: '#06B6D4' },
+  { title: 'Analytics', iconName: 'analytics' as const, action: 'Analytics', color: '#8B5CF6' },
 ];
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { colors } = useTheme();
+  const scrollPaddingBottom = RNPlatform.OS === 'android' ? Math.max(insets.bottom, 24) + 24 : insets.bottom + 24;
   const { user, profile, organization } = useAuth();
   const { config: assetConfig } = useAssetConfig();
   const [search, setSearch] = useState('');
@@ -68,6 +73,33 @@ export default function HomeScreen() {
       }
     }, [profile?.organization_id])
   );
+
+  const searchCustomerByName = async (possibleNames: string[]): Promise<{ name: string; id: string } | null> => {
+    if (!profile?.organization_id || possibleNames.length === 0) return null;
+    try {
+      for (const name of possibleNames) {
+        if (!name || name.length < 3) continue;
+        const { data: customers } = await supabase
+          .from('customers')
+          .select('CustomerListID, name')
+          .eq('organization_id', profile.organization_id)
+          .ilike('name', `%${name}%`)
+          .limit(1);
+        if (customers && customers.length > 0) {
+          const found = customers[0];
+          return { name: found.name, id: found.CustomerListID };
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleOcrCustomerFound = (customer: { name: string; id: string }) => {
+    setShowScanner(false);
+    navigation.navigate('CustomerDetails', { customerId: customer.id });
+  };
 
   const searchCustomers = async () => {
     if (!profile?.organization_id) {
@@ -234,14 +266,16 @@ export default function HomeScreen() {
         .eq('organization_id', profile.organization_id)
         .eq('user_id', profile.id);
 
-      // Get today's scans for this user
-      const today = new Date().toISOString().split('T')[0];
+      // Get today's scans for this user (local timezone: start to end of today)
+      const startOfToday = getStartOfTodayISO();
+      const endOfToday = getEndOfTodayISO();
       const { count: todayScans } = await supabase
         .from('bottle_scans')
         .select('*', { count: 'exact', head: true })
         .eq('organization_id', profile.organization_id)
         .eq('user_id', profile.id)
-        .gte('created_at', today);
+        .gte('created_at', startOfToday)
+        .lte('created_at', endOfToday);
 
       setStats({
         totalScans: totalScans || 0,
@@ -307,6 +341,7 @@ export default function HomeScreen() {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <ScrollView 
         style={[styles.container, { backgroundColor: colors.background }]}
+        contentContainerStyle={{ paddingBottom: scrollPaddingBottom }}
         showsVerticalScrollIndicator={false}
       >
         {/* Header with Gradient */}
@@ -329,8 +364,10 @@ export default function HomeScreen() {
               <TouchableOpacity 
                 style={styles.headerButton} 
                 onPress={() => navigation.navigate('RecentScans')}
+                accessibilityLabel="Recent scans"
+                accessibilityRole="button"
               >
-                <Text style={styles.headerButtonIcon}>🔔</Text>
+                <Ionicons name="notifications-outline" size={22} color="#FFFFFF" />
                 {stats.unreadScans > 0 && (
                   <View style={[styles.badge, { backgroundColor: colors.error }]}>
                     <Text style={[styles.badgeText, { color: '#fff' }]}>{stats.unreadScans}</Text>
@@ -340,8 +377,10 @@ export default function HomeScreen() {
               <TouchableOpacity 
                 style={styles.headerButton} 
                 onPress={() => navigation.navigate('Settings')}
+                accessibilityLabel="Settings"
+                accessibilityRole="button"
               >
-                <Text style={styles.headerButtonIcon}>⚙️</Text>
+                <Ionicons name="settings-outline" size={22} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
           </View>
@@ -351,7 +390,7 @@ export default function HomeScreen() {
         <View style={styles.searchContainer}>
           <ModernCard elevated={false} style={styles.searchBarCard}>
             <View style={styles.searchBar}>
-              <Text style={styles.searchIcon}>🔍</Text>
+              <Ionicons name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
               <TextInput
                 style={[styles.searchInput, { color: colors.text }]}
                 placeholder={`Search customers or ${assetConfig.assetTypePlural}...`}
@@ -389,7 +428,7 @@ export default function HomeScreen() {
                   setScanned(false);
                 }}
               >
-                <Ionicons name="camera" size={20} color="#FFFFFF" />
+                <Ionicons name="camera" size={22} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
           </ModernCard>
@@ -453,7 +492,7 @@ export default function HomeScreen() {
                 style={styles.actionCard}
               >
                 <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
-                  <Text style={styles.actionIconText}>{action.icon}</Text>
+                  <Ionicons name={action.iconName} size={22} color={action.color} />
                 </View>
                 <Text style={[styles.actionTitle, { color: colors.text, fontWeight: '700' }]}>{action.title}</Text>
               </MobileCard>
@@ -464,106 +503,60 @@ export default function HomeScreen() {
 
       {/* Barcode Scanner Modal */}
       <Modal visible={showScanner} animationType="slide" transparent={false}>
-        <ExpoCameraScanner
-          onBarcodeScanned={async (data) => {
-            if (scanned || !data) return;
-            
-            logger.log('📷 Barcode scanned in HomeScreen:', data);
-            setScanned(true);
-            
-            // Clean the barcode - remove leading/trailing asterisks
-            let cleanedBarcode = data.trim().replace(/^\*+|\*+$/g, '');
-            
-            if (!cleanedBarcode) {
-              logger.log('📷 Empty barcode after cleaning');
-              setScanned(false);
-              return;
-            }
-            
-            setShowScanner(false);
-            
-            // Determine if this is a customer (sales receipt with %) or cylinder (9 digits)
-            // Use FormatValidationService to check formats
-            try {
-              if (!profile?.organization_id) {
-                logger.log('❌ No organization ID, falling back to search');
-                setSearch(cleanedBarcode);
-                setTimeout(() => {
-                  searchCustomers();
-                  searchBottles();
-                }, 100);
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+          <ScanArea
+            searchCustomerByName={searchCustomerByName}
+            onCustomerFound={handleOcrCustomerFound}
+            onScanned={async (data) => {
+              if (scanned || !data) return;
+              setScanned(true);
+              let cleanedBarcode = data.trim().replace(/^\*+|\*+$/g, '');
+              if (!cleanedBarcode) {
+                setScanned(false);
                 return;
               }
-              
-              const formats = await FormatValidationService.getOrganizationFormats(profile.organization_id);
-              
-              // Check if it's a sales receipt barcode (starts with %)
-              const isSalesReceipt = cleanedBarcode.startsWith('%');
-              
-              // Check if it matches cylinder format (9 digits); accept after normalizing O→0, I→1, etc.
-              const cylinderPattern = formats.cylinder_serial_format?.pattern || '^[0-9]{9}$';
-              const cylinderRegex = new RegExp(cylinderPattern);
-              const letterToDigit: Record<string, string> = { O: '0', o: '0', I: '1', l: '1', L: '1', S: '5', s: '5', Z: '2', z: '2', B: '8', b: '8', G: '6', g: '6' };
-              const normalizedForCylinder = cleanedBarcode.replace(/./g, (c) => letterToDigit[c] ?? c);
-              const digitsOnly = normalizedForCylinder.replace(/[^0-9]/g, '');
-              const isCylinder = cylinderRegex.test(cleanedBarcode) || digitsOnly.length === 9;
-              const cylinderBarcode = digitsOnly.length === 9 ? digitsOnly : cleanedBarcode;
-              
-              logger.log('🔍 Barcode analysis:', {
-                cleanedBarcode,
-                isSalesReceipt,
-                isCylinder,
-                cylinderPattern
-              });
-              
-              if (isSalesReceipt) {
-                // Sales receipt - find customer by barcode or CustomerListID (PostgreSQL uses % for LIKE, not *)
-                logger.log('🔍 Searching for customer with barcode/ID:', cleanedBarcode);
-                const pattern = `%${cleanedBarcode}%`;
-                const { data: customer } = await supabase
-                  .from('customers')
-                  .select('CustomerListID')
-                  .eq('organization_id', profile.organization_id)
-                  .or(`barcode.ilike.${pattern},CustomerListID.ilike.${pattern}`)
-                  .limit(1)
-                  .single();
-                
-                if (customer) {
-                  logger.log('✅ Found customer, navigating to CustomerDetails');
-                  navigation.navigate('CustomerDetails', { customerId: customer.CustomerListID });
+              setShowScanner(false);
+              try {
+                if (!profile?.organization_id) {
+                  setSearch(cleanedBarcode);
+                  setTimeout(() => { searchCustomers(); searchBottles(); }, 100);
                   return;
                 }
-              } else if (isCylinder) {
-                // Cylinder barcode - navigate directly to cylinder details (use canonical 9-digit form)
-                logger.log('✅ Cylinder barcode detected, navigating to CylinderDetails');
-                navigation.navigate('CylinderDetails', { barcode: cylinderBarcode });
-                return;
+                const formats = await FormatValidationService.getOrganizationFormats(profile.organization_id);
+                const isSalesReceipt = cleanedBarcode.startsWith('%');
+                const cylinderPattern = formats.cylinder_serial_format?.pattern || '^[0-9]{9}$';
+                const cylinderRegex = new RegExp(cylinderPattern);
+                const isCylinder = cylinderRegex.test(cleanedBarcode);
+                if (isSalesReceipt) {
+                  const { data: customer } = await supabase
+                    .from('customers')
+                    .select('CustomerListID')
+                    .eq('organization_id', profile.organization_id)
+                    .ilike('barcode', `*${cleanedBarcode}*`)
+                    .limit(1)
+                    .single();
+                  if (customer) {
+                    navigation.navigate('CustomerDetails', { customerId: customer.CustomerListID });
+                    return;
+                  }
+                } else if (isCylinder) {
+                  navigation.navigate('CylinderDetails', { barcode: cleanedBarcode });
+                  return;
+                }
+                setSearch(cleanedBarcode);
+                setTimeout(() => { searchCustomers(); searchBottles(); }, 100);
+              } catch (error) {
+                logger.error('❌ Error processing barcode:', error);
+                setSearch(cleanedBarcode);
+                setTimeout(() => { searchCustomers(); searchBottles(); }, 100);
               }
-              
-              // Fallback: search for both
-              logger.log('🔍 No direct match, performing search');
-              setSearch(cleanedBarcode);
-              setTimeout(() => {
-                searchCustomers();
-                searchBottles();
-              }, 100);
-            } catch (error) {
-              logger.error('❌ Error processing barcode:', error);
-              // Fallback to search
-              setSearch(cleanedBarcode);
-              setTimeout(() => {
-                searchCustomers();
-                searchBottles();
-              }, 100);
-            }
-          }}
-          enabled={!scanned}
-          onClose={() => {
-            setShowScanner(false);
-            setScanned(false);
-          }}
-          target="customer"
-        />
+            }}
+            onClose={() => setShowScanner(false)}
+            label=""
+            validationPattern={/^[\dA-Za-z\-%*]+$/}
+            style={{ flex: 1 }}
+          />
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -609,18 +602,15 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
     position: 'relative',
-  },
-  headerButtonIcon: {
-    fontSize: 20,
   },
   badge: {
     position: 'absolute',
@@ -662,7 +652,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   searchIcon: {
-    fontSize: 20,
     marginRight: 12,
   },
   searchInput: {
@@ -670,17 +659,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   clearButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    minWidth: 48,
+    minHeight: 48,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 4,
   },
   scanButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
@@ -825,15 +813,12 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   actionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
-  },
-  actionIconText: {
-    fontSize: 20,
   },
   actionTitle: {
     fontSize: 12,

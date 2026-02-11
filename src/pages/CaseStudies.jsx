@@ -184,12 +184,12 @@ export default function CaseStudies() {
               <Typography variant="h2" fontWeight={800} sx={{ mb: 3 }}>
                 Success Stories
               </Typography>
-              <Typography variant="h5" sx={{ mb: 6, opacity: 0.9, maxWidth: 800, mx: 'auto' }}>
+              <Typography variant="h5" sx={{ mb: 6, opacity: 0.9, width: '100%' }}>
                 See how businesses across industries are transforming their operations with Scanified
               </Typography>
               
               {/* Industry Stats */}
-              <Grid container spacing={3} sx={{ maxWidth: 600, mx: 'auto' }}>
+              <Grid container spacing={3} sx={{ width: '100%' }}>
                 <Grid item xs={4}>
                   <Typography variant="h3" fontWeight={700}>2,500+</Typography>
                   <Typography variant="body1">Happy Customers</Typography>

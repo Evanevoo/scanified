@@ -14,8 +14,7 @@ import { Platform } from '../utils/platform';
 import { feedbackService } from '../services/feedbackService';
 import Constants from 'expo-constants';
 
-// Use ML Kit for free professional barcode scanning
-import MLKitScanner from '../components/MLKitScanner';
+import ScanArea from '../components/ScanArea';
 
 const { width, height } = Dimensions.get('window');
 
@@ -63,25 +62,34 @@ const normalizeBarcode = (value: string): string => {
 
 // Correct common OCR errors in scanned barcodes
 // Handles common misreads: O→0, I→1, S→5, Z→2, etc.
+// For sales receipt format (8 hex - 10 digits - letter), only applies trailing letter fix to avoid corrupting hex IDs
 const correctOCRErrors = (scanned: string): string => {
   if (!scanned) return scanned;
   
-  // Common OCR error mappings
+  let corrected = scanned.toUpperCase();
+  
+  // Sales receipt / hex customer ID: %XXXXXXXX-YYYYYYYYYYZ or 8 hex chars (800005BE)
+  // Do NOT apply aggressive corrections - hex chars (B,E,F etc.) are valid and get corrupted
+  const cleanedForCheck = corrected.replace(/[*%]/g, '');
+  const salesReceiptPattern = /^[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?$/;
+  const hexOnlyPattern = /^[0-9A-Fa-f]{8}$/;
+  if (hexOnlyPattern.test(cleanedForCheck)) {
+    return corrected; // 8 hex chars - no corrections, avoid corrupting B,E,F
+  }
+  if (salesReceiptPattern.test(cleanedForCheck)) {
+    // Only trailing letter fix (B→A, I→A at end - common misreads)
+    corrected = corrected.replace(/B$/, 'A').replace(/I$/, 'A').replace(/1$/, 'A');
+    return corrected;
+  }
+  
+  // Common OCR error mappings (unused - kept for reference)
   const ocrCorrections: { [key: string]: string } = {
-    // Letter to number corrections
     'O': '0', 'o': '0', 'D': '0', 'Q': '0',
     'I': '1', 'l': '1', '|': '1',
     'S': '5', 's': '5',
     'Z': '2', 'z': '2',
     'B': '8', 'b': '8',
     'G': '6', 'g': '6',
-    // Number to letter corrections (less common but possible)
-    '0': 'O', // Only if context suggests it should be a letter
-    '1': 'I',
-    '5': 'S',
-    '2': 'Z',
-    '8': 'B',
-    '6': 'G',
   };
   
   // Common multi-character OCR errors
@@ -116,8 +124,6 @@ const correctOCRErrors = (scanned: string): string => {
       return match[0];
     }},
   ];
-  
-  let corrected = scanned.toUpperCase();
   
   // Remove special characters that are likely OCR errors
   corrected = corrected.replace(/[+*%]/g, '');
@@ -421,6 +427,8 @@ export default function ScanCylindersScreen() {
   const lastScanTimeRef = React.useRef<number>(0);
   const scanCooldownRef = React.useRef<NodeJS.Timeout | null>(null);
   const cameraRef = useRef<any>(null);
+  // Ref so timeout in handleBarcodeScanned always sees latest customers (avoids stale closure)
+  const customersRef = React.useRef<Customer[]>([]);
 
 
   useEffect(() => {
@@ -474,6 +482,10 @@ export default function ScanCylindersScreen() {
     fetchCustomers();
   }, [profile, authLoading]);
 
+  // Keep ref in sync so handleBarcodeScanned timeout always sees latest list
+  useEffect(() => {
+    customersRef.current = customers;
+  }, [customers]);
 
   useEffect(() => {
     // Only reset scanned state when scanner opens, not when it closes
@@ -715,30 +727,15 @@ export default function ScanCylindersScreen() {
     }
   };
 
-  // Handle OCR text found - automatically select customer if found
-  const handleTextFound = async (text: string, possibleNames: string[]) => {
-    logger.log('📝 OCR: Text found, searching for customers...');
-    
-    const foundCustomer = await searchCustomerByName(possibleNames);
-    
-    if (foundCustomer) {
-      logger.log('✅ OCR: Customer found, selecting:', foundCustomer.name);
-      setSelectedCustomer(foundCustomer);
-      setSearch(foundCustomer.CustomerListID || foundCustomer.name);
-      setCustomerBarcodeError('');
-      // Close scanner after finding customer
-      setShowCustomerScan(false);
-      setScannerVisible(false);
-      setScannerTarget(null);
-      // Provide feedback
-      await feedbackService.scanSuccess();
-    } else {
-      logger.log('⚠️ OCR: No customer found, showing in search');
-      // If no customer found, add first name to search
-      if (possibleNames.length > 0) {
-        setSearch(possibleNames[0]);
-      }
-    }
+  const handleCustomerFound = (customer: { name: string; id: string }) => {
+    logger.log('✅ OCR: Customer found in system:', customer.name);
+    setSelectedCustomer({ ...customer, CustomerListID: customer.id } as Customer);
+    setSearch(customer.id || customer.name);
+    setCustomerBarcodeError('');
+    setShowCustomerScan(false);
+    setScannerVisible(false);
+    setScannerTarget(null);
+    feedbackService.scanSuccess();
   };
 
   const handleBarcodeScanned = async (event: any) => {
@@ -768,9 +765,12 @@ export default function ScanCylindersScreen() {
     const barcode = cleanedBarcode;
 
     // Direct navigation logic - only for cylinder barcodes (e.g. 9 digits)
-    // Customer barcodes (%XXXXXXXX-YYYYYYYYYYZ) stay on this screen
+    // Skip when scanning for customer - customer IDs can be 8-10 digits
+    const explicitTarget = (typeof event === 'object' && event?.target) ? event.target : null;
+    const isCustomerScanContext = explicitTarget === 'customer' || scannerTarget === 'customer';
+
     try {
-      if (profile?.organization_id) {
+      if (profile?.organization_id && !isCustomerScanContext) {
         const formats = await FormatValidationService.getOrganizationFormats(profile.organization_id);
         const cylinderPattern = formats.cylinder_serial_format?.pattern || '^[0-9]{9}$';
         const cylinderRegex = new RegExp(cylinderPattern);
@@ -793,7 +793,7 @@ export default function ScanCylindersScreen() {
     }
 
     // handleBarcodeScanned is only used by the customer scanner; default to customer
-    let effectiveTarget = scannerTarget || 'customer';
+    let effectiveTarget = explicitTarget || scannerTarget || 'customer';
     
     // Prevent duplicate scans of the same barcode
     const now = Date.now();
@@ -849,6 +849,8 @@ export default function ScanCylindersScreen() {
       // Apply the scanned data based on target
       if (effectiveTarget === 'customer') {
         logger.log('👤 Setting customer search:', data);
+        // Use ref so we always have the latest list (avoids stale closure when timeout runs)
+        const customersToSearch = (customersRef.current?.length ? customersRef.current : customers) as Customer[];
         
         // Check if this is a sales receipt barcode (starts with % or wrapped in asterisks)
         // Sales receipt format: %XXXXXXXX-YYYYYYYYYYZ where XXXXXXXXX is the customer ID
@@ -965,8 +967,8 @@ export default function ScanCylindersScreen() {
         logger.log('📋 Extracted customer ID:', extractedCustomerId);
         logger.log('🧹 After normalization:', scannedBarcode);
         logger.log('🔢 Scanned normalized:', scannedNormalized);
-        logger.log('👥 Total customers to search:', customers.length);
-        logger.log('🏢 Current organization:', customers[0]?.organization_id || 'N/A');
+        logger.log('👥 Total customers to search:', customersToSearch.length);
+        logger.log('🏢 Current organization:', customersToSearch[0]?.organization_id || 'N/A');
         
         // Collect all potential matches with their match quality scores
         // This prevents always returning the first customer in the array
@@ -975,7 +977,7 @@ export default function ScanCylindersScreen() {
         // If we have a full extracted customer ID (with dash), check for exact matches first
         // This is much faster than checking every customer with prefix matches
         if (extractedCustomerId && extractedCustomerId.includes('-')) {
-          for (const customer of customers) {
+          for (const customer of customersToSearch) {
             if (!customer.CustomerListID) continue;
             
             // Check exact match with full customer ID first
@@ -1009,7 +1011,7 @@ export default function ScanCylindersScreen() {
         // If no exact match was found, continue with other matching strategies
         if (potentialMatches.length === 0) {
           // Use a for loop instead of forEach to allow early exit
-          for (const customer of customers) {
+          for (const customer of customersToSearch) {
           if (!customer.CustomerListID) {
             continue; // Skip customers without CustomerListID
           }
@@ -1245,9 +1247,56 @@ export default function ScanCylindersScreen() {
         if (!matchingCustomer) {
           logger.log('⚠️ Scanned barcode does not match any existing customer');
           
+          // Try Supabase lookup in case this customer wasn't in the in-memory list
+          if (profile?.organization_id && (scannedBarcode || extractedCustomerId)) {
+            try {
+              const idsToTry = [scannedBarcode, extractedCustomerId].filter(Boolean) as string[];
+              for (const id of idsToTry) {
+                const { data: byListId } = await supabase
+                  .from('customers')
+                  .select('name, barcode, CustomerListID')
+                  .eq('organization_id', profile.organization_id)
+                  .eq('CustomerListID', id)
+                  .maybeSingle();
+                if (byListId) {
+                  logger.log('✅ Customer found via Supabase lookup (CustomerListID):', byListId.name);
+                  setSearch(normalizeBarcode(byListId.CustomerListID || id));
+                  setSelectedCustomer(byListId as Customer);
+                  setScanned(false);
+                  setScannerEnabled(true);
+                  if (scanCooldownRef.current) {
+                    clearTimeout(scanCooldownRef.current);
+                    scanCooldownRef.current = null;
+                  }
+                  return;
+                }
+                const { data: byBarcode } = await supabase
+                  .from('customers')
+                  .select('name, barcode, CustomerListID')
+                  .eq('organization_id', profile.organization_id)
+                  .eq('barcode', id)
+                  .maybeSingle();
+                if (byBarcode) {
+                  logger.log('✅ Customer found via Supabase lookup (barcode):', byBarcode.name);
+                  setSearch(normalizeBarcode(byBarcode.CustomerListID || id));
+                  setSelectedCustomer(byBarcode as Customer);
+                  setScanned(false);
+                  setScannerEnabled(true);
+                  if (scanCooldownRef.current) {
+                    clearTimeout(scanCooldownRef.current);
+                    scanCooldownRef.current = null;
+                  }
+                  return;
+                }
+              }
+            } catch (e) {
+              logger.error('Supabase customer lookup failed:', e);
+            }
+          }
+          
           // Find similar customers with their full info for selection
           // Lower threshold to catch more partial matches
-          const similarCustomers = customers
+          const similarCustomers = customersToSearch
             .filter(customer => customer.CustomerListID)
             .map(customer => {
               const customerBarcode = normalizeBarcode(customer.CustomerListID);
@@ -1634,46 +1683,52 @@ export default function ScanCylindersScreen() {
         </>
       )}
 
-      {/* Scanbot - Customer Scanner */}
+      {/* Customer Scanner */}
       {showCustomerScan && (
-        <MLKitScanner
-          onBarcodeScanned={(data: string, result?: { format: string; confidence: number }) => {
-            const s = typeof data === 'string' ? data : '';
-            if (!s || !s.trim()) return;
-            logger.log('📷 MLKit: Customer barcode scanned:', s.substring(0, 30) + (s.length > 30 ? '…' : ''), result?.format);
-            handleBarcodeScanned({ data: s.trim(), type: 'scanbot' });
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+        <ScanArea
+          searchCustomerByName={async (names) => {
+            const c = await searchCustomerByName(names);
+            return c ? { name: c.name, id: c.CustomerListID } : null;
           }}
-          onTextFound={handleTextFound}
-          enabled={scannerEnabled && !scanned}
+          onCustomerFound={handleCustomerFound}
+          onScanned={(data: string) => {
+            const s = (typeof data === 'string' ? data : '').trim();
+            if (!s) return;
+            // Pass all barcodes - customer IDs can be 8-10 digits or sales receipt format
+            logger.log('📷 Customer barcode scanned:', s.substring(0, 30) + (s.length > 30 ? '…' : ''));
+            handleBarcodeScanned({ data: s, type: 'camera', target: 'customer' });
+          }}
           onClose={() => {
             setShowCustomerScan(false);
             setScannerVisible(false);
             setScannerTarget(null);
           }}
-          title="Scan Customer Barcode"
-          subtitle="Point camera at customer barcode or name"
+          label=""
+          validationPattern={/^[\dA-Za-z\-%]+$/}
+          style={{ flex: 1 }}
         />
+        </View>
       )}
 
-      {/* Scanbot - Order Scanner */}
+      {/* Order Scanner */}
       {showOrderScan && (
-        <MLKitScanner
-          onBarcodeScanned={(data: string, result?: { format: string; confidence: number }) => {
-            logger.log('📷 MLKit: Order barcode scanned:', data, result?.format);
-            const barcode = data.trim();
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+        <ScanArea
+          onScanned={(data: string) => {
+            logger.log('📷 Order barcode scanned:', data);
+            const barcode = (typeof data === 'string' ? data : '').trim();
             if (barcode) {
-              logger.log('📷 MLKit: Order barcode detected:', barcode);
               setOrderNumber(barcode);
               setShowOrderScan(false);
             }
           }}
-          enabled={scannerEnabled && !scanned}
-          onClose={() => {
-            setShowOrderScan(false);
-          }}
-          title="Scan Order Number"
-          subtitle="Point camera at order barcode"
+          onClose={() => setShowOrderScan(false)}
+          label="Scan order number"
+          validationPattern={/^[\dA-Za-z\-%]+$/}
+          style={{ flex: 1 }}
         />
+        </View>
       )}
     </View>
   );

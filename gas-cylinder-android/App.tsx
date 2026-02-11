@@ -30,7 +30,7 @@ if (__DEV__) {
   ]);
 }
 
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ThemeProvider } from './context/ThemeContext';
@@ -51,14 +51,12 @@ import SettingsScreen from './screens/SettingsScreen';
 import LoginScreen from './LoginScreen';
 import FillCylinderScreen from './screens/FillCylinderScreen';
 import AddCylinderScreen from './screens/AddCylinderScreen';
-import TrackAboutStyleScanScreen from './screens/TrackAboutStyleScanScreen';
 import CustomizationScreen from './screens/CustomizationScreen';
 import OrganizationJoinScreen from './screens/OrganizationJoinScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import RecentScansScreen from './screens/RecentScansScreen';
 import SupportTicketScreen from './screens/SupportTicketScreen';
 import UserManagementScreen from './screens/UserManagementScreen';
-import DriverDashboard from './screens/DriverDashboard';
 import AnalyticsScreen from './screens/AnalyticsScreen';
 import NotificationSettingsScreen from './screens/NotificationSettingsScreen';
 import { notificationService } from './services/NotificationService';
@@ -273,11 +271,6 @@ function AppContent() {
               options={{ title: 'Add Cylinder' }}
             />
             <Stack.Screen 
-              name="TrackAboutStyleScan" 
-              component={TrackAboutStyleScanScreen}
-              options={{ title: 'Track & Scan' }}
-            />
-            <Stack.Screen 
               name="Customization" 
               component={CustomizationScreen}
               options={{ title: 'Customization' }}
@@ -306,11 +299,6 @@ function AppContent() {
               name="UserManagement" 
               component={UserManagementScreen}
               options={{ title: 'User Management' }}
-            />
-            <Stack.Screen 
-              name="DriverDashboard" 
-              component={DriverDashboard}
-              options={{ title: 'Driver Dashboard' }}
             />
             <Stack.Screen 
               name="Analytics" 
@@ -353,12 +341,14 @@ function AppContent() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <SettingsProvider>
-        <AssetProvider>
-          <AppContent />
-        </AssetProvider>
-      </SettingsProvider>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <SettingsProvider>
+          <AssetProvider>
+            <AppContent />
+          </AssetProvider>
+        </SettingsProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

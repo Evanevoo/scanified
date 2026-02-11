@@ -299,7 +299,7 @@ export default function Pricing() {
               </Typography>
             </Fade>
             <Fade in timeout={1500}>
-              <Typography variant="h5" sx={{ mb: 6, maxWidth: 600, mx: 'auto', color: '#6B7280' }}>
+              <Typography variant="h5" sx={{ mb: 6, width: '100%', color: '#6B7280' }}>
                 Choose the perfect plan for your business. No hidden fees, no surprises.
               </Typography>
             </Fade>
@@ -642,7 +642,7 @@ export default function Pricing() {
             Frequently Asked Questions
           </Typography>
           
-          <Box sx={{ maxWidth: 800, mx: 'auto' }}>
+          <Box sx={{ width: '100%' }}>
             {faqs.map((faq, index) => (
               <Accordion 
                 key={index}

@@ -6,11 +6,13 @@ import { useRoute, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../context/AssetContext';
 import { useTheme } from '../context/ThemeContext';
+import { formatDateLocal, formatDateTimeLocal } from '../utils/dateUtils';
 
 export default function CylinderDetailsScreen() {
   const route = useRoute();
   const navigation = useNavigation();
-  const { barcode } = route.params as { barcode: string };
+  const params = (route?.params ?? {}) as { barcode?: string };
+  const barcode = params.barcode ?? '';
   const { profile } = useAuth();
   const { config: assetConfig } = useAssetConfig();
   const { colors } = useTheme();
@@ -20,10 +22,18 @@ export default function CylinderDetailsScreen() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    let isMounted = true;
     const fetchDetails = async () => {
-      if (!profile?.organization_id) {
-        setError('Organization not found');
+      if (!barcode) {
+        setError('No barcode provided');
         setLoading(false);
+        return;
+      }
+      if (!profile?.organization_id) {
+        if (isMounted) {
+          setError('Organization not found');
+          setLoading(false);
+        }
         return;
       }
 
@@ -45,13 +55,15 @@ export default function CylinderDetailsScreen() {
       
       if (cylErr || !cyl) {
         logger.log('❌ Cylinder not found:', cylErr);
-        setError(`${assetConfig?.assetDisplayName || 'Cylinder'} not found.`);
-        setLoading(false);
+        if (isMounted) {
+          setError(`${assetConfig?.assetDisplayName || 'Cylinder'} not found.`);
+          setLoading(false);
+        }
         return;
       }
       
       logger.log('✅ Cylinder found:', cyl.barcode_number);
-      setCylinder(cyl);
+      if (isMounted) setCylinder(cyl);
       
       // Fetch customer info if cylinder is assigned to a customer
       // Check both assigned_customer and customer_name fields
@@ -67,32 +79,24 @@ export default function CylinderDetailsScreen() {
         
         if (!custErr && cust) {
           logger.log('✅ Customer found:', cust.name);
-          setCustomer(cust);
-        } else if (cyl.customer_name) {
-          // Fallback: Use customer_name from bottle if customer lookup fails
+          if (isMounted) setCustomer(cust);
+        } else if (cyl.customer_name && isMounted) {
           logger.log('⚠️ Customer lookup failed, using customer_name from bottle:', cyl.customer_name);
           setCustomer({ name: cyl.customer_name, CustomerListID: cyl.assigned_customer || '' });
         }
-      } else if (cyl.customer_name) {
-        // If no assigned_customer but customer_name exists, use it
+      } else if (cyl.customer_name && isMounted) {
         logger.log('📋 Using customer_name from bottle:', cyl.customer_name);
         setCustomer({ name: cyl.customer_name, CustomerListID: '' });
       }
       
-      setLoading(false);
+      if (isMounted) setLoading(false);
     };
     fetchDetails();
+    return () => { isMounted = false; };
   }, [barcode, profile]);
 
-  const formatDate = (dateString: string) => {
-    if (!dateString) return 'Not set';
-    return new Date(dateString).toLocaleDateString();
-  };
-
-  const formatDateTime = (dateString: string) => {
-    if (!dateString) return 'Not set';
-    return new Date(dateString).toLocaleString();
-  };
+  const formatDate = (dateString: string) => (dateString ? formatDateLocal(dateString) : 'Not set');
+  const formatDateTime = (dateString: string) => (dateString ? formatDateTimeLocal(dateString) : 'Not set');
 
   if (loading) {
     return (
@@ -165,7 +169,7 @@ export default function CylinderDetailsScreen() {
                 backgroundColor: cylinder.status === 'filled' ? '#22C55E' :
                                  cylinder.status === 'empty' ? '#F59E0B' :
                                  cylinder.status === 'rented' ? '#3B82F6' :
-                                 cylinder.status === 'available' ? '#6B7280' :
+                                 cylinder.status === 'available' ? '#22C55E' : // available = Full (in stock)
                                  '#9CA3AF',
               }
             ]}>
@@ -173,7 +177,7 @@ export default function CylinderDetailsScreen() {
                 {cylinder.status === 'filled' ? 'Full' :
                  cylinder.status === 'empty' ? 'Empty' :
                  cylinder.status === 'rented' ? 'Rented' :
-                 cylinder.status === 'available' ? 'Available' :
+                 cylinder.status === 'available' ? 'Full' : // available = Full (in stock)
                  cylinder.status || 'Unknown'}
               </Text>
             </View>

@@ -10,6 +10,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { statsService, DailyStats, WeeklyStats, Achievement } from '../services/statsService';
+import { formatDateLocal } from '../utils/dateUtils';
 import { feedbackService } from '../services/feedbackService';
 
 const { width } = Dimensions.get('window');
@@ -103,7 +104,7 @@ export default function DailySummaryCard({ onPress }: DailySummaryCardProps) {
         <View style={styles.header}>
           <View style={styles.titleContainer}>
             <Text style={styles.title}>📊 Daily Summary</Text>
-            <Text style={styles.date}>{new Date().toLocaleDateString()}</Text>
+            <Text style={styles.date}>{formatDateLocal(new Date().toISOString())}</Text>
           </View>
           <View style={[styles.productivityBadge, { backgroundColor: productivity.color + '20' }]}>
             <Text style={[styles.productivityIcon, { color: productivity.color }]}>

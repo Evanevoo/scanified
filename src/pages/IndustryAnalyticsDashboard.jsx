@@ -433,15 +433,6 @@ export default function IndustryAnalyticsDashboard() {
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
           <StatCard
-            title="Pending Deliveries"
-            value={quickStats.pendingDeliveries}
-            icon={<DeliveryIcon />}
-            color="warning"
-            onClick={() => navigate('/deliveries')}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={2}>
-          <StatCard
             title="Overdue Returns"
             value={quickStats.overdueReturns}
             icon={<WarningIcon />}

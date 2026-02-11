@@ -1,10 +1,10 @@
 import logger from '../utils/logger';
 import React, { useState, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Linking, ScrollView, Pressable, Modal, Dimensions, Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
+import ScanArea from '../components/ScanArea';
 import { Picker } from '@react-native-picker/picker';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
@@ -15,8 +15,10 @@ import { soundService } from '../services/soundService';
 const { width, height } = Dimensions.get('window');
 
 export default function EditCylinderScreen() {
+  const insets = useSafeAreaInsets();
   const { config: assetConfig } = useAssetConfig();
   const { profile } = useAuth();
+  const scrollPaddingBottom = Platform.OS === 'android' ? Math.max(insets.bottom, 24) + 40 : insets.bottom + 40;
   const navigation = useNavigation();
   const route = useRoute();
   const { colors } = useTheme();
@@ -28,10 +30,6 @@ export default function EditCylinderScreen() {
   const [error, setError] = useState('');
   const [scanned, setScanned] = useState(false);
   const [scannerVisible, setScannerVisible] = useState(false);
-  const [permission, requestPermission] = useCameraPermissions();
-  const [flashEnabled, setFlashEnabled] = useState(false);
-  const [cameraZoom, setCameraZoom] = useState(0); // Zoom level (0 = no zoom, max 2x)
-  const [focusTrigger, setFocusTrigger] = useState(0); // Used to trigger autofocus on tap
   const [ownerType, setOwnerType] = useState('organization');
   const [ownerCustomerId, setOwnerCustomerId] = useState('');
   const [ownerName, setOwnerName] = useState('');
@@ -51,6 +49,33 @@ export default function EditCylinderScreen() {
   const [ownershipValuesLoading, setOwnershipValuesLoading] = useState(false);
   const [selectedOwnership, setSelectedOwnership] = useState('');
   const [ownershipPickerVisible, setOwnershipPickerVisible] = useState(false);
+
+  const searchCustomerByName = async (possibleNames: string[]): Promise<{ name: string; id: string } | null> => {
+    if (!profile?.organization_id || possibleNames.length === 0) return null;
+    try {
+      for (const name of possibleNames) {
+        if (!name || name.length < 3) continue;
+        const { data: customers } = await supabase
+          .from('customers')
+          .select('CustomerListID, name')
+          .eq('organization_id', profile.organization_id)
+          .ilike('name', `%${name}%`)
+          .limit(1);
+        if (customers && customers.length > 0) {
+          const found = customers[0];
+          return { name: found.name, id: found.CustomerListID };
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleOcrCustomerFound = (customer: { name: string; id: string }) => {
+    setScannerVisible(false);
+    navigation.navigate('CustomerDetails', { customerId: customer.id });
+  };
 
   // Fetch customers, locations, and ownership values when cylinder is loaded (step 2)
   React.useEffect(() => {
@@ -132,7 +157,7 @@ export default function EditCylinderScreen() {
 
   // Initialize barcode from route params if provided
   React.useEffect(() => {
-    const routeBarcode = (route.params as any)?.barcode;
+    const routeBarcode = (route?.params as any)?.barcode;
     if (routeBarcode) {
       setBarcode(routeBarcode);
       fetchCylinder(routeBarcode);
@@ -348,7 +373,7 @@ export default function EditCylinderScreen() {
       </View>
 
       {step === 1 && (
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollPaddingBottom }]}>
           <Text style={[styles.stepTitle, { color: colors.primary }]}>Scan or Enter Cylinder Barcode</Text>
           <View style={{ position: 'relative' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
@@ -376,7 +401,7 @@ export default function EditCylinderScreen() {
                         setShowBarcodeSuggestions(false);
                       }}
                     >
-                      <Text style={styles.suggestionText}>{bottle.barcode_number}</Text>
+                      <Text style={[styles.suggestionText, { color: colors.text }]}>{bottle.barcode_number}</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -400,7 +425,7 @@ export default function EditCylinderScreen() {
         </View>
       )}
       {step === 2 && cylinder && (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollPaddingBottom }]}>
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.primary }]}>Basic Information</Text>
             
@@ -640,96 +665,25 @@ export default function EditCylinderScreen() {
           {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
         </ScrollView>
       )}
-      {/* Scanner Modal - same layout as HomeScreen */}
+      {/* Scanner Modal */}
       <Modal visible={scannerVisible} animationType="slide" transparent={false}>
-        <View style={styles.fullscreenWrapper}>
-          {!permission ? (
-            <Text style={{ color: '#fff' }}>Requesting camera permission...</Text>
-          ) : !permission.granted ? (
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ color: '#fff', marginBottom: 16 }}>Camera access is required to scan barcodes</Text>
-              <TouchableOpacity onPress={async () => {
-                const result = await requestPermission();
-                if (!result.granted && result.canAskAgain === false) {
-                  Alert.alert(
-                    'Camera Permission',
-                    'Please enable camera access in your device settings to use the scanner.',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Open Settings', onPress: () => Linking.openSettings() }
-                    ]
-                  );
-                }
-              }} style={{ backgroundColor: '#40B5AD', padding: 16, borderRadius: 10 }}>
-                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Continue</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <>
-              <Pressable 
-                style={styles.fullscreenCamera}
-                onPress={(event) => {
-                  // Tap to focus - Android Expo Camera handles this automatically
-                }}
-              >
-                <CameraView
-                  style={StyleSheet.absoluteFill}
-                  facing="back"
-                  enableTorch={flashEnabled}
-                  zoom={cameraZoom}
-                  barcodeScannerSettings={{
-                    barcodeTypes: ['code128', 'code39', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14', 'qr', 'aztec', 'datamatrix', 'pdf417'],
-                    regionOfInterest: {
-                      x: (width - 320) / 2 / width,
-                      y: 150 / height,
-                      width: 320 / width,
-                      height: 150 / height,
-                    },
-                  }}
-                  onBarcodeScanned={scanned ? undefined : (event: any) => {
-                    handleBarcodeScanned(event);
-                  }}
-                />
-              </Pressable>
-              {/* Camera Overlay - same as HomeScreen */}
-              <View style={styles.cameraOverlay} pointerEvents="none">
-                <View style={styles.scanFrame} pointerEvents="none" />
-              </View>
-              <TouchableOpacity
-                style={styles.closeCameraButton}
-                onPress={() => setScannerVisible(false)}
-              >
-                <Text style={styles.closeCameraText}>✕ Close</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.flashButton}
-                onPress={() => setFlashEnabled(!flashEnabled)}
-              >
-                <Ionicons name={flashEnabled ? 'flash' : 'flash-off'} size={28} color={flashEnabled ? '#FFD700' : '#FFFFFF'} />
-              </TouchableOpacity>
-
-              {/* Zoom Controls */}
-              <View style={styles.zoomControls}>
-                <TouchableOpacity
-                  style={styles.zoomButton}
-                  onPress={() => {
-                    setCameraZoom(Math.max(0, cameraZoom - 0.1));
-                  }}
-                >
-                  <Ionicons name="remove-outline" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-                <Text style={styles.zoomText}>{Math.round((1 + cameraZoom) * 100)}%</Text>
-                <TouchableOpacity
-                  style={styles.zoomButton}
-                  onPress={() => {
-                    setCameraZoom(Math.min(2, cameraZoom + 0.1));
-                  }}
-                >
-                  <Ionicons name="add-outline" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+          <ScanArea
+            searchCustomerByName={searchCustomerByName}
+            onCustomerFound={handleOcrCustomerFound}
+            onScanned={(data: string) => {
+              if (!scanned && data) {
+                handleBarcodeScanned({ data: data.trim() });
+              }
+            }}
+            onClose={() => {
+              setScannerVisible(false);
+              setScanned(false);
+            }}
+            label="Scan cylinder barcode"
+            validationPattern={/^[\dA-Za-z\-%]+$/}
+            style={{ flex: 1 }}
+          />
         </View>
       </Modal>
     </SafeAreaView>
@@ -890,9 +844,9 @@ const styles = StyleSheet.create({
   },
   label: {
     fontWeight: 'bold',
-    color: '#222',
     marginBottom: 4,
     marginTop: 8,
+    // color applied inline where used: { color: colors.text }
   },
   nextButton: {
     paddingVertical: 18,
@@ -1050,7 +1004,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   removeButton: {
-    backgroundColor: '#ff5a1f',
     paddingVertical: 10,
     borderRadius: 10,
     alignItems: 'center',
@@ -1085,6 +1038,5 @@ const styles = StyleSheet.create({
   },
   suggestionText: {
     fontSize: 14,
-    color: '#222',
   },
 }); 

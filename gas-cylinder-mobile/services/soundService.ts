@@ -139,7 +139,7 @@ class SoundService {
           }
           
           const sound = new AudioPlayer(audioSource);
-          sound.volume = 0.8;
+          sound.volume = 1.0; // Max volume for scan/feedback
           
           this.soundCache.set(id, sound);
           loadedCount++;
@@ -190,7 +190,8 @@ class SoundService {
               // Small delay to ensure player is initialized
               await new Promise(resolve => setTimeout(resolve, 50));
             }
-            
+            // Max volume so scan beep is audible
+            sound.volume = 1.0;
             // Play the sound (expo-audio AudioPlayer automatically resets to start)
             sound.play();
             logger.log(`🔊 Played sound: ${type} (${soundId}) on ${Platform.OS}`);

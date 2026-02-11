@@ -10,8 +10,10 @@ import {
   Alert,
   ActivityIndicator,
   FlatList,
-  Modal
+  Modal,
+  Platform
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../context/ThemeContext';
@@ -30,8 +32,10 @@ interface SupportTicket {
 }
 
 export default function SupportTicketScreen() {
+  const insets = useSafeAreaInsets();
   const { user, profile } = useAuth();
   const { colors } = useTheme();
+  const listPaddingBottom = Platform.OS === 'android' ? Math.max(insets.bottom, 24) + 24 : insets.bottom + 16;
   
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,7 +90,7 @@ export default function SupportTicketScreen() {
             <Text style={[styles.ticketStatus, { color: colors.textSecondary }]}>Status: {item.status}</Text>
           </View>
         )}
-        contentContainerStyle={styles.ticketsList}
+        contentContainerStyle={[styles.ticketsList, { paddingBottom: listPaddingBottom }]}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="chatbubbles-outline" size={64} color={colors.textSecondary} />

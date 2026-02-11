@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import MLKitScanner from '../components/MLKitScanner';
+import ScanArea from '../components/ScanArea';
 import { DetectedBarcode } from '../../shared/scanners/UnifiedScanner';
 import { feedbackService } from '../services/feedbackService';
 
@@ -100,16 +100,27 @@ export default function TestConcurrentScanScreen() {
         </View>
       ) : (
         <>
-          <EnhancedExpoCameraScanner
-            onBarcodeScanned={(barcode) => console.log('Single scan:', barcode)}
-            onMultipleBarcodesDetected={handleMultipleDetected}
-            scanner={scanner}
-            scanMode="concurrent"
-            enabled={true}
+          <ScanArea
+            onScanned={(barcode) => {
+              handleMultipleDetected([{
+                barcode,
+                format: 'unknown',
+                confidence: 1,
+                frame: 0,
+                timestamp: Date.now(),
+                enhanced: true,
+                source: 'native',
+                bounds: undefined,
+                priority: 5
+              }]);
+            }}
             onClose={() => {
               setScanning(false);
               setDetected([]);
             }}
+            label="Concurrent Scan Test - Scan barcodes"
+            validationPattern={/^[\dA-Za-z\-%]+$/}
+            style={{ flex: 1, backgroundColor: '#000' }}
           />
           <ConcurrentScanOverlay
             detectedBarcodes={detected}

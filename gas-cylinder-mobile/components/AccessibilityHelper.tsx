@@ -2,6 +2,7 @@ import logger from '../utils/logger';
 import React, { useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, AccessibilityInfo, Platform } from 'react-native';
 import { customizationService } from '../services/customizationService';
+import { formatTimeLocal } from '../utils/dateUtils';
 
 interface AccessibilityHelperProps {
   children: React.ReactNode;
@@ -106,7 +107,7 @@ export function AccessibleScanResult({
   timestamp: number;
   onPress: () => void;
 }) {
-  const speakText = `Scanned ${barcode} for ${action} at ${new Date(timestamp).toLocaleTimeString()}`;
+  const speakText = `Scanned ${barcode} for ${action} at ${formatTimeLocal(timestamp != null ? new Date(timestamp).toISOString() : null)}`;
   
   return (
     <AccessibilityHelper
@@ -122,7 +123,7 @@ export function AccessibleScanResult({
           <Text style={{ fontSize: 16, fontWeight: 'bold' }}>{barcode}</Text>
           <Text style={{ fontSize: 14, color: '#666' }}>{action.toUpperCase()}</Text>
           <Text style={{ fontSize: 12, color: '#999' }}>
-            {new Date(timestamp).toLocaleTimeString()}
+            {formatTimeLocal(timestamp != null ? new Date(timestamp).toISOString() : null)}
           </Text>
         </View>
       </TouchableOpacity>

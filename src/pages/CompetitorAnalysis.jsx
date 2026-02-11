@@ -218,7 +218,7 @@ export default function CompetitorAnalysis() {
           <Typography variant="h3" fontWeight={700} gutterBottom>
             How We Compare
           </Typography>
-          <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 800, mx: 'auto' }}>
+          <Typography variant="h6" color="text.secondary" sx={{ width: '100%' }}>
             See how Scanified stacks up against the competition. We've analyzed the top asset management solutions to show you the differences.
           </Typography>
         </Box>
