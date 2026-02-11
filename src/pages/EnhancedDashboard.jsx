@@ -235,7 +235,7 @@ export default function EnhancedDashboard() {
         description: 'Analytics and insights',
         icon: <AnalyticsIcon />,
         color: '#EF4444',
-        path: '/organization-analytics',
+        path: '/custom-reports',
         count: null
       },
       {

@@ -1,10 +1,9 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView } from 'react-native';
+import React, { useEffect, useState, useMemo } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView, Keyboard } from 'react-native';
 import { supabase } from '../supabase';
-import { Picker } from '@react-native-picker/picker';
 import { useTheme } from '../context/ThemeContext';
-import MLKitScanner from '../components/MLKitScanner';
+import ScanArea from '../components/ScanArea';
 import { useAuth } from '../hooks/useAuth';
 import { CylinderLimitService } from '../services/CylinderLimitService';
 import { useAssetConfig } from '../context/AssetContext';
@@ -50,14 +49,57 @@ export default function AddCylinderScreen() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const { profile } = useAuth();
+
+  const searchCustomerByName = async (possibleNames: string[]): Promise<{ name: string; id: string } | null> => {
+    if (!profile?.organization_id || possibleNames.length === 0) return null;
+    try {
+      for (const name of possibleNames) {
+        if (!name || name.length < 3) continue;
+        const { data: customers } = await supabase
+          .from('customers')
+          .select('CustomerListID, name')
+          .eq('organization_id', profile.organization_id)
+          .ilike('name', `%${name}%`)
+          .limit(1);
+        if (customers && customers.length > 0) {
+          const found = customers[0];
+          return { name: found.name, id: found.CustomerListID };
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleOcrCustomerFound = (customer: { name: string; id: string }) => {
+    setScannerVisible(false);
+    navigation.navigate('CustomerDetails', { customerId: customer.id });
+  };
+
   const [owners, setOwners] = useState<{ id: string; name: string }[]>([]);
   const [selectedOwner, setSelectedOwner] = useState('');
   const [addingOwner, setAddingOwner] = useState(false);
   const [newOwnerName, setNewOwnerName] = useState('');
   const [scannerVisible, setScannerVisible] = useState(false);
-  const [gasTypePickerVisible, setGasTypePickerVisible] = useState(false);
+  const [gasTypeSearch, setGasTypeSearch] = useState('');
+  const [gasTypeSuggestionsVisible, setGasTypeSuggestionsVisible] = useState(false);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   const [ownerPickerVisible, setOwnerPickerVisible] = useState(false);
+
+  const getGasTypeLabel = (gt: GasType) => `${gt.category} - ${gt.type}`;
+
+  const gasTypeSuggestions = useMemo(() => {
+    if (!gasTypeSearch.trim()) return [];
+    const q = gasTypeSearch.trim().toLowerCase();
+    const toSearchStr = (gt: GasType) => [
+      getGasTypeLabel(gt),
+      gt.group_name || '',
+      gt.product_code || '',
+      gt.description || '',
+    ].join(' ').toLowerCase();
+    return gasTypes.filter(gt => toSearchStr(gt).includes(q)).slice(0, 12);
+  }, [gasTypes, gasTypeSearch]);
 
   useEffect(() => {
     const fetchGasTypes = async () => {
@@ -218,6 +260,7 @@ export default function AddCylinderScreen() {
       setBarcode('');
       setSerial('');
       setSelectedGasType('');
+      setGasTypeSearch('');
       setSelectedLocation('');
       // localStorage.removeItem('addCylinderDraft'); // Removed for React Native compatibility
     }
@@ -300,20 +343,75 @@ export default function AddCylinderScreen() {
               <Text style={[styles.loadingText, { color: colors.text }]}>Loading gas types...</Text>
             </View>
           ) : (
-            <TouchableOpacity 
-              style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => setGasTypePickerVisible(true)}
-            >
-              <Text style={[styles.pickerButtonText, { color: selectedGasType ? colors.text : colors.textSecondary }]}>
-                {selectedGasType 
-                  ? gasTypes.find(gt => gt.id.toString() === selectedGasType)
-                    ? `${gasTypes.find(gt => gt.id.toString() === selectedGasType)!.category} - ${gasTypes.find(gt => gt.id.toString() === selectedGasType)!.type}`
-                    : 'Select Gas Type'
-                  : 'Select Gas Type'
-                }
-              </Text>
-              <Text style={[styles.pickerArrow, { color: colors.text }]}>▼</Text>
-            </TouchableOpacity>
+            <View style={styles.gasTypeSearchWrapper}>
+              <TextInput
+                style={[styles.input, styles.gasTypeInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                placeholder="Search gas type..."
+                placeholderTextColor={colors.textSecondary}
+                value={selectedGasType ? (() => { const gt = gasTypes.find(g => g.id.toString() === selectedGasType); return gt ? getGasTypeLabel(gt) : gasTypeSearch; })() : gasTypeSearch}
+                onChangeText={(text) => {
+                  setSelectedGasType('');
+                  setGasTypeSearch(text);
+                  setGasTypeSuggestionsVisible(true);
+                }}
+                onFocus={() => {
+                  setGasTypeSuggestionsVisible(true);
+                  if (selectedGasType) {
+                    const gt = gasTypes.find(g => g.id.toString() === selectedGasType);
+                    if (gt) setGasTypeSearch(getGasTypeLabel(gt));
+                    setSelectedGasType('');
+                  }
+                }}
+                onBlur={() => setTimeout(() => setGasTypeSuggestionsVisible(false), 200)}
+                autoCapitalize="none"
+              />
+              {gasTypeSuggestionsVisible && (gasTypeSearch.trim() || !selectedGasType) && (
+                <View style={[styles.suggestionsList, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  {gasTypeSearch.trim() ? (
+                    gasTypeSuggestions.length > 0 ? (
+                      gasTypeSuggestions.map(gt => (
+                        <TouchableOpacity
+                          key={gt.id}
+                          style={[styles.suggestionItem, { borderBottomColor: colors.border }]}
+                          onPress={() => {
+                            setSelectedGasType(gt.id.toString());
+                            setGasTypeSearch('');
+                            setGasTypeSuggestionsVisible(false);
+                            Keyboard.dismiss();
+                          }}
+                        >
+                          <Text style={[styles.suggestionText, { color: colors.text }]}>{getGasTypeLabel(gt)}</Text>
+                          {(gt.group_name || gt.product_code) && (
+                            <Text style={[styles.suggestionSubtext, { color: colors.textSecondary }]}>
+                              {[gt.group_name, gt.product_code].filter(Boolean).join(' • ')}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
+                      ))
+                    ) : (
+                      <View style={styles.suggestionEmpty}>
+                        <Text style={[styles.suggestionEmptyText, { color: colors.textSecondary }]}>No matches found</Text>
+                      </View>
+                    )
+                  ) : (
+                    gasTypes.slice(0, 8).map(gt => (
+                      <TouchableOpacity
+                        key={gt.id}
+                        style={[styles.suggestionItem, { borderBottomColor: colors.border }]}
+                        onPress={() => {
+                          setSelectedGasType(gt.id.toString());
+                          setGasTypeSearch('');
+                          setGasTypeSuggestionsVisible(false);
+                          Keyboard.dismiss();
+                        }}
+                      >
+                        <Text style={[styles.suggestionText, { color: colors.text }]}>{getGasTypeLabel(gt)}</Text>
+                      </TouchableOpacity>
+                    ))
+                  )}
+                </View>
+              )}
+            </View>
           )}
         </View>
 
@@ -397,59 +495,21 @@ export default function AddCylinderScreen() {
         visible={scannerVisible}
         onRequestClose={() => setScannerVisible(false)}
         animationType="slide"
-        transparent={true}
+        transparent={false}
       >
-        <MLKitScanner
-          onBarcodeScanned={(scannedBarcode) => {
-            setBarcode(scannedBarcode);
-            setScannerVisible(false);
-          }}
-          onClose={() => setScannerVisible(false)}
-          enabled={scannerVisible}
-          title="Scan Barcode"
-          subtitle="Scan cylinder barcode to add"
-        />
-      </Modal>
-
-      {/* Gas Type Picker Modal */}
-      <Modal
-        visible={gasTypePickerVisible}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setGasTypePickerVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.pickerModal, { backgroundColor: colors.surface }]}>
-            <View style={[styles.pickerModalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Gas Type</Text>
-              <TouchableOpacity onPress={() => setGasTypePickerVisible(false)}>
-                <Text style={[styles.pickerModalClose, { color: colors.primary }]}>Done</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.pickerModalScroll}>
-              {gasTypes.map(gasType => (
-                <TouchableOpacity
-                  key={gasType.id}
-                  style={[
-                    styles.pickerModalItem,
-                    { borderBottomColor: colors.border },
-                    selectedGasType === gasType.id.toString() && { backgroundColor: colors.primary + '20' }
-                  ]}
-                  onPress={() => {
-                    setSelectedGasType(gasType.id.toString());
-                    setGasTypePickerVisible(false);
-                  }}
-                >
-                  <Text style={[styles.pickerModalItemText, { color: colors.text }]}>
-                    {gasType.category} - {gasType.type}
-                  </Text>
-                  {selectedGasType === gasType.id.toString() && (
-                    <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+          <ScanArea
+            searchCustomerByName={searchCustomerByName}
+            onCustomerFound={handleOcrCustomerFound}
+            onScanned={(scannedBarcode) => {
+              setBarcode(scannedBarcode);
+              setScannerVisible(false);
+            }}
+            onClose={() => setScannerVisible(false)}
+            label="Scan cylinder barcode to add"
+            validationPattern={/^[\dA-Za-z\-%]+$/}
+            style={{ flex: 1 }}
+          />
         </View>
       </Modal>
 
@@ -578,6 +638,49 @@ const styles = StyleSheet.create({
     padding: 16,
     fontSize: 16,
     borderWidth: 1,
+  },
+  gasTypeSearchWrapper: {
+    position: 'relative',
+    zIndex: 10,
+  },
+  gasTypeInput: {
+    zIndex: 1,
+  },
+  suggestionsList: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    maxHeight: 280,
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+  },
+  suggestionItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  suggestionText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  suggestionSubtext: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  suggestionEmpty: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  suggestionEmptyText: {
+    fontSize: 14,
   },
   pickerWrapper: {
     borderRadius: 12,

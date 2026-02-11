@@ -17,7 +17,7 @@ function Documentation() {
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
       p: 2
     }}>
-      <Card sx={{ maxWidth: 800, width: '100%' }}>
+      <Card sx={{ width: '100%' }}>
         <CardContent sx={{ p: 4 }}>
           <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 2 }}>
             <Button

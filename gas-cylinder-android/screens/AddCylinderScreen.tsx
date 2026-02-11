@@ -1,15 +1,15 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView, FlatList, Pressable, Dimensions } from 'react-native';
+import React, { useEffect, useState, useMemo } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView, FlatList, Pressable, Dimensions, Keyboard, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
 import { Picker } from '@react-native-picker/picker';
 import { useTheme } from '../context/ThemeContext';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
+import ScanArea from '../components/ScanArea';
 import { useAuth } from '../hooks/useAuth';
 import { CylinderLimitService } from '../services/CylinderLimitService';
 import { useAssetConfig } from '../context/AssetContext';
-import { Platform } from '../utils/platform';
 import { useNavigation } from '@react-navigation/native';
 import { soundService } from '../services/soundService';
 
@@ -39,7 +39,9 @@ interface Location {
 }
 
 export default function AddCylinderScreen() {
+  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const scrollPaddingBottom = Platform.OS === 'android' ? Math.max(insets.bottom, 24) + 40 : insets.bottom + 40;
   const { config: assetConfig } = useAssetConfig();
   const navigation = useNavigation();
   const [barcode, setBarcode] = useState('');
@@ -54,84 +56,54 @@ export default function AddCylinderScreen() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const { profile } = useAuth();
+
+  const searchCustomerByName = async (possibleNames: string[]): Promise<{ name: string; id: string } | null> => {
+    if (!profile?.organization_id || possibleNames.length === 0) return null;
+    try {
+      for (const name of possibleNames) {
+        if (!name || name.length < 3) continue;
+        const { data: customers } = await supabase
+          .from('customers')
+          .select('CustomerListID, name')
+          .eq('organization_id', profile.organization_id)
+          .ilike('name', `%${name}%`)
+          .limit(1);
+        if (customers && customers.length > 0) {
+          const found = customers[0];
+          return { name: found.name, id: found.CustomerListID };
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleOcrCustomerFound = (customer: { name: string; id: string }) => {
+    setScannerVisible(false);
+    navigation.navigate('CustomerDetails', { customerId: customer.id });
+  };
   const [owners, setOwners] = useState<{ id: string; name: string }[]>([]);
   const [selectedOwner, setSelectedOwner] = useState('');
   const [addingOwner, setAddingOwner] = useState(false);
   const [newOwnerName, setNewOwnerName] = useState('');
   const [scannerVisible, setScannerVisible] = useState(false);
-  const [scanned, setScanned] = useState(false);
-  const [flashEnabled, setFlashEnabled] = useState(false);
-  const [cameraZoom, setCameraZoom] = useState(0);
-  const [permission, requestPermission] = useCameraPermissions();
-  const cameraRef = useRef<CameraView>(null);
+  const [gasTypeSearch, setGasTypeSearch] = useState('');
+  const [gasTypeSuggestionsVisible, setGasTypeSuggestionsVisible] = useState(false);
 
-  const handleBarcodeScanned = (event: { data?: string; bounds?: any }) => {
-    if (scanned || !event?.data) return;
-    
-    // Filter by bounds to ensure barcode is within visual scan frame
-    if (event.bounds && !isBarcodeInScanArea(event.bounds)) {
-      logger.log('📷 Barcode outside scan area, ignoring');
-      return;
-    }
-    
-    const barcode = event.data.trim().replace(/^\*+|\*+$/g, '');
-    if (barcode) {
-      // Play scan sound
-      soundService.playSound('scan').catch(err => {
-        logger.warn('⚠️ Could not play scan sound:', err);
-      });
-      
-      setBarcode(barcode);
-      setScanned(true);
-      setScannerVisible(false);
-      setTimeout(() => setScanned(false), 1000);
-    }
-  };
+  const getGasTypeLabel = (gt: GasType) => `${gt.category} - ${gt.type}`;
 
-  // Check if barcode is within the visual scan frame
-  const isBarcodeInScanArea = (bounds: any): boolean => {
-    if (!bounds) return true; // Allow if no bounds
-    
-    const screenWidth = width;
-    const screenHeight = height;
-    const scanFrameWidth = 320;
-    const scanFrameHeight = 150;
-    const scanFrameTop = 150;
-    
-    const scanAreaLeft = (screenWidth - scanFrameWidth) / 2;
-    const scanAreaTop = scanFrameTop;
-    const scanAreaRight = scanAreaLeft + scanFrameWidth;
-    const scanAreaBottom = scanAreaTop + scanFrameHeight;
-    
-    const barcodeX = bounds.origin?.x || bounds.x || 0;
-    const barcodeY = bounds.origin?.y || bounds.y || 0;
-    const barcodeWidth = bounds.size?.width || bounds.width || 0;
-    const barcodeHeight = bounds.size?.height || bounds.height || 0;
-    
-    const barcodeCenterX = barcodeX + (barcodeWidth / 2);
-    const barcodeCenterY = barcodeY + (barcodeHeight / 2);
-    
-    let screenBarcodeX: number;
-    let screenBarcodeY: number;
-    
-    if (barcodeCenterX <= 1 && barcodeCenterY <= 1) {
-      screenBarcodeX = barcodeCenterX * screenWidth;
-      screenBarcodeY = barcodeCenterY * screenHeight;
-    } else {
-      screenBarcodeX = barcodeCenterX;
-      screenBarcodeY = barcodeCenterY;
-    }
-    
-    const toleranceX = scanFrameWidth * 0.1;
-    const toleranceY = scanFrameHeight * 0.1;
-    
-    return (
-      screenBarcodeX >= (scanAreaLeft - toleranceX) &&
-      screenBarcodeX <= (scanAreaRight + toleranceX) &&
-      screenBarcodeY >= (scanAreaTop - toleranceY) &&
-      screenBarcodeY <= (scanAreaBottom + toleranceY)
-    );
-  };
+  const gasTypeSuggestions = useMemo(() => {
+    if (!gasTypeSearch.trim()) return [];
+    const q = gasTypeSearch.trim().toLowerCase();
+    const toSearchStr = (gt: GasType) => [
+      getGasTypeLabel(gt),
+      gt.group_name || '',
+      gt.product_code || '',
+      gt.description || '',
+    ].join(' ').toLowerCase();
+    return gasTypes.filter(gt => toSearchStr(gt).includes(q)).slice(0, 12);
+  }, [gasTypes, gasTypeSearch]);
 
   useEffect(() => {
     const fetchGasTypes = async () => {
@@ -292,6 +264,7 @@ export default function AddCylinderScreen() {
       setBarcode('');
       setSerial('');
       setSelectedGasType('');
+      setGasTypeSearch('');
       setSelectedLocation('');
       // localStorage.removeItem('addCylinderDraft'); // Removed for React Native compatibility
     }
@@ -313,7 +286,7 @@ export default function AddCylinderScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}>
+    <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background, paddingBottom: scrollPaddingBottom }]}>
       {/* Scanner Section */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.primary }]}>Scan Barcode</Text>
@@ -373,23 +346,74 @@ export default function AddCylinderScreen() {
               <Text style={[styles.loadingText, { color: colors.text }]}>Loading gas types...</Text>
             </View>
           ) : (
-            <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Picker
-                selectedValue={selectedGasType}
-                onValueChange={setSelectedGasType}
-                style={[styles.picker, { color: colors.text }]}
-                enabled={true}
-                dropdownIconColor={colors.text}
-              >
-                <Picker.Item label="Select Gas Type" value="" />
-                {gasTypes.map(gasType => (
-                  <Picker.Item 
-                    key={gasType.id} 
-                    label={`${gasType.category} - ${gasType.type}`} 
-                    value={gasType.id.toString()} 
-                  />
-                ))}
-              </Picker>
+            <View style={styles.gasTypeSearchWrapper}>
+              <TextInput
+                style={[styles.input, styles.gasTypeInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                placeholder="Search gas type..."
+                placeholderTextColor={colors.textSecondary}
+                value={selectedGasType ? (() => { const gt = gasTypes.find(g => g.id.toString() === selectedGasType); return gt ? getGasTypeLabel(gt) : gasTypeSearch; })() : gasTypeSearch}
+                onChangeText={(text) => {
+                  setSelectedGasType('');
+                  setGasTypeSearch(text);
+                  setGasTypeSuggestionsVisible(true);
+                }}
+                onFocus={() => {
+                  setGasTypeSuggestionsVisible(true);
+                  if (selectedGasType) {
+                    const gt = gasTypes.find(g => g.id.toString() === selectedGasType);
+                    if (gt) setGasTypeSearch(getGasTypeLabel(gt));
+                    setSelectedGasType('');
+                  }
+                }}
+                onBlur={() => setTimeout(() => setGasTypeSuggestionsVisible(false), 200)}
+                autoCapitalize="none"
+              />
+              {gasTypeSuggestionsVisible && (gasTypeSearch.trim() || !selectedGasType) && (
+                <View style={[styles.suggestionsList, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  {gasTypeSearch.trim() ? (
+                    gasTypeSuggestions.length > 0 ? (
+                      gasTypeSuggestions.map(gt => (
+                        <TouchableOpacity
+                          key={gt.id}
+                          style={[styles.suggestionItem, { borderBottomColor: colors.border }]}
+                          onPress={() => {
+                            setSelectedGasType(gt.id.toString());
+                            setGasTypeSearch('');
+                            setGasTypeSuggestionsVisible(false);
+                            Keyboard.dismiss();
+                          }}
+                        >
+                          <Text style={[styles.suggestionText, { color: colors.text }]}>{getGasTypeLabel(gt)}</Text>
+                          {(gt.group_name || gt.product_code) && (
+                            <Text style={[styles.suggestionSubtext, { color: colors.textSecondary }]}>
+                              {[gt.group_name, gt.product_code].filter(Boolean).join(' • ')}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
+                      ))
+                    ) : (
+                      <View style={styles.suggestionEmpty}>
+                        <Text style={[styles.suggestionEmptyText, { color: colors.textSecondary }]}>No matches found</Text>
+                      </View>
+                    )
+                  ) : (
+                    gasTypes.slice(0, 8).map(gt => (
+                      <TouchableOpacity
+                        key={gt.id}
+                        style={[styles.suggestionItem, { borderBottomColor: colors.border }]}
+                        onPress={() => {
+                          setSelectedGasType(gt.id.toString());
+                          setGasTypeSearch('');
+                          setGasTypeSuggestionsVisible(false);
+                          Keyboard.dismiss();
+                        }}
+                      >
+                        <Text style={[styles.suggestionText, { color: colors.text }]}>{getGasTypeLabel(gt)}</Text>
+                      </TouchableOpacity>
+                    ))
+                  )}
+                </View>
+              )}
             </View>
           )}
         </View>
@@ -484,103 +508,28 @@ export default function AddCylinderScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Scanner Modal - same layout as other screens */}
+      {/* Scanner Modal */}
       <Modal
         visible={scannerVisible}
         onRequestClose={() => setScannerVisible(false)}
         animationType="slide"
         transparent={false}
       >
-        <View style={styles.fullscreenWrapper}>
-          {!permission ? (
-            <View style={styles.centerContent}>
-              <ActivityIndicator size="large" color="#fff" />
-              <Text style={styles.statusText}>Requesting camera permission...</Text>
-            </View>
-          ) : !permission.granted ? (
-            <View style={styles.centerContent}>
-              <Text style={styles.statusText}>Camera permission required</Text>
-              <TouchableOpacity onPress={requestPermission} style={styles.permissionButton}>
-                <Text style={styles.buttonText}>Continue</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.closeCameraButton} onPress={() => setScannerVisible(false)}>
-                <Text style={styles.closeCameraText}>✕ Close</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <>
-              <Pressable
-                style={styles.fullscreenCamera}
-                onPress={() => {
-                  // Tap to focus - Android Expo Camera handles this automatically
-                }}
-              >
-                <CameraView
-                  ref={cameraRef}
-                  style={StyleSheet.absoluteFill}
-                  facing="back"
-                  enableTorch={flashEnabled}
-                  zoom={cameraZoom}
-                  barcodeScannerSettings={{
-                    barcodeTypes: ['code128', 'code39', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14', 'qr', 'aztec', 'datamatrix', 'pdf417'],
-                    regionOfInterest: {
-                      x: (width - 320) / 2 / width,
-                      y: 150 / height,
-                      width: 320 / width,
-                      height: 150 / height,
-                    },
-                  }}
-                  onBarcodeScanned={scanned ? undefined : (event: any) => {
-                    handleBarcodeScanned(event);
-                  }}
-                />
-              </Pressable>
-              
-              {/* Camera Overlay - same as HomeScreen */}
-              <View style={styles.cameraOverlay} pointerEvents="none">
-                <View style={styles.scanFrame} pointerEvents="none" />
-              </View>
-              
-              <TouchableOpacity
-                style={styles.closeCameraButton}
-                onPress={() => setScannerVisible(false)}
-              >
-                <Text style={styles.closeCameraText}>✕ Close</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={styles.flashButton}
-                onPress={() => setFlashEnabled(!flashEnabled)}
-              >
-                <Ionicons 
-                  name={flashEnabled ? 'flash' : 'flash-off'} 
-                  size={28} 
-                  color={flashEnabled ? '#FFD700' : '#FFFFFF'} 
-                />
-              </TouchableOpacity>
-
-              {/* Zoom Controls */}
-              <View style={styles.zoomControls}>
-                <TouchableOpacity
-                  style={styles.zoomButton}
-                  onPress={() => {
-                    setCameraZoom(Math.max(0, cameraZoom - 0.1));
-                  }}
-                >
-                  <Ionicons name="remove-outline" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-                <Text style={styles.zoomText}>{Math.round((1 + cameraZoom) * 100)}%</Text>
-                <TouchableOpacity
-                  style={styles.zoomButton}
-                  onPress={() => {
-                    setCameraZoom(Math.min(2, cameraZoom + 0.1));
-                  }}
-                >
-                  <Ionicons name="add-outline" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+          <ScanArea
+            searchCustomerByName={searchCustomerByName}
+            onCustomerFound={handleOcrCustomerFound}
+            onScanned={(data: string) => {
+              if (data) {
+                setBarcode(data.trim());
+                setScannerVisible(false);
+              }
+            }}
+            onClose={() => setScannerVisible(false)}
+            label="Scan cylinder barcode to add"
+            validationPattern={/^[\dA-Za-z\-%]+$/}
+            style={{ flex: 1 }}
+          />
         </View>
       </Modal>
     </ScrollView>
@@ -614,6 +563,49 @@ const styles = StyleSheet.create({
     padding: 16,
     fontSize: 16,
     borderWidth: 1,
+  },
+  gasTypeSearchWrapper: {
+    position: 'relative',
+    zIndex: 10,
+  },
+  gasTypeInput: {
+    zIndex: 1,
+  },
+  suggestionsList: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    maxHeight: 280,
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+  },
+  suggestionItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  suggestionText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  suggestionSubtext: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  suggestionEmpty: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  suggestionEmptyText: {
+    fontSize: 14,
   },
   pickerWrapper: {
     borderRadius: 12,

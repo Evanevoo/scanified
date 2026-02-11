@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import MLKitScanner from '../components/MLKitScanner';
+import ScanArea from '../components/ScanArea';
 import { feedbackService } from '../services/feedbackService';
 
 export default function TestSingleScanScreen() {
@@ -85,12 +85,12 @@ export default function TestSingleScanScreen() {
           </View>
         </View>
       ) : (
-        <MLKitScanner
-          onBarcodeScanned={handleScan}
-          enabled={true}
+        <ScanArea
+          onScanned={handleScan}
           onClose={() => setScanning(false)}
-          title="Single Scan Test"
-          subtitle="Scan a barcode"
+          label="Single Scan Test - Scan a barcode"
+          validationPattern={/^[\dA-Za-z\-%]+$/}
+          style={{ flex: 1, backgroundColor: '#000' }}
         />
       )}
     </SafeAreaView>

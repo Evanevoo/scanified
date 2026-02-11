@@ -58,7 +58,7 @@ const ProtectedRoute = ({ children }) => {
         bgcolor: '#f5f5f5',
         p: 3
       }}>
-        <Card sx={{ maxWidth: 800, width: '100%' }}>
+        <Card sx={{ width: '100%' }}>
           <CardContent sx={{ p: 4 }}>
             <Typography variant="h4" gutterBottom align="center" color="error">
               Your Trial Has Expired

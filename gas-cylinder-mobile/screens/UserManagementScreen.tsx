@@ -10,6 +10,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
+import { formatDateLocal } from '../utils/dateUtils';
 import { supabase } from '../supabase';
 
 interface User {
@@ -146,7 +147,7 @@ export default function UserManagementScreen() {
             {item.role.toUpperCase()}
           </Text>
           <Text style={[styles.userDate, { color: colors.textSecondary }]}>
-            Joined: {new Date(item.created_at).toLocaleDateString()}
+            Joined: {formatDateLocal(item.created_at)}
           </Text>
         </View>
       </View>

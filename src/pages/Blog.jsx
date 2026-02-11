@@ -117,7 +117,7 @@ export default function Blog() {
           <Typography variant="h2" fontWeight={700} gutterBottom>
             Scanified Blog
           </Typography>
-          <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto' }}>
+          <Typography variant="h6" color="text.secondary" sx={{ width: '100%' }}>
             Insights, tips, and best practices for modern asset management
           </Typography>
         </Box>

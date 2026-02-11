@@ -382,15 +382,17 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
       logger.log('Invoice is for monthly rental. Billing period months:', rentalMonths);
     }
     
-    // Monthly rate per bottle (for monthly rentals)
-    const monthlyRate = 10; // Default monthly rate per bottle
+    // Use actual rental amounts when available (from lease or rental record); fallback to $10/bottle
     const numBottles = rentals.length;
-    
+    const defaultRate = 10;
+    const monthlyRate =
+      numBottles > 0 && rentals.some((r) => parseFloat(r.rental_amount) > 0)
+        ? rentals.reduce((sum, r) => sum + (parseFloat(r.rental_amount) || 0), 0) / numBottles
+        : defaultRate;
+
     // Calculate subtotal:
-    // - Monthly rentals: $10/month × 1 month (paying for upcoming month)
-    // - Yearly rentals: 
-    //   * If during lease period: charge for remaining months until lease end
-    //   * If new year (after lease end): charge for full 12 months
+    // - Monthly rentals: sum(rental_amount) × 1 month
+    // - Yearly rentals: sum(rental_amount) × months to charge (lease period or full year)
     let subtotal;
     if (isYearlyRental) {
       // Get lease agreement dates - check rentals first, then state
@@ -399,58 +401,42 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
       const leaseStartDate = leaseAgreement?.start_date ? new Date(leaseAgreement.start_date) : null;
       const leaseEndDate = leaseAgreement?.end_date ? new Date(leaseAgreement.end_date) : null;
       const invoiceDate = new Date(formData.invoice_date);
-      
-      logger.log('Yearly rental calculation - leaseAgreement:', leaseAgreement);
-      logger.log('Yearly rental calculation - leaseStartDate:', leaseStartDate, 'leaseEndDate:', leaseEndDate, 'invoiceDate:', invoiceDate);
-      
+
       let monthsToCharge = 12; // Default: full year
-      
+
       if (leaseEndDate && invoiceDate) {
-        // Check if invoice date is after lease end date (new year)
         if (invoiceDate > leaseEndDate) {
-          // New year: charge for full 12 months
           monthsToCharge = 12;
           logger.log('Yearly rental - new year: charging for full 12 months');
         } else if (leaseStartDate && leaseEndDate) {
-          // During lease period: calculate remaining months starting from the month AFTER invoice date
           const invoiceYear = invoiceDate.getFullYear();
           const invoiceMonth = invoiceDate.getMonth();
           const leaseEndYear = leaseEndDate.getFullYear();
           const leaseEndMonth = leaseEndDate.getMonth();
-          
-          // Start from the month AFTER invoice date
-          // If invoice is in November (month 10), start from December (month 11)
           let startYear = invoiceYear;
           let startMonth = invoiceMonth + 1;
-          
-          // If we go past December, move to next year
           if (startMonth > 11) {
-            startMonth = 0; // January
+            startMonth = 0;
             startYear += 1;
           }
-          
-          // Calculate months from the month after invoice date to lease end date
           monthsToCharge = (leaseEndYear - startYear) * 12 + (leaseEndMonth - startMonth) + 1;
-          
-          // Ensure we don't charge more than 12 months
           if (monthsToCharge > 12) monthsToCharge = 12;
           if (monthsToCharge < 1) monthsToCharge = 1;
-          
-          logger.log('Yearly rental - during lease period: charging for', monthsToCharge, 'remaining months (starting from month after invoice date)');
+          logger.log('Yearly rental - during lease: charging for', monthsToCharge, 'remaining months');
         }
       }
-      
-      // Calculate: monthly rate × months to charge × number of cylinders
-      subtotal = numBottles * monthlyRate * monthsToCharge;
-      logger.log('Yearly rental calculation:', numBottles, 'cylinders × $', monthlyRate, '/month ×', monthsToCharge, 'months = $', subtotal);
-      
-      // Store monthsToCharge for use in PDF generation
+
       rentalMonths = monthsToCharge;
+      // Subtotal = sum of (each bottle's monthly rate × months to charge)
+      subtotal = rentals.reduce((sum, r) => {
+        const rate = parseFloat(r.rental_amount) > 0 ? parseFloat(r.rental_amount) : monthlyRate;
+        return sum + rate * monthsToCharge;
+      }, 0);
+      logger.log('Yearly rental subtotal:', subtotal, '(rate from lease/rental_amount,', monthsToCharge, 'months)');
     } else {
-      // Monthly rental: $10/month × 1 month (paying for upcoming month)
-      // Always charge for 1 month, regardless of period dates
-      subtotal = numBottles * monthlyRate * 1;
-      logger.log('Monthly rental calculation:', numBottles, 'cylinders × $', monthlyRate, '/month × 1 month = $', subtotal);
+      // Monthly: sum of rental_amount × 1 month
+      subtotal = rentals.reduce((sum, r) => sum + (parseFloat(r.rental_amount) || monthlyRate) * 1, 0);
+      logger.log('Monthly rental subtotal:', subtotal);
       
       // Calculate billing period for display: upcoming month (month after invoice date)
       const invoiceDate = new Date(formData.invoice_date);
@@ -562,39 +548,13 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
         const actualStartDate = rentalStartDate < startDate ? rentalStartDate : startDate;
         const daysHeld = Math.ceil((endDate - actualStartDate) / (1000 * 60 * 60 * 24)) + 1;
         
-        // Calculate line total based on rental type
+        // Calculate line total based on rental type (use actual rental_amount when set)
+        const rateForLine = parseFloat(rental.rental_amount) > 0 ? parseFloat(rental.rental_amount) : monthlyRate;
         let lineTotal;
         if (isYearlyRental) {
-          // Yearly rental: calculate months to charge (remaining months or full year)
-          const yearlyRental = rentals.find(r => r.lease_agreement || r.rental_type === 'yearly');
-          const leaseEndDate = yearlyRental?.lease_agreement?.end_date ? new Date(yearlyRental.lease_agreement.end_date) : null;
-          const invoiceDate = new Date(formData.invoice_date);
-          
-          let monthsToCharge = 12; // Default: full year
-          
-          if (leaseEndDate && invoiceDate) {
-            if (invoiceDate > leaseEndDate) {
-              // New year: charge for full 12 months
-              monthsToCharge = 12;
-            } else if (yearlyRental?.lease_agreement?.start_date) {
-              const leaseStartDate = new Date(yearlyRental.lease_agreement.start_date);
-              const invoiceYear = invoiceDate.getFullYear();
-              const invoiceMonth = invoiceDate.getMonth();
-              const leaseEndYear = leaseEndDate.getFullYear();
-              const leaseEndMonth = leaseEndDate.getMonth();
-              
-              // Calculate remaining months
-              monthsToCharge = (leaseEndYear - invoiceYear) * 12 + (leaseEndMonth - invoiceMonth) + 1;
-              if (monthsToCharge > 12) monthsToCharge = 12;
-              if (monthsToCharge < 1) monthsToCharge = 1;
-            }
-          }
-          
-          lineTotal = monthlyRate * monthsToCharge;
+          lineTotal = rateForLine * rentalMonths;
         } else {
-          // Monthly rental: $10/month × 1 month (paying for upcoming month)
-          // Always charge for 1 month, regardless of period dates
-          lineTotal = monthlyRate * 1;
+          lineTotal = rateForLine * 1;
         }
         
         return {
@@ -789,9 +749,10 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
             : invoiceData.billingPeriodEnd)
         : formData.period_end;
       
+      const billingTypeLabel = isYearlyRental ? ' (Yearly lease)' : ' (Monthly rental)';
       const periodHeaders = ['RENTAL PERIOD', 'BILL TO ACCT #', 'SHIP TO ACCT #'];
       const periodValues = [
-        `${formatDate(displayPeriodStart)} - ${formatDate(displayPeriodEnd)}`,
+        `${formatDate(displayPeriodStart)} - ${formatDate(displayPeriodEnd)}${billingTypeLabel}`,
         customer.CustomerListID || '',
         customer.CustomerListID || ''
       ];
@@ -827,15 +788,13 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
       y = doc.lastAutoTable.finalY + 10;
     }
 
-    // LEASE SUMMARY section for yearly rentals (12 months)
+    // LEASE SUMMARY section for yearly rentals
     if (isYearlyRental) {
-      // Generate lease number from invoice number (e.g., R43405 -> L001069 format)
-      // For now, use a simple format: L + last 6 digits of invoice number
-      const leaseNumber = invoiceNumber.replace(/[^0-9]/g, '').slice(-6);
-      const formattedLeaseNumber = `L${leaseNumber.padStart(6, '0')}`;
-      
-      // Calculate rate per cylinder (total rental amount / number of cylinders)
-      const ratePerCylinder = invoiceData.subtotal / invoiceData.numBottles;
+      const yearlyRental = rentals.find(r => r.lease_agreement || r.rental_type === 'yearly');
+      const leaseAgreement = yearlyRental?.lease_agreement || customerLeaseAgreement;
+      const formattedLeaseNumber = leaseAgreement?.agreement_number || `L${invoiceNumber.replace(/[^0-9]/g, '').slice(-6).padStart(6, '0')}`;
+      const monthsCharged = invoiceData.rentalMonths || 12;
+      const ratePerCylinderPerMonth = invoiceData.numBottles > 0 ? invoiceData.subtotal / invoiceData.numBottles / monthsCharged : 0;
       
       // LEASE SUMMARY table - use proper table structure
       autoTable(doc, {
@@ -852,14 +811,14 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
       // LEASE SUMMARY details table
       autoTable(doc, {
         startY: y,
-        head: [['TYPE', 'NUMBER', 'DATE', 'DURATION', 'ASSETS', 'RATE', 'TOTAL']],
+        head: [['TYPE', 'NUMBER', 'DATE', 'DURATION', 'ASSETS', 'RATE (per cyl/mo)', 'TOTAL']],
         body: [[
           'Lease',
           formattedLeaseNumber,
           formatDate(formData.invoice_date),
-          `${invoiceData.rentalMonths} Months`, // Show actual months being charged (remaining or full year)
+          `${monthsCharged} Months`,
           `${invoiceData.numBottles} Industrial Cylinder${invoiceData.numBottles !== 1 ? 's' : ''}`,
-          `$${ratePerCylinder.toFixed(2)}`,
+          `$${ratePerCylinderPerMonth.toFixed(2)}`,
           `$${invoiceData.subtotal.toFixed(2)}`
         ]],
         theme: 'plain',

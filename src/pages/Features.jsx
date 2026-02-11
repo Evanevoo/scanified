@@ -221,7 +221,7 @@ export default function Features() {
               </Typography>
             </Fade>
             <Fade in timeout={1500}>
-              <Typography variant="h5" sx={{ mb: 6, color: '#E5E7EB', maxWidth: 800, mx: 'auto' }}>
+              <Typography variant="h5" sx={{ mb: 6, color: '#E5E7EB', width: '100%' }}>
                 From basic tracking to advanced analytics, Scanified provides all the tools you need to run your business efficiently
               </Typography>
             </Fade>
@@ -395,7 +395,7 @@ export default function Features() {
             Frequently Asked Questions
           </Typography>
           
-          <Box sx={{ maxWidth: 800, mx: 'auto' }}>
+          <Box sx={{ width: '100%' }}>
             <Accordion 
               expanded={expandedAccordion === 'panel1'} 
               onChange={handleAccordionChange('panel1')}

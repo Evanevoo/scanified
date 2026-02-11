@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import MLKitScanner from '../components/MLKitScanner';
+import ScanArea from '../components/ScanArea';
 import BatchScanControls from '../../shared/components/BatchScanControls';
 import { UnifiedScanner, ScanResult } from '../../shared/scanners/UnifiedScanner';
 import { BatchScanner } from '../../shared/scanners/BatchScanner';
@@ -157,24 +157,21 @@ export default function TestBatchScanScreen() {
         </View>
       ) : (
         <>
-          <MLKitScanner
-            onBarcodeScanned={(barcode, result) => {
-              if (result) {
-                handleScan(barcode, { 
-                  barcode, 
-                  format: result.format, 
-                  confidence: result.confidence,
-                  frame: 0,
-                  timestamp: Date.now(),
-                  enhanced: true,
-                  source: 'native'
-                });
-              }
+          <ScanArea
+            onScanned={(barcode) => {
+              handleScan(barcode, { 
+                barcode, 
+                format: 'unknown', 
+                confidence: 1,
+                frame: 0,
+                timestamp: Date.now(),
+                enhanced: true,
+                source: 'native'
+              });
             }}
-            enabled={true}
-            batchMode={true}
-            title="Batch Scan Mode"
-            subtitle="Scan multiple barcodes"
+            label="Batch Scan Mode - Scan multiple barcodes"
+            validationPattern={/^[\dA-Za-z\-%]+$/}
+            style={{ flex: 1, backgroundColor: '#000' }}
           />
           {session && (
             <BatchScanControls

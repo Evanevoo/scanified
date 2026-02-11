@@ -280,7 +280,6 @@ borderColor: 'divider',
       title: 'Operations',
       icon: <LocalShipping />,
       items: [
-        { title: 'Deliveries', path: '/deliveries', icon: <LocalShipping />, roles: ['admin', 'user', 'manager'] },
         { title: 'Bottles for Day', path: '/bottles-for-day', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
         { title: 'Rentals', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
         { title: 'Scanned Orders', path: '/scanned-orders', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
@@ -297,16 +296,15 @@ borderColor: 'divider',
         { title: 'Bottle Management', path: '/bottle-management', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
         { title: 'Ownership Management', path: '/ownership-management', icon: <BusinessIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Assets', path: '/assets', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Asset History Lookup', path: '/asset-history-lookup', icon: <SearchIcon />, roles: ['admin', 'user', 'manager'] }
+        { title: 'Asset History Lookup', path: '/asset-history-lookup', icon: <SearchIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Recently Added Cylinders', path: '/recent-cylinders', icon: <Inventory />, roles: ['admin', 'user', 'manager'] }
       ]
     },
     analytics: {
       title: 'Analytics & Reports',
       icon: <Analytics />,
       items: [
-        { title: 'Organization Analytics', path: '/organization-analytics', icon: <Analytics />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Custom Reports', path: '/custom-reports', icon: <ReportIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Audit Management', path: '/audit-management', icon: <Assessment />, roles: ['admin', 'manager'] }
+        { title: 'Custom Reports', path: '/custom-reports', icon: <ReportIcon />, roles: ['admin', 'user', 'manager'] }
       ]
     }
   };
@@ -348,6 +346,20 @@ borderColor: 'divider',
       backgroundColor: '#F5F5F5', // Light gray background like in the image
       borderRight: 'none'
     }}>
+        {/* Sidebar collapse toggle */}
+        {onToggleCollapse && (
+          <Box sx={{ p: 1, display: 'flex', justifyContent: isCollapsed ? 'center' : 'flex-end' }}>
+            <Tooltip title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+              <IconButton
+                size="small"
+                onClick={onToggleCollapse}
+                sx={{ color: '#6B7280', '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' } }}
+              >
+                {isCollapsed ? <ChevronRight /> : <ChevronLeft />}
+              </IconButton>
+            </Tooltip>
+          </Box>
+        )}
 
         {/* Search */}
         {!isCollapsed && (
@@ -426,16 +438,22 @@ borderColor: 'divider',
 
         {/* Menu Sections */}
         <Box sx={{ flex: 1, overflow: 'auto' }}>
-            {Object.entries(filteredSections).map(([sectionKey, section], sectionIndex) => (
+            {Object.entries(filteredSections).map(([sectionKey, section], sectionIndex) => {
+              const isSectionOpen = sections[sectionKey] !== false;
+              return (
               <React.Fragment key={sectionKey}>
-                {/* Section Header */}
-                {!isCollapsed && (
+                {/* Section Header - clickable when expanded to collapse/expand section */}
+                {!isCollapsed ? (
                   <ListItem disablePadding>
-                    <Box sx={{ 
-                      px: 2.5, 
-                      py: 1,
-                      width: '100%'
-                    }}>
+                    <ListItemButton
+                      onClick={() => toggleSection(sectionKey)}
+                      sx={{ 
+                        px: 2.5, 
+                        py: 1,
+                        minHeight: 36,
+                        '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' }
+                      }}
+                    >
                       <Typography 
                         variant="caption" 
                         sx={{ 
@@ -443,16 +461,27 @@ borderColor: 'divider',
                           fontSize: '11px',
                           fontWeight: 600,
                           letterSpacing: '0.5px',
-                          textTransform: 'uppercase'
+                          textTransform: 'uppercase',
+                          flex: 1
                         }}
                       >
+                        {section.title}
+                      </Typography>
+                      {isSectionOpen ? <ExpandLess sx={{ fontSize: 18, color: '#6B7280' }} /> : <ExpandMore sx={{ fontSize: 18, color: '#6B7280' }} />}
+                    </ListItemButton>
+                  </ListItem>
+                ) : (
+                  <ListItem disablePadding>
+                    <Box sx={{ px: 2.5, py: 1, width: '100%' }}>
+                      <Typography variant="caption" sx={{ color: '#6B7280', fontSize: '11px', fontWeight: 600, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
                         {section.title}
                       </Typography>
                     </Box>
                   </ListItem>
                 )}
                 
-                {/* Section Items */}
+                {/* Section Items - collapsible when sidebar is expanded */}
+                <Collapse in={isCollapsed ? true : isSectionOpen} timeout="auto" unmountOnExit={false}>
                 <List component="div" disablePadding>
                   {section.items.map((item) => {
                     const active = isActive(item.path);
@@ -518,8 +547,10 @@ borderColor: 'divider',
                     );
                   })}
                 </List>
+                </Collapse>
               </React.Fragment>
-            ))}
+            );
+            })}
         </Box>
 
         {/* User Profile Section at Bottom */}

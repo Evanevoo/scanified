@@ -146,6 +146,19 @@ export interface AssetType extends OrganizationEntity {
 // CUSTOMER TYPES
 // =============================================================================
 
+/** One department under a customer (when using customer_departments). */
+export interface CustomerDepartment {
+  id: string;
+  organization_id: string;
+  customer_id: string;
+  name: string;
+  code?: string;
+  address?: string;
+  is_default?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface Customer extends OrganizationEntity {
   CustomerListID: string;
   name: string;
@@ -165,6 +178,16 @@ export interface Customer extends OrganizationEntity {
   industry?: string;
   customer_type: 'individual' | 'business' | 'government';
   status: 'active' | 'inactive' | 'suspended';
+  /** Optional single department/location/cost center. Use when each customer has one department. */
+  department?: string;
+  /** When one customer has multiple departments, use this (join from customer_departments). */
+  departments?: CustomerDepartment[];
+  /** Parent customer id (uuid). This customer is a location/department under that parent. E.g. "Stevenson Industrial Regina" has parent = Stevenson Industrial. */
+  parent_customer_id?: string | null;
+  /** Parent customer (when joined). */
+  parent?: Customer | null;
+  /** Child customers / locations under this customer (when joined). E.g. Stevenson Industrial has children Regina, Saskatoon. */
+  child_customers?: Customer[];
   notes?: string;
   created_by?: string;
   last_contact_date?: string;

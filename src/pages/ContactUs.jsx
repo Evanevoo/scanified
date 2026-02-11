@@ -305,7 +305,7 @@ export default function ContactUs() {
           <Typography variant="h2" fontWeight={700} sx={{ mb: 3, color: '#000000' }}>
             {contactConfig.header.title}
           </Typography>
-          <Typography variant="h6" sx={{ maxWidth: 600, mx: 'auto', color: '#6B7280' }}>
+          <Typography variant="h6" sx={{ width: '100%', color: '#6B7280' }}>
             {contactConfig.header.subtitle}
           </Typography>
         </Box>

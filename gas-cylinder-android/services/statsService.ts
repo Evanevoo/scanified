@@ -73,7 +73,7 @@ class StatsService {
    */
   private async loadTodayStats() {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; })();
       const stored = await AsyncStorage.getItem(`daily_stats_${today}`);
       
       if (stored) {
@@ -83,7 +83,7 @@ class StatsService {
       }
     } catch (error) {
       logger.error('Error loading today stats:', error);
-      const today = new Date().toISOString().split('T')[0];
+      const today = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; })();
       this.todayStats = this.createEmptyDayStats(today);
     }
   }

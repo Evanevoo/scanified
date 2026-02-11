@@ -88,6 +88,9 @@ export default function CustomerDetail() {
   const [quickTransferDialogOpen, setQuickTransferDialogOpen] = useState(false);
   const [recentCustomers, setRecentCustomers] = useState([]);
   const [warehouseConfirmDialogOpen, setWarehouseConfirmDialogOpen] = useState(false);
+  const [parentCustomer, setParentCustomer] = useState(null); // { id, name, CustomerListID } when this customer is under a parent
+  const [childCustomers, setChildCustomers] = useState([]);   // customers where parent_customer_id = this customer's id
+  const [parentOptions, setParentOptions] = useState([]);     // for edit form "Under parent" selector
 
   useEffect(() => {
     const fetchData = async () => {
@@ -118,6 +121,21 @@ export default function CustomerDetail() {
         const customerData = allCustomers[0];
         setCustomer(customerData);
         setEditForm(customerData);
+
+        // Parent: customer under another (e.g. Stevenson Industrial Regina under Stevenson Industrial)
+        if (customerData.parent_customer_id) {
+          const { data: parentRow } = await supabase.from('customers').select('id, name, CustomerListID').eq('id', customerData.parent_customer_id).single();
+          setParentCustomer(parentRow || null);
+        } else {
+          setParentCustomer(null);
+        }
+        // Children: locations/departments under this customer (e.g. Stevenson Industrial Regina, Saskatoon under Stevenson Industrial)
+        if (customerData.id) {
+          const { data: children } = await supabase.from('customers').select('id, name, CustomerListID').eq('parent_customer_id', customerData.id).order('name');
+          setChildCustomers(children || []);
+        } else {
+          setChildCustomers([]);
+        }
         
         // SECURITY: Only fetch bottles from user's organization
         const { data: customerAssetsData, error: customerAssetsError } = await supabase
@@ -151,6 +169,17 @@ export default function CustomerDetail() {
     };
     fetchData();
   }, [id]);
+
+  // Load parent customer options when entering edit (for "Under parent" selector)
+  useEffect(() => {
+    if (!editing || !organization?.id || !customer?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.from('customers').select('id, name, CustomerListID').eq('organization_id', organization.id).order('name');
+      if (!cancelled && data) setParentOptions(data.filter(c => c.id !== customer.id));
+    })();
+    return () => { cancelled = true; };
+  }, [editing, organization?.id, customer?.id]);
 
   // Enhanced transfer functionality functions
   const handleSelectAsset = (assetId) => {
@@ -491,6 +520,8 @@ export default function CustomerDetail() {
       postal_code: editForm.postal_code,
       customer_type: editForm.customer_type || 'CUSTOMER',
       location: editForm.location || 'SASKATOON',
+      department: (editForm.department || '').trim() || null,
+      parent_customer_id: editForm.parent_customer_id || null,
       // Include barcode if provided (empty string allowed to clear)
       barcode: normalizedBarcode || null
     };
@@ -504,6 +535,12 @@ export default function CustomerDetail() {
       return;
     }
     setCustomer({ ...customer, ...updateFields });
+    if (updateFields.parent_customer_id) {
+      const { data: p } = await supabase.from('customers').select('id, name, CustomerListID').eq('id', updateFields.parent_customer_id).single();
+      setParentCustomer(p || null);
+    } else {
+      setParentCustomer(null);
+    }
     setEditing(false);
     setSaving(false);
     setSaveSuccess(true);
@@ -574,6 +611,29 @@ export default function CustomerDetail() {
           <Box>
             <Typography variant="body2" color="text.secondary">Customer ID</Typography>
             <Typography variant="body1" fontWeight={600} fontFamily="monospace" sx={{ mb: 2 }}>{customer.CustomerListID}</Typography>
+            <Typography variant="body2" color="text.secondary">Part of (parent customer)</Typography>
+            {editing ? (
+              <Autocomplete
+                options={parentOptions}
+                getOptionLabel={(opt) => (opt && (opt.name || opt.CustomerListID || '')) || ''}
+                value={parentOptions.find(o => o.id === editForm.parent_customer_id) || null}
+                onChange={(_, v) => setEditForm({ ...editForm, parent_customer_id: v?.id ?? null })}
+                renderInput={(params) => (
+                  <TextField {...params} size="small" label="Under (parent customer)" placeholder="e.g. Stevenson Industrial" sx={{ mb: 2, minWidth: 220 }} />
+                )}
+                isOptionEqualToValue={(a, b) => (a?.id ?? null) === (b?.id ?? null)}
+              />
+            ) : (
+              <Typography variant="body1" sx={{ mb: 2 }}>
+                {parentCustomer ? (
+                  <Button size="small" variant="text" sx={{ p: 0, minWidth: 0, textTransform: 'none' }} onClick={() => navigate(`/customer/${parentCustomer.CustomerListID}`)}>
+                    {parentCustomer.name}
+                  </Button>
+                ) : (
+                  <em style={{ color: '#888' }}>— Top-level customer</em>
+                )}
+              </Typography>
+            )}
             <Typography variant="body2" color="text.secondary">Customer Barcode</Typography>
             {editing ? (
               <TextField 
@@ -702,6 +762,22 @@ export default function CustomerDetail() {
                 />
               </Typography>
             )}
+            <Typography variant="body2" color="text.secondary">Department</Typography>
+            {editing ? (
+              <TextField
+                name="department"
+                value={editForm.department || ''}
+                onChange={handleEditChange}
+                size="small"
+                label="Department (optional)"
+                placeholder="e.g. Warehouse, Lab, Shipping"
+                sx={{ mb: 2, minWidth: 180 }}
+              />
+            ) : (
+              <Typography variant="body1" sx={{ mb: 2 }}>
+                {customer.department || <em style={{ color: '#888' }}>Not set</em>}
+              </Typography>
+            )}
             <Typography variant="body2" color="text.secondary">Contact</Typography>
             {editing ? (
               <TextField name="contact_details" value={editForm.contact_details || ''} onChange={handleEditChange} size="small" label="Contact" sx={{ minWidth: 180 }} />
@@ -760,6 +836,22 @@ export default function CustomerDetail() {
             )}
           </Box>
         </Box>
+        {childCustomers.length > 0 && (
+          <Box sx={{ mt: 3 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Locations / departments under this customer</Typography>
+            <Box display="flex" flexWrap="wrap" gap={1}>
+              {childCustomers.map((ch) => (
+                <Chip
+                  key={ch.id}
+                  label={ch.name}
+                  onClick={() => navigate(`/customer/${ch.CustomerListID}`)}
+                  sx={{ cursor: 'pointer' }}
+                  variant="outlined"
+                />
+              ))}
+            </Box>
+          </Box>
+        )}
         {editing && (
           <Box>
             {/* Customer Type Info */}

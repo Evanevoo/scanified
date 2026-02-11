@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { supabase } from '../supabase/client';
 import { resetDaysAtLocation } from '../utils/daysAtLocationUpdater';
 import { 
-  Box, Paper, Typography, Button, Alert, Snackbar, CircularProgress, Divider, 
+  Box, Paper, Typography, Button, Alert, CircularProgress, Divider, 
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton, 
   MenuItem, Select, FormControl, InputLabel, Chip, Checkbox, Autocomplete, Tooltip, Fab, 
   Zoom, Card, CardContent, CardHeader, Grid, Tabs, Tab, Badge, LinearProgress,
@@ -15,6 +15,7 @@ import {
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { SearchInputWithIcon } from '../components/ui/search-input-with-icon';
+import PortalSnackbar from '../components/PortalSnackbar';
 import {
   History as HistoryIcon,
   Close as CloseIcon,
@@ -451,6 +452,64 @@ const validateReturnBalance = async (bottle, orderNumber, organization) => {
   return { isOnBalance: true, exceptionCreated: false };
 };
 
+/**
+ * Revert bottle status when a return scan is rejected/cancelled.
+ * Bottles were marked as empty when the return was scanned; we restore them to rented.
+ */
+const revertBottlesForRejectedReturn = async (orderNumber, organizationId) => {
+  if (!orderNumber || !organizationId) return;
+  try {
+    const barcodesToRevert = new Set();
+    // Get RETURN scans from bottle_scans (before we delete them)
+    const { data: bottleScans } = await supabase
+      .from('bottle_scans')
+      .select('bottle_barcode, mode')
+      .eq('order_number', orderNumber);
+    if (bottleScans) {
+      bottleScans.forEach(s => {
+        const modeUpper = (s.mode || '').toUpperCase();
+        if (s.bottle_barcode && (modeUpper === 'RETURN' || modeUpper === 'IN')) {
+          barcodesToRevert.add(s.bottle_barcode);
+        }
+      });
+    }
+    // Get RETURN scans from scans table (action='in' or mode='RETURN')
+    const { data: scans } = await supabase
+      .from('scans')
+      .select('barcode_number, bottle_barcode, action, mode')
+      .eq('order_number', orderNumber);
+    if (scans) {
+      scans.forEach(s => {
+        const barcode = s.barcode_number || s.bottle_barcode;
+        const isReturn = s.action === 'in' || (s.mode || '').toUpperCase() === 'RETURN';
+        if (barcode && isReturn) barcodesToRevert.add(barcode);
+      });
+    }
+    for (const barcode of barcodesToRevert) {
+      // Fetch current bottle to determine correct revert status
+      const { data: bottle } = await supabase
+        .from('bottles')
+        .select('assigned_customer')
+        .eq('barcode_number', barcode)
+        .eq('organization_id', organizationId)
+        .single();
+      const newStatus = bottle?.assigned_customer ? 'rented' : 'available';
+      const { error } = await supabase
+        .from('bottles')
+        .update({ status: newStatus })
+        .eq('barcode_number', barcode)
+        .eq('organization_id', organizationId);
+      if (error) {
+        logger.warn('Could not revert bottle status for rejected return:', barcode, error);
+      } else {
+        logger.log('Reverted bottle after return rejected:', barcode, '->', newStatus);
+      }
+    }
+  } catch (err) {
+    logger.error('Error reverting bottles for rejected return:', err);
+  }
+};
+
 function determineVerificationStatus(record) {
   const data = parseDataField(record.data);
   
@@ -533,8 +592,6 @@ export default function ImportApprovals() {
   // Enhanced state management  
   const [selectedRecords, setSelectedRecords] = useState([]);
   const [viewMode, setViewMode] = useState('list'); // 'list', 'grid', 'timeline'
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [refreshInterval, setRefreshInterval] = useState(30000); // 30 seconds
   const [verificationDialog, setVerificationDialog] = useState({ open: false, record: null, step: 0 });
   const [bulkActionDialog, setBulkActionDialog] = useState({ open: false, action: null });
   const [filterDialog, setFilterDialog] = useState({ open: false });
@@ -647,16 +704,6 @@ export default function ImportApprovals() {
         : [...prev, id]
     );
   };
-
-  // Auto-refresh functionality
-  useEffect(() => {
-    if (autoRefresh) {
-      const interval = setInterval(() => {
-        fetchData();
-      }, refreshInterval);
-      return () => clearInterval(interval);
-    }
-  }, [autoRefresh, refreshInterval]);
 
   // Initialize component with optimized loading
   useEffect(() => {
@@ -854,6 +901,18 @@ export default function ImportApprovals() {
   // Get filtered records
   const filteredInvoices = deduplicateRecords(filterRecords(pendingInvoices));
   const filteredReceipts = deduplicateRecords(filterRecords(pendingReceipts));
+
+  // Sort by scan time (created_at = when record was created/scanned), newest first
+  const getSortableScanTime = (record) => {
+    const t = record?.created_at;
+    return t ? new Date(t).getTime() : 0;
+  };
+  const sortedFilteredInvoices = useMemo(() => {
+    return [...(filteredInvoices || [])].sort((a, b) => getSortableScanTime(b) - getSortableScanTime(a));
+  }, [filteredInvoices]);
+  const sortedFilteredReceipts = useMemo(() => {
+    return [...(filteredReceipts || [])].sort((a, b) => getSortableScanTime(b) - getSortableScanTime(a));
+  }, [filteredReceipts]);
   
   // Create a Set of visible IDs for efficient lookup (memoized to prevent recreation)
   const visibleRecordIds = useMemo(() => {
@@ -4367,15 +4426,6 @@ export default function ImportApprovals() {
           </Typography>
         </Box>
         <Box display="flex" gap={2}>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={autoRefresh}
-                onChange={(e) => setAutoRefresh(e.target.checked)}
-              />
-            }
-            label="Auto Refresh"
-          />
           <Button
             startIcon={<RefreshIcon />}
             onClick={fetchData}
@@ -4614,7 +4664,7 @@ export default function ImportApprovals() {
       <Dialog 
         open={bottleInfoDialog.open} 
         onClose={() => setBottleInfoDialog({ open: false, orderNumber: null, bottles: [], scannedBarcodes: [], loading: false })}
-        maxWidth="md"
+        maxWidth="xl"
         fullWidth
       >
         <DialogTitle>
@@ -5178,30 +5228,8 @@ export default function ImportApprovals() {
       >
         <DialogTitle>Import Approval Settings</DialogTitle>
         <DialogContent>
-          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={autoRefresh}
-                  onChange={(e) => setAutoRefresh(e.target.checked)}
-                />
-              }
-              label="Auto Refresh"
-            />
-            <FormControl fullWidth>
-              <InputLabel>Refresh Interval</InputLabel>
-              <Select
-                value={refreshInterval}
-                onChange={(e) => setRefreshInterval(e.target.value)}
-                label="Refresh Interval"
-                disabled={!autoRefresh}
-              >
-                <MenuItem value={10000}>10 seconds</MenuItem>
-                <MenuItem value={30000}>30 seconds</MenuItem>
-                <MenuItem value={60000}>1 minute</MenuItem>
-                <MenuItem value={300000}>5 minutes</MenuItem>
-              </Select>
-            </FormControl>
+          <Box sx={{ pt: 2 }}>
+            <Typography color="text.secondary">No additional settings.</Typography>
           </Box>
         </DialogContent>
         <DialogActions>
@@ -5218,16 +5246,13 @@ export default function ImportApprovals() {
       </Dialog>
 
       {/* Snackbar for notifications */}
-      <Snackbar
+      <PortalSnackbar
         open={!!snackbar}
         autoHideDuration={6000}
         onClose={() => setSnackbar('')}
         message={snackbar}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-        sx={{ 
-          zIndex: 9999,
-          marginTop: '80px' // Account for header/sidebar
-        }}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+        sx={{ marginTop: '80px' }}
       />
     </Box>
   );
@@ -5275,7 +5300,7 @@ export default function ImportApprovals() {
     
     return (
       <Box sx={{ mt: 2 }}>
-        {filteredInvoices.map(invoice => {
+        {sortedFilteredInvoices.map(invoice => {
           const data = parseDataField(invoice.data);
           const orderNum = String(getOrderNumber(data)).trim();
           const customerInfo = getCustomerInfo(data);
@@ -5487,6 +5512,8 @@ export default function ImportApprovals() {
                     const returned = isScannedOnlyRecord ? 0 : (item.returned || 0);
                     const shippedMismatch = shipped !== scannedOut;
                     const returnedMismatch = returned !== scannedIn;
+                    // DNS = Delivered Not Scanned: invoice says delivered (inv > 0) but no scan (trk = 0) – customer will be charged rental
+                    const isDNS = !isScannedOnlyRecord && shipped > 0 && scannedOut === 0;
                     
                     return (
                       <Paper 
@@ -5494,15 +5521,23 @@ export default function ImportApprovals() {
                         sx={{ 
                           p: 2, 
                           mb: 2, 
-                          border: '1px solid #f0f0f0',
+                          border: isDNS ? '2px solid #ed6c02' : '1px solid #f0f0f0',
                           borderRadius: 1,
-                          backgroundColor: '#fafafa',
+                          backgroundColor: isDNS ? '#fff4e5' : '#fafafa',
                           '&:hover': {
-                            backgroundColor: '#f5f5f5',
-                            borderColor: '#e0e0e0'
+                            backgroundColor: isDNS ? '#ffecd2' : '#f5f5f5',
+                            borderColor: isDNS ? '#ed6c02' : '#e0e0e0'
                           }
                         }}
                       >
+                        {isDNS && (
+                          <Chip 
+                            label="DNS (Delivered Not Scanned)" 
+                            size="small" 
+                            color="warning" 
+                            sx={{ mb: 1.5, fontWeight: 600 }}
+                          />
+                        )}
                         <Grid container spacing={2} alignItems="center">
                           <Grid item xs={12} sm={2}>
                             <Typography variant="caption" color="text.secondary" fontWeight={600}>
@@ -5557,6 +5592,11 @@ export default function ImportApprovals() {
                                   >
                                     Inv: {!hasInvoiceData ? '?' : shipped}
                                   </Typography>
+                                  {isDNS && (
+                                    <Typography variant="caption" color="warning.main" fontWeight={600} sx={{ mt: 0.5 }}>
+                                      Customer charged rental
+                                    </Typography>
+                                  )}
                                 </Box>
                               </Box>
                               <Box sx={{ textAlign: 'center', minWidth: '60px' }}>
@@ -5638,7 +5678,7 @@ export default function ImportApprovals() {
     
     return (
       <Grid container spacing={3}>
-        {filteredInvoices.map((invoice) => {
+        {sortedFilteredInvoices.map((invoice) => {
           const data = parseDataField(invoice.data);
           const detailedItems = getDetailedLineItems(data);
           const orderNum = String(getOrderNumber(data)).trim();
@@ -5935,13 +5975,9 @@ export default function ImportApprovals() {
       );
     }
     
-    const sortedInvoices = [...filteredInvoices].sort((a, b) => 
-      new Date(b.created_at) - new Date(a.created_at)
-    );
-
     return (
       <Box>
-        {sortedInvoices.map((invoice, index) => {
+        {sortedFilteredInvoices.map((invoice, index) => {
           const data = parseDataField(invoice.data);
           const orderNum = getOrderNumber(data);
           const customerInfo = getCustomerInfo(data);
@@ -5962,7 +5998,7 @@ export default function ImportApprovals() {
                     mt: 1
                   }}
                 />
-                {index < sortedInvoices.length - 1 && (
+                {index < sortedFilteredInvoices.length - 1 && (
                   <Box
                     sx={{
                       width: 2,
@@ -5982,8 +6018,8 @@ export default function ImportApprovals() {
                     size="small"
                     icon={VERIFICATION_STATES[status].icon}
                   />
-                  <Typography variant="caption" color="text.secondary">
-                    {new Date(invoice.created_at).toLocaleString()}
+                  <Typography variant="caption" color="text.secondary" title="Scan time (local)">
+                    {formatDate(invoice.created_at)}
                   </Typography>
                 </Box>
                 <Typography variant="body2" color="text.secondary" gutterBottom>
@@ -6062,7 +6098,7 @@ export default function ImportApprovals() {
   function renderReceiptsGrid() {
     return (
       <Grid container spacing={2}>
-        {filteredReceipts.map((receipt) => {
+        {sortedFilteredReceipts.map((receipt) => {
           const data = parseDataField(receipt.data);
           const detailedItems = getDetailedLineItems(data);
           const orderNum = String(getOrderNumber(data)).trim();
@@ -6168,13 +6204,9 @@ export default function ImportApprovals() {
   }
 
   function renderReceiptsTimeline() {
-    const sortedReceipts = [...filteredReceipts].sort((a, b) => 
-      new Date(b.created_at) - new Date(a.created_at)
-    );
-
     return (
       <Box>
-        {sortedReceipts.map((receipt, index) => {
+        {sortedFilteredReceipts.map((receipt, index) => {
           const data = parseDataField(receipt.data);
           const orderNum = getOrderNumber(data);
           const customerInfo = getCustomerInfo(data);
@@ -6196,7 +6228,7 @@ export default function ImportApprovals() {
                     mt: 1
                   }}
                 />
-                {index < sortedReceipts.length - 1 && (
+                {index < sortedFilteredReceipts.length - 1 && (
                   <Box
                     sx={{
                       width: 2,
@@ -6216,8 +6248,8 @@ export default function ImportApprovals() {
                     size="small"
                     icon={VERIFICATION_STATES[status].icon}
                   />
-                  <Typography variant="caption" color="text.secondary">
-                    {new Date(receipt.created_at).toLocaleString()}
+                  <Typography variant="caption" color="text.secondary" title="Scan time (local)">
+                    {formatDate(receipt.created_at)}
                   </Typography>
                 </Box>
                 <Typography variant="body2" color="text.secondary" gutterBottom>
@@ -6460,6 +6492,11 @@ export default function ImportApprovals() {
         const orderNumber = row.id.replace('scanned_', '');
         const { data: { user: currentUser } } = await supabase.auth.getUser();
         
+        // Revert bottles that were marked empty when return was scanned (before we reject)
+        if (organization?.id) {
+          await revertBottlesForRejectedReturn(orderNumber, organization.id);
+        }
+        
         // Mark all scans for this order as rejected in scans table
         const { error: scanError } = await supabase
           .from('scans')
@@ -6487,7 +6524,13 @@ export default function ImportApprovals() {
         return;
       }
       
-      // Handle regular imported records
+      // Handle regular imported records - revert bottles for return scans in this import
+      const data = parseDataField(row.data);
+      const orderNumber = data?.order_number || data?.reference_number || data?.invoice_number;
+      if (orderNumber && organization?.id) {
+        await revertBottlesForRejectedReturn(orderNumber, organization.id);
+      }
+      
       const tableName = type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts';
       const { error } = await supabase
         .from(tableName)
@@ -7422,6 +7465,20 @@ export default function ImportApprovals() {
         }
       }
       
+      // DNS (Delivered Not Scanned): invoice says delivered (inv > 0) but no scan (trk = 0) – create DNS rental(s) so customer is charged
+      for (const row of rows) {
+        const invShipped = parseInt(row.qty_out || row.shipped || row.quantity || 0, 10);
+        if (invShipped <= 0) continue;
+        const productCode = row.product_code || row.bottle_barcode || row.barcode || '';
+        if (!productCode) continue;
+        const scannedOut = getScannedQty(orderNumber, productCode, 'out', record);
+        if (scannedOut > 0) continue; // Already has scan – handled above
+        // This row is DNS: inv 1 (or more), trk 0 – create one DNS rental per unit
+        for (let i = 0; i < invShipped; i++) {
+          await createDNSRentalRecord(record, row, newCustomerName, newCustomerId, orderNumber, assignmentSuccesses, assignmentWarnings);
+        }
+      }
+      
       // Show summary messages
       if (assignmentSuccesses.length > 0) {
         logger.log(`✅ Successfully assigned ${assignmentSuccesses.length} bottle(s)`);
@@ -7487,6 +7544,51 @@ export default function ImportApprovals() {
       }
     } catch (error) {
       logger.error('Error creating rental record:', error);
+    }
+  }
+
+  // Create DNS (Delivered Not Scanned) rental – invoice says delivered but no scan; customer is charged rental
+  async function createDNSRentalRecord(record, row, customerName, customerId, orderNumber, assignmentSuccesses = [], assignmentWarnings = []) {
+    if (!organization?.id || !customerName) {
+      logger.warn('createDNSRentalRecord: missing organization or customer');
+      return;
+    }
+    try {
+      const productCode = row.product_code || row.bottle_barcode || row.barcode || 'DNS';
+      const description = row.description || row.product_code || 'Delivered Not Scanned';
+      const { error } = await supabase
+        .from('rentals')
+        .insert({
+          organization_id: organization.id,
+          customer_id: customerId || customerName,
+          customer_name: customerName,
+          is_dns: true,
+          dns_product_code: productCode,
+          dns_description: description,
+          dns_order_number: orderNumber,
+          bottle_id: null,
+          bottle_barcode: null,
+          rental_start_date: new Date().toISOString().split('T')[0],
+          rental_end_date: null,
+          rental_amount: 10,
+          rental_type: 'monthly',
+          tax_code: 'GST+PST',
+          tax_rate: 0.11,
+          location: 'SASKATOON',
+          status: 'active',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+      if (error) {
+        logger.error('Error creating DNS rental:', error);
+        assignmentWarnings.push(`Failed to create DNS rental for ${productCode}: ${error.message}`);
+      } else {
+        logger.log(`✅ Created DNS rental for order ${orderNumber} product ${productCode} – customer charged rental`);
+        assignmentSuccesses.push(`DNS: ${productCode} – ${description} (customer charged rental)`);
+      }
+    } catch (error) {
+      logger.error('Error in createDNSRentalRecord:', error);
+      assignmentWarnings.push(`DNS rental error: ${error?.message || error}`);
     }
   }
 
@@ -7564,6 +7666,11 @@ export default function ImportApprovals() {
         
         // Extract order number from scanned_ prefix
         const orderNumber = record.id.replace('scanned_', '');
+        
+        // Revert bottles that were marked empty when return was scanned (before we reject)
+        if (organization?.id) {
+          await revertBottlesForRejectedReturn(orderNumber, organization.id);
+        }
         
         // Mark all scans for this order as rejected
         logger.log('Attempting to reject scans for order:', orderNumber);
@@ -7683,6 +7790,13 @@ export default function ImportApprovals() {
       
       logger.log('Found existing record in imported_invoices:', existingRecord);
       
+      // Revert bottles for return scans in this import before rejecting
+      const recordData = parseDataField(record.data);
+      const orderNum = recordData?.order_number || recordData?.reference_number || recordData?.invoice_number;
+      if (orderNum && organization?.id) {
+        await revertBottlesForRejectedReturn(orderNum, organization.id);
+      }
+      
       const { error } = await supabase
         .from('imported_invoices')
         .update({
@@ -7748,6 +7862,13 @@ export default function ImportApprovals() {
         logger.error('Record not found in imported_invoices:', recordId, checkError);
         setSnackbar('Record not found in database');
         return;
+      }
+
+      // Revert bottles for return scans in this import before rejecting
+      const recordData = parseDataField(record.data);
+      const orderNum = recordData?.order_number || recordData?.reference_number || recordData?.invoice_number;
+      if (orderNum && organization?.id) {
+        await revertBottlesForRejectedReturn(orderNum, organization.id);
       }
 
       // Update the record
@@ -7831,7 +7952,7 @@ export default function ImportApprovals() {
         'Date': data.date || '',
         'Status': record.status || '',
         'Uploaded By': record.uploaded_by || '',
-        'Created At': record.created_at || ''
+        'Scan time': record.created_at ? new Date(record.created_at).toLocaleString() : ''
       };
     });
 

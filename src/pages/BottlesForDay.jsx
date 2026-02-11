@@ -67,11 +67,14 @@ function BottlesForDay({ profile }) {
     return new Date(d + 'T12:00:00').toLocaleDateString();
   };
 
-  // Build start/end of selected local day in UTC for DB queries
+  // Build start/end of selected local day in UTC for DB queries (explicit local date to avoid timezone bugs)
   const getDateRangeISO = (dateStr) => {
     const d = dateStr || new Date().toISOString().split('T')[0];
-    const start = new Date(d + 'T00:00:00');
-    const end = new Date(d + 'T23:59:59.999');
+    const year = parseInt(d.slice(0, 4), 10);
+    const month = parseInt(d.slice(5, 7), 10) - 1;
+    const day = parseInt(d.slice(8, 10), 10);
+    const start = new Date(year, month, day, 0, 0, 0, 0);
+    const end = new Date(year, month, day, 23, 59, 59, 999);
     return { startISO: start.toISOString(), endISO: end.toISOString() };
   };
 
@@ -95,6 +98,7 @@ function BottlesForDay({ profile }) {
           cylinder_id,
           barcode_number,
           fill_date,
+          fill_timezone,
           filled_by,
           notes,
           fill_type,
@@ -132,6 +136,7 @@ function BottlesForDay({ profile }) {
               bottlesList.push({
                 ...bottle,
                 fill_date: fill.fill_date,
+                fill_timezone: fill.fill_timezone ?? null,
                 fill_notes: fill.notes,
                 filled_by: fill.filled_by,
                 fill_record_id: fill.id,
@@ -215,6 +220,33 @@ function BottlesForDay({ profile }) {
     const d = new Date(iso);
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  // Format fill date/time: show in scanner timezone when available, otherwise browser local
+  const formatFillDate = (bottle) => {
+    if (!bottle?.fill_date) return null;
+    const d = new Date(bottle.fill_date);
+    if (Number.isNaN(d.getTime())) return null;
+    const tz = bottle.fill_timezone;
+    try {
+      if (tz) {
+        return d.toLocaleString(undefined, { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' });
+      }
+      return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    } catch {
+      return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    }
+  };
+  const formatFillDateTzLabel = (bottle) => {
+    if (!bottle?.fill_date || !bottle?.fill_timezone) return null;
+    try {
+      const rtf = new Intl.DateTimeFormat(undefined, { timeZone: bottle.fill_timezone, timeZoneName: 'short' });
+      const parts = rtf.formatToParts(new Date(bottle.fill_date));
+      const tzPart = parts.find(p => p.type === 'timeZoneName');
+      return tzPart?.value ?? bottle.fill_timezone;
+    } catch {
+      return bottle.fill_timezone;
+    }
   };
 
   const handleOpenEdit = (bottle) => {
@@ -337,7 +369,7 @@ function BottlesForDay({ profile }) {
               InputLabelProps={{ shrink: true }}
               sx={{ minWidth: 200 }}
             />
-            <Box sx={{ flex: 1, maxWidth: 450 }}>
+            <Box sx={{ flex: 1, width: '100%' }}>
               <SearchInputWithIcon
                 placeholder="Search bottles by barcode, serial, customer..."
                 value={searchInput}
@@ -355,6 +387,7 @@ function BottlesForDay({ profile }) {
               ? `Found ${bottles.length} bottles matching "${searchInput}"`
               : `Showing ${bottles.length} bottles processed on Fill Cylinder page for ${formatSelectedDate(selectedDate)}`
             }
+            {' '}Fill times are shown in scanner timezone when available; otherwise in your local timezone.
           </Typography>
         </Box>
 
@@ -421,9 +454,16 @@ function BottlesForDay({ profile }) {
                     </TableCell>
                     <TableCell>
                       {bottle.fill_date ? (
-                        <Typography variant="body2">
-                          {new Date(bottle.fill_date).toLocaleDateString()} {new Date(bottle.fill_date).toLocaleTimeString()}
-                        </Typography>
+                        <Box>
+                          <Typography variant="body2">
+                            {formatFillDate(bottle)}
+                          </Typography>
+                          {formatFillDateTzLabel(bottle) && (
+                            <Typography variant="caption" color="text.secondary">
+                              {formatFillDateTzLabel(bottle)}
+                            </Typography>
+                          )}
+                        </Box>
                       ) : (
                         <Typography variant="body2" color="text.secondary">N/A</Typography>
                       )}

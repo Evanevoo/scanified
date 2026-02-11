@@ -73,6 +73,8 @@ export default function ProofOfDelivery({
   const [locationPermission, setLocationPermission] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [focusTrigger, setFocusTrigger] = useState(0); // Used to trigger autofocus on tap
+  const [cameraZoom, setCameraZoom] = useState(0); // 0-1 (percentage of max zoom)
+  const [flashEnabled, setFlashEnabled] = useState(false);
   
   const cameraRef = useRef<CameraView>(null);
   const signaturePaths = useRef<any[]>([]);
@@ -570,18 +572,43 @@ export default function ProofOfDelivery({
                 ref={cameraRef}
                 style={StyleSheet.absoluteFill}
                 facing="back"
-                autofocus="on"
                 active={showCamera}
+                zoom={cameraZoom}
+                enableTorch={flashEnabled}
+                autofocus="off"
                 mode="picture"
                 barcodeScannerEnabled={true}
               >
               <View style={styles.cameraOverlay}>
-                <TouchableOpacity
-                  style={styles.closeCamera}
-                  onPress={() => setShowCamera(false)}
-                >
-                  <Text style={styles.closeCameraText}>✕</Text>
-                </TouchableOpacity>
+                <View style={styles.cameraControlsTopRight}>
+                  <TouchableOpacity
+                    style={[styles.zoomFlashButton, flashEnabled && styles.zoomFlashButtonActive]}
+                    onPress={() => setFlashEnabled((v) => !v)}
+                  >
+                    <Text style={styles.zoomFlashIcon}>{flashEnabled ? '🔦' : '💡'}</Text>
+                  </TouchableOpacity>
+                  <View style={styles.zoomButtonsRow}>
+                    <TouchableOpacity
+                      style={styles.zoomBtn}
+                      onPress={() => setCameraZoom((z) => Math.max(0, z - 0.25))}
+                    >
+                      <Text style={styles.zoomBtnText}>−</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.zoomLabel}>{Math.round(cameraZoom * 100)}%</Text>
+                    <TouchableOpacity
+                      style={styles.zoomBtn}
+                      onPress={() => setCameraZoom((z) => Math.min(1, z + 0.25))}
+                    >
+                      <Text style={styles.zoomBtnText}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.closeCamera}
+                    onPress={() => setShowCamera(false)}
+                  >
+                    <Text style={styles.closeCameraText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
                 <View style={styles.cameraControls}>
                   <TouchableOpacity
                     style={styles.captureButton}
@@ -843,10 +870,16 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'space-between',
   },
-  closeCamera: {
+  cameraControlsTopRight: {
     position: 'absolute',
     top: 50,
     right: 20,
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  closeCamera: {
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 20,
     width: 40,
@@ -858,6 +891,43 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 20,
     fontWeight: 'bold',
+  },
+  zoomFlashButton: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    padding: 12,
+    minWidth: 44,
+    alignItems: 'center',
+  },
+  zoomFlashButtonActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.8)',
+  },
+  zoomFlashIcon: {
+    fontSize: 20,
+  },
+  zoomButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  zoomBtn: {
+    padding: 8,
+    minWidth: 36,
+    alignItems: 'center',
+  },
+  zoomBtnText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  zoomLabel: {
+    color: '#fff',
+    fontSize: 12,
+    minWidth: 36,
+    textAlign: 'center',
   },
   cameraControls: {
     alignItems: 'center',

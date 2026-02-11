@@ -182,7 +182,7 @@ export default function FAQ() {
           <Typography variant="h2" fontWeight={700} sx={{ mb: 3 }}>
             Frequently Asked Questions
           </Typography>
-          <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto' }}>
+          <Typography variant="h6" color="text.secondary" sx={{ width: '100%' }}>
             Find answers to common questions about our gas cylinder management platform.
             Can't find what you're looking for? Contact our support team.
           </Typography>

@@ -1,13 +1,27 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Box, Typography, Button, Card, CardContent } from '@mui/material';
+import { Assignment as AssignmentIcon } from '@mui/icons-material';
 
 export default function RentalClasses() {
   const navigate = useNavigate();
   return (
-    <div className="p-8">
-      <button onClick={() => navigate(-1)} className="mb-4 bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded">Back</button>
-      <h2 className="text-2xl font-bold mb-4">Rental Classes</h2>
-      <div>Rental Classes content goes here.</div>
-    </div>
+    <Box sx={{ p: 4 }}>
+      <Button onClick={() => navigate(-1)} sx={{ mb: 2 }} variant="outlined">Back</Button>
+      <Typography variant="h5" fontWeight="bold" mb={3}>Rental Classes</Typography>
+      <Card>
+        <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 6 }}>
+          <AssignmentIcon sx={{ fontSize: 48, color: 'action.disabled' }} />
+          <Box>
+            <Typography variant="body1" color="text.secondary">
+              Rental classes define pricing tiers and grouping for rental assets. Configure classes within each rental class group.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Coming soon — connect rental classes to your class groups and asset types.
+            </Typography>
+          </Box>
+        </CardContent>
+      </Card>
+    </Box>
   );
 } 

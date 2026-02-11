@@ -23,7 +23,7 @@ export default function QuantityDiscrepancyDemo() {
   const [showDemo, setShowDemo] = useState(false);
 
   return (
-    <Box sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
+    <Box sx={{ p: 3, width: '100%' }}>
       <Typography variant="h4" gutterBottom>
         Quantity Discrepancy Detector - Demo
       </Typography>

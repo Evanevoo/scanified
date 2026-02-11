@@ -79,7 +79,7 @@ export default function Integrations() {
             <Typography variant="h2" fontWeight={700} gutterBottom>
               Integrations
             </Typography>
-            <Typography variant="h5" sx={{ mb: 4, opacity: 0.9, maxWidth: 700, mx: 'auto' }}>
+            <Typography variant="h5" sx={{ mb: 4, opacity: 0.9, width: '100%' }}>
               Connect Scanified with your existing tools and workflows
             </Typography>
           </Box>
@@ -101,7 +101,7 @@ export default function Integrations() {
                 </InputAdornment>
               ),
             }}
-            sx={{ maxWidth: 500, mx: 'auto', display: 'block' }}
+            sx={{ width: '100%', display: 'block' }}
           />
         </Box>
 
@@ -157,7 +157,7 @@ export default function Integrations() {
           <Typography variant="h4" fontWeight={600} gutterBottom>
             Developer API
           </Typography>
-          <Typography variant="h6" color="text.secondary" sx={{ mb: 4, maxWidth: 600, mx: 'auto' }}>
+          <Typography variant="h6" color="text.secondary" sx={{ mb: 4, width: '100%' }}>
             Build custom integrations with our comprehensive REST API
           </Typography>
           <Stack direction="row" spacing={2} justifyContent="center">

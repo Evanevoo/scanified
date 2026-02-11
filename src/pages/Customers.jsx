@@ -4,7 +4,7 @@ import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination, Chip, IconButton,
-  Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment
+  Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, Autocomplete
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -95,7 +95,7 @@ function Customers({ profile }) {
   logger.log('Customers component rendering, profile:', profile);
   
   const [customers, setCustomers] = useState([]);
-  const [form, setForm] = useState({ CustomerListID: '', name: '', email: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
+  const [form, setForm] = useState({ CustomerListID: '', name: '', email: '', contact_details: '', phone: '', customer_type: 'CUSTOMER', department: '', parent_customer_id: null });
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -110,6 +110,8 @@ function Customers({ profile }) {
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [totalCount, setTotalCount] = useState(0);
   const [assetCounts, setAssetCounts] = useState({});
+  const [parentNames, setParentNames] = useState({}); // parent_customer_id -> parent name
+  const [parentOptions, setParentOptions] = useState([]); // { id, name, CustomerListID } for Add dialog
   const [addDialogOpen, setAddDialogOpen] = useState(false);
 
   const navigate = useNavigate();
@@ -171,6 +173,18 @@ function Customers({ profile }) {
 
       logger.log('Customers fetched successfully:', data?.length || 0, 'Total count:', count);
       setCustomers(data || []);
+
+      // Resolve parent names for customers that have parent_customer_id
+      const parentIds = [...new Set((data || []).map(c => c.parent_customer_id).filter(Boolean))];
+      if (parentIds.length > 0) {
+        const { data: parents } = await supabase.from('customers').select('id, name').in('id', parentIds);
+        const map = {};
+        (parents || []).forEach(p => { map[p.id] = p.name; });
+        setParentNames(map);
+      } else {
+        setParentNames({});
+      }
+
       setTotalCount(count || 0);
 
       // Fetch asset counts for these customers
@@ -220,6 +234,17 @@ function Customers({ profile }) {
   useEffect(() => {
     fetchCustomers(debouncedSearch);
   }, [organization, locationFilter, page, rowsPerPage, sortField, sortDirection, debouncedSearch]);
+
+  // Load parent customer options when Add dialog opens (for "Under parent" selector)
+  useEffect(() => {
+    if (!addDialogOpen || !organization?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.from('customers').select('id, name, CustomerListID').eq('organization_id', organization.id).order('name');
+      if (!cancelled && data) setParentOptions(data);
+    })();
+    return () => { cancelled = true; };
+  }, [addDialogOpen, organization?.id]);
 
   // Search now happens automatically via debouncedSearch useEffect
   const handleSearchChange = (e) => {
@@ -274,10 +299,13 @@ function Customers({ profile }) {
         location: form.location || 'SASKATOON',
         organization_id: organization.id
       };
+      if (form.department?.trim()) payload.department = form.department.trim();
+      if (form.email?.trim()) payload.email = form.email.trim();
+      if (form.parent_customer_id) payload.parent_customer_id = form.parent_customer_id;
       const { error } = await supabase.from('customers').insert([payload]);
       if (error) throw error;
       
-      setForm({ CustomerListID: '', name: '', email: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
+      setForm({ CustomerListID: '', name: '', email: '', contact_details: '', phone: '', customer_type: 'CUSTOMER', department: '', parent_customer_id: null });
       setSuccessMsg('Customer added successfully!');
       
       // Refresh the current page
@@ -318,6 +346,9 @@ function Customers({ profile }) {
         phone: form.phone,
         customer_type: form.customer_type
       };
+      if (form.email !== undefined) payload.email = form.email ?? null;
+      if (form.department !== undefined) payload.department = form.department?.trim() || null;
+      if (form.parent_customer_id !== undefined) payload.parent_customer_id = form.parent_customer_id || null;
       const { error } = await supabase
         .from('customers')
         .update(payload)
@@ -326,7 +357,7 @@ function Customers({ profile }) {
       if (error) throw error;
       
       setEditingId(null);
-      setForm({ CustomerListID: '', name: '', email: '', contact_details: '', phone: '', customer_type: 'CUSTOMER' });
+      setForm({ CustomerListID: '', name: '', email: '', contact_details: '', phone: '', customer_type: 'CUSTOMER', department: '', parent_customer_id: null });
       setSuccessMsg('Customer updated successfully!');
       
       // Refresh current page
@@ -561,7 +592,7 @@ function Customers({ profile }) {
           <Typography variant="h4" fontWeight={800} color="#1976d2" sx={{ mb: 2 }}>Customer Management</Typography>
           
           <Box display="flex" gap={2} alignItems="center" mb={3}>
-            <Box display="flex" alignItems="center" sx={{ maxWidth: 450, flex: 1 }}>
+            <Box display="flex" alignItems="center" sx={{ flex: 1, width: '100%' }}>
               <SearchInputWithIcon
                 placeholder="Search customers by name, ID, or contact..."
                 value={searchInput}
@@ -674,6 +705,19 @@ function Customers({ profile }) {
                     display="flex" 
                     alignItems="center" 
                     sx={{ cursor: 'pointer', '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' } }}
+                    onClick={() => handleSort('parent_customer_id')}
+                  >
+                    Under (Parent)
+                    {sortField === 'parent_customer_id' && (
+                      sortDirection === 'asc' ? <ArrowUpwardIcon sx={{ ml: 1, fontSize: 16 }} /> : <ArrowDownwardIcon sx={{ ml: 1, fontSize: 16 }} />
+                    )}
+                  </Box>
+                </TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>
+                  <Box 
+                    display="flex" 
+                    alignItems="center" 
+                    sx={{ cursor: 'pointer', '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' } }}
                     onClick={() => handleSort('contact_details')}
                   >
                     Contact
@@ -720,6 +764,7 @@ function Customers({ profile }) {
                     />
                   </TableCell>
                   <TableCell>{c.CustomerListID}</TableCell>
+                  <TableCell>{c.parent_customer_id ? (parentNames[c.parent_customer_id] || '—') : '—'}</TableCell>
                   <TableCell>{c.contact_details}</TableCell>
                   <TableCell>{c.phone}</TableCell>
                   <TableCell>
@@ -867,6 +912,25 @@ function Customers({ profile }) {
                   <MenuItem value="VENDOR">VENDOR</MenuItem>
                 </Select>
               </FormControl>
+              <Autocomplete
+                options={parentOptions}
+                getOptionLabel={(opt) => (opt && (opt.name || opt.CustomerListID || '')) || ''}
+                value={parentOptions.find(o => o.id === form.parent_customer_id) || null}
+                onChange={(_, v) => setForm({ ...form, parent_customer_id: v?.id ?? null })}
+                renderInput={(params) => (
+                  <TextField {...params} label="Under (parent customer)" placeholder="e.g. Stevenson Industrial" margin="normal" fullWidth />
+                )}
+                isOptionEqualToValue={(a, b) => (a?.id ?? null) === (b?.id ?? null)}
+              />
+              <TextField
+                label="Department / location label (optional)"
+                name="department"
+                value={form.department ?? ''}
+                onChange={handleChange}
+                fullWidth
+                margin="normal"
+                placeholder="e.g. Regina, Saskatoon"
+              />
             </Box>
           </DialogContent>
           <DialogActions>

@@ -67,8 +67,7 @@ export default function ComprehensiveRoleManager() {
         { id: 'assets', title: 'Assets', path: '/assets' },
         { id: 'inventory', title: 'Inventory Management', path: '/inventory-management' },
         { id: 'rentals', title: 'Rentals', path: '/rentals' },
-        { id: 'orders', title: 'Orders', path: '/orders' },
-        { id: 'deliveries', title: 'Deliveries', path: '/deliveries' }
+        { id: 'orders', title: 'Orders', path: '/orders' }
       ]
     },
     reports: {
@@ -76,8 +75,7 @@ export default function ComprehensiveRoleManager() {
       icon: <SettingsIcon />,
       items: [
         { id: 'analytics', title: 'Analytics', path: '/analytics' },
-        { id: 'reports', title: 'Reports', path: '/reports' },
-        { id: 'organization_analytics', title: 'Organization Analytics', path: '/organization-analytics' }
+        { id: 'reports', title: 'Reports', path: '/reports' }
       ]
     }
   };

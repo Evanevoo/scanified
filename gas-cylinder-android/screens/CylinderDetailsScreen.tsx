@@ -1,16 +1,21 @@
 import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../context/AssetContext';
 import { useTheme } from '../context/ThemeContext';
+import { formatDateLocal, formatDateTimeLocal } from '../utils/dateUtils';
 
 export default function CylinderDetailsScreen() {
+  const insets = useSafeAreaInsets();
   const route = useRoute();
   const navigation = useNavigation();
-  const { barcode } = route.params as { barcode: string };
+  const scrollPaddingBottom = Platform.OS === 'android' ? Math.max(insets.bottom, 24) + 24 : insets.bottom + 24;
+  const params = (route?.params ?? {}) as { barcode?: string };
+  const barcode = params.barcode ?? '';
   const { profile } = useAuth();
   const { config: assetConfig } = useAssetConfig();
   const { colors } = useTheme();
@@ -20,10 +25,18 @@ export default function CylinderDetailsScreen() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    let isMounted = true;
     const fetchDetails = async () => {
-      if (!profile?.organization_id) {
-        setError('Organization not found');
+      if (!barcode) {
+        setError('No barcode provided');
         setLoading(false);
+        return;
+      }
+      if (!profile?.organization_id) {
+        if (isMounted) {
+          setError('Organization not found');
+          setLoading(false);
+        }
         return;
       }
 
@@ -45,13 +58,15 @@ export default function CylinderDetailsScreen() {
       
       if (cylErr || !cyl) {
         logger.log('❌ Cylinder not found:', cylErr);
-        setError(`${assetConfig?.assetDisplayName || 'Cylinder'} not found.`);
-        setLoading(false);
+        if (isMounted) {
+          setError(`${assetConfig?.assetDisplayName || 'Cylinder'} not found.`);
+          setLoading(false);
+        }
         return;
       }
       
       logger.log('✅ Cylinder found:', cyl.barcode_number);
-      setCylinder(cyl);
+      if (isMounted) setCylinder(cyl);
       
       // Fetch customer info if cylinder is assigned to a customer
       // Check both assigned_customer and customer_name fields
@@ -67,32 +82,32 @@ export default function CylinderDetailsScreen() {
         
         if (!custErr && cust) {
           logger.log('✅ Customer found:', cust.name);
-          setCustomer(cust);
-        } else if (cyl.customer_name) {
-          // Fallback: Use customer_name from bottle if customer lookup fails
+          if (isMounted) setCustomer(cust);
+        } else if (cyl.customer_name && isMounted) {
           logger.log('⚠️ Customer lookup failed, using customer_name from bottle:', cyl.customer_name);
           setCustomer({ name: cyl.customer_name, CustomerListID: cyl.assigned_customer || '' });
         }
-      } else if (cyl.customer_name) {
-        // If no assigned_customer but customer_name exists, use it
+      } else if (cyl.customer_name && isMounted) {
         logger.log('📋 Using customer_name from bottle:', cyl.customer_name);
         setCustomer({ name: cyl.customer_name, CustomerListID: '' });
       }
       
-      setLoading(false);
+      if (isMounted) setLoading(false);
     };
     fetchDetails();
+    return () => { isMounted = false; };
   }, [barcode, profile]);
 
-  const formatDate = (dateString: string) => {
-    if (!dateString) return 'Not set';
-    return new Date(dateString).toLocaleDateString();
-  };
+  const formatDate = (dateString: string) => (dateString ? formatDateLocal(dateString) : 'Not set');
+  const formatDateTime = (dateString: string) => (dateString ? formatDateTimeLocal(dateString) : 'Not set');
 
-  const formatDateTime = (dateString: string) => {
-    if (!dateString) return 'Not set';
-    return new Date(dateString).toLocaleString();
-  };
+  // Normalize status for display/color (DB may store 'full', 'Full', 'filled', 'available', etc.)
+  const statusLower = (cylinder?.status ?? '').toString().toLowerCase();
+  const isFull = statusLower === 'filled' || statusLower === 'available' || statusLower === 'full';
+  const isEmpty = statusLower === 'empty';
+  const isRented = statusLower === 'rented';
+  const statusBadgeColor = isFull ? '#22C55E' : isEmpty ? '#F59E0B' : isRented ? '#3B82F6' : '#9CA3AF';
+  const statusLabel = isFull ? 'Full' : isEmpty ? 'Empty' : isRented ? 'Rented' : (cylinder?.status || 'Unknown');
 
   if (loading) {
     return (
@@ -118,7 +133,7 @@ export default function CylinderDetailsScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}>
+    <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background, paddingBottom: scrollPaddingBottom }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={[styles.title, { color: colors.primary }]}>
@@ -159,23 +174,8 @@ export default function CylinderDetailsScreen() {
         <View style={styles.infoRow}>
           <Text style={[styles.label, { color: colors.text }]}>Status:</Text>
           <View style={styles.statusContainer}>
-            <View style={[
-              styles.statusBadge,
-              {
-                backgroundColor: cylinder.status === 'filled' ? '#22C55E' :
-                                 cylinder.status === 'empty' ? '#F59E0B' :
-                                 cylinder.status === 'rented' ? '#3B82F6' :
-                                 cylinder.status === 'available' ? '#6B7280' :
-                                 '#9CA3AF',
-              }
-            ]}>
-              <Text style={styles.statusBadgeText}>
-                {cylinder.status === 'filled' ? 'Full' :
-                 cylinder.status === 'empty' ? 'Empty' :
-                 cylinder.status === 'rented' ? 'Rented' :
-                 cylinder.status === 'available' ? 'Available' :
-                 cylinder.status || 'Unknown'}
-              </Text>
+            <View style={[styles.statusBadge, { backgroundColor: statusBadgeColor }]}>
+              <Text style={styles.statusBadgeText}>{statusLabel}</Text>
             </View>
           </View>
         </View>
@@ -183,9 +183,9 @@ export default function CylinderDetailsScreen() {
         {customer && (
           <View style={styles.infoRow}>
             <Text style={[styles.label, { color: colors.text }]}>
-              {cylinder.status === 'rented' ? 'Rented To:' : 'Assigned To:'}
+              {isRented ? 'Rented To:' : 'Assigned To:'}
             </Text>
-            <Text style={[styles.value, { color: colors.textSecondary, fontWeight: cylinder.status === 'rented' ? '600' : '400' }]}>
+            <Text style={[styles.value, { color: colors.textSecondary, fontWeight: isRented ? '600' : '400' }]}>
               {customer.name}
             </Text>
           </View>
@@ -193,9 +193,9 @@ export default function CylinderDetailsScreen() {
         {!customer && cylinder.customer_name && (
           <View style={styles.infoRow}>
             <Text style={[styles.label, { color: colors.text }]}>
-              {cylinder.status === 'rented' ? 'Rented To:' : 'Assigned To:'}
+              {isRented ? 'Rented To:' : 'Assigned To:'}
             </Text>
-            <Text style={[styles.value, { color: colors.textSecondary, fontWeight: cylinder.status === 'rented' ? '600' : '400' }]}>
+            <Text style={[styles.value, { color: colors.textSecondary, fontWeight: isRented ? '600' : '400' }]}>
               {cylinder.customer_name}
             </Text>
           </View>
@@ -226,12 +226,12 @@ export default function CylinderDetailsScreen() {
       {customer && (
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.primary }]}>
-            {cylinder.status === 'rented' ? 'Currently Rented To' : 'Assigned Customer'}
+            {isRented ? 'Currently Rented To' : 'Assigned Customer'}
           </Text>
           
           <View style={styles.infoRow}>
             <Text style={[styles.label, { color: colors.text }]}>Customer Name:</Text>
-            <Text style={[styles.value, { color: colors.textSecondary, fontWeight: cylinder.status === 'rented' ? '600' : '400' }]}>
+            <Text style={[styles.value, { color: colors.textSecondary, fontWeight: isRented ? '600' : '400' }]}>
               {customer.name}
             </Text>
           </View>

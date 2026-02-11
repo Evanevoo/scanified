@@ -35,7 +35,7 @@ class FeedbackService {
     soundEnabled: true,
     hapticEnabled: true,
     voiceEnabled: true,
-    volume: 0.8,
+    volume: 1.0, // Max volume so scan beep is audible even at device max volume
   };
 
   private sounds: { [key: string]: AudioPlayer | null } = {};
@@ -56,6 +56,9 @@ class FeedbackService {
         await setAudioModeAsync({
           playsInSilentMode: true,
           interruptionMode: 'mixWithOthers',
+          // Android: use 'duckOthers' (mixWithOthers not supported on Android)
+          interruptionModeAndroid: 'duckOthers',
+          shouldPlayInBackground: false,
         });
         logger.log('🔊 Audio mode configured for Android');
       } catch (audioModeError) {
@@ -215,6 +218,8 @@ class FeedbackService {
       await setAudioModeAsync({
         playsInSilentMode: true,
         interruptionMode: 'mixWithOthers',
+        interruptionModeAndroid: 'duckOthers',
+        shouldPlayInBackground: false,
       });
     } catch (audioModeError) {
       logger.debug('⚠️ Could not reconfigure audio mode (may already be set):', audioModeError);

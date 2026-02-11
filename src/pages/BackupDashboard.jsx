@@ -214,7 +214,7 @@ export default function BackupDashboard() {
   };
 
   return (
-    <Box sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
+    <Box sx={{ p: 3, width: '100%' }}>
       <Typography variant="h4" fontWeight={800} color="primary" mb={3}>
         <BackupIcon sx={{ mr: 2, verticalAlign: 'middle' }} />
         Backup Dashboard

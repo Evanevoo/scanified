@@ -1,7 +1,6 @@
 import logger from '../utils/logger';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Asset } from 'expo-asset';
 
 // Import AudioPlayer - same approach as feedbackService.ts
 // In Expo Go, this may not be available, so we'll handle errors gracefully
@@ -62,7 +61,8 @@ class SoundService {
           await setAudioModeAsync({
             playsInSilentMode: true,
             interruptionMode: 'mixWithOthers',
-            staysActiveInBackground: false,
+            interruptionModeAndroid: 'duckOthers',
+            shouldPlayInBackground: false,
           });
           console.log('🔊 [SoundService] Audio mode configured for Android');
           logger.log('🔊 Audio mode configured for Android in SoundService');
@@ -152,7 +152,7 @@ class SoundService {
           const source = require('../assets/sounds/scan_error.mp3'); // Default fallback
           let audioSource: any;
           
-          // Try to load the specific file
+          // Try to load the specific file - use require() directly for Android reliability
           try {
             if (path.includes('button_press')) {
               audioSource = require('../assets/sounds/button_press.mp3');
@@ -167,28 +167,15 @@ class SoundService {
             audioSource = source;
           }
           
-          // On Android, use Asset to ensure proper URI resolution
-          try {
-            const asset = Asset.fromModule(audioSource);
-            await asset.downloadAsync();
-            audioSource = asset.localUri || asset.uri;
-            console.log(`🔊 [SoundService] Android: Using asset URI for ${id}: ${audioSource}`);
-            logger.log(`🔊 Android: Using asset URI for ${id}: ${audioSource}`);
-          } catch (assetError: any) {
-            console.warn(`⚠️ [SoundService] Could not get asset URI for ${id}, using require() directly:`, assetError?.message);
-            logger.warn(`⚠️ Could not get asset URI for ${id}, using require() directly:`, assetError?.message);
-            // Fall back to using require() directly
-          }
-          
-          // Create audio player using createAudioPlayer() function
+          // On Android: use require() directly - expo-audio's createAudioPlayer handles it
+          // (Asset URI approach can fail on some devices)
           try {
             console.log(`🔊 [SoundService] Creating audio player for ${id}...`);
-            // Use createAudioPlayer() instead of new AudioPlayer()
             const player = createAudioPlayer(audioSource);
             
-            // Set volume (if supported)
+            // Set volume (if supported) - use 1.0 for maximum loudness
             if (player.volume !== undefined) {
-              player.volume = 0.9;
+              player.volume = 1.0;
             }
             
             this.soundCache.set(id, player);
@@ -251,7 +238,8 @@ class SoundService {
                 await setAudioModeAsync({
                   playsInSilentMode: true,
                   interruptionMode: 'mixWithOthers',
-                  staysActiveInBackground: false,
+                  interruptionModeAndroid: 'duckOthers',
+                  shouldPlayInBackground: false,
                 });
                 console.log('🔊 [SoundService] Audio mode set successfully');
                 logger.log('🔊 Audio mode set successfully');
@@ -264,9 +252,9 @@ class SoundService {
               logger.warn('⚠️ setAudioModeAsync not available');
             }
             
-            // Ensure volume is set
-            sound.volume = 0.9;
-            console.log(`🔊 [SoundService] Volume set to 0.9, calling sound.play()`);
+            // Ensure volume is set to max for scan feedback
+            sound.volume = 1.0;
+            console.log(`🔊 [SoundService] Volume set to 1.0, calling sound.play()`);
             logger.log(`🔊 Volume set to 0.9, calling sound.play()`);
             
             // On Android, AudioPlayer.play() should automatically reset to beginning

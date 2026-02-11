@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, TextInput, ActivityIndicator, Modal, Dimensions, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, TextInput, ActivityIndicator, Modal, Dimensions, useWindowDimensions, Alert, Platform } from 'react-native';
 import { supabase } from '../supabase';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../hooks/useAuth';
@@ -8,32 +8,36 @@ import { useAssetConfig } from '../context/AssetContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Platform as PlatformUtil } from '../utils/platform';
 import { soundService } from '../services/soundService';
-import { StatCard, ModernCard } from '../components/design-system';
+import { ModernCard } from '../components/design-system';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable } from 'react-native';
 import { FormatValidationService } from '../services/FormatValidationService';
-import MLKitScanner from '../components/MLKitScanner';
+import ScanArea from '../components/ScanArea';
+import { getStartOfTodayISO, getEndOfTodayISO } from '../utils/dateUtils';
 
 const { width, height } = Dimensions.get('window');
 
-// Quick Actions Configuration
+// Quick Actions Configuration (Ionicons for design system)
 const getQuickActions = () => [
-  { title: 'Delivery', icon: '📷', action: 'ScanCylinders', color: '#3B82F6' },
-  { title: 'Add', icon: '➕', action: 'AddCylinder', color: '#10B981' },
-  { title: 'Edit', icon: '✏️', action: 'EditCylinder', color: '#F59E0B' },
-  { title: 'Locate', icon: '📍', action: 'FillCylinder', color: '#EF4444' },
-  { title: 'History', icon: '📊', action: 'History', color: '#06B6D4' },
-  { title: 'Analytics', icon: '📈', action: 'Analytics', color: '#8B5CF6' },
+  { title: 'Delivery', iconName: 'camera' as const, action: 'ScanCylinders', color: '#3B82F6' },
+  { title: 'Add', iconName: 'add' as const, action: 'AddCylinder', color: '#10B981' },
+  { title: 'Edit', iconName: 'pencil' as const, action: 'EditCylinder', color: '#F59E0B' },
+  { title: 'Locate', iconName: 'location' as const, action: 'FillCylinder', color: '#EF4444' },
+  { title: 'History', iconName: 'time' as const, action: 'History', color: '#06B6D4' },
+  { title: 'Analytics', iconName: 'analytics' as const, action: 'Analytics', color: '#8B5CF6' },
 ];
+
+const SMALL_SCREEN_WIDTH = 375;
 
 export default function HomeScreen() {
   const navigation = useNavigation();
   const { colors } = useTheme();
   const { user, profile, organization } = useAuth();
   const { config: assetConfig } = useAssetConfig();
-  
-  
+  const { width: screenWidth } = useWindowDimensions();
+  const isSmallScreen = screenWidth < SMALL_SCREEN_WIDTH;
+
   const [search, setSearch] = useState('');
   const [customerResults, setCustomerResults] = useState([]);
   const [bottleResults, setBottleResults] = useState([]);
@@ -69,6 +73,33 @@ export default function HomeScreen() {
       }
     }, [profile?.organization_id])
   );
+
+  const searchCustomerByName = async (possibleNames: string[]): Promise<{ name: string; id: string } | null> => {
+    if (!profile?.organization_id || possibleNames.length === 0) return null;
+    try {
+      for (const name of possibleNames) {
+        if (!name || name.length < 3) continue;
+        const { data: customers } = await supabase
+          .from('customers')
+          .select('CustomerListID, name')
+          .eq('organization_id', profile.organization_id)
+          .ilike('name', `%${name}%`)
+          .limit(1);
+        if (customers && customers.length > 0) {
+          const found = customers[0];
+          return { name: found.name, id: found.CustomerListID };
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleOcrCustomerFound = (customer: { name: string; id: string }) => {
+    setShowScanner(false);
+    navigation.navigate('CustomerDetails', { customerId: customer.id });
+  };
 
   const searchCustomers = async () => {
     if (!profile?.organization_id) {
@@ -235,14 +266,16 @@ export default function HomeScreen() {
         .eq('organization_id', profile.organization_id)
         .eq('user_id', profile.id);
 
-      // Get today's scans for this user
-      const today = new Date().toISOString().split('T')[0];
+      // Get today's scans for this user (local timezone: start to end of today)
+      const startOfToday = getStartOfTodayISO();
+      const endOfToday = getEndOfTodayISO();
       const { count: todayScans } = await supabase
         .from('bottle_scans')
         .select('*', { count: 'exact', head: true })
         .eq('organization_id', profile.organization_id)
         .eq('user_id', profile.id)
-        .gte('created_at', today);
+        .gte('created_at', startOfToday)
+        .lte('created_at', endOfToday);
 
       setStats({
         totalScans: totalScans || 0,
@@ -315,23 +348,25 @@ export default function HomeScreen() {
           colors={colors.gradient || [colors.primary, colors.secondary]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={styles.headerGradient}
+          style={[styles.headerGradient, isSmallScreen && { paddingBottom: 14, marginBottom: 14 }]}
         >
-          <View style={styles.header}>
-            <View style={styles.headerContent}>
-              <Text style={styles.welcomeText}>
+          <View style={[styles.header, isSmallScreen && { paddingHorizontal: 14, paddingVertical: 8 }]}>
+            <View style={[styles.headerContent, isSmallScreen && { minWidth: 0, flex: 1 }]}>
+              <Text style={[styles.welcomeText, isSmallScreen && { fontSize: 14 }]} numberOfLines={1} ellipsizeMode="tail" adjustsFontSizeToFit minimumFontScale={0.75}>
                 Welcome back{profile?.full_name ? `, ${profile.full_name}` : ''}!
               </Text>
-              <Text style={styles.appName} numberOfLines={1} ellipsizeMode="tail" adjustsFontSizeToFit minimumFontScale={0.7}>
+              <Text style={[styles.appName, isSmallScreen && { fontSize: 13, marginTop: 1 }]} numberOfLines={1} ellipsizeMode="tail" adjustsFontSizeToFit minimumFontScale={0.65}>
                 {organization?.app_name || organization?.name || assetConfig.appName}
               </Text>
             </View>
-            <View style={styles.headerActions}>
+            <View style={[styles.headerActions, isSmallScreen && { gap: 8 }]}>
               <TouchableOpacity 
                 style={styles.headerButton} 
                 onPress={() => navigation.navigate('RecentScans')}
+                accessibilityLabel="Recent scans"
+                accessibilityRole="button"
               >
-                <Text style={styles.headerButtonIcon}>🔔</Text>
+                <Ionicons name="notifications-outline" size={22} color="#FFFFFF" />
                 {stats.unreadScans > 0 && (
                   <View style={[styles.badge, { backgroundColor: colors.error }]}>
                     <Text style={[styles.badgeText, { color: '#fff' }]}>{stats.unreadScans}</Text>
@@ -341,36 +376,49 @@ export default function HomeScreen() {
               <TouchableOpacity 
                 style={styles.headerButton} 
                 onPress={() => navigation.navigate('Settings')}
+                accessibilityLabel="Settings"
+                accessibilityRole="button"
               >
-                <Text style={styles.headerButtonIcon}>⚙️</Text>
+                <Ionicons name="settings-outline" size={22} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
           </View>
         </LinearGradient>
 
         {/* Search Bar */}
-        <View style={styles.searchContainer}>
+        <View style={[styles.searchContainer, isSmallScreen && { paddingHorizontal: 14, marginBottom: 16 }]}>
           <ModernCard elevated={false} style={styles.searchBarCard}>
-            <View style={styles.searchBar}>
-              <Text style={styles.searchIcon}>🔍</Text>
+            <View style={[styles.searchBar, isSmallScreen && { paddingHorizontal: 12, paddingVertical: 10 }]}>
+              <Ionicons name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
               <TextInput
-                style={[styles.searchInput, { color: colors.text }]}
+                style={[styles.searchInput, { color: colors.text }, isSmallScreen && { fontSize: 15 }]}
                 placeholder={`Search customers or ${assetConfig.assetTypePlural}...`}
                 placeholderTextColor={colors.textSecondary}
                 value={search}
                 onChangeText={setSearch}
               />
+              {search.length > 0 && (
+                <TouchableOpacity
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  onPress={() => setSearch('')}
+                  style={styles.clearButton}
+                  accessibilityLabel="Clear search"
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="close-circle" size={22} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
                 style={[styles.scanButton, { backgroundColor: colors.primary }]}
-                accessibilityLabel="Scanbot Scanner"
-                accessibilityHint="Open Scanbot barcode scanner"
+                accessibilityLabel="Barcode Scanner"
+                accessibilityHint="Open barcode scanner"
                 onPress={() => {
                   logger.log('📷 MLKit: Opening scanner from HomeScreen');
                   setShowScanner(true);
                   setScanned(false);
                 }}
               >
-                <Ionicons name="camera" size={20} color="#FFFFFF" />
+                <Ionicons name="camera" size={22} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
           </ModernCard>
@@ -378,18 +426,18 @@ export default function HomeScreen() {
 
         {/* Search Results */}
         {search.trim().length > 0 && (
-          <View style={[styles.searchResults, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={[styles.searchResults, { backgroundColor: colors.surface, borderColor: colors.border }, isSmallScreen && { marginHorizontal: 14 }]}>
             {customerResults.length > 0 && (
               <View style={styles.resultsSection}>
-                <Text style={[styles.resultsHeader, { color: colors.primary }]}>Customers</Text>
+                <Text style={[styles.resultsHeader, { color: colors.primary }, isSmallScreen && { fontSize: 13 }]}>Customers</Text>
                 {customerResults.map((item, index) => (
                   <TouchableOpacity
                     key={`${item.CustomerListID}_${index}`}
-                    style={[styles.resultItem, { borderBottomColor: colors.border }]}
+                    style={[styles.resultItem, { borderBottomColor: colors.border }, isSmallScreen && { paddingHorizontal: 12, paddingVertical: 10 }]}
                     onPress={() => navigation.navigate('CustomerDetails', { customerId: item.CustomerListID })}
                   >
-                    <Text style={[styles.resultTitle, { color: colors.text }]}>{item.name}</Text>
-                    <Text style={[styles.resultSubtitle, { color: colors.textSecondary }]}>
+                    <Text style={[styles.resultTitle, { color: colors.text }, isSmallScreen && { fontSize: 15 }]} numberOfLines={1} ellipsizeMode="tail">{item.name}</Text>
+                    <Text style={[styles.resultSubtitle, { color: colors.textSecondary }, isSmallScreen && { fontSize: 13, marginTop: 2 }]} numberOfLines={1} ellipsizeMode="tail">
                       ID: {item.CustomerListID} • Gases: {item.gases.length > 0 ? item.gases.join(', ') : 'None'}
                     </Text>
                   </TouchableOpacity>
@@ -399,15 +447,15 @@ export default function HomeScreen() {
 
             {bottleResults.length > 0 && (
               <View style={styles.resultsSection}>
-                                 <Text style={[styles.resultsHeader, { color: colors.primary }]}>{assetConfig.assetDisplayNamePlural}</Text>
+                <Text style={[styles.resultsHeader, { color: colors.primary }, isSmallScreen && { fontSize: 13 }]}>{assetConfig.assetDisplayNamePlural}</Text>
                 {bottleResults.map((item, index) => (
                   <TouchableOpacity
                     key={`${item.barcode_number}_${index}`}
-                    style={[styles.resultItem, { borderBottomColor: colors.border }]}
+                    style={[styles.resultItem, { borderBottomColor: colors.border }, isSmallScreen && { paddingHorizontal: 12, paddingVertical: 10 }]}
                     onPress={() => navigation.navigate('CylinderDetails', { barcode: item.barcode_number })}
                   >
-                    <Text style={[styles.resultTitle, { color: colors.text }]}>#{item.barcode_number}</Text>
-                    <Text style={[styles.resultSubtitle, { color: colors.textSecondary }]}>
+                    <Text style={[styles.resultTitle, { color: colors.text }, isSmallScreen && { fontSize: 15 }]} numberOfLines={1} ellipsizeMode="tail">#{item.barcode_number}</Text>
+                    <Text style={[styles.resultSubtitle, { color: colors.textSecondary }, isSmallScreen && { fontSize: 13, marginTop: 2 }]} numberOfLines={1} ellipsizeMode="tail">
                       {item.customer_name || 'Unassigned'} • {item.product_code}
                     </Text>
                   </TouchableOpacity>
@@ -422,190 +470,83 @@ export default function HomeScreen() {
         )}
 
         {/* Quick Actions */}
-        <View style={styles.quickActionsContainer}>
-          <Text style={[styles.sectionTitle, { color: colors.text, fontWeight: '800' }]}>Quick Actions</Text>
-          <View style={styles.actionsGrid}>
+        <View style={[styles.quickActionsContainer, isSmallScreen && { paddingHorizontal: 14, paddingBottom: 14 }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text, fontWeight: '800' }, isSmallScreen && { fontSize: 18, marginBottom: 12 }]}>Quick Actions</Text>
+          <View style={[styles.actionsGrid, isSmallScreen && { gap: 10 }]}>
             {getQuickActions().map((action, index) => (
               <ModernCard
                 key={index}
                 onPress={() => handleQuickAction(action.action)}
                 elevated
-                style={styles.actionCard}
+                style={[styles.actionCard, isSmallScreen && { padding: 12, minWidth: 0 }]}
               >
-                <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
-                  <Text style={styles.actionIconText}>{action.icon}</Text>
+                <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }, isSmallScreen && { width: 36, height: 36, marginBottom: 6 }]}>
+                  <Ionicons name={action.iconName} size={22} color={action.color} />
                 </View>
-                <Text style={[styles.actionTitle, { color: colors.text, fontWeight: '700' }]}>{action.title}</Text>
+                <Text style={[styles.actionTitle, { color: colors.text, fontWeight: '700' }, isSmallScreen && { fontSize: 11 }]} numberOfLines={1} ellipsizeMode="tail" adjustsFontSizeToFit minimumFontScale={0.8}>{action.title}</Text>
               </ModernCard>
             ))}
           </View>
         </View>
       </ScrollView>
 
-      {/* Scanbot Scanner Modal */}
+      {/* Scanner */}
       <Modal visible={showScanner} animationType="slide" transparent={false}>
-        <MLKitScanner
-          onTextFound={async (text: string, possibleNames: string[]) => {
-            // When OCR finds a customer name, search for it and navigate
-            if (possibleNames.length > 0 && profile?.organization_id) {
-              const customerName = possibleNames[0].trim();
-              logger.log('📝 OCR: Found customer name:', customerName, 'All names:', possibleNames);
-              
-              if (!customerName || customerName.length < 3) {
-                logger.log('⚠️ OCR: Customer name too short, ignoring');
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+          <ScanArea
+            searchCustomerByName={searchCustomerByName}
+            onCustomerFound={handleOcrCustomerFound}
+            onScanned={async (data: string) => {
+              if (scanned || !data) return;
+              logger.log('📷 Barcode scanned in HomeScreen:', data);
+              setScanned(true);
+              let cleanedBarcode = data.trim().replace(/^\*+|\*+$/g, '');
+              if (!cleanedBarcode) {
+                setScanned(false);
                 return;
               }
-              
+              setShowScanner(false);
               try {
-                // Search for customer by name - try exact match first, then substring
-                let customers = null;
-                
-                // Try exact match first (case insensitive)
-                const { data: exactMatch } = await supabase
-                  .from('customers')
-                  .select('CustomerListID, name')
-                  .eq('organization_id', profile.organization_id)
-                  .ilike('name', customerName)
-                  .limit(1);
-                
-                if (exactMatch && exactMatch.length > 0) {
-                  customers = exactMatch;
-                  logger.log('✅ OCR: Exact match found');
-                } else {
-                  // Try substring match
-                  const { data: substringMatch } = await supabase
+                if (!profile?.organization_id) {
+                  setSearch(cleanedBarcode);
+                  setTimeout(() => { searchCustomers(); searchBottles(); }, 100);
+                  return;
+                }
+                const formats = await FormatValidationService.getOrganizationFormats(profile.organization_id);
+                const isSalesReceipt = cleanedBarcode.startsWith('%');
+                const cylinderPattern = formats.cylinder_serial_format?.pattern || '^[0-9]{9}$';
+                const cylinderRegex = new RegExp(cylinderPattern);
+                const isCylinder = cylinderRegex.test(cleanedBarcode);
+                if (isSalesReceipt) {
+                  const { data: customer } = await supabase
                     .from('customers')
-                    .select('CustomerListID, name')
+                    .select('CustomerListID')
                     .eq('organization_id', profile.organization_id)
-                    .ilike('name', `%${customerName}%`)
-                    .limit(5);
-                  
-                  if (substringMatch && substringMatch.length > 0) {
-                    customers = substringMatch;
-                    logger.log('✅ OCR: Substring match found');
+                    .ilike('barcode', `*${cleanedBarcode}*`)
+                    .limit(1)
+                    .single();
+                  if (customer) {
+                    navigation.navigate('CustomerDetails', { customerId: customer.CustomerListID });
+                    return;
                   }
-                }
-                
-                if (customers && customers.length > 0) {
-                  logger.log('✅ OCR: Found customer(s), navigating to:', customers[0].name);
-                  // Close scanner first
-                  setShowScanner(false);
-                  setScanned(true);
-                  // Small delay to ensure scanner closes smoothly
-                  setTimeout(() => {
-                    // Navigate to the first matching customer
-                    navigation.navigate('CustomerDetails', { customerId: customers[0].CustomerListID });
-                  }, 300);
+                } else if (isCylinder) {
+                  navigation.navigate('CylinderDetails', { barcode: cleanedBarcode });
                   return;
-                } else {
-                  logger.log('⚠️ OCR: No customer found with name:', customerName);
-                  // Add to search bar so user can see/search manually
-                  setSearch(customerName);
-                  setTimeout(() => {
-                    searchCustomers();
-                  }, 100);
                 }
-              } catch (error) {
-                logger.error('❌ OCR: Error searching for customer:', error);
-              }
-            }
-          }}
-          onBarcodeScanned={async (data: string, result?: { format: string; confidence: number }) => {
-            if (scanned || !data) return;
-            
-            logger.log('📷 MLKit: Barcode scanned in HomeScreen:', data, result?.format);
-            setScanned(true);
-            
-            // Clean the barcode - remove leading/trailing asterisks
-            let cleanedBarcode = data.trim().replace(/^\*+|\*+$/g, '');
-            
-            if (!cleanedBarcode) {
-              logger.log('📷 MLKit: Empty barcode after cleaning');
-              setScanned(false);
-              return;
-            }
-            
-            setShowScanner(false);
-            
-            // Determine if this is a customer (sales receipt with %) or cylinder (9 digits)
-            try {
-              if (!profile?.organization_id) {
-                logger.log('❌ No organization ID, falling back to search');
                 setSearch(cleanedBarcode);
-                setTimeout(() => {
-                  searchCustomers();
-                  searchBottles();
-                }, 100);
-                return;
+                setTimeout(() => { searchCustomers(); searchBottles(); }, 100);
+              } catch (error) {
+                logger.error('❌ Error processing barcode:', error);
+                setSearch(cleanedBarcode);
+                setTimeout(() => { searchCustomers(); searchBottles(); }, 100);
               }
-              
-              const formats = await FormatValidationService.getOrganizationFormats(profile.organization_id);
-              
-              // Check if it's a sales receipt barcode (starts with %)
-              const isSalesReceipt = cleanedBarcode.startsWith('%');
-              
-              // Check if it matches cylinder format (9 digits by default)
-              const cylinderPattern = formats.cylinder_serial_format?.pattern || '^[0-9]{9}$';
-              const cylinderRegex = new RegExp(cylinderPattern);
-              const isCylinder = cylinderRegex.test(cleanedBarcode);
-              
-              logger.log('🔍 MLKit: Barcode analysis:', {
-                cleanedBarcode,
-                isSalesReceipt,
-                isCylinder,
-                cylinderPattern,
-                format: result?.format,
-                confidence: result?.confidence
-              });
-              
-              if (isSalesReceipt) {
-                // Sales receipt - find customer by barcode
-                logger.log('🔍 MLKit: Searching for customer with barcode:', cleanedBarcode);
-                const { data: customer } = await supabase
-                  .from('customers')
-                  .select('CustomerListID')
-                  .eq('organization_id', profile.organization_id)
-                  .ilike('barcode', `*${cleanedBarcode}*`)
-                  .limit(1)
-                  .single();
-                
-                if (customer) {
-                  logger.log('✅ MLKit: Found customer, navigating to CustomerDetails');
-                  navigation.navigate('CustomerDetails', { customerId: customer.CustomerListID });
-                  return;
-                }
-              } else if (isCylinder) {
-                // Cylinder barcode - navigate directly to cylinder details
-                logger.log('✅ MLKit: Cylinder barcode detected, navigating to CylinderDetails');
-                navigation.navigate('CylinderDetails', { barcode: cleanedBarcode });
-                return;
-              }
-              
-              // Fallback: search for both
-              logger.log('🔍 MLKit: No direct match, performing search');
-              setSearch(cleanedBarcode);
-              setTimeout(() => {
-                searchCustomers();
-                searchBottles();
-              }, 100);
-            } catch (error) {
-              logger.error('❌ MLKit: Error processing barcode:', error);
-              // Fallback to search
-              setSearch(cleanedBarcode);
-              setTimeout(() => {
-                searchCustomers();
-                searchBottles();
-              }, 100);
-            }
-          }}
-          enabled={!scanned}
-          onClose={() => {
-            setShowScanner(false);
-            setScanned(false);
-          }}
-          title="Search by Barcode"
-          subtitle="Scan customer or cylinder barcode"
-        />
+            }}
+            onClose={() => setShowScanner(false)}
+            label=""
+            validationPattern={/^[\dA-Za-z\-%*]+$/}
+            style={{ flex: 1 }}
+          />
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -651,18 +592,15 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
     position: 'relative',
-  },
-  headerButtonIcon: {
-    fontSize: 20,
   },
   badge: {
     position: 'absolute',
@@ -706,17 +644,23 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   searchIcon: {
-    fontSize: 20,
     marginRight: 12,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
   },
+  clearButton: {
+    minWidth: 48,
+    minHeight: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
   scanButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
@@ -836,15 +780,12 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   actionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
-  },
-  actionIconText: {
-    fontSize: 20,
   },
   actionTitle: {
     fontSize: 12,

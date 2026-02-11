@@ -9,8 +9,10 @@ import {
   ScrollView, 
   Alert,
   ActivityIndicator,
-  SafeAreaView
+  SafeAreaView,
+  Platform
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../hooks/useAuth';
 import { useSettings } from '../context/SettingsContext';
@@ -22,9 +24,13 @@ import { notificationService } from '../services/NotificationService';
 import { offlineModeService } from '../services/OfflineModeService';
 import { soundService } from '../services/soundService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
+import { MobileCard } from '../components/design-system';
 
 export default function SettingsScreen() {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const scrollPaddingBottom = Platform.OS === 'android' ? Math.max(insets.bottom, 24) + 24 : insets.bottom + 24;
   const { user, profile, loading } = useAuth();
   const { settings, updateSetting, clearAllData, resetSettings } = useSettings();
   const { colors } = useTheme();
@@ -219,9 +225,9 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={{ paddingBottom: scrollPaddingBottom }} showsVerticalScrollIndicator={false}>
         {/* Profile Section */}
-        <View style={[styles.profileSection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <MobileCard elevated intensity="light" style={styles.profileSection}>
           <View style={styles.profileInfo}>
             <View style={[styles.profileAvatar, { backgroundColor: colors.primary }]}>
               <Text style={styles.profileAvatarText}>
@@ -240,11 +246,11 @@ export default function SettingsScreen() {
               </Text>
             </View>
           </View>
-        </View>
+        </MobileCard>
 
         {/* Sync & Data Section */}
         <SectionHeader title="SYNC & DATA" />
-        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <MobileCard elevated={false} style={styles.section}>
           <SettingItem
             title="Sync Data"
             subtitle={`${offlineCount} items pending sync`}
@@ -253,7 +259,7 @@ export default function SettingsScreen() {
               syncing ? (
                 <ActivityIndicator color={colors.primary} />
               ) : (
-                <View style={[styles.statusDot, { backgroundColor: isConnected ? '#10B981' : '#EF4444' }]} />
+                <View style={[styles.statusDot, { backgroundColor: isConnected ? colors.success : colors.error }]} />
               )
             }
           />
@@ -284,31 +290,16 @@ export default function SettingsScreen() {
             }
             showBorder={false}
           />
-        </View>
+        </MobileCard>
 
         {/* App Preferences */}
         <SectionHeader title="APP PREFERENCES" />
-        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <SettingItem
-            title="Notifications"
-            subtitle="Push notifications and alerts"
-            rightComponent={
-              <TouchableOpacity
-                onPress={() => navigation.navigate('NotificationSettings' as never)}
-                style={styles.chevronButton}
-              >
-                <Text style={[styles.chevronText, { color: colors.primary }]}>
-                  Configure
-                </Text>
-                <Text style={[styles.chevron, { color: colors.textSecondary }]}>›</Text>
-              </TouchableOpacity>
-            }
-          />
+        <MobileCard elevated={false} style={styles.section}>
           <SettingItem
             title="Notifications"
             subtitle="Push notifications and alerts"
             onPress={() => navigation.navigate('NotificationSettings')}
-            rightComponent={<Text style={styles.chevron}>›</Text>}
+            rightComponent={<Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />}
           />
           <SettingItem
             title="Sound Effects"
@@ -337,12 +328,11 @@ export default function SettingsScreen() {
             }
             showBorder={false}
           />
-        </View>
-
+        </MobileCard>
 
         {/* Data Management */}
         <SectionHeader title="DATA MANAGEMENT" />
-        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <MobileCard elevated={false} style={styles.section}>
           <SettingItem
             title="Clear Cache"
             subtitle="Free up storage space"
@@ -373,14 +363,14 @@ export default function SettingsScreen() {
             title="Clear All Data"
             subtitle="Remove all offline data"
             onPress={handleClearData}
-            rightComponent={<Text style={[styles.actionText, { color: '#EF4444' }]}>Clear</Text>}
+            rightComponent={<Text style={[styles.actionText, { color: colors.error }]}>Clear</Text>}
             showBorder={false}
           />
-        </View>
+        </MobileCard>
 
         {/* Support & Info */}
         <SectionHeader title="SUPPORT & INFO" />
-        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <MobileCard elevated={false} style={styles.section}>
           <SettingItem
             title="Help & Support"
             subtitle="Get help and contact support"
@@ -412,7 +402,7 @@ export default function SettingsScreen() {
                 ]
               );
             }}
-            rightComponent={<Text style={styles.chevron}>›</Text>}
+            rightComponent={<Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />}
           />
           <SettingItem
             title="Privacy Policy"
@@ -420,7 +410,7 @@ export default function SettingsScreen() {
             onPress={() => {
               Alert.alert('Privacy Policy', 'Privacy policy would open here');
             }}
-            rightComponent={<Text style={styles.chevron}>›</Text>}
+            rightComponent={<Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />}
           />
           <SettingItem
             title="Version"
@@ -428,11 +418,11 @@ export default function SettingsScreen() {
             rightComponent={null}
             showBorder={false}
           />
-        </View>
+        </MobileCard>
 
         {/* Account Management */}
         <SectionHeader title="ACCOUNT MANAGEMENT" />
-        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <MobileCard elevated={false} style={styles.section}>
           <SettingItem
             title="Delete Account"
             subtitle="Permanently delete your account and all associated data"
@@ -482,21 +472,21 @@ export default function SettingsScreen() {
                 ]
               );
             }}
-            rightComponent={<Text style={[styles.actionText, { color: '#EF4444' }]}>Delete</Text>}
+            rightComponent={<Text style={[styles.actionText, { color: colors.error }]}>Delete</Text>}
             showBorder={false}
           />
-        </View>
+        </MobileCard>
 
         {/* Sign Out */}
         <TouchableOpacity
-          style={[styles.signOutButton, { backgroundColor: '#FEF2F2', borderColor: '#EF4444' }]}
+          style={[styles.signOutButton, { backgroundColor: colors.error + '12', borderColor: colors.error }]}
           onPress={handleLogout}
           disabled={logoutLoading}
         >
           {logoutLoading ? (
-            <ActivityIndicator color="#EF4444" />
+            <ActivityIndicator color={colors.error} />
           ) : (
-            <Text style={[styles.signOutText, { color: '#EF4444' }]}>Sign Out</Text>
+            <Text style={[styles.signOutText, { color: colors.error }]}>Sign Out</Text>
           )}
         </TouchableOpacity>
 

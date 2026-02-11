@@ -54,7 +54,7 @@ class FeedbackService {
     soundEnabled: true,
     hapticEnabled: true,
     voiceEnabled: true,
-    volume: 0.8,
+    volume: 1.0, // Max volume so scan beep is audible even at device max volume
   };
 
   private sounds: { [key: string]: any } = {};

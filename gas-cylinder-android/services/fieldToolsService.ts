@@ -1,7 +1,9 @@
 import logger from '../utils/logger';
 import * as Location from 'expo-location';
-import { Camera } from 'expo-camera';
 import { Alert, Linking } from 'react-native';
+
+// Note: expo-camera v17+ removed Camera.setFlashlightAsync. Flashlight is only available
+// via the enableTorch prop on CameraView when the camera is open.
 
 /**
  * Field Tools Service - Provides GPS tagging, flashlight control, and route optimization
@@ -213,20 +215,28 @@ class FieldToolsService {
    */
   async toggleFlashlight(): Promise<boolean> {
     try {
+      // expo-camera v17+ removed Camera.setFlashlightAsync - flashlight is only available
+      // via enableTorch on CameraView when the camera is open
+      const camera = require('expo-camera');
+      const setFlashlight = (camera as any).setFlashlightAsync ?? (camera as any).Camera?.setFlashlightAsync;
+      if (typeof setFlashlight !== 'function') {
+        logger.warn('Flashlight API not available - use torch on camera when scanning');
+        Alert.alert('Flashlight', 'Flashlight is available when the camera scanner is open. Open the scanner and use the torch button.');
+        return this.isFlashlightOn;
+      }
       if (this.isFlashlightOn) {
-        await Camera.setFlashlightAsync(false);
+        await setFlashlight(false);
         this.isFlashlightOn = false;
         logger.log('🔦 Flashlight turned OFF');
       } else {
-        await Camera.setFlashlightAsync(true);
+        await setFlashlight(true);
         this.isFlashlightOn = true;
         logger.log('🔦 Flashlight turned ON');
       }
-      
       return this.isFlashlightOn;
     } catch (error) {
       logger.error('Error toggling flashlight:', error);
-      Alert.alert('Flashlight Error', 'Could not control flashlight. Make sure camera permissions are granted.');
+      Alert.alert('Flashlight', 'Flashlight is available when the camera scanner is open.');
       return this.isFlashlightOn;
     }
   }
@@ -441,7 +451,13 @@ class FieldToolsService {
     this.stopLocationTracking();
     
     if (this.isFlashlightOn) {
-      Camera.setFlashlightAsync(false).catch(console.error);
+      try {
+        const camera = require('expo-camera');
+        const setFlashlight = (camera as any).setFlashlightAsync ?? (camera as any).Camera?.setFlashlightAsync;
+        if (typeof setFlashlight === 'function') {
+          setFlashlight(false).catch(console.error);
+        }
+      } catch (_) { /* API not available */ }
       this.isFlashlightOn = false;
     }
     

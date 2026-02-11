@@ -14,7 +14,7 @@ import {
   Pressable
 } from 'react-native';
 import { Platform } from '../utils/platform';
-import { Camera, CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { Canvas, Path, Skia } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -68,11 +68,14 @@ export default function ProofOfDelivery({
   const [customerName, setCustomerName] = useState('');
   const [gpsLocation, setGpsLocation] = useState<any>(null);
   const [showCamera, setShowCamera] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false); // Defer mount to prevent Android crash
   const [showSignature, setShowSignature] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [locationPermission, setLocationPermission] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [focusTrigger, setFocusTrigger] = useState(0); // Used to trigger autofocus on tap
+  const [autofocusMode, setAutofocusMode] = useState<'on' | 'off'>('on');
+  const [cameraZoom, setCameraZoom] = useState(0); // 0-1 (percentage of max zoom)
+  const [flashEnabled, setFlashEnabled] = useState(false);
   
   const cameraRef = useRef<CameraView>(null);
   const signaturePaths = useRef<any[]>([]);
@@ -92,6 +95,16 @@ export default function ProofOfDelivery({
       getCurrentLocation();
     }
   }, [visible]);
+
+  // Defer CameraView mount when opening camera (prevents Android crash)
+  useEffect(() => {
+    if (!showCamera || !cameraPermission?.granted) {
+      setCameraReady(false);
+      return;
+    }
+    const t = setTimeout(() => setCameraReady(true), 400);
+    return () => clearTimeout(t);
+  }, [showCamera, cameraPermission?.granted]);
 
   const requestLocationPermission = async () => {
     try {
@@ -553,34 +566,65 @@ export default function ProofOfDelivery({
         presentationStyle="fullScreen"
       >
         <View style={styles.cameraContainer}>
-          {cameraPermission?.granted ? (
+          {cameraPermission?.granted ? !cameraReady ? (
+            <View style={[styles.camera, styles.centerContent]}>
+              <Text style={styles.permissionText}>Starting camera...</Text>
+            </View>
+          ) : (
             <Pressable
               style={styles.camera}
-              onPress={(event) => {
-                // Trigger autofocus on tap by toggling autofocus prop
-                setFocusTrigger(prev => {
-                  const newValue = prev + 1;
-                  // Toggle autofocus to trigger refocus
-                  setTimeout(() => setFocusTrigger(newValue + 1), 50);
-                  return newValue;
-                });
+              onPress={() => {
+                // Tap to refocus on Android - toggle autofocus to trigger startFocusMetering
+                setAutofocusMode('off');
+                setTimeout(() => setAutofocusMode('on'), 100);
               }}
             >
               <CameraView
                 ref={cameraRef}
                 style={StyleSheet.absoluteFill}
                 facing="back"
-                autofocus="on"
-                mode="video"
+                zoom={cameraZoom}
+                enableTorch={flashEnabled}
+                autofocus={autofocusMode}
+                onCameraReady={() => {
+                  setAutofocusMode('off');
+                  setTimeout(() => setAutofocusMode('on'), 80);
+                }}
+                mode="picture"
                 barcodeScannerEnabled={true}
               >
               <View style={styles.cameraOverlay}>
-                <TouchableOpacity
-                  style={styles.closeCamera}
-                  onPress={() => setShowCamera(false)}
-                >
-                  <Text style={styles.closeCameraText}>✕</Text>
-                </TouchableOpacity>
+                <View style={styles.cameraControlsTopRight}>
+                  <TouchableOpacity
+                    style={[styles.zoomFlashButton, flashEnabled && styles.zoomFlashButtonActive]}
+                    onPress={() => setFlashEnabled((v) => !v)}
+                  >
+                    <Text style={styles.zoomFlashIcon}>{flashEnabled ? '🔦' : '💡'}</Text>
+                  </TouchableOpacity>
+                  <View style={styles.zoomButtonsRow}>
+                    <TouchableOpacity
+                      style={styles.zoomBtn}
+                      onPress={() => setCameraZoom((z) => Math.max(0, z - 0.25))}
+                    >
+                      <Text style={styles.zoomBtnText}>−</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.zoomLabel}>{Math.round(cameraZoom * 100)}%</Text>
+                    <TouchableOpacity
+                      style={styles.zoomBtn}
+                      onPress={() => setCameraZoom((z) => Math.min(1, z + 0.25))}
+                    >
+                      <Text style={styles.zoomBtnText}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.closeCamera}
+                    onPress={() => setShowCamera(false)}
+                  >
+                    <Text style={styles.closeCameraText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+                {/* Scan border - old camera view style */}
+                <View style={styles.scanFrame} pointerEvents="none" />
                 <View style={styles.cameraControls}>
                   <TouchableOpacity
                     style={styles.captureButton}
@@ -592,7 +636,7 @@ export default function ProofOfDelivery({
               </View>
             </CameraView>
             </Pressable>
-          ) : (
+          ) ) : (
             <View style={styles.permissionContainer}>
               <Text style={styles.permissionText}>
                 Camera permission is required to take photos
@@ -838,14 +882,24 @@ const styles = StyleSheet.create({
   camera: {
     flex: 1,
   },
+  centerContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   cameraOverlay: {
     flex: 1,
     justifyContent: 'space-between',
   },
-  closeCamera: {
+  cameraControlsTopRight: {
     position: 'absolute',
     top: 50,
     right: 20,
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  closeCamera: {
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 20,
     width: 40,
@@ -857,6 +911,55 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 20,
     fontWeight: 'bold',
+  },
+  zoomFlashButton: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    padding: 12,
+    minWidth: 44,
+    alignItems: 'center',
+  },
+  zoomFlashButtonActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.8)',
+  },
+  zoomFlashIcon: {
+    fontSize: 20,
+  },
+  zoomButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  zoomBtn: {
+    padding: 8,
+    minWidth: 36,
+    alignItems: 'center',
+  },
+  zoomBtnText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  zoomLabel: {
+    color: '#fff',
+    fontSize: 12,
+    minWidth: 36,
+    textAlign: 'center',
+  },
+  scanFrame: {
+    position: 'absolute',
+    top: '25%',
+    left: '50%',
+    transform: [{ translateX: -160 }],
+    width: 320,
+    height: 150,
+    borderWidth: 2,
+    borderColor: '#fff',
+    borderRadius: 8,
+    backgroundColor: 'transparent',
   },
   cameraControls: {
     alignItems: 'center',

@@ -1,19 +1,24 @@
 import logger from '../utils/logger';
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert, ScrollView, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert, ScrollView, Dimensions, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
+import { useTheme } from '../context/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
+import { formatDateTimeLocal } from '../utils/dateUtils';
 
-function formatDate(dateStr) {
-  const d = new Date(dateStr);
-  return d.toLocaleString();
+function formatDate(dateStr: string) {
+  return formatDateTimeLocal(dateStr);
 }
 
 export default function HistoryScreen() {
+  const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const { config: assetConfig } = useAssetConfig();
   const { profile } = useAuth();
+  const listPaddingBottom = Platform.OS === 'android' ? Math.max(insets.bottom, 24) + 24 : insets.bottom + 16;
   const [scans, setScans] = useState([]);
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -30,6 +35,7 @@ export default function HistoryScreen() {
   const [showBottleSuggestions, setShowBottleSuggestions] = useState({});
   const [bottles, setBottles] = useState([]);
   const [itemDetails, setItemDetails] = useState({});
+  const [fills, setFills] = useState<any[]>([]);
 
   // Fetch customers
   useEffect(() => {
@@ -276,10 +282,23 @@ export default function HistoryScreen() {
           setError(`Failed to load scans: ${error.message || 'Unknown error'}`);
         } else {
           setError('');
-          // Group scans by order_number
           const groupedScans = groupScansByOrderNumber(data || []);
           setScans(groupedScans);
           logger.log(`Loaded ${data?.length || 0} scans, grouped into ${groupedScans.length} orders`);
+        }
+
+        // Fill history (last 24h) from cylinder_fills
+        const { data: fillsData, error: fillsError } = await supabase
+          .from('cylinder_fills')
+          .select('id, barcode_number, fill_type, fill_date, previous_status, created_at')
+          .eq('organization_id', profile.organization_id)
+          .gte('created_at', since)
+          .order('created_at', { ascending: false });
+
+        if (fillsError) {
+          logger.warn('Fill history load error:', fillsError);
+        } else {
+          setFills(fillsData || []);
         }
       } catch (err) {
         logger.error('Unexpected error loading scans:', err);
@@ -487,18 +506,41 @@ export default function HistoryScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Scan History (Last 24h)</Text>
-      <Text style={styles.subtitle}>Grouped by Order Number</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Text style={[styles.title, { color: colors.primary }]}>Scan History (Last 24h)</Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Grouped by Order Number</Text>
       
       {loading ? (
-        <ActivityIndicator color="#40B5AD" size="large" style={{ marginTop: 24 }} />
+        <ActivityIndicator color={colors.primary} size="large" style={{ marginTop: 24 }} />
       ) : error ? (
-        <Text style={styles.error}>{error}</Text>
+        <Text style={[styles.error, { color: colors.error }]}>{error}</Text>
       ) : (
         <FlatList
           data={scans}
+          contentContainerStyle={{ paddingBottom: listPaddingBottom }}
           keyExtractor={item => item.order_number || `no-order-${item.scans[0]?.id}`}
+          ListFooterComponent={
+            fills.length > 0 ? (
+              <View style={styles.fillSection}>
+                <Text style={styles.fillSectionTitle}>Fill History (Last 24h)</Text>
+                <Text style={styles.fillSectionSubtitle}>Marked as Full or Empty</Text>
+                {fills.map((fill) => (
+                  <View key={fill.id} style={styles.fillCard}>
+                    <View style={styles.fillCardMain}>
+                      <Text style={styles.fillBarcode}>{fill.barcode_number || '—'}</Text>
+                      <View style={[styles.fillBadge, fill.fill_type === 'full' ? styles.fillBadgeFull : styles.fillBadgeEmpty]}>
+                        <Text style={styles.fillBadgeText}>{fill.fill_type === 'full' ? 'Full' : 'Empty'}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.fillDate}>{formatDate(fill.fill_date || fill.created_at)}</Text>
+                    {fill.previous_status ? (
+                      <Text style={styles.fillPrevious}>Was: {fill.previous_status}</Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            ) : null
+          }
           renderItem={({ item }) => {
             const scanTime = new Date(item.earliest_created_at);
             const now = new Date();
@@ -514,7 +556,7 @@ export default function HistoryScreen() {
               .filter((v, i, a) => a.indexOf(v) === i); // Remove duplicates
             
             return (
-              <View style={[styles.orderCard, !isEditable && styles.orderCardDisabled]}>
+              <View style={[styles.orderCard, { backgroundColor: colors.surface }, !isEditable && styles.orderCardDisabled]}>
                 {/* Order Header - Collapsible */}
                 <TouchableOpacity 
                   style={styles.orderHeader}
@@ -525,17 +567,17 @@ export default function HistoryScreen() {
                     <Ionicons 
                       name={isExpanded ? 'chevron-down' : 'chevron-forward'} 
                       size={24} 
-                      color="#40B5AD" 
+                      color={colors.primary} 
                     />
                     <View style={styles.orderInfo}>
-                      <Text style={styles.orderNumber}>
+                      <Text style={[styles.orderNumber, { color: colors.primary }]}>
                         {item.order_number || 'No Order Number'}
                       </Text>
-                      <Text style={styles.orderCustomer}>{item.customer_name || 'No Customer'}</Text>
-                      <Text style={styles.orderDate}>{formatDate(item.earliest_created_at)}</Text>
+                      <Text style={[styles.orderCustomer, { color: colors.text }]}>{item.customer_name || 'No Customer'}</Text>
+                      <Text style={[styles.orderDate, { color: colors.textSecondary }]}>{formatDate(item.earliest_created_at)}</Text>
                     </View>
                   </View>
-                  <View style={styles.orderBadge}>
+                  <View style={[styles.orderBadge, { backgroundColor: colors.primary }]}>
                     <Text style={styles.orderBadgeText}>{bottleBarcodes.length}</Text>
                     <Text style={styles.orderBadgeLabel}>bottles</Text>
                   </View>
@@ -568,6 +610,7 @@ export default function HistoryScreen() {
                     <TouchableOpacity 
                       style={[
                         styles.editButton,
+                        { backgroundColor: colors.primary },
                         !isEditable && styles.editButtonDisabled
                       ]}
                       onPress={() => openEdit(item)}
@@ -582,14 +625,14 @@ export default function HistoryScreen() {
                 )}
                 
                 {!isEditable && !isExpanded && (
-                  <Text style={styles.expiredBadge}>Edit period expired</Text>
+                  <Text style={[styles.expiredBadge, { color: colors.error }]}>Edit period expired</Text>
                 )}
               </View>
             );
           }}
           ListEmptyComponent={
             !error ? (
-              <Text style={styles.emptyText}>
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
                 No scans in the last 24 hours.
               </Text>
             ) : null
@@ -599,8 +642,8 @@ export default function HistoryScreen() {
       {/* Edit Modal */}
       <Modal visible={!!editScan} animationType="slide" transparent onRequestClose={() => setEditScan(null)}>
         <View style={styles.modalBg}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Edit Scan</Text>
+          <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.primary }]}>Edit Scan</Text>
             
             <ScrollView 
               style={styles.modalScrollView}
@@ -610,7 +653,7 @@ export default function HistoryScreen() {
               keyboardShouldPersistTaps="handled"
             >
               {/* Customer Selection */}
-              <Text style={styles.label}>Customer</Text>
+              <Text style={[styles.label, { color: colors.text }]}>Customer</Text>
             <View style={styles.inputContainer}>
               <TextInput
                 style={[styles.input, { flex: 1 }]}
@@ -619,10 +662,10 @@ export default function HistoryScreen() {
                 placeholder="Type or select customer..."
               />
               <TouchableOpacity 
-                style={styles.pickerButton}
+                style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
                 onPress={() => setShowCustomerPicker(true)}
               >
-                <Text style={styles.pickerButtonText}>📋</Text>
+                <Ionicons name="list-outline" size={20} color={colors.primary} />
               </TouchableOpacity>
               {showCustomerSuggestions && customerSuggestions.length > 0 && (
                 <View style={styles.suggestionsContainer}>
@@ -635,7 +678,7 @@ export default function HistoryScreen() {
                         setShowCustomerSuggestions(false);
                       }}
                     >
-                      <Text style={styles.suggestionText}>{customer.name}</Text>
+                      <Text style={[styles.suggestionText, { color: colors.text }]}>{customer.name}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -643,7 +686,7 @@ export default function HistoryScreen() {
             </View>
 
             {/* Assets List */}
-            <Text style={styles.label}>{assetConfig?.assetDisplayNamePlural || 'Assets'} ({editAssets.length})</Text>
+            <Text style={[styles.label, { color: colors.text }]}>{assetConfig?.assetDisplayNamePlural || 'Assets'} ({editAssets.length})</Text>
             {editAssets.map((asset, index) => (
               <View key={index} style={styles.assetRowContainer}>
                 <View style={styles.assetRow}>
@@ -696,7 +739,7 @@ export default function HistoryScreen() {
                           }
                         }}
                         >
-                          <Text style={styles.suggestionText}>{bottle.barcode_number}</Text>
+                          <Text style={[styles.suggestionText, { color: colors.text }]}>{bottle.barcode_number}</Text>
                         </TouchableOpacity>
                       ))}
                     </ScrollView>
@@ -710,7 +753,7 @@ export default function HistoryScreen() {
               style={styles.addButton}
               onPress={addAsset}
             >
-              <Text style={styles.addButtonText}>+ Add {assetConfig?.assetDisplayName || 'Asset'}</Text>
+              <Text style={[styles.addButtonText, { color: colors.primary }]}>+ Add {assetConfig?.assetDisplayName || 'Asset'}</Text>
             </TouchableOpacity>
 
             {/* Delete Button */}
@@ -725,9 +768,9 @@ export default function HistoryScreen() {
             {/* Action Buttons */}
             <View style={{ flexDirection: 'row', marginTop: 12 }}>
               <TouchableOpacity style={[styles.btn, { backgroundColor: '#eee', flex: 1, marginRight: 8 }]} onPress={() => setEditScan(null)}>                   
-                <Text style={{ color: '#40B5AD', fontWeight: 'bold' }}>Cancel</Text>                                                                            
+                <Text style={{ color: colors.primary, fontWeight: 'bold' }}>Cancel</Text>                                                                            
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.btn, { backgroundColor: '#40B5AD', flex: 1, marginLeft: 8 }]} onPress={saveEdit} disabled={saving}>              
+              <TouchableOpacity style={[styles.btn, { backgroundColor: colors.primary, flex: 1, marginLeft: 8 }]} onPress={saveEdit} disabled={saving}>              
                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>{saving ? 'Saving...' : 'Save'}</Text>                                                      
               </TouchableOpacity>
             </View>
@@ -754,7 +797,7 @@ export default function HistoryScreen() {
                   setShowCustomerPicker(false);
                 }}
               >
-                <Text style={styles.customerItemText}>
+                <Text style={[styles.customerItemText, { color: colors.text }]}>
                   {editCustomer === '' ? '✓ No customer' : 'No customer'}
                 </Text>
               </TouchableOpacity>
@@ -767,13 +810,13 @@ export default function HistoryScreen() {
                     setShowCustomerPicker(false);
                   }}
                 >
-                  <Text style={[styles.customerItemText, editCustomer === customer.name && { fontWeight: 'bold', color: '#40B5AD' }]}>
+                  <Text style={[styles.customerItemText, { color: colors.text }, editCustomer === customer.name && { fontWeight: 'bold', color: colors.primary }]}>
                     {editCustomer === customer.name && '✓ '}{customer.name}
                   </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <TouchableOpacity style={[styles.btn, { backgroundColor: '#40B5AD', marginTop: 18 }]} onPress={() => setShowCustomerPicker(false)}>
+            <TouchableOpacity style={[styles.btn, { backgroundColor: colors.primary, marginTop: 18 }]} onPress={() => setShowCustomerPicker(false)}>
               <Text style={{ color: '#fff', fontWeight: 'bold' }}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -867,6 +910,76 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#fff',
     textTransform: 'uppercase',
+  },
+  // Fill History section
+  fillSection: {
+    marginTop: 24,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+  },
+  fillSectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#40B5AD',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  fillSectionSubtitle: {
+    fontSize: 13,
+    color: '#888',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  fillCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  fillCardMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  fillBarcode: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+    fontFamily: 'monospace',
+  },
+  fillBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  fillBadgeFull: {
+    backgroundColor: '#22C55E',
+  },
+  fillBadgeEmpty: {
+    backgroundColor: '#F59E0B',
+  },
+  fillBadgeText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#fff',
+    textTransform: 'uppercase',
+  },
+  fillDate: {
+    fontSize: 12,
+    color: '#888',
+  },
+  fillPrevious: {
+    fontSize: 11,
+    color: '#666',
+    marginTop: 2,
+    fontStyle: 'italic',
   },
   expiredBadge: {
     paddingHorizontal: 16,

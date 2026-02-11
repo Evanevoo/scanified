@@ -34,6 +34,33 @@ import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { useDynamicAssetTerms } from '../hooks/useDynamicAssetTerms';
 
+// Same derivation as Inventory (Assets) page - group by product_code when present so one row per code
+function deriveInventoryGasTypes(bottles) {
+  const assetMap = new Map();
+  function cleanedLabel(bottle) {
+    let gasType = bottle.description || bottle.product_code || bottle.gas_type || bottle.type;
+    if (gasType) {
+      gasType = gasType
+        .replace(/^AVIATOR\s+/i, '')
+        .replace(/\s+BOTTLE.*$/i, '')
+        .replace(/\s+ASSET.*$/i, '')
+        .replace(/\s+SIZE\s+\d+.*$/i, '')
+        .replace(/\s+-\s+SIZE\s+\d+.*$/i, '')
+        .replace(/\s+ASSETS.*$/i, '')
+        .trim();
+      if (gasType.length < 3) gasType = bottle.description || bottle.product_code || bottle.gas_type || bottle.type;
+    }
+    return gasType || 'Unknown Gas Type';
+  }
+  bottles.forEach((bottle) => {
+    const normalizedCode = bottle.product_code && bottle.product_code.trim() ? bottle.product_code.trim() : null;
+    const groupingKey = normalizedCode || cleanedLabel(bottle);
+    if (!assetMap.has(groupingKey)) assetMap.set(groupingKey, []);
+    assetMap.get(groupingKey).push(bottle);
+  });
+  return Array.from(assetMap.keys()).filter(Boolean).sort((a, b) => (a || '').localeCompare(b || ''));
+}
+
 export default function AssetDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -56,11 +83,13 @@ export default function AssetDetail() {
   const [customerData, setCustomerData] = useState(null);
   const [customers, setCustomers] = useState([]);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
+  const [gasTypes, setGasTypes] = useState([]);
 
   useEffect(() => {
     fetchAssetDetail();
     fetchLocations();
     fetchCustomers();
+    fetchGasTypes();
     if (profile?.organization_id) {
       fetchOwnershipValues();
     }
@@ -162,6 +191,23 @@ export default function AssetDetail() {
       logger.error('Error fetching customers:', error);
     } finally {
       setLoadingCustomers(false);
+    }
+  };
+
+  // Build the same Gas Type list as Inventory (/inventory) from this org's bottles
+  const fetchGasTypes = async () => {
+    try {
+      if (!profile?.organization_id) return;
+      const { data: bottles, error } = await supabase
+        .from('bottles')
+        .select('product_code, description, gas_type, type')
+        .eq('organization_id', profile.organization_id);
+
+      if (error) throw error;
+      const list = deriveInventoryGasTypes(bottles || []);
+      setGasTypes(list);
+    } catch (err) {
+      logger.error('Error fetching gas types from inventory:', err);
     }
   };
 
@@ -1072,14 +1118,17 @@ export default function AssetDetail() {
                   <MenuItem value="">
                     <em>None</em>
                   </MenuItem>
-                  <MenuItem value="ARGON">Argon</MenuItem>
-                  <MenuItem value="OXYGEN">Oxygen</MenuItem>
-                  <MenuItem value="NITROGEN">Nitrogen</MenuItem>
-                  <MenuItem value="HELIUM">Helium</MenuItem>
-                  <MenuItem value="CO2">CO2</MenuItem>
-                  <MenuItem value="CHEMTANE">Chemtane</MenuItem>
-                  <MenuItem value="ACETYLENE">Acetylene</MenuItem>
-                  <MenuItem value="PROPANE">Propane</MenuItem>
+                  {gasTypes.map((label) => (
+                    <MenuItem key={label} value={label}>
+                      {label}
+                    </MenuItem>
+                  ))}
+                  {/* If current value is not in inventory list (e.g. new type), keep it selectable */}
+                  {editData.gas_type && !gasTypes.includes((editData.gas_type || '').trim()) && (
+                    <MenuItem value={editData.gas_type}>
+                      {editData.gas_type} (current)
+                    </MenuItem>
+                  )}
                 </Select>
               </FormControl>
             </Grid>

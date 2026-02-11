@@ -49,10 +49,9 @@ export default function Home() {
       setLoading(true);
       
       // Core statistics - available to all users
-      const [customersRes, cylindersRes, deliveriesRes] = await Promise.all([
+      const [customersRes, cylindersRes] = await Promise.all([
         supabase.from('customers').select('id', { count: 'exact' }).eq('organization_id', organization.id),
-        supabase.from('bottles').select('id', { count: 'exact' }).eq('organization_id', organization.id),
-        supabase.from('deliveries').select('id', { count: 'exact' }).eq('organization_id', organization.id).eq('status', 'pending')
+        supabase.from('bottles').select('id', { count: 'exact' }).eq('organization_id', organization.id)
       ]);
 
       // Get active rentals count - count bottles with status "rented" assigned to customers
@@ -182,7 +181,6 @@ export default function Home() {
         customers: customersRes.count || 0,
         cylinders: cylindersRes.count || 0,
         activeRentals: activeRentalsCount,
-        pendingDeliveries: deliveriesRes.count || 0,
         overdueInvoices: 0,
         totalUsers: 0,
         recentActivity: []
@@ -199,48 +197,82 @@ export default function Home() {
         newStats.totalUsers = usersRes.count || 0;
       }
 
-      // Recent activity for all users
-      // Try to get audit logs first, then fall back to recent deliveries/customer updates
+      // Recent activity for all users - try multiple sources so we usually have something to show
+      const activityItems = [];
+      // 1) audit_logs (if table exists and has rows)
       try {
-        // First try audit_logs
         const activityRes = await supabase
           .from('audit_logs')
           .select('action, table_name, created_at, user_id, profiles(full_name), details')
           .eq('organization_id', organization.id)
           .order('created_at', { ascending: false })
           .limit(5);
-
         if (activityRes.data && activityRes.data.length > 0) {
-          setRecentActivity(activityRes.data.map(log => ({
+          activityRes.data.forEach(log => activityItems.push({
             action: log.action || 'Action',
             table_name: log.table_name || (log.details?.table || 'System'),
             created_at: log.created_at,
-            profiles: log.profiles
-          })));
-        } else {
-          // Fallback: Get recent deliveries as activity
-          const deliveriesRes = await supabase
-            .from('deliveries')
-            .select('id, status, delivery_date, customer_id, customers(name), created_at, profiles(full_name)')
-            .eq('organization_id', organization.id)
-            .order('created_at', { ascending: false })
-            .limit(5);
-
-          if (deliveriesRes.data && deliveriesRes.data.length > 0) {
-            setRecentActivity(deliveriesRes.data.map(delivery => ({
-              action: 'Delivery',
-              table_name: delivery.customers?.name || 'Customer',
-              created_at: delivery.created_at || delivery.delivery_date,
-              profiles: delivery.profiles || { full_name: 'System' }
-            })));
-          } else {
-            setRecentActivity([]);
-          }
+            profiles: log.profiles || { full_name: 'System' }
+          }));
         }
-      } catch (error) {
-        logger.log('Recent activity not available:', error);
-        setRecentActivity([]);
+      } catch (_) { /* table may not exist */ }
+      // 2) If still empty: recent bottle_scans (scans are common activity)
+      if (activityItems.length === 0) {
+        try {
+          const { data: scans } = await supabase.from('bottle_scans').select('created_at, order_number, bottle_barcode, customer_name, action, mode').eq('organization_id', organization.id).order('created_at', { ascending: false }).limit(5);
+          if (scans && scans.length > 0) {
+            scans.forEach(s => activityItems.push({
+              action: s.action || s.mode || 'Scan',
+              table_name: s.order_number ? `Order ${s.order_number}` : (s.customer_name || s.bottle_barcode || 'Cylinder'),
+              created_at: s.created_at,
+              profiles: { full_name: 'Scan' }
+            }));
+          }
+        } catch (_) { /* column may differ */ }
       }
+      // 3) If still empty: recent deliveries (no profiles join to avoid schema issues)
+      if (activityItems.length === 0) {
+        try {
+          const deliveriesRes = await supabase.from('deliveries').select('id, status, delivery_date, created_at').eq('organization_id', organization.id).order('created_at', { ascending: false }).limit(5);
+          if (deliveriesRes.data && deliveriesRes.data.length > 0) {
+            deliveriesRes.data.forEach(d => activityItems.push({
+              action: 'Delivery',
+              table_name: d.status || 'Scheduled',
+              created_at: d.created_at || d.delivery_date,
+              profiles: { full_name: 'Delivery' }
+            }));
+          }
+        } catch (_) { /* ignore */ }
+      }
+      // 4) If still empty: recently updated bottles (always has data when org has cylinders)
+      if (activityItems.length === 0) {
+        try {
+          const { data: bottles } = await supabase.from('bottles').select('barcode_number, product_code, last_updated, created_at').eq('organization_id', organization.id).order('created_at', { ascending: false }).limit(5);
+          if (bottles && bottles.length > 0) {
+            bottles.forEach(b => activityItems.push({
+              action: 'Cylinder',
+              table_name: b.product_code || b.barcode_number || 'Added',
+              created_at: b.last_updated || b.created_at,
+              profiles: { full_name: 'Inventory' }
+            }));
+          }
+        } catch (_) { /* ignore */ }
+      }
+      // 5) If still empty: recent rentals
+      if (activityItems.length === 0) {
+        try {
+          const { data: rentals } = await supabase.from('rentals').select('created_at, bottle_barcode').eq('organization_id', organization.id).order('created_at', { ascending: false }).limit(5);
+          if (rentals && rentals.length > 0) {
+            rentals.forEach(r => activityItems.push({
+              action: 'Rental',
+              table_name: r.bottle_barcode ? `Barcode ${String(r.bottle_barcode).slice(-6)}` : 'Rental',
+              created_at: r.created_at,
+              profiles: { full_name: 'Rentals' }
+            }));
+          }
+        } catch (_) { /* ignore */ }
+      }
+      setRecentActivity(activityItems.slice(0, 5));
 
       setStats(newStats);
     } catch (error) {
@@ -263,7 +295,6 @@ export default function Home() {
     } else if (isManager()) {
       return [
         { title: 'Add New Customer', path: '/customers', icon: <AddIcon />, color: 'primary' },
-        { title: 'Manage Deliveries', path: '/deliveries', icon: <LocalShipping />, color: 'secondary' },
         { title: 'View Reports', path: '/reports', icon: <Analytics />, color: 'info' },
         { title: 'Truck Reconciliation', path: '/truck-reconciliation', icon: <CheckCircle />, color: 'success' },
         { title: 'Route Optimization', path: '/route-optimization', icon: <TrendingUp />, color: 'warning' },
@@ -273,7 +304,6 @@ export default function Home() {
       return [
         { title: 'View Customers', path: '/customers', icon: <People />, color: 'primary' },
         { title: 'Check Inventory', path: '/inventory', icon: <Inventory />, color: 'secondary' },
-        { title: 'View Deliveries', path: '/deliveries', icon: <LocalShipping />, color: 'info' },
         { title: 'View Rentals', path: '/rentals', icon: <Schedule />, color: 'success' },
         { title: 'View Invoices', path: '/invoices', icon: <Receipt />, color: 'warning' },
         { title: 'Customer Portal', path: '/customer-portal', icon: <DashboardIcon />, color: 'error' }
@@ -335,16 +365,6 @@ export default function Home() {
           navigate('/rentals');
         }
       },
-      { 
-        title: 'Pending Deliveries', 
-        value: stats.pendingDeliveries, 
-        icon: <LocalShipping />, 
-        color: primaryColor,
-        onClick: () => {
-          logger.log('🔄 Navigating to /deliveries');
-          navigate('/deliveries');
-        }
-      }
     ];
 
     if (isAdmin()) {

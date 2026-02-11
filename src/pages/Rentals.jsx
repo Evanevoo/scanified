@@ -1,6 +1,7 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../supabase/client';
+import { useDebounce } from '../utils/performance';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, 
@@ -27,6 +28,7 @@ import { useAuth } from '../hooks/useAuth';
 import InvoiceGenerator from '../components/InvoiceGenerator';
 import BulkInvoiceEmailDialog from '../components/BulkInvoiceEmailDialog';
 import DNSConversionDialog from '../components/DNSConversionDialog';
+import { getNextInvoiceNumbers, getNextAgreementNumbers, toCsv, downloadFile } from '../utils/invoiceUtils';
 
 // Business logic functions to determine asset status
 const getAssetStatus = (assignedCustomer, customerType) => {
@@ -78,6 +80,7 @@ function RentalsImproved() {
   const [invoiceDialog, setInvoiceDialog] = useState({ open: false, customer: null, rentals: [] });
   const [bulkEmailDialogOpen, setBulkEmailDialogOpen] = useState(false);
   const [updatingRentals, setUpdatingRentals] = useState(false);
+  const [exportingInvoices, setExportingInvoices] = useState(false);
   const [error, setError] = useState(null);
   const [filters, setFilters] = useState({
     status: 'all',
@@ -85,8 +88,9 @@ function RentalsImproved() {
     search: '',
     showDNSOnly: false
   });
+  const debouncedSearch = useDebounce(filters.search, 300);
   const [locations, setLocations] = useState([]);
-  const [expandedCustomers, setExpandedCustomers] = useState(new Set());
+  const [expandedCustomers, setExpandedCustomers] = useState(() => new Set());
 
   // Statistics
   const [stats, setStats] = useState({
@@ -114,57 +118,26 @@ function RentalsImproved() {
         return;
       }
 
-      logger.log('Fetching rentals for organization:', organization.id);
+      // Parallel fetch: rentals, bottles, locations, pricing, leases
+      const [
+        { data: rentalsData, error: rentalsError },
+        { data: assignedBottles, error: bottlesError },
+        { data: allBottles, error: allBottlesError },
+        { data: locationsData },
+        { data: customerPricing },
+        { data: leaseAgreements, error: leaseError }
+      ] = await Promise.all([
+        supabase.from('rentals').select('*').is('rental_end_date', null).eq('organization_id', organization.id),
+        supabase.from('bottles').select('*, customers:assigned_customer(customer_type)').eq('organization_id', organization.id).not('assigned_customer', 'is', null),
+        supabase.from('bottles').select('*').eq('organization_id', organization.id),
+        supabase.from('locations').select('id, name, total_tax_rate').eq('organization_id', organization.id),
+        supabase.from('customer_pricing').select('*').eq('organization_id', organization.id),
+        supabase.from('lease_agreements').select('*').eq('organization_id', organization.id).eq('status', 'active'),
+      ]);
 
-      // Simplified approach - get all data separately to debug
-      // 1. Get all active rentals (from rentals table) - including DNS rentals
-      const { data: rentalsData, error: rentalsError } = await supabase
-        .from('rentals')
-        .select('*')
-        .is('rental_end_date', null)
-        .eq('organization_id', organization.id); // Only rentals for this organization
-
-      if (rentalsError) {
-        logger.error('Rentals query error:', rentalsError);
-        throw rentalsError;
-      }
-
-      logger.log('All active rentals:', rentalsData?.length || 0);
-      
-      // Log how many rentals have bottle_id vs how many don't
-      const rentalsWithBottleId = (rentalsData || []).filter(r => r.bottle_id).length;
-      const rentalsWithoutBottleId = (rentalsData || []).filter(r => !r.bottle_id).length;
-      logger.log('Rentals breakdown:', {
-        total: rentalsData?.length || 0,
-        withBottleId: rentalsWithBottleId,
-        withoutBottleId: rentalsWithoutBottleId,
-        dnsRentals: (rentalsData || []).filter(r => r.is_dns === true).length
-      });
-
-      // 2. Get all assigned bottles for this organization
-      const { data: assignedBottles, error: bottlesError } = await supabase
-        .from('bottles')
-        .select('*, customers:assigned_customer(customer_type)')
-        .eq('organization_id', organization.id)
-        .not('assigned_customer', 'is', null);
-
-      if (bottlesError) {
-        logger.error('Bottles query error:', bottlesError);
-        throw bottlesError;
-      }
-
-      logger.log('Assigned bottles for org:', assignedBottles?.length || 0);
-
-      // 3. Get all bottles for this organization (to join with rentals)
-      const { data: allBottles, error: allBottlesError } = await supabase
-        .from('bottles')
-        .select('*')
-        .eq('organization_id', organization.id);
-
-      if (allBottlesError) {
-        logger.error('All bottles query error:', allBottlesError);
-        throw allBottlesError;
-      }
+      if (rentalsError) throw rentalsError;
+      if (bottlesError) throw bottlesError;
+      if (allBottlesError) throw allBottlesError;
 
       // Create a map of bottles for quick lookup by barcode AND by bottle_id
       const bottlesMap = (allBottles || []).reduce((map, bottle) => {
@@ -183,29 +156,12 @@ function RentalsImproved() {
       const assignedBottlesCount = assignedBottles?.length || 0;
       const unassignedBottles = totalBottles - assignedBottlesCount;
       
-      logger.log('Bottles breakdown:', {
-        totalBottles: totalBottles,
-        assignedBottles: assignedBottlesCount,
-        unassignedBottles: unassignedBottles,
-        expectedInRentals: assignedBottlesCount
-      });
-
-      // 4. Combine rentals with bottles from this organization
       const allRentalData = [];
-      
-      // Load location tax rates first (needed for both regular and DNS rentals)
-      const { data: locations } = await supabase
-        .from('locations')
-        .select('id, name, total_tax_rate')
-        .eq('organization_id', organization.id);
-      
-      const locationTaxMap = (locations || []).reduce((map, location) => {
+      const locationTaxMap = (locationsData || []).reduce((map, location) => {
         map[location.name.toUpperCase()] = location.total_tax_rate / 100; // Convert percentage to decimal
         return map;
       }, {});
-      
-      logger.log('Location tax rates loaded:', locationTaxMap);
-      
+
       // Add rentals that have matching bottles in this organization
       // Also include DNS rentals (is_dns = true) even if they don't have matching bottles
       let rentalsIncluded = 0;
@@ -244,16 +200,8 @@ function RentalsImproved() {
           });
         } else {
           rentalsExcluded++;
-          logger.warn('Rental excluded (no matching bottle, not DNS, no bottle_id):', {
-            rental_id: rental.id,
-            bottle_barcode: rental.bottle_barcode,
-            bottle_id: rental.bottle_id,
-            customer_id: rental.customer_id
-          });
         }
       }
-      
-      logger.log(`Rentals processing: ${rentalsIncluded} included, ${rentalsExcluded} excluded`);
 
       // Helper to detect placeholder barcodes (used in multiple places)
       const isPlaceholderBarcode = (barcode) => {
@@ -267,18 +215,8 @@ function RentalsImproved() {
                normalized === 'dns';
       };
       
-      // Query for rentals that might have bottle_id but no matching bottle by barcode
-      // This catches rentals with placeholder barcodes that weren't included above
-      const { data: rentalsByBottleId, error: rentalsByBottleIdError } = await supabase
-        .from('rentals')
-        .select('*')
-        .is('rental_end_date', null)
-        .eq('organization_id', organization.id)
-        .not('bottle_id', 'is', null);
-      
-      if (!rentalsByBottleIdError && rentalsByBottleId) {
-        logger.log(`Found ${rentalsByBottleId.length} rentals with bottle_id (including placeholder barcodes)`);
-        
+      const rentalsByBottleId = (rentalsData || []).filter(r => r.bottle_id);
+      if (rentalsByBottleId.length > 0) {
         let rentalsByBottleIdAdded = 0;
         // Add rentals that weren't already included (by bottle_id lookup)
         for (const rental of rentalsByBottleId) {
@@ -310,9 +248,8 @@ function RentalsImproved() {
             rentalsByBottleIdAdded++;
           }
         }
-        logger.log(`Added ${rentalsByBottleIdAdded} rentals by bottle_id to allRentalData`);
       }
-      
+
       // Add bottles that are assigned but don't have rental records
       // Track both barcodes AND bottle_ids to catch all cases
       const existingBottleBarcodes = new Set();
@@ -326,18 +263,6 @@ function RentalsImproved() {
         if (r.bottle_id) existingBottleIds.add(r.bottle_id);
         if (r.bottles?.id) existingBottleIds.add(r.bottles.id);
       });
-      
-      logger.log('Existing rentals tracking:', {
-        barcodes: existingBottleBarcodes.size,
-        bottle_ids: existingBottleIds.size,
-        totalRentals: allRentalData.length
-      });
-      
-      // Load customer pricing to apply correct rates
-      const { data: customerPricing } = await supabase
-        .from('customer_pricing')
-        .select('*')
-        .eq('organization_id', organization.id);
       
       const pricingMap = (customerPricing || []).reduce((map, pricing) => {
         map[pricing.customer_id] = pricing;
@@ -406,16 +331,8 @@ function RentalsImproved() {
           bottlesAdded++;
         } else {
           bottlesSkipped++;
-          logger.log(`Skipping bottle (already in rentals):`, { 
-            bottle_id: bottleId, 
-            barcode: barcode || 'no barcode',
-            is_placeholder: isPlaceholder,
-            customer_id: bottle.assigned_customer 
-          });
         }
       }
-      
-      logger.log(`Bottle assignments: ${bottlesAdded} added, ${bottlesSkipped} skipped (already in rentals)`);
 
       // Remove duplicates based on bottle_barcode OR bottle_id (keep rental records over bottle assignments)
       // For placeholder barcodes, use bottle_id as the unique identifier
@@ -439,8 +356,7 @@ function RentalsImproved() {
             if (bottleId && seenBottleIds.has(bottleId)) {
               // Duplicate bottle_id found
               duplicateBarcodes.set(barcode || 'no_barcode', (duplicateBarcodes.get(barcode || 'no_barcode') || 1) + 1);
-              logger.warn(`Duplicate rental record for bottle_id ${bottleId}:`, item);
-            } else {
+          } else {
               deduplicatedData.push(item);
               if (isDNS) dnsRentalsIncluded++;
               if (bottleId) seenBottleIds.add(bottleId);
@@ -451,14 +367,10 @@ function RentalsImproved() {
             seenBarcodes.add(barcode);
             if (bottleId) seenBottleIds.add(bottleId);
           } else {
-            // Duplicate real barcode found
             duplicateBarcodes.set(barcode, (duplicateBarcodes.get(barcode) || 1) + 1);
-            logger.warn(`Duplicate rental record for barcode ${barcode}:`, item);
           }
         }
       }
-      
-      logger.log(`Included ${dnsRentalsIncluded} DNS rentals in deduplication`);
       
       // Second pass: Add bottle assignments only if no rental record exists
       let bottlesWithoutBarcode = 0;
@@ -485,12 +397,6 @@ function RentalsImproved() {
             if (isPlaceholder) {
               placeholderBottlesSkipped++;
             }
-            logger.log(`Bottle assignment skipped (rental record exists):`, { 
-              customer_id: item.customer_id, 
-              bottle_id: bottleId,
-              barcode: barcode || 'no barcode',
-              is_placeholder: isPlaceholder
-            });
           } else {
             // Include this bottle assignment
             deduplicatedData.push(item);
@@ -512,38 +418,6 @@ function RentalsImproved() {
         }
       }
       
-      logger.log(`Placeholder bottles: ${placeholderBottlesAdded} added, ${placeholderBottlesSkipped} skipped`);
-      logger.log(`Deduplication summary:`, {
-        totalBefore: allRentalData.length,
-        totalAfter: deduplicatedData.length,
-        removed: allRentalData.length - deduplicatedData.length,
-        rentalsIncluded: deduplicatedData.filter(r => r.source === 'rental').length,
-        bottleAssignmentsIncluded: deduplicatedData.filter(r => r.source === 'bottle_assignment').length,
-        placeholderBottlesAdded,
-        placeholderBottlesSkipped
-      });
-      
-      if (duplicateBarcodes.size > 0) {
-        const duplicateEntries = Array.from(duplicateBarcodes.entries());
-        const totalDuplicates = duplicateEntries.reduce((sum, [barcode, count]) => sum + (count - 1), 0);
-        logger.warn(`Found ${duplicateBarcodes.size} unique barcodes with ${totalDuplicates} total duplicate entries. Sample duplicates:`, duplicateEntries.slice(0, 10));
-      }
-      
-      logger.log('Before deduplication:', allRentalData.length, 'After deduplication:', deduplicatedData.length, 'Duplicates removed:', allRentalData.length - deduplicatedData.length, 'Bottles without barcode included:', bottlesWithoutBarcode);
-
-      logger.log('Combined rental data:', deduplicatedData.length);
-
-      // 5. Fetch active lease agreements (per-bottle and customer-level)
-      const { data: leaseAgreements, error: leaseError } = await supabase
-        .from('lease_agreements')
-        .select('*')
-        .eq('organization_id', organization.id)
-        .eq('status', 'active');
-
-      if (leaseError) {
-        logger.error('Error fetching lease agreements:', leaseError);
-      }
-
       // Per-bottle lease map: bottle_id -> agreement (one lease per bottle)
       const leaseByBottleId = (leaseAgreements || [])
         .filter(a => a.bottle_id)
@@ -571,7 +445,6 @@ function RentalsImproved() {
             }, {});
           }
         } catch (error) {
-          logger.log('Customer_type column not found, using fallback');
           const { data: customersData } = await supabase
             .from('customers')
             .select('CustomerListID, name, contact_details, phone')
@@ -587,13 +460,7 @@ function RentalsImproved() {
         }
       }
 
-      logger.log('Customers found:', Object.keys(customersMap).length);
-
-      // 7. Apply per-bottle lease: only mark a rental as yearly if it has lease_agreement_id or its bottle has a lease (one lease per bottle)
-      // New/extra bottles default to monthly until admin switches to yearly.
-      if (leaseByBottleId && Object.keys(leaseByBottleId).length > 0) {
-        logger.log('Applying per-bottle leases:', Object.keys(leaseByBottleId).length);
-      }
+      // Apply per-bottle lease: only mark a rental as yearly if it has lease_agreement_id or its bottle has a lease (one lease per bottle)
       for (const rental of deduplicatedData) {
         const bottleId = rental.bottle_id || rental.bottles?.id;
         const agreementFromBottle = bottleId ? leaseByBottleId[bottleId] : null;
@@ -620,30 +487,12 @@ function RentalsImproved() {
         customer: customersMap[r.customer_id] || null
       }));
 
-      // Filter out vendors from rental page (they should only appear in inventory/in-house)
-      // But include rentals even if customer is null (they might have customer_id but customer not found)
+      // Include all rentals with customer_id (vendors included - filter applied in UI)
       const filteredRentals = rentalsWithCustomer.filter(r => {
-        // Include if it has a customer_id (even if customer object is null - might be missing customer record)
-        if (!r.customer_id) {
-          logger.warn('Rental missing customer_id:', r);
-          return false;
-        }
-        // Exclude vendors
-        if (r.customer && r.customer.customer_type === 'VENDOR') {
-          return false;
-        }
+        if (!r.customer_id) return false;
         return true;
       });
-      
-      logger.log('Rentals breakdown:', {
-        totalAfterDeduplication: deduplicatedData.length,
-        withCustomer: rentalsWithCustomer.filter(r => r.customer).length,
-        withoutCustomer: rentalsWithCustomer.filter(r => !r.customer).length,
-        afterFiltering: filteredRentals.length,
-        excludedVendors: rentalsWithCustomer.filter(r => r.customer?.customer_type === 'VENDOR').length,
-        excludedNoCustomerId: rentalsWithCustomer.filter(r => !r.customer_id).length
-      });
-      
+
       setAssets(filteredRentals);
 
       // 7. Calculate statistics based on bottle status and customer assignment
@@ -736,19 +585,6 @@ function RentalsImproved() {
         totalRevenue 
       });
 
-      logger.log('Final results:', {
-        totalBottles: totalBottles,
-        unassignedBottles: unassignedBottles,
-        assignedBottlesCount: assignedBottlesCount,
-        bottlesWithVendors: bottlesWithVendors,
-        rentedBottles: rentedBottles,
-        assignedBottlesAvailable: assignedBottlesAvailable,
-        availableAssets: inHouseTotal,
-        revenue: totalRevenue
-      });
-
-
-
     } catch (err) {
       logger.error('Error in fetchRentals:', err);
       setError(err.message);
@@ -770,8 +606,6 @@ function RentalsImproved() {
         if (error) throw error;
         customersData = data || [];
       } catch (error) {
-        // If there's an error (possibly due to missing customer_type), try basic query
-        logger.log('Falling back to basic customer query');
         const { data, error: fallbackError } = await supabase
           .from('customers')
           .select('CustomerListID, name, contact_details, phone')
@@ -809,107 +643,70 @@ function RentalsImproved() {
     }
   };
 
-  // Group rentals by customer (like original rentals page)
-  const customersWithRentals = [];
-  const customerMap = {};
-  let dnsCount = 0;
-  let rentalsWithoutCustomer = 0;
-
-  for (const rental of assets) {
-    // Count DNS rentals
-    if (rental.is_dns === true) {
-      dnsCount++;
+  // Memoized: Group rentals by customer
+  const { customersWithRentals, dnsCount } = useMemo(() => {
+    const list = [];
+    const customerMap = {};
+    let dns = 0;
+    for (const rental of assets) {
+      if (rental.is_dns === true) dns++;
+      const custId = rental.customer?.CustomerListID || rental.customer_id;
+      if (!custId) continue;
+      if (!customerMap[custId]) {
+        customerMap[custId] = {
+          customer: rental.customer || {
+            CustomerListID: custId,
+            name: rental.customer_name || `Customer ${custId}`,
+            customer_type: 'CUSTOMER',
+          },
+          rentals: [],
+        };
+        list.push(customerMap[custId]);
+      }
+      customerMap[custId].rentals.push(rental);
     }
-    
-    // Use customer_id if customer object is null (customer might not exist in DB)
-    const custId = rental.customer?.CustomerListID || rental.customer_id;
-    if (!custId) {
-      rentalsWithoutCustomer++;
-      logger.warn('Rental has no customer_id or customer:', { 
-        rental_id: rental.id, 
-        is_dns: rental.is_dns, 
-        dns_product_code: rental.dns_product_code 
+    return { customersWithRentals: list, dnsCount: dns };
+  }, [assets]);
+
+  // Memoized: Filter customers (uses debounced search)
+  const filteredCustomers = useMemo(() => {
+    return customersWithRentals
+      .map(({ customer, rentals }) => {
+        let filteredRentals = rentals;
+        if (filters.showDNSOnly) {
+          filteredRentals = rentals.filter(r => r.is_dns === true);
+        }
+        return { customer, rentals: filteredRentals };
+      })
+      .filter(({ customer, rentals }) => {
+        if (rentals.length === 0) return false;
+        const custType = customer.customer_type || 'CUSTOMER';
+        if (filters.customer_type !== 'all' && custType !== filters.customer_type) return false;
+        if (filters.status !== 'all') {
+          const isVendor = custType === 'VENDOR';
+          if (filters.status === 'IN-HOUSE' && !isVendor) return false;
+          if (filters.status === 'RENTED' && isVendor) return false;
+        }
+        const searchText = debouncedSearch.toLowerCase();
+        if (debouncedSearch) {
+          return customer.name?.toLowerCase().includes(searchText) ||
+            customer.CustomerListID?.toLowerCase().includes(searchText) ||
+            rentals.some(r => {
+              const barcode = r.bottles?.barcode_number || r.bottles?.barcode || r.bottle_barcode;
+              const dnsLabel = r.is_dns ? `${r.dns_product_code || 'DNS'} - ${r.dns_description || 'Not Scanned'}` : '';
+              return (barcode?.toLowerCase().includes(searchText) || dnsLabel.toLowerCase().includes(searchText));
+            });
+        }
+        return true;
       });
-      continue;
-    }
-    
-    // Create customer object if it doesn't exist
-    if (!customerMap[custId]) {
-      customerMap[custId] = {
-        customer: rental.customer || {
-          CustomerListID: custId,
-          name: rental.customer_name || `Customer ${custId}`,
-          customer_type: 'CUSTOMER' // Default to CUSTOMER if unknown
-        },
-        rentals: [],
-      };
-      customersWithRentals.push(customerMap[custId]);
-    }
-    customerMap[custId].rentals.push(rental);
-  }
-  
-  logger.log('Grouped rentals:', {
-    totalRentals: assets.length,
-    customersWithRentals: customersWithRentals.length,
-    totalBottles: customersWithRentals.reduce((sum, c) => sum + c.rentals.length, 0),
-    dnsRentals: dnsCount,
-    rentalsWithoutCustomer: rentalsWithoutCustomer
-  });
+  }, [customersWithRentals, filters.showDNSOnly, filters.customer_type, filters.status, debouncedSearch]);
 
-  // Filter customers based on search and DNS filter
-  const filteredCustomers = customersWithRentals
-    .map(({ customer, rentals }) => {
-      // Filter rentals within each customer if DNS filter is active
-      let filteredRentals = rentals;
-      if (filters.showDNSOnly) {
-        filteredRentals = rentals.filter(r => r.is_dns === true);
-      }
-      
-      // Return customer with filtered rentals (only include if they have rentals after filtering)
-      return { customer, rentals: filteredRentals };
-    })
-    .filter(({ customer, rentals }) => {
-      // Only include customers that have rentals after filtering
-      if (rentals.length === 0) return false;
-      
-      // Apply search filter
-      const searchText = filters.search.toLowerCase();
-      if (filters.search) {
-        return customer.name?.toLowerCase().includes(searchText) ||
-               customer.CustomerListID?.toLowerCase().includes(searchText) ||
-               rentals.some(r => {
-                 const barcode = r.bottles?.barcode_number || r.bottles?.barcode || r.bottle_barcode;
-                 const dnsLabel = r.is_dns ? `${r.dns_product_code || 'DNS'} - ${r.dns_description || 'Not Scanned'}` : '';
-                 return barcode?.toLowerCase().includes(searchText) || 
-                        dnsLabel.toLowerCase().includes(searchText);
-               });
-      }
-      return true;
-    });
-
-  const tabs = [
-    { 
-      label: 'All Customers', 
-      value: 'all', 
-      count: filteredCustomers.length 
-    },
-    { 
-      label: 'Monthly Rentals', 
-      value: 'monthly', 
-      count: filteredCustomers.reduce((count, c) => count + c.rentals.filter(r => r.rental_type === 'monthly').length, 0)
-    },
-    { 
-      label: 'Yearly Rentals', 
-      value: 'yearly', 
-      count: filteredCustomers.reduce((count, c) => count + c.rentals.filter(r => r.rental_type === 'yearly').length, 0)
-    },
-    { 
-      label: 'DNS (Not Scanned)', 
-      value: 'dns', 
-      count: dnsCount,
-      color: 'warning'
-    },
-  ];
+  const tabs = useMemo(() => [
+    { label: 'All Customers', value: 'all', count: filteredCustomers.length },
+    { label: 'Monthly Rentals', value: 'monthly', count: filteredCustomers.reduce((c, x) => c + x.rentals.filter(r => r.rental_type === 'monthly').length, 0) },
+    { label: 'Yearly Rentals', value: 'yearly', count: filteredCustomers.reduce((c, x) => c + x.rentals.filter(r => r.rental_type === 'yearly').length, 0) },
+    { label: 'DNS (Not Scanned)', value: 'dns', count: dnsCount, color: 'warning' },
+  ], [filteredCustomers, dnsCount]);
 
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
@@ -922,10 +719,6 @@ function RentalsImproved() {
     }
   };
 
-  const handleEditAsset = (asset) => {
-    setEditDialog({ open: true, asset });
-  };
-
   const handleUpdateAsset = async (assetId, updates) => {
     try {
       const { error } = await supabase
@@ -935,118 +728,156 @@ function RentalsImproved() {
 
       if (error) throw error;
 
-      // Refresh data
-      await fetchAssets();
-      setEditDialog({ open: false, asset: null });
+      await fetchRentals();
+      setEditDialog({ open: false, customer: null, rentals: [] });
     } catch (error) {
       logger.error('Error updating asset:', error);
     }
   };
 
-  // Original export format from old rentals page
   const exportToCSV = (customers) => {
     const rows = [];
+    const cols = ['Customer', 'CustomerID', 'Barcode', 'RentalType', 'RentalRate', 'TaxCode', 'Location', 'StartDate', 'EndDate', 'TotalBottles'];
     customers.forEach(({ customer, rentals }) => {
-      rentals.forEach(rental => {
+      rentals.forEach((rental) => {
+        const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || rental.bottle_barcode;
+        const dnsLabel = rental.is_dns ? `${rental.dns_product_code || 'DNS'} - ${rental.dns_description || 'Not Scanned'}` : '';
         rows.push({
           Customer: customer.name,
           CustomerID: customer.CustomerListID,
-          TotalBottles: rentals.length,
+          Barcode: barcode || dnsLabel || '',
           RentalType: rental.rental_type,
           RentalRate: rental.rental_amount,
           TaxCode: rental.tax_code,
           Location: rental.location,
           StartDate: rental.rental_start_date,
           EndDate: rental.rental_end_date,
+          TotalBottles: rentals.length,
         });
       });
     });
     if (rows.length === 0) return;
-    const header = Object.keys(rows[0]).join(',');
-    const csv = [header, ...rows.map(r => Object.values(r).join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `rentals_export_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const csv = toCsv(rows, cols);
+    const filename = `rentals_export_${new Date().toISOString().slice(0, 10)}.csv`;
+    downloadFile(csv, filename);
   };
 
-  // QuickBooks invoice export from old rentals page
-  const exportInvoices = (customers) => {
-    if (!customers.length) return;
-    const getNextInvoiceNumber = () => {
-      const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
-      const now = new Date();
-      const currentMonth = now.getFullYear() + '-' + (now.getMonth() + 1).toString().padStart(2, '0');
-      let lastNumber = 10000;
-      let lastMonth = currentMonth;
-      if (state.lastMonth === currentMonth && state.lastNumber) {
-        lastNumber = 10000;
-      } else if (state.lastMonth !== currentMonth && state.lastNumber) {
-        lastNumber = state.lastNumber + 1;
-        lastMonth = currentMonth;
-      }
-      return { next: lastNumber, currentMonth, lastMonth };
-    };
-    
-    const setInvoiceState = (number, month) => {
-      const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
-      if (state.lastMonth !== month) {
-        localStorage.setItem('invoice_state', JSON.stringify({ lastNumber: number, lastMonth: month }));
-      }
-    };
-
-    const getInvoiceDates = () => {
+  const exportInvoices = async (customers) => {
+    if (!customers.length || !organization?.id) return;
+    setExportingInvoices(true);
+    try {
       const now = new Date();
       const invoiceDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
       const dueDate = new Date(invoiceDate.getFullYear(), invoiceDate.getMonth() + 1, 1);
-      const fmt = d => d.toISOString().slice(0, 10);
-      return { invoiceDate: fmt(invoiceDate), dueDate: fmt(dueDate) };
-    };
+      const fmt = (d) => d.toISOString().slice(0, 10);
+      const invoiceDateStr = fmt(invoiceDate);
+      const dueDateStr = fmt(dueDate);
 
-    const { next, currentMonth } = getNextInvoiceNumber();
-    let invoiceNumber = next;
-    const { invoiceDate, dueDate } = getInvoiceDates();
-    const rate = 10;
-    const rows = customers.map(({ customer, rentals }, idx) => {
-      const numBottles = rentals.length;
-      const base = numBottles * rate;
-      // Use the actual tax rate from the first rental (they should all be the same for a customer)
-      const taxRate = rentals[0]?.tax_rate || 0.11;
-      const tax = +(base * taxRate).toFixed(1);
-      const total = +(base + tax).toFixed(2);
-      return {
-        'Invoice#': `W${(invoiceNumber + idx).toString().padStart(5, '0')}`,
-        'Customer Number': customer.CustomerListID,
-        'Total': total,
-        'Date': invoiceDate,
-        'TX': tax,
-        'TX code': 'G',
-        'Due date': dueDate,
-        'Rate': rate,
-        'Name': customer.name,
-        '# of Bottles': numBottles
-      };
-    });
-    
-    setInvoiceState(invoiceNumber + rows.length - 1, currentMonth);
-    const header = Object.keys(rows[0]).join(',');
-    const csv = [header, ...rows.map(r => Object.values(r).join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `quickbooks_invoices_${invoiceDate}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+      // Split each customer's rentals into monthly and yearly
+      const monthlyEntries = [];
+      const yearlyEntries = [];
+      customers.forEach(({ customer, rentals }) => {
+        const monthlyRentals = rentals.filter((r) => (r.rental_type || 'monthly') === 'monthly');
+        const yearlyRentals = rentals.filter((r) => r.rental_type === 'yearly');
+        if (monthlyRentals.length > 0) {
+          monthlyEntries.push({ customer, rentals: monthlyRentals });
+        }
+        if (yearlyRentals.length > 0) {
+          yearlyEntries.push({ customer, rentals: yearlyRentals });
+        }
+      });
+
+      const totalRows = monthlyEntries.length + yearlyEntries.length;
+      if (totalRows === 0) {
+        setError('No rentals to export.');
+        return;
+      }
+
+      const invoiceNumbers = await getNextInvoiceNumbers(organization.id, totalRows);
+      if (invoiceNumbers.length < totalRows) {
+        setError('Could not reserve invoice numbers. Please try again.');
+        return;
+      }
+
+      const cols = ['Invoice#', 'Customer Number', 'Name', 'Total', 'Date', 'TX', 'TX code', 'Due date', 'Rate', '# of Bottles', 'Type'];
+      let numberIdx = 0;
+
+      if (monthlyEntries.length > 0) {
+        const monthlyNumbers = invoiceNumbers.slice(numberIdx, numberIdx + monthlyEntries.length);
+        numberIdx += monthlyEntries.length;
+        const monthlyRows = monthlyEntries.map(({ customer, rentals }, i) => {
+          const base = rentals.reduce((sum, r) => sum + (parseFloat(r.rental_amount) || 0), 0);
+          const totalWithTax = rentals.reduce((sum, r) => {
+            const amt = parseFloat(r.rental_amount) || 0;
+            const taxRate = r.tax_rate || 0.11;
+            return sum + amt + amt * taxRate;
+          }, 0);
+          const tax = +(totalWithTax - base).toFixed(2);
+          const total = +(base + tax).toFixed(2);
+          const avgRate = rentals.length > 0 ? (base / rentals.length).toFixed(2) : '0.00';
+          return {
+            'Invoice#': monthlyNumbers[i] || `W${String(i + 1).padStart(5, '0')}`,
+            'Customer Number': customer.CustomerListID,
+            Name: customer.name,
+            Total: total,
+            Date: invoiceDateStr,
+            TX: tax,
+            'TX code': 'G',
+            'Due date': dueDateStr,
+            Rate: avgRate,
+            '# of Bottles': rentals.length,
+            Type: 'Monthly',
+          };
+        });
+        const monthlyCsv = toCsv(monthlyRows, cols);
+        downloadFile(monthlyCsv, `quickbooks_invoices_monthly_${invoiceDateStr}.csv`);
+      }
+
+      if (yearlyEntries.length > 0) {
+        const yearlyNumbers = invoiceNumbers.slice(numberIdx, numberIdx + yearlyEntries.length);
+        const yearlyRows = yearlyEntries.map(({ customer, rentals }, i) => {
+          const base = rentals.reduce((sum, r) => sum + (parseFloat(r.rental_amount) || 0), 0);
+          const totalWithTax = rentals.reduce((sum, r) => {
+            const amt = parseFloat(r.rental_amount) || 0;
+            const taxRate = r.tax_rate || 0.11;
+            return sum + amt + amt * taxRate;
+          }, 0);
+          const tax = +(totalWithTax - base).toFixed(2);
+          const total = +(base + tax).toFixed(2);
+          const avgRate = rentals.length > 0 ? (base / rentals.length).toFixed(2) : '0.00';
+          return {
+            'Invoice#': yearlyNumbers[i] || `W${String(i + 1).padStart(5, '0')}`,
+            'Customer Number': customer.CustomerListID,
+            Name: customer.name,
+            Total: total,
+            Date: invoiceDateStr,
+            TX: tax,
+            'TX code': 'G',
+            'Due date': dueDateStr,
+            Rate: avgRate,
+            '# of Bottles': rentals.length,
+            Type: 'Yearly',
+          };
+        });
+        const yearlyCsv = toCsv(yearlyRows, cols);
+        downloadFile(yearlyCsv, `quickbooks_invoices_yearly_${invoiceDateStr}.csv`);
+      }
+
+      setError(null);
+    } catch (err) {
+      logger.error('exportInvoices error:', err);
+      setError(err.message || 'Export failed');
+    } finally {
+      setExportingInvoices(false);
+    }
   };
 
-  const currentCustomers = activeTab === 0 ? filteredCustomers : 
-    activeTab === 1 ? filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'monthly')) :
-    activeTab === 2 ? filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly')) :
-    filteredCustomers.filter(c => c.rentals.some(r => r.is_dns === true));
+  const currentCustomers = useMemo(() => {
+    if (activeTab === 0) return filteredCustomers;
+    if (activeTab === 1) return filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'monthly'));
+    if (activeTab === 2) return filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly'));
+    return filteredCustomers.filter(c => c.rentals.some(r => r.is_dns === true));
+  }, [filteredCustomers, activeTab]);
 
   if (loading) {
     return (
@@ -1074,11 +905,11 @@ function RentalsImproved() {
           </Button>
           <Button
             variant="outlined"
-            startIcon={<MoneyIcon />}
+            startIcon={exportingInvoices ? <CircularProgress size={18} /> : <MoneyIcon />}
             onClick={() => exportInvoices(filteredCustomers)}
-            disabled={filteredCustomers.length === 0}
+            disabled={filteredCustomers.length === 0 || exportingInvoices}
           >
-            Export QuickBooks Invoices
+            {exportingInvoices ? 'Exporting...' : 'Export QuickBooks Invoices'}
           </Button>
           <Button
             variant="contained"
@@ -1389,12 +1220,23 @@ function RentalsImproved() {
                     </TableCell>
                     <TableCell sx={{ py: 2.5 }}>
                       <Typography variant="body2">
-                        {rentals[0]?.rental_type || 'monthly'}
+                        {(() => {
+                          const monthly = rentals.filter(r => r.rental_type === 'monthly').length;
+                          const yearly = rentals.filter(r => r.rental_type === 'yearly').length;
+                          if (monthly > 0 && yearly > 0) {
+                            return `${monthly} monthly, ${yearly} yearly`;
+                          }
+                          return rentals[0]?.rental_type || 'monthly';
+                        })()}
                       </Typography>
                     </TableCell>
                     <TableCell sx={{ py: 2.5 }}>
                       <Typography variant="body2" fontWeight="bold">
-                        ${rentals[0]?.rental_amount || '10.00'}
+                        {(() => {
+                          const amounts = [...new Set(rentals.map(r => (parseFloat(r.rental_amount) || 10).toFixed(2)))];
+                          const formatted = amounts.map(a => `$${a}`);
+                          return formatted.length > 1 ? formatted.join(', ') : formatted[0] || '$10.00';
+                        })()}
                       </Typography>
                     </TableCell>
                     <TableCell sx={{ py: 2.5 }}>
@@ -1461,13 +1303,12 @@ function RentalsImproved() {
                       <Box>
                         <Box
                           onClick={() => {
-                            const newExpanded = new Set(expandedCustomers);
-                            if (newExpanded.has(customer.CustomerListID)) {
-                              newExpanded.delete(customer.CustomerListID);
-                            } else {
-                              newExpanded.add(customer.CustomerListID);
-                            }
-                            setExpandedCustomers(newExpanded);
+                            setExpandedCustomers(prev => {
+                              const next = new Set(prev);
+                              if (next.has(customer.CustomerListID)) next.delete(customer.CustomerListID);
+                              else next.add(customer.CustomerListID);
+                              return next;
+                            });
                           }}
                           sx={{
                             p: 1.5,
@@ -1683,11 +1524,9 @@ function RentalsImproved() {
 
                   if (newType === 'yearly' && !leaseAgreementId && bottleId) {
                     // Create a per-bottle yearly lease for this rental
-                    const { data: numberData, error: numberError } = await supabase
-                      .rpc('generate_agreement_number', { org_id: organization?.id });
-                    if (numberError) {
-                      logger.error('Error generating agreement number:', numberError);
-                      alert('Error creating lease: ' + numberError.message);
+                    const [numberData] = await getNextAgreementNumbers(organization?.id, 1);
+                    if (!numberData) {
+                      alert('Error creating lease: Failed to generate agreement number');
                       setUpdatingRentals(false);
                       return;
                     }
@@ -1749,7 +1588,6 @@ function RentalsImproved() {
                   }
                 }
 
-                logger.log('Successfully updated rentals for customer:', customerId);
                 setEditDialog({ open: false, customer: null, rentals: [] });
                 await fetchRentals();
                 alert(`Successfully updated rental settings for ${editDialog.customer?.name}`);

@@ -17,7 +17,7 @@ function PrivacyPolicy() {
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
       p: 2
     }}>
-      <Card sx={{ maxWidth: 800, width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
+      <Card sx={{ width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
         <CardContent sx={{ p: 4 }}>
           {/* Back to Home Button */}
           <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 2 }}>

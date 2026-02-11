@@ -7,6 +7,8 @@ export default function SimpleCameraTest() {
   const [permission, requestPermission] = useCameraPermissions();
   const [showCamera, setShowCamera] = useState(false);
   const [scannedData, setScannedData] = useState('');
+  const [cameraZoom, setCameraZoom] = useState(0);
+  const [flashEnabled, setFlashEnabled] = useState(false);
 
   const openCamera = async () => {
     if (!permission?.granted) {
@@ -32,6 +34,8 @@ export default function SimpleCameraTest() {
           <CameraView
             style={styles.camera}
             facing="back"
+            zoom={cameraZoom}
+            enableTorch={flashEnabled}
             onBarcodeScanned={({ data }) => {
               logger.log('🎯 SIMPLE TEST - Barcode detected:', data);
               setScannedData(data);
@@ -40,11 +44,34 @@ export default function SimpleCameraTest() {
             }}
             barcodeScannerSettings={{}}
           />
+          <View style={styles.cameraControls}>
+            <TouchableOpacity
+              style={[styles.controlButton, flashEnabled && styles.controlButtonActive]}
+              onPress={() => setFlashEnabled((v) => !v)}
+            >
+              <Text style={styles.controlIcon}>{flashEnabled ? '🔦' : '💡'}</Text>
+            </TouchableOpacity>
+            <View style={styles.zoomRow}>
+              <TouchableOpacity
+                style={styles.zoomBtn}
+                onPress={() => setCameraZoom((z) => Math.max(0, z - 0.25))}
+              >
+                <Text style={styles.zoomBtnText}>−</Text>
+              </TouchableOpacity>
+              <Text style={styles.zoomLabel}>{Math.round(cameraZoom * 100)}%</Text>
+              <TouchableOpacity
+                style={styles.zoomBtn}
+                onPress={() => setCameraZoom((z) => Math.min(1, z + 0.25))}
+              >
+                <Text style={styles.zoomBtnText}>+</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={styles.controlButton} onPress={() => setShowCamera(false)}>
+              <Text style={styles.controlIcon}>✕</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.overlay}>
             <Text style={styles.instruction}>Point camera at any barcode</Text>
-            <TouchableOpacity style={styles.closeButton} onPress={() => setShowCamera(false)}>
-              <Text style={styles.closeButtonText}>Close</Text>
-            </TouchableOpacity>
           </View>
         </View>
       )}
@@ -86,6 +113,35 @@ const styles = StyleSheet.create({
   camera: {
     flex: 1,
   },
+  cameraControls: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  controlButton: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    padding: 12,
+    alignSelf: 'flex-start',
+  },
+  controlButtonActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.8)',
+  },
+  controlIcon: { fontSize: 20 },
+  zoomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+  },
+  zoomBtn: { padding: 8 },
+  zoomBtnText: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  zoomLabel: { color: '#fff', fontSize: 12, minWidth: 36, textAlign: 'center' },
   overlay: {
     position: 'absolute',
     top: 0,
@@ -104,17 +160,6 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
     marginBottom: 20,
-  },
-  closeButton: {
-    backgroundColor: 'rgba(255,0,0,0.8)',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  closeButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
   result: {
     marginTop: 20,
