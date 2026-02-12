@@ -11,7 +11,8 @@ import {
   ScrollView,
   Image,
   Dimensions,
-  Pressable
+  Pressable,
+  Platform as RNPlatform
 } from 'react-native';
 import { Platform } from '../utils/platform';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -78,6 +79,7 @@ export default function ProofOfDelivery({
   const [flashEnabled, setFlashEnabled] = useState(false);
   
   const cameraRef = useRef<CameraView>(null);
+  const focusTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
   const signaturePaths = useRef<any[]>([]);
   const currentPath = useRef<any>(null);
 
@@ -102,9 +104,16 @@ export default function ProofOfDelivery({
       setCameraReady(false);
       return;
     }
-    const t = setTimeout(() => setCameraReady(true), 400);
+    const t = setTimeout(() => setCameraReady(true), RNPlatform.OS === 'android' ? 350 : 400);
     return () => clearTimeout(t);
   }, [showCamera, cameraPermission?.granted]);
+
+  useEffect(() => {
+    return () => {
+      focusTimeoutsRef.current.forEach((id) => clearTimeout(id));
+      focusTimeoutsRef.current = [];
+    };
+  }, []);
 
   const requestLocationPermission = async () => {
     try {
@@ -587,8 +596,18 @@ export default function ProofOfDelivery({
                 enableTorch={flashEnabled}
                 autofocus={autofocusMode}
                 onCameraReady={() => {
-                  setAutofocusMode('off');
-                  setTimeout(() => setAutofocusMode('on'), 80);
+                  const triggerFocus = () => {
+                    setAutofocusMode('off');
+                    setTimeout(() => setAutofocusMode('on'), 80);
+                  };
+                  triggerFocus();
+                  if (RNPlatform.OS === 'android') {
+                    focusTimeoutsRef.current.forEach((id) => clearTimeout(id));
+                    focusTimeoutsRef.current = [
+                      setTimeout(triggerFocus, 250),
+                      setTimeout(triggerFocus, 550),
+                    ];
+                  }
                 }}
                 mode="picture"
                 barcodeScannerEnabled={true}

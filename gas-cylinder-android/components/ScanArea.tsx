@@ -83,6 +83,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   const cameraRef = useRef<any>(null);
   const lastBarcodeScanTimeRef = useRef<number>(0);
   const lastOcrCustomerRef = useRef<string>('');
+  const focusTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
   const idleCheckRef = useRef({ isOcrProcessing, isProcessing, scanned, permissionGranted: permission?.granted });
   const searchCustomerByNameRef = useRef(searchCustomerByName);
   const onCustomerFoundRef = useRef(onCustomerFound);
@@ -101,9 +102,17 @@ const ScanArea: React.FC<ScanAreaProps> = ({
       setCameraReady(false);
       return;
     }
-    const t = setTimeout(() => setCameraReady(true), 400);
+    const t = setTimeout(() => setCameraReady(true), Platform.OS === 'android' ? 350 : 400);
     return () => clearTimeout(t);
   }, [permission?.granted]);
+
+  // Clear scheduled focus timeouts on unmount
+  useEffect(() => {
+    return () => {
+      focusTimeoutsRef.current.forEach((id) => clearTimeout(id));
+      focusTimeoutsRef.current = [];
+    };
+  }, []);
 
   const validateBarcode = (barcode: string): { isValid: boolean; errorMessage?: string } => {
     if (!barcode || barcode.trim().length === 0) {
@@ -303,8 +312,19 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                   autofocus={autofocusMode}
                   onCameraReady={() => {
                     // Re-trigger focus when camera is ready (helps Android devices that miss initial focus)
-                    setAutofocusMode('off');
-                    setTimeout(() => setAutofocusMode('on'), 80);
+                    const triggerFocus = () => {
+                      setAutofocusMode('off');
+                      setTimeout(() => setAutofocusMode('on'), 80);
+                    };
+                    triggerFocus();
+                    // On Android, schedule extra focus triggers so camera locks focus sooner
+                    if (Platform.OS === 'android') {
+                      focusTimeoutsRef.current.forEach((id) => clearTimeout(id));
+                      focusTimeoutsRef.current = [
+                        setTimeout(triggerFocus, 250),
+                        setTimeout(triggerFocus, 550),
+                      ];
+                    }
                   }}
                   animateShutter={false}
                   barcodeScannerSettings={{

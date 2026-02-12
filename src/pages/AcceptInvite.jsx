@@ -122,9 +122,18 @@ export default function AcceptInvite() {
         return;
       }
 
+      // Resolve role display name (invite may store role_id UUID from UserManagement or role name from UserInvites)
+      let roleDisplayName = inviteData.role;
+      const isRoleIdUuid = typeof inviteData.role === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(inviteData.role);
+      if (isRoleIdUuid) {
+        const { data: roleRow } = await supabase.from('roles').select('name').eq('id', inviteData.role).maybeSingle();
+        roleDisplayName = roleRow?.name || 'Member';
+      }
+
       const inviteForState = {
         ...inviteData,
-        organizations: inviteData.organizations || (inviteData.organization_name ? { name: inviteData.organization_name } : { name: '' })
+        organizations: inviteData.organizations || (inviteData.organization_name ? { name: inviteData.organization_name } : { name: '' }),
+        roleDisplayName
       };
       setInvite(inviteForState);
       setValidatedToken(token);
@@ -218,7 +227,28 @@ export default function AcceptInvite() {
 
       if (!acceptResponse.ok) {
         const payload = await acceptResponse.json().catch(() => ({}));
-        throw new Error(payload.error || payload.message || 'Failed to accept invite');
+        const errMsg = payload.error || payload.message || 'Failed to accept invite';
+        // Fallback: profile may have been created by useAuth without org – try to fix from client
+        try {
+          const { error: updateErr } = await supabase
+            .from('profiles')
+            .update({
+              organization_id: inviteData.organization_id,
+              role: inviteData.role,
+              full_name: displayName,
+              is_active: true,
+              deleted_at: null,
+              disabled_at: null
+            })
+            .eq('id', user.id);
+          if (!updateErr) {
+            setStatus('success');
+            setMessage('Successfully joined the organization!');
+            setTimeout(() => { window.location.href = '/home'; }, 2000);
+            return;
+          }
+        } catch (_) { /* ignore */ }
+        throw new Error(errMsg);
       }
 
       setStatus('success');
@@ -251,7 +281,7 @@ export default function AcceptInvite() {
               Join {invite.organizations.name}
             </Typography>
             <Typography variant="body1" color="text.secondary" paragraph>
-              You've been invited to join as a <strong>{invite.role}</strong>
+              You've been invited to join as a <strong>{invite.roleDisplayName ?? invite.role}</strong>
             </Typography>
 
             <Box component="form" onSubmit={handleSignUpAndAccept} sx={{ mt: 3 }}>
