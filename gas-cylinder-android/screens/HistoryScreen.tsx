@@ -36,6 +36,7 @@ export default function HistoryScreen() {
   const [bottles, setBottles] = useState([]);
   const [itemDetails, setItemDetails] = useState({});
   const [fills, setFills] = useState<any[]>([]);
+  const [fillItemDetails, setFillItemDetails] = useState<Record<string, { gas_type?: string }>>({});
 
   // Fetch customers
   useEffect(() => {
@@ -83,6 +84,31 @@ export default function HistoryScreen() {
     }
   }, [profile]);
 
+  // Group fill history by batch (fills scanned/saved at the same time, within 90s)
+  const groupFillsByBatch = (fillList: any[]): { batchTime: string; fills: any[] }[] => {
+    if (!fillList?.length) return [];
+    const BATCH_WINDOW_MS = 90 * 1000;
+    const sorted = [...fillList].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+    const groups: { batchTime: string; fills: any[] }[] = [];
+    for (const fill of sorted) {
+      const fillTime = new Date(fill.created_at).getTime();
+      const lastBatch = groups[groups.length - 1];
+      const lastBatchNewest = lastBatch?.fills[0]?.created_at
+        ? new Date(lastBatch.fills[0].created_at).getTime()
+        : 0;
+      if (!lastBatch || lastBatchNewest - fillTime > BATCH_WINDOW_MS) {
+        groups.push({ batchTime: fill.created_at, fills: [fill] });
+      } else {
+        lastBatch.fills.push(fill);
+      }
+    }
+    return groups;
+  };
+
+  const fillBatches = groupFillsByBatch(fills);
+
   // Group scans by order_number AND customer_name (to properly separate different customers/orders)
   const groupScansByOrderNumber = (scans) => {
     const grouped = {};
@@ -121,6 +147,29 @@ export default function HistoryScreen() {
       // If any scan is verified, mark the group as verified
       if (scan.verified) {
         grouped[orderKey].verified = true;
+      }
+    });
+
+    // Deduplicate: one scan per bottle per order (keep most recent by created_at)
+    Object.keys(grouped).forEach(key => {
+      const byBottle = {};
+      grouped[key].scans.forEach(s => {
+        const barcode = s.bottle_barcode || s.assets?.[0] || '';
+        if (!barcode) return;
+        const existing = byBottle[barcode];
+        if (!existing || new Date(s.created_at) > new Date(existing.created_at)) {
+          byBottle[barcode] = s;
+        }
+      });
+      const deduped = Object.values(byBottle).sort(
+        (a, b) => new Date(b.created_at) - new Date(a.created_at)
+      );
+      grouped[key].scans = deduped;
+      if (deduped.length > 0) {
+        grouped[key].earliest_created_at = deduped.reduce(
+          (min, s) => (new Date(s.created_at) < new Date(min) ? s.created_at : min),
+          deduped[0].created_at
+        );
       }
     });
     
@@ -299,6 +348,22 @@ export default function HistoryScreen() {
           logger.warn('Fill history load error:', fillsError);
         } else {
           setFills(fillsData || []);
+          // Fetch gas type for each fill barcode from bottles
+          const fillBarcodes = (fillsData || []).map((f: any) => f.barcode_number).filter(Boolean);
+          if (fillBarcodes.length > 0 && profile?.organization_id) {
+            const { data: bottleRows } = await supabase
+              .from('bottles')
+              .select('barcode_number, gas_type')
+              .eq('organization_id', profile.organization_id)
+              .in('barcode_number', fillBarcodes);
+            const details: Record<string, { gas_type?: string }> = {};
+            (bottleRows || []).forEach((b: any) => {
+              details[b.barcode_number] = { gas_type: b.gas_type || undefined };
+            });
+            setFillItemDetails(details);
+          } else {
+            setFillItemDetails({});
+          }
         }
       } catch (err) {
         logger.error('Unexpected error loading scans:', err);
@@ -520,22 +585,39 @@ export default function HistoryScreen() {
           contentContainerStyle={{ paddingBottom: listPaddingBottom }}
           keyExtractor={item => item.order_number || `no-order-${item.scans[0]?.id}`}
           ListFooterComponent={
-            fills.length > 0 ? (
+            fillBatches.length > 0 ? (
               <View style={styles.fillSection}>
                 <Text style={styles.fillSectionTitle}>Fill History (Last 24h)</Text>
-                <Text style={styles.fillSectionSubtitle}>Marked as Full or Empty</Text>
-                {fills.map((fill) => (
-                  <View key={fill.id} style={styles.fillCard}>
-                    <View style={styles.fillCardMain}>
-                      <Text style={styles.fillBarcode}>{fill.barcode_number || '—'}</Text>
-                      <View style={[styles.fillBadge, fill.fill_type === 'full' ? styles.fillBadgeFull : styles.fillBadgeEmpty]}>
-                        <Text style={styles.fillBadgeText}>{fill.fill_type === 'full' ? 'Full' : 'Empty'}</Text>
-                      </View>
+                <Text style={styles.fillSectionSubtitle}>Grouped by batch (scanned at same time)</Text>
+                {fillBatches.map((batch, batchIndex) => (
+                  <View key={`batch-${batch.batchTime}-${batchIndex}`} style={styles.fillBatchBlock}>
+                    <View style={[styles.fillBatchHeader, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.fillBatchHeaderTime, { color: colors.text }]}>
+                        {formatDate(batch.batchTime)}
+                      </Text>
+                      <Text style={[styles.fillBatchHeaderCount, { color: colors.textSecondary }]}>
+                        {batch.fills.length} {batch.fills.length === 1 ? 'item' : 'items'}
+                      </Text>
                     </View>
-                    <Text style={styles.fillDate}>{formatDate(fill.fill_date || fill.created_at)}</Text>
-                    {fill.previous_status ? (
-                      <Text style={styles.fillPrevious}>Was: {fill.previous_status}</Text>
-                    ) : null}
+                    {batch.fills.map((fill) => {
+                      const gasType = fillItemDetails[fill.barcode_number]?.gas_type;
+                      return (
+                        <View key={fill.id} style={styles.fillCard}>
+                          <View style={styles.fillCardMain}>
+                            <Text style={styles.fillBarcode}>{fill.barcode_number || '—'}</Text>
+                            <View style={[styles.fillBadge, fill.fill_type === 'full' ? styles.fillBadgeFull : styles.fillBadgeEmpty]}>
+                              <Text style={styles.fillBadgeText}>{fill.fill_type === 'full' ? 'Full' : 'Empty'}</Text>
+                            </View>
+                          </View>
+                          {gasType ? (
+                            <Text style={[styles.fillGasType, { color: colors.textSecondary }]}>{gasType}</Text>
+                          ) : null}
+                          {fill.previous_status ? (
+                            <Text style={styles.fillPrevious}>Was: {fill.previous_status}</Text>
+                          ) : null}
+                        </View>
+                      );
+                    })}
                   </View>
                 ))}
               </View>
@@ -588,12 +670,25 @@ export default function HistoryScreen() {
                   <View style={styles.bottleList}>
                     {item.scans.map((scan, index) => {
                       const info = itemDetails[scan.bottle_barcode];
+                      const isReturn = (scan.mode || '').toUpperCase() === 'RETURN';
+                      const modeLabel = isReturn ? 'Return' : 'Shipped';
                       return (
                         <View key={scan.id} style={styles.bottleItem}>
                           <View style={styles.bottleItemContent}>
-                            <Text style={styles.bottleBarcode}>
-                              {index + 1}. {scan.bottle_barcode || 'N/A'}
-                            </Text>
+                            <View style={styles.bottleRow}>
+                              <Text style={styles.bottleBarcode}>
+                                {index + 1}. {scan.bottle_barcode || 'N/A'}
+                              </Text>
+                              <View style={[styles.modeBadge, isReturn ? styles.modeBadgeReturn : styles.modeBadgeShip]}>
+                                <Ionicons
+                                  name={isReturn ? 'arrow-back' : 'arrow-forward'}
+                                  size={12}
+                                  color="#fff"
+                                  style={{ marginRight: 4 }}
+                                />
+                                <Text style={styles.modeBadgeText}>{modeLabel}</Text>
+                              </View>
+                            </View>
                             {info && (
                               <Text style={styles.bottleType}>
                                 {info.description || info.productCode || 'Unknown Type'}
@@ -931,6 +1026,26 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: 'center',
   },
+  fillBatchBlock: {
+    marginBottom: 20,
+  },
+  fillBatchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+  },
+  fillBatchHeaderTime: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  fillBatchHeaderCount: {
+    fontSize: 13,
+  },
   fillCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -953,6 +1068,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
     fontFamily: 'monospace',
+  },
+  fillGasType: {
+    fontSize: 13,
+    marginBottom: 2,
   },
   fillBadge: {
     paddingHorizontal: 10,
@@ -1007,11 +1126,37 @@ const styles = StyleSheet.create({
   bottleItemContent: {
     flex: 1,
   },
+  bottleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    marginBottom: 2,
+  },
   bottleBarcode: {
     fontSize: 14,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 2,
+    flex: 1,
+  },
+  modeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  modeBadgeShip: {
+    backgroundColor: '#40B5AD',
+  },
+  modeBadgeReturn: {
+    backgroundColor: '#0ea5e9',
+  },
+  modeBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#fff',
+    textTransform: 'uppercase',
   },
   bottleType: {
     fontSize: 12,

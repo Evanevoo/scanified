@@ -625,6 +625,7 @@ export default function ImportApprovals() {
   
   // Existing state
   const [customerNameToId, setCustomerNameToId] = useState({});
+  const [customerIdToName, setCustomerIdToName] = useState({});
   const customerLookupDone = useRef(false);
   const [productCodeToGroup, setProductCodeToGroup] = useState({});
   const [scannedCounts, setScannedCounts] = useState({});
@@ -1835,17 +1836,20 @@ export default function ImportApprovals() {
     setProductCodeToGroup(map);
   }
 
-  // Fetch all customers once for lookup
+  // Fetch all customers once for lookup (name->id and id->name)
   async function fetchCustomers() {
     if (customerLookupDone.current) return;
     try {
       const { data: customers, error } = await supabase.from('customers').select('CustomerListID, name');
       if (error) throw error;
-      const map = {};
+      const nameToId = {};
+      const idToName = {};
       (customers || []).forEach(c => {
-        if (c.name) map[c.name.toLowerCase()] = c.CustomerListID;
+        if (c.name) nameToId[c.name.toLowerCase()] = c.CustomerListID;
+        if (c.CustomerListID != null) idToName[String(c.CustomerListID)] = c.name || '';
       });
-      setCustomerNameToId(map);
+      setCustomerNameToId(nameToId);
+      setCustomerIdToName(idToName);
       customerLookupDone.current = true;
     } catch (error) {
       logger.error('Error fetching customers:', error);
@@ -2319,51 +2323,19 @@ export default function ImportApprovals() {
           const customerName = firstScan.customer_name || firstScan.customer || 'Unknown Customer';
           const customerId = firstScan.customer_id || firstScan.CustomerID || firstScan.CustomerId || firstScan.CustomerListID || null;
           
-          // Deduplicate scans by barcode to prevent multiple entries for the same bottle
-          const seenBarcodes = new Set();
-          const uniqueScans = scans.filter(scan => {
-            const barcode = scan.barcode_number || scan.bottle_barcode;
-            if (!barcode) return true; // Keep scans without barcodes
-            
-            if (seenBarcodes.has(barcode)) {
-              logger.log('⚠️ Skipping duplicate scan for barcode:', barcode);
-              return false;
-            }
-            seenBarcodes.add(barcode);
-            return true;
-          });
+          // One row per scan so Trk shows actual scan counts (8 ship, 6 return)
+          logger.log(`📊 Scanned-only order ${orderNumber}: ${scans.length} scans (one row per scan)`);
           
-          logger.log(`📊 Deduplicated scans for order ${orderNumber}: ${scans.length} -> ${uniqueScans.length}`);
-          
-          // Create a mock data structure that matches imported invoices format
           return {
             id: `scanned_${orderNumber}`,
             data: {
-              rows: uniqueScans.map(scan => {
-                // Determine if this is a SHIP/OUT scan or RETURN/IN scan
-                // Check multiple field names and values to be robust
+              rows: scans.map(scan => {
                 const mode = scan.mode || scan.scan_type || scan.action || '';
                 const modeUpper = mode.toString().toUpperCase();
                 const action = (scan.action || '').toString().toLowerCase();
                 const scanType = (scan.scan_type || '').toString().toLowerCase();
-                
-                const isOut = action === 'out' || 
-                              scanType === 'delivery' || 
-                              modeUpper === 'SHIP' || 
-                              modeUpper === 'DELIVERY' ||
-                              modeUpper === 'OUT';
-                              
-                const isIn = action === 'in' || 
-                            scanType === 'pickup' || 
-                            modeUpper === 'RETURN' || 
-                            modeUpper === 'PICKUP' ||
-                            modeUpper === 'IN';
-                
-                // Log for debugging (only for first few scans to avoid spam)
-                if (uniqueScans.indexOf(scan) < 3) {
-                  logger.log(`📊 Scan processing: barcode=${scan.barcode_number || scan.bottle_barcode}, mode="${mode}", action="${scan.action}", scan_type="${scan.scan_type}", isOut=${isOut}, isIn=${isIn}`);
-                }
-                
+                const isOut = action === 'out' || scanType === 'delivery' || modeUpper === 'SHIP' || modeUpper === 'DELIVERY' || modeUpper === 'OUT';
+                const isIn = action === 'in' || scanType === 'pickup' || modeUpper === 'RETURN' || modeUpper === 'PICKUP' || modeUpper === 'IN';
                 const row = {
                   order_number: orderNumber,
                   customer_name: customerName,
@@ -2376,17 +2348,10 @@ export default function ImportApprovals() {
                   qty_in: isIn ? 1 : 0,
                   date: scan.scan_date || scan.created_at || new Date().toISOString().split('T')[0],
                   location: scan.location || 'Unknown',
-                  // Add mobile-specific fields for better display
                   barcode: scan.barcode_number || scan.bottle_barcode,
                   description: scan.description || 'Unknown',
                   gas_type: scan.gas_type || 'Unknown'
                 };
-                
-                // Log first few rows for debugging
-                if (uniqueScans.indexOf(scan) < 3) {
-                  logger.log(`📊 Created scanned-only row: barcode=${row.barcode}, qty_out=${row.qty_out}, qty_in=${row.qty_in}, mode="${mode}", isOut=${isOut}, isIn=${isIn}`);
-                }
-                
                 return row;
               }),
               customer_name: customerName,
@@ -2395,7 +2360,7 @@ export default function ImportApprovals() {
               CustomerId: customerId,
               CustomerListID: customerId,
               summary: {
-                total_rows: uniqueScans.length,
+                total_rows: scans.length,
                 uploaded_by: firstScan.user_id || 'scanner',
                 uploaded_at: firstScan.created_at || new Date().toISOString()
               },
@@ -2653,10 +2618,11 @@ export default function ImportApprovals() {
       // NOTE: bottle_scans uses 'bottle_barcode' and 'cylinder_barcode', not 'barcode_number'
       let bottleScans = [];
       
+      const bottleScansSelect = 'bottle_barcode, cylinder_barcode, barcode_number, created_at, order_number, organization_id, mode';
       // Try exact match first (string)
       let { data: bottleScansData, error: bottleScansError } = await supabase
         .from('bottle_scans')
-        .select('bottle_barcode, cylinder_barcode, barcode_number, created_at, order_number, organization_id')
+        .select(bottleScansSelect)
         .eq('order_number', orderNumStr);
       
       if (bottleScansError) {
@@ -2669,7 +2635,7 @@ export default function ImportApprovals() {
       if (bottleScans.length === 0 && !isNaN(orderNumNum)) {
         const { data: bottleScansDataNum, error: bottleScansErrorNum } = await supabase
           .from('bottle_scans')
-          .select('bottle_barcode, cylinder_barcode, barcode_number, created_at, order_number, organization_id')
+          .select(bottleScansSelect)
           .eq('order_number', orderNumNum);
         
         if (!bottleScansErrorNum && bottleScansDataNum && bottleScansDataNum.length > 0) {
@@ -2682,7 +2648,7 @@ export default function ImportApprovals() {
       if (bottleScans.length === 0 && uniqueOrderNumbers.length > 1) {
         const { data: bottleScansDataAll, error: bottleScansErrorAll } = await supabase
           .from('bottle_scans')
-          .select('bottle_barcode, cylinder_barcode, barcode_number, created_at, order_number, organization_id')
+          .select(bottleScansSelect)
           .in('order_number', uniqueOrderNumbers);
         
         if (!bottleScansErrorAll && bottleScansDataAll && bottleScansDataAll.length > 0) {
@@ -2697,7 +2663,7 @@ export default function ImportApprovals() {
         // First try: order number contains the search term
         let { data: bottleScansText, error: bottleScansTextError } = await supabase
           .from('bottle_scans')
-          .select('bottle_barcode, cylinder_barcode, barcode_number, created_at, order_number, organization_id')
+          .select(bottleScansSelect)
           .ilike('order_number', `%${orderNumStr}%`);
         
         if (!bottleScansTextError && bottleScansText && bottleScansText.length > 0) {
@@ -2899,25 +2865,44 @@ export default function ImportApprovals() {
           logger.log('✅ Found bottles in database:', bottleData.length, 'bottles');
           logger.log('✅ Bottle barcodes found:', bottleData.map(b => b.barcode_number));
           
-          // Match bottles with scan information
+          // Build per-barcode "best" scan - prefer SHIP when both (so counts match actual: 8 ship, 6 return)
+          const getBarcode = (s) => (s.barcode_number || s.bottle_barcode || s.cylinder_barcode)?.toString().trim();
+          const isReturnScan = (s) => {
+            const mode = (s.mode || '').toString().toUpperCase();
+            const action = (s.action || '').toString().toLowerCase();
+            const st = (s.scan_type || '').toString().toLowerCase();
+            return mode === 'RETURN' || mode === 'PICKUP' || st === 'pickup' || (action === 'in' && mode !== 'SHIP' && mode !== 'DELIVERY');
+          };
+          const barcodeToBestScan = new Map();
+          [...(scans || []), ...(bottleScans || [])].forEach(s => {
+            const b = getBarcode(s);
+            if (!b) return;
+            const existing = barcodeToBestScan.get(b);
+            const thisIsReturn = isReturnScan(s);
+            if (!existing || (!thisIsReturn && existing.isReturn)) {
+              barcodeToBestScan.set(b, {
+                action: s.action,
+                mode: s.mode,
+                created_at: s.created_at,
+                customer_name: s.customer_name,
+                isReturn: thisIsReturn
+              });
+            }
+          });
+          
+          // Match bottles with scan information (use RETURN-wins map so counts match card Trk)
           bottleData.forEach(bottle => {
-            // Match with scans table
-            const scanInfo = scans?.find(s => 
-              s.barcode_number?.toString().trim() === bottle.barcode_number?.toString().trim() || 
-              s.bottle_barcode?.toString().trim() === bottle.barcode_number?.toString().trim()
-            );
-            
-            // Match with bottle_scans table (uses bottle_barcode and cylinder_barcode)
-            const bottleScanInfo = bottleScans?.find(bs => 
-              bs.bottle_barcode?.toString().trim() === bottle.barcode_number?.toString().trim() || 
-              bs.cylinder_barcode?.toString().trim() === bottle.barcode_number?.toString().trim() ||
-              bs.barcode_number?.toString().trim() === bottle.barcode_number?.toString().trim()
-            );
+            const b = bottle.barcode_number?.toString().trim();
+            const best = b ? barcodeToBestScan.get(b) : null;
+            const scanAction = best ? (best.action || best.mode) : 'unknown';
+            const scanDate = best?.created_at ?? null;
+            const customer_name = bottle.customer_name || best?.customer_name || null;
             
             bottles.push({
               ...bottle,
-              scanAction: scanInfo?.action || scanInfo?.mode || bottleScanInfo?.mode || 'unknown',
-              scanDate: scanInfo?.created_at || bottleScanInfo?.created_at
+              customer_name,
+              scanAction,
+              scanDate
             });
           });
           
@@ -2960,13 +2945,14 @@ export default function ImportApprovals() {
 
   // Handle opening bottle info dialog - defined early to avoid hoisting issues
   function handleViewBottles(orderNumber) {
-      setBottleInfoDialog({
+    setBottleInfoDialog({
       open: true,
       orderNumber: orderNumber,
       bottles: [],
       scannedBarcodes: [],
       loading: true
     });
+    fetchCustomers(); // ensure id->name lookup is available for customer column
     fetchBottleInfoForOrder(orderNumber);
   }
 
@@ -3812,31 +3798,16 @@ export default function ImportApprovals() {
       });
     }
     
-    // For scanned-only records, aggregate by product code AND barcode to prevent duplicates
+    // For scanned-only records, sum qty_out and qty_in by product (actual scan counts: 8 ship, 6 return)
     if (isScannedOnly && lineItems.length > 0) {
-      const aggregated = {};
-      const seenBarcodes = new Set(); // Track barcodes to prevent duplicate entries
-      
+      const finalAggregated = {};
       lineItems.forEach(item => {
         const productInfo = getProductInfo(item);
         const productCode = productInfo.productCode;
-        
-        // Use barcode as a unique key to prevent duplicate entries from the same scan
-        const barcode = item.barcode || item.barcode_number || item.bottle_barcode || 
-                       `${productCode}_${item.qty_out}_${item.qty_in}`;
-        
-        // Create a unique key combining product code and barcode
-        const uniqueKey = `${productCode}_${barcode}`;
-        
-        // Skip if we've already processed this exact barcode
-        if (seenBarcodes.has(barcode)) {
-          logger.log('⚠️ Skipping duplicate barcode in line items:', barcode);
-          return;
-        }
-        
-        if (!aggregated[uniqueKey]) {
-          seenBarcodes.add(barcode);
-          aggregated[uniqueKey] = {
+        const qty_out = parseInt(item.qty_out || 0, 10);
+        const qty_in = parseInt(item.qty_in || 0, 10);
+        if (!finalAggregated[productCode]) {
+          finalAggregated[productCode] = {
             ...item,
             productInfo,
             shipped: 0,
@@ -3845,44 +3816,14 @@ export default function ImportApprovals() {
             scannedReturned: 0
           };
         }
-        
-        // Count scanned quantities - only count if they're actually set (not default 0)
-        const qty_out = parseInt(item.qty_out || 0, 10);
-        const qty_in = parseInt(item.qty_in || 0, 10);
-        
-        // Only add to counts if the value is actually set (not just default 0)
-        if (qty_out > 0) {
-          aggregated[uniqueKey].scannedShipped += qty_out;
-        }
-        if (qty_in > 0) {
-          aggregated[uniqueKey].scannedReturned += qty_in;
-        }
-        
-        logger.log(`📊 Aggregating item: barcode=${item.barcode || item.barcode_number}, qty_out=${qty_out}, qty_in=${qty_in}, scannedShipped=${aggregated[uniqueKey].scannedShipped}, scannedReturned=${aggregated[uniqueKey].scannedReturned}`);
+        finalAggregated[productCode].scannedShipped += qty_out;
+        finalAggregated[productCode].scannedReturned += qty_in;
       });
-      
-      // If we still have multiple entries with the same product code, merge them
-      const finalAggregated = {};
-      Object.values(aggregated).forEach(item => {
-        const productCode = item.productInfo.productCode;
-        if (!finalAggregated[productCode]) {
-          finalAggregated[productCode] = item;
-        } else {
-          // Merge quantities for same product code
-          finalAggregated[productCode].scannedShipped += item.scannedShipped;
-          finalAggregated[productCode].scannedReturned += item.scannedReturned;
-        }
-      });
-      
       const result = Object.values(finalAggregated).map(item => {
         const highlight = getHighlightInfo(item, item.productInfo);
-        logger.log(`📊 Final aggregated item: productCode=${item.productInfo.productCode}, scannedShipped=${item.scannedShipped}, scannedReturned=${item.scannedReturned}, qty_out=${item.qty_out}, qty_in=${item.qty_in}`);
-        return {
-          ...item,
-          highlight
-        };
+        return { ...item, highlight };
       });
-      logger.log(`📊 Scanned-only aggregation complete: ${result.length} items, total scannedShipped=${result.reduce((sum, item) => sum + (item.scannedShipped || 0), 0)}, total scannedReturned=${result.reduce((sum, item) => sum + (item.scannedReturned || 0), 0)}`);
+      logger.log(`📊 Scanned-only aggregation (actual counts): total scannedShipped=${result.reduce((sum, item) => sum + (item.scannedShipped || 0), 0)}, total scannedReturned=${result.reduce((sum, item) => sum + (item.scannedReturned || 0), 0)}`);
       return result;
     }
     
@@ -4892,7 +4833,7 @@ export default function ImportApprovals() {
                         <TableCell>
                           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                             <Typography variant="body2">
-                              {bottle.customer_name || (bottle.assigned_customer ? 'Assigned' : 'Available')}
+                              {bottle.customer_name || (bottle.assigned_customer && customerIdToName[String(bottle.assigned_customer)]) || (bottle.assigned_customer ? 'Assigned' : 'Available')}
                             </Typography>
                             {/* Show location if bottle is at a customer */}
                             {(bottle.customer_name || bottle.assigned_customer) && bottle.location && (
@@ -8385,14 +8326,14 @@ export default function ImportApprovals() {
       return orderMatch && productMatch && typeMatch;
     });
     
-    // Deduplicate by barcode - only count each unique barcode once per order/product code
+    // Deduplicate by barcode per type - same barcode can count in both SHP and RTN (actual scan counts: 8 ship, 6 return)
     const uniqueMatches = [];
     const seenBarcodes = new Set();
     
     matches.forEach(match => {
       const barcode = match.bottle_barcode || match.barcode_number;
       
-      // If we have a barcode, only count it once (even if scanned multiple times)
+      // If we have a barcode, only count it once per type (same barcode can appear in both SHP and RTN)
       if (barcode) {
         if (seenBarcodes.has(barcode)) {
           logger.log(`⚠️ Skipping duplicate scan for barcode ${barcode} in getScannedQty`);

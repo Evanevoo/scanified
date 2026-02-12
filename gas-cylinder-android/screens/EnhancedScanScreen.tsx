@@ -951,6 +951,11 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           try {
             await processScan(effectiveBarcode, { isUnassignedAsset: true });
             await feedbackService.scanSuccess(effectiveBarcode);
+            Alert.alert(
+              'Not in system',
+              "This barcode isn't in the system. It's been recorded and will show in Import Approvals so you can assign it later.",
+              [{ text: 'OK' }]
+            );
           } catch (err) {
             logger.error('Error processing unassigned scan:', err);
             setScanFeedback('❌ Failed to record unassigned asset');
