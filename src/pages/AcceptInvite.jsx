@@ -54,28 +54,67 @@ export default function AcceptInvite() {
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
 
-      // Get invite details via RPC (bypasses RLS so unauthenticated users can validate token)
-      const { data: inviteRows, error: inviteError } = await supabase
-        .rpc('get_invite_by_token', { p_token: token });
+      let inviteData = null;
 
-      if (inviteError) {
-        logger.warn('get_invite_by_token error:', inviteError);
-        const isMissingFunction = /function.*does not exist|42883|PGRST202/i.test(inviteError.message || '');
-        setStatus('error');
-        setMessage(isMissingFunction
-          ? 'Invite validation is not available. Please ask the person who invited you to send a new invite link, or contact support.'
-          : 'Invalid or expired invite link');
-        return;
+      // 1. Try Netlify function first (uses service_role, bypasses RLS - this was the working path)
+      try {
+        const response = await fetch('/.netlify/functions/fetch-invite-details', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token })
+        });
+
+        if (response.ok) {
+          const payload = await response.json();
+          if (payload?.invite) {
+            inviteData = payload.invite;
+            logger.log('Invite fetched via Netlify function');
+          }
+        } else {
+          const errorPayload = await response.json().catch(() => ({}));
+          logger.warn('Netlify function invite fetch failed:', response.status, errorPayload);
+          if (response.status === 404) {
+            setStatus('error');
+            setMessage('Invalid or expired invite link. The invite may have already been used or expired.');
+            return;
+          }
+          if (response.status === 409) {
+            setStatus('error');
+            setMessage('This invite has already been accepted.');
+            return;
+          }
+          if (response.status === 410) {
+            setStatus('error');
+            setMessage('This invite has expired');
+            return;
+          }
+        }
+      } catch (netlifyError) {
+        logger.warn('Netlify function not available, falling back to Supabase RPC:', netlifyError);
       }
 
-      const inviteData = inviteRows && inviteRows[0];
+      // 2. Fallback: Supabase RPC get_invite_by_token (for when Netlify is unavailable)
+      if (!inviteData) {
+        const { data: inviteRows, error: inviteError } = await supabase
+          .rpc('get_invite_by_token', { p_token: token });
+
+        if (!inviteError && inviteRows && inviteRows[0]) {
+          const row = inviteRows[0];
+          inviteData = {
+            ...row,
+            organizations: row.organization_name ? { name: row.organization_name } : null
+          };
+        }
+        if (inviteError) logger.warn('get_invite_by_token fallback error:', inviteError);
+      }
+
       if (!inviteData) {
         setStatus('error');
         setMessage('Invalid or expired invite link');
         return;
       }
 
-      // Check if expired (only if we have a valid expires_at; missing/invalid = allow)
+      // Check if expired (only if we have a valid expires_at)
       const expiresAt = inviteData.expires_at ? new Date(inviteData.expires_at) : null;
       if (expiresAt && !Number.isNaN(expiresAt.getTime()) && expiresAt < new Date()) {
         setStatus('error');
@@ -83,16 +122,14 @@ export default function AcceptInvite() {
         return;
       }
 
-      // Shape for UI: RPC returns organization_name, component expects invite.organizations.name
       const inviteForState = {
         ...inviteData,
-        organizations: { name: inviteData.organization_name }
+        organizations: inviteData.organizations || (inviteData.organization_name ? { name: inviteData.organization_name } : { name: '' })
       };
       setInvite(inviteForState);
       setValidatedToken(token);
       setAuthForm({ ...authForm, email: inviteData.email });
 
-      // If user is logged in, accept immediately
       if (user) {
         await acceptInvite(user, inviteData, token);
       } else {
@@ -160,36 +197,32 @@ export default function AcceptInvite() {
     try {
       setStatus('accepting');
 
-      // Create/update profile
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .upsert({
-          id: user.id,
-          email: inviteData.email,
-          name: authForm.name || user.user_metadata?.name,
-          organization_id: inviteData.organization_id,
-          role: inviteData.role,
-          is_active: true,
-          deleted_at: null,
-          disabled_at: null
-        }, {
-          onConflict: 'id'
-        });
+      // Use Netlify function to accept (service_role bypasses RLS for profile upsert + invite update)
+      const profilePayload = {
+        id: user.id,
+        email: inviteData.email,
+        name: authForm.name || user.user_metadata?.name,
+        organization_id: inviteData.organization_id,
+        role: inviteData.role,
+        is_active: true,
+        deleted_at: null,
+        disabled_at: null
+      };
 
-      if (profileError) throw profileError;
+      const acceptResponse = await fetch('/.netlify/functions/fetch-invite-details', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: inviteToken, accept: true, profile: profilePayload })
+      });
 
-      // Mark invite as accepted (use same normalized token we validated)
-      const { error: acceptError } = await supabase
-        .from('organization_invites')
-        .update({ accepted_at: new Date().toISOString() })
-        .eq('invite_token', inviteToken);
-
-      if (acceptError) throw acceptError;
+      if (!acceptResponse.ok) {
+        const payload = await acceptResponse.json().catch(() => ({}));
+        throw new Error(payload.error || payload.message || 'Failed to accept invite');
+      }
 
       setStatus('success');
       setMessage('Successfully joined the organization!');
       
-      // Redirect to dashboard
       setTimeout(() => {
         window.location.href = '/home';
       }, 2000);
