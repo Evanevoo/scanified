@@ -198,10 +198,11 @@ export default function AcceptInvite() {
       setStatus('accepting');
 
       // Use Netlify function to accept (service_role bypasses RLS for profile upsert + invite update)
+      const displayName = authForm.name || user.user_metadata?.name || user.user_metadata?.full_name || '';
       const profilePayload = {
         id: user.id,
         email: inviteData.email,
-        name: authForm.name || user.user_metadata?.name,
+        full_name: displayName,
         organization_id: inviteData.organization_id,
         role: inviteData.role,
         is_active: true,
