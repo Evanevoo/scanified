@@ -44,6 +44,7 @@ export default function UserInvites() {
   const [loading, setLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sendingAction, setSendingAction] = useState(null); // 'generate' | 'send'
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   
@@ -115,13 +116,14 @@ export default function UserInvites() {
     }
   };
 
-  const handleSendInvite = async () => {
+  const handleSendInvite = async (generateLinkOnly = false) => {
     if (!inviteForm.email || !inviteForm.role) {
       setError('Please fill in all fields');
       return;
     }
 
     setSending(true);
+    setSendingAction(generateLinkOnly ? 'generate' : 'send');
     setError('');
     setSuccess('');
 
@@ -131,13 +133,14 @@ export default function UserInvites() {
       
       if (!normalizedEmail || !normalizedEmail.includes('@')) {
         setError('Please enter a valid email address');
+        setSending(false);
         return;
       }
 
       // Create invite
       const { data: user } = await supabase.auth.getUser();
       
-      const { data: token, error: inviteError } = await supabase.rpc(
+      const { data: tokenData, error: inviteError } = await supabase.rpc(
         'create_user_invite',
         {
           p_organization_id: organization.id,
@@ -149,6 +152,26 @@ export default function UserInvites() {
 
       if (inviteError) {
         throw inviteError;
+      }
+
+      // RPC may return token as string or as object (e.g. { invite_token: "..." })
+      const token = typeof tokenData === 'string'
+        ? tokenData
+        : (tokenData?.invite_token ?? tokenData?.[0]?.invite_token ?? (Array.isArray(tokenData) && tokenData[0] ? tokenData[0] : null));
+      if (!token) {
+        throw new Error('Invite was created but no invite token was returned. Please copy the link from the table below.');
+      }
+
+      const inviteLink = `${window.location.origin}/accept-invite?token=${token}`;
+      if (generateLinkOnly) {
+        await navigator.clipboard.writeText(inviteLink);
+        setSuccess(`Invitation link generated and copied to clipboard. Share it with ${normalizedEmail}. Expires in 7 days.`);
+        setInviteForm({ email: '', role: 'user' });
+        setShowDialog(false);
+        fetchInvites();
+        setSending(false);
+        setSendingAction(null);
+        return;
       }
 
       // Also create a join code for this invite
@@ -176,8 +199,6 @@ export default function UserInvites() {
       }
 
       // Try to send email
-      const inviteLink = `${window.location.origin}/accept-invite?token=${token}`;
-      
       try {
         const emailResponse = await fetch('/.netlify/functions/send-email', {
           method: 'POST',
@@ -258,6 +279,7 @@ export default function UserInvites() {
       setError(err.message || 'Failed to send invite');
     } finally {
       setSending(false);
+      setSendingAction(null);
     }
   };
 
@@ -449,12 +471,20 @@ export default function UserInvites() {
         <DialogActions>
           <Button onClick={() => setShowDialog(false)}>Cancel</Button>
           <Button
-            variant="contained"
-            onClick={handleSendInvite}
+            variant="outlined"
+            onClick={() => handleSendInvite(true)}
             disabled={sending}
-            startIcon={sending ? <CircularProgress size={20} /> : <EmailIcon />}
+            startIcon={sending && sendingAction === 'generate' ? <CircularProgress size={20} /> : <CopyIcon />}
           >
-            {sending ? 'Sending...' : 'Send Invite'}
+            {sending && sendingAction === 'generate' ? 'Generating...' : 'Generate link'}
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => handleSendInvite(false)}
+            disabled={sending}
+            startIcon={sending && sendingAction === 'send' ? <CircularProgress size={20} /> : <EmailIcon />}
+          >
+            {sending && sendingAction === 'send' ? 'Sending...' : 'Send Invite'}
           </Button>
         </DialogActions>
       </Dialog>
