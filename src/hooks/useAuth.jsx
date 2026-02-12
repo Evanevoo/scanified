@@ -108,35 +108,40 @@ export const AuthProvider = ({ children }) => {
           .single();
 
         if (profileError) {
-          // If profile not found, auto-create it
+          // If profile not found, wait briefly then re-fetch (accept-invite flow may be creating it with organization_id)
           if (profileError.code === 'PGRST116') {
-            logger.log('Auth: Creating profile for new user...');
-            
-            // Determine default role
-            const defaultRole = sessionUser.email?.endsWith('@yourcompany.com') ? 'admin' : 'user';
-            
-            // Insert a new profile with minimal info
-            const { data: newProfile, error: insertError } = await supabase
+            logger.log('Auth: Profile not found, waiting for accept-invite flow or creating...');
+            await new Promise((r) => setTimeout(r, 2000));
+            const { data: retryProfile, error: retryError } = await supabase
               .from('profiles')
-              .insert({
-                id: sessionUser.id,
-                email: sessionUser.email,
-                full_name: sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || '',
-                role: defaultRole,
-              })
-              .select()
+              .select('*')
+              .eq('id', sessionUser.id)
               .single();
-              
-            if (insertError) {
-              logger.error('Auth: Failed to create profile:', insertError);
-              setProfile(null);
-              setOrganization(null);
-              setLoading(false);
-              authFlowInProgressRef.current = false;
-              return;
+            if (!retryError && retryProfile) {
+              profileData = retryProfile;
+            } else {
+              // Still no profile – create minimal one (normal signup, not from invite)
+              const defaultRole = sessionUser.email?.endsWith('@yourcompany.com') ? 'admin' : 'user';
+              const { data: newProfile, error: insertError } = await supabase
+                .from('profiles')
+                .insert({
+                  id: sessionUser.id,
+                  email: sessionUser.email,
+                  full_name: sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || '',
+                  role: defaultRole,
+                })
+                .select()
+                .single();
+              if (insertError) {
+                logger.error('Auth: Failed to create profile:', insertError);
+                setProfile(null);
+                setOrganization(null);
+                setLoading(false);
+                authFlowInProgressRef.current = false;
+                return;
+              }
+              profileData = newProfile;
             }
-            
-            profileData = newProfile;
           } else {
             // Other errors: log and clear state
             logger.error('Auth: Error loading profile:', profileError);
