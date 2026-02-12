@@ -100,6 +100,7 @@ export default function FillCylinderScreen() {
   const scannerActiveRef = useRef(false); // true only while scanner modal is open – avoids callbacks after close (camera crash)
   const hasScannedBottlesRef = useRef(false); // tracks if bottles were scanned this session (avoids stale state when closing)
   const isMountedRef = useRef(true); // false after unmount – avoid setState/Alert after Save (crash fix)
+  const processingBarcodesRef = useRef<Set<string>>(new Set()); // block duplicate scan callbacks while one is in flight
   const [manualEntryVisible, setManualEntryVisible] = useState(false);
   const [manualEntryBarcode, setManualEntryBarcode] = useState('');
   const [lastScannedBottleDetails, setLastScannedBottleDetails] = useState<ScannedBottle | null>(null);
@@ -335,9 +336,19 @@ export default function FillCylinderScreen() {
       return;
     }
 
+    // Block duplicate in-flight: same barcode already being processed (camera can fire multiple times)
+    if (processingBarcodesRef.current.has(barcode)) {
+      logger.log('⚠️ Duplicate scan (already processing), ignoring:', barcode);
+      await feedbackService.provideFeedback('duplicate', { barcode });
+      Vibration.vibrate([0, 100, 50, 100]);
+      return;
+    }
+    processingBarcodesRef.current.add(barcode);
+
     // Prevent duplicate scans within 1.5 seconds (rapid duplicate prevention)
     const now = Date.now();
-    if (barcode === lastScannedBarcode && now - lastScanTimeRef.current < 1500) {
+    if (barcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 1500) {
+      processingBarcodesRef.current.delete(barcode);
       return;
     }
 
@@ -346,11 +357,13 @@ export default function FillCylinderScreen() {
       await feedbackService.provideFeedback('duplicate', { barcode });
       Vibration.vibrate([0, 100, 50, 100]); // Double vibrate for duplicate
       setError(`Barcode ${barcode} already scanned`);
+      processingBarcodesRef.current.delete(barcode);
       setIsProcessing(false);
       return;
     }
 
     setLastScannedBarcode(barcode);
+    lastScannedBarcodeRef.current = barcode;
     lastScanTimeRef.current = now;
     setIsProcessing(true);
 
@@ -370,6 +383,7 @@ export default function FillCylinderScreen() {
 
       if (fetchError) {
         logger.error('Error fetching bottle:', fetchError);
+        processingBarcodesRef.current.delete(barcode);
         try {
           await feedbackService.provideFeedback('error', { message: 'Database error' });
         } catch (e) {}
@@ -381,6 +395,7 @@ export default function FillCylinderScreen() {
       }
 
       if (!bottleData) {
+        processingBarcodesRef.current.delete(barcode);
         try {
           await feedbackService.provideFeedback('error', { message: 'Not found' });
           Vibration.vibrate([0, 200, 100, 200]); // Long vibrate for not found
@@ -408,6 +423,7 @@ export default function FillCylinderScreen() {
                   text: 'Cancel', 
                   style: 'cancel',
                   onPress: () => {
+                    processingBarcodesRef.current.delete(barcode);
                     if (isMountedRef.current) setIsProcessing(false);
                   }
                 },
@@ -430,6 +446,7 @@ export default function FillCylinderScreen() {
 
     } catch (err) {
       logger.error('Error processing scan:', err);
+      processingBarcodesRef.current.delete(barcode);
       try {
         await feedbackService.provideFeedback('error', { message: 'Scan failed' });
       } catch (feedbackErr) {
@@ -460,9 +477,14 @@ export default function FillCylinderScreen() {
     };
 
     setScannedBottles(prev => {
+      if (prev.find(b => b.barcode_number === newBottle.barcode_number)) {
+        logger.log('⚠️ Bottle already in list, skipping duplicate add');
+        return prev;
+      }
       hasScannedBottlesRef.current = true; // mark that we've scanned (for onClose - state may be stale)
       return [newBottle, ...prev];
     }); // Add to top of list
+    processingBarcodesRef.current.delete(newBottle.barcode_number); // allow same barcode to be scanned again later if removed
     setLastScannedBottleDetails(newBottle);
     // Play success sound and haptic feedback
     try {
@@ -721,6 +743,7 @@ export default function FillCylinderScreen() {
     }
     scannerActiveRef.current = true;
     hasScannedBottlesRef.current = false; // reset when opening scanner
+    processingBarcodesRef.current.clear(); // allow all barcodes to be scanned again
     setScannerVisible(true);
   };
 

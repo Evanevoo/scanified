@@ -22,51 +22,6 @@ function parseDataField(data) {
   return data;
 }
 
-// Function to split grouped import data into individual records (professional workflow)
-function splitImportIntoIndividualRecords(importRecord) {
-  const data = parseDataField(importRecord.data);
-  const rows = data.rows || [];
-  
-  if (!rows || rows.length === 0) return [importRecord];
-  
-  // Group rows by order/receipt number
-  const groupedByOrder = {};
-  rows.forEach(row => {
-    const orderNumber = row.reference_number || row.order_number || row.invoice_number || row.sales_receipt_number || 'UNKNOWN';
-    if (!groupedByOrder[orderNumber]) {
-      groupedByOrder[orderNumber] = [];
-    }
-    groupedByOrder[orderNumber].push(row);
-  });
-  
-  // Create individual records for each order/receipt
-  const individualRecords = [];
-  Object.keys(groupedByOrder).forEach((orderNumber, index) => {
-    const orderRows = groupedByOrder[orderNumber];
-    const firstRow = orderRows[0];
-    
-    individualRecords.push({
-      ...importRecord,
-      // Keep original ID for database operations, use displayId for React keys
-      originalId: importRecord.id, // Original database ID
-      id: importRecord.id, // Keep original ID for database operations
-      displayId: `${importRecord.id}_${index}`, // Use for React keys only
-      splitIndex: index, // Track which split this is
-      data: {
-        ...data,
-        rows: orderRows, // Only the rows for this specific order
-        order_number: orderNumber,
-        customer_name: firstRow.customer_name,
-        customer_id: firstRow.customer_id,
-        date: firstRow.date,
-        reference_number: orderNumber
-      }
-    });
-  });
-  
-  return individualRecords;
-}
-
 export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber }) {
   const params = useParams();
   const [searchParams] = useSearchParams();
@@ -74,7 +29,6 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const navigate = useNavigate();
   const { organization } = useAuth();
   const [importRecord, setImportRecord] = useState(null);
-  const [individualRecords, setIndividualRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [actionMessage, setActionMessage] = useState('');
@@ -97,8 +51,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const [unassignedDeliveredBarcodes, setUnassignedDeliveredBarcodes] = useState([]);
   const [unassignedReturnedBarcodes, setUnassignedReturnedBarcodes] = useState([]);
   const [assignBottleDialog, setAssignBottleDialog] = useState({ open: false, barcode: null, section: null });
-  const [bottleTypes, setBottleTypes] = useState({ types: [], groupNames: [] });
-  const [assignBottleForm, setAssignBottleForm] = useState({ type: '', group_name: '', description: '' });
+  const [bottleTypes, setBottleTypes] = useState({ types: [], groupNames: [], categories: [], productCodes: [], ownerships: [], typeDefaults: {} });
+  const [assignBottleForm, setAssignBottleForm] = useState({ type: '', group_name: '', description: '', category: '', product_code: '', ownership: '' });
   const [assignBottleSaving, setAssignBottleSaving] = useState(false);
   const [refreshScannedBottlesTrigger, setRefreshScannedBottlesTrigger] = useState(0);
   
@@ -183,7 +137,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             rows: scans.map(scan => ({
               order_number: scan.order_number,
               customer_name: scan.customer_name,
-              product_code: scan.bottle_barcode,
+              product_code: scan.product_code || scan.bottle_barcode,
               qty_out: scan.mode === 'SHIP' ? 1 : 0,
               qty_in: scan.mode === 'RETURN' ? 1 : 0,
               date: scan.created_at ? new Date(scan.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
@@ -239,14 +193,6 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       }
       if (err && !data) setError(err.message);
       setImportRecord(data);
-      
-      // Split the import record into individual customer/invoice records
-      if (data) {
-        const splitRecords = splitImportIntoIndividualRecords(data);
-        setIndividualRecords(splitRecords);
-        logger.log(`Split import ${data.id} into ${splitRecords.length} individual records:`, splitRecords);
-      }
-      
       setLoading(false);
     }
     fetchImport();
@@ -258,7 +204,6 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       if (!importRecord?.uploaded_by) return;
       
       try {
-        // Try to get user info from profiles table first
         const { data: profile, error: profileError } = await supabase
           .from('profiles')
           .select('full_name, email')
@@ -270,27 +215,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           return;
         }
         
-        // Fallback: try to get from profiles table
-        const { data: fallbackProfile, error: fallbackProfileError } = await supabase
-          .from('profiles')
-          .select('full_name, email')
-          .eq('id', importRecord.uploaded_by)
-          .single();
-        
-        if (!fallbackProfileError && fallbackProfile) {
-          setUploadedByUser({
-            full_name: fallbackProfile.full_name || fallbackProfile.email,
-            email: fallbackProfile.email
-          });
-          return;
-        }
-        
-        // If all else fails, just show the email or ID
+        // No profile found – show uploaded_by as raw id
         setUploadedByUser({
           full_name: importRecord.uploaded_by,
           email: importRecord.uploaded_by
         });
-        
       } catch (error) {
         logger.error('Error fetching user info:', error);
         setUploadedByUser({
@@ -578,16 +507,15 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             mode: s.mode
           })));
           
-          // Process bottle_scans - if there are multiple scans for the same barcode, prioritize RETURN
+          // Process bottle_scans - if there are multiple scans for the same barcode, prefer SHIP (actual counts: 8 ship, 6 return)
           const bottleScanMap = new Map(); // Track the best scan for each barcode
           
           matchingBottleScans.forEach(scan => {
             if (scan.bottle_barcode) {
               const isDeliveredScan = isDelivered(scan.mode, null);
               const existing = bottleScanMap.get(scan.bottle_barcode);
-              
-              // If we haven't seen this barcode, or if this is a RETURN and existing is SHIP, use this one
-              if (!existing || (existing.isDelivered && !isDeliveredScan)) {
+              // Prefer SHIP when both: use this scan if it's SHIP and existing was RETURN
+              if (!existing || (isDeliveredScan && !existing.isDelivered)) {
                 bottleScanMap.set(scan.bottle_barcode, { mode: scan.mode, isDelivered: isDeliveredScan });
               }
             }
@@ -637,33 +565,21 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               const isDeliveredScan = isDelivered(scan.mode, scan.action);
               const existingMode = barcodeToModeMap.get(scan.barcode_number);
               
-              // CRITICAL: Prioritize RETURN over SHIP - if a RETURN scan exists, it takes precedence
-              // This handles cases where there are conflicting scans (e.g., old SHIP scan + new RETURN scan)
+              // Prefer SHIP when both (so counts match actual scans: 8 ship, 6 return)
               if (!existingMode) {
-                // First time seeing this barcode - add it
                 barcodeToModeMap.set(scan.barcode_number, { mode: scan.mode, action: scan.action, isDelivered: isDeliveredScan });
-                
                 if (isDeliveredScan) {
                   deliveredBarcodes.add(scan.barcode_number);
-                  logger.log(`📦 Added DELIVERED barcode from scans: ${scan.barcode_number} (mode: ${scan.mode}, action: ${scan.action})`);
                 } else {
                   returnedBarcodes.add(scan.barcode_number);
-                  logger.log(`📦 Added RETURNED barcode from scans: ${scan.barcode_number} (mode: ${scan.mode}, action: ${scan.action})`);
                 }
               } else {
-                // Barcode already exists - check if we need to update
-                // If existing is DELIVERED but this scan is RETURN, prioritize RETURN
-                if (existingMode.isDelivered && !isDeliveredScan) {
-                  // RETURN takes precedence over SHIP - move from delivered to returned
-                  deliveredBarcodes.delete(scan.barcode_number);
-                  returnedBarcodes.add(scan.barcode_number);
-                  barcodeToModeMap.set(scan.barcode_number, { mode: scan.mode, action: scan.action, isDelivered: false });
-                  logger.log(`🔄 Changed barcode ${scan.barcode_number} from DELIVERED to RETURNED (RETURN scan takes precedence over SHIP)`);
-                } else if (!existingMode.isDelivered && isDeliveredScan) {
-                  // Existing is RETURN, new is SHIP - keep RETURN (don't change)
-                  logger.log(`ℹ️ Keeping barcode ${scan.barcode_number} as RETURNED (RETURN takes precedence over SHIP)`);
+                if (!existingMode.isDelivered && isDeliveredScan) {
+                  returnedBarcodes.delete(scan.barcode_number);
+                  deliveredBarcodes.add(scan.barcode_number);
+                  barcodeToModeMap.set(scan.barcode_number, { mode: scan.mode, action: scan.action, isDelivered: true });
                 }
-                // If both are same type, no change needed
+                // If existing is SHIP and this is RETURN, keep SHIP (prefer SHIP)
               }
             }
           });
@@ -725,7 +641,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     fetchScannedBottles();
   }, [importRecord, organization, filterInvoiceNumber, refreshScannedBottlesTrigger]);
 
-  // Fetch bottle types/groups when Assign to type dialog opens (for dropdowns)
+  // Fetch bottle types/groups/categories/product codes/ownership when Assign to type dialog opens (for dropdowns and auto-fill)
   useEffect(() => {
     if (!assignBottleDialog.open || !organization?.id) return;
     let cancelled = false;
@@ -733,16 +649,33 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       try {
         const { data, error } = await supabase
           .from('bottles')
-          .select('type, group_name')
+          .select('type, group_name, description, category, product_code, ownership')
           .eq('organization_id', organization.id);
         if (error) {
           logger.error('Error fetching bottle types:', error);
           return;
         }
         if (cancelled) return;
-        const types = [...new Set((data || []).map(b => b.type).filter(Boolean))].sort();
-        const groupNames = [...new Set((data || []).map(b => b.group_name).filter(Boolean))].sort();
-        setBottleTypes({ types, groupNames });
+        const rows = data || [];
+        const types = [...new Set(rows.map(b => b.type).filter(Boolean))].sort();
+        const groupNames = [...new Set(rows.map(b => b.group_name).filter(Boolean))].sort();
+        const categories = [...new Set(rows.map(b => b.category).filter(Boolean))].sort();
+        const productCodes = [...new Set(rows.map(b => b.product_code).filter(Boolean))].sort();
+        const ownerships = [...new Set(rows.map(b => b.ownership).filter(Boolean))].sort();
+        // First bottle per type supplies defaults for description, category, product_code, ownership when user selects that type
+        const typeDefaults = {};
+        rows.forEach(b => {
+          if (b.type && !typeDefaults[b.type]) {
+            typeDefaults[b.type] = {
+              description: b.description || '',
+              category: b.category || '',
+              product_code: b.product_code || '',
+              ownership: b.ownership || '',
+              group_name: b.group_name || ''
+            };
+          }
+        });
+        setBottleTypes({ types, groupNames, categories, productCodes, ownerships, typeDefaults });
       } catch (e) {
         logger.error('Error loading bottle types:', e);
       }
@@ -1212,16 +1145,36 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           setShowCustomerModal(true);
           break;
         case 'Change Record Date and Time':
-          setShowDateModal(true);
+          if (typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_')) {
+            setActionMessage('Scanned-only records are not in the database yet. Approve or import this record first to change the date.');
+            setTimeout(() => setActionMessage(''), 5000);
+          } else {
+            setShowDateModal(true);
+          }
           break;
         case 'Change Sales Order Number':
-          setShowSalesOrderModal(true);
+          if (typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_')) {
+            setActionMessage('Scanned-only records are not in the database yet. Approve or import this record first to change the sales order number.');
+            setTimeout(() => setActionMessage(''), 5000);
+          } else {
+            setShowSalesOrderModal(true);
+          }
           break;
         case 'Change PO Number':
-          setShowPOModal(true);
+          if (typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_')) {
+            setActionMessage('Scanned-only records are not in the database yet. Approve or import this record first to change the PO number.');
+            setTimeout(() => setActionMessage(''), 5000);
+          } else {
+            setShowPOModal(true);
+          }
           break;
         case 'Change Location':
-          setShowLocationModal(true);
+          if (typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_')) {
+            setActionMessage('Scanned-only records are not in the database yet. Approve or import this record first to change the location.');
+            setTimeout(() => setActionMessage(''), 5000);
+          } else {
+            setShowLocationModal(true);
+          }
           break;
         case 'Create or Delete Correction Sales Order':
           setActionMessage('Correction Sales Order - Feature coming soon!');
@@ -1331,6 +1284,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       return;
     }
 
+    if (typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_')) {
+      setActionMessage('Scanned-only records are not in the database yet. Approve or import this record first to change the date.');
+      setTimeout(() => setActionMessage(''), 5000);
+      return;
+    }
+
     try {
       setActionMessage('Updating date...');
       
@@ -1383,6 +1342,14 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const handleSalesOrderChange = async () => {
     if (!newSalesOrder) {
       setActionMessage('Please enter a sales order number');
+      return;
+    }
+
+    // Scanned-only records are not in the DB; id is client-side (e.g. scanned_S475617).
+    // imported_invoices.id is integer, so PATCH by this "id" causes 400 invalid input syntax.
+    if (typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_')) {
+      setActionMessage('Scanned-only records are not in the database yet. Approve or import this record first to change the sales order number.');
+      setTimeout(() => setActionMessage(''), 5000);
       return;
     }
 
@@ -1443,6 +1410,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       return;
     }
 
+    if (typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_')) {
+      setActionMessage('Scanned-only records are not in the database yet. Approve or import this record first to change the PO number.');
+      setTimeout(() => setActionMessage(''), 5000);
+      return;
+    }
+
     try {
       setActionMessage('Updating PO number...');
       
@@ -1495,6 +1468,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const handleLocationChange = async () => {
     if (!newLocation) {
       setActionMessage('Please enter a location');
+      return;
+    }
+
+    if (typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_')) {
+      setActionMessage('Scanned-only records are not in the database yet. Approve or import this record first to change the location.');
+      setTimeout(() => setActionMessage(''), 5000);
       return;
     }
 
@@ -2061,15 +2040,16 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     }
   };
 
-  // Get display name for uploaded by
+  // Get display name for uploaded by (importRecord is non-null past guard above)
   const getUploadedByDisplay = () => {
+    if (!importRecord) return '—';
     if (uploadedByUser?.full_name && uploadedByUser.full_name !== importRecord.uploaded_by) {
       return uploadedByUser.full_name;
     }
     if (uploadedByUser?.email && uploadedByUser.email !== importRecord.uploaded_by) {
       return uploadedByUser.email;
     }
-    return importRecord.uploaded_by;
+    return importRecord.uploaded_by ?? '—';
   };
 
   return (
@@ -2322,7 +2302,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{barcode}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} />
                               <TableCell>
-                                <Button size="small" variant="contained" color="primary" onClick={() => { setAssignBottleForm({ type: '', group_name: '', description: '' }); setAssignBottleDialog({ open: true, barcode, section: 'delivered' }); }}>
+                                <Button size="small" variant="contained" color="primary" onClick={() => { setAssignBottleForm({ type: '', group_name: '', description: '', category: '', product_code: '', ownership: '' }); setAssignBottleDialog({ open: true, barcode, section: 'delivered' }); }}>
                                   Assign to type
                                 </Button>
                               </TableCell>
@@ -2474,7 +2454,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{barcode}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} />
                               <TableCell>
-                                <Button size="small" variant="contained" color="primary" onClick={() => { setAssignBottleForm({ type: '', group_name: '', description: '' }); setAssignBottleDialog({ open: true, barcode, section: 'returned' }); }}>
+                                <Button size="small" variant="contained" color="primary" onClick={() => { setAssignBottleForm({ type: '', group_name: '', description: '', category: '', product_code: '', ownership: '' }); setAssignBottleDialog({ open: true, barcode, section: 'returned' }); }}>
                                   Assign to type
                                 </Button>
                               </TableCell>
@@ -2498,9 +2478,46 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 <TextField label="Barcode" value={assignBottleDialog.barcode || ''} fullWidth sx={{ mb: 2 }} InputProps={{ readOnly: true }} />
                 <FormControl fullWidth sx={{ mb: 2 }}>
                   <InputLabel>Type</InputLabel>
-                  <Select value={assignBottleForm.type} label="Type" onChange={(e) => setAssignBottleForm(prev => ({ ...prev, type: e.target.value }))}>
+                  <Select
+                    value={assignBottleForm.type}
+                    label="Type"
+                    onChange={(e) => {
+                      const type = e.target.value;
+                      const defaults = bottleTypes.typeDefaults?.[type] || {};
+                      setAssignBottleForm(prev => ({
+                        ...prev,
+                        type,
+                        description: defaults.description ?? prev.description,
+                        category: defaults.category ?? prev.category,
+                        product_code: defaults.product_code ?? prev.product_code,
+                        ownership: defaults.ownership ?? prev.ownership,
+                        group_name: defaults.group_name ?? prev.group_name
+                      }));
+                    }}
+                  >
                     <MenuItem value="">Select type...</MenuItem>
                     {(bottleTypes.types || []).map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>Category</InputLabel>
+                  <Select value={assignBottleForm.category} label="Category" onChange={(e) => setAssignBottleForm(prev => ({ ...prev, category: e.target.value }))}>
+                    <MenuItem value="">Select category (optional)</MenuItem>
+                    {(bottleTypes.categories || []).map((c) => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>Product code</InputLabel>
+                  <Select value={assignBottleForm.product_code} label="Product code" onChange={(e) => setAssignBottleForm(prev => ({ ...prev, product_code: e.target.value }))}>
+                    <MenuItem value="">Select product code (optional)</MenuItem>
+                    {(bottleTypes.productCodes || []).map((p) => <MenuItem key={p} value={p}>{p}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>Ownership</InputLabel>
+                  <Select value={assignBottleForm.ownership} label="Ownership" onChange={(e) => setAssignBottleForm(prev => ({ ...prev, ownership: e.target.value }))}>
+                    <MenuItem value="">Select ownership (optional)</MenuItem>
+                    {(bottleTypes.ownerships || []).map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
                   </Select>
                 </FormControl>
                 <FormControl fullWidth sx={{ mb: 2 }}>
@@ -2531,6 +2548,9 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                         type: assignBottleForm.type.trim(),
                         group_name: assignBottleForm.group_name?.trim() || null,
                         description: assignBottleForm.description?.trim() || null,
+                        category: assignBottleForm.category?.trim() || null,
+                        product_code: assignBottleForm.product_code?.trim() || null,
+                        ownership: assignBottleForm.ownership?.trim() || null,
                         status: 'in_stock',
                       }]);
                       if (error) throw error;

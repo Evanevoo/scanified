@@ -50,28 +50,30 @@ export default function AcceptInvite() {
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
 
-      // Get invite details
-      const { data: inviteData, error: inviteError } = await supabase
-        .from('organization_invites')
-        .select('*, organizations(name)')
-        .eq('invite_token', token)
-        .is('accepted_at', null)
-        .single();
+      // Get invite details via RPC (bypasses RLS so unauthenticated users can validate token)
+      const { data: inviteRows, error: inviteError } = await supabase
+        .rpc('get_invite_by_token', { p_token: token });
 
+      const inviteData = inviteRows && inviteRows[0];
       if (inviteError || !inviteData) {
         setStatus('error');
         setMessage('Invalid or expired invite link');
         return;
       }
 
-      // Check if expired
+      // Check if expired (function also checks, but defense in depth)
       if (new Date(inviteData.expires_at) < new Date()) {
         setStatus('error');
         setMessage('This invite has expired');
         return;
       }
 
-      setInvite(inviteData);
+      // Shape for UI: RPC returns organization_name, component expects invite.organizations.name
+      const inviteForState = {
+        ...inviteData,
+        organizations: { name: inviteData.organization_name }
+      };
+      setInvite(inviteForState);
       setAuthForm({ ...authForm, email: inviteData.email });
 
       // If user is logged in, accept immediately

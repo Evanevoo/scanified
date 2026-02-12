@@ -109,7 +109,7 @@ export default function HistoryScreen() {
     }
   };
 
-  // Group scans by order number
+  // Group scans by order number (one scan per bottle per order - dedupe by bottle_barcode)
   const groupScansByOrder = (scans: any[]): GroupedOrder[] => {
     const orderMap = new Map<string, any[]>();
     
@@ -122,20 +122,28 @@ export default function HistoryScreen() {
       orderMap.get(orderNum)!.push(scan);
     });
     
-    // Convert to array and calculate metadata
+    // Convert to array and calculate metadata; dedupe by bottle_barcode per order (keep latest)
     const grouped: GroupedOrder[] = [];
     orderMap.forEach((orderScans, orderNumber) => {
-      const sortedScans = orderScans.sort((a, b) => 
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      const byBottle = new Map<string, any>();
+      orderScans.forEach(s => {
+        const barcode = s.bottle_barcode || '';
+        if (!barcode) return;
+        const existing = byBottle.get(barcode);
+        if (!existing || new Date(s.created_at) > new Date(existing.created_at)) {
+          byBottle.set(barcode, s);
+        }
+      });
+      const dedupedScans = Array.from(byBottle.values()).sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
-      
-      const earliest = new Date(Math.min(...orderScans.map(s => new Date(s.created_at).getTime())));
-      const latest = new Date(Math.max(...orderScans.map(s => new Date(s.created_at).getTime())));
+      const earliest = new Date(Math.min(...dedupedScans.map(s => new Date(s.created_at).getTime())));
+      const latest = new Date(Math.max(...dedupedScans.map(s => new Date(s.created_at).getTime())));
       const hoursDiff = (new Date().getTime() - earliest.getTime()) / (1000 * 60 * 60);
       
       grouped.push({
         order_number: orderNumber,
-        scans: sortedScans,
+        scans: dedupedScans,
         customer_name: orderScans[0].customer_name || 'Unknown Customer',
         earliest_date: earliest.toISOString(),
         latest_date: latest.toISOString(),
@@ -441,12 +449,25 @@ export default function HistoryScreen() {
                   <View style={styles.bottleList}>
                     {order.scans.map((scan, index) => {
                       const info = bottleInfo.get(scan.bottle_barcode);
+                      const isReturn = (scan.mode || '').toUpperCase() === 'RETURN';
+                      const modeLabel = isReturn ? 'Return' : 'Shipped';
                       return (
                         <View key={scan.id} style={styles.bottleItem}>
                           <View style={styles.bottleItemContent}>
-                            <Text style={styles.bottleBarcode}>
-                              {index + 1}. {scan.bottle_barcode}
-                            </Text>
+                            <View style={styles.bottleRow}>
+                              <Text style={styles.bottleBarcode}>
+                                {index + 1}. {scan.bottle_barcode}
+                              </Text>
+                              <View style={[styles.modeBadge, isReturn ? styles.modeBadgeReturn : styles.modeBadgeShip]}>
+                                <Ionicons
+                                  name={isReturn ? 'arrow-back' : 'arrow-forward'}
+                                  size={12}
+                                  color="#fff"
+                                  style={{ marginRight: 4 }}
+                                />
+                                <Text style={styles.modeBadgeText}>{modeLabel}</Text>
+                              </View>
+                            </View>
                             {info && (
                               <Text style={styles.bottleType}>
                                 {info.description || info.product_code || 'Unknown Type'}
@@ -527,12 +548,20 @@ export default function HistoryScreen() {
             <ScrollView style={styles.modalBottleList}>
               {editBottles.map((barcode, index) => {
                 const info = bottleInfo.get(barcode);
+                const scan = editOrder?.scans.find(s => s.bottle_barcode === barcode);
+                const isReturn = (scan?.mode || '').toUpperCase() === 'RETURN';
+                const modeLabel = isReturn ? 'Return' : 'Shipped';
                 return (
                   <View key={index} style={styles.modalBottleRow}>
                     <View style={styles.modalBottleInfo}>
-                      <Text style={styles.modalBottleBarcode}>
-                        {index + 1}. {barcode}
-                      </Text>
+                      <View style={styles.modalBottleRowTop}>
+                        <Text style={styles.modalBottleBarcode}>
+                          {index + 1}. {barcode}
+                        </Text>
+                        <View style={[styles.modeBadgeSmall, isReturn ? styles.modeBadgeReturn : styles.modeBadgeShip]}>
+                          <Text style={styles.modeBadgeText}>{modeLabel}</Text>
+                        </View>
+                      </View>
                       {info && (
                         <Text style={styles.modalBottleType}>
                           {info.description || info.product_code || 'Unknown'}
@@ -701,11 +730,42 @@ const styles = StyleSheet.create({
   bottleItemContent: {
     flex: 1,
   },
+  bottleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    marginBottom: 2,
+  },
   bottleBarcode: {
     fontSize: 14,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 2,
+    flex: 1,
+  },
+  modeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  modeBadgeShip: {
+    backgroundColor: '#40B5AD',
+  },
+  modeBadgeReturn: {
+    backgroundColor: '#0ea5e9',
+  },
+  modeBadgeSmall: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  modeBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#fff',
+    textTransform: 'uppercase',
   },
   bottleType: {
     fontSize: 12,
@@ -811,6 +871,13 @@ const styles = StyleSheet.create({
   },
   modalBottleInfo: {
     flex: 1,
+  },
+  modalBottleRowTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    marginBottom: 2,
   },
   modalBottleBarcode: {
     fontSize: 13,
