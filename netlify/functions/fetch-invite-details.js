@@ -62,8 +62,12 @@ exports.handler = async (event) => {
       return createResponse(event, 409, { error: 'Invite already accepted' });
     }
 
-    if (data.expires_at && new Date(data.expires_at) < new Date()) {
-      return createResponse(event, 410, { error: 'Invite expired' });
+    // Only treat as expired if we have a valid future check (avoid timezone/clock issues)
+    if (data.expires_at) {
+      const expiresAt = new Date(data.expires_at);
+      if (!Number.isNaN(expiresAt.getTime()) && expiresAt < new Date()) {
+        return createResponse(event, 410, { error: 'Invite expired' });
+      }
     }
 
     if (shouldAccept) {
