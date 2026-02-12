@@ -75,12 +75,25 @@ exports.handler = async (event) => {
         return createResponse(event, 400, { error: 'Missing profile data for acceptance' });
       }
 
+      // Normalize profile: profiles table uses full_name; accept name or full_name from client
+      const profile = {
+        id: profilePayload.id,
+        email: profilePayload.email,
+        full_name: profilePayload.full_name || profilePayload.name || '',
+        organization_id: profilePayload.organization_id,
+        role: profilePayload.role,
+        is_active: profilePayload.is_active !== false,
+        deleted_at: profilePayload.deleted_at ?? null,
+        disabled_at: profilePayload.disabled_at ?? null
+      };
+
       const { error: profileError } = await supabase
         .from('profiles')
-        .upsert(profilePayload, { onConflict: 'id' });
+        .upsert(profile, { onConflict: 'id' });
 
       if (profileError) {
-        throw profileError;
+        console.error('Profile upsert error:', profileError);
+        return createErrorResponse(event, 500, 'Failed to create profile. Please try again.', profileError);
       }
 
       const { error: acceptError } = await supabase
@@ -89,7 +102,8 @@ exports.handler = async (event) => {
         .eq('invite_token', token);
 
       if (acceptError) {
-        throw acceptError;
+        console.error('Invite accept update error:', acceptError);
+        return createErrorResponse(event, 500, 'Failed to complete invite acceptance.', acceptError);
       }
 
       return createResponse(event, 200, { invite: data, accepted: true });
@@ -97,7 +111,8 @@ exports.handler = async (event) => {
       return createResponse(event, 200, { invite: data });
     }
   } catch (err) {
-    return createErrorResponse(event, 500, 'Unexpected error processing invite', err);
+    console.error('fetch-invite-details unexpected error:', err);
+    return createErrorResponse(event, 500, err.message || 'Unexpected error processing invite', err);
   }
 };
 
