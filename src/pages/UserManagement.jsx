@@ -100,6 +100,7 @@ export default function UserManagement() {
   const [newEmail, setNewEmail] = useState('');
   const [newRoleId, setNewRoleId] = useState('');
   const [adding, setAdding] = useState(false);
+  const [addUserAction, setAddUserAction] = useState(null); // 'generate' | 'send'
   const [usage, setUsage] = useState(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
@@ -188,9 +189,11 @@ export default function UserManagement() {
     if (!error) setPendingInvites(data || []);
   }
 
-  async function handleAddUser(e) {
-    e.preventDefault();
+  async function handleAddUser(e, options = {}) {
+    const generateLinkOnly = options.generateLinkOnly === true;
+    e?.preventDefault?.();
     setAdding(true);
+    setAddUserAction(generateLinkOnly ? 'generate' : 'send');
     setError('');
     setSuccess('');
 
@@ -314,7 +317,20 @@ export default function UserManagement() {
 
       if (inviteToken) {
         const inviteLink = `${window.location.origin}/accept-invite?token=${inviteToken}`;
-        
+
+        if (generateLinkOnly) {
+          await navigator.clipboard.writeText(inviteLink);
+          setSuccess(`Invitation link generated and copied to clipboard. Share this link with ${normalizedEmail}. It expires in 7 days.`);
+          setNewEmail('');
+          setNewRoleId(roles.length > 0 ? roles[0].id : '');
+          setShowAddDialog(false);
+          fetchUsers();
+          fetchPendingInvites();
+          setAdding(false);
+          setAddUserAction(null);
+          return;
+        }
+
         try {
           const emailResponse = await fetch('/.netlify/functions/send-email', {
             method: 'POST',
@@ -415,6 +431,7 @@ export default function UserManagement() {
       setError(err.message);
     } finally {
       setAdding(false);
+      setAddUserAction(null);
     }
   }
 
@@ -809,12 +826,21 @@ export default function UserManagement() {
             <Button onClick={() => setShowAddDialog(false)}>
               Cancel
             </Button>
+            <Button
+              type="button"
+              variant="outlined"
+              disabled={adding}
+              onClick={(e) => handleAddUser(e, { generateLinkOnly: true })}
+              startIcon={<CopyIcon />}
+            >
+              {adding && addUserAction === 'generate' ? 'Generating...' : 'Generate link'}
+            </Button>
             <Button 
               type="submit" 
               variant="contained"
               disabled={adding}
             >
-              {adding ? 'Sending Invite...' : 'Send Invite'}
+              {adding && addUserAction === 'send' ? 'Sending Invite...' : 'Send Invite'}
             </Button>
           </DialogActions>
         </form>

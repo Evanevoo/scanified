@@ -25,6 +25,7 @@ export default function AcceptInvite() {
   const [message, setMessage] = useState('');
   const [invite, setInvite] = useState(null);
   const [user, setUser] = useState(null);
+  const [validatedToken, setValidatedToken] = useState(null);
   
   const [authForm, setAuthForm] = useState({
     name: '',
@@ -38,13 +39,16 @@ export default function AcceptInvite() {
 
   const checkInviteAndUser = async () => {
     try {
-      const token = searchParams.get('token');
-      
+      let token = searchParams.get('token');
       if (!token) {
         setStatus('error');
         setMessage('Invalid invite link');
         return;
       }
+      token = token.trim();
+      try {
+        if (token.includes('%')) token = decodeURIComponent(token);
+      } catch (_) { /* use as-is */ }
 
       // Check if user is logged in
       const { data: { user } } = await supabase.auth.getUser();
@@ -54,8 +58,18 @@ export default function AcceptInvite() {
       const { data: inviteRows, error: inviteError } = await supabase
         .rpc('get_invite_by_token', { p_token: token });
 
+      if (inviteError) {
+        logger.warn('get_invite_by_token error:', inviteError);
+        const isMissingFunction = /function.*does not exist|42883|PGRST202/i.test(inviteError.message || '');
+        setStatus('error');
+        setMessage(isMissingFunction
+          ? 'Invite validation is not available. Please ask the person who invited you to send a new invite link, or contact support.'
+          : 'Invalid or expired invite link');
+        return;
+      }
+
       const inviteData = inviteRows && inviteRows[0];
-      if (inviteError || !inviteData) {
+      if (!inviteData) {
         setStatus('error');
         setMessage('Invalid or expired invite link');
         return;
@@ -74,11 +88,12 @@ export default function AcceptInvite() {
         organizations: { name: inviteData.organization_name }
       };
       setInvite(inviteForState);
+      setValidatedToken(token);
       setAuthForm({ ...authForm, email: inviteData.email });
 
       // If user is logged in, accept immediately
       if (user) {
-        await acceptInvite(user, inviteData);
+        await acceptInvite(user, inviteData, token);
       } else {
         setStatus('needsAuth');
       }
@@ -122,8 +137,15 @@ export default function AcceptInvite() {
       if (signupError) throw signupError;
       if (!signupData.user) throw new Error('Failed to create account');
 
-      // Accept invite
-      await acceptInvite(signupData.user, invite);
+      // Accept invite (use validated token from state, or normalize from URL)
+      const tokenForAccept = validatedToken || (() => {
+        let t = searchParams.get('token');
+        if (!t) return null;
+        t = t.trim();
+        try { if (t.includes('%')) t = decodeURIComponent(t); } catch (_) {}
+        return t;
+      })();
+      await acceptInvite(signupData.user, invite, tokenForAccept);
 
     } catch (err) {
       logger.error('Error:', err);
@@ -132,7 +154,8 @@ export default function AcceptInvite() {
     }
   };
 
-  const acceptInvite = async (user, inviteData) => {
+  const acceptInvite = async (user, inviteData, tokenToUse) => {
+    const inviteToken = tokenToUse ?? validatedToken ?? searchParams.get('token')?.trim();
     try {
       setStatus('accepting');
 
@@ -154,11 +177,11 @@ export default function AcceptInvite() {
 
       if (profileError) throw profileError;
 
-      // Mark invite as accepted
+      // Mark invite as accepted (use same normalized token we validated)
       const { error: acceptError } = await supabase
         .from('organization_invites')
         .update({ accepted_at: new Date().toISOString() })
-        .eq('invite_token', searchParams.get('token'));
+        .eq('invite_token', inviteToken);
 
       if (acceptError) throw acceptError;
 
