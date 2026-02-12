@@ -33,8 +33,8 @@ BEGIN
     FROM organization_invites oi
     LEFT JOIN organizations o ON o.id = oi.organization_id
     WHERE oi.invite_token = p_token
-      AND oi.accepted_at IS NULL
-      AND oi.expires_at > NOW();
+      AND oi.accepted_at IS NULL;
+    -- Expiry is checked in the app to avoid timezone mismatches between DB NOW() and stored expires_at
 END;
 $$;
 

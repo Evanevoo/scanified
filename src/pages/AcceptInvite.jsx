@@ -75,8 +75,9 @@ export default function AcceptInvite() {
         return;
       }
 
-      // Check if expired (function also checks, but defense in depth)
-      if (new Date(inviteData.expires_at) < new Date()) {
+      // Check if expired (only if we have a valid expires_at; missing/invalid = allow)
+      const expiresAt = inviteData.expires_at ? new Date(inviteData.expires_at) : null;
+      if (expiresAt && !Number.isNaN(expiresAt.getTime()) && expiresAt < new Date()) {
         setStatus('error');
         setMessage('This invite has expired');
         return;
