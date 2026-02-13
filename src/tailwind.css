@@ -19,15 +19,14 @@
   --secondary-foreground: oklch(0.205 0 0);
   --muted: #F9FAFB;
   --muted-foreground: #6B7280;
-  --accent: #F3F4F6;
-  --accent-foreground: #111827;
+  --accent: var(--primary-color, #40B5AD);
+  --accent-foreground: #FFFFFF;
   --destructive: #EF4444;
   --border: #E5E7EB;
   --input: #E5E7EB;
   --ring: var(--primary-color, #40B5AD);
   
   /* Legacy variables for backward compatibility */
-  --accent: #6366f1; /* Indigo-500 */
   --font-serif: 'Playfair Display', serif;
   --font-sans: 'Inter', Arial, sans-serif;
   --text-main: #111;
@@ -169,13 +168,13 @@ button, .theme-button {
   letter-spacing: 0.04em;
   padding: 10px 24px;
   border: none;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.10);
+  box-shadow: 0 2px 8px rgba(64, 181, 173, 0.25);
   transition: all 0.2s ease;
 }
 button:hover, .theme-button:hover {
   background-color: var(--accent);
   opacity: 0.92;
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.18);
+  box-shadow: 0 4px 16px rgba(64, 181, 173, 0.35);
   transform: translateY(-1px);
 }
 

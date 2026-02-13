@@ -873,7 +873,7 @@ export default function Billing() {
         // Reload data and redirect to dashboard
         await loadBillingData();
         setTimeout(() => {
-          window.location.href = '/dashboard';
+          window.location.href = '/home';
         }, 2000);
       }
     } catch (error) {
@@ -1018,7 +1018,7 @@ export default function Billing() {
           <IconButton color="primary" onClick={() => navigate('/settings')}>
             <ArrowBackIcon />
           </IconButton>
-          <IconButton color="primary" onClick={() => navigate('/dashboard')}>
+          <IconButton color="primary" onClick={() => navigate('/home')}>
             <DashboardIcon />
           </IconButton>
           <Typography variant="h4" fontWeight={700}>

@@ -45,7 +45,7 @@ function LoginPage() {
     if (!loading) {
       if (user && profile && organization) {
         // Full authenticated user with organization
-        navigate('/dashboard');
+        navigate('/home');
       } else if (user && profile && !organization && profile.role === 'owner') {
         // Platform owner without organization
         navigate('/owner-portal');

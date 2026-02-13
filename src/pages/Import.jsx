@@ -9,9 +9,9 @@ import throttle from 'lodash.throttle';
 import debounce from 'lodash.debounce';
 import { toast } from 'react-hot-toast';
 import { getImportWorker, addImportWorkerListener, removeImportWorkerListener } from '../utils/ImportWorkerManager';
-import { Box, Paper, Typography, Button, IconButton, Alert, LinearProgress, Card, CardContent, Stack, Chip, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
-import { ArrowBack as ArrowBackIcon, Upload as UploadIcon, Search as SearchIcon, CheckCircle as CheckCircleIcon } from '@mui/icons-material';
-import { findCustomer, normalizeCustomerName } from '../utils/customerMatching';
+import { Box, Paper, Typography, Button, IconButton, Alert, LinearProgress, Card, CardContent, Stack, Chip, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions, TextField } from '@mui/material';
+import { ArrowBack as ArrowBackIcon, Upload as UploadIcon, Search as SearchIcon, CheckCircle as CheckCircleIcon, CloudUpload as CloudUploadIcon } from '@mui/icons-material';
+import { findCustomer, normalizeCustomerName, batchFindCustomers } from '../utils/customerMatching';
 import { validateImportData, autoCorrectImportData, generateImportSummary } from '../utils/importValidation';
 
 // Import type definitions
@@ -92,6 +92,7 @@ export default function Import() {
   const [rowStatuses, setRowStatuses] = useState([]);
   const [previewChecked, setPreviewChecked] = useState(false);
   const [previewSummary, setPreviewSummary] = useState(null);
+  const [previewLoadingStep, setPreviewLoadingStep] = useState('');
   const [validationErrors, setValidationErrors] = useState([]);
   const [progress, setProgress] = useState(0);
   const [importing, setImporting] = useState(false);
@@ -100,6 +101,13 @@ export default function Import() {
   const [debugMode, setDebugMode] = useState(false);
   const [skippedItems, setSkippedItems] = useState([]);
   const [workerStatus, setWorkerStatus] = useState({ status: 'idle', progress: 0, error: null });
+  const [isDragging, setIsDragging] = useState(false);
+  const [autoCreateCustomers, setAutoCreateCustomers] = useState(false);
+  const [importStep, setImportStep] = useState('');
+  const previewTableRef = useRef(null);
+  const [previewScrollTop, setPreviewScrollTop] = useState(0);
+  const PREVIEW_ROW_HEIGHT = 41;
+  const PREVIEW_VISIBLE_ROWS = 20;
   
   // Sales Receipts specific state
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -148,8 +156,8 @@ export default function Import() {
     return null;
   }
 
-  const handleFileChange = e => {
-    setFile(e.target.files[0]);
+  const clearFileState = useCallback(() => {
+    setFile(null);
     setRawRows([]);
     setColumns([]);
     setMapping({});
@@ -160,11 +168,28 @@ export default function Import() {
     setPreviewChecked(false);
     setPreviewSummary(null);
     setValidationErrors([]);
-    
-    const file = e.target.files[0];
+  }, []);
+
+  const processFile = useCallback((file) => {
     if (!file) return;
-    
     const ext = file.name.split('.').pop().toLowerCase();
+    const accepted = ['txt', 'csv', 'xls', 'xlsx'];
+    if (!accepted.includes(ext)) {
+      toast.error('Please upload a .txt, .csv, .xls, or .xlsx file');
+      return;
+    }
+    setFile(file);
+    setRawRows([]);
+    setColumns([]);
+    setMapping({});
+    setPreview([]);
+    setResult(null);
+    setError(null);
+    setRowStatuses([]);
+    setPreviewChecked(false);
+    setPreviewSummary(null);
+    setValidationErrors([]);
+
     const processRows = (rows) => {
       if (!rows.length) return;
       let detectedColumns = [];
@@ -258,12 +283,11 @@ export default function Import() {
       setMapping(autoMap);
       setPreview(generatePreview(dataRows, detectedColumns, autoMap));
       
-      // Always check preview statuses for both types
       setTimeout(() => {
         checkPreviewStatuses();
       }, 0);
     };
-    
+
     if (ext === 'xls' || ext === 'xlsx') {
       const reader = new FileReader();
       reader.onload = evt => {
@@ -296,6 +320,28 @@ export default function Import() {
       };
       reader.readAsText(file);
     }
+  }, []);
+
+  const handleFileChange = (e) => {
+    processFile(e.target.files?.[0]);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const droppedFile = e.dataTransfer?.files?.[0];
+    if (droppedFile) processFile(droppedFile);
   };
 
   // Generate preview rows based on mapping
@@ -363,10 +409,8 @@ export default function Import() {
     return null;
   }
 
-  function validateRows(previewRows, mappingObj) {
+  async function validateRows(previewRows, mappingObj, organizationId) {
     const errors = [];
-    const customerValidationPromises = [];
-    
     previewRows.forEach((row, idx) => {
       REQUIRED_FIELDS.forEach(field => {
         if (!mappingObj[field.key]) {
@@ -375,37 +419,28 @@ export default function Import() {
           errors.push({ row: idx, field: field.key, reason: 'Missing value' });
         }
       });
-      
-      // Enhanced customer validation
-      if (row.customer_id || row.customer_name) {
-        const validationPromise = findCustomer(row.customer_name, row.customer_id)
-          .then(customer => {
-            if (!customer) {
-              errors.push({ 
-                row: idx, 
-                field: 'customer_id', 
-                reason: `Customer not found: ${row.customer_name || 'Unknown'} (${row.customer_id || 'No ID'})` 
-              });
-            }
-          })
-          .catch(err => {
-            logger.error('Customer validation error:', err);
-            errors.push({ 
-              row: idx, 
-              field: 'customer_id', 
-              reason: 'Error validating customer' 
-            });
-          });
-        customerValidationPromises.push(validationPromise);
-      }
     });
-    
-    // Wait for all customer validations to complete
-    Promise.all(customerValidationPromises).then(() => {
-      setValidationErrors(errors);
-    });
-    
-    return errors.length === 0;
+    let missingCustomerCount = 0;
+    if (organizationId && previewRows.some(r => r.customer_id || r.customer_name)) {
+      const customersToCheck = previewRows.map(r => ({ CustomerListID: r.customer_id, name: r.customer_name }));
+      const customerMap = await batchFindCustomers(customersToCheck, organizationId);
+      const missingIds = new Set();
+      previewRows.forEach((row, idx) => {
+        if (row.customer_id || row.customer_name) {
+          const key = `${row.customer_id || ''}_${row.customer_name || ''}`;
+          if (!customerMap[key]) {
+            errors.push({ row: idx, field: 'customer_id', reason: `Customer not found: ${row.customer_name || 'Unknown'} (${row.customer_id || 'No ID'})` });
+            missingIds.add((row.customer_id || '').toLowerCase());
+          }
+        }
+      });
+      missingCustomerCount = missingIds.size;
+    }
+    setValidationErrors(errors);
+    if (missingCustomerCount > 0) {
+      setPreviewSummary(prev => ({ ...(prev || {}), customersCreated: missingCustomerCount }));
+    }
+    return { valid: errors.length === 0, missingCustomerCount: missingCustomerCount || 0 };
   }
 
   // Check for existing imports and update them
@@ -478,83 +513,106 @@ export default function Import() {
   // Unified import function that automatically detects type
   async function handleImport(e) {
     if (e) e.preventDefault();
-    if (!validateRows(preview, mapping)) return;
-    
     setLoading(true);
     setImporting(true);
     setImportProgress(0);
     setImportErrors([]);
-    
+    setImportStep('Validating...');
     try {
       const user = await getCurrentUser();
       if (!user) throw new Error('User not authenticated');
-      
-      // Auto-detect import type based on data patterns
+      const { data: userProfile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single();
+      let result = await validateRows(preview, mapping, userProfile?.organization_id);
+      let valid = result.valid;
+      if (!valid && autoCreateCustomers && result.missingCustomerCount > 0) {
+        setImportStep('Creating missing customers...');
+        await createMissingCustomers();
+        setLoading(true);
+        setImporting(true);
+        setValidationErrors([]);
+        setPreviewSummary(prev => prev ? { ...prev, customersCreated: 0 } : null);
+        result = await validateRows(preview, mapping, userProfile?.organization_id);
+        valid = result.valid;
+      }
+      if (!valid) {
+        setLoading(false);
+        setImporting(false);
+        setImportStep('');
+        return;
+      }
+      setImportStep('Detecting import type...');
+      setImportProgress(25);
       const isSalesReceipt = await detectSalesReceiptType();
-      
+      setImportStep('Submitting for approval...');
+      setImportProgress(75);
       if (isSalesReceipt) {
         await handleSalesReceiptImport();
       } else {
         await handleInvoiceImport();
       }
+      setImportProgress(100);
+      setImportStep('');
     } catch (error) {
       setError(error.message);
+      setImportStep('');
       setLoading(false);
       setImporting(false);
     }
   }
 
-  // Function to detect if this should be processed as sales receipts
+  // Function to detect if this should be processed as sales receipts (bulk query - fast)
   async function detectSalesReceiptType() {
-    let cylinderCount = 0;
-    let totalRows = 0;
-    
-    // Get current user and organization
     const user = await getCurrentUser();
     if (!user) {
       logger.error('User not authenticated');
       return false;
     }
-    
-    // Get user's organization_id
     const { data: userProfile, error: profileError } = await supabase
       .from('profiles')
       .select('organization_id')
       .eq('id', user.id)
       .single();
-    
     if (profileError || !userProfile?.organization_id) {
       logger.error('User not assigned to an organization');
       return false;
     }
-    
+    const productCodes = [...new Set(preview.map(r => r.product_code).filter(Boolean))];
+    if (productCodes.length === 0) return false;
+    const { data: cylinders } = await supabase
+      .from('bottles')
+      .select('barcode_number')
+      .in('barcode_number', productCodes)
+      .eq('organization_id', userProfile.organization_id);
+    const cylinderBarcodes = new Set((cylinders || []).map(c => c.barcode_number));
+    let cylinderCount = 0, totalRows = 0;
     for (const row of preview) {
       if (row.product_code) {
         totalRows++;
-        const { data: cylinder } = await supabase
-          .from('bottles')
-          .select('id')
-          .eq('barcode_number', row.product_code)
-          .eq('organization_id', userProfile.organization_id)
-          .single();
-        
-        if (cylinder) {
-          cylinderCount++;
-        }
+        if (cylinderBarcodes.has(row.product_code)) cylinderCount++;
       }
     }
-    
-    // If more than 50% of products are cylinders, treat as sales receipts
     return cylinderCount > 0 && (cylinderCount / totalRows) > 0.5;
   }
 
-  // Import logic for invoices
+  // Group preview rows by invoice/reference number – same invoice_number (or reference_number) = one group = one DB row
+  function groupPreviewByReferenceNumber(rows) {
+    const byInvoiceNumber = {};
+    for (const row of rows) {
+      const invoiceNumber = String(
+        row.invoice_number ?? row.reference_number ?? row.sales_receipt_number ?? ''
+      ).trim() || 'UNKNOWN';
+      if (!byInvoiceNumber[invoiceNumber]) byInvoiceNumber[invoiceNumber] = [];
+      byInvoiceNumber[invoiceNumber].push(row);
+    }
+    return Object.entries(byInvoiceNumber).map(([refNumber, groupRows]) => ({ refNumber, rows: groupRows }));
+  }
+
+  // Import logic for invoices – one DB row per invoice (per reference number)
   async function handleInvoiceImport() {
     try {
       const user = await getCurrentUser();
       if (!user) throw new Error('User not authenticated');
       
-      // Get user's organization_id
       const { data: userProfile, error: profileError } = await supabase
         .from('profiles')
         .select('organization_id')
@@ -565,91 +623,54 @@ export default function Import() {
         throw new Error('User not assigned to an organization');
       }
       
-      logger.log('Creating invoice import with data:', {
-        previewLength: preview.length,
-        userId: user.id,
-        organizationId: userProfile.organization_id,
-        status: 'pending'
-      });
+      const groups = groupPreviewByReferenceNumber(preview);
+      logger.log('Creating invoice import: one row per invoice', { groupCount: groups.length, totalRows: preview.length });
       
-      // Check for existing imports first
-      const existingImport = await checkAndUpdateExistingImport('invoice', preview, mapping, user, userProfile.organization_id);
-      if (existingImport) {
-        setResult({
-          message: 'Import updated and submitted for approval',
-          total_rows: preview.length,
-          status: 'pending_approval'
-        });
-        setLoading(false);
-        setImporting(false);
-        return;
-      }
-      
-      // Store in temporary table for approval instead of direct insertion
-      const { data: importedInvoice, error: importError } = await supabase
-        .from('imported_invoices')
-        .insert({
-          data: {
-            rows: preview,
-            mapping,
-            summary: {
-              total_rows: preview.length,
-              uploaded_by: user.id,
-              uploaded_at: new Date().toISOString()
-            }
-          },
-          uploaded_by: user.id,
-          organization_id: userProfile.organization_id,
-          status: 'pending'
-        })
-        .select()
-        .single();
-
-      logger.log('Invoice import result:', { importedInvoice, importError });
-
-      if (importError) {
-        // If RLS policy error, try without uploaded_by field
-        if (importError.message.includes('row-level security policy')) {
-          logger.log('RLS policy error detected, trying without uploaded_by field...');
-          
-          const { data: retryInvoice, error: retryError } = await supabase
-            .from('imported_invoices')
-            .insert({
-              data: {
-                rows: preview,
-                mapping,
-                summary: {
-                  total_rows: preview.length,
-                  uploaded_by: user.id,
-                  uploaded_at: new Date().toISOString()
-                }
-              },
-              status: 'pending'
-            })
-            .select()
-            .single();
-
-          if (retryError) {
-            throw new Error(`Import failed after RLS retry: ${retryError.message}`);
+      const insertPayloads = groups.map(({ refNumber, rows: groupRows }) => ({
+        data: {
+          rows: groupRows,
+          mapping,
+          summary: {
+            total_rows: groupRows.length,
+            uploaded_by: user.id,
+            uploaded_at: new Date().toISOString(),
+            reference_number: refNumber
           }
-          
-          setResult({
-            message: 'Import submitted for approval (RLS retry mode)',
-            total_rows: preview.length,
-            status: 'pending_approval'
-          });
-          return;
+        },
+        uploaded_by: user.id,
+        organization_id: userProfile.organization_id,
+        status: 'pending'
+      }));
+      
+      const BATCH = 50;
+      let inserted = 0;
+      for (let i = 0; i < insertPayloads.length; i += BATCH) {
+        const batch = insertPayloads.slice(i, i + BATCH);
+        const { data, error: importError } = await supabase
+          .from('imported_invoices')
+          .insert(batch)
+          .select('id');
+        if (importError) {
+          if (importError.message.includes('row-level security policy')) {
+            for (const payload of batch) {
+              const { error: singleError } = await supabase
+                .from('imported_invoices')
+                .insert({ ...payload, uploaded_by: undefined })
+                .select('id');
+              if (!singleError) inserted++;
+            }
+          } else throw new Error(importError.message);
+        } else {
+          inserted += (data?.length ?? 0);
         }
-        
-        throw new Error(importError.message);
       }
-
+      
       setResult({
         message: 'Import submitted for approval',
         total_rows: preview.length,
-        status: 'pending_approval'
+        status: 'pending_approval',
+        invoices_submitted: inserted
       });
-
     } catch (error) {
       logger.error('Invoice import error:', error);
       setError(error.message);
@@ -658,14 +679,13 @@ export default function Import() {
     setImporting(false);
   }
 
-  // Import logic for sales receipts
+  // Import logic for sales receipts – one DB row per receipt (per reference number)
   async function handleSalesReceiptImport() {
     setLoading(true);
     try {
       const user = await getCurrentUser();
       if (!user) throw new Error('User not authenticated');
       
-      // Get user's organization_id
       const { data: userProfile, error: profileError } = await supabase
         .from('profiles')
         .select('organization_id')
@@ -676,91 +696,54 @@ export default function Import() {
         throw new Error('User not assigned to an organization');
       }
       
-      logger.log('Creating sales receipt import with data:', {
-        previewLength: preview.length,
-        userId: user.id,
-        organizationId: userProfile.organization_id,
-        status: 'pending'
-      });
+      const groups = groupPreviewByReferenceNumber(preview);
+      logger.log('Creating sales receipt import: one row per receipt', { groupCount: groups.length, totalRows: preview.length });
       
-      // Check for existing imports first  
-      const existingImport = await checkAndUpdateExistingImport('sales_receipt', preview, mapping, user, userProfile.organization_id);
-      if (existingImport) {
-        setResult({
-          message: 'Import updated and submitted for approval',
-          total_rows: preview.length,
-          status: 'pending_approval'
-        });
-        setLoading(false);
-        setImporting(false);
-        return;
-      }
-      
-      // Store in temporary table for approval instead of direct insertion
-      const { data: importedReceipt, error: importError } = await supabase
-        .from('imported_sales_receipts')
-        .insert({
-          data: {
-            rows: preview,
-            mapping,
-            summary: {
-              total_rows: preview.length,
-              uploaded_by: user.id,
-              uploaded_at: new Date().toISOString()
-            }
-          },
-          uploaded_by: user.id,
-          organization_id: userProfile.organization_id,
-          status: 'pending'
-        })
-        .select()
-        .single();
-
-      logger.log('Sales receipt import result:', { importedReceipt, importError });
-
-      if (importError) {
-        // If RLS policy error, try without uploaded_by field
-        if (importError.message.includes('row-level security policy')) {
-          logger.log('RLS policy error detected, trying without uploaded_by field...');
-          
-          const { data: retryReceipt, error: retryError } = await supabase
-            .from('imported_sales_receipts')
-            .insert({
-              data: {
-                rows: preview,
-                mapping,
-                summary: {
-                  total_rows: preview.length,
-                  uploaded_by: user.id,
-                  uploaded_at: new Date().toISOString()
-                }
-              },
-              status: 'pending'
-            })
-            .select()
-            .single();
-
-          if (retryError) {
-            throw new Error(`Import failed after RLS retry: ${retryError.message}`);
+      const insertPayloads = groups.map(({ refNumber, rows: groupRows }) => ({
+        data: {
+          rows: groupRows,
+          mapping,
+          summary: {
+            total_rows: groupRows.length,
+            uploaded_by: user.id,
+            uploaded_at: new Date().toISOString(),
+            reference_number: refNumber
           }
-          
-          setResult({
-            message: 'Import submitted for approval (RLS retry mode)',
-            total_rows: preview.length,
-            status: 'pending_approval'
-          });
-          return;
+        },
+        uploaded_by: user.id,
+        organization_id: userProfile.organization_id,
+        status: 'pending'
+      }));
+      
+      const BATCH = 50;
+      let inserted = 0;
+      for (let i = 0; i < insertPayloads.length; i += BATCH) {
+        const batch = insertPayloads.slice(i, i + BATCH);
+        const { data, error: importError } = await supabase
+          .from('imported_sales_receipts')
+          .insert(batch)
+          .select('id');
+        if (importError) {
+          if (importError.message.includes('row-level security policy')) {
+            for (const payload of batch) {
+              const { error: singleError } = await supabase
+                .from('imported_sales_receipts')
+                .insert({ ...payload, uploaded_by: undefined })
+                .select('id');
+              if (!singleError) inserted++;
+            }
+          } else throw new Error(importError.message);
+        } else {
+          inserted += (data?.length ?? 0);
         }
-        
-        throw new Error(importError.message);
       }
-
+      
       setResult({
         message: 'Import submitted for approval',
         total_rows: preview.length,
-        status: 'pending_approval'
+        status: 'pending_approval',
+        receipts_submitted: inserted
       });
-
     } catch (error) {
       logger.error('Sales receipt import error:', error);
       setError(error.message);
@@ -795,138 +778,114 @@ export default function Import() {
     saveAs(blob, 'skipped_items_debug.csv');
   }
 
-  // Check preview statuses for both types
+  // Check preview statuses for both types (bulk queries - much faster)
   async function checkPreviewStatuses() {
     setLoading(true);
+    setPreviewLoadingStep('Loading customers & products...');
     const statuses = [];
     let customersCreated = 0, customersExisting = 0;
     let invoicesCreated = 0, invoicesExisting = 0;
     let receiptsCreated = 0, receiptsExisting = 0;
     let lineItemsCreated = 0, lineItemsSkipped = 0;
-    
-    // Get current user and organization
+
     const user = await getCurrentUser();
     if (!user) {
       toast.error('User not authenticated');
       setLoading(false);
       return;
     }
-    
-    // Get user's organization_id
     const { data: userProfile, error: profileError } = await supabase
       .from('profiles')
       .select('organization_id')
       .eq('id', user.id)
       .single();
-    
     if (profileError || !userProfile?.organization_id) {
       toast.error('User not assigned to an organization');
       setLoading(false);
       return;
     }
-    
-    // Deduplicate customer IDs in the preview
-    const allCustomerIds = Array.from(new Set(preview.map(row => (row.customer_id || '').trim().toLowerCase()))).filter(Boolean);
-    // Query all at once for existing customers in THIS organization only
-    const { data: existingCustomers, error: fetchError } = await supabase
-      .from('customers')
-      .select('CustomerListID')
-      .eq('organization_id', userProfile.organization_id);
-    const existingIds = new Set((existingCustomers || []).map(c => (c.CustomerListID || '').trim().toLowerCase()));
 
+    const refNumbers = preview.map(r => String(r.reference_number || '')).filter(Boolean);
+    const uniqueRefs = [...new Set(refNumbers)];
+    const productCodes = [...new Set(preview.map(r => r.product_code).filter(Boolean))];
+
+    const [customersRes, bottlesRes, receiptsRes, invoicesRes] = await Promise.all([
+      supabase.from('customers').select('CustomerListID').eq('organization_id', userProfile.organization_id),
+      productCodes.length ? supabase.from('bottles').select('barcode_number').in('barcode_number', productCodes).eq('organization_id', userProfile.organization_id) : { data: [] },
+      uniqueRefs.length ? supabase.from('sales_receipts').select('id,sales_receipt_number').in('sales_receipt_number', uniqueRefs) : { data: [] },
+      uniqueRefs.length ? supabase.from('invoices').select('id,details').in('details', uniqueRefs) : { data: [] }
+    ]);
+
+    const existingCustomerIds = new Set((customersRes.data || []).map(c => (c.CustomerListID || '').trim().toLowerCase()));
+    const bottleSet = new Set((bottlesRes.data || []).map(b => b.barcode_number));
+    const receiptByNumber = new Map((receiptsRes.data || []).map(r => [String(r.sales_receipt_number), r]));
+    const invoiceByDetails = new Map((invoicesRes.data || []).map(i => [String(i.details), i]));
+
+    setPreviewLoadingStep('Checking existing invoices & receipts...');
+    const receiptIds = [...receiptByNumber.values()].map(r => r.id).filter(Boolean);
+    const invoiceIds = [...invoiceByDetails.values()].map(i => i.id).filter(Boolean);
+    const existingLineItems = new Set();
+    if (receiptIds.length > 0) {
+      const { data: srItems } = await supabase.from('sales_receipt_line_items').select('sales_receipt_id,product_code').in('sales_receipt_id', receiptIds);
+      (srItems || []).forEach(it => existingLineItems.add(`${it.sales_receipt_id}|${it.product_code}`));
+    }
+    if (invoiceIds.length > 0) {
+      const { data: invItems } = await supabase.from('invoice_line_items').select('invoice_id,product_code').in('invoice_id', invoiceIds);
+      (invItems || []).forEach(it => existingLineItems.add(`inv|${it.invoice_id}|${it.product_code}`));
+    }
+
+    const seenCustomerIds = new Set();
     for (const row of preview) {
       let customerStatus = 'Existing';
       let invoiceStatus = 'Existing';
       let receiptStatus = 'Existing';
       let lineItemStatus = 'Created';
       const cid = (row.customer_id || '').trim().toLowerCase();
-      if (cid && !existingIds.has(cid)) {
-        customersCreated++;
-        customerStatus = 'Create';
-        existingIds.add(cid); // Prevent double-counting
-      } else {
-        customersExisting++;
+      if (cid) {
+        if (!existingCustomerIds.has(cid)) {
+          if (!seenCustomerIds.has(cid)) {
+            customersCreated++;
+            seenCustomerIds.add(cid);
+          }
+          customerStatus = 'Create';
+        } else {
+          customersExisting++;
+        }
       }
-      
-      // Check if this should be an invoice or sales receipt
-      const { data: bottle } = await supabase
-        .from('bottles')
-        .select('id')
-        .eq('barcode_number', row.product_code)
-        .eq('organization_id', userProfile.organization_id)
-        .single();
-      
-      if (bottle) {
-        // This is a sales receipt
-        const { data: existingReceipt } = await supabase
-          .from('sales_receipts')
-          .select('id')
-          .eq('sales_receipt_number', String(row.reference_number))
-          .single();
-        
-        if (!existingReceipt) {
+
+      const isCylinder = row.product_code && bottleSet.has(row.product_code);
+      const refNum = String(row.reference_number || '');
+
+      if (isCylinder) {
+        const receipt = refNum ? receiptByNumber.get(refNum) : null;
+        if (!receipt) {
           receiptsCreated++;
           receiptStatus = 'Create';
         } else {
           receiptsExisting++;
         }
+        if (receipt) {
+          const lineKey = `${receipt.id}|${row.product_code}`;
+          if (existingLineItems.has(lineKey)) {
+            lineItemStatus = 'Skipped (Duplicate)';
+            lineItemsSkipped++;
+          } else {
+            lineItemsCreated++;
+          }
+        } else {
+          lineItemsCreated++;
+        }
       } else {
-        // This is an invoice
-        const { data: existingInvoice } = await supabase
-          .from('invoices')
-          .select('id')
-          .eq('details', String(row.reference_number))
-          .single();
-        
-        if (!existingInvoice) {
+        const invoice = refNum ? invoiceByDetails.get(refNum) : null;
+        if (!invoice) {
           invoicesCreated++;
           invoiceStatus = 'Create';
         } else {
           invoicesExisting++;
         }
-      }
-      
-      // Check line item
-      if (bottle) {
-        // Sales receipt line item
-        const { data: existingReceipt } = await supabase
-          .from('sales_receipts')
-          .select('id')
-          .eq('sales_receipt_number', String(row.reference_number))
-          .single();
-        
-        if (existingReceipt) {
-          const { data: existingLineItem } = await supabase
-            .from('sales_receipt_line_items')
-            .select('id')
-            .eq('sales_receipt_id', existingReceipt.id)
-            .eq('product_code', row.product_code)
-            .single();
-          if (existingLineItem) {
-            lineItemStatus = 'Skipped (Duplicate)';
-            lineItemsSkipped++;
-          } else {
-            lineItemsCreated++;
-          }
-        } else {
-          lineItemsCreated++;
-        }
-      } else {
-        // Invoice line item
-        const { data: existingInvoice } = await supabase
-          .from('invoices')
-          .select('id')
-          .eq('details', String(row.reference_number))
-          .single();
-        
-        if (existingInvoice) {
-          const { data: existingLineItem } = await supabase
-            .from('invoice_line_items')
-            .select('id')
-            .eq('invoice_id', existingInvoice.id)
-            .eq('product_code', row.product_code)
-            .single();
-          if (existingLineItem) {
+        if (invoice) {
+          const lineKey = `inv|${invoice.id}|${row.product_code}`;
+          if (existingLineItems.has(lineKey)) {
             lineItemStatus = 'Skipped (Duplicate)';
             lineItemsSkipped++;
           } else {
@@ -936,12 +895,12 @@ export default function Import() {
           lineItemsCreated++;
         }
       }
-      
       statuses.push({ customerStatus, invoiceStatus, receiptStatus, lineItemStatus });
     }
     setRowStatuses(statuses);
     setPreviewSummary({ customersCreated, customersExisting, invoicesCreated, invoicesExisting, receiptsCreated, receiptsExisting, lineItemsCreated, lineItemsSkipped });
     setPreviewChecked(true);
+    setPreviewLoadingStep('');
     setLoading(false);
   }
 
@@ -1509,17 +1468,32 @@ export default function Import() {
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
             <strong>Note:</strong> The system will automatically detect whether to process as invoices or sales receipts based on your data.
           </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+            <strong>Tip:</strong> Preview is optional—you can map fields and click Import directly for faster workflow.
+          </Typography>
         </CardContent>
       </Card>
 
-      {/* File Upload Card */}
-      <Card variant="outlined" sx={{ mb: 3 }}>
+      {/* File Upload Card with Drag-and-Drop */}
+      <Card
+        variant="outlined"
+        sx={{
+          mb: 3,
+          border: '2px dashed',
+          borderColor: isDragging ? 'primary.main' : 'divider',
+          bgcolor: isDragging ? 'action.hover' : 'background.paper',
+          transition: 'border-color 0.2s, background-color 0.2s'
+        }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
         <CardContent>
           <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
             <Button
               variant="outlined"
               component="label"
-              startIcon={<UploadIcon />}
+              startIcon={<CloudUploadIcon />}
               disabled={loading}
             >
               Choose File
@@ -1536,16 +1510,13 @@ export default function Import() {
                 label={file.name} 
                 color="primary" 
                 variant="outlined" 
-                onDelete={() => {
-                  setFile(null);
-                  setRawRows([]);
-                  setColumns([]);
-                  setMapping({});
-                  setPreview([]);
-                  setResult(null);
-                  setError(null);
-                }}
+                onDelete={clearFileState}
               />
+            )}
+            {!file && (
+              <Typography variant="body2" color="text.secondary">
+                or drag and drop .txt, .csv, .xls, .xlsx here
+              </Typography>
             )}
             
             <Button
@@ -1555,21 +1526,55 @@ export default function Import() {
               disabled={!file || !preview.length || loading}
               startIcon={<SearchIcon />}
             >
-              {loading ? 'Analyzing...' : 'Preview'}
+              {loading ? (previewLoadingStep || 'Analyzing...') : 'Preview Status'}
             </Button>
             
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={autoCreateCustomers}
+                  onChange={(e) => setAutoCreateCustomers(e.target.checked)}
+                  color="primary"
+                />
+              }
+              label="Auto-create missing customers"
+            />
             <Button
               variant="contained"
               onClick={handleImport}
-              disabled={!file || !preview.length || loading || !previewChecked || validationErrors.length > 0 || importing || (previewSummary && previewSummary.customersCreated > 0)}
-              startIcon={loading ? <LinearProgress size={16} /> : <CheckCircleIcon />}
+              disabled={!file || !preview.length || loading || validationErrors.length > 0 || importing || (previewSummary?.customersCreated > 0 && !autoCreateCustomers)}
+              startIcon={!importStep ? <CheckCircleIcon /> : null}
             >
-              {loading ? 'Importing...' : 'Import'}
+              {importStep || (loading ? 'Importing...' : 'Import')}
             </Button>
           </Stack>
+          {importing && importStep && (
+            <Box sx={{ mt: 2 }}>
+              <LinearProgress variant="determinate" value={importProgress} sx={{ height: 8, borderRadius: 1 }} />
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                {importStep}
+              </Typography>
+            </Box>
+          )}
         </CardContent>
       </Card>
         
+      {/* Validation errors */}
+      {validationErrors.length > 0 && (
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setValidationErrors([])}>
+          <Typography variant="subtitle2" gutterBottom>Fix these issues before importing:</Typography>
+          <Box component="ul" sx={{ m: 0, pl: 2 }}>
+            {validationErrors.slice(0, 5).map((err, i) => (
+              <li key={i}>
+                Row {err.row + 1}: {err.reason}
+              </li>
+            ))}
+          </Box>
+          {validationErrors.length > 5 && (
+            <Typography variant="body2" color="text.secondary">...and {validationErrors.length - 5} more</Typography>
+          )}
+        </Alert>
+      )}
       {/* Help message when import is disabled due to missing customers */}
       {previewSummary && previewSummary.customersCreated > 0 && (
         <Alert severity="warning" sx={{ mb: 3 }}>
@@ -1646,324 +1651,303 @@ export default function Import() {
         </Card>
       )}
 
-      {/* Preview Table */}
-      {preview.length > 0 && (
-        <Card variant="outlined" sx={{ mb: 3 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-              <Typography variant="h6" fontWeight={600}>
-                Preview
-              </Typography>
-              <Chip 
-                label={`${preview.length} rows`} 
-                color="primary" 
-                variant="outlined" 
-                size="small"
-              />
-            </Box>
-            
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 600 }}>Customer ID</TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>Customer Name</TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>Product Code</TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>Reference Number</TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>Qty Out</TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>Qty In</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {preview.slice(0, 10).map((row, idx) => (
-                    <TableRow key={idx} hover>
-                      <TableCell>{row.customer_id || '-'}</TableCell>
-                      <TableCell>{row.customer_name || '-'}</TableCell>
-                      <TableCell>{row.date || '-'}</TableCell>
-                      <TableCell>{row.product_code || '-'}</TableCell>
-                      <TableCell>{row.reference_number || '-'}</TableCell>
-                      <TableCell>{row.qty_out || '0'}</TableCell>
-                      <TableCell>{row.qty_in || '0'}</TableCell>
+      {/* Preview Table (virtualized for large files) */}
+      {preview.length > 0 && (() => {
+        const useVirtual = preview.length > 50;
+        const startIndex = useVirtual ? Math.max(0, Math.floor(previewScrollTop / PREVIEW_ROW_HEIGHT)) : 0;
+        const endIndex = useVirtual ? Math.min(preview.length, startIndex + PREVIEW_VISIBLE_ROWS) : Math.min(preview.length, 10);
+        const visibleRows = preview.slice(startIndex, endIndex);
+        return (
+          <Card variant="outlined" sx={{ mb: 3 }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+                <Typography variant="h6" fontWeight={600}>
+                  Preview
+                </Typography>
+                <Chip 
+                  label={`${preview.length} rows`} 
+                  color="primary" 
+                  variant="outlined" 
+                  size="small"
+                />
+                {useVirtual && (
+                  <Typography variant="caption" color="text.secondary">
+                    (virtualized: showing rows {startIndex + 1}–{endIndex})
+                  </Typography>
+                )}
+              </Box>
+              
+              <TableContainer
+                ref={previewTableRef}
+                onScroll={(e) => setPreviewScrollTop(e.target.scrollTop)}
+                sx={{ maxHeight: useVirtual ? 420 : undefined, overflow: 'auto' }}
+              >
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 600 }}>Customer ID</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Customer Name</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Product Code</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Reference Number</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Qty Out</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Qty In</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-            
-            {preview.length > 10 && (
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                Showing first 10 rows of {preview.length} total rows
-              </Typography>
-            )}
-          </CardContent>
-        </Card>
-      )}
+                  </TableHead>
+                  <TableBody>
+                    {useVirtual && startIndex > 0 && (
+                      <TableRow sx={{ visibility: 'hidden', pointerEvents: 'none' }}>
+                        <TableCell colSpan={7} sx={{ height: startIndex * PREVIEW_ROW_HEIGHT, padding: 0, border: 0, lineHeight: 0 }} />
+                      </TableRow>
+                    )}
+                    {visibleRows.map((row, i) => (
+                      <TableRow key={startIndex + i} hover sx={{ height: PREVIEW_ROW_HEIGHT }}>
+                        <TableCell>{row.customer_id || '-'}</TableCell>
+                        <TableCell>{row.customer_name || '-'}</TableCell>
+                        <TableCell>{row.date || '-'}</TableCell>
+                        <TableCell>{row.product_code || '-'}</TableCell>
+                        <TableCell>{row.reference_number || '-'}</TableCell>
+                        <TableCell>{row.qty_out || '0'}</TableCell>
+                        <TableCell>{row.qty_in || '0'}</TableCell>
+                      </TableRow>
+                    ))}
+                    {useVirtual && endIndex < preview.length && (
+                      <TableRow sx={{ visibility: 'hidden', pointerEvents: 'none' }}>
+                        <TableCell colSpan={7} sx={{ height: (preview.length - endIndex) * PREVIEW_ROW_HEIGHT, padding: 0, border: 0, lineHeight: 0 }} />
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              
+              {preview.length > 10 && !useVirtual && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  Showing first 10 rows of {preview.length} total rows
+                </Typography>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
         {/* Preview Summary */}
         {previewSummary && (
-          <div className="mb-6 bg-white/80 rounded-lg p-4 border border-blue-200">
-            <div className="font-semibold mb-2">Preview Summary:</div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div>
-                <div className="font-medium text-gray-700">Customers:</div>
-                <div className="text-green-600">{previewSummary.customersCreated} to create</div>
-                <div className="text-gray-600">{previewSummary.customersExisting} existing</div>
-              </div>
-              <div>
-                <div className="font-medium text-gray-700">Invoices:</div>
-                <div className="text-blue-600">{previewSummary.invoicesCreated} to create</div>
-                <div className="text-gray-600">{previewSummary.invoicesExisting} existing</div>
-              </div>
-              <div>
-                <div className="font-medium text-gray-700">Sales Receipts:</div>
-                <div className="text-purple-600">{previewSummary.receiptsCreated} to create</div>
-                <div className="text-gray-600">{previewSummary.receiptsExisting} existing</div>
-              </div>
-              <div>
-                <div className="font-medium text-gray-700">Line Items:</div>
-                <div className="text-orange-600">{previewSummary.lineItemsCreated} to create</div>
-                <div className="text-gray-600">{previewSummary.lineItemsSkipped} skipped</div>
-              </div>
-            </div>
-            
-            {/* Create Missing Customers Button */}
-            {previewSummary.customersCreated > 0 && (
-              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
-                <div className="text-sm text-yellow-800 mb-2">
-                  <strong>Missing Customers Detected:</strong> You need to create {previewSummary.customersCreated} customers before importing.
-                </div>
-                <button
-                  onClick={createMissingCustomers}
-                  disabled={loading}
-                  className="bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700 font-semibold transition disabled:opacity-50"
-                >
-                  {loading ? 'Creating...' : 'Create Missing Customers'}
-                </button>
-              </div>
-            )}
-          </div>
+          <Card variant="outlined" sx={{ mb: 3, bgcolor: 'background.paper' }}>
+            <CardContent>
+              <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>Preview Summary</Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6} md={3}>
+                  <Typography variant="body2" color="text.secondary">Customers</Typography>
+                  <Typography variant="body2" color="success.main">{previewSummary.customersCreated} to create</Typography>
+                  <Typography variant="body2" color="text.secondary">{previewSummary.customersExisting} existing</Typography>
+                </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                  <Typography variant="body2" color="text.secondary">Invoices</Typography>
+                  <Typography variant="body2" color="info.main">{previewSummary.invoicesCreated} to create</Typography>
+                  <Typography variant="body2" color="text.secondary">{previewSummary.invoicesExisting} existing</Typography>
+                </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                  <Typography variant="body2" color="text.secondary">Sales Receipts</Typography>
+                  <Typography variant="body2" sx={{ color: 'secondary.main' }}>{previewSummary.receiptsCreated} to create</Typography>
+                  <Typography variant="body2" color="text.secondary">{previewSummary.receiptsExisting} existing</Typography>
+                </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                  <Typography variant="body2" color="text.secondary">Line Items</Typography>
+                  <Typography variant="body2" color="warning.main">{previewSummary.lineItemsCreated} to create</Typography>
+                  <Typography variant="body2" color="text.secondary">{previewSummary.lineItemsSkipped} skipped</Typography>
+                </Grid>
+              </Grid>
+              {previewSummary.customersCreated > 0 && (
+                <Alert severity="warning" sx={{ mt: 2 }} action={
+                  <Button color="inherit" size="small" onClick={createMissingCustomers} disabled={loading}>
+                    {loading ? 'Creating...' : 'Create Missing Customers'}
+                  </Button>
+                }>
+                  <Typography variant="body2">
+                    <strong>Missing customers:</strong> Create {previewSummary.customersCreated} customers before importing, or enable &quot;Auto-create missing customers&quot; and click Import.
+                  </Typography>
+                </Alert>
+              )}
+            </CardContent>
+          </Card>
         )}
 
         {/* Results */}
         {result && (
-          <div className="bg-green-100 text-green-800 p-4 rounded space-y-1">
+          <Alert severity="success" sx={{ mb: 3 }} icon={false}>
+            <Typography variant="h6" fontWeight={600} gutterBottom>
+              {result.status === 'pending_approval' ? 'Import Submitted for Approval!' : 'Import Completed Successfully!'}
+            </Typography>
             {result.status === 'pending_approval' ? (
               <>
-                <div className="font-semibold text-lg">✅ Import Submitted for Approval!</div>
-                <div>Your import has been submitted and is awaiting approval by an administrator.</div>
-                <div>Total rows: {result.total_rows}</div>
-                <div className="mt-2 text-sm">
-                  You can check the status of your import in the <strong>Import Approvals</strong> page.
-                </div>
-                <div className="mt-3">
-                  <a href="/import-approvals" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
-                    Go to Import Approvals
-                  </a>
-                </div>
+                <Typography variant="body2">Your import has been submitted and is awaiting approval by an administrator.</Typography>
+                <Typography variant="body2">Total rows: {result.total_rows}</Typography>
+                {(result.invoices_submitted != null || result.receipts_submitted != null) && (
+                  <Typography variant="body2">
+                    {result.invoices_submitted != null && `${result.invoices_submitted} invoice(s) submitted for approval. `}
+                    {result.receipts_submitted != null && `${result.receipts_submitted} sales receipt(s) submitted for approval. `}
+                    Each can be verified separately.
+                  </Typography>
+                )}
+                <Button component={Link} to="/import-approvals" variant="contained" size="small" sx={{ mt: 2 }}>
+                  Go to Import Approvals
+                </Button>
               </>
             ) : (
               <>
-                <div className="font-semibold text-lg">✅ Import Completed Successfully!</div>
-                <div>Customers created: {result.customersCreated}, already existed: {result.customersExisting}</div>
-                <div>
-                  {result.receiptsCreated !== undefined ? 'Sales Receipts' : 'Invoices'} created: {result.invoicesCreated || result.receiptsCreated}, 
-                  already existed: {result.invoicesExisting || result.receiptsExisting}
-                </div>
-                <div>Line items imported: {result.lineItemsCreated}, skipped: {result.lineItemsSkipped}</div>
-                <div>Total imported: {result.imported}, Errors: {result.errors}</div>
-                
-                {/* Show where to find the data */}
+                <Typography variant="body2">Customers created: {result.customersCreated ?? 0}, already existed: {result.customersExisting ?? 0}</Typography>
+                <Typography variant="body2">
+                  {result.receiptsCreated !== undefined ? 'Sales Receipts' : 'Invoices'} created: {result.invoicesCreated ?? result.receiptsCreated ?? 0}, existing: {result.invoicesExisting ?? result.receiptsExisting ?? 0}
+                </Typography>
+                <Typography variant="body2">Line items: {result.lineItemsCreated ?? 0} imported, {result.lineItemsSkipped ?? 0} skipped. Total: {result.imported ?? 0}, Errors: {result.errors ?? 0}</Typography>
                 {result.importType === 'direct' && (
-                  <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded">
-                    <div className="font-semibold text-blue-900 mb-2">📍 Where to find your imported data:</div>
-                    <div className="text-blue-800 text-sm space-y-1">
-                      <div>• <strong>Sales Receipts/Invoices:</strong> Check the <a href="/invoices" className="underline">Invoices page</a></div>
-                      <div>• <strong>Customers:</strong> Check the <a href="/customers" className="underline">Customers page</a></div>
-                      <div>• <strong>Line Items:</strong> View in the database or invoice details</div>
-                    </div>
-                    <div className="mt-2 flex gap-2">
-                      <a href="/invoices" className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 text-xs">
-                        View Invoices
-                      </a>
-                      <a href="/customers" className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 text-xs">
-                        View Customers
-                      </a>
-                    </div>
-                  </div>
+                  <Box sx={{ mt: 2, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+                    <Typography variant="body2" fontWeight={600} gutterBottom>Where to find your data</Typography>
+                    <Stack direction="row" spacing={1} flexWrap="wrap">
+                      <Button component={Link} to="/invoices" size="small" variant="outlined">View Invoices</Button>
+                      <Button component={Link} to="/customers" size="small" variant="outlined">View Customers</Button>
+                    </Stack>
+                  </Box>
                 )}
               </>
             )}
-            
-            {result.skippedRows && result.skippedRows.length > 0 && (
-              <button
-                className="bg-gray-200 text-gray-800 px-3 py-1 rounded shadow hover:bg-gray-300 text-xs font-semibold mb-2"
-                onClick={() => downloadCSV(result.skippedRows)}
-              >
+            {result.skippedRows?.length > 0 && (
+              <Button size="small" variant="outlined" sx={{ mt: 1 }} onClick={() => downloadCSV(result.skippedRows)}>
                 Download Skipped Rows as CSV
-              </button>
+              </Button>
             )}
-            
-            {/* Rental Invoice Generation Button for Sales Receipts */}
             {result.receiptsCreated !== undefined && Object.keys(assetBalances).length > 0 && (
-              <button
-                className="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 font-semibold transition mt-2"
-                onClick={() => setShowInvoiceModal(true)}
-                disabled={generatingInvoices}
-              >
-                Generate Rental Invoices
-              </button>
+              <Button variant="contained" size="small" sx={{ mt: 1, ml: 1 }} onClick={() => setShowInvoiceModal(true)} disabled={generatingInvoices}>
+                {generatingInvoices ? 'Generating...' : 'Generate Rental Invoices'}
+              </Button>
             )}
-          </div>
+          </Alert>
         )}
 
-        {/* Progress Bars */}
-        {loading && (
-          <div className="w-full bg-gray-200 rounded-full h-4 mb-4">
-            <div
-              className="bg-blue-600 h-4 rounded-full transition-all"
-              style={{ width: `${progress}%` }}
-            ></div>
-          </div>
-        )}
-        
         {importing && (
-          <div className="fixed bottom-4 right-4 bg-blue-600 text-white px-4 py-2 rounded shadow-lg z-50">
-            Import in progress... You can navigate to another page. Import will continue in the background.<br />
-            Progress: {importProgress}%
-            {importErrors.length > 0 && <div className="text-red-200 mt-2">Errors: {importErrors.length}</div>}
-          </div>
+          <Paper elevation={4} sx={{ position: 'fixed', bottom: 16, right: 16, p: 2, zIndex: 1300, minWidth: 220 }}>
+            <Typography variant="body2" fontWeight={600}>Import in progress</Typography>
+            <LinearProgress variant="determinate" value={importProgress} sx={{ mt: 1, height: 6, borderRadius: 1 }} />
+            <Typography variant="caption" color="text.secondary">{importProgress}%</Typography>
+            {importErrors.length > 0 && <Typography variant="caption" color="error.main" sx={{ display: 'block', mt: 0.5 }}>Errors: {importErrors.length}</Typography>}
+          </Paper>
         )}
 
-        {/* Debug Mode */}
         {debugMode && (
-          <div className="fixed bottom-0 right-0 bg-white border p-2 z-50">
-            <div>Status: {workerStatus.status}</div>
-            <div>Progress: {workerStatus.progress}%</div>
-            {workerStatus.error && <div className="text-red-500">Error: {workerStatus.error}</div>}
-          </div>
+          <Paper elevation={2} sx={{ position: 'fixed', bottom: 0, right: 0, p: 1.5, zIndex: 1200 }}>
+            <Typography variant="caption">Status: {workerStatus.status}</Typography>
+            <Typography variant="caption">Progress: {workerStatus.progress}%</Typography>
+            {workerStatus.error && <Typography variant="caption" color="error.main">Error: {workerStatus.error}</Typography>}
+          </Paper>
         )}
 
         {/* Rental Invoice Modal */}
-        {showInvoiceModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white p-6 rounded-lg w-96">
-              <h3 className="text-lg font-bold mb-4">Generate Rental Invoices</h3>
-              <form
-                onSubmit={async e => {
-                  e.preventDefault();
-                  setGeneratingInvoices(true);
-                  const invoices = {};
-                  for (const key in lastImportBalances.current) {
-                    const [customer_id, product_code] = key.split('|');
-                    const qty = lastImportBalances.current[key];
-                    if (qty > 0) {
-                      if (!invoices[customer_id]) invoices[customer_id] = [];
-                      invoices[customer_id].push({ product_code, qty });
-                    }
-                  }
-                  for (const customer_id in invoices) {
-                    const { data: invoice, error: invoiceError } = await supabase
-                      .from('invoices')
-                      .insert({
-                        customer_id,
-                        invoice_date: new Date().toISOString().split('T')[0],
-                        details: `Rental Invoice (${rentalPeriod})`,
-                        rental_period: rentalPeriod
-                      })
-                      .select()
-                      .single();
-                    if (invoiceError) continue;
-                    const lineItems = invoices[customer_id].map(item => ({
-                      invoice_id: invoice.id,
-                      product_code: item.product_code,
-                      qty_out: item.qty,
-                      rate: rentalAmount,
-                      amount: rentalAmount * item.qty
-                    }));
-                    if (lineItems.length) {
-                      await supabase.from('invoice_line_items').insert(lineItems);
-                    }
-                  }
-                  setGeneratingInvoices(false);
-                  setShowInvoiceModal(false);
-                  alert('Rental invoices generated!');
-                }}
+        <Dialog open={showInvoiceModal} onClose={() => !generatingInvoices && setShowInvoiceModal(false)} maxWidth="xs" fullWidth>
+          <DialogTitle>Generate Rental Invoices</DialogTitle>
+          <form
+            onSubmit={async e => {
+              e.preventDefault();
+              setGeneratingInvoices(true);
+              const invoices = {};
+              for (const key in lastImportBalances.current) {
+                const [customer_id, product_code] = key.split('|');
+                const qty = lastImportBalances.current[key];
+                if (qty > 0) {
+                  if (!invoices[customer_id]) invoices[customer_id] = [];
+                  invoices[customer_id].push({ product_code, qty });
+                }
+              }
+              for (const customer_id in invoices) {
+                const { data: invoice, error: invoiceError } = await supabase
+                  .from('invoices')
+                  .insert({
+                    customer_id,
+                    invoice_date: new Date().toISOString().split('T')[0],
+                    details: `Rental Invoice (${rentalPeriod})`,
+                    rental_period: rentalPeriod
+                  })
+                  .select()
+                  .single();
+                if (invoiceError) continue;
+                const lineItems = invoices[customer_id].map(item => ({
+                  invoice_id: invoice.id,
+                  product_code: item.product_code,
+                  qty_out: item.qty,
+                  rate: rentalAmount,
+                  amount: rentalAmount * item.qty
+                }));
+                if (lineItems.length) {
+                  await supabase.from('invoice_line_items').insert(lineItems);
+                }
+              }
+              setGeneratingInvoices(false);
+              setShowInvoiceModal(false);
+              toast.success('Rental invoices generated!');
+            }}
+          >
+            <DialogContent>
+              <TextField
+                fullWidth
+                label="Rental Amount per Asset"
+                type="number"
+                value={rentalAmount}
+                onChange={e => setRentalAmount(Number(e.target.value))}
+                inputProps={{ min: 0, step: 0.01 }}
+                required
+                sx={{ mb: 2 }}
+              />
+              <TextField
+                fullWidth
+                select
+                label="Rental Period"
+                value={rentalPeriod}
+                onChange={e => setRentalPeriod(e.target.value)}
+                SelectProps={{ native: true }}
               >
-                <div className="mb-4">
-                  <label className="block mb-2">Rental Amount per Asset</label>
-                  <input
-                    type="number"
-                    className="border p-2 rounded w-full"
-                    value={rentalAmount}
-                    onChange={e => setRentalAmount(Number(e.target.value))}
-                    min={0}
-                    step={0.01}
-                    required
-                  />
-                </div>
-                <div className="mb-4">
-                  <label className="block mb-2">Rental Period</label>
-                  <select
-                    className="border p-2 rounded w-full"
-                    value={rentalPeriod}
-                    onChange={e => setRentalPeriod(e.target.value)}
-                  >
-                    <option value="monthly">Monthly</option>
-                    <option value="yearly">Yearly</option>
-                  </select>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    className="bg-gray-400 text-white px-4 py-2 rounded"
-                    onClick={() => setShowInvoiceModal(false)}
-                    disabled={generatingInvoices}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="bg-blue-600 text-white px-4 py-2 rounded"
-                    disabled={generatingInvoices}
-                  >
-                    {generatingInvoices ? 'Generating...' : 'Generate'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
+                <option value="monthly">Monthly</option>
+                <option value="yearly">Yearly</option>
+              </TextField>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setShowInvoiceModal(false)} disabled={generatingInvoices}>Cancel</Button>
+              <Button type="submit" variant="contained" disabled={generatingInvoices}>{generatingInvoices ? 'Generating...' : 'Generate'}</Button>
+            </DialogActions>
+          </form>
+        </Dialog>
 
         {skippedItems.length > 0 && (
-          <button onClick={downloadSkippedItems} className="bg-gray-200 text-gray-800 px-3 py-1 rounded shadow hover:bg-gray-300 text-xs font-semibold mb-2">
+          <Button variant="outlined" size="small" onClick={downloadSkippedItems} sx={{ mb: 2 }}>
             Download Skipped Items Debug CSV
-          </button>
+          </Button>
         )}
 
         {/* Customer Import Report */}
         {customerImportReport && (
-          <div className="bg-gray-50 border border-gray-300 rounded p-4 mb-4">
-            <div className="font-bold mb-2">Customer Import Report</div>
-            <div className="mb-2 text-green-700">
-              <strong>Created ({customerImportReport.created.length}):</strong>
-              {customerImportReport.created.length === 0 ? ' None' : ''}
-              <ul className="list-disc ml-6">
-                {customerImportReport.created.map(c => (
-                  <li key={c.CustomerListID}>{c.CustomerListID} - {c.name}</li>
-                ))}
-              </ul>
-            </div>
-            <div className="mb-2 text-yellow-800">
-              <strong>Skipped ({customerImportReport.skipped.length}):</strong>
-              {customerImportReport.skipped.length === 0 ? ' None' : ''}
-              <ul className="list-disc ml-6">
-                {customerImportReport.skipped.map(c => (
-                  <li key={c.CustomerListID}>{c.CustomerListID} - {c.name} <span className="italic">({c.reason})</span></li>
-                ))}
-              </ul>
-            </div>
-          </div>
+          <Card variant="outlined" sx={{ mb: 3, bgcolor: 'grey.50' }}>
+            <CardContent>
+              <Typography variant="subtitle1" fontWeight={600} gutterBottom>Customer Import Report</Typography>
+              <Typography variant="body2" color="success.main" component="div">
+                <strong>Created ({customerImportReport.created.length}):</strong>
+                {customerImportReport.created.length === 0 ? ' None' : (
+                  <Box component="ul" sx={{ m: 0, pl: 2 }}>
+                    {customerImportReport.created.map(c => (
+                      <li key={c.CustomerListID}>{c.CustomerListID} – {c.name}</li>
+                    ))}
+                  </Box>
+                )}
+              </Typography>
+              <Typography variant="body2" color="warning.dark" sx={{ mt: 1 }} component="div">
+                <strong>Skipped ({customerImportReport.skipped.length}):</strong>
+                {customerImportReport.skipped.length === 0 ? ' None' : (
+                  <Box component="ul" sx={{ m: 0, pl: 2 }}>
+                    {customerImportReport.skipped.map(c => (
+                      <li key={c.CustomerListID}>{c.CustomerListID} – {c.name} <Box component="span" sx={{ fontStyle: 'italic' }}>({c.reason})</Box></li>
+                    ))}
+                  </Box>
+                )}
+              </Typography>
+            </CardContent>
+          </Card>
         )}
       </Box>
     );

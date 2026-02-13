@@ -33,7 +33,7 @@ const collapsedWidth = 72;
 const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   const { profile, organization } = useAuth();
   const { organizationColors } = useTheme();
-  const primaryColor = organizationColors?.primary || '#FF6B35';
+  const primaryColor = organizationColors?.primary || '#40B5AD';
   
   // CRITICAL: Check profile BEFORE calling any other hooks to avoid hook inconsistency
   if (!profile) return null;
@@ -270,7 +270,7 @@ borderColor: 'divider',
       title: 'Core',
       icon: <HomeIcon />,
       items: [
-        { title: 'Dashboard', path: '/dashboard', icon: <Dashboard />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Dashboard', path: '/home', icon: <Dashboard />, roles: ['admin', 'user', 'manager'] },
         { title: 'Industry Analytics', path: '/industry-analytics', icon: <Analytics />, roles: ['admin', 'user', 'manager'] },
         { title: 'Customers', path: '/customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
         { title: 'Locations', path: '/locations', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] }

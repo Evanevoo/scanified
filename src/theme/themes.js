@@ -533,8 +533,8 @@ export const themes = {
 export const themeMetadata = {
   modern: {
     name: 'Modern Professional',
-    description: 'Clean, professional design with blue accents',
-    preview: '#2563eb',
+    description: 'Clean, professional design with teal accents',
+    preview: '#40B5AD',
     category: 'Professional',
   },
   dark: {

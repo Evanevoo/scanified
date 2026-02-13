@@ -72,11 +72,11 @@ export default function OAuthOrganizationLink() {
       }
 
       // Organization exists and is active, redirect to dashboard
-      navigate('/dashboard');
+      navigate('/home');
     } catch (error) {
       logger.error('Error checking organization status:', error);
       // If we can't check, assume it's fine and redirect to dashboard
-      navigate('/dashboard');
+      navigate('/home');
     }
   };
 
@@ -170,7 +170,7 @@ export default function OAuthOrganizationLink() {
 
       setSuccess(`Welcome to ${invite.organization.name}! Redirecting to dashboard...`);
       setTimeout(() => {
-        window.location.href = '/dashboard'; // Force full reload to update auth context
+        window.location.href = '/home'; // Force full reload to update auth context
       }, 2000);
 
     } catch (err) {
@@ -360,7 +360,7 @@ export default function OAuthOrganizationLink() {
 
       setSuccess(`Successfully joined ${orgData?.name || 'the organization'}! Redirecting to dashboard...`);
       setTimeout(() => {
-        window.location.href = '/dashboard'; // Force full reload
+        window.location.href = '/home'; // Force full reload
       }, 2000);
 
     } catch (err) {

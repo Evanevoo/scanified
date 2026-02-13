@@ -455,56 +455,42 @@ const validateReturnBalance = async (bottle, orderNumber, organization) => {
 /**
  * Revert bottle status when a return scan is rejected/cancelled.
  * Bottles were marked as empty when the return was scanned; we restore them to rented.
+ * Batched: 2 queries for scan data, 1 for all bottles, then batch updates.
  */
 const revertBottlesForRejectedReturn = async (orderNumber, organizationId) => {
   if (!orderNumber || !organizationId) return;
   try {
     const barcodesToRevert = new Set();
-    // Get RETURN scans from bottle_scans (before we delete them)
-    const { data: bottleScans } = await supabase
-      .from('bottle_scans')
-      .select('bottle_barcode, mode')
-      .eq('order_number', orderNumber);
-    if (bottleScans) {
-      bottleScans.forEach(s => {
-        const modeUpper = (s.mode || '').toUpperCase();
-        if (s.bottle_barcode && (modeUpper === 'RETURN' || modeUpper === 'IN')) {
-          barcodesToRevert.add(s.bottle_barcode);
-        }
-      });
-    }
-    // Get RETURN scans from scans table (action='in' or mode='RETURN')
-    const { data: scans } = await supabase
-      .from('scans')
-      .select('barcode_number, bottle_barcode, action, mode')
-      .eq('order_number', orderNumber);
-    if (scans) {
-      scans.forEach(s => {
-        const barcode = s.barcode_number || s.bottle_barcode;
-        const isReturn = s.action === 'in' || (s.mode || '').toUpperCase() === 'RETURN';
-        if (barcode && isReturn) barcodesToRevert.add(barcode);
-      });
-    }
-    for (const barcode of barcodesToRevert) {
-      // Fetch current bottle to determine correct revert status
-      const { data: bottle } = await supabase
-        .from('bottles')
-        .select('assigned_customer')
-        .eq('barcode_number', barcode)
-        .eq('organization_id', organizationId)
-        .single();
+    const [bottleScansRes, scansRes] = await Promise.all([
+      supabase.from('bottle_scans').select('bottle_barcode, mode').eq('order_number', orderNumber),
+      supabase.from('scans').select('barcode_number, bottle_barcode, action, mode').eq('order_number', orderNumber)
+    ]);
+    (bottleScansRes.data || []).forEach(s => {
+      const modeUpper = (s.mode || '').toUpperCase();
+      if (s.bottle_barcode && (modeUpper === 'RETURN' || modeUpper === 'IN')) barcodesToRevert.add(s.bottle_barcode);
+    });
+    (scansRes.data || []).forEach(s => {
+      const barcode = s.barcode_number || s.bottle_barcode;
+      if (barcode && (s.action === 'in' || (s.mode || '').toUpperCase() === 'RETURN')) barcodesToRevert.add(barcode);
+    });
+    const barcodes = [...barcodesToRevert];
+    if (barcodes.length === 0) return;
+    const { data: bottles } = await supabase
+      .from('bottles')
+      .select('barcode_number, assigned_customer')
+      .in('barcode_number', barcodes)
+      .eq('organization_id', organizationId);
+    const byBarcode = new Map((bottles || []).map(b => [b.barcode_number, b]));
+    await Promise.all(barcodes.map(async (barcode) => {
+      const bottle = byBarcode.get(barcode);
       const newStatus = bottle?.assigned_customer ? 'rented' : 'available';
       const { error } = await supabase
         .from('bottles')
         .update({ status: newStatus })
         .eq('barcode_number', barcode)
         .eq('organization_id', organizationId);
-      if (error) {
-        logger.warn('Could not revert bottle status for rejected return:', barcode, error);
-      } else {
-        logger.log('Reverted bottle after return rejected:', barcode, '->', newStatus);
-      }
-    }
+      if (error) logger.warn('Could not revert bottle status for rejected return:', barcode, error);
+    }));
   } catch (err) {
     logger.error('Error reverting bottles for rejected return:', err);
   }
@@ -513,8 +499,15 @@ const revertBottlesForRejectedReturn = async (orderNumber, organizationId) => {
 function determineVerificationStatus(record) {
   const data = parseDataField(record.data);
   
+  // Scanned-only: orders scanned but not yet imported as invoice. Check first so filter works.
+  // ID format scanned_<orderNumber> or explicit is_scanned_only flag (data can still have qty_out/qty_in from scans)
+  const isScannedOnlyRecord = record.is_scanned_only === true ||
+    (typeof record.id === 'string' && record.id.startsWith('scanned_'));
+  if (isScannedOnlyRecord) {
+    return 'SCANNED_ONLY';
+  }
+  
   // Check if record has invoice data (shipped/returned quantities from invoice)
-  // This is the definitive check - if there are invoice quantities, it's NOT scanned-only
   const rows = data.rows || data.line_items || [];
   const hasInvoiceData = rows.some(row => {
     const shipped = parseInt(row.qty_out || row.QtyOut || row.shipped || row.Shipped || 0, 10);
@@ -523,19 +516,9 @@ function determineVerificationStatus(record) {
   });
   
   // Also check if this is from imported_invoices/imported_sales_receipts (has database ID)
-  // If it has originalId or ID is not a scanned ID, it's from an import
   const isFromImport = record.originalId || 
                       typeof record.id === 'number' || 
                       (typeof record.id === 'string' && !record.id.startsWith('scanned_'));
-  
-  // If record has invoice data OR is from an import, it's NOT scanned-only
-  // Handle scanned-only records (orders that have been scanned but not invoiced yet)
-  // Only mark as scanned-only if it has no invoice data AND is marked as scanned-only AND not from import
-  if (record.is_scanned_only && !hasInvoiceData && !isFromImport) {
-    return 'SCANNED_ONLY';
-  }
-  
-  // If it has invoice data or is from import, don't treat as scanned-only (fall through to other status checks)
   
   // Check for critical errors
   if (data._error) return 'EXCEPTION';
@@ -566,6 +549,11 @@ function determineVerificationStatus(record) {
   
   // Check for warnings
   if (data.warnings && data.warnings.length > 0) return 'INVESTIGATION';
+  
+  // Per-order verification: this order may have been verified in a multi-order import
+  const orderNumber = data.order_number || data.reference_number;
+  const verifiedOrders = data.verified_order_numbers || [];
+  if (orderNumber && Array.isArray(verifiedOrders) && verifiedOrders.includes(orderNumber)) return 'VERIFIED';
   
   // Check verification state - check status field
   if (record.status === 'approved' || record.status === 'verified') return 'VERIFIED';
@@ -1239,6 +1227,7 @@ export default function ImportApprovals() {
         });
         
         const splitRecords = splitImportIntoIndividualRecords(importRecord);
+        splitRecords.forEach(r => { r._sourceTable = 'imported_invoices'; });
         logger.log('📊 Split into individual records:', splitRecords.length);
         individualInvoices.push(...splitRecords);
       });
@@ -1252,6 +1241,7 @@ export default function ImportApprovals() {
         });
         
         const splitRecords = splitImportIntoIndividualRecords(importRecord);
+        splitRecords.forEach(r => { r._sourceTable = 'imported_sales_receipts'; });
         logger.log('📊 Split into individual records:', splitRecords.length);
         individualReceipts.push(...splitRecords);
       });
@@ -1686,7 +1676,7 @@ export default function ImportApprovals() {
       logger.log('📊 All records count (after deduplication):', allRecords.length);
       
       // Final cleanup: Remove any approved, verified, or rejected records that somehow made it through
-      // THIS IS THE FINAL SAFETY NET - approved records MUST be removed here
+      // Also remove individual orders that have been verified (per-order verification for same-file imports)
       const cleanedRecords = allRecords.filter(record => {
         const status = (record.status || '').toLowerCase();
         if (status === 'approved' || status === 'rejected' || status === 'verified') {
@@ -1696,6 +1686,12 @@ export default function ImportApprovals() {
             status: record.status
           });
           return false; // REMOVE IT - don't show approved/verified/rejected records
+        }
+        const orderNumber = record.data?.order_number || record.data?.reference_number;
+        const verifiedOrders = record.data?.verified_order_numbers || [];
+        if (orderNumber && verifiedOrders.includes(orderNumber)) {
+          logger.warn('🧹 REMOVING individually verified order from display:', { orderNumber, id: record.id });
+          return false; // This order was verified individually (same-file import)
         }
         return true;
       });
@@ -5141,10 +5137,35 @@ export default function ImportApprovals() {
             onClick={async () => {
               try {
                 setLoading(true);
+                const { type, record } = confirmationDialog;
                 if (confirmationDialog.action === 'approve') {
-                  await confirmApprove(confirmationDialog.type, confirmationDialog.record);
+                  setConfirmationDialog({ open: false, action: null, record: null, type: null });
+                  setLoading(false);
+                  if (type === 'invoice') {
+                    const recordId = record.originalId ?? record.id;
+                    const orderNumber = record.data?.order_number ?? record.data?.reference_number;
+                    setPendingInvoices(prev => prev.filter(inv => {
+                      const sameImport = inv.id === recordId || inv.originalId === recordId;
+                      const sameOrder = (inv.data?.order_number ?? inv.data?.reference_number) === orderNumber;
+                      return !(sameImport && sameOrder);
+                    }));
+                  } else {
+                    setPendingReceipts(prev => prev.filter(r => r.id !== record.id && r.originalId !== (record.originalId ?? record.id)));
+                  }
+                  setSnackbar('Approving record…');
+                  confirmApprove(type, record);
+                  return;
                 } else if (confirmationDialog.action === 'reject') {
-                  await confirmReject(confirmationDialog.type, confirmationDialog.record);
+                  setConfirmationDialog({ open: false, action: null, record: null, type: null });
+                  setLoading(false);
+                  if (type === 'invoice') {
+                    setPendingInvoices(prev => prev.filter(r => r.id !== record.id && r.originalId !== record.id));
+                  } else {
+                    setPendingReceipts(prev => prev.filter(r => r.id !== record.id && r.originalId !== record.id));
+                  }
+                  setSnackbar('Rejecting record…');
+                  confirmReject(type, record);
+                  return;
                 }
                 setConfirmationDialog({ open: false, action: null, record: null, type: null });
               } catch (error) {
@@ -5453,8 +5474,8 @@ export default function ImportApprovals() {
                     const returned = isScannedOnlyRecord ? 0 : (item.returned || 0);
                     const shippedMismatch = shipped !== scannedOut;
                     const returnedMismatch = returned !== scannedIn;
-                    // DNS = Delivered Not Scanned: invoice says delivered (inv > 0) but no scan (trk = 0) – customer will be charged rental
-                    const isDNS = !isScannedOnlyRecord && shipped > 0 && scannedOut === 0;
+                    // DNS = Delivered Not Scanned: only show after verifying invoice (has invoice data); invoice says delivered (inv > 0) but no scan (trk = 0) – customer will be charged rental
+                    const isDNS = !isScannedOnlyRecord && hasInvoiceData && shipped > 0 && scannedOut === 0;
                     
                     return (
                       <Paper 
@@ -6319,110 +6340,87 @@ export default function ImportApprovals() {
         // This allows verified orders to display the bottles that were scanned
         logger.log(`✅ Keeping bottle_scans for order ${orderNumber} for history/verification purposes`);
         
-        logger.log(`✅ Order ${orderNumber} fully approved - refreshing data`);
         setSnackbar('Scanned record approved and bottles assigned to customers');
-        
-        // Wait a moment to ensure the update is reflected in the database
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        logger.log('🔄 Fetching updated data after approval...');
-        await fetchData();
-        logger.log('✅ Data refresh complete');
         return;
       }
       
       const tableName = type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts';
       
       // Use originalId for split records, otherwise use id
-      // For split records, originalId is the actual database ID
       const recordId = row.originalId || row.id;
+      const orderNumber = row.data?.order_number || row.data?.reference_number;
       
       logger.log('🔍 Record details for approval:', {
         rowId: row.id,
         originalId: row.originalId,
         recordId: recordId,
-        isString: typeof recordId === 'string',
-        startsWithScanned: typeof recordId === 'string' && recordId.startsWith('scanned_'),
+        orderNumber,
         type: type,
         tableName: tableName
       });
       
-      // Validate that recordId is a valid database ID (number or valid UUID)
       if (!recordId || (typeof recordId === 'string' && recordId.startsWith('scanned_'))) {
         logger.error('❌ Invalid record ID:', recordId);
         throw new Error('Invalid record ID for database update');
       }
       
-      // Build update object - use 'approved' status to match check constraint
-      const updateData = {
-        status: 'approved',  // Set status to 'approved' (matches database constraint)
-        approved_at: new Date().toISOString()
-      };
+      // Per-order verification: one import row can contain many orders; only mark THIS order as verified
+      const { data: existingRow, error: fetchError } = await supabase
+        .from(tableName)
+        .select('id, data, status')
+        .eq('id', recordId)
+        .single();
       
-      logger.log('🔍 Approving record:', { type, tableName, id: recordId, originalId: row.originalId, displayId: row.id, updateData });
+      if (fetchError || !existingRow) {
+        logger.error('❌ Failed to fetch record for per-order update:', fetchError);
+        throw new Error('Failed to load record for approval');
+      }
+      
+      const existingData = typeof existingRow.data === 'string' ? JSON.parse(existingRow.data || '{}') : (existingRow.data || {});
+      const verifiedOrderNumbers = Array.isArray(existingData.verified_order_numbers) ? [...existingData.verified_order_numbers] : [];
+      
+      if (orderNumber && !verifiedOrderNumbers.includes(orderNumber)) {
+        verifiedOrderNumbers.push(orderNumber);
+      }
+      
+      const rows = existingData.rows || [];
+      const distinctOrderNumbers = [...new Set(rows.map(r => r.reference_number || r.order_number || r.invoice_number || r.sales_receipt_number).filter(Boolean))];
+      const allOrdersVerified = distinctOrderNumbers.length > 0 && distinctOrderNumbers.every(on => verifiedOrderNumbers.includes(on));
+      
+      const newData = { ...existingData, verified_order_numbers: verifiedOrderNumbers };
+      const updatePayload = allOrdersVerified
+        ? { data: newData, status: 'approved', approved_at: new Date().toISOString() }
+        : { data: newData };
+      
+      logger.log('🔍 Per-order approval:', { orderNumber, verifiedOrderNumbers, distinctOrderNumbers, allOrdersVerified });
       
       const { data: updateResult, error } = await supabase
         .from(tableName)
-        .update(updateData)
+        .update(updatePayload)
         .eq('id', recordId)
         .select();
       
       if (error) {
         logger.error('❌ Error approving record:', error);
-        logger.error('❌ Error details:', { 
-          message: error.message, 
-          details: error.details, 
-          hint: error.hint,
-          code: error.code 
-        });
-        throw new Error(`Failed to approve: ${error.message}${error.details ? ' - ' + error.details : ''}${error.hint ? ' (' + error.hint + ')' : ''}`);
+        throw new Error(`Failed to approve: ${error.message}`);
       }
-      
-      logger.log('✅ Record approved successfully:', {
-        updateResult: updateResult,
-        rowsUpdated: updateResult?.length || 0,
-        updatedRecord: updateResult?.[0]
-      });
       
       if (!updateResult || updateResult.length === 0) {
         logger.error('❌ No records were updated! Check if ID exists:', recordId);
         throw new Error(`No records were updated. Record with ID ${recordId} may not exist.`);
       }
       
-      // Verify the status was actually set to 'approved'
-      const updatedRecord = updateResult[0];
-      if (updatedRecord.status !== 'approved') {
-        logger.error('❌ Status was not set to approved! Current status:', updatedRecord.status);
-        throw new Error(`Status update failed. Record status is: ${updatedRecord.status}`);
-      }
+      logger.log('✅ Order approved successfully (per-order verification)');
       
-      logger.log('✅ Verified: Record status is now "approved" - it will be removed from Import Approvals');
-      
-      // Immediately remove the record from the UI (optimistic update)
-      setPendingInvoices(prev => prev.filter(inv => {
-        const shouldRemove = (inv.id === recordId || inv.originalId === recordId);
-        if (shouldRemove) {
-          logger.log('🗑️ Removing record from UI immediately:', inv.id);
-        }
-        return !shouldRemove;
-      }));
-      
-      // Assign bottles to customers after approval
+      // Assign bottles to customers after approval (UI already updated optimistically)
       await assignBottlesToCustomer(row);
       
       setSnackbar('Record approved successfully and bottles assigned to customers');
-      
-      // Wait a moment to ensure the update is reflected in the database
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Force a full refresh of the data to ensure everything is in sync
-      logger.log('🔄 Refreshing data after approval...');
-      await fetchData();
-      logger.log('✅ Data refresh complete - approved records should now be gone');
     } catch (error) {
       logger.error('❌ Failed to approve record:', error);
       setError('Failed to approve record: ' + error.message);
       setSnackbar('Failed to approve record: ' + error.message);
+      await fetchData();
     }
   }
 
@@ -6461,7 +6459,6 @@ export default function ImportApprovals() {
         }
         
         setSnackbar('Scanned records rejected successfully');
-        await fetchData();
         return;
       }
       
@@ -6484,9 +6481,10 @@ export default function ImportApprovals() {
       if (error) throw error;
       
       setSnackbar('Record rejected successfully');
-      await fetchData();
     } catch (error) {
       setError('Failed to reject record: ' + error.message);
+      setSnackbar('Failed to reject record: ' + error.message);
+      await fetchData();
     }
   }
 
@@ -7533,54 +7531,61 @@ export default function ImportApprovals() {
     }
   }
 
-  // Bulk verify records
+  // Bulk verify records (per-order: only mark selected orders as verified, not entire import rows)
   async function handleBulkVerify(records) {
-    // Get current user ID
     const { data: { user: currentUser } } = await supabase.auth.getUser();
-    if (!currentUser) {
-      throw new Error('User not authenticated');
+    if (!currentUser) throw new Error('User not authenticated');
+
+    const scannedOnly = records.filter(r => typeof r.id === 'string' && r.id.startsWith('scanned_'));
+    const imported = records.filter(r => !(typeof r.id === 'string' && r.id.startsWith('scanned_')));
+
+    for (const record of scannedOnly) {
+      logger.log('Skipping scanned-only record in bulk verify:', record.id);
     }
 
-    // Update each record individually to avoid upsert issues
-    for (const record of records) {
-      // Check if this is a scanned-only record that shouldn't be processed
-      if (typeof record.id === 'string' && record.id.startsWith('scanned_')) {
-        logger.log('Skipping scanned-only record:', record.id);
+    // Group by (table, import row id) so we update each import row once with all verified order numbers
+    const byKey = {};
+    for (const record of imported) {
+      const recordId = record.originalId ?? record.id;
+      if (recordId == null || (typeof recordId === 'string' && recordId.startsWith('scanned_'))) continue;
+      const orderNumber = record.data?.order_number || record.data?.reference_number;
+      if (!orderNumber) continue;
+      const tableName = record._sourceTable || 'imported_invoices';
+      const key = `${tableName}:${recordId}`;
+      if (!byKey[key]) byKey[key] = { tableName, recordId, orderNumbers: [] };
+      if (!byKey[key].orderNumbers.includes(orderNumber)) byKey[key].orderNumbers.push(orderNumber);
+    }
+
+    for (const key of Object.keys(byKey)) {
+      const { tableName, recordId, orderNumbers: orderNumbersToVerify } = byKey[key];
+      const { data: existingRow, error: fetchErr } = await supabase
+        .from(tableName)
+        .select('id, data, status')
+        .eq('id', recordId)
+        .single();
+      if (fetchErr || !existingRow) {
+        logger.error('Bulk verify: failed to fetch row:', tableName, recordId, fetchErr);
         continue;
       }
-      
-      // Extract numeric part from ID (e.g., "scanned_55555" -> 55555)
-      let recordId;
-      if (typeof record.id === 'string') {
-        const numericPart = record.id.match(/\d+/);
-        recordId = numericPart ? parseInt(numericPart[0], 10) : record.id;
-      } else {
-        recordId = record.id;
+      const existingData = typeof existingRow.data === 'string' ? JSON.parse(existingRow.data || '{}') : (existingRow.data || {});
+      const verifiedOrderNumbers = Array.isArray(existingData.verified_order_numbers) ? [...existingData.verified_order_numbers] : [];
+      for (const on of orderNumbersToVerify) {
+        if (!verifiedOrderNumbers.includes(on)) verifiedOrderNumbers.push(on);
       }
-      
-      if (isNaN(recordId)) {
-        logger.error('Cannot convert ID to number:', record.id);
-        throw new Error(`Invalid ID format: ${record.id}`);
-      }
-      
-      const { error } = await supabase
-        .from('imported_invoices')
-        .update({
-          status: 'verified',
-          verified_at: new Date().toISOString(),
-          verified_by: currentUser.id
-        })
-        .eq('id', recordId);
-
-      if (error) throw error;
+      const rows = existingData.rows || [];
+      const distinctOrderNumbers = [...new Set(rows.map(r => r.reference_number || r.order_number || r.invoice_number || r.sales_receipt_number).filter(Boolean))];
+      const allOrdersVerified = distinctOrderNumbers.length > 0 && distinctOrderNumbers.every(on => verifiedOrderNumbers.includes(on));
+      const newData = { ...existingData, verified_order_numbers: verifiedOrderNumbers };
+      const updatePayload = allOrdersVerified
+        ? { data: newData, status: 'verified', verified_at: new Date().toISOString(), verified_by: currentUser.id }
+        : { data: newData };
+      const { error } = await supabase.from(tableName).update(updatePayload).eq('id', recordId);
+      if (error) logger.error('Bulk verify: update error for', recordId, error);
     }
 
-    // Assign bottles to customers for each approved record
     for (const record of records) {
       await assignBottlesToCustomer(record);
     }
-    
-    // Refresh the data to remove verified records from the list
     await fetchData();
   }
 

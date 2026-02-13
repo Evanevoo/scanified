@@ -18,7 +18,7 @@ module.exports = {
           foreground: "#111827",
         },
         primary: {
-          DEFAULT: "#2563EB",
+          DEFAULT: "#40B5AD",
           foreground: "#FFFFFF",
         },
         secondary: {
@@ -39,7 +39,7 @@ module.exports = {
         },
         border: "#E5E7EB",
         input: "#E5E7EB",
-        ring: "#2563EB",
+        ring: "#40B5AD",
       },
       borderRadius: {
         lg: "var(--radius)",

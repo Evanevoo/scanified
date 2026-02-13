@@ -51,7 +51,7 @@ export default function MainLayout({ children }) {
   const { profile, organization, signOut } = useAuth();
   const { config: assetConfig } = useAssetConfig();
   const { organizationColors } = useTheme();
-  const primaryColor = organizationColors?.primary || '#FF6B35';
+  const primaryColor = organizationColors?.primary || '#40B5AD';
   const [integrationsOpen, setIntegrationsOpen] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
