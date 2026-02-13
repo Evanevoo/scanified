@@ -23,7 +23,7 @@ export default function Home() {
   const { profile, organization } = useAuth();
   const { can, isAdmin, isManager, isUser } = usePermissions();
   const { organizationColors } = useTheme();
-  const primaryColor = organizationColors?.primary || '#FF6B35';
+  const primaryColor = organizationColors?.primary || '#40B5AD';
   const navigate = useNavigate();
   
   const [stats, setStats] = useState({

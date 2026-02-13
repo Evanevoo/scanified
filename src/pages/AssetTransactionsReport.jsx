@@ -55,7 +55,7 @@ export default function AssetTransactionsReport() {
 
   return (
     <div className="p-8">
-      <button onClick={() => navigate('/dashboard')} className="mb-4 bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded">Back</button>
+      <button onClick={() => navigate('/home')} className="mb-4 bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded">Back</button>
       <h2 className="text-2xl font-bold mb-4">Asset Transactions Report</h2>
       <div className="mb-4">
         <input

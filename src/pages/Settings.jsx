@@ -1062,7 +1062,7 @@ export default function Settings() {
     try {
       await supabase
         .from('profiles')
-        .update({ theme_mode: isDarkMode ? 'light' : 'dark' })
+        .update({ theme_mode: isDarkMode ? 'dark' : 'light' })
         .eq('id', user.id);
     } catch (e) {
       logger.error('Error saving theme preference:', e);

@@ -149,7 +149,7 @@ export const useUser = () => useAppStore((state) => state.user);
 export const useProfile = () => useAppStore((state) => state.profile);
 export const useIsAuthenticated = () => useAppStore((state) => state.isAuthenticated);
 export const useSidebarOpen = () => useAppStore((state) => state.sidebarOpen);
-export const useTheme = () => useAppStore((state) => state.theme);
+export const useAppTheme = () => useAppStore((state) => state.theme);
 export const useNotifications = () => useAppStore((state) => state.notifications);
 export const useImportState = () => useAppStore((state) => ({
   progress: state.importProgress,

@@ -64,7 +64,7 @@ const RoleProtectedRoute = ({ children, allowedRoles = [] }) => {
           </Typography>
           <Button 
             variant="contained" 
-            onClick={() => navigate('/dashboard')}
+            onClick={() => navigate('/home')}
             sx={{ mt: 2 }}
           >
             Go to Dashboard

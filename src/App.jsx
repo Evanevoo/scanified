@@ -86,7 +86,6 @@ import NotificationLayer from './components/NotificationLayer';
 import Demo from './pages/Demo';
 import ParticleTextDemo from './pages/ParticleTextDemo';
 import Features from './pages/Features';
-import Pricing from './pages/Pricing';
 import About from './pages/About';
 import CaseStudies from './pages/CaseStudies';
 import OwnerCMS from './pages/OwnerCMS';
@@ -281,7 +280,6 @@ function AppContent() {
                   <Route path="/demo" element={<Demo />} />
                   <Route path="/particle-demo" element={<ParticleTextDemo />} />
                   <Route path="/features" element={<Features />} />
-                  <Route path="/pricing" element={<Pricing />} />
                   <Route path="/about" element={<About />} />
                   <Route path="/case-studies" element={<CaseStudiesPage />} />
                   <Route path="/compare" element={<CompetitorAnalysis />} />

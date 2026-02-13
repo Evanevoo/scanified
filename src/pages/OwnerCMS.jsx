@@ -214,7 +214,7 @@ export default function OwnerCMS() {
   // Redirect if not owner
   useEffect(() => {
     if (profile && profile.role !== 'owner') {
-      navigate('/dashboard');
+      navigate('/home');
     }
   }, [profile, navigate]);
 
@@ -341,7 +341,7 @@ export default function OwnerCMS() {
         <Typography color="text.secondary">
           Only website owners can access the CMS.
         </Typography>
-        <Button variant="contained" onClick={() => navigate('/dashboard')} sx={{ mt: 3 }}>
+        <Button variant="contained" onClick={() => navigate('/home')} sx={{ mt: 3 }}>
           Go to Dashboard
         </Button>
       </Container>
