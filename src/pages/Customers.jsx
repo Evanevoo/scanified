@@ -118,14 +118,20 @@ function Customers({ profile }) {
   const { organization, profile: authProfile } = useAuth();
   const effectiveProfile = profile || authProfile;
   const canEdit = effectiveProfile?.role === 'admin' || effectiveProfile?.role === 'manager';
+  const initialLoadDone = useRef(false);
 
+  // Reset initial-load flag when organization changes so we show spinner for the new org's first fetch
+  useEffect(() => {
+    initialLoadDone.current = false;
+  }, [organization?.id]);
 
   // Create a stable fetch function
   const fetchCustomers = async (searchTerm = '') => {
     if (!organization?.id) return;
     
     logger.log('Fetching customers...');
-    setLoading(true);
+    const isInitialLoad = !initialLoadDone.current;
+    if (isInitialLoad) setLoading(true);
     try {
       // Build base query
       let query = supabase
@@ -173,6 +179,7 @@ function Customers({ profile }) {
 
       logger.log('Customers fetched successfully:', data?.length || 0, 'Total count:', count);
       setCustomers(data || []);
+      initialLoadDone.current = true;
 
       // Resolve parent names for customers that have parent_customer_id
       const parentIds = [...new Set((data || []).map(c => c.parent_customer_id).filter(Boolean))];

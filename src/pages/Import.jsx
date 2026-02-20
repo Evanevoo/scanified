@@ -607,6 +607,49 @@ export default function Import() {
     return Object.entries(byInvoiceNumber).map(([refNumber, groupRows]) => ({ refNumber, rows: groupRows }));
   }
 
+  // Normalize order/ref number for matching (trim, strip leading zeros for all-digit)
+  function normalizeOrderNum(num) {
+    if (num == null || num === '') return '';
+    const s = String(num).trim();
+    if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
+    return s;
+  }
+
+  // Return a Set of normalized order numbers that are already verified for this org (so we can skip re-importing them)
+  async function getVerifiedOrderNumbersForOrg(type, organizationId) {
+    const table = type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts';
+    const { data: records, error } = await supabase
+      .from(table)
+      .select('id, data')
+      .eq('organization_id', organizationId)
+      .eq('status', 'verified');
+    if (error) {
+      logger.warn('Could not fetch verified records for skip check:', error);
+      return new Set();
+    }
+    const set = new Set();
+    for (const rec of records || []) {
+      const data = typeof rec.data === 'string' ? JSON.parse(rec.data) : rec.data;
+      if (!data) continue;
+      let orderNum = data.summary?.reference_number ?? data.reference_number ?? data.order_number ?? data.invoice_number;
+      if (orderNum == null && data.rows?.[0]) {
+        const row = data.rows[0];
+        orderNum = row.order_number ?? row.invoice_number ?? row.reference_number ?? row.sales_receipt_number;
+      }
+      const norm = normalizeOrderNum(orderNum);
+      if (norm) set.add(norm);
+      // Also include any verified_order_numbers from the same record (multi-order imports)
+      const verifiedOrders = data.verified_order_numbers;
+      if (Array.isArray(verifiedOrders)) {
+        verifiedOrders.forEach(n => {
+          const nNorm = normalizeOrderNum(n);
+          if (nNorm) set.add(nNorm);
+        });
+      }
+    }
+    return set;
+  }
+
   // Import logic for invoices – one DB row per invoice (per reference number)
   async function handleInvoiceImport() {
     try {
@@ -624,9 +667,15 @@ export default function Import() {
       }
       
       const groups = groupPreviewByReferenceNumber(preview);
-      logger.log('Creating invoice import: one row per invoice', { groupCount: groups.length, totalRows: preview.length });
-      
-      const insertPayloads = groups.map(({ refNumber, rows: groupRows }) => ({
+      const verifiedOrderNums = await getVerifiedOrderNumbersForOrg('invoice', userProfile.organization_id);
+      const groupsToInsert = groups.filter(({ refNumber }) => !verifiedOrderNums.has(normalizeOrderNum(refNumber)));
+      const skippedCount = groups.length - groupsToInsert.length;
+      if (skippedCount > 0) {
+        logger.log(`Skipping ${skippedCount} already verified invoice(s) on re-import`);
+      }
+      logger.log('Creating invoice import: one row per invoice', { groupCount: groupsToInsert.length, totalRows: preview.length, skippedAlreadyVerified: skippedCount });
+
+      const insertPayloads = groupsToInsert.map(({ refNumber, rows: groupRows }) => ({
         data: {
           rows: groupRows,
           mapping,
@@ -641,7 +690,7 @@ export default function Import() {
         organization_id: userProfile.organization_id,
         status: 'pending'
       }));
-      
+
       const BATCH = 50;
       let inserted = 0;
       for (let i = 0; i < insertPayloads.length; i += BATCH) {
@@ -664,12 +713,16 @@ export default function Import() {
           inserted += (data?.length ?? 0);
         }
       }
-      
+
+      const message = skippedCount > 0
+        ? `Import submitted. ${inserted} invoice(s) added for approval. ${skippedCount} already verified invoice(s) skipped.`
+        : 'Import submitted for approval';
       setResult({
-        message: 'Import submitted for approval',
+        message,
         total_rows: preview.length,
         status: 'pending_approval',
-        invoices_submitted: inserted
+        invoices_submitted: inserted,
+        invoices_skipped_already_verified: skippedCount
       });
     } catch (error) {
       logger.error('Invoice import error:', error);
@@ -697,9 +750,15 @@ export default function Import() {
       }
       
       const groups = groupPreviewByReferenceNumber(preview);
-      logger.log('Creating sales receipt import: one row per receipt', { groupCount: groups.length, totalRows: preview.length });
-      
-      const insertPayloads = groups.map(({ refNumber, rows: groupRows }) => ({
+      const verifiedOrderNums = await getVerifiedOrderNumbersForOrg('receipt', userProfile.organization_id);
+      const groupsToInsert = groups.filter(({ refNumber }) => !verifiedOrderNums.has(normalizeOrderNum(refNumber)));
+      const skippedCount = groups.length - groupsToInsert.length;
+      if (skippedCount > 0) {
+        logger.log(`Skipping ${skippedCount} already verified receipt(s) on re-import`);
+      }
+      logger.log('Creating sales receipt import: one row per receipt', { groupCount: groupsToInsert.length, totalRows: preview.length, skippedAlreadyVerified: skippedCount });
+
+      const insertPayloads = groupsToInsert.map(({ refNumber, rows: groupRows }) => ({
         data: {
           rows: groupRows,
           mapping,
@@ -714,7 +773,7 @@ export default function Import() {
         organization_id: userProfile.organization_id,
         status: 'pending'
       }));
-      
+
       const BATCH = 50;
       let inserted = 0;
       for (let i = 0; i < insertPayloads.length; i += BATCH) {
@@ -737,12 +796,16 @@ export default function Import() {
           inserted += (data?.length ?? 0);
         }
       }
-      
+
+      const message = skippedCount > 0
+        ? `Import submitted. ${inserted} receipt(s) added for approval. ${skippedCount} already verified receipt(s) skipped.`
+        : 'Import submitted for approval';
       setResult({
-        message: 'Import submitted for approval',
+        message,
         total_rows: preview.length,
         status: 'pending_approval',
-        receipts_submitted: inserted
+        receipts_submitted: inserted,
+        receipts_skipped_already_verified: skippedCount
       });
     } catch (error) {
       logger.error('Sales receipt import error:', error);
@@ -1786,11 +1849,14 @@ export default function Import() {
                   <Typography variant="body2">
                     {result.invoices_submitted != null && `${result.invoices_submitted} invoice(s) submitted for approval. `}
                     {result.receipts_submitted != null && `${result.receipts_submitted} sales receipt(s) submitted for approval. `}
+                    {(result.invoices_skipped_already_verified > 0 || result.receipts_skipped_already_verified > 0) && (
+                      <>{(result.invoices_skipped_already_verified ?? 0) + (result.receipts_skipped_already_verified ?? 0)} already verified order(s) were skipped. </>
+                    )}
                     Each can be verified separately.
                   </Typography>
                 )}
                 <Button component={Link} to="/import-approvals" variant="contained" size="small" sx={{ mt: 2 }}>
-                  Go to Import Approvals
+                  Go to Order Verification
                 </Button>
               </>
             ) : (

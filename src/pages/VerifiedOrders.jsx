@@ -75,12 +75,13 @@ export default function VerifiedOrders() {
       setLoading(true);
       logger.log('🔍 Fetching verified orders for organization:', organization.id);
 
-      // Fetch verified imported invoices
+      // Fetch verified imported invoices (order by approved_at first, then verified_at for latest first)
       const { data: invoices, error: invoiceError } = await supabase
         .from('imported_invoices')
         .select('*')
         .eq('organization_id', organization.id)
         .in('status', ['verified', 'approved'])
+        .order('approved_at', { ascending: false })
         .order('verified_at', { ascending: false });
 
       if (invoiceError) {
@@ -94,6 +95,7 @@ export default function VerifiedOrders() {
         .select('*')
         .eq('organization_id', organization.id)
         .in('status', ['verified', 'approved'])
+        .order('approved_at', { ascending: false })
         .order('verified_at', { ascending: false });
 
       if (receiptError) {
@@ -104,7 +106,7 @@ export default function VerifiedOrders() {
       // Fetch verified scanned orders (from scans table)
       const { data: scans, error: scanError } = await supabase
         .from('scans')
-        .select('*')
+        .select('id, barcode_number, order_number, "mode", action, status, organization_id, customer_name, customer_id, product_code, created_at')
         .eq('organization_id', organization.id)
         .in('status', ['verified', 'approved'])
         .not('order_number', 'is', null)
@@ -189,8 +191,40 @@ export default function VerifiedOrders() {
         }
       }
 
-      logger.log(`✅ Fetched ${allOrders.length} verified orders`);
-      setVerifiedOrders(allOrders);
+      // Deduplicate: keep only the most recently verified entry per order number + customer.
+      // Duplicate records can exist from re-imports; all get marked approved but we only show one.
+      const normalizeOrderNum = (num) => {
+        if (num == null || num === '') return '';
+        const s = String(num).trim();
+        if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
+        return s;
+      };
+      const orderMap = new Map();
+      allOrders.forEach(order => {
+        let orderNum = order.order_number || order.data_parsed?.order_number || order.data_parsed?.reference_number || order.data_parsed?.invoice_number;
+        if (!orderNum && order.data_parsed?.rows?.[0]) {
+          const r = order.data_parsed.rows[0];
+          orderNum = r.order_number || r.invoice_number || r.reference_number || r.sales_receipt_number;
+        }
+        const norm = normalizeOrderNum(orderNum);
+        const custName = (getCustomerName(order) || '').trim();
+        const key = norm ? `${norm}\t${custName}` : `_id_${order.id}`;
+        const existing = orderMap.get(key);
+        if (!existing) {
+          orderMap.set(key, order);
+        } else {
+          const existingTime = new Date(existing.approved_at || existing.verified_at || existing.created_at || 0).getTime();
+          const newTime = new Date(order.approved_at || order.verified_at || order.created_at || 0).getTime();
+          if (newTime > existingTime) orderMap.set(key, order);
+        }
+      });
+      const deduplicatedOrders = Array.from(orderMap.values());
+      // Sort by latest first (approved_at / verified_at / created_at descending)
+      const getOrderDate = (order) => new Date(order.approved_at || order.verified_at || order.created_at || 0).getTime();
+      deduplicatedOrders.sort((a, b) => getOrderDate(b) - getOrderDate(a));
+
+      logger.log(`✅ Fetched ${allOrders.length} verified orders (${deduplicatedOrders.length} after dedup)`);
+      setVerifiedOrders(deduplicatedOrders);
     } catch (error) {
       logger.error('Error fetching verified orders:', error);
       setSnackbar({ 
@@ -246,12 +280,12 @@ export default function VerifiedOrders() {
   const applyFilters = () => {
     let filtered = [...verifiedOrders];
 
-    // Type filter
+    // Type filter: match exact type (invoice, receipt, scanned)
     if (typeFilter !== 'all') {
-      filtered = filtered.filter(order => order.type === typeFilter);
+      filtered = filtered.filter(order => (order.type || '') === typeFilter);
     }
 
-    // Date filter
+    // Date filter: use approved_at first (what we set on verify), then verified_at, then created_at
     if (dateFilter !== 'all') {
       const now = new Date();
       const filterDate = new Date();
@@ -262,36 +296,236 @@ export default function VerifiedOrders() {
           break;
         case 'week':
           filterDate.setDate(now.getDate() - 7);
+          filterDate.setHours(0, 0, 0, 0);
           break;
         case 'month':
           filterDate.setMonth(now.getMonth() - 1);
+          filterDate.setHours(0, 0, 0, 0);
           break;
       }
 
       filtered = filtered.filter(order => {
-        const orderDate = new Date(order.verified_at || order.created_at);
+        const orderDate = new Date(order.approved_at || order.verified_at || order.created_at || 0);
         return orderDate >= filterDate;
       });
     }
 
-    // Search filter
+    // Search filter: use same getters as display so search matches what user sees
     if (search.trim()) {
-      const searchLower = search.toLowerCase();
+      const searchLower = search.toLowerCase().trim();
       filtered = filtered.filter(order => {
-        const orderNum = order.data_parsed?.order_number || order.order_number || '';
-        const customerName = order.data_parsed?.customer_name || order.customer_name || '';
-        const invoiceNum = order.data_parsed?.invoice_number || '';
-        
+        const orderNum = String(getOrderNumber(order) || '').toLowerCase();
+        const customerName = String(getCustomerName(order) || '').toLowerCase();
+        const refNum = String(order.data_parsed?.reference_number || order.data_parsed?.invoice_number || '').toLowerCase();
         return (
-          orderNum.toLowerCase().includes(searchLower) ||
-          customerName.toLowerCase().includes(searchLower) ||
-          invoiceNum.toLowerCase().includes(searchLower)
+          orderNum.includes(searchLower) ||
+          customerName.includes(searchLower) ||
+          refNum.includes(searchLower)
         );
       });
     }
 
+    // Keep sort by latest first
+    const getOrderDate = (order) => new Date(order.approved_at || order.verified_at || order.created_at || 0).getTime();
+    filtered.sort((a, b) => getOrderDate(b) - getOrderDate(a));
+
     setFilteredOrders(filtered);
     setPage(0); // Reset to first page when filters change
+  };
+
+  // Normalize order number for matching (trim, strip leading zeros for numeric)
+  const normalizeOrderNumForReverse = (num) => {
+    if (num == null || num === '') return '';
+    const s = String(num).trim();
+    if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
+    return s;
+  };
+  const normalizeBarcode = (b) => (b == null || b === '') ? '' : String(b).trim().replace(/^0+/, '') || String(b).trim();
+
+  // Reverse bottle assignments that were made during verify.
+  // SHIP bottles get unassigned; RETURN bottles get reassigned back to the customer.
+  const reverseBottleAssignments = async (orderNumber, customerName, orderCustomerId) => {
+    if (!orderNumber || !organization?.id) return;
+    const orgId = organization.id;
+    const targetOrderNorm = normalizeOrderNumForReverse(orderNumber);
+    if (!targetOrderNorm) return;
+
+    // Use customer ID from order first (customer detail page queries by CustomerListID)
+    let customerId = orderCustomerId ? String(orderCustomerId).trim() || null : null;
+    if (!customerId && customerName) {
+      const { data: cust } = await supabase
+        .from('customers')
+        .select('CustomerListID')
+        .eq('name', customerName)
+        .eq('organization_id', orgId)
+        .limit(1)
+        .single();
+      if (cust) customerId = cust.CustomerListID;
+    }
+
+    // Fetch all scans/bottle_scans for org and filter by normalized order number (handles 71760 vs 071760)
+    const [scansRes, bottleScansRes] = await Promise.all([
+      supabase.from('scans').select('barcode_number, "mode", action, created_at, order_number').eq('organization_id', orgId).not('order_number', 'is', null),
+      supabase.from('bottle_scans').select('bottle_barcode, mode, created_at, order_number').eq('organization_id', orgId).not('order_number', 'is', null)
+    ]);
+    const scans = (scansRes.data || []).filter(s => normalizeOrderNumForReverse(s.order_number) === targetOrderNorm);
+    const bottleScans = (bottleScansRes.data || []).filter(s => normalizeOrderNumForReverse(s.order_number) === targetOrderNorm);
+
+    // Most-recent-wins per barcode (normalized) to determine final mode
+    const barcodeMode = new Map();
+    const processRow = (barcode, mode, action, createdAt) => {
+      if (!barcode) return;
+      const bNorm = normalizeBarcode(barcode);
+      if (!bNorm) return;
+      const m = (mode || '').toUpperCase();
+      const a = (action || '').toLowerCase();
+      const isReturn = m === 'RETURN' || m === 'PICKUP' || a === 'in';
+      const time = new Date(createdAt || 0).getTime();
+      const existing = barcodeMode.get(bNorm);
+      if (!existing || time >= existing.time) {
+        barcodeMode.set(bNorm, { isReturn, time });
+      }
+    };
+    scans.forEach(s => processRow(s.barcode_number, s.mode, s.action, s.created_at));
+    bottleScans.forEach(s => processRow(s.bottle_barcode, s.mode, null, s.created_at));
+
+    const shippedBarcodeNorms = new Set();
+    const returnedBarcodeToRaw = new Map(); // norm -> one raw barcode for DB update
+    barcodeMode.forEach(({ isReturn }, bNorm) => {
+      if (isReturn) returnedBarcodeToRaw.set(bNorm, null);
+      else shippedBarcodeNorms.add(bNorm);
+    });
+    const shippedRawBarcodes = new Set();
+    scans.forEach(s => {
+      const b = s.barcode_number;
+      if (b) {
+        const n = normalizeBarcode(b);
+        if (returnedBarcodeToRaw.has(n) && returnedBarcodeToRaw.get(n) == null) returnedBarcodeToRaw.set(n, b);
+        if (shippedBarcodeNorms.has(n)) shippedRawBarcodes.add(b);
+      }
+    });
+    bottleScans.forEach(s => {
+      const b = s.bottle_barcode;
+      if (b) {
+        const n = normalizeBarcode(b);
+        if (returnedBarcodeToRaw.has(n) && returnedBarcodeToRaw.get(n) == null) returnedBarcodeToRaw.set(n, b);
+        if (shippedBarcodeNorms.has(n)) shippedRawBarcodes.add(b);
+      }
+    });
+
+    logger.log(`🔄 Reversing bottle assignments for order ${orderNumber}: ${shippedBarcodeNorms.size} SHIP (will unassign), ${returnedBarcodeToRaw.size} RETURN (will reassign)`);
+
+    // Reverse SHIP: unassign bottles from customer. Fetch by customer (ID + name) and by barcode so we don't miss.
+    if (shippedBarcodeNorms.size > 0) {
+      const byId = new Map();
+      if (customerId) {
+        const { data } = await supabase.from('bottles').select('id, barcode_number, assigned_customer, customer_name').eq('organization_id', orgId).eq('assigned_customer', customerId);
+        (data || []).forEach(b => byId.set(b.id, b));
+      }
+      if (customerName && customerName.trim()) {
+        const { data } = await supabase.from('bottles').select('id, barcode_number, assigned_customer, customer_name').eq('organization_id', orgId).eq('customer_name', customerName.trim());
+        (data || []).forEach(b => byId.set(b.id, b));
+      }
+      // Fallback: fetch by SHIP barcodes so we catch bottles even if customer id/name mismatch
+      if (shippedRawBarcodes.size > 0) {
+        const arr = [...shippedRawBarcodes];
+        for (let i = 0; i < arr.length; i += 200) {
+          const chunk = arr.slice(i, i + 200);
+          const { data } = await supabase.from('bottles').select('id, barcode_number, assigned_customer, customer_name').eq('organization_id', orgId).in('barcode_number', chunk);
+          (data || []).forEach(b => {
+            const norm = normalizeBarcode(b.barcode_number);
+            if (norm && shippedBarcodeNorms.has(norm)) {
+              const ac = String(b.assigned_customer || '').trim();
+              const cn = String(b.customer_name || '').trim();
+              const match = (customerId && ac === String(customerId).trim()) ||
+                (customerName && cn === String(customerName).trim()) ||
+                (customerName && ac === String(customerName).trim()) ||
+                (customerId && cn === String(customerId).trim());
+              if (match) byId.set(b.id, b);
+            }
+          });
+        }
+      }
+      const customerBottles = Array.from(byId.values());
+      const toUnassign = customerBottles.filter(b => {
+        const norm = normalizeBarcode(b.barcode_number);
+        return norm && shippedBarcodeNorms.has(norm);
+      });
+      for (const bottle of toUnassign) {
+        const { error } = await supabase
+          .from('bottles')
+          .update({ assigned_customer: null, customer_name: null, status: 'available' })
+          .eq('id', bottle.id);
+        if (error) {
+          logger.warn(`⚠️ Failed to unassign SHIP bottle ${bottle.barcode_number}:`, error.message);
+        } else {
+          logger.log(`✅ Unassigned SHIP bottle ${bottle.barcode_number} from customer`);
+          const { data: rentals } = await supabase
+            .from('rentals')
+            .select('id')
+            .eq('bottle_barcode', bottle.barcode_number)
+            .eq('organization_id', orgId)
+            .is('rental_end_date', null)
+            .limit(1);
+          if (rentals?.length > 0) {
+            await supabase.from('rentals').update({ rental_end_date: new Date().toISOString().split('T')[0] }).eq('id', rentals[0].id);
+          }
+        }
+      }
+    }
+
+    // Reverse RETURN: reassign bottles back to the customer (so they show on customer page again).
+    const returnedNorms = new Set(returnedBarcodeToRaw.keys());
+    if (returnedNorms.size === 0) return;
+
+    const barcodeStrings = new Set();
+    returnedBarcodeToRaw.forEach((raw, norm) => {
+      if (raw) barcodeStrings.add(raw);
+      if (norm) barcodeStrings.add(norm);
+    });
+    let bottlesToReassign = [];
+    const { data: byBarcode } = await supabase
+      .from('bottles')
+      .select('id, barcode_number')
+      .eq('organization_id', orgId)
+      .in('barcode_number', [...barcodeStrings]);
+    const byNorm = new Map();
+    (byBarcode || []).forEach(b => {
+      const n = normalizeBarcode(b.barcode_number);
+      if (n && returnedNorms.has(n)) byNorm.set(n, b);
+    });
+    bottlesToReassign = [...byNorm.values()];
+    if (bottlesToReassign.length < returnedNorms.size) {
+      const { data: allOrg } = await supabase
+        .from('bottles')
+        .select('id, barcode_number')
+        .eq('organization_id', orgId)
+        .not('barcode_number', 'is', null)
+        .limit(5000);
+      (allOrg || []).forEach(b => {
+        const n = normalizeBarcode(b.barcode_number);
+        if (n && returnedNorms.has(n) && !byNorm.has(n)) {
+          byNorm.set(n, b);
+        }
+      });
+      bottlesToReassign = [...byNorm.values()];
+    }
+    const assignPayload = {
+      assigned_customer: customerId != null ? customerId : customerName,
+      customer_name: customerName || '',
+      status: 'full'
+    };
+    for (const bottle of bottlesToReassign) {
+      const { error } = await supabase
+        .from('bottles')
+        .update(assignPayload)
+        .eq('id', bottle.id);
+      if (error) {
+        logger.warn(`⚠️ Failed to reassign RETURN bottle ${bottle.barcode_number} back to customer:`, error.message);
+      } else {
+        logger.log(`✅ Reassigned RETURN bottle ${bottle.barcode_number} back to customer ${customerName || customerId}`);
+      }
+    }
   };
 
   const handleUnverify = async (order) => {
@@ -318,7 +552,7 @@ export default function VerifiedOrders() {
         // For scanned orders, fetch all scans and filter by normalized order number
         const { data: allScans, error: fetchError } = await supabase
           .from('scans')
-          .select('*')
+          .select('id, barcode_number, order_number, "mode", action, status, organization_id, customer_name, customer_id, product_code, created_at')
           .eq('organization_id', organization.id);
         
         // Filter client-side using normalized order numbers
@@ -376,10 +610,10 @@ export default function VerifiedOrders() {
               organization_id: organization.id,
               bottle_barcode: scan.barcode_number || scan.bottle_barcode || scan.cylinder_barcode,
               product_code: scan.product_code || null, // CRITICAL: Include product_code for matching
-              mode: scan.mode || scan.action === 'out' ? 'SHIP' : scan.action === 'in' ? 'RETURN' : scan.action?.toUpperCase() || 'SHIP',
+              mode: scan.mode || (scan.action === 'out' ? 'SHIP' : scan.action === 'in' ? 'RETURN' : scan.action?.toUpperCase() || 'SHIP'),
               location: scan.location || null,
               user_id: scan.user_id || scan.scanned_by || null,
-              order_number: orderNumber, // Use the extracted order number
+              order_number: orderNumber,
               customer_name: scan.customer_name || order.customer_name || null,
               customer_id: scan.customer_id || null,
               timestamp: scan.created_at || scan.timestamp || new Date().toISOString(),
@@ -409,9 +643,31 @@ export default function VerifiedOrders() {
           }
         }
         
+        // Also clear verified_order_numbers from any matching imported_invoices/receipts
+        try {
+          for (const tbl of ['imported_invoices', 'imported_sales_receipts']) {
+            const { data: matchingRecords } = await supabase.from(tbl).select('id, data').eq('organization_id', organization.id);
+            for (const rec of (matchingRecords || [])) {
+              const recData = typeof rec.data === 'string' ? JSON.parse(rec.data) : rec.data;
+              if (Array.isArray(recData?.verified_order_numbers) && recData.verified_order_numbers.some(n => normalizeOrderNum(n) === normalizedOrderNum)) {
+                recData.verified_order_numbers = recData.verified_order_numbers.filter(n => normalizeOrderNum(n) !== normalizedOrderNum);
+                await supabase.from(tbl).update({ data: recData }).eq('id', rec.id);
+                logger.log(`✅ Cleared verified_order_numbers for scanned order ${orderNumber} in ${tbl} record ${rec.id}`);
+              }
+            }
+          }
+        } catch (vonErr) {
+          logger.warn('Warning clearing verified_order_numbers for scanned order:', vonErr);
+        }
+
+        // Reverse bottle assignments (SHIP → unassign, RETURN → reassign back)
+        const customerName = getCustomerName(order);
+        const orderCustomerId = getCustomerId(order);
+        await reverseBottleAssignments(orderNumber, customerName, orderCustomerId);
+
         setSnackbar({ 
           open: true, 
-          message: 'Order unverified successfully', 
+          message: 'Order unverified successfully. Bottle assignments have been reversed.', 
           severity: 'success' 
         });
         setUnverifyDialogOpen(false);
@@ -432,12 +688,27 @@ export default function VerifiedOrders() {
 
       if (recordError) throw recordError;
 
+      // Remove this order from verified_order_numbers in the data JSON so it shows as pending in Order Verification
+      try {
+        const { data: currentRecord } = await supabase.from(tableName).select('data').eq('id', order.id).single();
+        if (currentRecord?.data) {
+          const currentData = typeof currentRecord.data === 'string' ? JSON.parse(currentRecord.data) : currentRecord.data;
+          if (Array.isArray(currentData.verified_order_numbers) && currentData.verified_order_numbers.includes(orderNumber)) {
+            currentData.verified_order_numbers = currentData.verified_order_numbers.filter(n => normalizeOrderNum(n) !== normalizedOrderNum);
+            await supabase.from(tableName).update({ data: currentData }).eq('id', order.id);
+            logger.log('✅ Removed order from verified_order_numbers:', orderNumber);
+          }
+        }
+      } catch (vonErr) {
+        logger.warn('Warning clearing verified_order_numbers:', vonErr);
+      }
+
       // Also update associated scans in the scans table (if any)
       logger.log('🔄 Unverifying associated scans for order:', orderNumber);
       // Fetch all scans and filter by normalized order number
       const { data: allScans, error: fetchScansError } = await supabase
         .from('scans')
-        .select('*')
+        .select('id, barcode_number, order_number, "mode", action, status, organization_id, customer_name, customer_id, product_code, created_at')
         .eq('organization_id', organization.id);
 
       if (fetchScansError) {
@@ -509,7 +780,7 @@ export default function VerifiedOrders() {
               organization_id: organization.id,
               bottle_barcode: scan.barcode_number || scan.bottle_barcode || scan.cylinder_barcode,
               product_code: scan.product_code || null, // CRITICAL: Include product_code for matching
-              mode: scan.mode || scan.action === 'out' ? 'SHIP' : scan.action === 'in' ? 'RETURN' : scan.action?.toUpperCase() || 'SHIP',
+              mode: scan.mode || (scan.action === 'out' ? 'SHIP' : scan.action === 'in' ? 'RETURN' : scan.action?.toUpperCase() || 'SHIP'),
               location: scan.location || null,
               user_id: scan.user_id || scan.scanned_by || null,
               order_number: orderNumber,
@@ -625,9 +896,14 @@ export default function VerifiedOrders() {
         }
       }
 
+      // Reverse bottle assignments (SHIP → unassign, RETURN → reassign back)
+      const customerName = getCustomerName(order);
+      const orderCustomerId = getCustomerId(order);
+      await reverseBottleAssignments(orderNumber, customerName, orderCustomerId);
+
       setSnackbar({ 
         open: true, 
-        message: 'Order unverified successfully - will appear in Import Approvals', 
+        message: 'Order unverified successfully. Bottle assignments have been reversed.', 
         severity: 'success' 
       });
       setUnverifyDialogOpen(false);
@@ -721,8 +997,24 @@ export default function VerifiedOrders() {
         // Ignore parse errors
       }
     }
-    
-    return 'N/A';
+    return '';
+  };
+
+  const getCustomerId = (order) => {
+    if (order.customer_id) return order.customer_id;
+    if (order.data_parsed?.customer_id) return order.data_parsed.customer_id;
+    if (order.data_parsed?.CustomerListID) return order.data_parsed.CustomerListID;
+    if (order.data_parsed?.CustomerId) return order.data_parsed.CustomerId;
+    if (order.data_parsed?.rows?.[0]) {
+      const r = order.data_parsed.rows[0];
+      return r.customer_id || r.CustomerListID || r.CustomerId || '';
+    }
+    if (order.data_parsed?.line_items?.[0]) {
+      const i = order.data_parsed.line_items[0];
+      return i.customer_id || i.CustomerListID || i.CustomerId || '';
+    }
+    if (order.scans?.[0]?.customer_id) return order.scans[0].customer_id;
+    return '';
   };
 
   const getItemCount = (order) => {

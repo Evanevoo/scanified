@@ -1756,12 +1756,14 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       
       const allBarcodes = scannedItems.map(item => item.barcode);
       if (allBarcodes.length > 0) {
-        // Update bottle_scans table - update ALL scans for these barcodes to ensure correct order_number
+        // Update bottle_scans table - only update scans from THIS session (null or scanSessionId),
+        // not scans that already belong to other orders
         const { data: bottleScansUpdate, error: updateBottleScansError } = await supabase
           .from('bottle_scans')
           .update({ order_number: orderNumber })
           .in('bottle_barcode', allBarcodes)
           .eq('organization_id', organization.id)
+          .or(`order_number.is.null,order_number.eq.${scanSessionId}`)
           .select('id');
         
         if (updateBottleScansError) {

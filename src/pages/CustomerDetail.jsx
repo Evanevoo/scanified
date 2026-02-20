@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import {
@@ -91,6 +91,23 @@ export default function CustomerDetail() {
   const [parentCustomer, setParentCustomer] = useState(null); // { id, name, CustomerListID } when this customer is under a parent
   const [childCustomers, setChildCustomers] = useState([]);   // customers where parent_customer_id = this customer's id
   const [parentOptions, setParentOptions] = useState([]);     // for edit form "Under parent" selector
+
+  // Combine physical bottles with DNS (Delivered Not Scanned) so total count is visible
+  const dnsRentals = useMemo(() => (locationAssets || []).filter(r => r.is_dns), [locationAssets]);
+  const displayBottleList = useMemo(() => {
+    const physical = (customerAssets || []).map(a => ({ ...a, isDns: false }));
+    const dnsRows = dnsRentals.map(r => ({
+      id: 'dns-' + r.id,
+      serial_number: '—',
+      barcode_number: 'DNS',
+      type: r.dns_product_code || r.product_code || '—',
+      description: r.dns_description || '',
+      location: '—',
+      isDns: true
+    }));
+    return [...physical, ...dnsRows];
+  }, [customerAssets, dnsRentals]);
+  const totalBottleCount = (customerAssets?.length || 0) + dnsRentals.length;
 
   useEffect(() => {
     const fetchData = async () => {
@@ -989,14 +1006,19 @@ export default function CustomerDetail() {
         )}
       </Paper>
 
-      {/* Currently Assigned Bottles */}
+      {/* Currently Assigned Bottles (physical + DNS so we know how many the customer has) */}
       <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4 }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
           <Box>
             <Typography variant="h5" fontWeight={700} color="primary">
-              🏠 Currently Assigned Bottles ({customerAssets.length})
+              🏠 Currently Assigned Bottles ({totalBottleCount})
             </Typography>
-            {customerAssets.length === 0 && (
+            {dnsRentals.length > 0 && (
+              <Typography variant="body2" color="text.secondary">
+                {customerAssets.length} physical + {dnsRentals.length} DNS (Delivered Not Scanned)
+              </Typography>
+            )}
+            {totalBottleCount === 0 && (
               <Typography variant="body2" color="text.secondary">
                 No bottles assigned to this customer yet
               </Typography>
@@ -1076,7 +1098,7 @@ export default function CustomerDetail() {
           )}
         </Box>
         
-        {customerAssets.length === 0 ? (
+        {totalBottleCount === 0 ? (
           <Box>
             <Typography color="text.secondary" mb={2}>
               No bottles currently assigned to this customer.
@@ -1116,20 +1138,26 @@ export default function CustomerDetail() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {customerAssets
-                  .filter(asset => locationFilter === 'all' || asset.location === locationFilter)
+                {displayBottleList
+                  .filter(asset => asset.isDns || locationFilter === 'all' || asset.location === locationFilter)
                   .map((asset) => (
-                  <TableRow key={asset.id} hover selected={selectedAssets.includes(asset.id)}>
+                  <TableRow key={asset.id} hover selected={!asset.isDns && selectedAssets.includes(asset.id)} sx={asset.isDns ? { backgroundColor: 'action.hover' } : undefined}>
                     <TableCell padding="checkbox">
-                      <Checkbox
-                        checked={selectedAssets.includes(asset.id)}
-                        onChange={() => handleSelectAsset(asset.id)}
-                        color="primary"
-                      />
+                      {asset.isDns ? (
+                        <Typography component="span" color="text.secondary">—</Typography>
+                      ) : (
+                        <Checkbox
+                          checked={selectedAssets.includes(asset.id)}
+                          onChange={() => handleSelectAsset(asset.id)}
+                          color="primary"
+                        />
+                      )}
                     </TableCell>
                     <TableCell>{asset.serial_number}</TableCell>
                     <TableCell>
-                      {asset.barcode_number ? (
+                      {asset.isDns ? (
+                        <Typography component="span" color="text.secondary" fontWeight={500}>DNS</Typography>
+                      ) : asset.barcode_number ? (
                         <Link
                           to={`/bottle/${asset.id}`}
                           style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}
@@ -1148,24 +1176,28 @@ export default function CustomerDetail() {
                       />
                     </TableCell>
                     <TableCell>
-                      <Chip 
-                        label={
-                          customer?.customer_type === 'VENDOR' 
-                            ? "In-house (no charge)" 
-                            : customer?.customer_type === 'TEMPORARY'
-                            ? "Rented (temp - needs setup)"
-                            : (asset.status === 'rented' || asset.status === 'RENTED') 
-                              ? "Rented" 
-                              : asset.status || "Rented"
-                        }
-                        color={
-                          customer?.customer_type === 'VENDOR' ? 'default' : 
-                          customer?.customer_type === 'TEMPORARY' ? 'warning' : 
-                          (asset.status === 'rented' || asset.status === 'RENTED') ? 'success' : 'warning'
-                        }
-                        size="small"
-                        icon={customer?.customer_type === 'VENDOR' ? <HomeIcon /> : null}
-                      />
+                      {asset.isDns ? (
+                        <Chip label="DNS" color="info" size="small" variant="outlined" />
+                      ) : (
+                        <Chip 
+                          label={
+                            customer?.customer_type === 'VENDOR' 
+                              ? "In-house (no charge)" 
+                              : customer?.customer_type === 'TEMPORARY'
+                              ? "Rented (temp - needs setup)"
+                              : (asset.status === 'rented' || asset.status === 'RENTED') 
+                                ? "Rented" 
+                                : asset.status || "Rented"
+                          }
+                          color={
+                            customer?.customer_type === 'VENDOR' ? 'default' : 
+                            customer?.customer_type === 'TEMPORARY' ? 'warning' : 
+                            (asset.status === 'rented' || asset.status === 'RENTED') ? 'success' : 'warning'
+                          }
+                          size="small"
+                          icon={customer?.customer_type === 'VENDOR' ? <HomeIcon /> : null}
+                        />
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
