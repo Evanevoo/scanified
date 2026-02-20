@@ -31,6 +31,7 @@ import FieldToolsPanel from '../components/FieldToolsPanel';
 import { fieldToolsService, LocationData } from '../services/fieldToolsService';
 import { customizationService } from '../services/customizationService';
 import AccessibilityHelper, { AccessibleButton, ScreenReaderAnnouncement } from '../components/AccessibilityHelper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { 
   useSharedValue, 
@@ -40,8 +41,10 @@ import Animated, {
 } from 'react-native-reanimated';
 
 const { width, height } = Dimensions.get('window');
-// Determine if device has a small screen (iPhone SE, iPhone 12 mini, etc.)
+// Small screen: iPhone 12 mini, 13 mini, etc.
 const isSmallScreen = height < 800;
+// Very small: iPhone SE (2nd/3rd), iPhone 8, etc. - need extra compact layout for scanner
+const isVerySmallScreen = height < 670;
 
 interface ScanResult {
   id: string;
@@ -70,6 +73,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   const navigation = useNavigation();
   const { theme } = useTheme();
   const { config } = useAssetConfig();
+  const insets = useSafeAreaInsets();
 
   // Safe route params (avoid crash if route/params undefined when navigating from Delivery)
   const params = route?.params ?? {};
@@ -1723,12 +1727,14 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       
       const allBarcodes = scannedItems.map(item => item.barcode);
       if (allBarcodes.length > 0) {
-        // Update bottle_scans table - update ALL scans for these barcodes to ensure correct order_number
+        // Update bottle_scans table - only update scans from THIS session (null or scanSessionId),
+        // not scans that already belong to other orders
         const { data: bottleScansUpdate, error: updateBottleScansError } = await supabase
           .from('bottle_scans')
           .update({ order_number: orderNumber })
           .in('bottle_barcode', allBarcodes)
           .eq('organization_id', organization.id)
+          .or(`order_number.is.null,order_number.eq.${scanSessionId}`)
           .select('id');
         
         if (updateBottleScansError) {
@@ -2531,8 +2537,8 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
             </View>
           )}
 
-          {/* Bottom Action Buttons - Transparent */}
-          <View style={[styles.cameraBottomActions, { zIndex: 1000 }]}>
+          {/* Bottom Action Buttons - above home indicator on notched/small iOS */}
+          <View style={[styles.cameraBottomActions, { zIndex: 1000, bottom: 30 + insets.bottom }]}>
             {/* Action Selection Indicator */}
             <View style={styles.actionIndicator}>
               <Text style={styles.actionIndicatorText}>

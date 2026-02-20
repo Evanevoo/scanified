@@ -333,7 +333,7 @@ export default function AssetDetail() {
       if (barcodeNumber) {
         const { data: scansData, error: scansError } = await supabase
           .from('scans')
-          .select('*')
+          .select('id, barcode_number, created_at, "mode", action')
           .eq('barcode_number', barcodeNumber)
           .eq('organization_id', profile.organization_id)
           .order('created_at', { ascending: false })
@@ -352,12 +352,12 @@ export default function AssetDetail() {
         }
       }
 
-      // 2. Fetch from bottle_scans table
+      // 2. Fetch from bottle_scans table (bottle_barcode, cylinder_barcode, or barcode_number)
       if (barcodeNumber) {
         const { data: bsData, error: bsError } = await supabase
           .from('bottle_scans')
           .select('*')
-          .or(`barcode_number.eq.${barcodeNumber},bottle_barcode.eq.${barcodeNumber}`)
+          .or(`barcode_number.eq.${barcodeNumber},bottle_barcode.eq.${barcodeNumber},cylinder_barcode.eq.${barcodeNumber}`)
           .eq('organization_id', profile.organization_id)
           .order('created_at', { ascending: false })
           .limit(50);
@@ -524,8 +524,8 @@ export default function AssetDetail() {
           editData.customer_name = customer.name;
         }
       } else {
-        // Unassigning customer - set to available
-        finalStatus = 'available';
+        // Unassigning customer (return) - set to empty so it shows "Empty" until refilled
+        finalStatus = 'empty';
         editData.customer_name = null;
       }
       
@@ -593,6 +593,8 @@ export default function AssetDetail() {
           product_code: asset.product_code || editData.product_code,
           gas_type: asset.gas_type || editData.gas_type,
           mode: scanMode,
+          action: scanMode === 'RETURN' ? 'in' : scanMode === 'SHIP' ? 'out' : null,
+          order_number: 'manual', // Placeholder so insert doesn't fail if column is NOT NULL
           customer_id: editData.assigned_customer || null,
           customer_name: editData.customer_name || null,
           location: editData.location || null,
@@ -601,7 +603,7 @@ export default function AssetDetail() {
           status: 'approved' // Manual assignments are automatically approved
         };
         
-        // Insert into scans table
+        // Insert into scans table (for movement history)
         const { error: scanError } = await supabase
           .from('scans')
           .insert(scanData);
@@ -928,18 +930,19 @@ export default function AssetDetail() {
                 {movementHistory.slice(0, 10).map((record, index) => {
                   // Determine action type based on mode/action
                   let action = '';
-                  if (record.mode === 'SHIP' || record.action === 'SHIP' || record.history_type === 'rental_start') {
+                  const recordMode = record.mode;
+                  if (recordMode === 'SHIP' || record.action === 'SHIP' || record.history_type === 'rental_start') {
                     action = 'Delivery';
-                  } else if (record.mode === 'RETURN' || record.action === 'RETURN' || record.history_type === 'rental_end') {
+                  } else if (recordMode === 'RETURN' || record.action === 'RETURN' || record.history_type === 'rental_end') {
                     action = 'Return';
-                  } else if (record.mode === 'FILL' || record.action === 'FILL' || record.history_type === 'fill') {
+                  } else if (recordMode === 'FILL' || record.action === 'FILL' || record.history_type === 'fill') {
                     action = 'Fill';
-                  } else if (record.mode === 'LOCATE' || record.action === 'LOCATE') {
+                  } else if (recordMode === 'LOCATE' || record.action === 'LOCATE') {
                     action = 'Locate Full';
-                  } else if (record.mode === 'CREATE' || record.action === 'Add New Asset' || record.history_type === 'creation') {
+                  } else if (recordMode === 'CREATE' || record.action === 'Add New Asset' || record.history_type === 'creation') {
                     action = 'Add New Asset';
                   } else {
-                    action = record.mode || record.action || 'Scan';
+                    action = recordMode || record.action || 'Scan';
                   }
                   
                   // Determine resulting location

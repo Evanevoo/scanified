@@ -1,6 +1,7 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Pressable, Platform, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { feedbackService } from '../services/feedbackService';
 
@@ -63,6 +64,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
 }) => {
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraReady, setCameraReady] = useState(false); // Defer mount to prevent crash on open
+  const [nativeCameraReady, setNativeCameraReady] = useState(false); // iOS: only enable barcode scan after native preview is ready
   const [scanned, setScanned] = useState(false);
   const [lastScanned, setLastScanned] = useState('');
   const [error, setError] = useState('');
@@ -74,6 +76,10 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   const [flashEnabled, setFlashEnabled] = useState(false);
   const [isClosing, setIsClosing] = useState(false); // Graceful shutdown for iOS (avoids AVCaptureSession crash)
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  // iOS compact phones (13 mini, 12 mini ≈812pt) need small-screen handling; use lower threshold on iOS
+  const isSmallScreen = Platform.OS === 'ios' ? screenHeight < 850 : screenHeight < 700;
+  const isVerySmallScreen = Platform.OS === 'ios' ? screenHeight < 700 : screenHeight < 600;
   const holdTimeout = useRef<NodeJS.Timeout | null>(null);
   const scanCooldown = useRef<NodeJS.Timeout | null>(null);
   const cameraRef = useRef<any>(null);
@@ -92,16 +98,31 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   }, []);
 
   // Defer CameraView mount so layout is ready (prevents crash on open)
-  // iOS TestFlight: longer delay helps with permission timing on first install (expo/expo#28758)
-  const cameraMountDelay = Platform.OS === 'ios' ? 600 : 400;
+  // iOS: longer delay needed so barcode scanner works (iPhone 13, 13 mini, SE, etc.)
+  const cameraMountDelay = Platform.OS === 'ios'
+    ? (isVerySmallScreen ? 1000 : isSmallScreen ? 900 : 800)
+    : 400;
   useEffect(() => {
     if (!permission?.granted) {
       setCameraReady(false);
+      setNativeCameraReady(false);
       return;
     }
     const t = setTimeout(() => setCameraReady(true), cameraMountDelay);
     return () => clearTimeout(t);
   }, [permission?.granted]);
+
+  // iOS: reset native ready when camera closes so we wait again on next open
+  useEffect(() => {
+    if (isClosing || !cameraReady) setNativeCameraReady(false);
+  }, [isClosing, cameraReady]);
+
+  // iOS: enable scanning after a short delay even if onCameraReady never fires (fixes iPhone 13 / some builds)
+  useEffect(() => {
+    if (Platform.OS !== 'ios' || !cameraReady || isClosing) return;
+    const fallback = setTimeout(() => setNativeCameraReady(true), 2200);
+    return () => clearTimeout(fallback);
+  }, [Platform.OS, cameraReady, isClosing]);
 
   // Graceful camera shutdown before unmount - prevents AVCaptureSession crash on iOS TestFlight
   const handleClose = () => {
@@ -252,27 +273,34 @@ const ScanArea: React.FC<ScanAreaProps> = ({
     }
   };
 
-  // Run OCR periodically when idle - use refs so interval isn't reset on parent re-renders
+  // Run OCR periodically when idle (Android only; text reading disabled on iOS)
   useEffect(() => {
+    if (Platform.OS === 'ios') return;
     if (!searchCustomerByName || !onCustomerFound || !TextRecognition) return;
     const interval = setInterval(runOcrIfIdle, 2500);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- refs hold latest callbacks
   }, []);
 
-  // Calculate region of interest - frame slightly higher on iOS; scan area starts below upper border
-  const frameTopPercent = Platform.OS === 'ios' ? 24 : 30;
-  const roiYOffset = Platform.OS === 'ios' ? 0.03 : 0; // Scan area below upper border on iOS
-  const regionOfInterest = enableRegionOfInterest ? {
-    x: 0.1, // 10% from left
-    y: (frameTopPercent / 100) + roiYOffset, // Slightly below frame top on iOS
-    width: 0.8, // 80% width
-    height: 0.32, // 32% height
+  // Calculate region of interest - frame slightly higher on iOS; on small phones keep ROI in safe area
+  const safeTop = insets.top / screenHeight;
+  const frameTopPercent = Platform.OS === 'ios'
+    ? (isVerySmallScreen ? Math.max(20, safeTop * 100 + 8) : isSmallScreen ? 22 : 24)
+    : 30;
+  const roiYOffset = Platform.OS === 'ios' ? 0.02 : 0;
+  const roiHeight = isVerySmallScreen ? 0.38 : isSmallScreen ? 0.35 : 0.32;
+  // Android: use ROI to focus scan area. iOS: omit ROI - Apple detects 1D barcodes only near center,
+  // and ROI can cause onBarcodeScanned to never fire on some iOS builds.
+  const regionOfInterest = enableRegionOfInterest && Platform.OS !== 'ios' ? {
+    x: 0.08,
+    y: (frameTopPercent / 100) + roiYOffset,
+    width: 0.84,
+    height: roiHeight,
   } : undefined;
 
-  // Responsive scan layout - frame and controls positioned to avoid overlap on all screen sizes
-  const frameWidth = Math.min(320, screenWidth * 0.88);
-  const frameHeight = Math.min(150, screenHeight * 0.2);
+  // Responsive scan layout - smaller frame on small phones so it fits and aligns with ROI
+  const frameWidth = Math.min(isVerySmallScreen ? 280 : 320, screenWidth * 0.9);
+  const frameHeight = Math.min(isVerySmallScreen ? 130 : 150, Math.max(110, screenHeight * 0.22));
 
   return (
     <View style={[styles.wrapper, style]}>
@@ -318,20 +346,27 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                   enableTorch={flashEnabled}
                   autofocus="on"
                   animateShutter={false}
-                  mode="picture"
-                  onBarcodeScanned={scanned || isClosing ? undefined : handleBarcodeScanned}
-                  barcodeScannerEnabled={!isClosing}
+                  mode={Platform.OS === 'ios' ? 'video' : 'picture'}
+                  onCameraReady={() => setNativeCameraReady(true)}
+                  onBarcodeScanned={
+                    (scanned || isClosing) ? undefined
+                      : (Platform.OS === 'ios' && !nativeCameraReady) ? undefined
+                        : handleBarcodeScanned
+                  }
+                  barcodeScannerEnabled={
+                    !isClosing &&
+                    (Platform.OS !== 'ios' || nativeCameraReady)
+                  }
                   barcodeScannerSettings={{
-                    // OPTIMIZED FOR 1D BARCODES ON PAPER (2025-01-24)
-                    // Removed 2D types (qr, aztec, datamatrix, pdf417) to reduce false positives
+                    // Lowercase required on iOS. 1D types for gas cylinder barcodes.
                     barcodeTypes: ['code128', 'code39', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14'],
                     ...(regionOfInterest && { regionOfInterest })
                   }}
                 />
               </Pressable>
               
-              {/* Flash, Zoom, Close - all in top-right row */}
-              <View style={styles.cameraControlsTopRight}>
+              {/* Flash, Zoom, Close - all in top-right row (below safe area on notched devices) */}
+              <View style={[styles.cameraControlsTopRight, { top: Math.max(50, insets.top + 12) }]}>
                 <TouchableOpacity
                   style={[styles.cameraControlButton, flashEnabled && styles.cameraControlButtonActive]}
                   onPress={() => setFlashEnabled((v) => !v)}
@@ -393,9 +428,9 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                 </>
               )}
 
-              {/* Status overlay */}
+              {/* Status overlay (below safe area) */}
               {(error || isProcessing) && (
-                <View style={styles.statusOverlay}>
+                <View style={[styles.statusOverlay, { top: Math.max(20, insets.top + 8) }]}>
                   <View style={[
                     styles.statusBadge, 
                     error ? styles.errorBadge : styles.processingBadge

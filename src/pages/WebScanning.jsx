@@ -66,7 +66,7 @@ import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { useDebounce, useOptimizedFetch } from '../utils/performance';
 import { FadeIn, SlideIn, SmoothButton, LoadingOverlay } from '../components/SmoothLoading';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
 
 const scanModes = [
   { value: 'delivery', label: 'Delivery', icon: <DeliveryIcon />, color: 'primary' },
@@ -181,17 +181,29 @@ export default function WebScanning() {
     });
   }, []);
 
+  // Responsive qrbox for small iOS/small phones: use viewfinder dimensions so scan area fits viewport
+  const getQrboxDimensions = useCallback((viewfinderWidth, viewfinderHeight) => {
+    const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+    const maxEdge = Math.max(viewfinderWidth, viewfinderHeight);
+    // Barcode-friendly 2:1 ratio; cap size to 70% of smaller edge so it fits on small screens
+    const width = Math.min(Math.floor(maxEdge * 0.85), Math.floor(minEdge * 0.95));
+    const height = Math.max(120, Math.floor(width * 0.4));
+    return { width, height };
+  }, []);
+
   const initializeScanner = useCallback(() => {
     try {
       const scanner = new Html5QrcodeScanner(
         'qr-reader',
         {
           fps: 10,
-          qrbox: { width: 300, height: 150 },
-          aspectRatio: 1.777778,
+          qrbox: getQrboxDimensions,
+          aspectRatio: 1.0,
           supportedScanTypes: [
             Html5QrcodeScanType.SCAN_TYPE_CAMERA
-          ]
+          ],
+          rememberLastUsedCamera: true,
+          showTorchButtonIfSupported: true
         },
         false
       );
@@ -205,7 +217,7 @@ export default function WebScanning() {
     } catch (error) {
       logger.error('Failed to initialize scanner:', error);
     }
-  }, []);
+  }, [getQrboxDimensions]);
 
   const handleScanSuccess = useCallback(async (scannedText) => {
     const startTime = Date.now();
@@ -744,8 +756,24 @@ export default function WebScanning() {
                 </Box>
                 
                 {scannerActive ? (
-                  <Box>
-                    <div id="qr-reader" style={{ width: '100%' }} />
+                  <Box
+                    sx={{
+                      width: '100%',
+                      maxWidth: '100%',
+                      overflow: 'hidden',
+                      '& #qr-reader': {
+                        width: '100% !important',
+                        maxWidth: '100% !important',
+                      },
+                      '& video': {
+                        maxWidth: '100% !important',
+                        objectFit: 'contain !important',
+                      },
+                      paddingLeft: 'env(safe-area-inset-left)',
+                      paddingRight: 'env(safe-area-inset-right)',
+                    }}
+                  >
+                    <div id="qr-reader" style={{ width: '100%', minHeight: 200 }} />
                     <Alert severity="info" sx={{ mt: 2 }}>
                       Position barcode within the scanning area. Scanner will automatically detect and process barcodes.
                     </Alert>

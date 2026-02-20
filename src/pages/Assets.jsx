@@ -2,7 +2,7 @@ import logger from '../utils/logger';
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabase/client';
 import { 
-  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, TextField, FormControl, InputLabel, Select, MenuItem, Alert, Button
+  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, TextField, Alert, Button
 } from '@mui/material';
 import { useAuth } from '../hooks/useAuth';
 
@@ -149,19 +149,13 @@ export default function Assets() {
   const [bottles, setBottles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [organizations, setOrganizations] = useState([]);
-  const [selectedOrg, setSelectedOrg] = useState('');
   const [search, setSearch] = useState('');
   const { profile, organization } = useAuth();
   const [organizationName, setOrganizationName] = useState('');
 
   useEffect(() => {
-    fetchOrganizations();
-  }, []);
-
-  useEffect(() => {
     fetchBottles();
-  }, [selectedOrg]);
+  }, [organization?.id]);
 
   useEffect(() => {
     async function fetchOrgName() {
@@ -177,29 +171,6 @@ export default function Assets() {
     fetchOrgName();
   }, [profile]);
 
-  const fetchOrganizations = async () => {
-    try {
-      // Only fetch organizations for owners, regular users only see their own org
-      if (profile?.role === 'owner') {
-        const { data, error } = await supabase
-          .from('organizations')
-          .select('id, name')
-          .order('name');
-        
-        if (error) throw error;
-        setOrganizations(data || []);
-      } else {
-        // Non-owners only see their own organization
-        if (organization?.id) {
-          setOrganizations([{ id: organization.id, name: organization.name }]);
-        }
-      }
-    } catch (err) {
-      logger.error('Error fetching organizations:', err);
-      setError(err.message);
-    }
-  };
-
   const fetchBottles = async () => {
     setLoading(true);
     setError(null);
@@ -212,18 +183,11 @@ export default function Assets() {
         return;
       }
 
-      let query = supabase
+      const { data, error } = await supabase
         .from('bottles')
         .select('*')
-        .eq('organization_id', organization.id) // CRITICAL: Always filter by current organization
+        .eq('organization_id', organization.id)
         .order('barcode_number');
-      
-      // Additional organization filter for owners (if they want to see specific org)
-      if (selectedOrg && profile?.role === 'owner') {
-        query = query.eq('organization_id', selectedOrg);
-      }
-      
-      const { data, error } = await query;
       
       if (error) throw error;
       
@@ -397,22 +361,6 @@ export default function Assets() {
 
         {/* Filters */}
         <Box display="flex" gap={2} mb={3} flexWrap="wrap">
-        {/* Organization Filter - Only for Owners */}
-        {profile?.role === 'owner' && (
-          <FormControl sx={{ minWidth: 220 }} size="small">
-            <InputLabel>Organization</InputLabel>
-            <Select
-              value={selectedOrg}
-              label="Organization"
-              onChange={e => setSelectedOrg(e.target.value)}
-            >
-              <MenuItem value="">All Organizations</MenuItem>
-              {organizations.map(org => (
-                <MenuItem key={org.id} value={org.id}>{org.name}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        )}
           <TextField
             size="small"
             label="Search bottles, barcode, gas type..."

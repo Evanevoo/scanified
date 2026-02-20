@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
+import { useAuth } from '../hooks/useAuth';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, CircularProgress, Alert, MenuItem, Select, InputLabel, FormControl, Chip, IconButton, Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
@@ -42,28 +43,21 @@ function AssetWithWarning({ asset, currentCustomer }) {
 }
 
 export default function ScannedOrders() {
+  const { organization, profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
-  const [debugMode, setDebugMode] = useState(false);
-  const [organizations, setOrganizations] = useState([]);
-  const [selectedOrg, setSelectedOrg] = useState('');
   const [search, setSearch] = useState('');
   const [users, setUsers] = useState({});
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [bottles, setBottles] = useState([]);
 
-  useEffect(() => {
-    async function fetchOrganizations() {
-      const { data, error } = await supabase.from('organizations').select('id, name');
-      if (!error) setOrganizations(data || []);
-    }
-    fetchOrganizations();
-  }, []);
+  const selectedOrg = organization?.id ?? '';
 
   useEffect(() => {
     async function fetchUsers() {
@@ -83,9 +77,17 @@ export default function ScannedOrders() {
     async function fetchOrders() {
       setLoading(true);
       setError(null);
-      let query = supabase.from('bottle_scans').select('*').not('order_number', 'is', null).order('created_at', { ascending: false });
-      if (selectedOrg) query = query.eq('organization_id', selectedOrg);
-      const { data, error } = await query;
+      if (!selectedOrg) {
+        setOrders([]);
+        setLoading(false);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('bottle_scans')
+        .select('*')
+        .not('order_number', 'is', null)
+        .eq('organization_id', selectedOrg)
+        .order('created_at', { ascending: false });
       if (error) setError(error.message);
       else setOrders(data || []);
       setLoading(false);
@@ -94,16 +96,15 @@ export default function ScannedOrders() {
   }, [saving, selectedOrg]);
 
   const handleEdit = (order) => {
-    // Check if scan is within 24 hours
-    const scanTime = new Date(order.created_at);
-    const now = new Date();
-    const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
-    
-    if (hoursDiff > 24) {
-      alert('Edit Not Allowed: Scans can only be edited within 24 hours of submission.');
-      return;
+    if (!isAdmin) {
+      const scanTime = new Date(order.created_at);
+      const now = new Date();
+      const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
+      if (hoursDiff > 24) {
+        alert('Edit Not Allowed: Scans can only be edited within 24 hours of submission.');
+        return;
+      }
     }
-    
     setEditingId(order.id);
     setEditForm({
       order_number: order.order_number || '',
@@ -132,16 +133,15 @@ export default function ScannedOrders() {
   };
 
   const handleEnhancedEdit = (order) => {
-    // Check if scan is within 24 hours
-    const scanTime = new Date(order.created_at);
-    const now = new Date();
-    const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
-    
-    if (hoursDiff > 24) {
-      alert('Edit Not Allowed: Scans can only be edited within 24 hours of submission.');
-      return;
+    if (!isAdmin) {
+      const scanTime = new Date(order.created_at);
+      const now = new Date();
+      const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
+      if (hoursDiff > 24) {
+        alert('Edit Not Allowed: Scans can only be edited within 24 hours of submission.');
+        return;
+      }
     }
-    
     setSelectedOrder(order);
     setBottles([{ barcode: order.bottle_barcode, mode: order.mode }]);
     setEditForm({
@@ -231,19 +231,6 @@ export default function ScannedOrders() {
       <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
         <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Scanned Orders</Typography>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} gap={2}>
-          <FormControl sx={{ minWidth: 220 }} size="small">
-            <InputLabel>Organization</InputLabel>
-            <Select
-              value={selectedOrg}
-              label="Organization"
-              onChange={e => setSelectedOrg(e.target.value)}
-            >
-              <MenuItem value="">All Organizations</MenuItem>
-              {organizations.map(org => (
-                <MenuItem key={org.id} value={org.id}>{org.name}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
           <TextField
             size="small"
             label="Search orders, customer, asset..."
@@ -251,15 +238,12 @@ export default function ScannedOrders() {
             onChange={e => setSearch(e.target.value)}
             sx={{ minWidth: 260 }}
           />
-          <Button
-            variant="outlined"
-            color="secondary"
-            size="small"
-            onClick={() => setDebugMode(v => !v)}
-          >
-            {debugMode ? 'Hide Debug' : 'Show Debug'}
-          </Button>
         </Box>
+        {!organization && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            No organization is linked to your account. Scanned orders will appear here once your account is assigned to an organization.
+          </Alert>
+        )}
         {loading ? (
           <Box p={4} textAlign="center"><CircularProgress /></Box>
         ) : error ? (
@@ -277,16 +261,14 @@ export default function ScannedOrders() {
                   <TableCell>Scanned At</TableCell>
                   <TableCell>User ID</TableCell>
                   <TableCell>Actions</TableCell>
-                  {debugMode && <TableCell>Debug</TableCell>}
                 </TableRow>
               </TableHead>
               <TableBody>
                 {filteredOrders.map(order => {
-                  // Check if scan is within 24 hours
                   const scanTime = new Date(order.created_at);
                   const now = new Date();
                   const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
-                  const isEditable = hoursDiff <= 24;
+                  const isEditable = isAdmin || hoursDiff <= 24;
                   
                   return (
                     <TableRow 
@@ -393,11 +375,6 @@ export default function ScannedOrders() {
                           </>
                         )}
                       </TableCell>
-                      {debugMode && (
-                        <TableCell>
-                          <pre style={{ fontSize: 10, maxWidth: 200, whiteSpace: 'pre-wrap' }}>{JSON.stringify(order, null, 2)}</pre>
-                        </TableCell>
-                      )}
                     </TableRow>
                   );
                 })}
