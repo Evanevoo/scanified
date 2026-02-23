@@ -1679,41 +1679,43 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       let scansUpdated = false;
       let orderCreated = false;
 
-      // First, ensure all items are synced AND update order numbers
+      // Sync all pending items in parallel for a smoother experience
       const pendingItems = scannedItems.filter(i => !i.synced);
       if (pendingItems.length > 0) {
         logger.log(`Syncing ${pendingItems.length} pending items before submission...`);
         
+        const syncResults = await Promise.allSettled(
+          pendingItems.map(item => syncScanToServer(item))
+        );
+
+        const syncedIds: string[] = [];
         const syncErrors: string[] = [];
-        
-        for (const item of pendingItems) {
-          try {
-            logger.log(`Attempting to sync item: ${item.barcode}...`);
-            await syncScanToServer(item);
-            // Mark as synced in the UI
-            setScannedItems(prev => 
-              prev.map(scannedItem => 
-                scannedItem.id === item.id 
-                  ? { ...scannedItem, synced: true } 
-                  : scannedItem
-              )
-            );
+
+        syncResults.forEach((result, idx) => {
+          const item = pendingItems[idx];
+          if (result.status === 'fulfilled') {
+            syncedIds.push(item.id);
             logger.log(`✅ Successfully synced item: ${item.barcode}`);
-          } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            logger.error(`❌ Failed to sync item ${item.barcode}:`, error);
-            logger.error('Error details:', {
-              message: errorMessage,
-              errorType: typeof error,
-              errorObject: error
-            });
+          } else {
+            const errorMessage = result.reason instanceof Error ? result.reason.message : String(result.reason);
+            logger.error(`❌ Failed to sync item ${item.barcode}:`, result.reason);
             syncErrors.push(`${item.barcode}: ${errorMessage}`);
             allErrors.push(`Failed to sync ${item.barcode}: ${errorMessage}`);
-            // Continue with other items instead of stopping
           }
+        });
+
+        // Batch-update all successfully synced items at once
+        if (syncedIds.length > 0) {
+          const syncedSet = new Set(syncedIds);
+          setScannedItems(prev =>
+            prev.map(scannedItem =>
+              syncedSet.has(scannedItem.id)
+                ? { ...scannedItem, synced: true }
+                : scannedItem
+            )
+          );
         }
-        
-        // If there were any sync errors, track them
+
         if (syncErrors.length > 0) {
           const errorCount = syncErrors.length;
           const successCount = pendingItems.length - errorCount;

@@ -171,14 +171,31 @@ export default function CustomerDetail() {
         });
         setBottleSummary(summary);
         
-        // Get all rentals including DNS (Delivered Not Scanned) rentals
-        const { data: rentalData, error: rentalError } = await supabase
+        // Get all rentals -- match by CustomerListID first, then also by name
+        // (older records may have customer_name stored in customer_id field)
+        const orgId = customerData.organization_id;
+        const { data: rentalById, error: rentalErr1 } = await supabase
           .from('rentals')
           .select('*')
           .eq('customer_id', id)
-          .is('rental_end_date', null); // Only active rentals
-        if (rentalError) throw rentalError;
-        setLocationAssets(rentalData || []);
+          .eq('organization_id', orgId)
+          .is('rental_end_date', null);
+        if (rentalErr1) throw rentalErr1;
+
+        const { data: rentalByName, error: rentalErr2 } = await supabase
+          .from('rentals')
+          .select('*')
+          .eq('customer_name', customerData.name)
+          .eq('organization_id', orgId)
+          .is('rental_end_date', null);
+        if (rentalErr2) throw rentalErr2;
+
+        const seenIds = new Set((rentalById || []).map(r => r.id));
+        const combined = [...(rentalById || [])];
+        for (const r of (rentalByName || [])) {
+          if (!seenIds.has(r.id)) combined.push(r);
+        }
+        setLocationAssets(combined);
       } catch (err) {
         setError(err.message);
       }
@@ -285,43 +302,39 @@ export default function CustomerDetail() {
     setWarehouseConfirmDialogOpen(true);
   };
 
-  // Confirm and execute warehouse transfer (remove assignment)
   const confirmTransferToWarehouse = async () => {
     setWarehouseConfirmDialogOpen(false);
     setTransferLoading(true);
     try {
-      const { data: updatedAssets, error: updateError } = await supabase
-        .from('bottles')
-        .update({
-          assigned_customer: null,
-          customer_name: null,
-          location: null,
-          status: 'available'
-        })
-        .in('id', selectedAssets)
-        .eq('organization_id', organization?.id || customer?.organization_id)
-        .select();
+      const orgId = organization?.id || customer?.organization_id;
+      const { data: { user } } = await supabase.auth.getUser();
 
-      if (updateError) throw updateError;
+      const { data: result, error: rpcError } = await supabase.rpc('return_bottles_to_warehouse', {
+        p_bottle_ids: selectedAssets,
+        p_organization_id: orgId,
+        p_user_id: user?.id || null,
+      });
+
+      if (rpcError) throw rpcError;
+
+      const bottlesUpdated = result?.bottles_updated || selectedAssets.length;
+      const rentalsClosed = result?.rentals_closed || 0;
 
       setTransferMessage({
         open: true,
-        message: `Successfully transferred ${updatedAssets.length} asset(s) to warehouse`,
+        message: `Transferred ${bottlesUpdated} asset(s) to warehouse. ${rentalsClosed} rental(s) closed.`,
         severity: 'success'
       });
 
-      // Refresh data
-      // SECURITY: Only fetch bottles from user's organization
       const { data: customerAssetsData, error: customerAssetsError } = await supabase
         .from('bottles')
         .select('*')
         .eq('assigned_customer', id)
-        .eq('organization_id', organization?.id || customer?.organization_id);
+        .eq('organization_id', orgId);
 
       if (!customerAssetsError) {
         setCustomerAssets(customerAssetsData || []);
-        
-        // Recalculate bottle summary
+
         const summary = {};
         (customerAssetsData || []).forEach(bottle => {
           const type = bottle.type || bottle.description || 'Unknown';
@@ -342,43 +355,60 @@ export default function CustomerDetail() {
     }
   };
 
-  // Load transfer history
   const loadTransferHistory = async () => {
     try {
-      // For now, we'll create a simple audit trail from bottle updates
-      // In a real implementation, you'd have a dedicated transfers table
-      // Order by last_location_update (or created_at if null) to match the timestamp used in display
-      const { data, error } = await supabase
-        .from('bottles')
-        .select('*')
-        .eq('organization_id', organization?.id || customer?.organization_id)
-        .not('assigned_customer', 'is', null)
-        .order('last_location_update', { ascending: false, nullsFirst: false })
+      const orgId = organization?.id || customer?.organization_id;
+
+      // Fetch from scans table for this customer's bottles (actual audit trail)
+      const { data: scanData, error: scanError } = await supabase
+        .from('scans')
+        .select('id, barcode_number, created_at, "mode", action, location, order_number, customer_name')
+        .eq('organization_id', orgId)
+        .in('barcode_number', (customerAssets || []).map(b => b.barcode_number).filter(Boolean))
         .order('created_at', { ascending: false })
-        .limit(20);
+        .limit(50);
 
-      if (error) throw error;
-      
-      // This is a simplified version - in production you'd have proper transfer audit logs
-      const recentTransfers = (data || []).map(bottle => ({
-        id: bottle.id,
-        type: 'asset_assignment',
-        timestamp: bottle.last_location_update || bottle.created_at,
-        description: `Asset ${bottle.barcode_number || bottle.serial_number} assigned to ${bottle.customer_name}`,
-        details: {
-          assetId: bottle.id,
-          customerName: bottle.customer_name,
-          customerId: bottle.assigned_customer,
-          status: bottle.status
-        }
-      }));
+      if (scanError) throw scanError;
 
-      // Sort by timestamp in case the database ordering didn't work as expected
-      recentTransfers.sort((a, b) => {
-        return new Date(b.timestamp) - new Date(a.timestamp);
+      const transfers = (scanData || []).map(scan => {
+        const mode = (scan.mode || scan.action || '').toUpperCase();
+        const isShip = mode === 'SHIP' || mode === 'DELIVERY';
+        const isReturn = mode === 'RETURN' || mode === 'PICKUP';
+        return {
+          id: scan.id,
+          type: isShip ? 'delivery' : isReturn ? 'return' : 'scan',
+          timestamp: scan.created_at,
+          description: isShip
+            ? `Asset ${scan.barcode_number} delivered to ${scan.customer_name || scan.location || 'customer'}`
+            : isReturn
+              ? `Asset ${scan.barcode_number} returned to ${scan.location || 'warehouse'}`
+              : `Asset ${scan.barcode_number} scanned at ${scan.location || 'unknown'}`,
+          details: {
+            barcode: scan.barcode_number,
+            orderNumber: scan.order_number,
+            location: scan.location,
+            status: isShip ? 'rented' : isReturn ? 'returned' : 'scanned'
+          }
+        };
       });
 
-      setTransferHistory(recentTransfers);
+      // Fallback: if no scan records, show current bottle assignments
+      if (transfers.length === 0 && customerAssets?.length > 0) {
+        const bottleTransfers = customerAssets.map(bottle => ({
+          id: bottle.id,
+          type: 'asset_assignment',
+          timestamp: bottle.last_location_update || bottle.created_at,
+          description: `Asset ${bottle.barcode_number || bottle.serial_number} assigned to ${bottle.customer_name || customer?.name}`,
+          details: {
+            barcode: bottle.barcode_number,
+            status: bottle.status
+          }
+        }));
+        bottleTransfers.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        setTransferHistory(bottleTransfers.slice(0, 20));
+      } else {
+        setTransferHistory(transfers);
+      }
     } catch (error) {
       logger.error('Error loading transfer history:', error);
       setTransferHistory([]);
@@ -1000,7 +1030,7 @@ export default function CustomerDetail() {
               ))}
             </Box>
             <Typography variant="body2" color="text.secondary" mt={2}>
-              Total bottles: {customerAssets.length}
+              Total bottles: {totalBottleCount} ({customerAssets.length} physical{dnsRentals.length > 0 ? ` + ${dnsRentals.length} DNS` : ''})
             </Typography>
           </Box>
         )}

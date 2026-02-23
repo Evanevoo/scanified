@@ -219,25 +219,31 @@ const syncScanOperation = async (supabase, operation) => {
     orderNumber: operation.data.order_number
   });
 
+  const scanRecord = {
+    organization_id: operation.organizationId || null,
+    bottle_barcode: operation.data.barcode_number,
+    mode: actionToMode(operation.data.action),
+    location: operation.data.location || null,
+    user_id: operation.userId || null,
+    order_number: operation.data.order_number || null,
+    customer_name: operation.data.customer_name || null,
+    customer_id: operation.data.customer_id || null,
+    product_code: operation.data.product_code || null,
+    timestamp: operation.data.timestamp || new Date(operation.timestamp).toISOString(),
+  };
+
   const { error } = await supabase
     .from('bottle_scans')
-    .insert([{
-      organization_id: operation.organizationId || null,
-      bottle_barcode: operation.data.barcode_number,
-      mode: actionToMode(operation.data.action),
-      location: operation.data.location || null,
-      user_id: operation.userId || null,
-      order_number: operation.data.order_number || null,
-      customer_name: operation.data.customer_name || null,
-      customer_id: operation.data.customer_id || null,
-      product_code: operation.data.product_code || null
-    }]);
+    .upsert([scanRecord], {
+      onConflict: 'organization_id,bottle_barcode,order_number,mode,timestamp',
+      ignoreDuplicates: true,
+    });
 
-  if (error) {
+  if (error && error.code !== '23505') {
     logger.error('Scan sync error:', error);
     throw error;
   }
-  
+
   logger.log('Scan synced successfully');
 };
 

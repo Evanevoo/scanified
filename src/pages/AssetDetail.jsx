@@ -125,7 +125,7 @@ export default function AssetDetail() {
       
       const { data, error } = await supabase
         .from('bottles')
-        .select('id, barcode_number, serial_number, product_code, gas_type, status, location, assigned_customer, customer_name, ownership, description, organization_id')
+        .select('id, barcode_number, serial_number, product_code, gas_type, status, location, assigned_customer, customer_name, ownership, description, organization_id, created_at, days_at_location, type, category')
         .eq('id', id)
         .eq('organization_id', profile.organization_id)
         .single();
@@ -162,10 +162,7 @@ export default function AssetDetail() {
         fetchCustomerData(data.assigned_customer);
       }
       
-      // Fetch movement history after asset is loaded
-      if (data?.barcode_number || data?.serial_number) {
-        fetchMovementHistory();
-      }
+      // Movement history is fetched by the useEffect when asset state is set
     } catch (error) {
       logger.error('Error fetching asset:', error);
       setError(error.message || 'Failed to load asset details');
@@ -213,10 +210,11 @@ export default function AssetDetail() {
 
   const fetchLocations = async () => {
     try {
-      const { data, error } = await supabase
-        .from('locations')
-        .select('id, name, province')
-        .order('name');
+      let query = supabase.from('locations').select('id, name, province').order('name');
+      if (profile?.organization_id) {
+        query = query.eq('organization_id', profile.organization_id);
+      }
+      const { data, error } = await query;
 
       if (error) throw error;
       setLocations(data || []);
@@ -317,13 +315,17 @@ export default function AssetDetail() {
   const fetchMovementHistory = async () => {
     try {
       setLoadingHistory(true);
-      if (!profile?.organization_id || !asset) return;
+      if (!profile?.organization_id || !asset) {
+        setLoadingHistory(false);
+        return;
+      }
 
       const barcodeNumber = asset.barcode_number;
       const serialNumber = asset.serial_number;
       
       if (!barcodeNumber && !serialNumber) {
         setMovementHistory([]);
+        setLoadingHistory(false);
         return;
       }
 
@@ -333,7 +335,7 @@ export default function AssetDetail() {
       if (barcodeNumber) {
         const { data: scansData, error: scansError } = await supabase
           .from('scans')
-          .select('id, barcode_number, created_at, "mode", action')
+          .select('id, barcode_number, created_at, "mode", action, location, order_number, customer_name, customer_id, scanned_by, product_code')
           .eq('barcode_number', barcodeNumber)
           .eq('organization_id', profile.organization_id)
           .order('created_at', { ascending: false })
@@ -422,12 +424,20 @@ export default function AssetDetail() {
 
       // 4. Fetch from cylinder_fills table (for fill history)
       if (barcodeNumber || asset.id) {
-        const { data: fillsData, error: fillsError } = await supabase
+        const orClauses = [];
+        if (barcodeNumber) orClauses.push(`barcode_number.eq.${barcodeNumber}`);
+        if (asset.id) orClauses.push(`cylinder_id.eq.${asset.id}`);
+
+        let fillsQuery = supabase
           .from('cylinder_fills')
           .select('*')
-          .or(`barcode_number.eq.${barcodeNumber || ''},cylinder_id.eq.${asset.id || ''}`)
+          .or(orClauses.join(','))
           .order('fill_date', { ascending: false })
           .limit(50);
+        if (profile?.organization_id) {
+          fillsQuery = fillsQuery.eq('organization_id', profile.organization_id);
+        }
+        const { data: fillsData, error: fillsError } = await fillsQuery;
 
         if (!fillsError && fillsData) {
           fillsData.forEach(fill => {

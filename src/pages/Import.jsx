@@ -443,73 +443,6 @@ export default function Import() {
     return { valid: errors.length === 0, missingCustomerCount: missingCustomerCount || 0 };
   }
 
-  // Check for existing imports and update them
-  async function checkAndUpdateExistingImport(type, preview, mapping, user, organizationId) {
-    try {
-      // Create a unique key based on the data
-      const dataHash = JSON.stringify(preview).length + '_' + preview.length;
-      const importKey = `${type}_${dataHash}_${user.id}`;
-      
-      logger.log('Checking for existing import with key:', importKey);
-      
-      // Check if an import with similar data already exists (filter by organization)
-      const { data: existingImports, error: checkError } = await supabase
-        .from(type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts')
-        .select('id, status, uploaded_at, organization_id')
-        .eq('status', 'pending')
-        .eq('organization_id', organizationId)
-        .order('uploaded_at', { ascending: false })
-        .limit(5);
-      
-      if (checkError) {
-        logger.error('Error checking existing imports:', checkError);
-        return null; // Continue with new import
-      }
-      
-      logger.log('Found existing imports:', existingImports);
-      
-      // If we have recent pending imports, update the most recent one
-      if (existingImports && existingImports.length > 0) {
-        const mostRecent = existingImports[0];
-        logger.log('Updating existing import:', mostRecent.id);
-        
-        const { data: updatedImport, error: updateError } = await supabase
-          .from(type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts')
-          .update({
-            data: {
-              rows: preview,
-              mapping,
-              summary: {
-                total_rows: preview.length,
-                uploaded_by: user.id,
-                uploaded_at: new Date().toISOString(),
-                import_key: importKey,
-                updated_from_existing: true
-              }
-            },
-            uploaded_at: new Date().toISOString(),
-            organization_id: organizationId
-          })
-          .eq('id', mostRecent.id)
-          .select()
-          .single();
-        
-        if (updateError) {
-          logger.error('Error updating existing import:', updateError);
-          return null; // Continue with new import
-        }
-        
-        logger.log('Successfully updated existing import:', updatedImport);
-        return updatedImport;
-      }
-      
-      return null; // No existing import to update
-    } catch (error) {
-      logger.error('Error in checkAndUpdateExistingImport:', error);
-      return null; // Continue with new import
-    }
-  }
-
   // Unified import function that automatically detects type
   async function handleImport(e) {
     if (e) e.preventDefault();
@@ -615,14 +548,14 @@ export default function Import() {
     return s;
   }
 
-  // Return a Set of normalized order numbers that are already verified for this org (so we can skip re-importing them)
-  async function getVerifiedOrderNumbersForOrg(type, organizationId) {
+  // Return a Set of normalized order numbers that already exist (pending, verified, or approved) so we skip re-importing them
+  async function getExistingOrderNumbersForOrg(type, organizationId) {
     const table = type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts';
     const { data: records, error } = await supabase
       .from(table)
       .select('id, data')
       .eq('organization_id', organizationId)
-      .eq('status', 'verified');
+      .in('status', ['pending', 'verified', 'approved']);
     if (error) {
       logger.warn('Could not fetch verified records for skip check:', error);
       return new Set();
@@ -667,13 +600,13 @@ export default function Import() {
       }
       
       const groups = groupPreviewByReferenceNumber(preview);
-      const verifiedOrderNums = await getVerifiedOrderNumbersForOrg('invoice', userProfile.organization_id);
-      const groupsToInsert = groups.filter(({ refNumber }) => !verifiedOrderNums.has(normalizeOrderNum(refNumber)));
+      const existingOrderNums = await getExistingOrderNumbersForOrg('invoice', userProfile.organization_id);
+      const groupsToInsert = groups.filter(({ refNumber }) => !existingOrderNums.has(normalizeOrderNum(refNumber)));
       const skippedCount = groups.length - groupsToInsert.length;
       if (skippedCount > 0) {
-        logger.log(`Skipping ${skippedCount} already verified invoice(s) on re-import`);
+        logger.log(`Skipping ${skippedCount} already existing invoice(s) on re-import`);
       }
-      logger.log('Creating invoice import: one row per invoice', { groupCount: groupsToInsert.length, totalRows: preview.length, skippedAlreadyVerified: skippedCount });
+      logger.log('Creating invoice import: one row per invoice', { groupCount: groupsToInsert.length, totalRows: preview.length, skippedExisting: skippedCount });
 
       const insertPayloads = groupsToInsert.map(({ refNumber, rows: groupRows }) => ({
         data: {
@@ -715,14 +648,14 @@ export default function Import() {
       }
 
       const message = skippedCount > 0
-        ? `Import submitted. ${inserted} invoice(s) added for approval. ${skippedCount} already verified invoice(s) skipped.`
+        ? `Import submitted. ${inserted} invoice(s) added for approval. ${skippedCount} already existing invoice(s) skipped.`
         : 'Import submitted for approval';
       setResult({
         message,
         total_rows: preview.length,
         status: 'pending_approval',
         invoices_submitted: inserted,
-        invoices_skipped_already_verified: skippedCount
+        invoices_skipped: skippedCount
       });
     } catch (error) {
       logger.error('Invoice import error:', error);
@@ -732,7 +665,6 @@ export default function Import() {
     setImporting(false);
   }
 
-  // Import logic for sales receipts – one DB row per receipt (per reference number)
   async function handleSalesReceiptImport() {
     setLoading(true);
     try {
@@ -750,13 +682,13 @@ export default function Import() {
       }
       
       const groups = groupPreviewByReferenceNumber(preview);
-      const verifiedOrderNums = await getVerifiedOrderNumbersForOrg('receipt', userProfile.organization_id);
-      const groupsToInsert = groups.filter(({ refNumber }) => !verifiedOrderNums.has(normalizeOrderNum(refNumber)));
+      const existingOrderNums = await getExistingOrderNumbersForOrg('receipt', userProfile.organization_id);
+      const groupsToInsert = groups.filter(({ refNumber }) => !existingOrderNums.has(normalizeOrderNum(refNumber)));
       const skippedCount = groups.length - groupsToInsert.length;
       if (skippedCount > 0) {
-        logger.log(`Skipping ${skippedCount} already verified receipt(s) on re-import`);
+        logger.log(`Skipping ${skippedCount} already existing receipt(s) on re-import`);
       }
-      logger.log('Creating sales receipt import: one row per receipt', { groupCount: groupsToInsert.length, totalRows: preview.length, skippedAlreadyVerified: skippedCount });
+      logger.log('Creating sales receipt import: one row per receipt', { groupCount: groupsToInsert.length, totalRows: preview.length, skippedExisting: skippedCount });
 
       const insertPayloads = groupsToInsert.map(({ refNumber, rows: groupRows }) => ({
         data: {
@@ -798,14 +730,14 @@ export default function Import() {
       }
 
       const message = skippedCount > 0
-        ? `Import submitted. ${inserted} receipt(s) added for approval. ${skippedCount} already verified receipt(s) skipped.`
+        ? `Import submitted. ${inserted} receipt(s) added for approval. ${skippedCount} already existing receipt(s) skipped.`
         : 'Import submitted for approval';
       setResult({
         message,
         total_rows: preview.length,
         status: 'pending_approval',
         receipts_submitted: inserted,
-        receipts_skipped_already_verified: skippedCount
+        receipts_skipped: skippedCount
       });
     } catch (error) {
       logger.error('Sales receipt import error:', error);
@@ -1849,8 +1781,8 @@ export default function Import() {
                   <Typography variant="body2">
                     {result.invoices_submitted != null && `${result.invoices_submitted} invoice(s) submitted for approval. `}
                     {result.receipts_submitted != null && `${result.receipts_submitted} sales receipt(s) submitted for approval. `}
-                    {(result.invoices_skipped_already_verified > 0 || result.receipts_skipped_already_verified > 0) && (
-                      <>{(result.invoices_skipped_already_verified ?? 0) + (result.receipts_skipped_already_verified ?? 0)} already verified order(s) were skipped. </>
+                    {(result.invoices_skipped > 0 || result.receipts_skipped > 0) && (
+                      <>{(result.invoices_skipped ?? 0) + (result.receipts_skipped ?? 0)} already existing order(s) skipped. </>
                     )}
                     Each can be verified separately.
                   </Typography>

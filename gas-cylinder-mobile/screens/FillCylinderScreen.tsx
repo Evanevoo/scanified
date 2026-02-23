@@ -622,6 +622,22 @@ export default function FillCylinderScreen() {
             logger.warn(`⚠️ Update succeeded but no data returned for bottle ${bottle.barcode_number}`);
           }
 
+          // Close any active rentals when clearing customer assignment
+          if (updateData.assigned_customer === null) {
+            const { error: rentalCloseError } = await supabase
+              .from('rentals')
+              .update({ rental_end_date: new Date().toISOString().split('T')[0], updated_at: new Date().toISOString() })
+              .eq('organization_id', profile.organization_id)
+              .is('rental_end_date', null)
+              .or(`bottle_id.eq.${bottle.id},bottle_barcode.eq.${bottle.barcode_number}`);
+
+            if (rentalCloseError) {
+              logger.warn(`Could not close rental for ${bottle.barcode_number}:`, rentalCloseError);
+            } else {
+              logger.log(`📋 Closed active rental(s) for ${bottle.barcode_number}`);
+            }
+          }
+
           // Create a status change record for tracking (enables cancel/revert, Bottles for Day, and Movement History)
           const deviceTimezone = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return null; } })();
           const { error: fillErr } = await supabase

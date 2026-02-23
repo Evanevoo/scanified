@@ -39,6 +39,7 @@ import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import logger from '../utils/logger';
+import { bottleAssignmentService } from '../services/bottleAssignmentService';
 
 export default function VerifiedOrders() {
   const { organization } = useAuth();
@@ -676,17 +677,30 @@ export default function VerifiedOrders() {
         return;
       }
 
-      // For invoices and receipts, update both the record AND associated scans
-      const { error: recordError } = await supabase
-        .from(tableName)
-        .update({ 
-          status: 'pending',
-          verified_at: null,
-          verified_by: null
-        })
-        .eq('id', order.id);
+      // Try transactional RPC for bottle reversal + import record reset
+      const rpcResult = await bottleAssignmentService.unverifyOrder({
+        importRecordId: order.id,
+        importTable: tableName,
+        organizationId: organization.id,
+      });
 
-      if (recordError) throw recordError;
+      if (rpcResult.success) {
+        logger.log('RPC unverify succeeded:', rpcResult.data);
+      } else {
+        logger.warn('RPC unverify failed, falling back to inline logic:', rpcResult.error);
+
+        // Fallback: manual record reset
+        const { error: recordError } = await supabase
+          .from(tableName)
+          .update({ status: 'pending', verified_at: null, verified_by: null })
+          .eq('id', order.id);
+        if (recordError) throw recordError;
+
+        // Fallback: reverse bottle assignments manually
+        const customerName = getCustomerName(order);
+        const orderCustomerId = getCustomerId(order);
+        await reverseBottleAssignments(orderNumber, customerName, orderCustomerId);
+      }
 
       // Remove this order from verified_order_numbers in the data JSON so it shows as pending in Order Verification
       try {
@@ -696,7 +710,7 @@ export default function VerifiedOrders() {
           if (Array.isArray(currentData.verified_order_numbers) && currentData.verified_order_numbers.includes(orderNumber)) {
             currentData.verified_order_numbers = currentData.verified_order_numbers.filter(n => normalizeOrderNum(n) !== normalizedOrderNum);
             await supabase.from(tableName).update({ data: currentData }).eq('id', order.id);
-            logger.log('✅ Removed order from verified_order_numbers:', orderNumber);
+            logger.log('Removed order from verified_order_numbers:', orderNumber);
           }
         }
       } catch (vonErr) {
@@ -896,10 +910,7 @@ export default function VerifiedOrders() {
         }
       }
 
-      // Reverse bottle assignments (SHIP → unassign, RETURN → reassign back)
-      const customerName = getCustomerName(order);
-      const orderCustomerId = getCustomerId(order);
-      await reverseBottleAssignments(orderNumber, customerName, orderCustomerId);
+      // Bottle reversal is handled above (RPC path or fallback in the else branch)
 
       setSnackbar({ 
         open: true, 

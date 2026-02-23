@@ -84,6 +84,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   const lastBarcodeScanTimeRef = useRef<number>(0);
   const lastOcrCustomerRef = useRef<string>('');
   const focusTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
+  const focusIntervalRef = useRef<NodeJS.Timer | null>(null);
   const idleCheckRef = useRef({ isOcrProcessing, isProcessing, scanned, permissionGranted: permission?.granted });
   const searchCustomerByNameRef = useRef(searchCustomerByName);
   const onCustomerFoundRef = useRef(onCustomerFound);
@@ -106,11 +107,11 @@ const ScanArea: React.FC<ScanAreaProps> = ({
     return () => clearTimeout(t);
   }, [permission?.granted]);
 
-  // Clear scheduled focus timeouts on unmount
   useEffect(() => {
     return () => {
       focusTimeoutsRef.current.forEach((id) => clearTimeout(id));
       focusTimeoutsRef.current = [];
+      if (focusIntervalRef.current) clearInterval(focusIntervalRef.current as any);
     };
   }, []);
 
@@ -311,13 +312,11 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                   enableTorch={flashEnabled}
                   autofocus={autofocusMode}
                   onCameraReady={() => {
-                    // Re-trigger focus when camera is ready (helps Android devices that miss initial focus)
                     const triggerFocus = () => {
                       setAutofocusMode('off');
                       setTimeout(() => setAutofocusMode('on'), 80);
                     };
                     triggerFocus();
-                    // On Android, schedule extra focus triggers so camera locks focus sooner
                     if (Platform.OS === 'android') {
                       focusTimeoutsRef.current.forEach((id) => clearTimeout(id));
                       focusTimeoutsRef.current = [
@@ -325,6 +324,9 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                         setTimeout(triggerFocus, 550),
                       ];
                     }
+                    // Keep autofocus alive with periodic re-triggers (Android loses focus)
+                    if (focusIntervalRef.current) clearInterval(focusIntervalRef.current);
+                    focusIntervalRef.current = setInterval(triggerFocus, 3000);
                   }}
                   animateShutter={false}
                   barcodeScannerSettings={{
