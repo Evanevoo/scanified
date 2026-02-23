@@ -103,8 +103,6 @@ function RentalsImproved() {
   useEffect(() => {
     if (organization?.id) {
       fetchRentals();
-      fetchCustomers();
-      fetchLocations();
     }
   }, [organization]);
 
@@ -118,21 +116,23 @@ function RentalsImproved() {
         return;
       }
 
-      // Parallel fetch: rentals, bottles, locations, pricing, leases
+      // Parallel fetch: rentals, bottles, locations, pricing, leases, customers (all for org)
       const [
         { data: rentalsData, error: rentalsError },
         { data: assignedBottles, error: bottlesError },
         { data: allBottles, error: allBottlesError },
         { data: locationsData },
         { data: customerPricing },
-        { data: leaseAgreements, error: leaseError }
+        { data: leaseAgreements, error: leaseError },
+        { data: customersData }
       ] = await Promise.all([
         supabase.from('rentals').select('*').is('rental_end_date', null).eq('organization_id', organization.id),
         supabase.from('bottles').select('*, customers:assigned_customer(customer_type)').eq('organization_id', organization.id).not('assigned_customer', 'is', null),
         supabase.from('bottles').select('*').eq('organization_id', organization.id),
-        supabase.from('locations').select('id, name, total_tax_rate').eq('organization_id', organization.id),
+        supabase.from('locations').select('id, name, province, total_tax_rate').eq('organization_id', organization.id),
         supabase.from('customer_pricing').select('*').eq('organization_id', organization.id),
         supabase.from('lease_agreements').select('*').eq('organization_id', organization.id).eq('status', 'active'),
+        supabase.from('customers').select('*').eq('organization_id', organization.id).order('name'),
       ]);
 
       if (rentalsError) throw rentalsError;
@@ -423,42 +423,20 @@ function RentalsImproved() {
         .filter(a => a.bottle_id)
         .reduce((map, a) => { map[a.bottle_id] = a; return map; }, {});
 
-      // 6. Get customers with their types (with fallback) - include lease agreement customers
-      const customerIds = Array.from(new Set([
-        ...deduplicatedData.map(r => r.customer_id).filter(Boolean),
-        ...(leaseAgreements || []).map(a => a.customer_id).filter(Boolean)
-      ]));
-      let customersMap = {};
+      // Use customers from initial batch (no extra round trips)
+      const allCustomers = customersData || [];
+      setCustomers(allCustomers);
+      setLocations(locationsData || []);
 
-      if (customerIds.length > 0) {
-        try {
-          const { data: customersData, error: customersError } = await supabase
-            .from('customers')
-            .select('*')
-            .eq('organization_id', organization.id)
-            .in('CustomerListID', customerIds);
-          
-          if (!customersError && customersData) {
-            customersMap = customersData.reduce((map, c) => {
-              map[c.CustomerListID] = c;
-              return map;
-            }, {});
-          }
-        } catch (error) {
-          const { data: customersData } = await supabase
-            .from('customers')
-            .select('CustomerListID, name, contact_details, phone')
-            .eq('organization_id', organization.id)
-            .in('CustomerListID', customerIds);
+      const customersMap = allCustomers.reduce((map, c) => {
+        map[c.CustomerListID] = c;
+        return map;
+      }, {});
 
-          if (customersData) {
-            customersMap = customersData.reduce((map, c) => {
-              map[c.CustomerListID] = { ...c, customer_type: 'CUSTOMER' };
-              return map;
-            }, {});
-          }
-        }
-      }
+      const customerTypesMap = allCustomers.reduce((map, c) => {
+        map[c.CustomerListID] = c.customer_type || 'CUSTOMER';
+        return map;
+      }, {});
 
       // Apply per-bottle lease: only mark a rental as yearly if it has lease_agreement_id or its bottle has a lease (one lease per bottle)
       for (const rental of deduplicatedData) {
@@ -495,31 +473,10 @@ function RentalsImproved() {
 
       setAssets(filteredRentals);
 
-      // 7. Calculate statistics based on bottle status and customer assignment
+      // Calculate statistics based on bottle status and customer assignment
       // IMPORTANT: Bottles at locations WITHOUT customers should be "in-house" (available), not "rented"
       
-      // Get customer types for assigned bottles
-      const customerIdsForBottles = Array.from(new Set(
-        (assignedBottles || []).map(b => b.assigned_customer).filter(Boolean)
-      ));
-      
-      let customerTypesMap = {};
-      if (customerIdsForBottles.length > 0) {
-        const { data: customersData } = await supabase
-          .from('customers')
-          .select('CustomerListID, customer_type')
-          .eq('organization_id', organization.id)
-          .in('CustomerListID', customerIdsForBottles);
-        
-        if (customersData) {
-          customerTypesMap = customersData.reduce((map, c) => {
-            map[c.CustomerListID] = c.customer_type || 'CUSTOMER';
-            return map;
-          }, {});
-        }
-      }
-      
-      // Count bottles by status and customer type
+      // Count bottles by status and customer type (customerTypesMap from initial batch)
       // Bottles assigned to vendors are "with vendors" (in-house, no charge)
       const bottlesWithVendors = (assignedBottles || []).filter(bottle => {
         const customerType = customerTypesMap[bottle.assigned_customer] || 'CUSTOMER';
@@ -590,57 +547,6 @@ function RentalsImproved() {
       setError(err.message);
     }
     setLoading(false);
-  };
-
-  const fetchCustomers = async () => {
-    try {
-      // Try to get all customer data including customer_type if it exists
-      let customersData = [];
-      try {
-        const { data, error } = await supabase
-          .from('customers')
-          .select('*')
-          .eq('organization_id', organization.id)
-          .order('name');
-
-        if (error) throw error;
-        customersData = data || [];
-      } catch (error) {
-        const { data, error: fallbackError } = await supabase
-          .from('customers')
-          .select('CustomerListID, name, contact_details, phone')
-          .eq('organization_id', organization.id)
-          .order('name');
-        
-        if (fallbackError) throw fallbackError;
-        customersData = (data || []).map(c => ({ ...c, customer_type: 'CUSTOMER' })); // Default to CUSTOMER
-      }
-      
-      setCustomers(customersData);
-    } catch (error) {
-      logger.error('Error fetching customers:', error);
-    }
-  };
-
-  const fetchLocations = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('locations')
-        .select('id, name, province')
-        .order('name');
-
-      if (error) throw error;
-      setLocations(data || []);
-    } catch (error) {
-      logger.error('Error fetching locations:', error);
-      // Fallback to hardcoded locations if database fails
-      setLocations([
-        { id: 'saskatoon', name: 'Saskatoon', province: 'Saskatchewan' },
-        { id: 'regina', name: 'Regina', province: 'Saskatchewan' },
-        { id: 'chilliwack', name: 'Chilliwack', province: 'British Columbia' },
-        { id: 'prince-george', name: 'Prince George', province: 'British Columbia' }
-      ]);
-    }
   };
 
   // Memoized: Group rentals by customer

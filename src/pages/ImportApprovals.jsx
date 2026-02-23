@@ -64,6 +64,7 @@ import {
 import ImportApprovalDetail from './ImportApprovalDetail';
 import QuantityDiscrepancyDetector from '../components/QuantityDiscrepancyDetector';
 import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
+import { bottleAssignmentService } from '../services/bottleAssignmentService';
 
 // Enhanced status definitions for verification states
 const VERIFICATION_STATES = {
@@ -3939,11 +3940,10 @@ export default function ImportApprovals() {
         return;
       }
       
-      // Update bottle status to RENTED
       const { error: updateError } = await supabase
         .from('bottles')
         .update({
-          status: 'RENTED',
+          status: 'rented',
           assigned_customer: customerName,
           customer_id: customerId,
           rental_start_date: new Date().toISOString().split('T')[0],
@@ -6778,537 +6778,130 @@ export default function ImportApprovals() {
     }
   }
 
-  // Assign bottles to customers after approval
+  // Collect SHIP and RETURN barcodes for a given order from scans + bottle_scans tables
+  async function collectBarcodesForOrder(orderNumber) {
+    const shippedBarcodes = new Set();
+    const returnedBarcodes = new Set();
+
+    const isDelivered = (mode, action) => {
+      const modeUpper = (mode || '').toString().toUpperCase();
+      const actionLower = (action || '').toString().toLowerCase();
+      if (modeUpper === 'SHIP' || modeUpper === 'DELIVERY') return true;
+      if (modeUpper === 'RETURN' || modeUpper === 'PICKUP') return false;
+      if (actionLower === 'out') return true;
+      if (actionLower === 'in') return false;
+      return true;
+    };
+
+    const orderNumStr = String(orderNumber).trim();
+
+    // Fetch from scans table
+    let scansQuery = supabase.from('scans').select('barcode_number, "mode", action').eq('order_number', orderNumStr);
+    if (organization?.id) scansQuery = scansQuery.eq('organization_id', organization.id);
+    const { data: scans, error: scansError } = await scansQuery;
+    if (scansError) logger.error('Error fetching scans:', scansError);
+
+    if (scans && scans.length > 0) {
+      const scanMap = new Map();
+      scans.forEach(scan => {
+        if (scan.barcode_number) {
+          const isDeliveredScan = isDelivered(scan.mode, scan.action);
+          const existing = scanMap.get(scan.barcode_number);
+          if (!existing || (existing.isDelivered && !isDeliveredScan)) {
+            scanMap.set(scan.barcode_number, { mode: scan.mode, action: scan.action, isDelivered: isDeliveredScan });
+          }
+        }
+      });
+      scanMap.forEach((scanInfo, barcode) => {
+        if (scanInfo.isDelivered) shippedBarcodes.add(barcode);
+        else returnedBarcodes.add(barcode);
+      });
+    }
+
+    // Fetch from bottle_scans table
+    let bottleScansQuery = supabase.from('bottle_scans').select('bottle_barcode, mode').eq('order_number', orderNumStr);
+    if (organization?.id) bottleScansQuery = bottleScansQuery.eq('organization_id', organization.id);
+    const { data: bottleScans, error: bottleScansError } = await bottleScansQuery;
+    if (bottleScansError) logger.error('Error fetching bottle_scans:', bottleScansError);
+
+    if (bottleScans && bottleScans.length > 0) {
+      const bottleScanMap = new Map();
+      bottleScans.forEach(scan => {
+        if (scan.bottle_barcode) {
+          const isDeliveredScan = isDelivered(scan.mode, null);
+          const existing = bottleScanMap.get(scan.bottle_barcode);
+          if (!existing || (existing.isDelivered && !isDeliveredScan)) {
+            bottleScanMap.set(scan.bottle_barcode, { mode: scan.mode, isDelivered: isDeliveredScan });
+          }
+        }
+      });
+      bottleScanMap.forEach((scanInfo, barcode) => {
+        if (scanInfo.isDelivered) shippedBarcodes.add(barcode);
+        else returnedBarcodes.add(barcode);
+      });
+    }
+
+    // RETURN takes precedence over SHIP for the same barcode
+    returnedBarcodes.forEach(barcode => shippedBarcodes.delete(barcode));
+
+    return { shippedBarcodes, returnedBarcodes };
+  }
+
+  // Assign bottles to customers after approval using the transactional RPC
   async function assignBottlesToCustomer(record) {
     try {
-      logger.debug('🔍 assignBottlesToCustomer called with record:', {
-        id: record.id,
-        data: record.data,
-        is_scanned_only: record.is_scanned_only
-      });
-      
+      logger.debug('assignBottlesToCustomer called with record:', { id: record.id, is_scanned_only: record.is_scanned_only });
+
       const data = parseDataField(record.data);
       const rows = data.rows || data.line_items || [];
-      // Use getCustomerInfo to properly extract customer name from various possible locations
       const newCustomerName = getCustomerInfo(data);
-      
-      logger.debug('🔍 Customer name extracted:', newCustomerName, 'Rows:', rows.length, 'Data keys:', Object.keys(data));
-      
-      // Extract order number - handle scanned-only records specially
+
       let orderNumber = data.order_number || data.reference_number || data.invoice_number;
       if (!orderNumber && typeof record.id === 'string' && record.id.startsWith('scanned_')) {
         orderNumber = record.id.replace('scanned_', '');
-        logger.debug('🔍 Extracted order number from scanned ID:', orderNumber);
       }
       if (!orderNumber && rows.length > 0 && rows[0].order_number) {
         orderNumber = rows[0].order_number;
-        logger.debug('🔍 Extracted order number from first row:', orderNumber);
       }
-      
-      if (!orderNumber) {
-        logger.error('❌ No order number found for bottle assignment');
-        throw new Error('No order number found in record');
-      }
-      
-      // Get customer ID from customer name if possible
-      // IMPORTANT: Use CustomerListID (the business ID), not the internal UUID id
+      if (!orderNumber) throw new Error('No order number found in record');
+
       let newCustomerId = null;
       if (newCustomerName) {
-        logger.debug('🔍 Looking up customer:', newCustomerName, 'org:', organization?.id);
-        const { data: customer, error: customerError } = await supabase
+        const { data: customer } = await supabase
           .from('customers')
-          .select('CustomerListID, id')
+          .select('CustomerListID')
           .eq('name', newCustomerName)
           .eq('organization_id', organization?.id)
           .limit(1)
           .single();
-        
-        if (customerError) {
-          logger.error('❌ Error looking up customer:', customerError);
-        } else if (customer) {
-          // Use CustomerListID for assigned_customer (this is what customer detail page queries by)
-          newCustomerId = customer.CustomerListID;
-          logger.debug('✅ Found customer CustomerListID:', newCustomerId);
-        } else {
-          logger.warn('⚠️ Customer not found:', newCustomerName);
-        }
-      } else {
-        logger.warn('⚠️ No customer name found in record');
+        if (customer) newCustomerId = customer.CustomerListID;
       }
-      
-      // Get all scanned barcodes for this order, separated by SHIP (delivered) and RETURN (returned)
-      const shippedBarcodes = new Set(); // Barcodes being shipped (assigned to customer)
-      const returnedBarcodes = new Set(); // Barcodes being returned (unassigned from customer)
-      
-      // Helper function to determine if a scan is SHIP (delivered) or RETURN (returned)
-      const isDelivered = (mode, action) => {
-        const modeUpper = (mode || '').toString().toUpperCase();
-        const actionLower = (action || '').toString().toLowerCase();
-        
-        // SHIP mode = delivered
-        if (modeUpper === 'SHIP' || modeUpper === 'DELIVERY') return true;
-        // RETURN mode = returned
-        if (modeUpper === 'RETURN' || modeUpper === 'PICKUP') return false;
-        // Fallback to action field
-        if (actionLower === 'out') return true;
-        if (actionLower === 'in') return false;
-        // Default: if mode is not set, assume delivered (for backward compatibility)
-        return true;
-      };
-      
-      if (orderNumber) {
-        logger.debug('🔍 assignBottlesToCustomer: Looking for scans for order:', orderNumber, 'org:', organization?.id);
-        
-        const orderNumStr = String(orderNumber).trim();
-        
-        // Get scans from scans table - check mode to separate SHIP vs RETURN (order number as-is, no deriving)
-        // Note: scans table uses 'barcode_number', not 'bottle_barcode'
-        let scansQuery = supabase
-          .from('scans')
-          .select('barcode_number, "mode", action')
-          .eq('order_number', orderNumStr);
-        
-        // Add organization filter if available
-        if (organization?.id) {
-          scansQuery = scansQuery.eq('organization_id', organization.id);
-        }
-        
-        const { data: scans, error: scansError } = await scansQuery;
-        
-        if (scansError) {
-          logger.error('Error fetching scans:', scansError);
-        }
-        
-        if (scans && scans.length > 0) {
-          logger.debug(`✅ Found ${scans.length} scans for order ${orderNumber}`);
-          
-          // Process scans - if there are multiple scans for the same barcode, prioritize RETURN
-          const scanMap = new Map(); // Track the best scan for each barcode
-          
-          scans.forEach(scan => {
-            if (scan.barcode_number) {
-              const isDeliveredScan = isDelivered(scan.mode, scan.action);
-              const existing = scanMap.get(scan.barcode_number);
-              
-              // If we haven't seen this barcode, or if this is a RETURN and existing is SHIP, use this one
-              // RETURN takes precedence over SHIP (return is the most recent action)
-              if (!existing || (existing.isDelivered && !isDeliveredScan)) {
-                scanMap.set(scan.barcode_number, { mode: scan.mode, action: scan.action, isDelivered: isDeliveredScan });
-              }
-            }
-          });
-          
-          // Now add to the appropriate sets based on the best scan for each barcode
-          scanMap.forEach((scanInfo, barcode) => {
-            if (scanInfo.isDelivered) {
-              shippedBarcodes.add(barcode);
-              logger.debug(`📦 Added SHIPPED barcode from scans: ${barcode} (mode: ${scanInfo.mode}, action: ${scanInfo.action})`);
-            } else {
-              returnedBarcodes.add(barcode);
-              logger.debug(`📦 Added RETURNED barcode from scans: ${barcode} (mode: ${scanInfo.mode}, action: ${scanInfo.action})`);
-            }
-          });
-        } else {
-          logger.warn(`⚠️ No scans found for order ${orderNumber}`);
-        }
-        
-        // Also check bottle_scans table - check mode to separate SHIP vs RETURN (order number as-is)
-        // Note: bottle_scans uses 'bottle_barcode', not 'barcode_number' or 'cylinder_barcode'
-        let bottleScansQuery = supabase
-          .from('bottle_scans')
-          .select('bottle_barcode, mode')
-          .eq('order_number', orderNumStr);
-        
-        // Add organization filter if available
-        if (organization?.id) {
-          bottleScansQuery = bottleScansQuery.eq('organization_id', organization.id);
-        }
-        
-        const { data: bottleScans, error: bottleScansError } = await bottleScansQuery;
-        
-        if (bottleScansError) {
-          logger.error('Error fetching bottle_scans:', bottleScansError);
-        }
-        
-        if (bottleScans && bottleScans.length > 0) {
-          logger.debug(`✅ Found ${bottleScans.length} bottle_scans for order ${orderNumber}`);
-          
-          // Process bottle_scans - if there are multiple scans for the same barcode, prioritize RETURN
-          const bottleScanMap = new Map(); // Track the best scan for each barcode
-          
-          bottleScans.forEach(scan => {
-            if (scan.bottle_barcode) {
-              const isDeliveredScan = isDelivered(scan.mode, null);
-              const existing = bottleScanMap.get(scan.bottle_barcode);
-              
-              // If we haven't seen this barcode, or if this is a RETURN and existing is SHIP, use this one
-              // RETURN takes precedence over SHIP
-              if (!existing || (existing.isDelivered && !isDeliveredScan)) {
-                bottleScanMap.set(scan.bottle_barcode, { mode: scan.mode, isDelivered: isDeliveredScan });
-              }
-            }
-          });
-          
-          // Now add to the appropriate sets based on the best scan for each barcode
-          bottleScanMap.forEach((scanInfo, barcode) => {
-            if (scanInfo.isDelivered) {
-              shippedBarcodes.add(barcode);
-              logger.debug(`📦 Added SHIPPED barcode from bottle_scans: ${barcode} (mode: ${scanInfo.mode})`);
-            } else {
-              returnedBarcodes.add(barcode);
-              logger.debug(`📦 Added RETURNED barcode from bottle_scans: ${barcode} (mode: ${scanInfo.mode})`);
-            }
-          });
-        }
-      } else {
-        logger.warn('⚠️ No order number found in record data');
-      }
-      
-      // CRITICAL: Remove any barcodes from shippedBarcodes if they're also in returnedBarcodes
-      // RETURN always takes precedence over SHIP (return is the most recent action)
-      returnedBarcodes.forEach(barcode => {
-        if (shippedBarcodes.has(barcode)) {
-          shippedBarcodes.delete(barcode);
-          logger.debug(`🔄 Removed barcode ${barcode} from SHIPPED (RETURN takes precedence)`);
-        }
+
+      const { shippedBarcodes, returnedBarcodes } = await collectBarcodesForOrder(orderNumber);
+      logger.debug(`Collected barcodes for order ${orderNumber}: ${shippedBarcodes.size} SHIP, ${returnedBarcodes.size} RETURN`);
+
+      // Try transactional RPC first (does not mark import record - confirmApprove handles that)
+      const rpcResult = await bottleAssignmentService.assignBottles({
+        organizationId: organization?.id,
+        customerId: newCustomerId || newCustomerName,
+        customerName: newCustomerName,
+        shipBarcodes: Array.from(shippedBarcodes),
+        returnBarcodes: Array.from(returnedBarcodes),
       });
-      
-      logger.debug(`📦 Total SHIPPED barcodes: ${shippedBarcodes.size}`, Array.from(shippedBarcodes));
-      logger.debug(`📦 Total RETURNED barcodes: ${returnedBarcodes.size}`, Array.from(returnedBarcodes));
-      
-      const assignmentWarnings = [];
-      const assignmentSuccesses = [];
-      const processedBarcodes = new Set();
-      
-      // First, process RETURNED barcodes - unassign from customer
-      for (const barcode of returnedBarcodes) {
-        if (processedBarcodes.has(barcode)) continue;
-        processedBarcodes.add(barcode);
-        
-        const { data: bottles, error: bottleError } = await supabase
-          .from('bottles')
-          .select('*')
-          .eq('barcode_number', barcode)
-          .eq('organization_id', organization?.id)
-          .limit(1);
-          
-        if (bottleError) {
-          logger.error('Error finding bottle:', bottleError);
-          continue;
+
+      if (rpcResult.success) {
+        const d = rpcResult.data || {};
+        logger.debug(`RPC assignment succeeded: ${d.shipped || 0} shipped, ${d.returned || 0} returned, ${d.skipped || 0} skipped, ${d.created || 0} created`);
+        if (d.errors && d.errors.length > 0) {
+          logger.warn('RPC assignment warnings:', d.errors);
+          setSnackbar(`Bottles assigned (${d.shipped || 0} shipped, ${d.returned || 0} returned). ${d.errors.length} warning(s) - see logs.`);
         }
-        
-        if (bottles && bottles.length > 0) {
-          const bottle = bottles[0];
-          const currentCustomerName = bottle.assigned_customer || bottle.customer_name;
-          
-          if (currentCustomerName) {
-            // VALIDATION: Check if asset is on customer balance before processing return
-            const balanceCheck = await validateReturnBalance(bottle, orderNumber, organization);
-            
-            if (!balanceCheck.isOnBalance) {
-              // Asset was NOT on balance - create exception and mark as physically returned only
-              // DO NOT update customer assignment or rental records
-              const { error: statusUpdateError } = await supabase
-                .from('bottles')
-                .update({
-                  status: 'empty', // Mark as empty when returned
-                  last_location_update: new Date().toISOString()
-                  // NOTE: We intentionally do NOT unassign customer or update rental records
-                  // since the asset was not on balance
-                })
-                .eq('id', bottle.id)
-                .eq('organization_id', organization?.id);
-              
-              if (statusUpdateError) {
-                logger.error('Error updating bottle status:', statusUpdateError);
-                assignmentWarnings.push(`Failed to update status for bottle ${bottle.barcode_number}: ${statusUpdateError.message}`);
-              } else {
-                logger.debug(`✅ Asset ${bottle.barcode_number} marked as physically returned (no balance adjustment - exception created)`);
-                assignmentWarnings.push(`Bottle ${bottle.barcode_number} returned but was not on customer balance. Exception created. No credit given.`);
-              }
-              continue; // Skip normal return processing
-            }
-            
-            // NORMAL RETURN FLOW: Asset WAS on balance, proceed with standard return processing
-            // Unassign bottle from customer (return it)
-            // When returned, bottle should be marked as 'empty' (not 'available')
-            // User will use mobile app to mark it as 'filled' when refilled
-            const updateData = {
-              assigned_customer: null,
-              customer_name: null,
-              status: 'empty',  // Mark as empty when returned - user will mark as filled via mobile app
-              days_at_location: 0  // Reset days at location when returned
-            };
-            
-            const { error: updateError } = await supabase
-              .from('bottles')
-              .update(updateData)
-              .eq('id', bottle.id)
-              .eq('organization_id', organization?.id);
-            
-            if (updateError) {
-              logger.error('Error unassigning bottle:', updateError);
-              assignmentWarnings.push(`Failed to unassign bottle ${bottle.barcode_number}: ${updateError.message}`);
-            } else {
-              logger.debug(`✅ Unassigned bottle ${bottle.barcode_number} from customer ${currentCustomerName} (RETURN)`);
-              assignmentSuccesses.push(`Bottle ${bottle.barcode_number} returned from ${currentCustomerName}`);
-              
-              // Reset days_at_location using the utility function (handles last_location_update if it exists)
-              const resetResult = await resetDaysAtLocation(bottle.id);
-              if (resetResult.success) {
-                logger.debug(`✅ Reset days_at_location for bottle ${bottle.barcode_number}`);
-              } else {
-                logger.warn(`⚠️ Could not reset days_at_location for bottle ${bottle.barcode_number}: ${resetResult.error}`);
-              }
-              
-              // End rental record if it exists
-              const { data: activeRentals } = await supabase
-                .from('rentals')
-                .select('id')
-                .eq('bottle_barcode', barcode)
-                .eq('organization_id', organization?.id)
-                .is('rental_end_date', null)
-                .limit(1);
-              
-              if (activeRentals && activeRentals.length > 0) {
-                const { error: rentalError } = await supabase
-                  .from('rentals')
-                  .update({ rental_end_date: new Date().toISOString().split('T')[0] })
-                  .eq('id', activeRentals[0].id);
-                
-                if (rentalError) {
-                  logger.warn('Error ending rental:', rentalError);
-                } else {
-                  logger.debug(`✅ Ended rental for bottle ${bottle.barcode_number}`);
-                }
-              }
-            }
-          } else {
-            logger.debug(`ℹ️ Bottle ${bottle.barcode_number} is already unassigned (no customer)`);
-          }
-        } else {
-          logger.warn(`⚠️ Bottle not found for returned barcode: ${barcode}`);
-          assignmentWarnings.push(`Bottle not found: ${barcode}`);
-        }
+      } else {
+        logger.warn('RPC assignment failed, falling back to inline logic:', rpcResult.error);
+        await assignBottlesToCustomerInline(record, newCustomerName, newCustomerId, orderNumber, shippedBarcodes, returnedBarcodes, rows);
       }
-      
-      // Then, process SHIPPED barcodes - assign to customer
-      for (const barcode of shippedBarcodes) {
-        if (processedBarcodes.has(barcode)) continue;
-        processedBarcodes.add(barcode);
-        
-        const { data: bottles, error: bottleError } = await supabase
-          .from('bottles')
-          .select('*')
-          .eq('barcode_number', barcode)
-          .eq('organization_id', organization?.id)
-          .limit(1);
-          
-          if (bottleError) {
-            logger.error('Error finding bottle:', bottleError);
-            continue;
-          }
-          
-          if (bottles && bottles.length > 0) {
-            const bottle = bottles[0];
-            const currentCustomerName = bottle.assigned_customer || bottle.customer_name;
-            
-            // Check if bottle is at home (no customer assigned)
-            const isAtHome = !currentCustomerName || currentCustomerName === '' || currentCustomerName === null;
-            
-            // Check if the assigned_customer is a UUID or internal ID (incorrect assignment from previous attempt)
-            // UUIDs are typically 36 characters with hyphens, or internal IDs like "8000020B-1435161928S" (20 chars)
-            // CustomerListIDs that look like IDs from other systems often have this pattern
-            const looksLikeInternalId = currentCustomerName && (
-              (currentCustomerName.length >= 20 && currentCustomerName.includes('-') && /[A-F0-9]/.test(currentCustomerName)) ||
-              (currentCustomerName.length === 36 && currentCustomerName.split('-').length === 5)
-            );
-            const isAssignedToUUID = looksLikeInternalId;
-            
-            // Check if bottle is at a different customer (but not if it's wrongly assigned to a UUID)
-            const isAtDifferentCustomer = !isAtHome && !isAssignedToUUID && currentCustomerName !== newCustomerName;
-            
-            if (isAtHome || isAssignedToUUID) {
-              // Bottle is at home OR wrongly assigned to a UUID - assign/fix normally
-              if (isAssignedToUUID) {
-                logger.warn(`🔧 Fixing bottle ${bottle.barcode_number} - was assigned to UUID ${currentCustomerName}, reassigning to ${newCustomerName} (${newCustomerId})`);
-              }
-              
-              const updateData = {
-                assigned_customer: newCustomerId || newCustomerName,
-                customer_name: newCustomerName,
-                status: 'RENTED',
-                rental_start_date: new Date().toISOString().split('T')[0]
-              };
-              
-              const { error: updateError } = await supabase
-                .from('bottles')
-                .update(updateData)
-                .eq('id', bottle.id)
-                .eq('organization_id', organization?.id);
-              
-              if (updateError) {
-                logger.error('Error updating bottle:', updateError);
-                assignmentWarnings.push(`Failed to assign bottle ${bottle.barcode_number}: ${updateError.message}`);
-              } else {
-                logger.debug(`✅ Assigned bottle ${bottle.barcode_number} to customer ${newCustomerName} (${newCustomerId})`);
-                assignmentSuccesses.push(`Bottle ${bottle.barcode_number} assigned to ${newCustomerName}`);
-                
-                // Create rental record if it doesn't exist
-                await createRentalRecord(bottle, newCustomerName, null);
-              }
-            } else if (isAtDifferentCustomer) {
-              // Bottle is at a different customer - but we're verifying an order, so reassign it
-              // This handles cases where the bottle was incorrectly assigned or needs to be transferred
-              logger.warn(`⚠️ Bottle ${bottle.barcode_number} is at ${currentCustomerName}, reassigning to ${newCustomerName} per order verification`);
-              
-              const updateData = {
-                assigned_customer: newCustomerId || newCustomerName,
-                customer_name: newCustomerName,
-                status: 'RENTED',
-                rental_start_date: new Date().toISOString().split('T')[0]
-              };
-              
-              const { error: updateError } = await supabase
-                .from('bottles')
-                .update(updateData)
-                .eq('id', bottle.id)
-                .eq('organization_id', organization?.id);
-              
-              if (updateError) {
-                logger.error('Error reassigning bottle:', updateError);
-                assignmentWarnings.push(`Failed to reassign bottle ${bottle.barcode_number} from ${currentCustomerName} to ${newCustomerName}: ${updateError.message}`);
-              } else {
-                logger.debug(`✅ Reassigned bottle ${bottle.barcode_number} from ${currentCustomerName} to ${newCustomerName} (${newCustomerId})`);
-                assignmentSuccesses.push(`Bottle ${bottle.barcode_number} reassigned from ${currentCustomerName} to ${newCustomerName}`);
-                
-                // Create rental record if it doesn't exist
-                await createRentalRecord(bottle, newCustomerName, null);
-              }
-            } else {
-              // Already assigned to this customer - just log
-              logger.debug(`ℹ️ Bottle ${bottle.barcode_number} is already assigned to ${newCustomerName}`);
-            }
-          } else {
-            logger.warn(`⚠️ Bottle not found for scanned barcode: ${barcode}`);
-            assignmentWarnings.push(`Bottle not found: ${barcode}`);
-          }
-      }
-      
-      // Fallback: Process import rows if we didn't get barcodes from scans (for older imports)
-      for (const row of rows) {
-        // For shipped items (qty_out > 0), assign bottles to customer
-        if (row.qty_out > 0 && (row.product_code || row.bottle_barcode || row.barcode)) {
-          const barcode = row.bottle_barcode || row.barcode;
-          if (barcode && processedBarcodes.has(barcode)) continue; // Already processed
-          
-          // Find the bottle by barcode or product code
-          const bottleQuery = barcode
-            ? { barcode_number: barcode }
-            : { product_code: row.product_code };
-          
-          const { data: bottles, error: bottleError } = await supabase
-            .from('bottles')
-            .select('*')
-            .match(bottleQuery)
-            .eq('organization_id', organization?.id)
-            .limit(1);
-          
-          if (bottleError) {
-            logger.error('Error finding bottle:', bottleError);
-            continue;
-          }
-          
-          if (bottles && bottles.length > 0) {
-            const bottle = bottles[0];
-            if (barcode) processedBarcodes.add(barcode);
-            
-            const currentCustomerName = bottle.assigned_customer || bottle.customer_name;
-            
-            // Check if bottle is at home (no customer assigned)
-            const isAtHome = !currentCustomerName || currentCustomerName === '' || currentCustomerName === null;
-            
-            // Check if the assigned_customer is a UUID or internal ID (incorrect assignment from previous attempt)
-            // UUIDs are typically 36 characters with hyphens, or internal IDs like "8000020B-1435161928S" (20 chars)
-            // CustomerListIDs that look like IDs from other systems often have this pattern
-            const looksLikeInternalId = currentCustomerName && (
-              (currentCustomerName.length >= 20 && currentCustomerName.includes('-') && /[A-F0-9]/.test(currentCustomerName)) ||
-              (currentCustomerName.length === 36 && currentCustomerName.split('-').length === 5)
-            );
-            const isAssignedToUUID = looksLikeInternalId;
-            
-            // Check if bottle is at a different customer (but not if it's wrongly assigned to a UUID)
-            const isAtDifferentCustomer = !isAtHome && !isAssignedToUUID && currentCustomerName !== newCustomerName;
-            
-            if (isAtHome || isAssignedToUUID) {
-              // Bottle is at home OR wrongly assigned to a UUID - assign/fix normally
-              if (isAssignedToUUID) {
-                logger.warn(`🔧 Fixing bottle ${bottle.barcode_number} - was assigned to UUID ${currentCustomerName}, reassigning to ${newCustomerName} (${newCustomerId})`);
-              }
-              
-              const updateData = {
-                assigned_customer: newCustomerId || newCustomerName,
-                customer_name: newCustomerName,
-                status: 'RENTED',
-                rental_start_date: new Date().toISOString().split('T')[0]
-              };
-              
-              const { error: updateError } = await supabase
-                .from('bottles')
-                .update(updateData)
-                .eq('id', bottle.id)
-                .eq('organization_id', organization?.id);
-              
-              if (updateError) {
-                logger.error('Error updating bottle:', updateError);
-                assignmentWarnings.push(`Failed to assign bottle ${bottle.barcode_number}: ${updateError.message}`);
-              } else {
-                logger.debug(`✅ Assigned bottle ${bottle.barcode_number} to customer ${newCustomerName} (${newCustomerId})`);
-                assignmentSuccesses.push(`Bottle ${bottle.barcode_number} assigned to ${newCustomerName}`);
-                
-                // Create rental record if it doesn't exist
-                await createRentalRecord(bottle, newCustomerName, row);
-              }
-            } else if (isAtDifferentCustomer) {
-              // Bottle is at a different customer - but we're verifying an order, so reassign it
-              // This handles cases where the bottle was incorrectly assigned or needs to be transferred
-              logger.warn(`⚠️ Bottle ${bottle.barcode_number} is at ${currentCustomerName}, reassigning to ${newCustomerName} per order verification`);
-              
-              const updateData = {
-                assigned_customer: newCustomerId || newCustomerName,
-                customer_name: newCustomerName,
-                status: 'RENTED',
-                rental_start_date: new Date().toISOString().split('T')[0]
-              };
-              
-              const { error: updateError } = await supabase
-                .from('bottles')
-                .update(updateData)
-                .eq('id', bottle.id)
-                .eq('organization_id', organization?.id);
-              
-              if (updateError) {
-                logger.error('Error reassigning bottle:', updateError);
-                assignmentWarnings.push(`Failed to reassign bottle ${bottle.barcode_number} from ${currentCustomerName} to ${newCustomerName}: ${updateError.message}`);
-              } else {
-                logger.debug(`✅ Reassigned bottle ${bottle.barcode_number} from ${currentCustomerName} to ${newCustomerName} (${newCustomerId})`);
-                assignmentSuccesses.push(`Bottle ${bottle.barcode_number} reassigned from ${currentCustomerName} to ${newCustomerName}`);
-                
-                // Create rental record if it doesn't exist
-                await createRentalRecord(bottle, newCustomerName, row);
-              }
-            } else {
-              // Already assigned to this customer - just log
-              logger.debug(`ℹ️ Bottle ${bottle.barcode_number} is already assigned to ${newCustomerName}`);
-            }
-          } else {
-            logger.warn(`⚠️ Bottle not found for barcode: ${row.bottle_barcode || row.barcode || row.product_code}`);
-            assignmentWarnings.push(`Bottle not found: ${row.bottle_barcode || row.barcode || row.product_code}`);
-          }
-        }
-      }
-      
-      // DNS (Delivered Not Scanned): per Trackabout, DNS = Inv SHP − Trk SHP (delivered per invoice but not scanned)
+
+      // DNS (Delivered Not Scanned) records are not handled by the RPC
       for (const row of rows) {
         const invShipped = parseInt(row.qty_out || row.shipped || row.quantity || 0, 10);
         if (invShipped <= 0) continue;
@@ -7317,23 +6910,7 @@ export default function ImportApprovals() {
         const scannedOut = getScannedQty(orderNumber, productCode, 'out', record);
         const dnsCount = Math.max(0, invShipped - scannedOut);
         for (let i = 0; i < dnsCount; i++) {
-          await createDNSRentalRecord(record, row, newCustomerName, newCustomerId, orderNumber, assignmentSuccesses, assignmentWarnings);
-        }
-      }
-      
-      // Show summary messages
-      if (assignmentSuccesses.length > 0) {
-        logger.debug(`✅ Successfully assigned ${assignmentSuccesses.length} bottle(s)`);
-      }
-      
-      if (assignmentWarnings.length > 0) {
-        const warningMessage = `⚠️ ${assignmentWarnings.length} warning(s):\n${assignmentWarnings.join('\n')}`;
-        logger.warn(warningMessage);
-        // Optionally show warnings to user via snackbar
-        if (assignmentWarnings.length > 0 && assignmentSuccesses.length === 0) {
-          setError(warningMessage);
-        } else if (assignmentWarnings.length > 0) {
-          setSnackbar(`Assigned ${assignmentSuccesses.length} bottle(s). ${assignmentWarnings.length} warning(s) - see logs.`);
+          await createDNSRentalRecord(record, row, newCustomerName, newCustomerId, orderNumber);
         }
       }
     } catch (error) {
@@ -7342,15 +6919,117 @@ export default function ImportApprovals() {
     }
   }
 
+  // Fallback inline bottle assignment when the RPC is unavailable
+  async function assignBottlesToCustomerInline(record, newCustomerName, newCustomerId, orderNumber, shippedBarcodes, returnedBarcodes, rows) {
+    const assignmentWarnings = [];
+    const assignmentSuccesses = [];
+    const processedBarcodes = new Set();
+
+    for (const barcode of returnedBarcodes) {
+      if (processedBarcodes.has(barcode)) continue;
+      processedBarcodes.add(barcode);
+
+      const { data: bottles, error: bottleError } = await supabase
+        .from('bottles').select('*').eq('barcode_number', barcode).eq('organization_id', organization?.id).limit(1);
+      if (bottleError) { logger.error('Error finding bottle:', bottleError); continue; }
+      if (!bottles || bottles.length === 0) { assignmentWarnings.push(`Bottle not found: ${barcode}`); continue; }
+
+      const bottle = bottles[0];
+      const currentCustomer = bottle.assigned_customer || bottle.customer_name;
+      if (!currentCustomer) continue;
+
+      const balanceCheck = await validateReturnBalance(bottle, orderNumber, organization);
+      if (!balanceCheck.isOnBalance) {
+        await supabase.from('bottles').update({ status: 'empty', last_location_update: new Date().toISOString() }).eq('id', bottle.id);
+        assignmentWarnings.push(`Bottle ${bottle.barcode_number} returned but was not on customer balance.`);
+        continue;
+      }
+
+      const { error: updateError } = await supabase
+        .from('bottles')
+        .update({ assigned_customer: null, customer_name: null, status: 'empty', days_at_location: 0 })
+        .eq('id', bottle.id);
+      if (updateError) { assignmentWarnings.push(`Failed to unassign bottle ${bottle.barcode_number}`); continue; }
+
+      assignmentSuccesses.push(`Bottle ${bottle.barcode_number} returned from ${currentCustomer}`);
+      await resetDaysAtLocation(bottle.id);
+
+      const { data: activeRentals } = await supabase
+        .from('rentals').select('id').eq('bottle_barcode', barcode).eq('organization_id', organization?.id).is('rental_end_date', null).limit(1);
+      if (activeRentals?.length > 0) {
+        await supabase.from('rentals').update({ rental_end_date: new Date().toISOString().split('T')[0] }).eq('id', activeRentals[0].id);
+      }
+    }
+
+    for (const barcode of shippedBarcodes) {
+      if (processedBarcodes.has(barcode)) continue;
+      processedBarcodes.add(barcode);
+
+      const { data: bottles, error: bottleError } = await supabase
+        .from('bottles').select('*').eq('barcode_number', barcode).eq('organization_id', organization?.id).limit(1);
+      if (bottleError) { logger.error('Error finding bottle:', bottleError); continue; }
+      if (!bottles || bottles.length === 0) { assignmentWarnings.push(`Bottle not found: ${barcode}`); continue; }
+
+      const bottle = bottles[0];
+      const currentCustomer = bottle.assigned_customer || bottle.customer_name;
+      const isAtHome = !currentCustomer;
+      const isSameCustomer = currentCustomer === newCustomerName || currentCustomer === newCustomerId;
+
+      if (isAtHome || !isSameCustomer) {
+        const { error: updateError } = await supabase
+          .from('bottles')
+          .update({ assigned_customer: newCustomerId || newCustomerName, customer_name: newCustomerName, status: 'rented', rental_start_date: new Date().toISOString().split('T')[0] })
+          .eq('id', bottle.id);
+        if (updateError) { assignmentWarnings.push(`Failed to assign bottle ${bottle.barcode_number}`); continue; }
+        assignmentSuccesses.push(`Bottle ${bottle.barcode_number} assigned to ${newCustomerName}`);
+        await createRentalRecord(bottle, newCustomerName, newCustomerId, null);
+      } else if (isSameCustomer && bottle.status !== 'rented') {
+        await supabase.from('bottles').update({ status: 'rented' }).eq('id', bottle.id);
+        assignmentSuccesses.push(`Bottle ${bottle.barcode_number} status corrected to rented`);
+        await createRentalRecord(bottle, newCustomerName, newCustomerId, null);
+      }
+    }
+
+    // Fallback: process import rows for items without scan barcodes
+    for (const row of rows) {
+      if (row.qty_out > 0 && (row.product_code || row.bottle_barcode || row.barcode)) {
+        const barcode = row.bottle_barcode || row.barcode;
+        if (barcode && processedBarcodes.has(barcode)) continue;
+        const bottleQuery = barcode ? { barcode_number: barcode } : { product_code: row.product_code };
+        const { data: bottles } = await supabase.from('bottles').select('*').match(bottleQuery).eq('organization_id', organization?.id).limit(1);
+        if (bottles?.length > 0) {
+          const bottle = bottles[0];
+          if (barcode) processedBarcodes.add(barcode);
+          const currentCustomer = bottle.assigned_customer || bottle.customer_name;
+          const isSameCustomer = currentCustomer === newCustomerName || currentCustomer === newCustomerId;
+          if (!currentCustomer || !isSameCustomer) {
+            await supabase.from('bottles').update({ assigned_customer: newCustomerId || newCustomerName, customer_name: newCustomerName, status: 'rented' }).eq('id', bottle.id);
+            assignmentSuccesses.push(`Bottle ${bottle.barcode_number} assigned to ${newCustomerName}`);
+            await createRentalRecord(bottle, newCustomerName, newCustomerId, row);
+          } else if (isSameCustomer && bottle.status !== 'rented') {
+            await supabase.from('bottles').update({ status: 'rented' }).eq('id', bottle.id);
+            await createRentalRecord(bottle, newCustomerName, newCustomerId, row);
+          }
+        }
+      }
+    }
+
+    if (assignmentSuccesses.length > 0) logger.debug(`Inline: assigned ${assignmentSuccesses.length} bottle(s)`);
+    if (assignmentWarnings.length > 0) {
+      logger.warn(`Inline: ${assignmentWarnings.length} warning(s):`, assignmentWarnings);
+      setSnackbar(`Assigned ${assignmentSuccesses.length} bottle(s). ${assignmentWarnings.length} warning(s) - see logs.`);
+    }
+  }
+
 
   // Create rental record for assigned bottle
-  async function createRentalRecord(bottle, customerName, row) {
+  async function createRentalRecord(bottle, customerName, customerId, row) {
     try {
-      // Check if rental record already exists
       const { data: existingRental } = await supabase
         .from('rentals')
         .select('id')
         .eq('bottle_barcode', bottle.barcode_number)
+        .eq('organization_id', organization?.id)
         .is('rental_end_date', null)
         .limit(1);
 
@@ -7359,17 +7038,17 @@ export default function ImportApprovals() {
         return;
       }
 
-      // Create new rental record
       const { error: rentalError } = await supabase
         .from('rentals')
         .insert({
+          organization_id: organization?.id,
           bottle_id: bottle.id,
           bottle_barcode: bottle.barcode_number,
-          customer_id: customerName,
+          customer_id: customerId || customerName,
           customer_name: customerName,
           rental_start_date: new Date().toISOString().split('T')[0],
           rental_end_date: null,
-          rental_amount: 10, // Default rental amount
+          rental_amount: 10,
           rental_type: 'monthly',
           tax_code: 'GST+PST',
           tax_rate: 0.11,
@@ -7382,7 +7061,7 @@ export default function ImportApprovals() {
       if (rentalError) {
         logger.error('Error creating rental record:', rentalError);
       } else {
-        logger.debug(`✅ Created rental record for bottle ${bottle.barcode_number}`);
+        logger.debug(`Created rental record for bottle ${bottle.barcode_number}, customer_id: ${customerId || customerName}`);
       }
     } catch (error) {
       logger.error('Error creating rental record:', error);

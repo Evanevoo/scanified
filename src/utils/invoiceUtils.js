@@ -5,14 +5,33 @@ import { supabase } from '../supabase/client';
 import logger from './logger';
 
 /**
- * Reserve a block of sequential invoice numbers from invoice_settings.
- * Atomically fetches next_invoice_number, returns count numbers, and increments.
+ * Reserve a block of sequential invoice numbers atomically via database RPC.
+ * Uses a single UPDATE...RETURNING to prevent race conditions.
  * @param {string} organizationId
  * @param {number} count - Number of invoice numbers to reserve
  * @returns {Promise<string[]>} Array of formatted invoice numbers (e.g. ['W00001','W00002',...])
  */
 export async function getNextInvoiceNumbers(organizationId, count) {
   if (!organizationId || count < 1) return [];
+  try {
+    const { data: numbers, error } = await supabase.rpc('reserve_invoice_numbers', {
+      p_organization_id: organizationId,
+      p_count: count,
+    });
+
+    if (error) throw error;
+    if (numbers && numbers.length > 0) return numbers;
+
+    // Fallback if RPC not yet deployed
+    logger.warn('reserve_invoice_numbers RPC returned empty, using fallback');
+    return fallbackGetNextInvoiceNumbers(organizationId, count);
+  } catch (err) {
+    logger.error('getNextInvoiceNumbers RPC error, using fallback:', err);
+    return fallbackGetNextInvoiceNumbers(organizationId, count);
+  }
+}
+
+async function fallbackGetNextInvoiceNumbers(organizationId, count) {
   try {
     let { data: settings, error } = await supabase
       .from('invoice_settings')
@@ -69,7 +88,7 @@ export async function getNextInvoiceNumbers(organizationId, count) {
     }
     return numbers;
   } catch (err) {
-    logger.error('getNextInvoiceNumbers error:', err);
+    logger.error('fallbackGetNextInvoiceNumbers error:', err);
     return [];
   }
 }

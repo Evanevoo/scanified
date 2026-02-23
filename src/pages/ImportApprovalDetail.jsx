@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Button, Grid, List, ListItem, ListItemText, Divider, Alert, Chip, IconButton, Tooltip, Card, CardContent, CardHeader, Accordion, AccordionSummary, AccordionDetails, Badge, Dialog, DialogTitle, DialogContent, DialogActions, TextField, FormControl, InputLabel, Select, MenuItem, Checkbox } from '@mui/material';
 import { ExpandMore as ExpandMoreIcon, Person as PersonIcon, Receipt as ReceiptIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon } from '@mui/icons-material';
 import { CardSkeleton } from '../components/SmoothLoading';
+import { bottleAssignmentService } from '../services/bottleAssignmentService';
 
 // Enhanced data parsing with better error handling
 function parseDataField(data) {
@@ -1031,7 +1032,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             const updateData = {
               assigned_customer: newCustomerId || newCustomerName,
               customer_name: newCustomerName,
-              status: 'RENTED',
+              status: 'rented',
               rental_start_date: new Date().toISOString().split('T')[0],
               rental_order_number: orderNumber,
               updated_at: new Date().toISOString()
@@ -1259,52 +1260,86 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     try {
       switch (action) {
         case 'Verify This Record': {
-          // Get the original database ID (handle split records)
           const originalId = getOriginalId(invoiceNumber);
-          
-          // Skip database update for scanned-only records
-          if (!isScannedOnly && originalId) {
-            // Convert to numeric ID if it's a string
-            let recordId = originalId;
-            if (typeof originalId === 'string') {
-              const numericPart = originalId.match(/\d+/);
-              recordId = numericPart ? parseInt(numericPart[0], 10) : originalId;
+
+          // Collect barcodes from scans
+          const importData = importRecord?.data || {};
+          const scannedItems = importData.scannedItems || importData.items || [];
+          const shipBarcodes = [];
+          const returnBarcodes = [];
+
+          // Get scans from bottle_scans/scans tables for this order
+          const orderNum = importData.order_number || importData.invoice_number || invoiceNumber;
+          const { data: scanRecords } = await supabase
+            .from('bottle_scans')
+            .select('bottle_barcode, mode')
+            .eq('organization_id', organization?.id)
+            .eq('order_number', orderNum);
+
+          if (scanRecords) {
+            for (const scan of scanRecords) {
+              if (scan.mode === 'SHIP' || scan.mode === 'DELIVERY') {
+                shipBarcodes.push(scan.bottle_barcode);
+              } else if (scan.mode === 'RETURN' || scan.mode === 'PICKUP') {
+                returnBarcodes.push(scan.bottle_barcode);
+              }
             }
-            
-            // 1. Update imported_invoices status
-            const { error: updateError } = await supabase
-              .from('imported_invoices')
-              .update({ 
-                status: 'approved', 
-                approved_at: new Date().toISOString() 
-              })
-              .eq('id', recordId);
-            
-            if (updateError) {
-              logger.error('Error updating record status:', updateError);
-              setActionMessage(`Error updating record: ${updateError.message}`);
+          }
+
+          const customerName = importData.customer_name || importData.customer || '';
+          const customerId = importData.customer_id || importData.CustomerListID || customerName;
+
+          let recordId = originalId;
+          if (typeof originalId === 'string') {
+            const numericPart = originalId.match(/\d+/);
+            recordId = numericPart ? parseInt(numericPart[0], 10) : originalId;
+          }
+
+          // Use the transactional RPC — assignment + status update in one transaction
+          try {
+            const result = await bottleAssignmentService.assignBottles({
+              organizationId: organization?.id,
+              customerId,
+              customerName,
+              shipBarcodes,
+              returnBarcodes,
+              importRecordId: (!isScannedOnly && recordId) ? recordId : null,
+              importTable: 'imported_invoices',
+            });
+
+            if (!result.success) {
+              setActionMessage(`Verification failed: ${result.error}`);
               return;
             }
-            
-            logger.log(`✅ Updated record ${recordId} status to approved`);
-          }
 
-          // 2. Assign bottles to customers using the proper function
-          try {
-            const result = await assignBottlesToCustomer(importRecord);
-            if (result.warnings.length > 0 && result.successes.length === 0) {
-              setActionMessage(`Warning: ${result.warnings.join('; ')}`);
-            } else if (result.successes.length > 0) {
-              setActionMessage(`Record verified successfully! ${result.successes.length} bottle(s) assigned.`);
+            const d = result.data || {};
+            const totalAssigned = (d.shipped || 0) + (d.returned || 0) + (d.created || 0);
+            const skipped = d.skipped || 0;
+            const errors = d.errors || [];
+
+            if (errors.length > 0 && totalAssigned === 0) {
+              setActionMessage(`Warning: ${errors.join('; ')}`);
             } else {
-              setActionMessage('Record verified successfully!');
+              setActionMessage(
+                `Record verified successfully! ${totalAssigned} bottle(s) processed` +
+                (skipped > 0 ? `, ${skipped} skipped` : '') +
+                (errors.length > 0 ? ` (${errors.length} warnings)` : '')
+              );
             }
           } catch (assignError) {
-            logger.error('Error assigning bottles:', assignError);
-            setActionMessage(`Record verified but bottle assignment failed: ${assignError.message}`);
+            logger.error('Error during verification:', assignError);
+            setActionMessage(`Verification failed: ${assignError.message}`);
+            return;
           }
 
-          // Navigate back to approvals list after successful verification
+          // If scanned-only (no import record), manually mark as approved
+          if (isScannedOnly && recordId) {
+            await supabase
+              .from('imported_invoices')
+              .update({ status: 'approved', approved_at: new Date().toISOString() })
+              .eq('id', recordId);
+          }
+
           setTimeout(() => navigate('/import-approvals'), 2000);
           break;
         }
@@ -1330,6 +1365,26 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             return;
           }
           const recordId = typeof originalId === 'string' && originalId.match(/\d+/) ? parseInt(originalId.match(/\d+/)[0], 10) : originalId;
+
+          // Use the transactional RPC to reverse bottle assignments + delete DNS records
+          try {
+            const unverifyResult = await bottleAssignmentService.unverifyOrder({
+              importRecordId: recordId,
+              importTable: 'imported_invoices',
+              organizationId: organization?.id,
+            });
+
+            if (!unverifyResult.success) {
+              logger.warn('RPC unverify warning:', unverifyResult.error);
+            } else {
+              const ud = unverifyResult.data || {};
+              logger.log(`Unverify RPC: ${ud.bottles_restored || 0} bottles restored, ${ud.dns_records_deleted || 0} DNS records deleted`);
+            }
+          } catch (rpcErr) {
+            logger.warn('Unverify RPC not available, falling back to status-only update:', rpcErr);
+          }
+
+          // Also update the import record data (verified_order_numbers tracking)
           const { data: existingRow, error: fetchErr } = await supabase
             .from('imported_invoices')
             .select('id, data, status')
@@ -1373,7 +1428,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 .in('id', scansList.map(s => s.id));
             }
           }
-          setActionMessage('Record unverified. It will appear in pending again.');
+          setActionMessage('Record unverified. Bottle assignments have been reversed.');
           setImportRecord({ ...existingRow, data: newData, status: allOrdersVerified ? 'pending' : existingRow.status });
           setTimeout(() => navigate('/import-approvals', { state: { refetch: true } }), 1500);
           break;

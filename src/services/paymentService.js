@@ -1,12 +1,17 @@
 import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 
-// Stripe configuration (use Vite's import.meta.env for environment variables)
 const STRIPE_PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
-const STRIPE_SECRET_KEY = import.meta.env.VITE_STRIPE_SECRET_KEY;
+
+async function getAuthHeaders() {
+  const { data: { session } } = await supabase.auth.getSession();
+  return {
+    'Content-Type': 'application/json',
+    ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+  };
+}
 
 export const paymentService = {
-  // Initialize Stripe
   async initializeStripe() {
     if (typeof window !== 'undefined' && !window.Stripe) {
       const { loadStripe } = await import('@stripe/stripe-js');
@@ -15,14 +20,11 @@ export const paymentService = {
     return window.Stripe(STRIPE_PUBLISHABLE_KEY);
   },
 
-  // Create a payment intent for one-time payments
   async createPaymentIntent(amount, currency = 'usd', metadata = {}) {
     try {
       const response = await fetch('/.netlify/functions/create-payment-intent', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           amount,
           currency,
@@ -38,14 +40,11 @@ export const paymentService = {
     }
   },
 
-  // Create a subscription
   async createSubscription(priceId, customerId, metadata = {}) {
     try {
       const response = await fetch('/.netlify/functions/create-subscription', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           priceId,
           customerId,
@@ -145,14 +144,11 @@ export const paymentService = {
     }
   },
 
-  // Create Stripe customer
   async createStripeCustomer(organization) {
     try {
       const response = await fetch('/.netlify/functions/create-customer', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           name: organization.name,
           email: organization.email,
@@ -184,7 +180,8 @@ export const paymentService = {
         return [];
       }
 
-      const response = await fetch(`/.netlify/functions/get-payment-methods?customerId=${organization.stripe_customer_id}`);
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/.netlify/functions/get-payment-methods?customerId=${organization.stripe_customer_id}`, { headers });
       const result = await response.json();
       return result.paymentMethods || [];
     } catch (error) {
@@ -193,7 +190,6 @@ export const paymentService = {
     }
   },
 
-  // Cancel subscription
   async cancelSubscription(organizationId) {
     try {
       const { data: organization } = await supabase
@@ -208,9 +204,7 @@ export const paymentService = {
 
       const response = await fetch('/.netlify/functions/cancel-subscription', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           subscriptionId: organization.stripe_subscription_id
         }),
@@ -249,7 +243,8 @@ export const paymentService = {
         return [];
       }
 
-      const response = await fetch(`/.netlify/functions/get-invoices?customerId=${organization.stripe_customer_id}`);
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/.netlify/functions/get-invoices?customerId=${organization.stripe_customer_id}`, { headers });
       const result = await response.json();
       return result.invoices || [];
     } catch (error) {

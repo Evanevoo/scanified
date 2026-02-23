@@ -176,7 +176,6 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
     }
 
     try {
-      // Calculate invoice data (simplified version of InvoiceGenerator logic)
       const startDate = new Date(formData.period_start);
       const endDate = new Date(formData.period_end);
       const startMonth = startDate.getMonth();
@@ -184,9 +183,11 @@ export default function BulkInvoiceEmailDialog({ open, onClose, customers }) {
       const endMonth = endDate.getMonth();
       const endYear = endDate.getFullYear();
       const rentalMonths = (endYear - startYear) * 12 + (endMonth - startMonth) + 1;
-      const monthlyRate = 10;
-      const numBottles = rentals.length;
-      const subtotal = numBottles * monthlyRate * rentalMonths;
+      const defaultMonthlyRate = 10;
+      const subtotal = rentals.reduce((sum, r) => {
+        const rate = parseFloat(r.rental_amount) > 0 ? parseFloat(r.rental_amount) : defaultMonthlyRate;
+        return sum + rate * rentalMonths;
+      }, 0);
       
       // Get tax rate from location
       let taxRate = invoiceTemplate?.tax_rate || 0.11;

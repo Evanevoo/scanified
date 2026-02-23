@@ -73,7 +73,7 @@ export default function DNSConversionDialog({ dnsRental, customerId, customerNam
         .update({
           assigned_customer: customerId,
           customer_name: customerName,
-          status: 'RENTED',
+          status: 'rented',
           rental_start_date: dnsRental.rental_start_date || new Date().toISOString().split('T')[0]
         })
         .eq('id', bottle.id);
