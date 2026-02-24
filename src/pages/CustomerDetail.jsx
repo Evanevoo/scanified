@@ -94,6 +94,14 @@ export default function CustomerDetail() {
 
   // Combine physical bottles with DNS (Delivered Not Scanned) so total count is visible
   const dnsRentals = useMemo(() => (locationAssets || []).filter(r => r.is_dns), [locationAssets]);
+  const dnsSummaryByType = useMemo(() => {
+    const byType = {};
+    (dnsRentals || []).forEach(r => {
+      const type = r.dns_product_code || r.product_code || 'DNS';
+      byType[type] = (byType[type] || 0) + 1;
+    });
+    return byType;
+  }, [dnsRentals]);
   const displayBottleList = useMemo(() => {
     const physical = (customerAssets || []).map(a => ({ ...a, isDns: false }));
     const dnsRows = dnsRentals.map(r => ({
@@ -171,31 +179,71 @@ export default function CustomerDetail() {
         });
         setBottleSummary(summary);
         
-        // Get all rentals -- match by CustomerListID first, then also by name
-        // (older records may have customer_name stored in customer_id field)
-        const orgId = customerData.organization_id;
-        const { data: rentalById, error: rentalErr1 } = await supabase
+        // Get all rentals (active only). Match by customer_id (CustomerListID) and by customer_name so we don't miss any.
+        const { data: rentalById, error: rentalError } = await supabase
           .from('rentals')
           .select('*')
           .eq('customer_id', id)
-          .eq('organization_id', orgId)
+          .eq('organization_id', customerData.organization_id)
           .is('rental_end_date', null);
-        if (rentalErr1) throw rentalErr1;
-
-        const { data: rentalByName, error: rentalErr2 } = await supabase
+        if (rentalError) throw rentalError;
+        // Also fetch by customer_name (all active, not just DNS) in case rentals were stored with name instead of ID
+        const { data: rentalByName, error: rentalByNameError } = await supabase
           .from('rentals')
           .select('*')
           .eq('customer_name', customerData.name)
-          .eq('organization_id', orgId)
+          .eq('organization_id', customerData.organization_id)
           .is('rental_end_date', null);
-        if (rentalErr2) throw rentalErr2;
-
-        const seenIds = new Set((rentalById || []).map(r => r.id));
-        const combined = [...(rentalById || [])];
-        for (const r of (rentalByName || [])) {
-          if (!seenIds.has(r.id)) combined.push(r);
+        const seen = new Set((rentalById || []).map(r => r.id));
+        const merged = [...(rentalById || [])];
+        if (!rentalByNameError && rentalByName?.length) {
+          rentalByName.forEach(r => { if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); } });
         }
-        setLocationAssets(combined);
+        // Backfill: assigned bottles with no rental record (e.g. assigned before rental creation was enforced)
+        const bottleIdsWithRental = new Set(merged.map(r => r.bottle_id).filter(Boolean));
+        const barcodesWithRental = new Set(merged.map(r => r.bottle_barcode).filter(Boolean));
+        const bottlesWithoutRental = (customerAssetsData || []).filter(b => {
+          const hasById = b.id && bottleIdsWithRental.has(b.id);
+          const barcode = b.barcode_number || b.barcode;
+          const hasByBarcode = barcode && barcodesWithRental.has(barcode);
+          return !hasById && !hasByBarcode;
+        });
+        if (bottlesWithoutRental.length > 0) {
+          for (const bottle of bottlesWithoutRental) {
+            const barcode = bottle.barcode_number || bottle.barcode;
+            await supabase.from('rentals').insert({
+              organization_id: customerData.organization_id,
+              customer_id: id,
+              customer_name: customerData.name,
+              bottle_id: bottle.id,
+              bottle_barcode: barcode,
+              rental_start_date: bottle.rental_start_date || new Date().toISOString().split('T')[0],
+              rental_end_date: null,
+              rental_amount: 10,
+              rental_type: 'monthly',
+              tax_rate: 0.11,
+              location: bottle.location || 'SASKATOON',
+              status: 'active',
+              is_dns: false,
+            });
+          }
+          const { data: refetched } = await supabase
+            .from('rentals')
+            .select('*')
+            .eq('customer_id', id)
+            .eq('organization_id', customerData.organization_id)
+            .is('rental_end_date', null);
+          if (refetched?.length) {
+            const seen2 = new Set(refetched.map(r => r.id));
+            const merged2 = [...refetched];
+            (rentalByName || []).forEach(r => { if (!seen2.has(r.id)) { seen2.add(r.id); merged2.push(r); } });
+            setLocationAssets(merged2);
+          } else {
+            setLocationAssets(merged);
+          }
+        } else {
+          setLocationAssets(merged);
+        }
       } catch (err) {
         setError(err.message);
       }
@@ -771,7 +819,7 @@ export default function CustomerDetail() {
                 </Select>
               </FormControl>
             ) : (
-              <Typography variant="body1" sx={{ mb: 2 }}>
+              <Typography component="div" variant="body1" sx={{ mb: 2 }}>
                 <Chip 
                   label={customer.customer_type || 'CUSTOMER'} 
                   color={
@@ -800,7 +848,7 @@ export default function CustomerDetail() {
                 </Select>
               </FormControl>
             ) : (
-              <Typography variant="body1" sx={{ mb: 2 }}>
+              <Typography component="div" variant="body1" sx={{ mb: 2 }}>
                 <Chip 
                   label={customer.location || 'SASKATOON'} 
                   color="primary" 
@@ -1028,6 +1076,21 @@ export default function CustomerDetail() {
                   }}
                 />
               ))}
+              {Object.entries(dnsSummaryByType).map(([type, count]) => (
+                <Chip
+                  key={`dns-${type}`}
+                  label={`${type} DNS (${count})`}
+                  color="secondary"
+                  variant="outlined"
+                  sx={{ 
+                    fontWeight: 600, 
+                    fontSize: '1rem',
+                    px: 2,
+                    py: 1,
+                    borderRadius: 2
+                  }}
+                />
+              ))}
             </Box>
             <Typography variant="body2" color="text.secondary" mt={2}>
               Total bottles: {totalBottleCount} ({customerAssets.length} physical{dnsRentals.length > 0 ? ` + ${dnsRentals.length} DNS` : ''})
@@ -1067,37 +1130,43 @@ export default function CustomerDetail() {
                   </Button>
                 </Tooltip>
                 <Tooltip title={selectedAssets.length === 0 ? "Select assets to transfer" : `Transfer ${selectedAssets.length} selected asset(s) to customer`}>
-                  <Button
-                    onClick={() => handleOpenTransferDialog(false)}
-                    disabled={selectedAssets.length === 0 || transferLoading}
-                    startIcon={transferLoading ? <CircularProgress size={16} /> : <TransferWithinAStationIcon />}
-                    color="primary"
-                  >
-                    Transfer ({selectedAssets.length})
-                  </Button>
+                  <span style={{ display: 'inline-flex' }}>
+                    <Button
+                      onClick={() => handleOpenTransferDialog(false)}
+                      disabled={selectedAssets.length === 0 || transferLoading}
+                      startIcon={transferLoading ? <CircularProgress size={16} /> : <TransferWithinAStationIcon />}
+                      color="primary"
+                    >
+                      Transfer ({selectedAssets.length})
+                    </Button>
+                  </span>
                 </Tooltip>
               </ButtonGroup>
               
               <ButtonGroup variant="outlined" size="small">
                 <Tooltip title="Quick transfer to recent customers">
-                  <Button
-                    onClick={() => handleOpenTransferDialog(true)}
-                    disabled={selectedAssets.length === 0 || transferLoading}
-                    startIcon={<SpeedIcon />}
-                    color="secondary"
-                  >
-                    Quick Transfer
-                  </Button>
+                  <span style={{ display: 'inline-flex' }}>
+                    <Button
+                      onClick={() => handleOpenTransferDialog(true)}
+                      disabled={selectedAssets.length === 0 || transferLoading}
+                      startIcon={<SpeedIcon />}
+                      color="secondary"
+                    >
+                      Quick Transfer
+                    </Button>
+                  </span>
                 </Tooltip>
                 <Tooltip title="Return assets to warehouse/in-house">
-                  <Button
-                    onClick={handleTransferToWarehouse}
-                    disabled={selectedAssets.length === 0 || transferLoading}
-                    startIcon={<WarehouseIcon />}
-                    color="warning"
-                  >
-                    To Warehouse ({selectedAssets.length})
-                  </Button>
+                  <span style={{ display: 'inline-flex' }}>
+                    <Button
+                      onClick={handleTransferToWarehouse}
+                      disabled={selectedAssets.length === 0 || transferLoading}
+                      startIcon={<WarehouseIcon />}
+                      color="warning"
+                    >
+                      To Warehouse ({selectedAssets.length})
+                    </Button>
+                  </span>
                 </Tooltip>
               </ButtonGroup>
 
@@ -1323,18 +1392,27 @@ export default function CustomerDetail() {
                             customerId={customer?.CustomerListID}
                             customerName={customer?.name}
                             onConverted={() => {
-                              // Reload data
-                              const fetchData = async () => {
-                                const { data: rentalData, error: rentalError } = await supabase
+                              // Reload rentals (same as initial load: by customer_id and by customer_name for DNS)
+                              const loadRentals = async () => {
+                                const { data: rentalById } = await supabase
                                   .from('rentals')
                                   .select('*')
                                   .eq('customer_id', id)
+                                  .eq('organization_id', customer?.organization_id)
                                   .is('rental_end_date', null);
-                                if (!rentalError) {
-                                  setLocationAssets(rentalData || []);
-                                }
+                                const { data: rentalByName } = await supabase
+                                  .from('rentals')
+                                  .select('*')
+                                  .eq('customer_name', customer?.name)
+                                  .eq('organization_id', customer?.organization_id)
+                                  .is('rental_end_date', null)
+                                  .eq('is_dns', true);
+                                const seen = new Set((rentalById || []).map(r => r.id));
+                                const merged = [...(rentalById || [])];
+                                (rentalByName || []).forEach(r => { if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); } });
+                                setLocationAssets(merged);
                               };
-                              fetchData();
+                              loadRentals();
                             }}
                           />
                         )}

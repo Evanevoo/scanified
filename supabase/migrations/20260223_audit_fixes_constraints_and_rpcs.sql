@@ -22,6 +22,19 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- 2b. Ensure bottles.updated_at exists (RPCs and triggers may reference it)
+-- ---------------------------------------------------------------------------
+ALTER TABLE bottles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+-- Ensure rentals.updated_at and rentals.bottle_barcode exist (return_bottles_to_warehouse, assign_bottles_to_customer)
+ALTER TABLE rentals ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE rentals ADD COLUMN IF NOT EXISTS bottle_barcode TEXT;
+-- Ensure scans has columns used by RPC audit trail inserts
+ALTER TABLE scans ADD COLUMN IF NOT EXISTS scanned_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE scans ADD COLUMN IF NOT EXISTS scanned_by UUID;
+ALTER TABLE scans ADD COLUMN IF NOT EXISTS mode TEXT;
+ALTER TABLE scans ADD COLUMN IF NOT EXISTS order_number TEXT;
+
+-- ---------------------------------------------------------------------------
 -- 3. Add CHECK constraint on rental_invoices.status
 -- ---------------------------------------------------------------------------
 DO $$
@@ -225,9 +238,9 @@ BEGIN
       AND bottle_id IS DISTINCT FROM v_bottle.id;
 
     INSERT INTO scans (
-      organization_id, barcode_number, location, scanned_by, scanned_at, created_at, mode
+      organization_id, barcode_number, location, scanned_by, scanned_at, created_at, mode, action
     ) VALUES (
-      p_organization_id, v_bottle.barcode_number, 'Warehouse', p_user_id, NOW(), NOW(), 'RETURN'
+      p_organization_id, v_bottle.barcode_number, 'Warehouse', p_user_id, NOW(), NOW(), 'RETURN', 'in'
     );
   END LOOP;
 
@@ -332,9 +345,9 @@ BEGIN
         AND (bottle_id = v_bottle.id OR bottle_barcode = v_barcode);
 
       INSERT INTO scans (
-        organization_id, barcode_number, location, scanned_by, scanned_at, created_at, mode
+        organization_id, barcode_number, location, scanned_by, scanned_at, created_at, mode, action
       ) VALUES (
-        p_organization_id, v_barcode, 'Warehouse', p_user_id, NOW(), NOW(), 'RETURN'
+        p_organization_id, v_barcode, 'Warehouse', p_user_id, NOW(), NOW(), 'RETURN', 'in'
       );
 
       v_returned := v_returned + 1;
@@ -376,9 +389,9 @@ BEGIN
           );
 
           INSERT INTO scans (
-            organization_id, barcode_number, location, scanned_by, scanned_at, created_at, mode, order_number
+            organization_id, barcode_number, location, scanned_by, scanned_at, created_at, mode, action, order_number
           ) VALUES (
-            p_organization_id, v_barcode, p_customer_name, p_user_id, NOW(), NOW(), 'SHIP', NULL
+            p_organization_id, v_barcode, p_customer_name, p_user_id, NOW(), NOW(), 'SHIP', 'out', NULL
           );
 
           v_shipped := v_shipped + 1;
@@ -404,32 +417,8 @@ BEGIN
           'Bottle ' || v_barcode || ' already assigned to ' || COALESCE(v_bottle.customer_name, v_bottle.assigned_customer));
       END IF;
     ELSE
-      -- Auto-create bottle if it doesn't exist
-      INSERT INTO bottles (
-        organization_id, barcode_number, serial_number,
-        assigned_customer, customer_name, status,
-        created_at, updated_at
-      ) VALUES (
-        p_organization_id, v_barcode, v_barcode,
-        p_customer_id, p_customer_name, 'rented',
-        NOW(), NOW()
-      )
-      ON CONFLICT (barcode_number) DO NOTHING;
-
-      IF FOUND THEN
-        -- Create rental for auto-created bottle
-        INSERT INTO rentals (
-          organization_id, customer_id, bottle_barcode,
-          rental_start_date, rental_amount, tax_rate, rental_type,
-          created_at, updated_at
-        ) VALUES (
-          p_organization_id, p_customer_id, v_barcode,
-          CURRENT_DATE, p_default_rental_amount, p_default_tax_rate, 'monthly',
-          NOW(), NOW()
-        );
-
-        v_created := v_created + 1;
-      END IF;
+      -- Do not auto-create bottles; barcode must exist to prevent phantom/duplicate assignments
+      v_errors := array_append(v_errors, 'Bottle not found (add in Bottle Management first): ' || v_barcode);
     END IF;
   END LOOP;
 

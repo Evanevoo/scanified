@@ -34,6 +34,7 @@ export const bottleAssignmentService = {
     importTable = 'imported_invoices',
     defaultRentalAmount = 10,
     defaultTaxRate = 0.11,
+    orderNumber = null,
   }) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -49,6 +50,7 @@ export const bottleAssignmentService = {
         p_user_id: user?.id || null,
         p_default_rental_amount: defaultRentalAmount,
         p_default_tax_rate: defaultTaxRate,
+        p_order_number: orderNumber,
       });
 
       if (error) {
@@ -76,6 +78,7 @@ export const bottleAssignmentService = {
     importRecordId,
     importTable = 'imported_invoices',
     organizationId,
+    orderNumber = null,
   }) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -85,6 +88,7 @@ export const bottleAssignmentService = {
         p_import_table: importTable,
         p_organization_id: organizationId,
         p_user_id: user?.id || null,
+        p_order_number: orderNumber,
       });
 
       if (error) {

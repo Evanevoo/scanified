@@ -61,6 +61,18 @@ function deriveInventoryGasTypes(bottles) {
   return Array.from(assetMap.keys()).filter(Boolean).sort((a, b) => (a || '').localeCompare(b || ''));
 }
 
+// Only 4 statuses: Full, Empty, Rented, Lost (stored as filled, empty, rented, lost)
+const NORMAL_STATUSES = ['filled', 'empty', 'rented', 'lost'];
+const normalizeStatus = (s) => {
+  if (s == null || s === '') return 'empty';
+  const v = String(s).toLowerCase().trim();
+  if (['filled', 'full', 'available'].includes(v)) return 'filled';
+  if (v === 'empty') return 'empty';
+  if (v === 'rented') return 'rented';
+  if (v === 'lost') return 'lost';
+  return 'empty';
+};
+
 export default function AssetDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -149,7 +161,7 @@ export default function AssetDetail() {
         serial_number: data.serial_number || '',
         product_code: data.product_code || '',
         gas_type: data.gas_type || '',
-        status: data.status || 'available',
+        status: normalizeStatus(data.status),
         location: data.location || '',
         assigned_customer: data.assigned_customer || '',
         customer_name: data.customer_name || '',
@@ -261,7 +273,7 @@ export default function AssetDetail() {
 
       const { data, error } = await supabase
         .from('customers')
-        .select('CustomerListID, name, location, city, province')
+        .select('CustomerListID, name, location, city')
         .eq('CustomerListID', customerId)
         .eq('organization_id', profile.organization_id)
         .single();
@@ -506,38 +518,34 @@ export default function AssetDetail() {
       const previousCustomerName = asset.customer_name;
       const previousLocation = asset.location;
       
-      // Determine status based on customer assignment and ownership
+      // Determine status: respect user's choice unless assignment changed
       let finalStatus = editData.status;
+      const assignmentChanged = previousCustomer !== (editData.assigned_customer || null) && String(editData.assigned_customer || '').trim() !== String(previousCustomer || '').trim();
       const ownershipValue = String(editData.ownership || '').trim().toLowerCase();
       const isCustomerOwned = ownershipValue.includes('customer') || 
                              ownershipValue.includes('owned') || 
                              ownershipValue === 'customer owned';
       
-      // If assigning to customer, set status appropriately
-      if (editData.assigned_customer && editData.assigned_customer.trim()) {
-        // Find customer to get customer type
-        const customer = customers.find(c => c.CustomerListID === editData.assigned_customer);
-        
-        if (customer?.customer_type === 'VENDOR') {
-          // Vendors are in-house, no charge
-          finalStatus = 'available';
-        } else if (isCustomerOwned) {
-          // Customer-owned bottles stay available
-          finalStatus = 'available';
+      if (assignmentChanged) {
+        // Only override status when assignment actually changed
+        if (editData.assigned_customer && editData.assigned_customer.trim()) {
+          // Assigning to customer
+          const customer = customers.find(c => c.CustomerListID === editData.assigned_customer);
+          if (customer?.customer_type === 'VENDOR' || isCustomerOwned) {
+            finalStatus = 'filled'; // In-house / vendor: keep as Full
+          } else {
+            finalStatus = 'rented';
+          }
+          if (!editData.customer_name && customer) {
+            editData.customer_name = customer.name;
+          }
         } else {
-          // Regular customer assignment = rented
-          finalStatus = 'rented';
+          // Unassigning: use user's status choice (e.g. Full), or default to empty
+          finalStatus = normalizeStatus(editData.status);
+          editData.customer_name = null;
         }
-        
-        // Get customer name if not set
-        if (!editData.customer_name && customer) {
-          editData.customer_name = customer.name;
-        }
-      } else {
-        // Unassigning customer (return) - set to empty so it shows "Empty" until refilled
-        finalStatus = 'empty';
-        editData.customer_name = null;
       }
+      // If assignment did not change, finalStatus already is editData.status (user's choice)
       
       // Build update data object with only valid fields, ensuring no undefined or system fields
       const updateData = {};
@@ -556,7 +564,7 @@ export default function AssetDetail() {
         updateData.gas_type = editData.gas_type || null;
       }
       if (finalStatus !== undefined) {
-        updateData.status = finalStatus;
+        updateData.status = NORMAL_STATUSES.includes(finalStatus) ? finalStatus : normalizeStatus(finalStatus);
       }
       if (editData.location !== undefined) {
         updateData.location = editData.location || null;
@@ -589,21 +597,19 @@ export default function AssetDetail() {
       if (error) throw error;
 
       // Create a scan record if assignment changed
-      const assignmentChanged = previousCustomer !== editData.assigned_customer;
+      const assignmentChangedForScan = previousCustomer !== (editData.assigned_customer || null);
       const locationChanged = previousLocation !== editData.location;
       
-      if (assignmentChanged || locationChanged) {
+      if (assignmentChangedForScan || locationChanged) {
         const scanMode = assignmentChanged 
           ? (editData.assigned_customer ? 'SHIP' : 'RETURN')
           : 'LOCATE';
         
         const scanData = {
           barcode_number: asset.barcode_number || editData.barcode_number,
-          serial_number: asset.serial_number || editData.serial_number,
           product_code: asset.product_code || editData.product_code,
-          gas_type: asset.gas_type || editData.gas_type,
           mode: scanMode,
-          action: scanMode === 'RETURN' ? 'in' : scanMode === 'SHIP' ? 'out' : null,
+          action: scanMode === 'RETURN' ? 'in' : scanMode === 'SHIP' ? 'out' : 'out',
           order_number: 'manual', // Placeholder so insert doesn't fail if column is NOT NULL
           customer_id: editData.assigned_customer || null,
           customer_name: editData.customer_name || null,
@@ -796,19 +802,16 @@ export default function AssetDetail() {
             </Typography>
             <Chip 
               label={
-                asset.status === 'filled' ? 'Full' :
+                asset.status === 'filled' || asset.status === 'full' ? 'Full' :
                 asset.status === 'empty' ? 'Empty' :
                 asset.status === 'rented' ? 'Rented' :
-                asset.status === 'available' ? 'Available' :
+                asset.status === 'lost' ? 'Lost' :
                 asset.status || 'Unknown'
               }
               color={
-                asset.status === 'filled' ? 'success' :
+                asset.status === 'filled' || asset.status === 'full' ? 'success' :
                 asset.status === 'empty' ? 'warning' :
-                asset.status === 'rented' ? 'success' :
-                asset.status === 'available' ? 'default' :
-                asset.status === 'maintenance' ? 'warning' :
-                asset.status === 'retired' ? 'secondary' :
+                asset.status === 'rented' ? 'info' :
                 asset.status === 'lost' ? 'error' : 'default'
               }
               size="small"
@@ -1084,7 +1087,7 @@ export default function AssetDetail() {
             serial_number: asset.serial_number || '',
             product_code: asset.product_code || '',
             gas_type: asset.gas_type || '',
-            status: asset.status || 'available',
+            status: normalizeStatus(asset.status),
             location: asset.location || '',
             assigned_customer: asset.assigned_customer || '',
             customer_name: asset.customer_name || '',
@@ -1149,16 +1152,13 @@ export default function AssetDetail() {
               <FormControl fullWidth>
                 <InputLabel>Status</InputLabel>
                 <Select
-                  value={editData.status || 'available'}
+                  value={normalizeStatus(editData.status)}
                   onChange={(e) => setEditData({ ...editData, status: e.target.value })}
                   label="Status"
                 >
-                  <MenuItem value="available">Available</MenuItem>
                   <MenuItem value="filled">Full</MenuItem>
                   <MenuItem value="empty">Empty</MenuItem>
                   <MenuItem value="rented">Rented</MenuItem>
-                  <MenuItem value="maintenance">Maintenance</MenuItem>
-                  <MenuItem value="retired">Retired</MenuItem>
                   <MenuItem value="lost">Lost</MenuItem>
                 </Select>
               </FormControl>
@@ -1252,7 +1252,7 @@ export default function AssetDetail() {
                 serial_number: asset.serial_number || '',
                 product_code: asset.product_code || '',
                 gas_type: asset.gas_type || '',
-                status: asset.status || 'available',
+                status: normalizeStatus(asset.status),
                 location: asset.location || '',
                 assigned_customer: asset.assigned_customer || '',
                 customer_name: asset.customer_name || '',

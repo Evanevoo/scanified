@@ -215,8 +215,27 @@ export default function ScannedOrders() {
     }
   };
 
+  // Deduplicate: one row per (order_number, bottle_barcode, customer), most recent scan wins (so same order + different customers both show)
+  const dedupedOrders = React.useMemo(() => {
+    const keyToRow = new Map();
+    const norm = (v) => (v != null && v !== '') ? String(v).trim() : '';
+    (orders || []).forEach(row => {
+      const orderNum = norm(row.order_number);
+      const barcode = norm(row.bottle_barcode || row.cylinder_barcode || row.barcode_number);
+      const customer = norm(row.customer_name || row.customer_id || row.customer || '');
+      if (!orderNum || !barcode) return;
+      const key = `${orderNum}\t${barcode}\t${customer}`;
+      const existing = keyToRow.get(key);
+      const rowTime = new Date(row.created_at || 0).getTime();
+      if (!existing || rowTime >= new Date(existing.created_at || 0).getTime()) {
+        keyToRow.set(key, row);
+      }
+    });
+    return Array.from(keyToRow.values()).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  }, [orders]);
+
   // Filter orders by search
-  const filteredOrders = orders.filter(order => {
+  const filteredOrders = dedupedOrders.filter(order => {
     if (!search) return true;
     const s = search.toLowerCase();
     return (
