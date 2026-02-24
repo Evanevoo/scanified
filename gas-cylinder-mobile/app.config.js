@@ -6,7 +6,7 @@ module.exports = {
   expo: {
     name: "Scanified",
     slug: "gas-cylinder-mobile",
-    version: "1.0.43",
+    version: "1.0.45",
     orientation: "portrait",
     icon: "./assets/app-icon.png",
     userInterfaceStyle: "automatic",
@@ -20,7 +20,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.evanevoo.scanifiedmobile",
-      buildNumber: "101",
+      buildNumber: "103",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSCameraUsageDescription: "Scanified uses your camera to scan asset barcodes for inventory management and tracking purposes.",

@@ -1,14 +1,23 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView, Keyboard } from 'react-native';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView, Keyboard, Platform, KeyboardAvoidingView } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
 import { useTheme } from '../context/ThemeContext';
+import { Ionicons } from '@expo/vector-icons';
 import ScanArea from '../components/ScanArea';
 import { useAuth } from '../hooks/useAuth';
 import { CylinderLimitService } from '../services/CylinderLimitService';
 import { useAssetConfig } from '../context/AssetContext';
-import { Platform } from '../utils/platform';
 import { useNavigation } from '@react-navigation/native';
+
+const BATCH_INSERT_SIZE = 50;
+
+interface PendingBottle {
+  id: string;
+  barcode: string;
+  serial: string;
+}
 
 interface GasType {
   id: number;
@@ -34,11 +43,14 @@ interface Location {
 }
 
 export default function AddCylinderScreen() {
+  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const scrollPaddingBottom = Platform.OS === 'ios' ? insets.bottom + 48 : Math.max(insets.bottom, 24) + 40;
   const { config: assetConfig } = useAssetConfig();
   const navigation = useNavigation();
-  const [barcode, setBarcode] = useState('');
-  const [serial, setSerial] = useState('');
+  const [pendingBottles, setPendingBottles] = useState<PendingBottle[]>([]);
+  const [currentBarcode, setCurrentBarcode] = useState('');
+  const [currentSerial, setCurrentSerial] = useState('');
   const [gasTypes, setGasTypes] = useState<GasType[]>([]);
   const [selectedGasType, setSelectedGasType] = useState('');
   const [locations, setLocations] = useState<Location[]>([]);
@@ -77,17 +89,22 @@ export default function AddCylinderScreen() {
     navigation.navigate('CustomerDetails', { customerId: customer.id });
   };
 
-  const [owners, setOwners] = useState<{ id: string; name: string }[]>([]);
-  const [selectedOwner, setSelectedOwner] = useState('');
-  const [addingOwner, setAddingOwner] = useState(false);
-  const [newOwnerName, setNewOwnerName] = useState('');
   const [scannerVisible, setScannerVisible] = useState(false);
+  const [showSerialModal, setShowSerialModal] = useState(false);
   const [gasTypeSearch, setGasTypeSearch] = useState('');
   const [gasTypeSuggestionsVisible, setGasTypeSuggestionsVisible] = useState(false);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   const [ownerPickerVisible, setOwnerPickerVisible] = useState(false);
 
-  const getGasTypeLabel = (gt: GasType) => `${gt.category} - ${gt.type}`;
+  const [owners, setOwners] = useState<{ id: string; name: string }[]>([]);
+  const [selectedOwner, setSelectedOwner] = useState('');
+  const [addingOwner, setAddingOwner] = useState(false);
+  const [newOwnerName, setNewOwnerName] = useState('');
+
+  const getGasTypeLabel = (gt: GasType) => {
+    const base = `${gt.category} - ${gt.type}`;
+    return gt.description ? `${base} · ${gt.description}` : base;
+  };
 
   const gasTypeSuggestions = useMemo(() => {
     if (!gasTypeSearch.trim()) return [];
@@ -100,6 +117,10 @@ export default function AddCylinderScreen() {
     ].join(' ').toLowerCase();
     return gasTypes.filter(gt => toSearchStr(gt).includes(q)).slice(0, 12);
   }, [gasTypes, gasTypeSearch]);
+
+  useEffect(() => {
+    if (selectedGasType) setGasTypeSuggestionsVisible(false);
+  }, [selectedGasType]);
 
   useEffect(() => {
     const fetchGasTypes = async () => {
@@ -164,106 +185,176 @@ export default function AddCylinderScreen() {
     fetchOwners();
   }, [profile]);
 
-  useEffect(() => {
-    // Auto-save draft functionality removed for React Native compatibility
-    // localStorage is not available in React Native
-  }, [barcode, serial, selectedGasType, selectedLocation]);
+  const addCurrentToPending = useCallback(async (): Promise<boolean> => {
+    const b = (currentBarcode || '').trim();
+    if (!b) return false;
+    if (profile?.organization_id) {
+      const { data: existing } = await supabase
+        .from('bottles')
+        .select('id')
+        .eq('organization_id', profile.organization_id)
+        .eq('barcode_number', b)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        Alert.alert(
+          'Barcode already in system',
+          `The barcode "${b}" is already registered. It was not added to the list.`,
+          [{ text: 'OK', style: 'default' }]
+        );
+        return false;
+      }
+    }
+    setPendingBottles(prev => [...prev, { id: `row-${Date.now()}-${Math.random().toString(36).slice(2)}`, barcode: b, serial: (currentSerial || '').trim() }]);
+    setCurrentBarcode('');
+    setCurrentSerial('');
+    return true;
+  }, [currentBarcode, currentSerial, profile?.organization_id]);
+
+  const handleAddFromSerialModal = useCallback(async () => {
+    const added = await addCurrentToPending();
+    if (added) {
+      setShowSerialModal(false);
+      setScannerVisible(true);
+    }
+  }, [addCurrentToPending]);
+
+  const removePendingRow = useCallback((id: string) => {
+    setPendingBottles(prev => prev.filter(r => r.id !== id));
+  }, []);
+
+  const setScannedBarcode = useCallback((scannedBarcode: string) => {
+    const trimmed = (scannedBarcode || '').trim();
+    if (!trimmed) return;
+    setCurrentBarcode(trimmed);
+    setCurrentSerial('');
+    setScannerVisible(false);
+    setShowSerialModal(true);
+  }, []);
 
   const handleSubmit = async () => {
     setError('');
     setSuccess('');
-    if (!barcode || !serial || !selectedGasType || !selectedLocation) {
-      setError('All fields are required.');
+    const validRows = pendingBottles.filter(r => (r.barcode || '').trim() !== '');
+    if (validRows.length === 0) {
+      setError('Add at least one bottle (barcode required).');
+      return;
+    }
+    if (!selectedGasType || !selectedLocation) {
+      setError('Gas type and location are required for all bottles.');
       return;
     }
     setLoading(true);
-    
-    // Check cylinder limits before adding
+
     if (profile?.organization_id) {
-      const validation = await CylinderLimitService.validateCylinderAddition(profile.organization_id, 1);
-      
+      const validation = await CylinderLimitService.validateCylinderAddition(profile.organization_id, validRows.length);
       if (!validation.isValid) {
         setLoading(false);
-        Alert.alert(
-          validation.message.title,
-          validation.message.message,
-          [
-            { text: 'OK', style: 'default' }
-          ]
-        );
+        Alert.alert(validation.message.title, validation.message.message, [{ text: 'OK', style: 'default' }]);
         return;
       }
     }
-    
-    // Get the selected gas type details
+
     const selectedGasTypeData = gasTypes.find(gt => gt.id.toString() === selectedGasType);
     if (!selectedGasTypeData) {
       setError('Invalid gas type selected.');
       setLoading(false);
       return;
     }
-
-    // Get the selected location details
     const selectedLocationData = locations.find(loc => loc.id === selectedLocation);
     if (!selectedLocationData) {
       setError('Invalid location selected.');
       setLoading(false);
       return;
     }
-    
-    // Check for duplicate barcode or serial
-    const { data: barcodeDup, error: barcodeError } = await supabase
-      .from('bottles')
-      .select('id')
-      .eq('organization_id', profile.organization_id)
-      .eq('barcode_number', barcode);
-    
-    const { data: serialDup, error: serialError } = await supabase
-      .from('bottles')
-      .select('id')
-      .eq('organization_id', profile.organization_id)
-      .eq('serial_number', serial);
-    
-    if (barcodeError || serialError) {
-      logger.error('Duplicate check error:', barcodeError || serialError);
-      setError('Error checking duplicates: ' + (barcodeError?.message || serialError?.message));
+
+    const barcodes = validRows.map(r => (r.barcode || '').trim());
+    const serials = validRows.map(r => (r.serial || '').trim() || (r.barcode || '').trim());
+    const seenBarcodes = new Set<string>();
+    const duplicateInBatch: string[] = [];
+    validRows.forEach(r => {
+      const b = (r.barcode || '').trim();
+      if (seenBarcodes.has(b)) duplicateInBatch.push(b);
+      else seenBarcodes.add(b);
+    });
+    if (duplicateInBatch.length > 0) {
+      setError(`Duplicate barcodes in list: ${[...new Set(duplicateInBatch)].slice(0, 5).join(', ')}${duplicateInBatch.length > 5 ? '...' : ''}`);
       setLoading(false);
       return;
     }
-    
-    if ((barcodeDup && barcodeDup.length > 0) || (serialDup && serialDup.length > 0)) {
-      setError('A cylinder with this barcode or serial already exists.');
+
+    const { data: existingByBarcode } = await supabase
+      .from('bottles')
+      .select('barcode_number')
+      .eq('organization_id', profile!.organization_id)
+      .in('barcode_number', barcodes);
+    const existingBarcodes = new Set((existingByBarcode || []).map(b => (b.barcode_number || '').trim()));
+
+    const { data: existingBySerial } = await supabase
+      .from('bottles')
+      .select('serial_number')
+      .eq('organization_id', profile!.organization_id)
+      .in('serial_number', serials);
+    const existingSerials = new Set((existingBySerial || []).map(b => (b.serial_number || '').trim()));
+
+    const toInsert: typeof validRows = [];
+    const skipped: string[] = [];
+    validRows.forEach(r => {
+      const b = (r.barcode || '').trim();
+      const s = (r.serial || '').trim() || b;
+      if (existingBarcodes.has(b)) {
+        skipped.push(`Barcode ${b}`);
+        return;
+      }
+      if (s !== b && existingSerials.has(s)) {
+        skipped.push(`Serial ${s}`);
+        return;
+      }
+      toInsert.push(r);
+    });
+
+    if (toInsert.length === 0) {
+      setError(skipped.length > 0 ? `All bottles already exist: ${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? '...' : ''}` : 'No bottles to add.');
       setLoading(false);
       return;
     }
-    
-    // Insert new bottle with gas type and location information
-    const { error: insertError } = await supabase
-      .from('bottles')
-      .insert({ 
-        barcode_number: barcode, 
-        serial_number: serial, 
-        gas_type: selectedGasTypeData.type,
-        group_name: selectedGasTypeData.group_name,
-        category: selectedGasTypeData.category,
-        product_code: selectedGasTypeData.product_code,
-        description: selectedGasTypeData.description,
-        location: selectedLocationData.id,
-        ownership: selectedOwner,
-        organization_id: profile.organization_id
-      });
+
+    const baseRow = {
+      gas_type: selectedGasTypeData.type,
+      group_name: selectedGasTypeData.group_name,
+      category: selectedGasTypeData.category,
+      product_code: selectedGasTypeData.product_code,
+      description: selectedGasTypeData.description,
+      location: (selectedLocationData.name || '').toUpperCase().replace(/\s+/g, '_'),
+      ownership: selectedOwner || undefined,
+      organization_id: profile!.organization_id,
+    };
+
+    for (let i = 0; i < toInsert.length; i += BATCH_INSERT_SIZE) {
+      const batch = toInsert.slice(i, i + BATCH_INSERT_SIZE);
+      const rows = batch.map(r => ({
+        ...baseRow,
+        barcode_number: (r.barcode || '').trim(),
+        serial_number: (r.serial || '').trim() || (r.barcode || '').trim(),
+      }));
+      const { error: insertError } = await supabase.from('bottles').insert(rows);
+      if (insertError) {
+        logger.error('Batch insert error:', insertError);
+        setError(`Failed to add bottles: ${insertError.message}`);
+        setLoading(false);
+        return;
+      }
+    }
+
     setLoading(false);
-    if (insertError) {
-      setError('Failed to add cylinder.');
-    } else {
-      setSuccess(`${assetConfig?.assetDisplayName || 'Asset'} added successfully!`);
-      setBarcode('');
-      setSerial('');
-      setSelectedGasType('');
-      setGasTypeSearch('');
-      setSelectedLocation('');
-      // localStorage.removeItem('addCylinderDraft'); // Removed for React Native compatibility
-    }
+    const added = toInsert.length;
+    const skipMsg = skipped.length > 0 ? ` (${skipped.length} already existed)` : '';
+    setSuccess(`${added} ${assetConfig?.assetDisplayName || 'Asset'}${added !== 1 ? 's' : ''} added successfully!${skipMsg}`);
+    setPendingBottles([]);
+    setCurrentBarcode('');
+    setCurrentSerial('');
+    setSelectedGasType('');
+    setGasTypeSearch('');
+    setSelectedLocation('');
   };
 
   // Add new ownership value
@@ -282,58 +373,21 @@ export default function AddCylinderScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}>
-      
-      {/* Scanner Section */}
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: colors.background }}
+      behavior="padding"
+      keyboardVerticalOffset={0}
+    >
+    <ScrollView
+      contentContainerStyle={[styles.container, { backgroundColor: colors.background, paddingBottom: scrollPaddingBottom }]}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      onScrollBeginDrag={() => setGasTypeSuggestionsVisible(false)}
+      showsVerticalScrollIndicator={true}
+    >
+      {/* Details — set once for all bottles */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.primary }]}>Scan Barcode</Text>
-        <TouchableOpacity
-          style={[styles.scanButton, { backgroundColor: colors.primary }]}
-          onPress={() => setScannerVisible(true)}
-        >
-          <Text style={[styles.scanButtonText, { color: colors.surface }]}>
-            {barcode ? `✓ Scanned: ${barcode}` : '📷 SCAN BARCODE'}
-          </Text>
-        </TouchableOpacity>
-        {barcode && (
-          <Text style={[styles.scanSuccess, { color: colors.success }]}>
-            ✓ Barcode scanned successfully
-          </Text>
-        )}
-      </View>
-
-      {/* Basic Information Section */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.primary }]}>Basic Information</Text>
-        
-        <View style={styles.inputGroup}>
-          <Text style={[styles.inputLabel, { color: colors.text }]}>Barcode Number</Text>
-          <TextInput
-            style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-            placeholder="Enter barcode number"
-            placeholderTextColor={colors.textSecondary}
-            value={barcode}
-            onChangeText={setBarcode}
-            autoCapitalize="none"
-          />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={[styles.inputLabel, { color: colors.text }]}>Serial Number</Text>
-          <TextInput
-            style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-            placeholder="Enter serial number"
-            placeholderTextColor={colors.textSecondary}
-            value={serial}
-            onChangeText={setSerial}
-            autoCapitalize="none"
-          />
-        </View>
-      </View>
-
-      {/* Configuration Section */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.primary }]}>Configuration</Text>
+        <Text style={[styles.sectionTitle, { color: colors.primary }]}>Details</Text>
         
         <View style={styles.inputGroup}>
           <Text style={[styles.inputLabel, { color: colors.text }]}>Gas Type</Text>
@@ -344,27 +398,43 @@ export default function AddCylinderScreen() {
             </View>
           ) : (
             <View style={styles.gasTypeSearchWrapper}>
-              <TextInput
-                style={[styles.input, styles.gasTypeInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-                placeholder="Search gas type..."
-                placeholderTextColor={colors.textSecondary}
-                value={selectedGasType ? (() => { const gt = gasTypes.find(g => g.id.toString() === selectedGasType); return gt ? getGasTypeLabel(gt) : gasTypeSearch; })() : gasTypeSearch}
-                onChangeText={(text) => {
-                  setSelectedGasType('');
-                  setGasTypeSearch(text);
-                  setGasTypeSuggestionsVisible(true);
-                }}
-                onFocus={() => {
-                  setGasTypeSuggestionsVisible(true);
-                  if (selectedGasType) {
-                    const gt = gasTypes.find(g => g.id.toString() === selectedGasType);
-                    if (gt) setGasTypeSearch(getGasTypeLabel(gt));
+              <View style={[styles.gasTypeSearchRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <TextInput
+                  style={[styles.input, styles.gasTypeInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text, flex: 1, marginRight: 0, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
+                  placeholder="Search gas type..."
+                  placeholderTextColor={colors.textSecondary}
+                  value={selectedGasType ? (() => { const gt = gasTypes.find(g => g.id.toString() === selectedGasType); return gt ? getGasTypeLabel(gt) : gasTypeSearch; })() : gasTypeSearch}
+                  onChangeText={(text) => {
                     setSelectedGasType('');
-                  }
-                }}
-                onBlur={() => setTimeout(() => setGasTypeSuggestionsVisible(false), 200)}
-                autoCapitalize="none"
-              />
+                    setGasTypeSearch(text);
+                    setGasTypeSuggestionsVisible(true);
+                  }}
+                  onFocus={() => {
+                    setGasTypeSuggestionsVisible(true);
+                    if (selectedGasType) {
+                      const gt = gasTypes.find(g => g.id.toString() === selectedGasType);
+                      if (gt) setGasTypeSearch(getGasTypeLabel(gt));
+                      setSelectedGasType('');
+                    }
+                  }}
+                  onBlur={() => setTimeout(() => setGasTypeSuggestionsVisible(false), 200)}
+                  autoCapitalize="none"
+                />
+                {(selectedGasType || ((gasTypeSearch || '').trim() !== '')) ? (
+                  <TouchableOpacity
+                    style={[styles.searchClearBtn, { backgroundColor: colors.border }]}
+                    onPress={() => {
+                      setSelectedGasType('');
+                      setGasTypeSearch('');
+                      setGasTypeSuggestionsVisible(true);
+                      Keyboard.dismiss();
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="close" size={20} color={colors.text} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
               {gasTypeSuggestionsVisible && (gasTypeSearch.trim() || !selectedGasType) && (
                 <View style={[styles.suggestionsList, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   {gasTypeSearch.trim() ? (
@@ -383,7 +453,7 @@ export default function AddCylinderScreen() {
                           <Text style={[styles.suggestionText, { color: colors.text }]}>{getGasTypeLabel(gt)}</Text>
                           {(gt.group_name || gt.product_code) && (
                             <Text style={[styles.suggestionSubtext, { color: colors.textSecondary }]}>
-                              {[gt.group_name, gt.product_code].filter(Boolean).join(' • ')}
+                              {[gt.group_name, gt.product_code].filter(Boolean).join(' · ')}
                             </Text>
                           )}
                         </TouchableOpacity>
@@ -406,6 +476,13 @@ export default function AddCylinderScreen() {
                         }}
                       >
                         <Text style={[styles.suggestionText, { color: colors.text }]}>{getGasTypeLabel(gt)}</Text>
+                        {gt.description ? (
+                          <Text style={[styles.suggestionSubtext, { color: colors.textSecondary }]}>{gt.description}</Text>
+                        ) : (gt.group_name || gt.product_code) ? (
+                          <Text style={[styles.suggestionSubtext, { color: colors.textSecondary }]}>
+                            {[gt.group_name, gt.product_code].filter(Boolean).join(' · ')}
+                          </Text>
+                        ) : null}
                       </TouchableOpacity>
                     ))
                   )}
@@ -471,6 +548,36 @@ export default function AddCylinderScreen() {
         )}
       </View>
 
+      {/* Bottles — scan → enter serial in modal → Add → scan next */}
+      <View style={styles.section}>
+        <Text style={[styles.subsectionLabel, { color: colors.textSecondary, marginBottom: 12 }]}>
+          Add bottles · {pendingBottles.length} in list
+        </Text>
+        <TouchableOpacity
+          style={[styles.scanButton, { backgroundColor: colors.primary }]}
+          onPress={() => setScannerVisible(true)}
+        >
+          <Ionicons name="barcode-outline" size={22} color={colors.surface} />
+          <Text style={[styles.scanButtonText, { color: colors.surface }]}>Scan barcode</Text>
+        </TouchableOpacity>
+        {pendingBottles.length > 0 && (
+          <View style={styles.bottleList}>
+            {pendingBottles.map((row) => (
+              <View key={row.id} style={[styles.bottleRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.bottleRowBarcode, { color: colors.text }]} numberOfLines={1}>{row.barcode}</Text>
+                <Text style={[styles.bottleRowSerial, { color: colors.textSecondary }]} numberOfLines={1}>{row.serial || '—'}</Text>
+                <TouchableOpacity
+                  style={[styles.removeRowButton, { backgroundColor: colors.border }]}
+                  onPress={() => removePendingRow(row.id)}
+                >
+                  <Ionicons name="close" size={18} color={colors.text} />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+
       {/* Error and Success Messages */}
       {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
       {success ? <Text style={[styles.success, { color: colors.success }]}>{success}</Text> : null}
@@ -481,14 +588,19 @@ export default function AddCylinderScreen() {
           style={[
             styles.submitBtn, 
             { backgroundColor: colors.primary },
-            (loading || loadingGasTypes || loadingLocations || gasTypes.length === 0 || locations.length === 0) && { backgroundColor: colors.border }
+            (loading || loadingGasTypes || loadingLocations || gasTypes.length === 0 || locations.length === 0 || pendingBottles.length === 0) && { backgroundColor: colors.border }
           ]} 
           onPress={handleSubmit} 
-          disabled={loading || loadingGasTypes || loadingLocations || gasTypes.length === 0 || locations.length === 0}
+          disabled={loading || loadingGasTypes || loadingLocations || gasTypes.length === 0 || locations.length === 0 || pendingBottles.length === 0}
         >
-          {loading ? <ActivityIndicator color={colors.surface} /> : <Text style={[styles.submitBtnText, { color: colors.surface }]}>Add Cylinder</Text>}
+          {loading ? <ActivityIndicator color={colors.surface} /> : (
+            <Text style={[styles.submitBtnText, { color: colors.surface }]}>
+              Add {Math.max(1, pendingBottles.length)} {assetConfig?.assetDisplayName || 'Cylinder'}(s)
+            </Text>
+          )}
         </TouchableOpacity>
       </View>
+    </ScrollView>
 
       {/* Scanner Modal */}
       <Modal
@@ -501,15 +613,52 @@ export default function AddCylinderScreen() {
           <ScanArea
             searchCustomerByName={searchCustomerByName}
             onCustomerFound={handleOcrCustomerFound}
-            onScanned={(scannedBarcode) => {
-              setBarcode(scannedBarcode);
-              setScannerVisible(false);
+            onScanned={(data: string) => {
+              if (data) setScannedBarcode(data);
             }}
             onClose={() => setScannerVisible(false)}
-            label="Scan cylinder barcode to add"
+            label="Scan barcode — then add serial and tap Add"
             validationPattern={/^[\dA-Za-z\-%]+$/}
             style={{ flex: 1 }}
           />
+        </View>
+      </Modal>
+
+      {/* Serial number modal — after scan, enter serial then Add → scan next */}
+      <Modal
+        visible={showSerialModal}
+        onRequestClose={() => { setShowSerialModal(false); setCurrentBarcode(''); setCurrentSerial(''); }}
+        animationType="fade"
+        transparent={true}
+      >
+        <View style={styles.serialModalOverlay}>
+          <View style={[styles.serialModalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.serialModalTitle, { color: colors.text }]}>Enter serial number</Text>
+            <Text style={[styles.serialModalBarcode, { color: colors.textSecondary }]}>{currentBarcode}</Text>
+            <TextInput
+              style={[styles.input, styles.serialModalInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+              placeholder="Serial (optional)"
+              placeholderTextColor={colors.textSecondary}
+              value={currentSerial}
+              onChangeText={setCurrentSerial}
+              autoCapitalize="none"
+              autoFocus
+            />
+            <View style={styles.serialModalButtons}>
+              <TouchableOpacity
+                style={[styles.serialModalBtn, { backgroundColor: colors.border }]}
+                onPress={() => { setShowSerialModal(false); setCurrentBarcode(''); setCurrentSerial(''); }}
+              >
+                <Text style={[styles.serialModalBtnText, { color: colors.text }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.serialModalBtn, { backgroundColor: colors.primary }]}
+                onPress={handleAddFromSerialModal}
+              >
+                <Text style={[styles.serialModalBtnText, { color: colors.surface }]}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </Modal>
 
@@ -607,35 +756,40 @@ export default function AddCylinderScreen() {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
-    padding: 20,
-    paddingBottom: 40,
+    padding: 24,
+    paddingBottom: 48,
   },
   section: {
-    marginBottom: 32,
+    marginBottom: 40,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 17,
+    fontWeight: '600',
     marginBottom: 16,
+    letterSpacing: 0.2,
+  },
+  subsectionLabel: {
+    fontSize: 14,
+    fontWeight: '500',
   },
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: 18,
   },
   inputLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 8,
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 6,
   },
   input: {
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 10,
+    padding: 14,
     fontSize: 16,
     borderWidth: 1,
   },
@@ -643,8 +797,92 @@ const styles = StyleSheet.create({
     position: 'relative',
     zIndex: 10,
   },
+  gasTypeSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
   gasTypeInput: {
     zIndex: 1,
+    borderWidth: 0,
+    borderRadius: 0,
+    marginRight: 0,
+  },
+  searchClearBtn: {
+    width: 44,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  serialModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  serialModalCard: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 20,
+  },
+  serialModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  serialModalBarcode: {
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  serialModalInput: {
+    marginBottom: 20,
+  },
+  serialModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'flex-end',
+  },
+  serialModalBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  serialModalBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  bottleList: {
+    gap: 10,
+  },
+  bottleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 10,
+  },
+  bottleRowBarcode: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  bottleRowSerial: {
+    width: 90,
+    fontSize: 14,
+  },
+  removeRowButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   suggestionsList: {
     position: 'absolute',
@@ -808,17 +1046,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   submitContainer: {
-    marginTop: 32,
-    paddingHorizontal: 20,
+    marginTop: 24,
   },
   submitBtn: {
-    borderRadius: 12,
-    padding: 18,
+    borderRadius: 10,
+    padding: 16,
     alignItems: 'center',
   },
   submitBtnText: {
-    fontWeight: 'bold',
-    fontSize: 18,
+    fontWeight: '600',
+    fontSize: 16,
   },
   error: {
     marginBottom: 16,

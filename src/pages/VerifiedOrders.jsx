@@ -107,7 +107,7 @@ export default function VerifiedOrders() {
       // Fetch verified scanned orders (from scans table)
       const { data: scans, error: scanError } = await supabase
         .from('scans')
-        .select('id, barcode_number, order_number, "mode", action, status, organization_id, customer_name, customer_id, product_code, created_at')
+        .select('id, barcode_number, order_number, "mode", action, status, organization_id, customer_name, customer_id, created_at')
         .eq('organization_id', organization.id)
         .in('status', ['verified', 'approved'])
         .not('order_number', 'is', null)
@@ -553,7 +553,7 @@ export default function VerifiedOrders() {
         // For scanned orders, fetch all scans and filter by normalized order number
         const { data: allScans, error: fetchError } = await supabase
           .from('scans')
-          .select('id, barcode_number, order_number, "mode", action, status, organization_id, customer_name, customer_id, product_code, created_at')
+          .select('id, barcode_number, order_number, "mode", action, status, organization_id, customer_name, customer_id, created_at')
           .eq('organization_id', organization.id);
         
         // Filter client-side using normalized order numbers
@@ -682,6 +682,7 @@ export default function VerifiedOrders() {
         importRecordId: order.id,
         importTable: tableName,
         organizationId: organization.id,
+        orderNumber: orderNumber,
       });
 
       if (rpcResult.success) {
@@ -702,13 +703,16 @@ export default function VerifiedOrders() {
         await reverseBottleAssignments(orderNumber, customerName, orderCustomerId);
       }
 
-      // Remove this order from verified_order_numbers in the data JSON so it shows as pending in Order Verification
+      // Remove this order from verified_order_numbers in the data JSON so it shows as pending in Order Verification.
+      // Use normalized order matching so "S47475", "47475", "047475" all match; always clear when array has any match.
       try {
         const { data: currentRecord } = await supabase.from(tableName).select('data').eq('id', order.id).single();
         if (currentRecord?.data) {
           const currentData = typeof currentRecord.data === 'string' ? JSON.parse(currentRecord.data) : currentRecord.data;
-          if (Array.isArray(currentData.verified_order_numbers) && currentData.verified_order_numbers.includes(orderNumber)) {
-            currentData.verified_order_numbers = currentData.verified_order_numbers.filter(n => normalizeOrderNum(n) !== normalizedOrderNum);
+          const vor = Array.isArray(currentData.verified_order_numbers) ? currentData.verified_order_numbers : [];
+          const hasMatch = vor.some(n => normalizeOrderNum(n) === normalizedOrderNum);
+          if (hasMatch) {
+            currentData.verified_order_numbers = vor.filter(n => normalizeOrderNum(n) !== normalizedOrderNum);
             await supabase.from(tableName).update({ data: currentData }).eq('id', order.id);
             logger.log('Removed order from verified_order_numbers:', orderNumber);
           }
@@ -717,12 +721,27 @@ export default function VerifiedOrders() {
         logger.warn('Warning clearing verified_order_numbers:', vonErr);
       }
 
+      // Ensure import record is pending and verified fields cleared so it reappears in Order Verification
+      try {
+        await supabase
+          .from(tableName)
+          .update({
+            status: 'pending',
+            verified_at: null,
+            verified_by: null
+          })
+          .eq('id', order.id)
+          .eq('organization_id', organization.id);
+      } catch (e) {
+        logger.warn('Warning resetting import record status:', e);
+      }
+
       // Also update associated scans in the scans table (if any)
       logger.log('🔄 Unverifying associated scans for order:', orderNumber);
       // Fetch all scans and filter by normalized order number
       const { data: allScans, error: fetchScansError } = await supabase
         .from('scans')
-        .select('id, barcode_number, order_number, "mode", action, status, organization_id, customer_name, customer_id, product_code, created_at')
+        .select('id, barcode_number, order_number, "mode", action, status, organization_id, customer_name, customer_id, created_at')
         .eq('organization_id', organization.id);
 
       if (fetchScansError) {

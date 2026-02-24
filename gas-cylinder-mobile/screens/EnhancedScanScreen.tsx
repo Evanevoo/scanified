@@ -172,6 +172,8 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
   const lastScannedBarcodeRef = useRef<string>('');
   const lastScannedTimeRef = useRef<number>(0);
   const scanCooldownRef = useRef<NodeJS.Timeout | null>(null);
+  // Synchronous ref so same-session duplicate is seen before React state updates (prevents double-scan in one session)
+  const scannedBarcodesThisSessionRef = useRef<Set<string>>(new Set());
   
   // Camera permissions (for permission UI)
   const [permission, requestPermission] = useCameraPermissions();
@@ -817,6 +819,29 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     const now = Date.now();
     
     // Check if barcode was already scanned in this session
+    const normBarcode = (data || '').trim();
+    const sessionKey = `${normBarcode}_${selectedAction}`;
+    if (scannedBarcodesThisSessionRef.current.has(sessionKey)) {
+      logger.log('⚠️ Duplicate scan (session ref):', data);
+      processingBarcodesRef.current.delete(data);
+      Vibration.vibrate([0, 200, 100, 200]);
+      try {
+        await feedbackService.scanDuplicate(data);
+      } catch (soundError) {
+        logger.warn('⚠️ Error playing duplicate sound:', soundError);
+      }
+      setScanFeedback(`Barcode "${data}" already scanned`);
+      setTimeout(() => { setScanFeedback(''); setLastScanAttempt(''); }, 5000);
+      await statsService.recordScan({
+        action: selectedAction,
+        customer: customerName.trim() || undefined,
+        location: location.trim() || undefined,
+        isDuplicate: true,
+        isBatchMode: batchMode,
+        timestamp: Date.now(),
+      });
+      return;
+    }
     const existingScanIndex = scannedItems.findIndex(item => item.barcode === data);
     if (existingScanIndex !== -1) {
       const existingScan = scannedItems[existingScanIndex];
@@ -863,6 +888,8 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       } else {
         // Different action - update the existing scan instead of adding duplicate
         logger.log(`🔄 Switching scan action from ${existingScan.action} to ${selectedAction} for barcode: ${data}`);
+        scannedBarcodesThisSessionRef.current.delete(`${normBarcode}_${existingScan.action}`);
+        scannedBarcodesThisSessionRef.current.add(sessionKey);
         
         // Remove the old scan and add new one with updated action
         setScannedItems(prev => {
@@ -895,6 +922,9 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         return;
       }
     }
+    
+    // Passed duplicate check: reserve this barcode+action now so a second scan in same session is blocked before state updates
+    scannedBarcodesThisSessionRef.current.add(sessionKey);
     
     // Check if barcode exists in the system
     try {
@@ -1307,6 +1337,24 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       
       logger.log('Database connection test passed');
 
+      // Prevent duplicate: same barcode already scanned for same action on this order (e.g. from another session or device)
+      const mode = scanResult.action === 'out' ? 'SHIP' : scanResult.action === 'in' ? 'RETURN' : (scanResult.action || '').toUpperCase();
+      const orderNum = orderNumber || scanSessionId;
+      if (orderNum && scanResult.barcode) {
+        const { data: existingRow } = await supabase
+          .from('bottle_scans')
+          .select('id')
+          .eq('organization_id', organization.id)
+          .eq('order_number', orderNum)
+          .eq('bottle_barcode', scanResult.barcode)
+          .eq('mode', mode)
+          .maybeSingle();
+        if (existingRow) {
+          logger.log('⚠️ Skipping duplicate: barcode already scanned for ' + mode + ' on order ' + orderNum);
+          return;
+        }
+      }
+
       // Use same columns as web app (ImportApprovalDetail) to avoid 42703 on iOS
       const insertData: Record<string, unknown> = {
         organization_id: organization.id,
@@ -1643,6 +1691,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           style: 'destructive',
           onPress: () => {
             setScannedItems([]);
+            scannedBarcodesThisSessionRef.current.clear();
             setScanCount(0);
             setDuplicates([]);
           }
@@ -1723,20 +1772,21 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         }
       }
 
-      // CRITICAL: Update order_number on all scans (both synced and pending)
-      // This ensures scans with null or scanSessionId get the correct order_number
-      logger.log(`Updating order_number to "${orderNumber}" for all scans in this session...`);
+      // CRITICAL: Update order_number on all scans (both synced and pending) that belong to THIS session only.
+      // Only update rows where order_number = scanSessionId. Do NOT update order_number.is.null, or we would
+      // overwrite old scans from other orders/sessions when the same barcodes are scanned for a new order (e.g.
+      // Industrial Machine RETURN scans from Feb 11 getting changed to today's S47658).
+      logger.log(`Updating order_number to "${orderNumber}" for scans in this session (order_number=${scanSessionId})...`);
       
       const allBarcodes = scannedItems.map(item => item.barcode);
       if (allBarcodes.length > 0) {
-        // Update bottle_scans table - only update scans from THIS session (null or scanSessionId),
-        // not scans that already belong to other orders
+        // Update bottle_scans: only rows that have order_number = scanSessionId (this session's unassigned scans)
         const { data: bottleScansUpdate, error: updateBottleScansError } = await supabase
           .from('bottle_scans')
           .update({ order_number: orderNumber })
           .in('bottle_barcode', allBarcodes)
           .eq('organization_id', organization.id)
-          .or(`order_number.is.null,order_number.eq.${scanSessionId}`)
+          .eq('order_number', scanSessionId)
           .select('id');
         
         if (updateBottleScansError) {
@@ -1760,8 +1810,8 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
             .update({ order_number: orderNumber })
             .in('barcode_number', allBarcodes)
             .eq('organization_id', organization.id)
-            .or(`order_number.is.null,order_number.eq.${scanSessionId}`)
-            .select('id'); // Update null or scanSessionId
+            .eq('order_number', scanSessionId)
+            .select('id');
           
           if (updateScansError) {
             // Check if error is due to missing column
@@ -1895,6 +1945,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
               onPress: () => {
                 setShowScannedItems(false);
                 setScannedItems([]);
+                scannedBarcodesThisSessionRef.current.clear();
                 navigation.navigate('Home');
               }
             }
@@ -1999,6 +2050,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
             
             // Remove from local state
             setScannedItems(prev => prev.filter((_, i) => i !== index));
+            scannedBarcodesThisSessionRef.current.delete(`${(itemToRemove.barcode || '').trim()}_${itemToRemove.action}`);
             
             // Update scan count
             setScanCount(prev => Math.max(0, prev - 1));

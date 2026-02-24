@@ -21,13 +21,11 @@ import {
   Receipt as InvoiceIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
-  Email as EmailIcon,
-  Warning as WarningIcon
+  Email as EmailIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 import InvoiceGenerator from '../components/InvoiceGenerator';
 import BulkInvoiceEmailDialog from '../components/BulkInvoiceEmailDialog';
-import DNSConversionDialog from '../components/DNSConversionDialog';
 import { getNextInvoiceNumbers, getNextAgreementNumbers, toCsv, downloadFile } from '../utils/invoiceUtils';
 
 // Business logic functions to determine asset status
@@ -85,8 +83,7 @@ function RentalsImproved() {
   const [filters, setFilters] = useState({
     status: 'all',
     customer_type: 'all',
-    search: '',
-    showDNSOnly: false
+    search: ''
   });
   const debouncedSearch = useDebounce(filters.search, 300);
   const [locations, setLocations] = useState([]);
@@ -549,13 +546,11 @@ function RentalsImproved() {
     setLoading(false);
   };
 
-  // Memoized: Group rentals by customer
-  const { customersWithRentals, dnsCount } = useMemo(() => {
+  // Memoized: Group rentals by customer (includes DNS for billing)
+  const customersWithRentals = useMemo(() => {
     const list = [];
     const customerMap = {};
-    let dns = 0;
     for (const rental of assets) {
-      if (rental.is_dns === true) dns++;
       const custId = rental.customer?.CustomerListID || rental.customer_id;
       if (!custId) continue;
       if (!customerMap[custId]) {
@@ -571,19 +566,12 @@ function RentalsImproved() {
       }
       customerMap[custId].rentals.push(rental);
     }
-    return { customersWithRentals: list, dnsCount: dns };
+    return list;
   }, [assets]);
 
-  // Memoized: Filter customers (uses debounced search)
+  // Memoized: Filter customers (full list including DNS – used for billing so customer is billed for all bottles)
   const filteredCustomers = useMemo(() => {
     return customersWithRentals
-      .map(({ customer, rentals }) => {
-        let filteredRentals = rentals;
-        if (filters.showDNSOnly) {
-          filteredRentals = rentals.filter(r => r.is_dns === true);
-        }
-        return { customer, rentals: filteredRentals };
-      })
       .filter(({ customer, rentals }) => {
         if (rentals.length === 0) return false;
         const custType = customer.customer_type || 'CUSTOMER';
@@ -605,24 +593,23 @@ function RentalsImproved() {
         }
         return true;
       });
-  }, [customersWithRentals, filters.showDNSOnly, filters.customer_type, filters.status, debouncedSearch]);
+  }, [customersWithRentals, filters.customer_type, filters.status, debouncedSearch]);
+
+  // Display-only: exclude DNS so Rentals page shows only physical rentals (DNS is on Customer details)
+  const displayCustomers = useMemo(() => {
+    return filteredCustomers
+      .map(({ customer, rentals }) => ({ customer, rentals: rentals.filter(r => !r.is_dns) }))
+      .filter(({ rentals }) => rentals.length > 0);
+  }, [filteredCustomers]);
 
   const tabs = useMemo(() => [
-    { label: 'All Customers', value: 'all', count: filteredCustomers.length },
-    { label: 'Monthly Rentals', value: 'monthly', count: filteredCustomers.reduce((c, x) => c + x.rentals.filter(r => r.rental_type === 'monthly').length, 0) },
-    { label: 'Yearly Rentals', value: 'yearly', count: filteredCustomers.reduce((c, x) => c + x.rentals.filter(r => r.rental_type === 'yearly').length, 0) },
-    { label: 'DNS (Not Scanned)', value: 'dns', count: dnsCount, color: 'warning' },
-  ], [filteredCustomers, dnsCount]);
+    { label: 'All Customers', value: 'all', count: displayCustomers.length },
+    { label: 'Monthly Rentals', value: 'monthly', count: displayCustomers.reduce((c, x) => c + x.rentals.filter(r => r.rental_type === 'monthly').length, 0) },
+    { label: 'Yearly Rentals', value: 'yearly', count: displayCustomers.reduce((c, x) => c + x.rentals.filter(r => r.rental_type === 'yearly').length, 0) },
+  ], [displayCustomers]);
 
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
-    // Automatically enable DNS filter when DNS tab is selected
-    if (newValue === 3) { // DNS tab is index 3
-      setFilters({ ...filters, showDNSOnly: true });
-    } else if (filters.showDNSOnly && activeTab === 3) {
-      // If switching away from DNS tab, disable DNS filter
-      setFilters({ ...filters, showDNSOnly: false });
-    }
   };
 
   const handleUpdateAsset = async (assetId, updates) => {
@@ -779,11 +766,11 @@ function RentalsImproved() {
   };
 
   const currentCustomers = useMemo(() => {
-    if (activeTab === 0) return filteredCustomers;
-    if (activeTab === 1) return filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'monthly'));
-    if (activeTab === 2) return filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly'));
-    return filteredCustomers.filter(c => c.rentals.some(r => r.is_dns === true));
-  }, [filteredCustomers, activeTab]);
+    if (activeTab === 0) return displayCustomers;
+    if (activeTab === 1) return displayCustomers.filter(c => c.rentals.some(r => r.rental_type === 'monthly'));
+    if (activeTab === 2) return displayCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly'));
+    return displayCustomers;
+  }, [displayCustomers, activeTab]);
 
   if (loading) {
     return (
@@ -920,28 +907,6 @@ function RentalsImproved() {
           </Card>
         </Grid>
 
-        {dnsCount > 0 && (
-          <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ border: '2px solid', borderColor: 'warning.main' }}>
-              <CardContent>
-                <Box display="flex" alignItems="center" justifyContent="between">
-                  <Box>
-                    <Typography variant="h4" fontWeight="bold" color="warning.main">
-                      {dnsCount}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      DNS Bottles
-                    </Typography>
-                    <Typography variant="caption" color="warning.main">
-                      (Not Scanned)
-                    </Typography>
-                  </Box>
-                  <WarningIcon sx={{ fontSize: 40, color: '#ed6c02' }} />
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
       </Grid>
 
       {/* Filters */}
@@ -985,28 +950,6 @@ function RentalsImproved() {
                   <MenuItem value="VENDOR">Vendors Only</MenuItem>
                 </Select>
               </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3.8}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={filters.showDNSOnly}
-                    onChange={(e) => setFilters({ ...filters, showDNSOnly: e.target.checked })}
-                    color="warning"
-                  />
-                }
-                label={
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography variant="body2">Show DNS Only</Typography>
-                    <Chip 
-                      label={dnsCount} 
-                      size="small" 
-                      color="warning" 
-                      sx={{ height: 20, fontSize: '0.7rem' }}
-                    />
-                  </Box>
-                }
-              />
             </Grid>
           </Grid>
         </CardContent>
@@ -1172,11 +1115,10 @@ function RentalsImproved() {
                           <IconButton
                             size="small"
                             color="primary"
-                            onClick={() => setInvoiceDialog({ 
-                              open: true, 
-                              customer, 
-                              rentals
-                            })}
+                            onClick={() => {
+                              const full = filteredCustomers.find(f => f.customer.CustomerListID === customer.CustomerListID);
+                              setInvoiceDialog({ open: true, customer, rentals: full?.rentals ?? rentals });
+                            }}
                             sx={{ mr: 1 }}
                           >
                             <InvoiceIcon />
@@ -1186,11 +1128,10 @@ function RentalsImproved() {
                       <Tooltip title="Edit Rentals">
                         <IconButton
                           size="small"
-                          onClick={() => setEditDialog({ 
-                            open: true, 
-                            customer,
-                            rentals 
-                          })}
+                          onClick={() => {
+                            const full = filteredCustomers.find(f => f.customer.CustomerListID === customer.CustomerListID);
+                            setEditDialog({ open: true, customer, rentals: full?.rentals ?? rentals });
+                          }}
                         >
                           <EditIcon />
                         </IconButton>
@@ -1241,49 +1182,28 @@ function RentalsImproved() {
                           <Box sx={{ p: 1.5, bgcolor: '#fafafa' }}>
                             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
                               {rentals.map((rental, idx) => {
-                                const isDNS = rental.is_dns === true;
                                 const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || rental.bottle_barcode;
-                                const displayLabel = isDNS 
-                                  ? `${rental.dns_product_code || 'DNS'} - ${rental.dns_description || 'Not Scanned'}`
-                                  : (barcode || `Asset ${idx + 1}`);
-                                
+                                const displayLabel = barcode || `Asset ${idx + 1}`;
+                                const bottleId = rental.bottles?.id || rental.bottle_id;
                                 return (
-                                  <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                    <Chip
-                                      label={displayLabel}
-                                      size="small"
-                                      variant="outlined"
-                                      color={isDNS ? 'warning' : 'default'}
-                                      onClick={() => {
-                                        // Navigate to bottle details page (only if not DNS)
-                                        if (!isDNS) {
-                                          const bottleId = rental.bottles?.id || rental.bottle_id;
-                                          if (bottleId) {
-                                            navigate(`/bottle/${bottleId}`);
-                                          }
-                                        }
-                                      }}
-                                      sx={{ 
-                                        fontSize: 11,
-                                        cursor: isDNS ? 'default' : 'pointer',
-                                        '&:hover': isDNS ? {} : {
-                                          bgcolor: 'primary.light',
-                                          color: 'primary.contrastText',
-                                          borderColor: 'primary.main'
-                                        }
-                                      }}
-                                    />
-                                    {isDNS && (
-                                      <DNSConversionDialog
-                                        dnsRental={rental}
-                                        customerId={customer.CustomerListID}
-                                        customerName={customer.name}
-                                        onConverted={() => {
-                                          fetchRentals();
-                                        }}
-                                      />
-                                    )}
-                                  </Box>
+                                  <Chip
+                                    key={rental.id || idx}
+                                    label={displayLabel}
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => {
+                                      if (bottleId) navigate(`/bottle/${bottleId}`);
+                                    }}
+                                    sx={{
+                                      fontSize: 11,
+                                      cursor: 'pointer',
+                                      '&:hover': {
+                                        bgcolor: 'primary.light',
+                                        color: 'primary.contrastText',
+                                        borderColor: 'primary.main'
+                                      }
+                                    }}
+                                  />
                                 );
                               })}
                             </Box>

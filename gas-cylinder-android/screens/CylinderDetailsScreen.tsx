@@ -21,8 +21,11 @@ export default function CylinderDetailsScreen() {
   const { colors } = useTheme();
   const [cylinder, setCylinder] = useState<any>(null);
   const [customer, setCustomer] = useState<any>(null);
+  const [locationDisplayName, setLocationDisplayName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test((s || '').trim());
 
   useEffect(() => {
     let isMounted = true;
@@ -90,6 +93,19 @@ export default function CylinderDetailsScreen() {
       } else if (cyl.customer_name && isMounted) {
         logger.log('📋 Using customer_name from bottle:', cyl.customer_name);
         setCustomer({ name: cyl.customer_name, CustomerListID: '' });
+      }
+
+      // If location is stored as UUID (legacy), resolve to location name for display
+      if (cyl.location && isUuid(cyl.location) && profile?.organization_id) {
+        const { data: loc } = await supabase
+          .from('locations')
+          .select('name')
+          .eq('id', cyl.location)
+          .eq('organization_id', profile.organization_id)
+          .single();
+        if (isMounted && loc?.name) setLocationDisplayName(loc.name);
+      } else if (isMounted) {
+        setLocationDisplayName(null);
       }
       
       if (isMounted) setLoading(false);
@@ -208,7 +224,9 @@ export default function CylinderDetailsScreen() {
         
         <View style={styles.infoRow}>
           <Text style={[styles.label, { color: colors.text }]}>Current Location:</Text>
-          <Text style={[styles.value, { color: colors.textSecondary }]}>{cylinder.location || 'Not set'}</Text>
+          <Text style={[styles.value, { color: colors.textSecondary }]}>
+            {locationDisplayName ?? (cylinder.location ? cylinder.location.replace(/_/g, ' ') : null) ?? 'Not set'}
+          </Text>
         </View>
         
         <View style={styles.infoRow}>
