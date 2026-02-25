@@ -45,6 +45,7 @@ function AssetWithWarning({ asset, currentCustomer }) {
 export default function ScannedOrders() {
   const { organization, profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
+  const userTimezone = profile?.preferences?.timezone || (typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone) || undefined;
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -345,15 +346,15 @@ export default function ScannedOrders() {
                           size="small"
                         />
                       </TableCell>
-                      <TableCell>{order.created_at ? new Date(order.created_at).toLocaleString('en-US', { 
-                        year: 'numeric', 
-                        month: '2-digit', 
-                        day: '2-digit', 
-                        hour: '2-digit', 
-                        minute: '2-digit',
-                        second: '2-digit',
-                        hour12: true 
-                      }) : 'N/A'}</TableCell>
+                      <TableCell>{order.created_at ? (() => {
+                        try {
+                          const opts = { dateStyle: 'medium', timeStyle: 'short' };
+                          if (userTimezone) opts.timeZone = userTimezone;
+                          return new Date(order.created_at).toLocaleString(undefined, opts);
+                        } catch {
+                          return new Date(order.created_at).toLocaleString();
+                        }
+                      })() : 'N/A'}</TableCell>
                       <TableCell>{users[order.user_id] || order.user_id || 'N/A'}</TableCell>
                       <TableCell>
                         {editingId === order.id ? (

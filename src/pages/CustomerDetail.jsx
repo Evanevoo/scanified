@@ -1080,7 +1080,7 @@ export default function CustomerDetail() {
                 <Chip
                   key={`dns-${type}`}
                   label={`${type} DNS (${count})`}
-                  color="secondary"
+                  color="error"
                   variant="outlined"
                   sx={{ 
                     fontWeight: 600, 
@@ -1332,6 +1332,10 @@ export default function CustomerDetail() {
               <TableBody>
                 {locationAssets.map((rental) => {
                   const isDNS = rental.is_dns === true;
+                  const bottle = !isDNS && (customerAssets || []).find(
+                    (b) => b.id === rental.bottle_id || (b.barcode_number || b.barcode) === rental.bottle_barcode
+                  );
+                  const typeProduct = bottle ? (bottle.type || bottle.description || bottle.product_code) : (rental.cylinder?.type || 'Unknown');
                   return (
                     <TableRow key={rental.id} hover sx={{ bgcolor: isDNS ? '#fff3cd' : 'inherit' }}>
                       <TableCell>
@@ -1357,7 +1361,7 @@ export default function CustomerDetail() {
                             </Typography>
                           </Box>
                         ) : (
-                          rental.cylinder?.type || 'Unknown'
+                          typeProduct
                         )}
                       </TableCell>
                       <TableCell>

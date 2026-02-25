@@ -197,9 +197,12 @@ export default function Home() {
         newStats.totalUsers = usersRes.count || 0;
       }
 
-      // Recent activity for all users - try multiple sources so we usually have something to show
+      // Recent activity: merge audit_logs, bottle_scans (movement), and rentals; sort by date; show full barcodes
       const activityItems = [];
-      // 1) audit_logs (if table exists and has rows)
+      const addItem = (item) => {
+        if (item && item.created_at) activityItems.push(item);
+      };
+      // 1) audit_logs
       try {
         const activityRes = await supabase
           .from('audit_logs')
@@ -208,7 +211,7 @@ export default function Home() {
           .order('created_at', { ascending: false })
           .limit(5);
         if (activityRes.data && activityRes.data.length > 0) {
-          activityRes.data.forEach(log => activityItems.push({
+          activityRes.data.forEach(log => addItem({
             action: log.action || 'Action',
             table_name: log.table_name || (log.details?.table || 'System'),
             created_at: log.created_at,
@@ -216,26 +219,42 @@ export default function Home() {
           }));
         }
       } catch (_) { /* table may not exist */ }
-      // 2) If still empty: recent bottle_scans (scans are common activity)
-      if (activityItems.length === 0) {
-        try {
-          const { data: scans } = await supabase.from('bottle_scans').select('created_at, order_number, bottle_barcode, customer_name, action, mode').eq('organization_id', organization.id).order('created_at', { ascending: false }).limit(5);
-          if (scans && scans.length > 0) {
-            scans.forEach(s => activityItems.push({
-              action: s.action || s.mode || 'Scan',
-              table_name: s.order_number ? `Order ${s.order_number}` : (s.customer_name || s.bottle_barcode || 'Cylinder'),
-              created_at: s.created_at,
-              profiles: { full_name: 'Scan' }
-            }));
-          }
-        } catch (_) { /* column may differ */ }
-      }
-      // 3) If still empty: recent deliveries (no profiles join to avoid schema issues)
+      // 2) bottle_scans (bottle movement: SHIP, RETURN, Order scans)
+      try {
+        const { data: scans } = await supabase.from('bottle_scans').select('created_at, timestamp, order_number, bottle_barcode, customer_name, action, mode').eq('organization_id', organization.id).order('created_at', { ascending: false }).limit(10);
+        if (scans && scans.length > 0) {
+          scans.forEach(s => {
+            const at = s.created_at || s.timestamp;
+            const movement = (s.mode || s.action || 'Scan').toUpperCase();
+            const barcode = s.bottle_barcode ? String(s.bottle_barcode).trim() : '';
+            const detail = s.order_number ? `Order ${s.order_number}` : (s.customer_name || (barcode || 'Cylinder'));
+            addItem({
+              action: movement,
+              table_name: barcode ? `${detail} • ${barcode}` : detail,
+              created_at: at,
+              profiles: { full_name: 'Movement' }
+            });
+          });
+        }
+      } catch (_) { /* column may differ */ }
+      // 3) recent rentals (full barcode)
+      try {
+        const { data: rentals } = await supabase.from('rentals').select('created_at, bottle_barcode').eq('organization_id', organization.id).order('created_at', { ascending: false }).limit(10);
+        if (rentals && rentals.length > 0) {
+          rentals.forEach(r => addItem({
+            action: 'Rental',
+            table_name: r.bottle_barcode ? String(r.bottle_barcode).trim() : '—',
+            created_at: r.created_at,
+            profiles: { full_name: 'Rental' }
+          }));
+        }
+      } catch (_) { /* ignore */ }
+      // 4) If still empty: deliveries
       if (activityItems.length === 0) {
         try {
           const deliveriesRes = await supabase.from('deliveries').select('id, status, delivery_date, created_at').eq('organization_id', organization.id).order('created_at', { ascending: false }).limit(5);
           if (deliveriesRes.data && deliveriesRes.data.length > 0) {
-            deliveriesRes.data.forEach(d => activityItems.push({
+            deliveriesRes.data.forEach(d => addItem({
               action: 'Delivery',
               table_name: d.status || 'Scheduled',
               created_at: d.created_at || d.delivery_date,
@@ -244,12 +263,12 @@ export default function Home() {
           }
         } catch (_) { /* ignore */ }
       }
-      // 4) If still empty: recently updated bottles (always has data when org has cylinders)
+      // 5) If still empty: recently updated bottles
       if (activityItems.length === 0) {
         try {
           const { data: bottles } = await supabase.from('bottles').select('barcode_number, product_code, last_updated, created_at').eq('organization_id', organization.id).order('created_at', { ascending: false }).limit(5);
           if (bottles && bottles.length > 0) {
-            bottles.forEach(b => activityItems.push({
+            bottles.forEach(b => addItem({
               action: 'Cylinder',
               table_name: b.product_code || b.barcode_number || 'Added',
               created_at: b.last_updated || b.created_at,
@@ -258,20 +277,8 @@ export default function Home() {
           }
         } catch (_) { /* ignore */ }
       }
-      // 5) If still empty: recent rentals
-      if (activityItems.length === 0) {
-        try {
-          const { data: rentals } = await supabase.from('rentals').select('created_at, bottle_barcode').eq('organization_id', organization.id).order('created_at', { ascending: false }).limit(5);
-          if (rentals && rentals.length > 0) {
-            rentals.forEach(r => activityItems.push({
-              action: 'Rental',
-              table_name: r.bottle_barcode ? `Barcode ${String(r.bottle_barcode).slice(-6)}` : 'Rental',
-              created_at: r.created_at,
-              profiles: { full_name: 'Rentals' }
-            }));
-          }
-        } catch (_) { /* ignore */ }
-      }
+      // Sort by created_at descending and take top 5
+      activityItems.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       setRecentActivity(activityItems.slice(0, 5));
 
       setStats(newStats);

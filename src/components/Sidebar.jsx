@@ -46,10 +46,10 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   
   const [searchTerm, setSearchTerm] = useState('');
   const [sections, setSections] = useState({
-    core: true,
-    operations: true,
+    core: false,
+    operations: false,
+    inventory: false,
     analytics: false,
-    inventory: true,
     advanced: false,
     admin: false
   });
@@ -442,7 +442,7 @@ borderColor: 'divider',
               const isSectionOpen = sections[sectionKey] !== false;
               return (
               <React.Fragment key={sectionKey}>
-                {/* Section Header - clickable when expanded to collapse/expand section */}
+                {/* Section Header - clickable to collapse/expand section */}
                 {!isCollapsed ? (
                   <ListItem disablePadding>
                     <ListItemButton

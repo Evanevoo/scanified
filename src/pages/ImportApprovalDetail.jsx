@@ -28,7 +28,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const [searchParams] = useSearchParams();
   const invoiceNumber = propInvoiceNumber || params.id; // Changed from params.invoiceNumber to params.id
   const navigate = useNavigate();
-  const { organization } = useAuth();
+  const { organization, profile } = useAuth();
+  const userTimezone = profile?.preferences?.timezone || (typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone) || undefined;
   const [importRecord, setImportRecord] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -2800,7 +2801,14 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                         const raw = importRecord.uploaded_at ?? importRecord.created_at ?? importRecord?.data?.summary?.uploaded_at;
                         if (raw == null || raw === '') return '—';
                         const d = new Date(raw);
-                        return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+                        if (Number.isNaN(d.getTime())) return '—';
+                        try {
+                          const opts = { dateStyle: 'medium', timeStyle: 'short' };
+                          if (userTimezone) opts.timeZone = userTimezone;
+                          return d.toLocaleString(undefined, opts);
+                        } catch {
+                          return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+                        }
                       })()}
                     </Typography>
                   </Grid>
