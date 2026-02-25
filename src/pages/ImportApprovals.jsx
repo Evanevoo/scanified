@@ -301,9 +301,18 @@ function EditBottleDialog({ open, bottle, barcode, isNew, organizationId, onClos
   );
 }
 
-function formatDate(dt) {
+// formatDate with optional timezone (used at call site with component's userTimezone)
+function formatDate(dt, timeZone) {
   if (!dt) return '';
-  return new Date(dt).toLocaleString();
+  const d = new Date(dt);
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    const opts = { dateStyle: 'medium', timeStyle: 'short' };
+    if (timeZone) opts.timeZone = timeZone;
+    return d.toLocaleString(undefined, opts);
+  } catch {
+    return d.toLocaleString();
+  }
 }
 
 function PreviewJson({ data }) {
@@ -566,7 +575,9 @@ function determineVerificationStatus(record) {
 }
 
 export default function ImportApprovals() {
-  const { user, organization } = useAuth();
+  const { user, organization, profile } = useAuth();
+  // Use profile timezone, else browser local — never UTC so scan times show in user's local time
+  const userTimezone = profile?.preferences?.timezone || (typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone) || undefined;
   const [pendingInvoices, setPendingInvoices] = useState([]);
   const [pendingReceipts, setPendingReceipts] = useState([]);
   const [ordersWithBottlesAtCustomers, setOrdersWithBottlesAtCustomers] = useState(new Set());
@@ -5962,7 +5973,7 @@ export default function ImportApprovals() {
                     icon={VERIFICATION_STATES[status].icon}
                   />
                   <Typography variant="caption" color="text.secondary" title="Scan time (local)">
-                    {formatDate(invoice.created_at)}
+                    {formatDate(invoice.created_at, userTimezone)}
                   </Typography>
                 </Box>
                 <Typography variant="body2" color="text.secondary" gutterBottom>
@@ -6192,7 +6203,7 @@ export default function ImportApprovals() {
                     icon={VERIFICATION_STATES[status].icon}
                   />
                   <Typography variant="caption" color="text.secondary" title="Scan time (local)">
-                    {formatDate(receipt.created_at)}
+                    {formatDate(receipt.created_at, userTimezone)}
                   </Typography>
                 </Box>
                 <Typography variant="body2" color="text.secondary" gutterBottom>
@@ -7960,20 +7971,31 @@ export default function ImportApprovals() {
 
   function getRecordDate(data) {
     if (!data) return '';
-    
+    const formatIfIso = (raw) => {
+      if (raw == null || raw === '') return '';
+      if (typeof raw === 'string' && raw.includes('T')) {
+        const d = new Date(raw);
+        if (!Number.isNaN(d.getTime())) {
+          try {
+            const opts = { dateStyle: 'medium', timeStyle: 'short' };
+            if (userTimezone) opts.timeZone = userTimezone;
+            return d.toLocaleString(undefined, opts);
+          } catch { return raw; }
+        }
+      }
+      return raw;
+    };
     // Try direct properties first (now set by splitImportIntoIndividualRecords)
     if (data.date || data.invoice_date || data.receipt_date) {
-      return data.date || data.invoice_date || data.receipt_date;
+      return formatIfIso(data.date || data.invoice_date || data.receipt_date);
     }
-    
     // Try to get from rows array (fallback)
     if (data.rows && data.rows.length > 0) {
       const firstRow = data.rows[0];
       if (firstRow.date || firstRow.invoice_date || firstRow.receipt_date) {
-        return firstRow.date || firstRow.invoice_date || firstRow.receipt_date;
+        return formatIfIso(firstRow.date || firstRow.invoice_date || firstRow.receipt_date);
       }
     }
-    
     return '';
   }
 

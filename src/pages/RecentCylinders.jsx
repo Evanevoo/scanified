@@ -30,8 +30,9 @@ const PAGE_SIZE = 50;
 
 export default function RecentCylinders() {
   const navigate = useNavigate();
-  const { organization, loading: authLoading } = useAuth();
+  const { organization, profile, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
+  const userTimezone = profile?.preferences?.timezone || (typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone) || undefined;
   const [error, setError] = useState(null);
   const [cylinders, setCylinders] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -58,9 +59,8 @@ export default function RecentCylinders() {
           product_code,
           description,
           status,
-          customer_name,
-          created_at,
-          customers:assigned_customer(name, CustomerListID)
+          location,
+          created_at
         `)
         .eq('organization_id', organization.id)
         .order('created_at', { ascending: false })
@@ -83,10 +83,20 @@ export default function RecentCylinders() {
       (c.serial_number && c.serial_number.toLowerCase().includes(term)) ||
       (c.product_code && c.product_code.toLowerCase().includes(term)) ||
       (c.description && c.description?.toLowerCase().includes(term)) ||
-      (c.customer_name && c.customer_name.toLowerCase().includes(term)) ||
-      (c.customers?.name && c.customers.name.toLowerCase().includes(term))
+      (c.location && c.location.toLowerCase().includes(term))
     );
   });
+
+  const formatAddedDate = (isoString) => {
+    if (!isoString) return '—';
+    try {
+      const opts = { dateStyle: 'medium', timeStyle: 'short' };
+      if (userTimezone) opts.timeZone = userTimezone;
+      return new Date(isoString).toLocaleString(undefined, opts);
+    } catch {
+      return new Date(isoString).toLocaleString();
+    }
+  };
 
   if (authLoading || loading) {
     return (
@@ -141,7 +151,7 @@ export default function RecentCylinders() {
         <TextField
           fullWidth
           size="small"
-          placeholder={'Search by barcode, serial, product code, description, or customer...'}
+          placeholder={'Search by barcode, serial, product code, description, or location...'}
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           InputProps={{
@@ -162,7 +172,7 @@ export default function RecentCylinders() {
                 <TableCell><strong>Serial</strong></TableCell>
                 <TableCell><strong>Product / Description</strong></TableCell>
                 <TableCell><strong>Status</strong></TableCell>
-                <TableCell><strong>Customer</strong></TableCell>
+                <TableCell><strong>Location</strong></TableCell>
                 <TableCell><strong>Added</strong></TableCell>
                 <TableCell align="right"><strong>Actions</strong></TableCell>
               </TableRow>
@@ -183,8 +193,8 @@ export default function RecentCylinders() {
                     <TableCell>
                       <Chip label={row.status || '—'} size="small" color={row.status === 'active' ? 'success' : 'default'} />
                     </TableCell>
-                    <TableCell>{row.customer_name || row.customers?.name || 'Unassigned'}</TableCell>
-                    <TableCell>{row.created_at ? new Date(row.created_at).toLocaleString() : '—'}</TableCell>
+                    <TableCell>{row.location || '—'}</TableCell>
+                    <TableCell>{formatAddedDate(row.created_at)}</TableCell>
                     <TableCell align="right">
                       <Button size="small" onClick={() => navigate(`/bottle/${row.id}`)} endIcon={<OpenInNewIcon />}>
                         View

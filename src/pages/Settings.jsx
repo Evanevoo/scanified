@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
+import PortalSnackbar from '../components/PortalSnackbar';
 import {
   Box,
   Paper,
@@ -13,7 +14,6 @@ import {
   TextField,
   Button,
   Switch,
-  Snackbar,
   IconButton,
   Select,
   MenuItem,
@@ -294,12 +294,23 @@ export default function Settings() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // Profile preferences (timezone, locale)
+  // Profile preferences (timezone, locale) — locale must be one of the Language select options (en, es, fr, de)
+  const LOCALE_OPTIONS = ['en', 'es', 'fr', 'de'];
+  const normalizeLocale = (locale) => {
+    if (!locale) return 'en';
+    const base = String(locale).split('-')[0].toLowerCase();
+    return LOCALE_OPTIONS.includes(base) ? base : LOCALE_OPTIONS.includes(locale) ? locale : 'en';
+  };
   const [preferences, setPreferences] = useState({
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-    locale: typeof navigator !== 'undefined' ? (navigator.language || 'en') : 'en',
+    locale: normalizeLocale(typeof navigator !== 'undefined' ? (navigator.language || 'en') : 'en'),
   });
   const [preferencesChanged, setPreferencesChanged] = useState(false);
+
+  // Guaranteed valid value for the Language Select (avoids MUI out-of-range when profile has e.g. en-US)
+  const localeSelectValue = LOCALE_OPTIONS.includes(preferences.locale)
+    ? preferences.locale
+    : normalizeLocale(preferences.locale);
 
   // Loading states
   const [profileLoading, setProfileLoading] = useState(false);
@@ -612,11 +623,14 @@ export default function Settings() {
         full_name: profileData.full_name 
       });
       
+      const updates = { full_name: profileData.full_name };
+      if (preferencesChanged) {
+        updates.preferences = { timezone: preferences.timezone, locale: preferences.locale };
+      }
+      
       const { data, error } = await supabase
         .from('profiles')
-        .update({ 
-          full_name: profileData.full_name
-        })
+        .update(updates)
         .eq('id', user.id)
         .select()
         .single();
@@ -629,6 +643,7 @@ export default function Settings() {
       logger.log('Profile updated successfully:', data);
       setProfileMsg('Profile updated successfully!');
       setProfileChanged(false);
+      if (preferencesChanged) setPreferencesChanged(false);
       
       // Reload auth context to get updated profile
       if (reloadUserData) {
@@ -975,16 +990,23 @@ export default function Settings() {
     if (activeTab === 4) loadSupportTickets(); // Help & Support tab index
   }, [activeTab, loadSupportTickets]);
 
-  // Load profile preferences
+  // Load profile preferences from profile when it becomes available (e.g. after refresh)
   useEffect(() => {
-    const prefs = profile?.preferences || {};
-    if (typeof prefs === 'object' && (prefs.timezone || prefs.locale)) {
+    const prefs = profile?.preferences;
+    if (profile && prefs !== undefined && prefs !== null && typeof prefs === 'object') {
       setPreferences(prev => ({
-        timezone: prefs.timezone || prev.timezone,
-        locale: prefs.locale || prev.locale,
+        timezone: prefs.timezone !== undefined && prefs.timezone !== null ? prefs.timezone : prev.timezone,
+        locale: prefs.locale !== undefined && prefs.locale !== null ? normalizeLocale(prefs.locale) : prev.locale,
       }));
     }
-  }, [profile?.preferences]);
+  }, [profile?.id, profile?.preferences]);
+
+  // If state ever has an invalid locale (e.g. en-US), normalize it so Select never receives it
+  useEffect(() => {
+    if (preferences.locale && !LOCALE_OPTIONS.includes(preferences.locale)) {
+      setPreferences(prev => ({ ...prev, locale: normalizeLocale(prev.locale) }));
+    }
+  }, [preferences.locale]);
 
 
   const handleLogoUpload = async (e) => {
@@ -1252,7 +1274,7 @@ export default function Settings() {
                   <FormControl fullWidth>
                     <InputLabel>Language</InputLabel>
                     <Select
-                      value={preferences.locale}
+                      value={localeSelectValue}
                       label="Language"
                       onChange={(e) => {
                         setPreferences(prev => ({ ...prev, locale: e.target.value }));
@@ -2653,29 +2675,27 @@ export default function Settings() {
             </Paper>
           </TabPanel>
 
-          {/* Snackbars */}
-          <Snackbar open={profileSnackbar} autoHideDuration={3000} onClose={() => setProfileSnackbar(false)}>
+          {/* Snackbars — portaled so they appear above the sidebar */}
+          <PortalSnackbar open={profileSnackbar} autoHideDuration={3000} onClose={() => setProfileSnackbar(false)}>
             <Alert onClose={() => setProfileSnackbar(false)} severity={profileMsg.includes('successfully') ? 'success' : 'error'} sx={{ width: '100%' }}>
               {profileMsg}
             </Alert>
-          </Snackbar>
-          
-          <Snackbar open={passwordSnackbar} autoHideDuration={3000} onClose={() => setPasswordSnackbar(false)}>
+          </PortalSnackbar>
+          <PortalSnackbar open={passwordSnackbar} autoHideDuration={3000} onClose={() => setPasswordSnackbar(false)}>
             <Alert onClose={() => setPasswordSnackbar(false)} severity={passwordMsg.includes('successfully') ? 'success' : 'error'} sx={{ width: '100%' }}>
               {passwordMsg}
             </Alert>
-          </Snackbar>
-          
-          <Snackbar open={supportSnackbar} autoHideDuration={3000} onClose={() => setSupportSnackbar(false)}>
+          </PortalSnackbar>
+          <PortalSnackbar open={supportSnackbar} autoHideDuration={3000} onClose={() => setSupportSnackbar(false)}>
             <Alert onClose={() => setSupportSnackbar(false)} severity={supportMsg.includes('Error') ? 'error' : 'success'} sx={{ width: '100%' }}>
               {supportMsg}
             </Alert>
-          </Snackbar>
-          <Snackbar open={notifSnackbar} autoHideDuration={3000} onClose={() => setNotifSnackbar(false)}>
+          </PortalSnackbar>
+          <PortalSnackbar open={notifSnackbar} autoHideDuration={3000} onClose={() => setNotifSnackbar(false)}>
             <Alert onClose={() => setNotifSnackbar(false)} severity="success" sx={{ width: '100%' }}>
               {notifMsg}
             </Alert>
-          </Snackbar>
+          </PortalSnackbar>
 
           {/* Delete account confirmation */}
           <Dialog open={deleteAccountDialog} onClose={() => !deleteLoading && setDeleteAccountDialog(false)}>
