@@ -92,22 +92,32 @@ export default function CustomerDetail() {
   const [childCustomers, setChildCustomers] = useState([]);   // customers where parent_customer_id = this customer's id
   const [parentOptions, setParentOptions] = useState([]);     // for edit form "Under parent" selector
 
-  // Combine physical bottles with DNS (Delivered Not Scanned) so total count is visible
+  // Combine physical bottles with DNS (Delivered Not Scanned) and RNB (Return not on balance) so total count is visible
   const dnsRentals = useMemo(() => (locationAssets || []).filter(r => r.is_dns), [locationAssets]);
+  const rnbRentals = useMemo(() => dnsRentals.filter(r => (r.dns_description || '').includes('Return not on balance')), [dnsRentals]);
+  const dnsOnlyRentals = useMemo(() => dnsRentals.filter(r => !(r.dns_description || '').includes('Return not on balance')), [dnsRentals]);
   const dnsSummaryByType = useMemo(() => {
     const byType = {};
-    (dnsRentals || []).forEach(r => {
+    (dnsOnlyRentals || []).forEach(r => {
       const type = r.dns_product_code || r.product_code || 'DNS';
       byType[type] = (byType[type] || 0) + 1;
     });
     return byType;
-  }, [dnsRentals]);
+  }, [dnsOnlyRentals]);
+  const rnbSummaryByType = useMemo(() => {
+    const byType = {};
+    (rnbRentals || []).forEach(r => {
+      const type = r.dns_product_code || r.product_code || 'RNB';
+      byType[type] = (byType[type] || 0) + 1;
+    });
+    return byType;
+  }, [rnbRentals]);
   const displayBottleList = useMemo(() => {
     const physical = (customerAssets || []).map(a => ({ ...a, isDns: false }));
     const dnsRows = dnsRentals.map(r => ({
       id: 'dns-' + r.id,
       serial_number: '—',
-      barcode_number: 'DNS',
+      barcode_number: (r.dns_description || '').includes('Return not on balance') ? 'RNB' : 'DNS',
       type: r.dns_product_code || r.product_code || '—',
       description: r.dns_description || '',
       location: '—',
@@ -115,7 +125,8 @@ export default function CustomerDetail() {
     }));
     return [...physical, ...dnsRows];
   }, [customerAssets, dnsRentals]);
-  const totalBottleCount = (customerAssets?.length || 0) + dnsRentals.length;
+  // Total = physical + DNS only. RNB (return not on balance) is an exception record — don't add and don't subtract.
+  const totalBottleCount = Math.max(0, (customerAssets?.length || 0) + dnsOnlyRentals.length);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -407,19 +418,24 @@ export default function CustomerDetail() {
     try {
       const orgId = organization?.id || customer?.organization_id;
 
-      // Fetch from scans table for this customer's bottles (actual audit trail)
+      const barcodes = (customerAssets || []).map(b => b.barcode_number).filter(Boolean);
+      if (barcodes.length === 0) {
+        setTransferHistory([]);
+        return;
+      }
       const { data: scanData, error: scanError } = await supabase
-        .from('scans')
-        .select('id, barcode_number, created_at, "mode", action, location, order_number, customer_name')
+        .from('bottle_scans')
+        .select('id, bottle_barcode, created_at, mode, order_number, customer_name')
         .eq('organization_id', orgId)
-        .in('barcode_number', (customerAssets || []).map(b => b.barcode_number).filter(Boolean))
+        .in('bottle_barcode', barcodes)
         .order('created_at', { ascending: false })
         .limit(50);
 
       if (scanError) throw scanError;
 
       const transfers = (scanData || []).map(scan => {
-        const mode = (scan.mode || scan.action || '').toUpperCase();
+        const barcode = scan.bottle_barcode || scan.barcode_number;
+        const mode = (scan.mode || '').toString().toUpperCase();
         const isShip = mode === 'SHIP' || mode === 'DELIVERY';
         const isReturn = mode === 'RETURN' || mode === 'PICKUP';
         return {
@@ -427,12 +443,12 @@ export default function CustomerDetail() {
           type: isShip ? 'delivery' : isReturn ? 'return' : 'scan',
           timestamp: scan.created_at,
           description: isShip
-            ? `Asset ${scan.barcode_number} delivered to ${scan.customer_name || scan.location || 'customer'}`
+            ? `Asset ${barcode} delivered to ${scan.customer_name || 'customer'}`
             : isReturn
-              ? `Asset ${scan.barcode_number} returned to ${scan.location || 'warehouse'}`
-              : `Asset ${scan.barcode_number} scanned at ${scan.location || 'unknown'}`,
+              ? `Asset ${barcode} returned to warehouse`
+              : `Asset ${barcode} scanned`,
           details: {
-            barcode: scan.barcode_number,
+            barcode: barcode,
             orderNumber: scan.order_number,
             location: scan.location,
             status: isShip ? 'rented' : isReturn ? 'returned' : 'scanned'
@@ -1080,6 +1096,21 @@ export default function CustomerDetail() {
                 <Chip
                   key={`dns-${type}`}
                   label={`${type} DNS (${count})`}
+                  color="info"
+                  variant="outlined"
+                  sx={{ 
+                    fontWeight: 600, 
+                    fontSize: '1rem',
+                    px: 2,
+                    py: 1,
+                    borderRadius: 2
+                  }}
+                />
+              ))}
+              {Object.entries(rnbSummaryByType).map(([type, count]) => (
+                <Chip
+                  key={`rnb-${type}`}
+                  label={`${type} RNB (${count})`}
                   color="error"
                   variant="outlined"
                   sx={{ 
@@ -1093,7 +1124,7 @@ export default function CustomerDetail() {
               ))}
             </Box>
             <Typography variant="body2" color="text.secondary" mt={2}>
-              Total bottles: {totalBottleCount} ({customerAssets.length} physical{dnsRentals.length > 0 ? ` + ${dnsRentals.length} DNS` : ''})
+              Total bottles: {totalBottleCount} ({customerAssets.length} physical{dnsOnlyRentals.length > 0 ? ` + ${dnsOnlyRentals.length} DNS` : ''}{rnbRentals.length > 0 ? `, ${rnbRentals.length} RNB not counted` : ''})
             </Typography>
           </Box>
         )}
@@ -1106,9 +1137,12 @@ export default function CustomerDetail() {
             <Typography variant="h5" fontWeight={700} color="primary">
               🏠 Currently Assigned Bottles ({totalBottleCount})
             </Typography>
-            {dnsRentals.length > 0 && (
+            {(dnsOnlyRentals.length > 0 || rnbRentals.length > 0) && (
               <Typography variant="body2" color="text.secondary">
-                {customerAssets.length} physical + {dnsRentals.length} DNS (Delivered Not Scanned)
+                {customerAssets.length} physical
+                {dnsOnlyRentals.length > 0 ? ` + ${dnsOnlyRentals.length} DNS` : ''}
+                {rnbRentals.length > 0 ? ` (${rnbRentals.length} RNB return not on balance — not counted)` : ''}
+                {totalBottleCount !== customerAssets.length && dnsOnlyRentals.length > 0 && ` = ${totalBottleCount} total`}
               </Typography>
             )}
             {totalBottleCount === 0 && (
@@ -1255,7 +1289,7 @@ export default function CustomerDetail() {
                     <TableCell>{asset.serial_number}</TableCell>
                     <TableCell>
                       {asset.isDns ? (
-                        <Typography component="span" color="text.secondary" fontWeight={500}>DNS</Typography>
+                        <Typography component="span" color="text.secondary" fontWeight={500}>{asset.barcode_number || 'DNS'}</Typography>
                       ) : asset.barcode_number ? (
                         <Link
                           to={`/bottle/${asset.id}`}
@@ -1276,7 +1310,7 @@ export default function CustomerDetail() {
                     </TableCell>
                     <TableCell>
                       {asset.isDns ? (
-                        <Chip label="DNS" color="info" size="small" variant="outlined" />
+                        <Chip label={asset.barcode_number || 'DNS'} color={asset.barcode_number === 'RNB' ? 'error' : 'info'} size="small" variant="outlined" />
                       ) : (
                         <Chip 
                           label={
@@ -1309,7 +1343,7 @@ export default function CustomerDetail() {
       {/* Rental History */}
       <Paper elevation={3} sx={{ p: 4, borderRadius: 4 }}>
         <Typography variant="h5" fontWeight={700} color="primary" mb={3}>
-          📋 Rental History ({locationAssets.length})
+          📋 Rental History ({locationAssets.length}{rnbRentals.length > 0 ? ` — ${totalBottleCount} billable` : ''})
         </Typography>
         
         {locationAssets.length === 0 ? (
@@ -1332,14 +1366,17 @@ export default function CustomerDetail() {
               <TableBody>
                 {locationAssets.map((rental) => {
                   const isDNS = rental.is_dns === true;
+                  const isRNB = isDNS && (rental.dns_description || '').includes('Return not on balance');
                   const bottle = !isDNS && (customerAssets || []).find(
                     (b) => b.id === rental.bottle_id || (b.barcode_number || b.barcode) === rental.bottle_barcode
                   );
                   const typeProduct = bottle ? (bottle.type || bottle.description || bottle.product_code) : (rental.cylinder?.type || 'Unknown');
                   return (
-                    <TableRow key={rental.id} hover sx={{ bgcolor: isDNS ? '#fff3cd' : 'inherit' }}>
+                    <TableRow key={rental.id} hover sx={{ bgcolor: isRNB ? '#ffebee' : isDNS ? '#fff3cd' : 'inherit' }}>
                       <TableCell>
-                        {isDNS ? (
+                        {isRNB ? (
+                          <Chip label="RNB" color="error" size="small" sx={{ fontWeight: 'bold' }} />
+                        ) : isDNS ? (
                           <Chip 
                             label="DNS" 
                             color="warning" 
@@ -1384,13 +1421,13 @@ export default function CustomerDetail() {
                       <TableCell>{rental.rental_start_date || '-'}</TableCell>
                       <TableCell>
                         <Chip 
-                          label={isDNS ? 'DNS (Not Scanned)' : (rental.status || 'Active')} 
-                          color={isDNS ? 'warning' : (rental.status === 'at_home' ? 'warning' : 'success')}
+                          label={isRNB ? 'RNB (Return not on balance)' : isDNS ? 'DNS (Not Scanned)' : (rental.status || 'Active')} 
+                          color={isRNB ? 'error' : isDNS ? 'warning' : (rental.status === 'at_home' ? 'warning' : 'success')}
                           size="small"
                         />
                       </TableCell>
                       <TableCell>
-                        {isDNS && (
+                        {isDNS && !isRNB && (
                           <DNSConversionDialog
                             dnsRental={rental}
                             customerId={customer?.CustomerListID}

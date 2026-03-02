@@ -29,7 +29,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const invoiceNumber = propInvoiceNumber || params.id; // Changed from params.invoiceNumber to params.id
   const navigate = useNavigate();
   const { organization, profile } = useAuth();
-  const userTimezone = profile?.preferences?.timezone || (typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone) || undefined;
+  const browserTz = typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone;
+  const userTimezone = profile?.preferences?.timezone || (browserTz && browserTz !== 'UTC' ? browserTz : undefined);
   const [importRecord, setImportRecord] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -104,16 +105,22 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       
       // Handle scanned-only records
       if (invoiceNumber && invoiceNumber.startsWith('scanned_')) {
-        // For scanned-only records, create a mock record structure
-        const orderNumber = invoiceNumber.replace('scanned_', '');
+        // ID format: scanned_<orderNumber> or scanned_<orderNumber>_<customerSuffix>
+        // bottle_scans stores only order_number (e.g. S47744), not the full id suffix
+        const afterPrefix = invoiceNumber.replace(/^scanned_/, '');
+        const orderNumber = afterPrefix.includes('_') ? afterPrefix.split('_')[0] : afterPrefix;
         const customerName = filterCustomerName || '';
         
         // Fetch scan data from bottle_scans table
-        const { data: scans, error: scansError } = await supabase
+        let query = supabase
           .from('bottle_scans')
           .select('*')
           .eq('order_number', orderNumber)
           .order('created_at', { ascending: false });
+        if (organization?.id) {
+          query = query.eq('organization_id', organization.id);
+        }
+        const { data: scans, error: scansError } = await query;
         
         if (scansError) {
           setError(`Error fetching scan data: ${scansError.message}`);
@@ -308,52 +315,45 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           }
         }
         
-        // Create a map of barcode_number OR product_code to asset info
+        // Create a map of barcode_number, product_code, OR type to asset info (so import "product_code" that is actually a type still resolves)
+        const assetInfoEntry = (bottle) => ({
+          category: bottle.category || '',
+          group: bottle.group_name || '',
+          type: bottle.type || '',
+          product_code: bottle.product_code || '',
+          description: bottle.description || '',
+          gas_type: bottle.gas_type || ''
+        });
         const map = {};
         bottles.forEach(bottle => {
           const barcode = bottle.barcode_number?.trim();
           const prodCode = bottle.product_code?.trim();
+          const typeKey = bottle.type?.trim();
           
-          logger.log(`📊 Bottle - Barcode: ${barcode}, ProductCode: ${prodCode}:`, {
+          logger.log(`📊 Bottle - Barcode: ${barcode}, ProductCode: ${prodCode}, Type: ${typeKey}:`, {
             category: bottle.category,
             group: bottle.group_name,
             type: bottle.type
           });
           
+          const entry = assetInfoEntry(bottle);
+          
           // Map by barcode if available (most accurate)
           if (barcode) {
-            logger.log(`✅ Mapping bottle data for barcode: ${barcode}`, {
-              category: bottle.category || 'EMPTY',
-              group: bottle.group_name || 'EMPTY',
-              type: bottle.type || 'EMPTY',
-              description: bottle.description || 'EMPTY',
-              gas_type: bottle.gas_type || 'EMPTY'
-            });
-            map[barcode] = {
-              category: bottle.category || '',
-              group: bottle.group_name || '',
-              type: bottle.type || '',
-              description: bottle.description || '',
-              gas_type: bottle.gas_type || ''
-            };
+            logger.log(`✅ Mapping bottle data for barcode: ${barcode}`, { ...entry });
+            map[barcode] = entry;
           }
           
           // Also map by product_code if available
           if (prodCode) {
-            logger.log(`✅ Mapping bottle data for product_code: ${prodCode}`, {
-              category: bottle.category || 'EMPTY',
-              group: bottle.group_name || 'EMPTY',
-              type: bottle.type || 'EMPTY',
-              description: bottle.description || 'EMPTY',
-              gas_type: bottle.gas_type || 'EMPTY'
-            });
-            map[prodCode] = {
-              category: bottle.category || '',
-              group: bottle.group_name || '',
-              type: bottle.type || '',
-              description: bottle.description || '',
-              gas_type: bottle.gas_type || ''
-            };
+            logger.log(`✅ Mapping bottle data for product_code: ${prodCode}`, { ...entry });
+            map[prodCode] = entry;
+          }
+          
+          // Also map by type so imports that use "type" (e.g. BCS68-125) in the product_code column still resolve to the bottle and show real product_code (e.g. 72010)
+          if (typeKey) {
+            logger.log(`✅ Mapping bottle data for type: ${typeKey}`, { ...entry });
+            map[typeKey] = entry;
           }
         });
         
@@ -407,9 +407,10 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         }
       }
       
-      // 4. From record ID (for scanned-only records)
+      // 4. From record ID (for scanned-only records; ID format: scanned_<orderNumber> or scanned_<orderNumber>_<suffix>)
       if ((!orderNumber || orderNumber === 'N/A') && typeof importRecord.id === 'string' && importRecord.id.startsWith('scanned_')) {
-        orderNumber = importRecord.id.replace('scanned_', '');
+        const afterPrefix = importRecord.id.replace(/^scanned_/, '');
+        orderNumber = afterPrefix.includes('_') ? afterPrefix.split('_')[0] : afterPrefix;
         logger.log('🔍 Order number from scanned ID:', orderNumber);
       }
       
@@ -449,9 +450,19 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         importRecordStatus: importRecord?.status
       });
       
-      // Order number as-is for matching (trim only; letter-prefix and digits-only both accepted, no deriving)
+      // Order number variants so we match all scans the list shows (string/number/zero-padded)
       const trimOrderNum = (num) => (num == null || num === '') ? '' : String(num).trim();
       const orderNumTrimmed = trimOrderNum(orderNumber);
+      const orderVariants = [orderNumTrimmed];
+      if (/^\d+$/.test(orderNumTrimmed)) {
+        const normalized = orderNumTrimmed.replace(/^0+/, '') || '0';
+        if (normalized !== orderNumTrimmed) orderVariants.push(normalized);
+        const padded = orderNumTrimmed.padStart(6, '0');
+        if (padded !== orderNumTrimmed) orderVariants.push(padded);
+        const asNum = parseInt(orderNumTrimmed, 10);
+        if (!Number.isNaN(asNum)) orderVariants.push(String(asNum));
+      }
+      const uniqueOrderVariants = [...new Set(orderVariants)].filter(Boolean);
       
       try {
         // Track barcodes separately for delivered (SHIP) and returned (RETURN)
@@ -475,12 +486,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           return true;
         };
         
-        // Fetch from bottle_scans table filtered directly by order_number (avoids 1000-row cap)
+        // Fetch from bottle_scans with order number variants (so scans that appear on list also show here)
         const { data: matchingBottleScans, error: bottleScansError } = await supabase
           .from('bottle_scans')
           .select('bottle_barcode, order_number, mode, created_at')
           .eq('organization_id', organization.id)
-          .eq('order_number', orderNumTrimmed);
+          .in('order_number', uniqueOrderVariants);
         
         if (bottleScansError) {
           logger.error('Error fetching bottle_scans:', bottleScansError);
@@ -525,46 +536,6 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             } else {
               returnedBarcodes.add(barcode);
               logger.log(`📦 Added RETURNED barcode from bottle_scans: ${barcode} (mode: ${scanInfo.mode})`);
-            }
-          });
-        }
-        
-        // Also check scans table filtered directly by order_number (avoids 1000-row cap)
-        const { data: matchingScans, error: scansError } = await supabase
-          .from('scans')
-          .select('barcode_number, order_number, "mode", action, created_at')
-          .eq('organization_id', organization.id)
-          .eq('order_number', orderNumTrimmed);
-        
-        if (scansError) {
-          logger.error('Error fetching scans:', scansError);
-        } else {
-          logger.log(`✅ Found ${(matchingScans || []).length} scans for order ${orderNumber}`);
-          logger.log('📋 Matching scans:', (matchingScans || []).map(s => ({
-            order_number: s.order_number,
-            barcode_number: s.barcode_number,
-            mode: s.mode,
-            action: s.action
-          })));
-          
-          (matchingScans || []).forEach(scan => {
-            if (scan.barcode_number) {
-              const isDeliveredScan = isDelivered(scan.mode, scan.action);
-              const modeType = isDeliveredScan ? 'SHIP' : 'RETURN';
-              const mapKey = `${scan.barcode_number}\t${modeType}`;
-              const existingMode = barcodeToModeMap.get(mapKey);
-              const newTime = new Date(scan.created_at || 0).getTime();
-              const existingTime = existingMode ? new Date(existingMode.created_at || 0).getTime() : -1;
-              
-              // Newest scan wins per (barcode+modeType) — SHIP and RETURN are additive
-              if (!existingMode || newTime >= existingTime) {
-                barcodeToModeMap.set(mapKey, { mode: scan.mode, action: scan.action, isDelivered: isDeliveredScan, created_at: scan.created_at });
-                if (isDeliveredScan) {
-                  deliveredBarcodes.add(scan.barcode_number);
-                } else {
-                  returnedBarcodes.add(scan.barcode_number);
-                }
-              }
             }
           });
         }
@@ -865,28 +836,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       if (orderNumber) {
         logger.log('🔍 Looking for scans for order:', orderNumber, 'org:', organization?.id);
 
-        // Scans table: filter by order_number in the query (avoids fetching entire table)
-        const { data: orderScans, error: scansError } = await supabase
-          .from('scans')
-          .select('barcode_number, product_code, order_number, "mode", action, created_at')
-          .eq('order_number', orderNumTrimmed)
-          .eq('organization_id', organization?.id);
-        if (!scansError && orderScans) {
-          orderScans.forEach(scan => {
-            if (!scan.barcode_number) return;
-            const mode = (scan.mode || '').toUpperCase();
-            const action = (scan.action || '').toLowerCase();
-            const isReturn = mode === 'RETURN' || mode === 'PICKUP' || action === 'in';
-            const modeType = isReturn ? 'RETURN' : 'SHIP';
-            const time = new Date(scan.created_at || 0).getTime();
-            const existing = barcodeLatestMode.get(scan.barcode_number);
-            if (!existing || time >= existing.time) {
-              barcodeLatestMode.set(scan.barcode_number, { mode: modeType, time });
-            }
-          });
-        }
-
-        // Bottle_scans table: filter by order_number in the query
+        // bottle_scans only
         const { data: orderBottleScans, error: bottleScansError } = await supabase
           .from('bottle_scans')
           .select('bottle_barcode, cylinder_barcode, order_number, mode, created_at')
@@ -935,7 +885,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       const assignmentSuccesses = [];
       const processedShipped = new Set();
 
-      // Process RETURN barcodes first: unassign bottle, close rental, ensure scan in scans table for movement history
+      // Process RETURN barcodes first: unassign bottle, close rental, ensure scan in bottle_scans for movement history
       for (const barcode of returnedBarcodes) {
         const { data: bottles, error: bottleError } = await supabase
           .from('bottles')
@@ -979,26 +929,25 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           .is('rental_end_date', null)
           .eq('organization_id', organization?.id);
 
-        // Ensure scans table has a row for movement history (AssetDetail reads from scans)
-        const { data: existingScan } = await supabase
-          .from('scans')
+        // Ensure bottle_scans has a row for movement history
+        const { data: existingBottleScan } = await supabase
+          .from('bottle_scans')
           .select('id')
-          .eq('barcode_number', barcode)
+          .eq('bottle_barcode', barcode)
           .eq('order_number', orderNumTrimmed)
           .eq('organization_id', organization?.id)
           .limit(1);
-        if (!existingScan?.length) {
+        if (!existingBottleScan?.length) {
           const { error: scanInsertError } = await supabase
-            .from('scans')
+            .from('bottle_scans')
             .insert({
               organization_id: organization?.id,
-              barcode_number: barcode,
+              bottle_barcode: barcode,
               order_number: orderNumTrimmed,
               customer_name: newCustomerName || null,
               customer_id: newCustomerId || null,
               mode: 'RETURN',
-              action: 'in',
-              status: 'approved',
+              timestamp: new Date().toISOString(),
               created_at: new Date().toISOString()
             });
           if (scanInsertError) logger.warn('Could not insert return scan for history:', scanInsertError);
@@ -1142,26 +1091,25 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 });
             }
 
-            // Insert scan record for movement history
-            const { data: existingScan } = await supabase
-              .from('scans')
+            // Insert bottle_scan record for movement history
+            const { data: existingBottleScan } = await supabase
+              .from('bottle_scans')
               .select('id')
-              .eq('barcode_number', barcode)
+              .eq('bottle_barcode', barcode)
               .eq('order_number', orderNumTrimmed)
               .eq('organization_id', organization?.id)
               .limit(1);
-            if (!existingScan?.length) {
+            if (!existingBottleScan?.length) {
               await supabase
-                .from('scans')
+                .from('bottle_scans')
                 .insert({
                   organization_id: organization?.id,
-                  barcode_number: barcode,
+                  bottle_barcode: barcode,
                   order_number: orderNumTrimmed,
                   customer_name: newCustomerName || null,
                   customer_id: newCustomerId || null,
                   mode: 'SHIP',
-                  action: 'out',
-                  status: 'approved',
+                  timestamp: new Date().toISOString(),
                   created_at: new Date().toISOString()
                 });
             }
@@ -1306,10 +1254,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             if (actionLower === 'in') return false;
             return true;
           };
+          const normalizeBarcode = (b) => (b == null || b === '') ? '' : String(b).trim().replace(/^0+/, '') || String(b).trim();
 
           let bottleScanRows = [];
           let scanRows = [];
-          // 1. bottle_scans: bottle_barcode, mode
+          // 1. bottle_scans: bottle_barcode, mode — key by normalized barcode so same bottle (e.g. 634457676 vs 0634457676) is one entry, latest scan wins
           if (orderVariants.length > 0) {
             const resBs = await supabase
               .from('bottle_scans')
@@ -1318,20 +1267,23 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               .eq('organization_id', organization.id);
             bottleScanRows = resBs.data || [];
 
-            const resScans = await supabase
-              .from('scans')
-              .select('barcode_number, mode, action, created_at')
-              .in('order_number', orderVariants)
-              .eq('organization_id', organization.id);
-            scanRows = resScans.data || [];
+            // Single source: bottle_scans; map to barcode_number for fallback code that uses scanRows
+            scanRows = (bottleScanRows || []).map((s) => ({
+              barcode_number: s.bottle_barcode,
+              mode: s.mode,
+              action: (s.mode || '').toString().toUpperCase() === 'SHIP' || (s.mode || '').toString().toUpperCase() === 'DELIVERY' ? 'out' : 'in',
+              created_at: s.created_at || s.timestamp
+            }));
 
             const barcodeToLatest = new Map();
             const addScan = (barcode, isDeliveredScan, time) => {
               if (!barcode) return;
               const bc = String(barcode).trim();
-              const existing = barcodeToLatest.get(bc);
+              const norm = normalizeBarcode(bc);
+              if (!norm) return;
+              const existing = barcodeToLatest.get(norm);
               if (!existing || time >= existing.time) {
-                barcodeToLatest.set(bc, { isDelivered: isDeliveredScan, time });
+                barcodeToLatest.set(norm, { isDelivered: isDeliveredScan, time, raw: bc });
               }
             };
 
@@ -1341,16 +1293,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               const time = new Date(scan.timestamp || scan.created_at || 0).getTime();
               addScan(barcode, isDeliveredScan, time);
             });
-            (scanRows || []).forEach((scan) => {
-              const barcode = scan.barcode_number;
-              const isDeliveredScan = isDelivered(scan.mode, scan.action);
-              const time = new Date(scan.created_at || 0).getTime();
-              addScan(barcode, isDeliveredScan, time);
-            });
 
-            barcodeToLatest.forEach((info, barcode) => {
-              if (info.isDelivered) shipBarcodes.push(barcode);
-              else returnBarcodes.push(barcode);
+            barcodeToLatest.forEach((info, norm) => {
+              const raw = info.raw || norm;
+              if (info.isDelivered) shipBarcodes.push(raw);
+              else returnBarcodes.push(raw);
             });
           }
 
@@ -1360,8 +1307,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             const barcode = row.barcode || row.barcode_number || row.bottle_barcode || row.cylinder_barcode;
             if (!barcode) return;
             const bc = String(barcode).trim();
-            const qtyIn = parseInt(row.qty_in || row.QtyIn || row.returned || 0, 10);
-            const qtyOut = parseInt(row.qty_out || row.shipped || row.quantity || 0, 10);
+            const qtyIn = parseInt(row.qty_in || row.QtyIn || row.returned || row.Returned || row.return_qty || row.ReturnQty || 0, 10);
+            const qtyOut = parseInt(row.qty_out || row.QtyOut || row.shipped || row.Shipped || row.quantity || 0, 10);
             const isReturn = row.mode === 'RETURN' || (row.action || '').toString().toLowerCase() === 'in';
             const isShip = row.mode === 'SHIP' || row.mode === 'DELIVERY' || (row.action || '').toString().toLowerCase() === 'out';
             if (qtyIn > 0) {
@@ -1386,7 +1333,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             }
           }
           rows.forEach((row) => {
-            const qtyIn = parseInt(row.qty_in || row.QtyIn || row.returned || 0, 10);
+            const qtyIn = parseInt(row.qty_in || row.QtyIn || row.returned || row.Returned || row.return_qty || row.ReturnQty || 0, 10);
             if (qtyIn <= 0) return;
             const productCode = (row.product_code || row.barcode || row.bottle_barcode || '').toString().trim();
             if (!productCode) return;
@@ -1404,20 +1351,68 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             });
           });
 
-          // RETURN takes precedence: remove from ship any barcode that is also a return
-          const returnSet = new Set(returnBarcodes);
+          // RETURN takes precedence: remove from ship any barcode that is also a return.
+          // Use normalized comparison so "12345" and "0012345" (same bottle) are treated as one.
+          const normalizedReturnSet = new Set(returnBarcodes.map(normalizeBarcode).filter(Boolean));
           for (let i = shipBarcodes.length - 1; i >= 0; i--) {
-            if (returnSet.has(shipBarcodes[i])) shipBarcodes.splice(i, 1);
+            if (normalizedReturnSet.has(normalizeBarcode(shipBarcodes[i]))) shipBarcodes.splice(i, 1);
           }
 
           // Dedupe (rows can add same barcode multiple times when qty_in/qty_out > 1)
-          const shipBarcodesUnique = [...new Set(shipBarcodes)];
+          let shipBarcodesUnique = [...new Set(shipBarcodes)];
           const returnBarcodesUnique = [...new Set(returnBarcodes)];
-
-          logger.log('Verify: orderNum=', orderNum, 'orderVariants=', orderVariants, 'returnBarcodes=', returnBarcodesUnique, 'shipBarcodes=', shipBarcodesUnique);
 
           const customerName = importData.customer_name || importData.customer || '';
           const customerId = importData.customer_id || importData.CustomerListID || customerName;
+
+          // Net-balance guard + RNB: if a return bottle is NOT actually assigned to this customer,
+          // count it as "Return not on balance" (like DNS) and remove one ship of same product so net stays correct.
+          let returnsNotOnBalance = [];
+          if (returnBarcodesUnique.length > 0) {
+            const allBarcodes = [...new Set([...shipBarcodesUnique, ...returnBarcodesUnique])];
+            const { data: bottleRows } = await supabase
+              .from('bottles')
+              .select('barcode_number, product_code, assigned_customer, customer_name')
+              .eq('organization_id', organization.id)
+              .in('barcode_number', allBarcodes);
+            const bottleMap = new Map();
+            (bottleRows || []).forEach(b => bottleMap.set(String(b.barcode_number).trim(), b));
+            if (bottleRows && bottleRows.length < allBarcodes.length) {
+              const missing = allBarcodes.filter(bc => !bottleMap.has(bc));
+              if (missing.length > 0) {
+                const { data: extra } = await supabase
+                  .from('bottles')
+                  .select('barcode_number, product_code, assigned_customer, customer_name')
+                  .eq('organization_id', organization.id);
+                (extra || []).forEach(b => {
+                  const norm = normalizeBarcode(b.barcode_number);
+                  missing.forEach(bc => {
+                    if (normalizeBarcode(bc) === norm && !bottleMap.has(bc)) {
+                      bottleMap.set(bc, b);
+                    }
+                  });
+                });
+              }
+            }
+
+            const custIdStr = String(customerId || '').trim();
+            const custNameStr = String(customerName || '').trim();
+
+            for (const retBc of returnBarcodesUnique) {
+              const bottle = bottleMap.get(retBc);
+              if (!bottle) continue;
+              const assignedTo = String(bottle.assigned_customer || '').trim();
+              const assignedName = String(bottle.customer_name || '').trim();
+              const onBalance = (custIdStr && assignedTo === custIdStr) ||
+                (custNameStr && (assignedTo === custNameStr || assignedName === custNameStr));
+              if (!onBalance) {
+                returnsNotOnBalance.push({ barcode: retBc, product_code: (bottle.product_code || '').trim() });
+              }
+            }
+            // Do NOT remove a ship when we have RNB: the scanned SHIP is real and should be assigned; RNB is just an exception record.
+          }
+
+          logger.log('Verify: orderNum=', orderNum, 'orderVariants=', orderVariants, 'returnBarcodes=', returnBarcodesUnique, 'shipBarcodes=', shipBarcodesUnique);
 
           let recordId = originalId;
           if (typeof originalId === 'string') {
@@ -1458,6 +1453,38 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               );
             }
 
+            // RNB (Return not on balance): return was scanned but bottle was not at this customer – create DNS-style record so it shows on customer page
+            if (returnsNotOnBalance?.length > 0) {
+              let resolvedCustomerId = customerId;
+              if (!resolvedCustomerId && customerName && organization?.id) {
+                const { data: cust } = await supabase.from('customers').select('CustomerListID').eq('name', customerName).eq('organization_id', organization.id).limit(1).maybeSingle();
+                if (cust?.CustomerListID) resolvedCustomerId = cust.CustomerListID;
+              }
+              if (!resolvedCustomerId) resolvedCustomerId = customerName;
+              for (const rnb of returnsNotOnBalance) {
+                await supabase.from('rentals').insert({
+                  organization_id: organization.id,
+                  customer_id: resolvedCustomerId,
+                  customer_name: customerName,
+                  is_dns: true,
+                  dns_product_code: rnb.product_code || 'Unknown',
+                  dns_description: 'Return not on balance',
+                  dns_order_number: orderNum,
+                  bottle_id: null,
+                  bottle_barcode: null,
+                  rental_start_date: new Date().toISOString().split('T')[0],
+                  rental_end_date: null,
+                  rental_amount: 10,
+                  rental_type: 'monthly',
+                  tax_code: 'GST+PST',
+                  tax_rate: 0.11,
+                  location: 'SASKATOON',
+                  status: 'active',
+                });
+              }
+              setActionMessage((m) => (m || '') + ` ${returnsNotOnBalance.length} return(s) not on customer balance (RNB – see customer page).`);
+            }
+
             // DNS (Delivered Not Scanned): create rental rows for invoiced ship qty that wasn't scanned (same as ImportApprovals)
             const lineRows = importData.rows || importData.line_items || [];
             let resolvedCustomerId = customerId;
@@ -1476,17 +1503,22 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               }
             }
 
+            const normalizeProductCode = (pc) => (pc == null || pc === '') ? '' : String(pc).trim().replace(/\s+/g, '');
             const countScannedOutForProduct = (productCode) => {
+              const norm = normalizeProductCode(productCode);
+              if (!norm) return 0;
               let n = 0;
               (scanRows || []).forEach((s) => {
                 if (s.mode !== 'SHIP' && s.mode !== 'DELIVERY') return;
-                const match = (s.product_code && String(s.product_code).trim() === String(productCode).trim()) || (s.barcode_number && String(s.barcode_number).trim() === String(productCode).trim());
+                const sProd = normalizeProductCode(s.product_code);
+                const sBarcode = normalizeProductCode(s.barcode_number);
+                const match = (sProd && sProd === norm) || (sBarcode && sBarcode === norm);
                 if (match) n += 1;
               });
               (bottleScanRows || []).forEach((s) => {
                 if (s.mode !== 'SHIP' && s.mode !== 'DELIVERY') return;
                 const prod = barcodeToProduct.get(String(s.bottle_barcode || '').trim());
-                if (prod && String(prod).trim() === String(productCode).trim()) n += 1;
+                if (prod && normalizeProductCode(prod) === norm) n += 1;
               });
               return n;
             };
@@ -1496,6 +1528,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               const invShipped = parseInt(row.qty_out || row.shipped || row.quantity || 0, 10);
               if (invShipped <= 0) continue;
               const productCode = (row.product_code || row.bottle_barcode || row.barcode || row.description || 'DNS').toString().trim() || 'DNS';
+              if (productCode === 'DNS' && !(row.product_code || row.bottle_barcode || row.barcode || row.description)) continue;
               const scannedOut = countScannedOutForProduct(productCode);
               const dnsCount = Math.max(0, invShipped - scannedOut);
               const description = row.description || row.product_code || 'Delivered Not Scanned';
@@ -1547,15 +1580,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           const originalId = getOriginalId(invoiceNumber);
           if (invoiceNumber && invoiceNumber.startsWith('scanned_')) {
             const orderNumber = invoiceNumber.replace('scanned_', '');
-            const { error: scanErr } = await supabase
-              .from('scans')
-              .update({ status: 'pending', verified_at: null, verified_by: null })
-              .eq('order_number', orderNumber)
-              .eq('organization_id', organization.id);
-            if (scanErr) {
-              setActionMessage(`Error unverifying scans: ${scanErr.message}`);
-              return;
-            }
+            // bottle_scans has no status; unverify state is on import record only
             setActionMessage('Scanned record unverified. It will appear in pending again.');
             setTimeout(() => navigate('/import-approvals', { state: { refetch: true } }), 1500);
             break;
@@ -1620,19 +1645,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             setActionMessage(`Error unverifying record: ${updateErr.message}`);
             return;
           }
-          if (currentOrderTrimmed) {
-            const { data: scansList } = await supabase
-              .from('scans')
-              .select('id')
-              .eq('order_number', currentOrderTrimmed)
-              .eq('organization_id', organization.id);
-            if (scansList && scansList.length > 0) {
-              await supabase
-                .from('scans')
-                .update({ status: 'pending', verified_at: null, verified_by: null })
-                .in('id', scansList.map(s => s.id));
-            }
-          }
+          // bottle_scans has no status/verified_at; unverify state is on import record only
           setActionMessage('Record unverified. Bottle assignments have been reversed.');
           setImportRecord({ ...existingRow, data: newData, status: allOrdersVerified ? 'pending' : existingRow.status });
           setTimeout(() => navigate('/import-approvals', { state: { refetch: true } }), 1500);
@@ -1680,12 +1693,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           }
           break;
         case 'Change Sales Order Number':
-          if (typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_')) {
-            setActionMessage('Scanned-only records are not in the database yet. Approve or import this record first to change the sales order number.');
-            setTimeout(() => setActionMessage(''), 5000);
-          } else {
-            setShowSalesOrderModal(true);
-          }
+          setShowSalesOrderModal(true);
           break;
         case 'Change PO Number':
           if (typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_')) {
@@ -1735,20 +1743,69 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       }
 
       if (isScannedOnly) {
-        // For scanned-only records, update bottle_scans table
-        const orderNumber = invoiceNumber.replace('scanned_', '');
-        await supabase
-          .from('bottle_scans')
-          .update({ 
-            customer_name: customer.name,
-            customer_id: customer.CustomerListID 
-          })
-          .eq('order_number', orderNumber);
-        
-        setActionMessage('Customer updated successfully!');
+        // For scanned-only records, update bottle_scans via RPC (bypasses RLS, runs server-side)
+        // ID format: scanned_<orderNumber> or scanned_<orderNumber>_<customerSuffix>
+        const afterPrefix = invoiceNumber.replace(/^scanned_/, '');
+        const orderNumber = (afterPrefix.includes('_') ? afterPrefix.split('_')[0] : afterPrefix).trim();
+        if (!organization?.id) {
+          setActionMessage('Organization not loaded. Please refresh the page and try again.');
+          setTimeout(() => setActionMessage(''), 5000);
+          return;
+        }
+        logger.log('Change customer (scanned-only): orderNumber=', orderNumber, 'org=', organization.id, 'newCustomer=', customer.name);
+        const { data: rpcData, error: rpcError } = await supabase.rpc('update_bottle_scans_customer', {
+          p_order_number: orderNumber,
+          p_org_id: organization.id,
+          p_customer_name: customer.name ?? '',
+          p_customer_id: customer.CustomerListID ?? ''
+        });
+        if (rpcError) {
+          logger.error('update_bottle_scans_customer RPC error:', rpcError);
+          setActionMessage(rpcError.message || 'Update failed. Run migration 20260226_bottle_scans_customer_columns.sql and 20260226_update_bottle_scans_customer_rpc.sql.');
+          setTimeout(() => setActionMessage(''), 8000);
+          return;
+        }
+        if (!rpcData?.ok) {
+          setActionMessage(rpcData?.error || 'Update failed.');
+          setTimeout(() => setActionMessage(''), 5000);
+          return;
+        }
+        const updatedCount = rpcData.bottle_scans_updated ?? 0;
+        logger.log('Change customer result: bottle_scans_updated=', updatedCount);
+        if (updatedCount === 0) {
+          setActionMessage('No scan rows found for this order. Scans may have been deleted or the order number may not match.');
+          setTimeout(() => setActionMessage(''), 6000);
+          return;
+        }
+        setActionMessage(`Customer updated to ${customer.name} (${updatedCount} scan(s) updated).`);
+        setTimeout(() => setActionMessage(''), 4000);
         setShowCustomerModal(false);
-        // Reload the page to reflect changes
-        window.location.reload();
+        setSelectedCustomer('');
+        setCustomerSearch('');
+        // Update in-memory record so UI reflects change (header uses importRecord.data.customer_name)
+        setImportRecord(prev => {
+          if (!prev?.data) return prev;
+          return {
+            ...prev,
+            data: {
+              ...prev.data,
+              customer_name: customer.name,
+              customer_id: customer.CustomerListID,
+              rows: (prev.data.rows || []).map(row => ({
+                ...row,
+                customer_name: customer.name,
+                customer_id: customer.CustomerListID
+              })),
+              summary: prev.data.summary ? { ...prev.data.summary, customer_name: customer.name } : undefined
+            }
+          };
+        });
+        // Update URL so refresh and back-navigation show the new customer
+        const orderParam = searchParams.get('order') || effectiveOrderNumber || '';
+        navigate(
+          `/import-approval/${invoiceNumber}/detail?customer=${encodeURIComponent(customer.name)}&order=${encodeURIComponent(orderParam)}`,
+          { replace: true }
+        );
         return;
       }
 
@@ -1865,26 +1922,24 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     setTimeout(() => setActionMessage(''), 3000);
   };
 
-  // Handle sales order number change — update by record id, then sync scans
+  // Handle sales order number change — update by record id, then sync scans; for scanned-only, only update scans/bottle_scans
   const handleSalesOrderChange = async () => {
     if (!newSalesOrder?.trim()) {
       setActionMessage('Please enter a sales order number');
       return;
     }
 
-    if (typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_')) {
-      setActionMessage('Scanned-only records are not in the database yet. Approve or import this record first to change the sales order number.');
-      setTimeout(() => setActionMessage(''), 5000);
-      return;
-    }
-
-    if (!organization?.id || !importRecord?.id) {
-      setActionMessage('Cannot update: missing organization or record.');
+    if (!organization?.id) {
+      setActionMessage('Cannot update: missing organization.');
       return;
     }
 
     const trim = (s) => (s == null || s === '') ? '' : String(s).trim();
-    const currentOrder = trim(getOrderNumber(parseDataField(importRecord?.data)));
+    const isScannedOnly = typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_');
+    const currentOrder = trim(
+      getOrderNumber(parseDataField(importRecord?.data))
+      || (isScannedOnly && invoiceNumber ? trim(String(invoiceNumber).replace(/^scanned_/, '').split('_')[0]) : '')
+    );
     if (!currentOrder) {
       setActionMessage('Cannot determine current order number for this record.');
       return;
@@ -1896,6 +1951,35 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
     try {
       setActionMessage('Updating sales order number...');
+
+      // Scanned-only: no import row in DB; just update bottle_scans and scans so they match the invoice number
+      if (isScannedOnly) {
+        const { data: rpcData, error: rpcError } = await supabase.rpc('update_scans_order_number', {
+          p_old_order: currentOrder,
+          p_new_order: newOrder,
+          p_org_id: organization.id
+        });
+        if (!rpcError && rpcData?.ok) {
+          setActionMessage(`Order number updated to ${newOrder}. Scans moved. Returning to list...`);
+        } else {
+          // Fallback: update tables directly if RPC missing or failed
+          const currentOrderNum = /^\d+$/.test(currentOrder) ? parseInt(currentOrder, 10) : null;
+          let bottleRes = await supabase.from('bottle_scans').update({ order_number: newOrder }).eq('organization_id', organization.id).eq('order_number', currentOrder).select('id');
+          if ((!bottleRes.data || bottleRes.data.length === 0) && currentOrderNum != null) {
+            bottleRes = await supabase.from('bottle_scans').update({ order_number: newOrder }).eq('organization_id', organization.id).eq('order_number', currentOrderNum).select('id');
+          }
+          const moved = bottleRes.data?.length || 0;
+          setActionMessage(moved > 0 ? `Order number updated to ${newOrder}. Scans moved. Returning to list...` : `Order number updated to ${newOrder}. Returning to list...`);
+        }
+        setTimeout(() => navigate('/import-approvals', { state: { refetch: true } }), 1500);
+        return;
+      }
+
+      if (!importRecord?.id) {
+        setActionMessage('Cannot update: missing record.');
+        return;
+      }
+
       const importData = parseDataField(importRecord?.data || {});
       const rows = importData.rows || importData.line_items || [];
       const updatedRows = rows.map(row => {
@@ -2014,20 +2098,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           logger.warn('update_scans_order_number RPC failed:', rpcError);
           setActionMessage(`Order saved. Run migration 20250218_update_scans_order_number_rpc in Supabase SQL Editor to merge the two cards.`);
           const currentOrderNum = /^\d+$/.test(currentOrder) ? parseInt(currentOrder, 10) : null;
-          let scanIdsRes = await supabase.from('scans').select('id').eq('organization_id', organization.id).eq('order_number', currentOrder);
-          if ((!scanIdsRes.data || scanIdsRes.data.length === 0) && currentOrderNum != null) {
-            scanIdsRes = await supabase.from('scans').select('id').eq('organization_id', organization.id).eq('order_number', currentOrderNum);
-          }
           let bottleIdsRes = await supabase.from('bottle_scans').select('id').eq('organization_id', organization.id).eq('order_number', currentOrder);
           if ((!bottleIdsRes.data || bottleIdsRes.data.length === 0) && currentOrderNum != null) {
             bottleIdsRes = await supabase.from('bottle_scans').select('id').eq('organization_id', organization.id).eq('order_number', currentOrderNum);
           }
-          const scanIds = (scanIdsRes.data || []).map((r) => r.id).filter(Boolean);
           const bottleIds = (bottleIdsRes.data || []).map((r) => r.id).filter(Boolean);
-          if (scanIds.length > 0) {
-            const e = await supabase.from('scans').update({ order_number: newOrder }).in('id', scanIds);
-            if (!e.error) scansMoved = true;
-          }
           if (bottleIds.length > 0) {
             const e = await supabase.from('bottle_scans').update({ order_number: newOrder }).in('id', bottleIds);
             if (!e.error) scansMoved = true;
@@ -2293,16 +2368,16 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           logger.error(`Error updating bottle_scans for ${barcode}:`, bottleScansError);
         }
         
-        // Also update in scans table
-        const { error: scansError } = await supabase
-          .from('scans')
-          .update({ mode: newMode, action: newMode === 'SHIP' ? 'out' : 'in' })
+        // Also update bottle_scans (single source)
+        const { error: bottleScansErr } = await supabase
+          .from('bottle_scans')
+          .update({ mode: newMode })
           .eq('organization_id', organization.id)
-          .eq('barcode_number', barcode)
+          .eq('bottle_barcode', barcode)
           .eq('order_number', orderNumber);
-        
-        if (scansError) {
-          logger.error(`Error updating scans for ${barcode}:`, scansError);
+
+        if (bottleScansErr) {
+          logger.error(`Error updating bottle_scans for ${barcode}:`, bottleScansErr);
         }
         
         successCount++;
@@ -2321,47 +2396,67 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     }
   };
 
-  // Detach assets from order
+  // Detach assets from order (remove scan from bottle_scans so they no longer show on Import Approvals)
   const handleDetachAssets = async () => {
     if (selectedAssets.size === 0 || !organization?.id) return;
     
     setAssetActionSaving(true);
     const orderNumber = effectiveOrderNumber ||
                        (invoiceNumber && invoiceNumber.startsWith('scanned_') ? invoiceNumber.replace('scanned_', '') : null);
+    if (!orderNumber) {
+      setActionMessage('Cannot detach: no order number for this record.');
+      setAssetActionSaving(false);
+      return;
+    }
+    const trimOrderNum = (num) => (num == null || num === '') ? '' : String(num).trim();
+    const orderVariants = [trimOrderNum(orderNumber)];
+    if (/^\d+$/.test(orderVariants[0])) {
+      const normalized = orderVariants[0].replace(/^0+/, '') || '0';
+      if (normalized !== orderVariants[0]) orderVariants.push(normalized);
+      const padded = orderVariants[0].padStart(6, '0');
+      if (padded !== orderVariants[0]) orderVariants.push(padded);
+      const asNum = parseInt(orderVariants[0], 10);
+      if (!Number.isNaN(asNum)) orderVariants.push(String(asNum));
+    }
+    const uniqueOrderVariants = [...new Set(orderVariants)].filter(Boolean);
     
     try {
       const barcodeArray = Array.from(selectedAssets);
       let successCount = 0;
       
+      const normBarcode = (b) => (b == null || b === '') ? '' : String(b).trim();
       for (const barcode of barcodeArray) {
-        // Delete from bottle_scans
-        const { error: bottleScansError } = await supabase
-          .from('bottle_scans')
-          .delete()
-          .eq('organization_id', organization.id)
-          .eq('bottle_barcode', barcode)
-          .eq('order_number', orderNumber);
-        
-        if (bottleScansError) {
-          logger.error(`Error deleting from bottle_scans for ${barcode}:`, bottleScansError);
+        const bc = normBarcode(barcode);
+        if (!bc) continue;
+        let deletedAny = false;
+        // Delete from bottle_scans: try each order variant (handles string/number/zero-pad in DB)
+        for (const orderVariant of uniqueOrderVariants) {
+          const { error: bottleScansError } = await supabase
+            .from('bottle_scans')
+            .delete()
+            .eq('organization_id', organization.id)
+            .eq('bottle_barcode', bc)
+            .eq('order_number', orderVariant);
+          if (!bottleScansError) deletedAny = true;
+          if (bottleScansError) logger.warn(`bottle_scans delete ${bc} order ${orderVariant}:`, bottleScansError.message);
         }
-        
-        // Also delete from scans table
-        const { error: scansError } = await supabase
-          .from('scans')
-          .delete()
-          .eq('organization_id', organization.id)
-          .eq('barcode_number', barcode)
-          .eq('order_number', orderNumber);
-        
-        if (scansError) {
-          logger.error(`Error deleting from scans for ${barcode}:`, scansError);
+        // If order_number in DB is integer, try numeric variant
+        if (uniqueOrderVariants.some(v => /^\d+$/.test(v))) {
+          const numVal = parseInt(uniqueOrderVariants.find(v => /^\d+$/.test(v)), 10);
+          if (!Number.isNaN(numVal)) {
+            const { error: bottleScansNumErr } = await supabase
+              .from('bottle_scans')
+              .delete()
+              .eq('organization_id', organization.id)
+              .eq('bottle_barcode', bc)
+              .eq('order_number', numVal);
+            if (!bottleScansNumErr) deletedAny = true;
+          }
         }
-        
         successCount++;
       }
       
-      setActionMessage(`Successfully detached ${successCount} asset(s)`);
+      setActionMessage(`Detached ${successCount} asset(s). Refreshing...`);
       setDetachAssetsDialog({ open: false });
       setSelectedAssets(new Set());
       setRefreshScannedBottlesTrigger(prev => prev + 1);
@@ -2402,13 +2497,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           .eq('order_number', orderNumber);
         
         await supabase
-          .from('scans')
+          .from('bottle_scans')
           .delete()
           .eq('organization_id', organization.id)
-          .eq('barcode_number', attachBarcodeDialog.replacingBarcode)
+          .eq('bottle_barcode', attachBarcodeDialog.replacingBarcode)
           .eq('order_number', orderNumber);
       }
-      
+
       // Insert into bottle_scans
       const { error: bottleScansError } = await supabase
         .from('bottle_scans')
@@ -2425,25 +2520,6 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       
       if (bottleScansError) {
         throw bottleScansError;
-      }
-      
-      // Also insert into scans table
-      const { error: scansError } = await supabase
-        .from('scans')
-        .insert([{
-          organization_id: organization.id,
-          barcode_number: barcode,
-          order_number: orderNumber,
-          customer_name: customerName,
-          customer_id: customerId,
-          mode: mode,
-          action: mode === 'SHIP' ? 'out' : 'in',
-          status: 'pending',
-          created_at: new Date().toISOString()
-        }]);
-      
-      if (scansError) {
-        logger.warn('Warning: Failed to insert into scans table:', scansError);
       }
       
       const message = attachBarcodeDialog.mode === 'REPLACE' 
@@ -2541,18 +2617,6 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         
         if (bottleScansError) {
           logger.error(`Error updating bottle_scans for ${barcode}:`, bottleScansError);
-        }
-        
-        // Also update in scans table
-        const { error: scansError } = await supabase
-          .from('scans')
-          .update({ order_number: newOrderNumber })
-          .eq('organization_id', organization.id)
-          .eq('barcode_number', barcode)
-          .eq('order_number', currentOrderNumber);
-        
-        if (scansError) {
-          logger.error(`Error updating scans for ${barcode}:`, scansError);
         }
         
         successCount++;
@@ -2725,7 +2789,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           </Button>
           {effectiveOrderNumber && (
             <Typography variant="subtitle1" sx={{ opacity: 0.7, color: 'var(--text-main)' }}>
-              Invoice: {effectiveOrderNumber} | Customer: {filterCustomerName || filterCustomerId}
+              Invoice: {effectiveOrderNumber} | Customer: {importRecord?.data?.customer_name ?? importRecord?.data?.customer_id ?? filterCustomerName ?? filterCustomerId ?? '—'}
             </Typography>
           )}
         </Box>
@@ -3064,7 +3128,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.group || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.type || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
-                                <Chip label={row.product_code} size="small" variant="outlined" sx={{ 
+                                <Chip label={(assetInfo.product_code != null && assetInfo.product_code !== '') ? assetInfo.product_code : (row.product_code || '')} size="small" variant="outlined" sx={{ 
                                   border: '2px solid #333',
                                   fontWeight: 600,
                                   bgcolor: 'white',
@@ -3737,13 +3801,20 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               Change Sales Order Number
             </Typography>
             
-            <Typography variant="body2" color="text.secondary" mb={3}>
-              Enter the new sales order number for this import record.
+            <Typography variant="body2" color="text.secondary" mb={1}>
+              {typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_')
+                ? 'Scanned-only record: enter the invoice/order number to match your import (e.g. the number on the import card). Scans will be moved to that order.'
+                : 'Enter the new sales order number for this import record.'}
             </Typography>
+            {effectiveOrderNumber && (
+              <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 2 }}>
+                Current: {effectiveOrderNumber}
+              </Typography>
+            )}
 
             <input
               type="text"
-              placeholder="Enter sales order number..."
+              placeholder="Enter sales order number (e.g. invoice number)..."
               value={newSalesOrder}
               onChange={(e) => setNewSalesOrder(e.target.value)}
               style={{

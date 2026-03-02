@@ -683,6 +683,7 @@ export default function EditCylinderScreen() {
             label="Scan cylinder barcode"
             validationPattern={/^[\dA-Za-z\-%]+$/}
             style={{ flex: 1 }}
+            disablePeriodicFocus
           />
         </View>
       </Modal>

@@ -90,21 +90,13 @@ export default function AnalyticsScreen() {
         topCustomersResult,
         scanTrendsResult
       ] = await Promise.all([
-        // Scan counts - try bottle_scans first, fallback to scans
+        // Scan counts (bottle_scans only)
         (async () => {
           let result = await supabase
             .from('bottle_scans')
             .select('id, created_at')
             .eq('organization_id', orgId);
           
-          // If bottle_scans doesn't exist, try scans table
-          if (result.error && result.error.message?.includes('relation') && result.error.message?.includes('does not exist')) {
-            logger.log('bottle_scans table not found, trying scans table...');
-            result = await supabase
-              .from('scans')
-              .select('id, created_at')
-              .eq('organization_id', orgId);
-          }
           return result;
         })(),
         
@@ -120,7 +112,7 @@ export default function AnalyticsScreen() {
           .select('id')
           .eq('organization_id', orgId),
         
-        // Recent activity - try bottle_scans first, fallback to scans
+        // Recent activity (bottle_scans only)
         (async () => {
           let result = await supabase
             .from('bottle_scans')
@@ -129,16 +121,6 @@ export default function AnalyticsScreen() {
             .order('created_at', { ascending: false })
             .limit(10);
           
-          // If bottle_scans doesn't exist, try scans table
-          if (result.error && result.error.message?.includes('relation') && result.error.message?.includes('does not exist')) {
-            logger.log('bottle_scans table not found, trying scans table...');
-            result = await supabase
-              .from('scans')
-              .select('id, action, bottle_id, customer_name, created_at')
-              .eq('organization_id', orgId)
-              .order('created_at', { ascending: false })
-              .limit(10);
-          }
           return result;
         })(),
         
@@ -149,7 +131,7 @@ export default function AnalyticsScreen() {
           .eq('organization_id', orgId)
           .not('customer_name', 'is', null),
         
-        // Scan trends (last 7 days) - try bottle_scans first, fallback to scans
+        // Scan trends (last 7 days, bottle_scans only)
         (async () => {
           let result = await supabase
             .from('bottle_scans')
@@ -158,16 +140,6 @@ export default function AnalyticsScreen() {
             .gte('created_at', weekAgo.toISOString())
             .order('created_at', { ascending: true });
           
-          // If bottle_scans doesn't exist, try scans table
-          if (result.error && result.error.message?.includes('relation') && result.error.message?.includes('does not exist')) {
-            logger.log('bottle_scans table not found, trying scans table...');
-            result = await supabase
-              .from('scans')
-              .select('created_at')
-              .eq('organization_id', orgId)
-              .gte('created_at', weekAgo.toISOString())
-              .order('created_at', { ascending: true });
-          }
           return result;
         })()
       ]);
@@ -195,7 +167,7 @@ export default function AnalyticsScreen() {
 
       // Process recent activity
       const recentActivity = (recentActivityResult.data || []).map(scan => {
-        // Handle both bottle_scans (mode) and scans (action) schemas
+        // bottle_scans uses mode (SHIP/RETURN); map to action for display
         const action = scan.mode ? (scan.mode === 'SHIP' ? 'out' : scan.mode === 'RETURN' ? 'in' : scan.mode.toLowerCase()) : scan.action;
         const asset_id = scan.bottle_barcode || scan.bottles?.barcode_number || scan.bottle_id;
         

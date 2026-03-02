@@ -1,15 +1,16 @@
 import React from 'react';
 import { cn } from "@/lib/utils";
 
-const Input = ({ 
+const Input = React.forwardRef(({ 
   className = '', 
   type = 'text',
   disabled = false,
   error = false,
   ...props 
-}) => {
+}, ref) => {
   return (
     <input
+      ref={ref}
       type={type}
       className={cn(
         "flex h-11 w-full rounded-xl border bg-white px-4 py-2.5 text-sm",
@@ -27,6 +28,7 @@ const Input = ({
       {...props}
     />
   );
-};
+});
+Input.displayName = 'Input';
 
 export { Input }; 

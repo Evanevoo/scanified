@@ -1678,6 +1678,7 @@ export default function ScanCylindersScreen() {
             label="Scan customer barcode"
             validationPattern={/^[\dA-Za-z\-%]+$/}
             style={{ flex: 1 }}
+            disablePeriodicFocus
           />
         </View>
       )}
@@ -1697,6 +1698,7 @@ export default function ScanCylindersScreen() {
           label="Scan order number"
           validationPattern={/^[\dA-Za-z\-%]+$/}
           style={{ flex: 1 }}
+          disablePeriodicFocus
         />
         </View>
       )}

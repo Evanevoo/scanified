@@ -89,10 +89,10 @@ export default function EnhancedDashboard() {
         reconciliationsResult,
         invoicesResult
       ] = await Promise.allSettled([
-        supabase.from('bottles').select('id, status, product_type').eq('organization_id', organization.id),
-        supabase.from('customers').select('id, name, created_at').eq('organization_id', organization.id),
-        supabase.from('rentals').select('id, rental_amount, status, rental_type').eq('organization_id', organization.id),
-        supabase.from('scans').select('id, created_at').eq('organization_id', organization.id).order('created_at', { ascending: false }).limit(100),
+        supabase.from('bottles').select('id, status, product_type, assigned_customer, ownership').eq('organization_id', organization.id),
+        supabase.from('customers').select('id, name, created_at, CustomerListID, customer_type').eq('organization_id', organization.id),
+        supabase.from('rentals').select('id, rental_amount, status, rental_type, rental_end_date').eq('organization_id', organization.id),
+        supabase.from('bottle_scans').select('id, created_at').eq('organization_id', organization.id).order('created_at', { ascending: false }).limit(100),
         supabase.from('truck_reconciliations').select('id, status, discrepancy_cost').eq('organization_id', organization.id),
         supabase.from('invoices').select('id, total_amount, status, created_at').eq('organization_id', organization.id)
       ]);
@@ -111,9 +111,23 @@ export default function EnhancedDashboard() {
         .filter(inv => new Date(inv.created_at) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
         .reduce((sum, inv) => sum + (parseFloat(inv.total_amount) || 0), 0);
 
-      const activeRentals = rentals.filter(r => r.status === 'active').length;
+      // Active Rentals = Rented Assets (Billable) - same as Rentals page: bottles assigned to CUSTOMER
+      // with status "rented", excluding vendors and customer-owned
+      const customerTypesMap = (customers || []).reduce((map, c) => {
+        map[c.CustomerListID] = c.customer_type || 'CUSTOMER';
+        return map;
+      }, {});
+      const activeRentals = bottles.filter(b => {
+        if (!b.assigned_customer) return false;
+        const customerType = customerTypesMap[b.assigned_customer] || 'CUSTOMER';
+        if (customerType !== 'CUSTOMER') return false;
+        const ownershipValue = String(b.ownership || '').trim().toLowerCase();
+        const isCustomerOwned = ownershipValue.includes('customer') || ownershipValue.includes('owned') || ownershipValue === 'customer owned';
+        if (isCustomerOwned) return false;
+        return b.status === 'rented' || b.status === 'RENTED';
+      }).length;
       const availableBottles = bottles.filter(b => b.status === 'available').length;
-      const rentedBottles = bottles.filter(b => b.status === 'rented').length;
+      const rentedBottles = bottles.filter(b => b.status === 'rented' || b.status === 'RENTED').length;
 
       // Recent activity (last 7 days)
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);

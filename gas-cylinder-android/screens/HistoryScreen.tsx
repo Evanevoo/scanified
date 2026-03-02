@@ -519,8 +519,9 @@ export default function HistoryScreen() {
             }
 
             setSaving(true);
-            // Delete all scans in the group
-            const scanIds = editScan?.scans?.map(s => s.id) || [];
+            // Delete all scans in the group from bottle_scans
+            const scansToDelete = editScan?.scans || [];
+            const scanIds = scansToDelete.map(s => s.id);
             const deletePromises = scanIds.map(scanId =>
               supabase
                 .from('bottle_scans')
@@ -532,7 +533,7 @@ export default function HistoryScreen() {
             const { error } = results.find(r => r.error) || { error: null };
 
             setSaving(false);
-            
+
             if (error) {
               Alert.alert('Error', 'Failed to delete scan. Please try again.');
             } else {

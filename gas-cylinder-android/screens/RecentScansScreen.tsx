@@ -51,41 +51,16 @@ export default function RecentScansScreen() {
       .order('created_at', { ascending: false })
       .limit(20);
     
-    // Also query scans table as fallback (some scans might only be in scans table)
-    const { data: scansData, error: scansError } = await supabase
-      .from('scans')
-      .select('id, barcode_number, order_number, customer_name, created_at')
-      .eq('organization_id', profile.organization_id)
-      .gte('created_at', ninetyDaysAgo.toISOString())
-      .order('created_at', { ascending: false })
-      .limit(20);
-    
     if (bottleError) {
       logger.log('Bottle_scans query error:', bottleError);
     }
-    if (scansError) {
-      logger.log('Scans table query error:', scansError);
-    }
     
-    // Combine and normalize data from both tables
     const allScans = [];
-    
-    // Add bottle_scans (map bottle_barcode to barcode_number for consistency)
     if (bottleScans) {
       allScans.push(...bottleScans.map(scan => ({
         ...scan,
         barcode_number: scan.bottle_barcode,
         source: 'bottle_scans'
-      })));
-    }
-    
-    // Add scans table data (map barcode_number to bottle_barcode for consistency)
-    if (scansData) {
-      allScans.push(...scansData.map(scan => ({
-        ...scan,
-        bottle_barcode: scan.barcode_number,
-        read: false, // scans table doesn't have read field
-        source: 'scans'
       })));
     }
     
@@ -102,13 +77,13 @@ export default function RecentScansScreen() {
     uniqueScans.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     const finalScans = uniqueScans.slice(0, 20);
     
-    if (bottleError && scansError) {
-      setError('Failed to load scans from both tables.');
-      logger.log('Both queries failed:', { bottleError, scansError });
+    if (bottleError) {
+      setError('Failed to load scans.');
+      logger.log('Bottle_scans query failed:', bottleError);
     } else {
       setError('');
       setScans(finalScans);
-      logger.log(`✅ Loaded ${finalScans.length} recent scans (${bottleScans?.length || 0} from bottle_scans, ${scansData?.length || 0} from scans)`);
+      logger.log(`✅ Loaded ${finalScans.length} recent scans from bottle_scans`);
     }
     
     if (isRefresh) {

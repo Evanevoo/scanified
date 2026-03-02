@@ -298,23 +298,22 @@ export default function HistoryScreen() {
       const removedBottles = originalBottles.filter(b => !editBottles.includes(b));
       const addedBottles = editBottles.filter(b => !originalBottles.includes(b));
       
-      // Delete scans for removed bottles
+      // Delete scans for removed bottles (bottle_scans only)
       if (removedBottles.length > 0) {
-        const scansToDelete = editOrder.scans
-          .filter(s => removedBottles.includes(s.bottle_barcode))
-          .map(s => s.id);
-        
+        const scansToDelete = editOrder.scans.filter(s => removedBottles.includes(s.bottle_barcode));
+        const bottleScanIds = scansToDelete.map(s => s.id);
+
         const { error: deleteError } = await supabase
           .from('bottle_scans')
           .delete()
-          .in('id', scansToDelete)
+          .in('id', bottleScanIds)
           .eq('organization_id', profile.organization_id);
-        
+
         if (deleteError) {
           throw deleteError;
         }
-        
-        logger.log(`Deleted ${scansToDelete.length} scans for removed bottles`);
+
+        logger.log(`Deleted ${scansToDelete.length} scans for removed bottles (bottle_scans)`);
       }
       
       // Update existing scans with new customer name and order number

@@ -32,7 +32,8 @@ export default function RecentCylinders() {
   const navigate = useNavigate();
   const { organization, profile, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
-  const userTimezone = profile?.preferences?.timezone || (typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone) || undefined;
+  const browserTz = typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone;
+  const userTimezone = profile?.preferences?.timezone || (browserTz && browserTz !== 'UTC' ? browserTz : undefined);
   const [error, setError] = useState(null);
   const [cylinders, setCylinders] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');

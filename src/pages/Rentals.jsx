@@ -49,6 +49,9 @@ const getStatusDescription = (assignedCustomer, customerType) => {
   return 'Available for assignment';
 };
 
+// RNB = Return not on balance – do not count or bill (exception only)
+const isRNB = (r) => r?.is_dns === true && (r?.dns_description || '').includes('Return not on balance');
+
 // Enhanced status mapping with colors and descriptions
 const ASSET_STATUS = {
   'IN-HOUSE': { 
@@ -97,13 +100,7 @@ function RentalsImproved() {
     totalRevenue: 0
   });
 
-  useEffect(() => {
-    if (organization?.id) {
-      fetchRentals();
-    }
-  }, [organization]);
-
-  const fetchRentals = async () => {
+  const fetchRentals = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -525,8 +522,8 @@ function RentalsImproved() {
       // - Assigned bottles with status "available" or customer-owned
       const inHouseTotal = unassignedBottles + bottlesWithVendors + assignedBottlesAvailable;
       
-      // Calculate monthly revenue from all displayed rentals (DB records + bottle assignments)
-      const totalRevenue = filteredRentals.reduce((sum, rental) => {
+      // Calculate monthly revenue from billable rentals only (exclude RNB – return not on balance)
+      const totalRevenue = filteredRentals.filter((r) => !isRNB(r)).reduce((sum, rental) => {
         const baseAmount = rental.rental_amount || 0;
         const taxAmount = baseAmount * (rental.tax_rate || 0);
         return sum + baseAmount + taxAmount;
@@ -544,7 +541,21 @@ function RentalsImproved() {
       setError(err.message);
     }
     setLoading(false);
-  };
+  }, [organization?.id]);
+
+  useEffect(() => {
+    if (organization?.id) fetchRentals();
+  }, [organization?.id, fetchRentals]);
+
+  // Stable expand/collapse by customer id (avoids inline handlers creating new Sets every render)
+  const toggleExpanded = useCallback((customerId) => {
+    setExpandedCustomers((prev) => {
+      const next = new Set(prev);
+      if (next.has(customerId)) next.delete(customerId);
+      else next.add(customerId);
+      return next;
+    });
+  }, []);
 
   // Memoized: Group rentals by customer (includes DNS for billing)
   const customersWithRentals = useMemo(() => {
@@ -595,18 +606,11 @@ function RentalsImproved() {
       });
   }, [customersWithRentals, filters.customer_type, filters.status, debouncedSearch]);
 
-  // Display-only: exclude DNS so Rentals page shows only physical rentals (DNS is on Customer details)
-  const displayCustomers = useMemo(() => {
-    return filteredCustomers
-      .map(({ customer, rentals }) => ({ customer, rentals: rentals.filter(r => !r.is_dns) }))
-      .filter(({ rentals }) => rentals.length > 0);
-  }, [filteredCustomers]);
-
   const tabs = useMemo(() => [
-    { label: 'All Customers', value: 'all', count: displayCustomers.length },
-    { label: 'Monthly Rentals', value: 'monthly', count: displayCustomers.reduce((c, x) => c + x.rentals.filter(r => r.rental_type === 'monthly').length, 0) },
-    { label: 'Yearly Rentals', value: 'yearly', count: displayCustomers.reduce((c, x) => c + x.rentals.filter(r => r.rental_type === 'yearly').length, 0) },
-  ], [displayCustomers]);
+    { label: 'All Customers', value: 'all', count: filteredCustomers.length },
+    { label: 'Monthly Rentals', value: 'monthly', count: filteredCustomers.reduce((c, x) => c + x.rentals.filter(r => r.rental_type === 'monthly').length, 0) },
+    { label: 'Yearly Rentals', value: 'yearly', count: filteredCustomers.reduce((c, x) => c + x.rentals.filter(r => r.rental_type === 'yearly').length, 0) },
+  ], [filteredCustomers]);
 
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
@@ -666,12 +670,13 @@ function RentalsImproved() {
       const invoiceDateStr = fmt(invoiceDate);
       const dueDateStr = fmt(dueDate);
 
-      // Split each customer's rentals into monthly and yearly
+      // Split each customer's rentals into monthly and yearly (exclude RNB – return not on balance – from billing)
       const monthlyEntries = [];
       const yearlyEntries = [];
       customers.forEach(({ customer, rentals }) => {
-        const monthlyRentals = rentals.filter((r) => (r.rental_type || 'monthly') === 'monthly');
-        const yearlyRentals = rentals.filter((r) => r.rental_type === 'yearly');
+        const billable = rentals.filter((r) => !isRNB(r));
+        const monthlyRentals = billable.filter((r) => (r.rental_type || 'monthly') === 'monthly');
+        const yearlyRentals = billable.filter((r) => r.rental_type === 'yearly');
         if (monthlyRentals.length > 0) {
           monthlyEntries.push({ customer, rentals: monthlyRentals });
         }
@@ -766,11 +771,11 @@ function RentalsImproved() {
   };
 
   const currentCustomers = useMemo(() => {
-    if (activeTab === 0) return displayCustomers;
-    if (activeTab === 1) return displayCustomers.filter(c => c.rentals.some(r => r.rental_type === 'monthly'));
-    if (activeTab === 2) return displayCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly'));
-    return displayCustomers;
-  }, [displayCustomers, activeTab]);
+    if (activeTab === 0) return filteredCustomers;
+    if (activeTab === 1) return filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'monthly'));
+    if (activeTab === 2) return filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly'));
+    return filteredCustomers;
+  }, [filteredCustomers, activeTab]);
 
   if (loading) {
     return (
@@ -1064,7 +1069,7 @@ function RentalsImproved() {
                     </TableCell>
                     <TableCell sx={{ py: 2.5 }}>
                       <Typography variant="h6" fontWeight="bold" color="primary">
-                        {rentals.length}
+                        {rentals.filter(r => !isRNB(r)).length}
                       </Typography>
                     </TableCell>
                     <TableCell sx={{ py: 2.5 }}>
@@ -1115,10 +1120,7 @@ function RentalsImproved() {
                           <IconButton
                             size="small"
                             color="primary"
-                            onClick={() => {
-                              const full = filteredCustomers.find(f => f.customer.CustomerListID === customer.CustomerListID);
-                              setInvoiceDialog({ open: true, customer, rentals: full?.rentals ?? rentals });
-                            }}
+                            onClick={() => setInvoiceDialog({ open: true, customer, rentals: rentals.filter((r) => !isRNB(r)) })}
                             sx={{ mr: 1 }}
                           >
                             <InvoiceIcon />
@@ -1128,10 +1130,7 @@ function RentalsImproved() {
                       <Tooltip title="Edit Rentals">
                         <IconButton
                           size="small"
-                          onClick={() => {
-                            const full = filteredCustomers.find(f => f.customer.CustomerListID === customer.CustomerListID);
-                            setEditDialog({ open: true, customer, rentals: full?.rentals ?? rentals });
-                          }}
+                          onClick={() => setEditDialog({ open: true, customer, rentals })}
                         >
                           <EditIcon />
                         </IconButton>
@@ -1149,14 +1148,7 @@ function RentalsImproved() {
                     >
                       <Box>
                         <Box
-                          onClick={() => {
-                            setExpandedCustomers(prev => {
-                              const next = new Set(prev);
-                              if (next.has(customer.CustomerListID)) next.delete(customer.CustomerListID);
-                              else next.add(customer.CustomerListID);
-                              return next;
-                            });
-                          }}
+                          onClick={() => toggleExpanded(customer.CustomerListID)}
                           sx={{
                             p: 1.5,
                             bgcolor: '#f5f5f5',
@@ -1179,35 +1171,37 @@ function RentalsImproved() {
                           </Typography>
                         </Box>
                         <Collapse in={expandedCustomers.has(customer.CustomerListID)}>
-                          <Box sx={{ p: 1.5, bgcolor: '#fafafa' }}>
-                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-                              {rentals.map((rental, idx) => {
-                                const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || rental.bottle_barcode;
-                                const displayLabel = barcode || `Asset ${idx + 1}`;
-                                const bottleId = rental.bottles?.id || rental.bottle_id;
-                                return (
-                                  <Chip
-                                    key={rental.id || idx}
-                                    label={displayLabel}
-                                    size="small"
-                                    variant="outlined"
-                                    onClick={() => {
-                                      if (bottleId) navigate(`/bottle/${bottleId}`);
-                                    }}
-                                    sx={{
-                                      fontSize: 11,
-                                      cursor: 'pointer',
-                                      '&:hover': {
-                                        bgcolor: 'primary.light',
-                                        color: 'primary.contrastText',
-                                        borderColor: 'primary.main'
-                                      }
-                                    }}
-                                  />
-                                );
-                              })}
+                          {expandedCustomers.has(customer.CustomerListID) ? (
+                            <Box sx={{ p: 1.5, bgcolor: '#fafafa' }}>
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+                                {rentals.map((rental, idx) => {
+                                  const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || rental.bottle_barcode;
+                                  const displayLabel = barcode || (rental.is_dns ? `${rental.dns_product_code || 'DNS'} - ${rental.dns_description || 'Not Scanned'}` : `Asset ${idx + 1}`);
+                                  const bottleId = rental.bottles?.id || rental.bottle_id;
+                                  return (
+                                    <Chip
+                                      key={rental.id || idx}
+                                      label={displayLabel}
+                                      size="small"
+                                      variant="outlined"
+                                      onClick={() => {
+                                        if (bottleId) navigate(`/bottle/${bottleId}`);
+                                      }}
+                                      sx={{
+                                        fontSize: 11,
+                                        cursor: 'pointer',
+                                        '&:hover': {
+                                          bgcolor: 'primary.light',
+                                          color: 'primary.contrastText',
+                                          borderColor: 'primary.main'
+                                        }
+                                      }}
+                                    />
+                                  );
+                                })}
+                              </Box>
                             </Box>
-                          </Box>
+                          ) : null}
                         </Collapse>
                       </Box>
                     </TableCell>

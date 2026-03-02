@@ -54,124 +54,30 @@ export default function Home() {
         supabase.from('bottles').select('id', { count: 'exact' }).eq('organization_id', organization.id)
       ]);
 
-      // Get active rentals count - count bottles with status "rented" assigned to customers
-      // This matches the logic used in Rentals.jsx
+      // Active rentals = Rented Assets (Billable) - same definition as Rentals page: bottles assigned to
+      // CUSTOMER with status "rented", excluding vendors and customer-owned
       let activeRentalsCount = 0;
-      
       try {
-        // First, try to count from rentals table (actual rental records)
-        const { data: activeRentalsData, error: rentalsQueryError } = await supabase
-          .from('rentals')
-          .select('*')
-          .is('rental_end_date', null)
-          .eq('organization_id', organization.id);
-        
-        if (!rentalsQueryError && activeRentalsData && activeRentalsData.length > 0) {
-          // Get all bottles to verify they exist and get customer types
-          const { data: allBottles, error: allBottlesError } = await supabase
-            .from('bottles')
-            .select('barcode_number, assigned_customer, status, ownership')
-            .eq('organization_id', organization.id);
-          
-          if (!allBottlesError && allBottles) {
-            // Create bottles map for quick lookup
-            const bottlesMap = (allBottles || []).reduce((map, bottle) => {
-              const barcode = bottle.barcode_number || bottle.barcode;
-              if (barcode) {
-                map[barcode] = bottle;
-              }
-              return map;
-            }, {});
-
-            // Filter rentals to only include those with matching bottles in this organization
-            const validRentals = (activeRentalsData || []).filter(rental => {
-              const bottle = bottlesMap[rental.bottle_barcode];
-              return bottle !== undefined;
-            });
-
-            // Get customer IDs and fetch customer types to exclude vendors
-            const customerIds = Array.from(new Set(
-              validRentals.map(r => r.customer_id).filter(Boolean)
-            ));
-
-            let customersMap = {};
-            if (customerIds.length > 0) {
-              const { data: customersData } = await supabase
-                .from('customers')
-                .select('CustomerListID, customer_type')
-                .eq('organization_id', organization.id)
-                .in('CustomerListID', customerIds);
-              
-              if (customersData) {
-                customersMap = customersData.reduce((map, c) => {
-                  map[c.CustomerListID] = c;
-                  return map;
-                }, {});
-              }
-            }
-
-            // Filter out vendors - only count actual customer rentals
-            const customerRentals = validRentals.filter(r => {
-              const customer = customersMap[r.customer_id];
-              return r.customer_id && customer && customer.customer_type !== 'VENDOR';
-            });
-
-            activeRentalsCount = customerRentals.length;
-          } else {
-            // Fallback: count all active rentals if bottle lookup fails
-            activeRentalsCount = (activeRentalsData || []).length;
-          }
-        } else {
-          // No rental records found, count bottles with status "rented" assigned to customers
-          // This matches Rentals.jsx logic
-          const { data: assignedBottles, error: bottlesError } = await supabase
-            .from('bottles')
-            .select('assigned_customer, status, ownership')
-            .eq('organization_id', organization.id)
-            .not('assigned_customer', 'is', null)
-            .in('status', ['rented', 'RENTED']);
-          
-          if (!bottlesError && assignedBottles && assignedBottles.length > 0) {
-            // Get customer types to exclude vendors and customer-owned bottles
-            const customerIds = Array.from(new Set(
-              assignedBottles.map(b => b.assigned_customer).filter(Boolean)
-            ));
-            
-            let customerTypesMap = {};
-            if (customerIds.length > 0) {
-              const { data: customersData } = await supabase
-                .from('customers')
-                .select('CustomerListID, customer_type')
-                .eq('organization_id', organization.id)
-                .in('CustomerListID', customerIds);
-              
-              if (customersData) {
-                customerTypesMap = customersData.reduce((map, c) => {
-                  map[c.CustomerListID] = c.customer_type || 'CUSTOMER';
-                  return map;
-                }, {});
-              }
-            }
-            
-            // Count rented bottles: assigned to customers with status "rented" (excluding vendors and customer-owned)
-            activeRentalsCount = assignedBottles.filter(bottle => {
-              const customerType = customerTypesMap[bottle.assigned_customer] || 'CUSTOMER';
-              const ownershipValue = String(bottle.ownership || '').trim().toLowerCase();
-              const isCustomerOwned = ownershipValue.includes('customer') || 
-                                     ownershipValue.includes('owned') || 
-                                     ownershipValue === 'customer owned';
-              
-              return bottle.assigned_customer && 
-                     customerType === 'CUSTOMER' && 
-                     (bottle.status === 'rented' || bottle.status === 'RENTED') &&
-                     !isCustomerOwned;
-            }).length;
-          }
+        const [
+          { data: assignedBottles, error: bottlesErr },
+          { data: customersData, error: customersErr }
+        ] = await Promise.all([
+          supabase.from('bottles').select('assigned_customer, status, ownership').eq('organization_id', organization.id).not('assigned_customer', 'is', null),
+          supabase.from('customers').select('CustomerListID, customer_type').eq('organization_id', organization.id)
+        ]);
+        if (!bottlesErr && !customersErr && assignedBottles?.length > 0) {
+          const customerTypesMap = (customersData || []).reduce((map, c) => {
+            map[c.CustomerListID] = c.customer_type || 'CUSTOMER';
+            return map;
+          }, {});
+          activeRentalsCount = assignedBottles.filter(bottle => {
+            const customerType = customerTypesMap[bottle.assigned_customer] || 'CUSTOMER';
+            const ownershipValue = String(bottle.ownership || '').trim().toLowerCase();
+            const isCustomerOwned = ownershipValue.includes('customer') || ownershipValue.includes('owned') || ownershipValue === 'customer owned';
+            return bottle.assigned_customer && customerType === 'CUSTOMER' && (bottle.status === 'rented' || bottle.status === 'RENTED') && !isCustomerOwned;
+          }).length;
         }
-        
-        logger.log('Dashboard active rentals count:', {
-          activeRentalsCount: activeRentalsCount
-        });
+        logger.log('Dashboard active rentals count (Rented Assets Billable):', { activeRentalsCount });
       } catch (error) {
         logger.error('Error calculating active rentals:', error);
         activeRentalsCount = 0;
