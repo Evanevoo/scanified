@@ -1395,41 +1395,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         logger.log('Scan synced successfully to bottle_scans:', data);
       }
 
-      // Also save to scans table for backup/recovery and history purposes
-      // This is critical for verified orders to display bottles after approval
-      // Use minimal columns to avoid 42703 (column does not exist) - match web app's insert
-      const scansInsertData: Record<string, unknown> = {
-        organization_id: organization.id,
-        barcode_number: scanResult.barcode,
-        action: scanResult.action,
-        mode: scanResult.action === 'out' ? 'SHIP' : scanResult.action === 'in' ? 'RETURN' : scanResult.action.toUpperCase(),
-        order_number: orderNumber || scanSessionId,
-        customer_name: routeCustomerName || null,
-        customer_id: customerId || null,
-        status: 'pending',
-        created_at: new Date().toISOString()
-      };
-
-      logger.log('Inserting into scans table:', JSON.stringify(scansInsertData, null, 2));
-
-      const { data: scansData, error: scansError } = await supabase
-        .from('scans')
-        .insert([scansInsertData])
-        .select(); // Add .select() to ensure we get data back
-
-      if (scansError) {
-        // 42703 = column does not exist - log hint for debugging
-        if (scansError.code === '42703') {
-          logger.warn('Scans table missing column (42703):', scansError.hint || scansError.message);
-        }
-        logger.warn('Warning: Failed to save to scans table (non-critical):', scansError);
-        // Don't throw - this is a backup, bottle_scans is the primary record
-      } else if (!scansData || !Array.isArray(scansData) || scansData.length === 0) {
-        logger.warn('Scans table insert succeeded but no data returned (non-critical)');
-      } else {
-        logger.log('Scan also saved to scans table successfully:', scansData);
-      }
-
       logger.log('Customer info from route params:', { customerId, customerName: routeCustomerName });
 
       // Update bottle status only for known bottles (skip for unassigned assets - admin will assign type in Import Approvals)
@@ -1802,35 +1767,6 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           }
         }
 
-        // Also update scans table if it has order_number column
-        // Note: Some database schemas may not have order_number in scans table
-        try {
-          const { data: scansUpdate, error: updateScansError } = await supabase
-            .from('scans')
-            .update({ order_number: orderNumber })
-            .in('barcode_number', allBarcodes)
-            .eq('organization_id', organization.id)
-            .eq('order_number', scanSessionId)
-            .select('id');
-          
-          if (updateScansError) {
-            // Check if error is due to missing column
-            if (updateScansError.message?.includes('does not exist') || updateScansError.message?.includes('column')) {
-              logger.warn('⚠️ scans table does not have order_number column, skipping update');
-              // Don't add to errors - this is expected for some schemas
-            } else {
-              logger.error('❌ Failed to update order_number in scans:', updateScansError);
-              allErrors.push(`Failed to update scans table: ${updateScansError.message}`);
-            }
-          } else {
-            const updatedCount = scansUpdate?.length || 0;
-            logger.log(`✅ Updated order_number in scans table for ${updatedCount} records`);
-            if (updatedCount > 0) scansUpdated = true;
-          }
-        } catch (err) {
-          logger.warn('⚠️ Error updating scans table (may not have order_number column):', err);
-          // Don't add to errors - this is expected for some schemas
-        }
       }
 
       // Create or update order record in sales_orders table

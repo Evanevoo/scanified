@@ -1182,6 +1182,7 @@ export default function FillCylinderScreen() {
                 validationPattern={/^[\dA-Za-z\-%]+$/}
                 style={{ flex: 1 }}
                 hideLastScannedIndicator={true}
+                disablePeriodicFocus
               />
               {/* Details card + quantity badge (quantity under the details box) */}
               <View style={styles.scannerOverlayContainer} pointerEvents="none">

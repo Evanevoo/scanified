@@ -104,21 +104,42 @@ export default function VerifiedOrders() {
         throw receiptError;
       }
 
-      // Fetch verified scanned orders (from scans table)
-      const { data: scans, error: scanError } = await supabase
-        .from('scans')
-        .select('id, barcode_number, order_number, "mode", action, status, organization_id, customer_name, customer_id, created_at')
+      // Scanned orders: from bottle_scans only (no status column; verified state is from import record)
+      const { data: bottleScansList, error: bottleScanError } = await supabase
+        .from('bottle_scans')
+        .select('id, bottle_barcode, order_number, mode, organization_id, customer_name, customer_id, created_at')
         .eq('organization_id', organization.id)
-        .in('status', ['verified', 'approved'])
         .not('order_number', 'is', null)
         .order('created_at', { ascending: false });
+      const scansForGroup = (bottleScansList || []).map(s => ({
+        ...s,
+        barcode_number: s.bottle_barcode,
+        action: (s.mode || '').toString().toUpperCase() === 'SHIP' || (s.mode || '').toString().toUpperCase() === 'DELIVERY' ? 'out' : 'in'
+      }));
 
-      if (scanError) {
-        logger.error('Error fetching verified scans:', scanError);
-        // Continue without scans if error
+      if (bottleScanError) {
+        logger.error('Error fetching bottle_scans for verified list:', bottleScanError);
       }
 
-      // Combine and format all orders
+      // Scanned orders only count as "verified" if their order number is in verified_order_numbers on an import.
+      const normalizeOrderNumForList = (num) => {
+        if (num == null || num === '') return '';
+        const s = String(num).trim();
+        if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
+        return s;
+      };
+      const verifiedOrderNums = new Set();
+      [...(invoices || []), ...(receipts || [])].forEach(rec => {
+        const data = parseDataField(rec.data);
+        (Array.isArray(data?.verified_order_numbers) ? data.verified_order_numbers : []).forEach(n => {
+          const norm = normalizeOrderNumForList(n);
+          if (norm) verifiedOrderNums.add(norm);
+        });
+      });
+      const scannedOrders = groupScansByOrder(scansForGroup).filter(o =>
+        verifiedOrderNums.has(normalizeOrderNumForList(o.order_number))
+      );
+
       const allOrders = [
         ...(invoices || []).map(inv => ({
           ...inv,
@@ -134,8 +155,7 @@ export default function VerifiedOrders() {
           icon: <ShippingIcon />,
           data_parsed: parseDataField(rec.data)
         })),
-        // Group scans by order_number
-        ...groupScansByOrder(scans || [])
+        ...scannedOrders
       ];
       
       // For orders without customer names, try to get from invoice data first, then fallback to bottle_scans or rentals
@@ -364,15 +384,13 @@ export default function VerifiedOrders() {
       if (cust) customerId = cust.CustomerListID;
     }
 
-    // Fetch all scans/bottle_scans for org and filter by normalized order number (handles 71760 vs 071760)
-    const [scansRes, bottleScansRes] = await Promise.all([
-      supabase.from('scans').select('barcode_number, "mode", action, created_at, order_number').eq('organization_id', orgId).not('order_number', 'is', null),
-      supabase.from('bottle_scans').select('bottle_barcode, mode, created_at, order_number').eq('organization_id', orgId).not('order_number', 'is', null)
-    ]);
-    const scans = (scansRes.data || []).filter(s => normalizeOrderNumForReverse(s.order_number) === targetOrderNorm);
-    const bottleScans = (bottleScansRes.data || []).filter(s => normalizeOrderNumForReverse(s.order_number) === targetOrderNorm);
+    const { data: bottleScansData } = await supabase
+      .from('bottle_scans')
+      .select('bottle_barcode, mode, created_at, order_number')
+      .eq('organization_id', orgId)
+      .not('order_number', 'is', null);
+    const bottleScans = (bottleScansData || []).filter(s => normalizeOrderNumForReverse(s.order_number) === targetOrderNorm);
 
-    // Most-recent-wins per barcode (normalized) to determine final mode
     const barcodeMode = new Map();
     const processRow = (barcode, mode, action, createdAt) => {
       if (!barcode) return;
@@ -387,7 +405,6 @@ export default function VerifiedOrders() {
         barcodeMode.set(bNorm, { isReturn, time });
       }
     };
-    scans.forEach(s => processRow(s.barcode_number, s.mode, s.action, s.created_at));
     bottleScans.forEach(s => processRow(s.bottle_barcode, s.mode, null, s.created_at));
 
     const shippedBarcodeNorms = new Set();
@@ -397,14 +414,6 @@ export default function VerifiedOrders() {
       else shippedBarcodeNorms.add(bNorm);
     });
     const shippedRawBarcodes = new Set();
-    scans.forEach(s => {
-      const b = s.barcode_number;
-      if (b) {
-        const n = normalizeBarcode(b);
-        if (returnedBarcodeToRaw.has(n) && returnedBarcodeToRaw.get(n) == null) returnedBarcodeToRaw.set(n, b);
-        if (shippedBarcodeNorms.has(n)) shippedRawBarcodes.add(b);
-      }
-    });
     bottleScans.forEach(s => {
       const b = s.bottle_barcode;
       if (b) {
@@ -550,99 +559,16 @@ export default function VerifiedOrders() {
       } else if (order.type === 'receipt') {
         tableName = 'imported_sales_receipts';
       } else if (order.type === 'scanned') {
-        // For scanned orders, fetch all scans and filter by normalized order number
-        const { data: allScans, error: fetchError } = await supabase
-          .from('scans')
-          .select('id, barcode_number, order_number, "mode", action, status, organization_id, customer_name, customer_id, created_at')
+        // bottle_scans only; no status to revert (unverify for scanned = no-op for DB, UI removes from list)
+        const { data: existingBottleScans } = await supabase
+          .from('bottle_scans')
+          .select('id, order_number')
           .eq('organization_id', organization.id);
-        
-        // Filter client-side using normalized order numbers
-        const existingScans = (allScans || []).filter(scan => {
-          const scanOrderNum = normalizeOrderNum(scan.order_number);
-          return scanOrderNum === normalizedOrderNum || scanOrderNum === normalizeOrderNum(order.order_number);
+        const matching = (existingBottleScans || []).filter(bs => {
+          const bsOrderNum = normalizeOrderNum(bs.order_number);
+          return bsOrderNum === normalizedOrderNum || bsOrderNum === normalizeOrderNum(order.order_number);
         });
-        
-        logger.log('🔍 Found scans for scanned order:', {
-          totalScans: allScans?.length || 0,
-          matchingScans: existingScans.length,
-          orderNumber: order.order_number,
-          normalizedOrderNum: normalizedOrderNum
-        });
-
-        if (fetchError) {
-          logger.warn('Warning fetching scans:', fetchError);
-        }
-
-        // Update scans status to pending (update all matching scans)
-        if (existingScans.length > 0) {
-          const scanIds = existingScans.map(s => s.id);
-          const { error } = await supabase
-            .from('scans')
-            .update({ 
-              status: 'pending',
-              verified_at: null,
-              verified_by: null
-            })
-            .in('id', scanIds);
-          
-          if (error) {
-            logger.warn('Warning updating scans:', error);
-          }
-        }
-
-        // Recreate bottle_scans from scans if they were deleted
-        if (existingScans && existingScans.length > 0) {
-          logger.log(`🔄 Recreating ${existingScans.length} bottle_scans from scans table for scanned order:`, order.order_number);
-          
-          // Check if bottle_scans already exist (using normalized matching)
-          const { data: allBottleScans } = await supabase
-            .from('bottle_scans')
-            .select('id, order_number')
-            .eq('organization_id', organization.id);
-          
-          const existingBottleScans = (allBottleScans || []).filter(bs => {
-            const bsOrderNum = normalizeOrderNum(bs.order_number);
-            return bsOrderNum === normalizedOrderNum || bsOrderNum === normalizeOrderNum(order.order_number);
-          });
-
-          if (!existingBottleScans || existingBottleScans.length === 0) {
-          const bottleScansToInsert = existingScans.map(scan => {
-            const insertData = {
-              organization_id: organization.id,
-              bottle_barcode: scan.barcode_number || scan.bottle_barcode || scan.cylinder_barcode,
-              product_code: scan.product_code || null, // CRITICAL: Include product_code for matching
-              mode: scan.mode || (scan.action === 'out' ? 'SHIP' : scan.action === 'in' ? 'RETURN' : scan.action?.toUpperCase() || 'SHIP'),
-              location: scan.location || null,
-              user_id: scan.user_id || scan.scanned_by || null,
-              order_number: orderNumber,
-              customer_name: scan.customer_name || order.customer_name || null,
-              customer_id: scan.customer_id || null,
-              timestamp: scan.created_at || scan.timestamp || new Date().toISOString(),
-              created_at: scan.created_at || new Date().toISOString()
-            };
-            
-            logger.log('📦 Creating bottle_scan from scans table:', {
-              bottle_barcode: insertData.bottle_barcode,
-              product_code: insertData.product_code,
-              order_number: insertData.order_number,
-              mode: insertData.mode,
-              originalScan: scan
-            });
-            
-            return insertData;
-          });
-
-            const { error: insertError } = await supabase
-              .from('bottle_scans')
-              .insert(bottleScansToInsert);
-
-            if (insertError) {
-              logger.error('Error recreating bottle_scans:', insertError);
-            } else {
-              logger.log(`✅ Recreated ${bottleScansToInsert.length} bottle_scans for scanned order ${order.order_number}`);
-            }
-          }
-        }
+        logger.log('🔍 Scanned order unverify (bottle_scans only):', order.order_number, 'rows:', matching.length);
         
         // Also clear verified_order_numbers from any matching imported_invoices/receipts
         try {
@@ -736,200 +662,10 @@ export default function VerifiedOrders() {
         logger.warn('Warning resetting import record status:', e);
       }
 
-      // Also update associated scans in the scans table (if any)
-      logger.log('🔄 Unverifying associated scans for order:', orderNumber);
-      // Fetch all scans and filter by normalized order number
-      const { data: allScans, error: fetchScansError } = await supabase
-        .from('scans')
-        .select('id, barcode_number, order_number, "mode", action, status, organization_id, customer_name, customer_id, created_at')
-        .eq('organization_id', organization.id);
+      // bottle_scans has no status; unverify state is on import record only
+      logger.log('🔄 Unverify complete for order:', orderNumber);
 
-      if (fetchScansError) {
-        logger.warn('Warning fetching scans:', fetchScansError);
-      }
-
-      // Filter client-side using normalized order numbers
-      const existingScans = (allScans || []).filter(scan => {
-        const scanOrderNum = normalizeOrderNum(scan.order_number);
-        return scanOrderNum === normalizedOrderNum;
-      });
-      
-      logger.log('🔍 Found scans for order:', {
-        totalScans: allScans?.length || 0,
-        matchingScans: existingScans.length,
-        orderNumber: orderNumber,
-        normalizedOrderNum: normalizedOrderNum,
-        sampleMatchingScans: existingScans.slice(0, 3).map(s => ({
-          id: s.id,
-          order_number: s.order_number,
-          barcode: s.barcode_number || s.bottle_barcode
-        }))
-      });
-
-      // Update scans status to pending (update all matching scans)
-      if (existingScans.length > 0) {
-        const scanIds = existingScans.map(s => s.id);
-        const { error: scansError } = await supabase
-          .from('scans')
-          .update({ 
-            status: 'pending',
-            verified_at: null,
-            verified_by: null
-          })
-          .in('id', scanIds);
-
-        if (scansError) {
-          logger.warn('Warning updating scans:', scansError);
-          // Don't throw - scans might not exist
-        }
-      }
-
-      // Recreate bottle_scans from scans table if they were deleted during approval
-      if (existingScans && existingScans.length > 0) {
-        logger.log(`🔄 Recreating ${existingScans.length} bottle_scans from scans table for order:`, orderNumber);
-        
-        // Check if bottle_scans already exist (using normalized matching)
-        const { data: allBottleScans } = await supabase
-          .from('bottle_scans')
-          .select('id, order_number')
-          .eq('organization_id', organization.id);
-        
-        const existingBottleScans = (allBottleScans || []).filter(bs => {
-          const bsOrderNum = normalizeOrderNum(bs.order_number);
-          return bsOrderNum === normalizedOrderNum;
-        });
-        
-        logger.log('🔍 Checking existing bottle_scans:', {
-          totalBottleScans: allBottleScans?.length || 0,
-          matchingBottleScans: existingBottleScans.length,
-          orderNumber: orderNumber,
-          normalizedOrderNum: normalizedOrderNum
-        });
-
-        // Only recreate if they don't exist
-        if (!existingBottleScans || existingBottleScans.length === 0) {
-          const bottleScansToInsert = existingScans.map(scan => {
-            const insertData = {
-              organization_id: organization.id,
-              bottle_barcode: scan.barcode_number || scan.bottle_barcode || scan.cylinder_barcode,
-              product_code: scan.product_code || null, // CRITICAL: Include product_code for matching
-              mode: scan.mode || (scan.action === 'out' ? 'SHIP' : scan.action === 'in' ? 'RETURN' : scan.action?.toUpperCase() || 'SHIP'),
-              location: scan.location || null,
-              user_id: scan.user_id || scan.scanned_by || null,
-              order_number: orderNumber,
-              customer_name: scan.customer_name || order.data_parsed?.customer_name || null,
-              customer_id: scan.customer_id || order.data_parsed?.customer_id || null,
-              timestamp: scan.created_at || scan.timestamp || new Date().toISOString(),
-              created_at: scan.created_at || new Date().toISOString()
-            };
-            
-            logger.log('📦 Creating bottle_scan from scans table (invoice/receipt):', {
-              bottle_barcode: insertData.bottle_barcode,
-              product_code: insertData.product_code,
-              order_number: insertData.order_number,
-              mode: insertData.mode,
-              originalScan: scan
-            });
-            
-            return insertData;
-          });
-
-          const { error: insertError } = await supabase
-            .from('bottle_scans')
-            .insert(bottleScansToInsert);
-
-          if (insertError) {
-            logger.error('Error recreating bottle_scans:', insertError);
-            // Don't throw - this is not critical
-          } else {
-            logger.log(`✅ Recreated ${bottleScansToInsert.length} bottle_scans for order ${orderNumber}`);
-          }
-        } else {
-          logger.log('✅ bottle_scans already exist for order:', orderNumber);
-        }
-      } else {
-        logger.log('ℹ️ No scans found in scans table. Trying to recreate from bottles table...');
-        
-        // If no scans exist, try to recreate from bottles table
-        // Check if bottles were assigned to the customer with this order number
-        const customerName = getCustomerName(order);
-        const { data: bottles, error: bottlesError } = await supabase
-          .from('bottles')
-          .select('barcode_number, assigned_customer, customer_name, location, status, product_code')
-          .eq('organization_id', organization.id)
-          .or(`assigned_customer.eq.${customerName},customer_name.eq.${customerName}`)
-          .eq('status', 'delivered')
-          .limit(100);
-
-        if (bottlesError) {
-          logger.warn('Error fetching bottles:', bottlesError);
-        } else if (bottles && bottles.length > 0) {
-          logger.log(`🔍 Found ${bottles.length} bottles assigned to customer ${customerName}. Creating bottle_scans...`);
-          
-          // Get the invoice/receipt data to extract product codes
-          const { data: invoiceData } = await supabase
-            .from(tableName)
-            .select('data')
-            .eq('id', order.id)
-            .single();
-
-          const parsedData = invoiceData?.data ? (typeof invoiceData.data === 'string' ? JSON.parse(invoiceData.data) : invoiceData.data) : null;
-          const rows = parsedData?.rows || parsedData?.line_items || [];
-          
-          // Create a map of product codes from the invoice
-          const productCodeMap = new Map();
-          rows.forEach(row => {
-            const productCode = row.product_code || row.ProductCode || row.item_code;
-            if (productCode) {
-              productCodeMap.set(productCode.toLowerCase(), productCode);
-            }
-          });
-
-          // Create bottle_scans from bottles that match the invoice product codes
-          const bottleScansToInsert = bottles
-            .filter(bottle => {
-              // Match by product code if available
-              if (bottle.product_code && productCodeMap.has(bottle.product_code.toLowerCase())) {
-                return true;
-              }
-              // If no product code match, include all delivered bottles for this customer
-              return true;
-            })
-            .slice(0, 10) // Limit to prevent too many inserts
-            .map(bottle => ({
-              organization_id: organization.id,
-              bottle_barcode: bottle.barcode_number,
-              product_code: bottle.product_code || null,
-              mode: 'SHIP', // Assume SHIP for delivered bottles
-              location: bottle.location || null,
-              user_id: null, // We don't know who scanned it
-              order_number: orderNumber,
-              customer_name: customerName,
-              customer_id: bottle.assigned_customer || null,
-              timestamp: new Date().toISOString(),
-              created_at: new Date().toISOString()
-            }));
-
-          if (bottleScansToInsert.length > 0) {
-            logger.log(`🔄 Creating ${bottleScansToInsert.length} bottle_scans from bottles table for order ${orderNumber}`);
-            const { error: insertError } = await supabase
-              .from('bottle_scans')
-              .insert(bottleScansToInsert);
-
-            if (insertError) {
-              logger.error('Error recreating bottle_scans from bottles:', insertError);
-            } else {
-              logger.log(`✅ Recreated ${bottleScansToInsert.length} bottle_scans from bottles table for order ${orderNumber}`);
-            }
-          } else {
-            logger.log('ℹ️ No matching bottles found to recreate scans from');
-          }
-        } else {
-          logger.log('ℹ️ No bottles found assigned to customer for order:', orderNumber);
-        }
-      }
-
-      // Bottle reversal is handled above (RPC path or fallback in the else branch)
+      // Bottle reversal is handled above (RPC path or fallback)
 
       setSnackbar({ 
         open: true, 

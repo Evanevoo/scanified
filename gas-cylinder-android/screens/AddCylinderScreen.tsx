@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView, FlatList, Pressable, Dimensions, Keyboard, Platform, KeyboardAvoidingView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
@@ -89,8 +89,9 @@ export default function AddCylinderScreen() {
   };
 
   const handleOcrCustomerFound = (customer: { name: string; id: string }) => {
-    setScannerVisible(false);
-    navigation.navigate('CustomerDetails', { customerId: customer.id });
+    closeScannerModal(() => {
+      if (isMountedRef.current) navigation.navigate('CustomerDetails', { customerId: customer.id });
+    });
   };
   const [owners, setOwners] = useState<{ id: string; name: string }[]>([]);
   const [selectedOwner, setSelectedOwner] = useState('');
@@ -100,6 +101,32 @@ export default function AddCylinderScreen() {
   const [showSerialModal, setShowSerialModal] = useState(false);
   const [gasTypeSearch, setGasTypeSearch] = useState('');
   const [gasTypeSuggestionsVisible, setGasTypeSuggestionsVisible] = useState(false);
+  const isMountedRef = useRef(true);
+  const scannerCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Avoid setState/Alert after unmount (prevents Android crash when adding bottles)
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (scannerCloseTimeoutRef.current) clearTimeout(scannerCloseTimeoutRef.current);
+    };
+  }, []);
+
+  // Delayed scanner close on Android so camera can release before unmount (prevents native crash)
+  const closeScannerModal = useCallback((afterClose?: () => void) => {
+    if (Platform.OS !== 'android') {
+      setScannerVisible(false);
+      afterClose?.();
+      return;
+    }
+    if (scannerCloseTimeoutRef.current) clearTimeout(scannerCloseTimeoutRef.current);
+    scannerCloseTimeoutRef.current = setTimeout(() => {
+      scannerCloseTimeoutRef.current = null;
+      if (isMountedRef.current) setScannerVisible(false);
+      afterClose?.();
+    }, 500);
+  }, []);
 
   const getGasTypeLabel = (gt: GasType) => {
     const base = `${gt.category} - ${gt.type}`;
@@ -123,32 +150,37 @@ export default function AddCylinderScreen() {
   }, [selectedGasType]);
 
   useEffect(() => {
+    let isMounted = true;
     const fetchGasTypes = async () => {
-      setLoadingGasTypes(true);
-      setError('');
+      if (isMounted) setLoadingGasTypes(true);
+      if (isMounted) setError('');
       const { data, error } = await supabase
         .from('gas_types')
         .select('*')
         .order('category', { ascending: true })
         .order('group_name', { ascending: true })
         .order('type', { ascending: true });
+      if (!isMounted) return;
       if (error) {
         setError('Failed to load gas types.');
+        setLoadingGasTypes(false);
         return;
       }
       setGasTypes(data || []);
       setLoadingGasTypes(false);
     };
     fetchGasTypes();
+    return () => { isMounted = false; };
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
     const fetchLocations = async () => {
-      setLoadingLocations(true);
-      setError('');
+      if (isMounted) setLoadingLocations(true);
+      if (isMounted) setError('');
       if (!profile?.organization_id) {
-        setLocations([]);
-        setLoadingLocations(false);
+        if (isMounted) setLocations([]);
+        if (isMounted) setLoadingLocations(false);
         return;
       }
       const { data, error } = await supabase
@@ -156,6 +188,7 @@ export default function AddCylinderScreen() {
         .select('*')
         .eq('organization_id', profile.organization_id)
         .order('name', { ascending: true });
+      if (!isMounted) return;
       if (error) {
         setError('Failed to load locations.');
         setLocations([]);
@@ -166,10 +199,11 @@ export default function AddCylinderScreen() {
       setLoadingLocations(false);
     };
     fetchLocations();
+    return () => { isMounted = false; };
   }, [profile]);
 
   useEffect(() => {
-    // Fetch ownership values for the current organization
+    let isMounted = true;
     const fetchOwners = async () => {
       if (!profile?.organization_id) return;
       const { data, error } = await supabase
@@ -177,12 +211,11 @@ export default function AddCylinderScreen() {
         .select('id, value')
         .eq('organization_id', profile.organization_id)
         .order('value', { ascending: true });
-      if (!error && data) {
-        // Map the data to match the expected format (name -> value)
-        setOwners(data.map(item => ({ id: item.id, name: item.value })));
-      }
+      if (!isMounted) return;
+      if (!error && data) setOwners(data.map(item => ({ id: item.id, name: item.value })));
     };
     fetchOwners();
+    return () => { isMounted = false; };
   }, [profile]);
 
   const addCurrentToPending = useCallback(async (): Promise<boolean> => {
@@ -195,8 +228,9 @@ export default function AddCylinderScreen() {
         .eq('organization_id', profile.organization_id)
         .eq('barcode_number', b)
         .limit(1);
+      if (!isMountedRef.current) return false;
       if (existing && existing.length > 0) {
-        Alert.alert(
+        if (isMountedRef.current) Alert.alert(
           'Barcode already in system',
           `The barcode "${b}" is already registered. It was not added to the list.`,
           [{ text: 'OK', style: 'default' }]
@@ -204,6 +238,7 @@ export default function AddCylinderScreen() {
         return false;
       }
     }
+    if (!isMountedRef.current) return false;
     setPendingBottles(prev => [...prev, { id: `row-${Date.now()}-${Math.random().toString(36).slice(2)}`, barcode: b, serial: (currentSerial || '').trim() }]);
     setCurrentBarcode('');
     setCurrentSerial('');
@@ -227,9 +262,10 @@ export default function AddCylinderScreen() {
     if (!trimmed) return;
     setCurrentBarcode(trimmed);
     setCurrentSerial('');
-    setScannerVisible(false);
-    setShowSerialModal(true);
-  }, []);
+    closeScannerModal(() => {
+      if (isMountedRef.current) setShowSerialModal(true);
+    });
+  }, [closeScannerModal]);
 
   const handleSubmit = async () => {
     setError('');
@@ -247,9 +283,10 @@ export default function AddCylinderScreen() {
 
     if (profile?.organization_id) {
       const validation = await CylinderLimitService.validateCylinderAddition(profile.organization_id, validRows.length);
+      if (!isMountedRef.current) return;
       if (!validation.isValid) {
         setLoading(false);
-        Alert.alert(validation.message.title, validation.message.message, [{ text: 'OK', style: 'default' }]);
+        if (isMountedRef.current) Alert.alert(validation.message.title, validation.message.message, [{ text: 'OK', style: 'default' }]);
         return;
       }
     }
@@ -287,6 +324,7 @@ export default function AddCylinderScreen() {
       .select('barcode_number')
       .eq('organization_id', profile!.organization_id)
       .in('barcode_number', barcodes);
+    if (!isMountedRef.current) return;
     const existingBarcodes = new Set((existingByBarcode || []).map(b => (b.barcode_number || '').trim()));
 
     const { data: existingBySerial } = await supabase
@@ -294,6 +332,7 @@ export default function AddCylinderScreen() {
       .select('serial_number')
       .eq('organization_id', profile!.organization_id)
       .in('serial_number', serials);
+    if (!isMountedRef.current) return;
     const existingSerials = new Set((existingBySerial || []).map(b => (b.serial_number || '').trim()));
 
     const toInsert: typeof validRows = [];
@@ -330,6 +369,7 @@ export default function AddCylinderScreen() {
     };
 
     for (let i = 0; i < toInsert.length; i += BATCH_INSERT_SIZE) {
+      if (!isMountedRef.current) return;
       const batch = toInsert.slice(i, i + BATCH_INSERT_SIZE);
       const rows = batch.map(r => ({
         ...baseRow,
@@ -337,6 +377,7 @@ export default function AddCylinderScreen() {
         serial_number: (r.serial || '').trim() || (r.barcode || '').trim(),
       }));
       const { error: insertError } = await supabase.from('bottles').insert(rows);
+      if (!isMountedRef.current) return;
       if (insertError) {
         logger.error('Batch insert error:', insertError);
         setError(`Failed to add bottles: ${insertError.message}`);
@@ -345,6 +386,7 @@ export default function AddCylinderScreen() {
       }
     }
 
+    if (!isMountedRef.current) return;
     setLoading(false);
     const added = toInsert.length;
     const skipMsg = skipped.length > 0 ? ` (${skipped.length} already existed)` : '';
@@ -364,6 +406,7 @@ export default function AddCylinderScreen() {
       .from('ownership_values')
       .insert({ value: newOwnerName.trim(), organization_id: profile.organization_id })
       .select();
+    if (!isMountedRef.current) return;
     if (!error && data && data[0]) {
       setOwners([...owners, { id: data[0].id, name: data[0].value }]);
       setSelectedOwner(data[0].value);
@@ -620,7 +663,7 @@ export default function AddCylinderScreen() {
       {/* Scanner Modal */}
       <Modal
         visible={scannerVisible}
-        onRequestClose={() => setScannerVisible(false)}
+        onRequestClose={() => closeScannerModal()}
         animationType="slide"
         transparent={false}
       >
@@ -631,10 +674,11 @@ export default function AddCylinderScreen() {
             onScanned={(data: string) => {
               if (data) setScannedBarcode(data);
             }}
-            onClose={() => setScannerVisible(false)}
+            onClose={() => closeScannerModal()}
             label="Scan barcode — then add serial and tap Add"
             validationPattern={/^[\dA-Za-z\-%]+$/}
             style={{ flex: 1 }}
+            disablePeriodicFocus
           />
         </View>
       </Modal>

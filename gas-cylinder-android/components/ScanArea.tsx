@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Pressable, useWindowDimensions, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Pressable, useWindowDimensions, Platform, Animated } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { feedbackService } from '../services/feedbackService';
 
@@ -32,6 +32,8 @@ interface ScanAreaProps {
   hideScanningLine?: boolean;
   /** When true, hides the "Last scanned" success indicator (for screens that show their own scanned item UI) */
   hideLastScannedIndicator?: boolean;
+  /** When true, disables the periodic autofocus toggle on Android (avoids blur when pointing at barcode). Use for customer barcode scanning. */
+  disablePeriodicFocus?: boolean;
 }
 
 // Extract potential customer names from OCR text (exclude barcodes, numbers, short words)
@@ -64,9 +66,12 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   onClose,
   hideScanningLine = false,
   hideLastScannedIndicator = false,
+  disablePeriodicFocus = false,
 }) => {
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraReady, setCameraReady] = useState(false); // Defer mount to prevent Android crash
+  const [previewReady, setPreviewReady] = useState(false); // Hide "Starting camera..." overlay when native preview is ready
+  const overlayOpacity = useRef(new Animated.Value(1)).current;
   const [scanned, setScanned] = useState(false);
   const [lastScanned, setLastScanned] = useState('');
   const [error, setError] = useState('');
@@ -97,13 +102,19 @@ const ScanArea: React.FC<ScanAreaProps> = ({
     feedbackService.initialize();
   }, []);
 
-  // Defer CameraView mount so layout is ready (prevents Android crash on open)
+  // Defer CameraView mount so layout is ready (prevents Android crash on open). Short delay; overlay hides init glitch.
   useEffect(() => {
     if (!permission?.granted) {
       setCameraReady(false);
+      setPreviewReady(false);
       return;
     }
-    const t = setTimeout(() => setCameraReady(true), Platform.OS === 'android' ? 350 : 400);
+    const delay = Platform.OS === 'android' ? 150 : 200;
+    const t = setTimeout(() => {
+      setCameraReady(true);
+      setPreviewReady(false);
+      overlayOpacity.setValue(1);
+    }, delay);
     return () => clearTimeout(t);
   }, [permission?.granted]);
 
@@ -299,9 +310,11 @@ const ScanArea: React.FC<ScanAreaProps> = ({
               <Pressable
                 style={styles.camera}
                 onPress={() => {
-                  // Tap to refocus on Android - toggle autofocus prop to trigger startFocusMetering
-                  setAutofocusMode('off');
-                  setTimeout(() => setAutofocusMode('on'), 100);
+                  // Tap to focus: toggle autofocus to trigger focus cycle (same timing as periodic focus)
+                  if (Platform.OS === 'android') {
+                    setAutofocusMode('off');
+                    setTimeout(() => setAutofocusMode('on'), 180);
+                  }
                 }}
               >
                 <CameraView
@@ -312,21 +325,32 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                   enableTorch={flashEnabled}
                   autofocus={autofocusMode}
                   onCameraReady={() => {
+                    // Longer off duration so Android has time to complete each focus cycle (better focus on Add Cylinders / scanner modal)
+                    const FOCUS_OFF_MS = 180;
                     const triggerFocus = () => {
                       setAutofocusMode('off');
-                      setTimeout(() => setAutofocusMode('on'), 80);
+                      setTimeout(() => setAutofocusMode('on'), FOCUS_OFF_MS);
                     };
-                    triggerFocus();
                     if (Platform.OS === 'android') {
                       focusTimeoutsRef.current.forEach((id) => clearTimeout(id));
-                      focusTimeoutsRef.current = [
-                        setTimeout(triggerFocus, 250),
-                        setTimeout(triggerFocus, 550),
-                      ];
+                      focusTimeoutsRef.current = [];
+                      if (!disablePeriodicFocus) {
+                        // First trigger after a short delay so preview is stable
+                        focusTimeoutsRef.current.push(setTimeout(triggerFocus, 100));
+                        // Dense burst over ~2.5s so focus locks quickly and stays sharp
+                        [350, 650, 1000, 1400, 1900, 2500].forEach((ms) => {
+                          focusTimeoutsRef.current.push(setTimeout(triggerFocus, ms));
+                        });
+                        // Re-trigger focus every second so it stays sharp all the time (Add Cylinders, etc.)
+                        if (focusIntervalRef.current) clearInterval(focusIntervalRef.current as ReturnType<typeof setInterval>);
+                        focusIntervalRef.current = setInterval(triggerFocus, 1000);
+                      }
+                      // When disablePeriodicFocus: rely on continuous autofocus only (tap-to-focus still works)
+                    } else {
+                      triggerFocus();
                     }
-                    // Keep autofocus alive with periodic re-triggers (Android loses focus)
-                    if (focusIntervalRef.current) clearInterval(focusIntervalRef.current);
-                    focusIntervalRef.current = setInterval(triggerFocus, 3000);
+                    // Fade out "Starting camera..." overlay so preview appears smoothly
+                    Animated.timing(overlayOpacity, { toValue: 0, duration: 250, useNativeDriver: true }).start(() => setPreviewReady(true));
                   }}
                   animateShutter={false}
                   barcodeScannerSettings={{
@@ -343,6 +367,14 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                   }}
                   onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
                 />
+                {/* Overlay hides camera init glitch; fades out when preview is ready */}
+                <Animated.View
+                  pointerEvents={previewReady ? 'none' : 'auto'}
+                  style={[styles.cameraStartingOverlay, { opacity: overlayOpacity }]}
+                >
+                  <ActivityIndicator size="large" color="#fff" />
+                  <Text style={styles.statusText}>Starting camera...</Text>
+                </Animated.View>
               </Pressable>
               
               {/* Flash, Zoom, Close - all in top-right row */}
@@ -464,6 +496,13 @@ const styles = StyleSheet.create({
   },
   camera: {
     flex: 1,
+  },
+  cameraStartingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
   },
   centerContent: {
     flex: 1,

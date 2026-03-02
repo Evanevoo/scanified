@@ -343,30 +343,7 @@ export default function AssetDetail() {
 
       let allHistory = [];
 
-      // 1. Fetch from scans table (primary source for movement history)
-      if (barcodeNumber) {
-        const { data: scansData, error: scansError } = await supabase
-          .from('scans')
-          .select('id, barcode_number, created_at, "mode", action, location, order_number, customer_name, customer_id, scanned_by, product_code')
-          .eq('barcode_number', barcodeNumber)
-          .eq('organization_id', profile.organization_id)
-          .order('created_at', { ascending: false })
-          .limit(50);
-
-        if (!scansError && scansData) {
-          scansData.forEach(scan => {
-            allHistory.push({
-              ...scan,
-              history_type: 'scan',
-              action: scan.mode || scan.action || 'SCAN'
-            });
-          });
-        } else if (scansError) {
-          logger.error('Error fetching scans:', scansError);
-        }
-      }
-
-      // 2. Fetch from bottle_scans table (bottle_barcode, cylinder_barcode, or barcode_number)
+      // Fetch from bottle_scans (single source for movement history)
       if (barcodeNumber) {
         const { data: bsData, error: bsError } = await supabase
           .from('bottle_scans')
@@ -619,16 +596,22 @@ export default function AssetDetail() {
           status: 'approved' // Manual assignments are automatically approved
         };
         
-        // Insert into scans table (for movement history)
-        const { error: scanError } = await supabase
-          .from('scans')
-          .insert(scanData);
-        
-        if (scanError) {
-          logger.error('Error creating scan record:', scanError);
-          // Don't throw - the bottle update succeeded, scan record is just for history
+        const { error: bottleScanError } = await supabase
+          .from('bottle_scans')
+          .insert({
+            organization_id: profile.organization_id,
+            bottle_barcode: asset.barcode_number || editData.barcode_number,
+            mode: scanMode,
+            order_number: scanData.order_number,
+            customer_id: editData.assigned_customer || null,
+            customer_name: editData.customer_name || null,
+            timestamp: new Date().toISOString(),
+            created_at: new Date().toISOString()
+          });
+        if (bottleScanError) {
+          logger.error('Error creating bottle_scan record:', bottleScanError);
         } else {
-          logger.log('Created scan record for assignment change');
+          logger.log('Created bottle_scan record for assignment change');
         }
       }
 

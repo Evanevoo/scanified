@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Pressable, Platform, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Pressable, Platform, useWindowDimensions, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { feedbackService } from '../services/feedbackService';
@@ -65,6 +65,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraReady, setCameraReady] = useState(false); // Defer mount to prevent crash on open
   const [nativeCameraReady, setNativeCameraReady] = useState(false); // iOS: only enable barcode scan after native preview is ready
+  const overlayOpacity = useRef(new Animated.Value(1)).current;
   const [scanned, setScanned] = useState(false);
   const [lastScanned, setLastScanned] = useState('');
   const [error, setError] = useState('');
@@ -97,18 +98,21 @@ const ScanArea: React.FC<ScanAreaProps> = ({
     feedbackService.initialize();
   }, []);
 
-  // Defer CameraView mount so layout is ready (prevents crash on open)
-  // iOS: longer delay needed so barcode scanner works (iPhone 13, 13 mini, SE, etc.)
+  // Defer CameraView mount so layout is ready (prevents crash on open). Shorter delay; overlay hides init glitch.
   const cameraMountDelay = Platform.OS === 'ios'
-    ? (isVerySmallScreen ? 1000 : isSmallScreen ? 900 : 800)
-    : 400;
+    ? (isVerySmallScreen ? 400 : 300)
+    : 200;
   useEffect(() => {
     if (!permission?.granted) {
       setCameraReady(false);
       setNativeCameraReady(false);
       return;
     }
-    const t = setTimeout(() => setCameraReady(true), cameraMountDelay);
+    const t = setTimeout(() => {
+      setCameraReady(true);
+      setNativeCameraReady(false);
+      overlayOpacity.setValue(1);
+    }, cameraMountDelay);
     return () => clearTimeout(t);
   }, [permission?.granted]);
 
@@ -347,7 +351,10 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                   autofocus="on"
                   animateShutter={false}
                   mode={Platform.OS === 'ios' ? 'video' : 'picture'}
-                  onCameraReady={() => setNativeCameraReady(true)}
+                  onCameraReady={() => {
+                  setNativeCameraReady(true);
+                  Animated.timing(overlayOpacity, { toValue: 0, duration: 250, useNativeDriver: true }).start();
+                }}
                   onBarcodeScanned={
                     (scanned || isClosing) ? undefined
                       : (Platform.OS === 'ios' && !nativeCameraReady) ? undefined
@@ -363,6 +370,14 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                     ...(regionOfInterest && { regionOfInterest })
                   }}
                 />
+                {/* Overlay hides camera init glitch; fades out when preview is ready */}
+                <Animated.View
+                  pointerEvents={nativeCameraReady ? 'none' : 'auto'}
+                  style={[styles.cameraStartingOverlay, { opacity: overlayOpacity }]}
+                >
+                  <ActivityIndicator size="large" color="#fff" />
+                  <Text style={styles.statusText}>Starting camera...</Text>
+                </Animated.View>
               </Pressable>
               
               {/* Flash, Zoom, Close - all in top-right row (below safe area on notched devices) */}
@@ -483,6 +498,13 @@ const styles = StyleSheet.create({
   },
   camera: {
     flex: 1,
+  },
+  cameraStartingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
   },
   centerContent: {
     flex: 1,

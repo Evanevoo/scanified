@@ -45,7 +45,8 @@ function AssetWithWarning({ asset, currentCustomer }) {
 export default function ScannedOrders() {
   const { organization, profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
-  const userTimezone = profile?.preferences?.timezone || (typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone) || undefined;
+  const browserTz = typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone;
+  const userTimezone = profile?.preferences?.timezone || (browserTz && browserTz !== 'UTC' ? browserTz : undefined);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -57,6 +58,7 @@ export default function ScannedOrders() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [bottles, setBottles] = useState([]);
+  const [barcodeToProductCode, setBarcodeToProductCode] = useState({});
 
   const selectedOrg = organization?.id ?? '';
 
@@ -95,6 +97,34 @@ export default function ScannedOrders() {
     }
     fetchOrders();
   }, [saving, selectedOrg]);
+
+  // Resolve product_code from bottles table for displayed barcodes (bottle_scans may not have product_code)
+  useEffect(() => {
+    async function fetchProductCodes() {
+      if (!selectedOrg || !orders?.length) {
+        setBarcodeToProductCode({});
+        return;
+      }
+      const barcodes = [...new Set(orders.map(o => (o.bottle_barcode || o.cylinder_barcode || o.barcode_number).trim()).filter(Boolean))];
+      if (barcodes.length === 0) {
+        setBarcodeToProductCode({});
+        return;
+      }
+      const { data: bottleRows, error } = await supabase
+        .from('bottles')
+        .select('barcode_number, product_code')
+        .eq('organization_id', selectedOrg)
+        .in('barcode_number', barcodes);
+      if (error) return;
+      const map = {};
+      (bottleRows || []).forEach(b => {
+        const bc = (b.barcode_number || '').trim();
+        if (bc) map[bc] = b.product_code || '';
+      });
+      setBarcodeToProductCode(map);
+    }
+    fetchProductCodes();
+  }, [selectedOrg, orders]);
 
   const handleEdit = (order) => {
     if (!isAdmin) {
@@ -235,14 +265,23 @@ export default function ScannedOrders() {
     return Array.from(keyToRow.values()).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   }, [orders]);
 
+  const getProductCode = (order) => {
+    const fromScan = order.product_code;
+    if (fromScan != null && fromScan !== '') return fromScan;
+    const barcode = (order.bottle_barcode || order.cylinder_barcode || order.barcode_number || '').trim();
+    return barcode ? (barcodeToProductCode[barcode] ?? '') : '';
+  };
+
   // Filter orders by search
   const filteredOrders = dedupedOrders.filter(order => {
     if (!search) return true;
     const s = search.toLowerCase();
+    const productCode = getProductCode(order);
     return (
       (order.order_number && order.order_number.toLowerCase().includes(s)) ||
       (order.customer_name && order.customer_name.toLowerCase().includes(s)) ||
-      (order.bottle_barcode && order.bottle_barcode.toLowerCase().includes(s))
+      (order.bottle_barcode && order.bottle_barcode.toLowerCase().includes(s)) ||
+      (productCode && productCode.toLowerCase().includes(s))
     );
   });
 
@@ -253,7 +292,7 @@ export default function ScannedOrders() {
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} gap={2}>
           <TextField
             size="small"
-            label="Search orders, customer, asset..."
+            label="Search orders, customer, product code, asset..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             sx={{ minWidth: 260 }}
@@ -276,6 +315,7 @@ export default function ScannedOrders() {
                   <TableCell>Scan ID</TableCell>
                   <TableCell>Order Number</TableCell>
                   <TableCell>Customer</TableCell>
+                  <TableCell>Product Code</TableCell>
                   <TableCell>Bottle Barcode</TableCell>
                   <TableCell>Mode</TableCell>
                   <TableCell>Scanned At</TableCell>
@@ -325,6 +365,9 @@ export default function ScannedOrders() {
                         ) : (
                           order.customer_name
                         )}
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" fontWeight={500}>{getProductCode(order) || '—'}</Typography>
                       </TableCell>
                       <TableCell>
                         {editingId === order.id ? (

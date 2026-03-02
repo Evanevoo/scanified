@@ -555,6 +555,7 @@ export default function HomeScreen() {
             label=""
             validationPattern={/^[\dA-Za-z\-%*]+$/}
             style={{ flex: 1 }}
+            disablePeriodicFocus
           />
         </View>
       </Modal>

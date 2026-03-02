@@ -5,7 +5,7 @@ module.exports = {
   expo: {
     name: "Scanified Android",
     slug: "gas-cylinder-android",
-    version: "1.0.44",
+    version: "1.0.45",
     orientation: "portrait",
     icon: "./assets/app-icon.png",
     userInterfaceStyle: "automatic",
@@ -23,7 +23,7 @@ module.exports = {
         backgroundColor: "#FFFFFF"
       },
       package: "com.evanevoo.scanifiedandroid",
-      versionCode: 99,
+      versionCode: 100,
       permissions: [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"

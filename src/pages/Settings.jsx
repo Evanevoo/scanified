@@ -1268,6 +1268,9 @@ export default function Settings() {
                       <MenuItem value="Asia/Tokyo">Asia/Tokyo</MenuItem>
                       <MenuItem value="Australia/Sydney">Australia/Sydney</MenuItem>
                     </Select>
+                    <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Scan times on Orders use this. Set to your local timezone (e.g. Central) for correct times.
+                    </Typography>
                   </FormControl>
                 </Grid>
                 <Grid item xs={12} sm={6}>
