@@ -6625,13 +6625,17 @@ return (
         // Do NOT remove a ship when we have RNB: the scanned SHIP is real and should be assigned; RNB is just an exception record.
       }
 
+      // Only pass returns that are on this customer's balance to the RPC. RNB returns must not be unassigned for this order (we only create RNB records).
+      const rnbBarcodeSet = new Set((returnsNotOnBalance || []).map((r) => r.barcode));
+      const returnBarcodesOnBalance = retArr.filter((bc) => !rnbBarcodeSet.has(bc));
+
       // Try transactional RPC first (does not mark import record - confirmApprove handles that)
       const rpcResult = await bottleAssignmentService.assignBottles({
         organizationId: organization?.id,
         customerId: newCustomerId || newCustomerName,
         customerName: newCustomerName,
         shipBarcodes: shipArr,
-        returnBarcodes: retArr,
+        returnBarcodes: returnBarcodesOnBalance,
         orderNumber: orderNumber,
       });
 
@@ -6640,7 +6644,7 @@ return (
         logger.debug(`RPC assignment succeeded: ${d.shipped || 0} shipped, ${d.returned || 0} returned, ${d.skipped || 0} skipped, ${d.created || 0} created`);
         if (returnsNotOnBalance.length > 0) {
           for (const rnb of returnsNotOnBalance) {
-            await createRNBRentalRecord(newCustomerName, newCustomerId, orderNumber, rnb.product_code || 'Unknown');
+            await createRNBRentalRecord(newCustomerName, newCustomerId, orderNumber, rnb.product_code || 'Unknown', rnb.barcode);
           }
           setSnackbar(`Bottles assigned. ${returnsNotOnBalance.length} return(s) were not on customer balance (RNB – see customer page).`);
         } else if (d.errors && d.errors.length > 0) {
@@ -6649,7 +6653,7 @@ return (
         }
       } else {
         logger.warn('RPC assignment failed, falling back to inline logic:', rpcResult.error);
-        await assignBottlesToCustomerInline(record, newCustomerName, newCustomerId, orderNumber, shippedBarcodes, returnedBarcodes, rows);
+        await assignBottlesToCustomerInline(record, newCustomerName, newCustomerId, orderNumber, shippedBarcodes, returnBarcodesOnBalance, rows);
       }
 
       // DNS (Delivered Not Scanned) records are not handled by the RPC
@@ -6945,7 +6949,7 @@ return (
   }
 
   // Create RNB (Return not on balance) record – return was scanned but bottle was not at this customer (like DNS for returns)
-  async function createRNBRentalRecord(customerName, customerId, orderNumber, productCode) {
+  async function createRNBRentalRecord(customerName, customerId, orderNumber, productCode, scannedBarcode = null) {
     if (!organization?.id || !customerName) return;
     try {
       let resolvedCustomerId = customerId;
@@ -6971,7 +6975,7 @@ return (
           dns_description: 'Return not on balance',
           dns_order_number: orderNumber,
           bottle_id: null,
-          bottle_barcode: null,
+          bottle_barcode: scannedBarcode || null,
           rental_start_date: new Date().toISOString().split('T')[0],
           rental_end_date: null,
           rental_amount: 10,

@@ -117,7 +117,9 @@ export default function CustomerDetail() {
     const dnsRows = dnsRentals.map(r => ({
       id: 'dns-' + r.id,
       serial_number: '—',
-      barcode_number: (r.dns_description || '').includes('Return not on balance') ? 'RNB' : 'DNS',
+      barcode_number: (r.dns_description || '').includes('Return not on balance')
+        ? (r.bottle_barcode || 'RNB')
+        : (r.bottle_barcode || 'DNS'),
       type: r.dns_product_code || r.product_code || '—',
       description: r.dns_description || '',
       location: '—',
@@ -1375,7 +1377,12 @@ export default function CustomerDetail() {
                     <TableRow key={rental.id} hover sx={{ bgcolor: isRNB ? '#ffebee' : isDNS ? '#fff3cd' : 'inherit' }}>
                       <TableCell>
                         {isRNB ? (
-                          <Chip label="RNB" color="error" size="small" sx={{ fontWeight: 'bold' }} />
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Typography component="span" variant="body2" fontFamily="monospace">
+                              {rental.bottle_barcode || '—'}
+                            </Typography>
+                            <Chip label="RNB" color="error" size="small" sx={{ fontWeight: 'bold' }} />
+                          </Box>
                         ) : isDNS ? (
                           <Chip 
                             label="DNS" 
