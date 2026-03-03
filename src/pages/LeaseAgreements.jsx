@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useDebounce } from '../utils/performance';
 import { toCsv, downloadFile, getNextAgreementNumbers } from '../utils/invoiceUtils';
 import {
@@ -49,7 +49,9 @@ import {
   AttachMoney as MoneyIcon,
   DateRange as DateIcon,
   Business as BusinessIcon,
-  Autorenew as RenewIcon
+  Autorenew as RenewIcon,
+  Upload as UploadIcon,
+  Email as EmailIcon
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
@@ -594,6 +596,12 @@ export default function LeaseAgreements() {
         <Box display="flex" gap={2}>
           <Button variant="outlined" startIcon={<DownloadIcon />} onClick={exportToCSV} disabled={filteredAgreements.length === 0}>
             Export CSV
+          </Button>
+          <Button variant="outlined" component={Link} to="/import-rental-agreements" startIcon={<UploadIcon />}>
+            Import from TrackAbout
+          </Button>
+          <Button variant="outlined" component={Link} to="/send-yearly-lease-emails" startIcon={<EmailIcon />}>
+            Send yearly lease emails
           </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={handleAddAgreement}>
             New Agreement

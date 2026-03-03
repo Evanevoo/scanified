@@ -2,7 +2,7 @@ import logger from '../utils/logger';
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../supabase/client';
 import { useDebounce } from '../utils/performance';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, 
   Card, CardContent, Grid, Chip, IconButton, TextField, FormControl, InputLabel, Select, MenuItem,
@@ -808,6 +808,14 @@ function RentalsImproved() {
             disabled={filteredCustomers.length === 0 || exportingInvoices}
           >
             {exportingInvoices ? 'Exporting...' : 'Export QuickBooks Invoices'}
+          </Button>
+          <Button
+            variant="outlined"
+            component={Link}
+            to="/send-yearly-lease-emails"
+            startIcon={<EmailIcon />}
+          >
+            Send yearly lease emails
           </Button>
           <Button
             variant="contained"

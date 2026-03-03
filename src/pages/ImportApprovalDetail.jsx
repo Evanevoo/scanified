@@ -450,7 +450,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         importRecordStatus: importRecord?.status
       });
       
-      // Order number variants so we match all scans the list shows (string/number/zero-padded)
+      // Order number variants: include primary order AND record/row order numbers so we load all scans for this record (e.g. some under S47782, some under 71969)
       const trimOrderNum = (num) => (num == null || num === '') ? '' : String(num).trim();
       const orderNumTrimmed = trimOrderNum(orderNumber);
       const orderVariants = [orderNumTrimmed];
@@ -461,6 +461,16 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         if (padded !== orderNumTrimmed) orderVariants.push(padded);
         const asNum = parseInt(orderNumTrimmed, 10);
         if (!Number.isNaN(asNum)) orderVariants.push(String(asNum));
+      }
+      const recordOrder = trimOrderNum(getOrderNumber(data));
+      if (recordOrder && recordOrder !== 'N/A' && !orderVariants.includes(recordOrder)) orderVariants.push(recordOrder);
+      (data.rows || []).forEach((row) => {
+        const ro = trimOrderNum(row.order_number || row.invoice_number || row.reference_number || row.sales_receipt_number);
+        if (ro && ro !== 'N/A' && !orderVariants.includes(ro)) orderVariants.push(ro);
+      });
+      if (filterInvoiceNumber) {
+        const urlOrder = trimOrderNum(filterInvoiceNumber);
+        if (urlOrder && urlOrder !== 'N/A' && !orderVariants.includes(urlOrder)) orderVariants.push(urlOrder);
       }
       const uniqueOrderVariants = [...new Set(orderVariants)].filter(Boolean);
       
@@ -712,8 +722,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     return '';
   };
 
-  // Prefer record's saved order number (so after sales order change, UI and filters use it)
-  const effectiveOrderNumber = (importRecord && getOrderNumber(parseDataField(importRecord.data))) || filterInvoiceNumber;
+  // Prefer URL param (?order=71969) so "scan to 71969" works; else use record's saved order (e.g. S47782)
+  const effectiveOrderNumber = filterInvoiceNumber || (importRecord && getOrderNumber(parseDataField(importRecord.data)));
 
   // Helper function to get customer info from data
   const getCustomerInfo = (data) => {
@@ -1412,7 +1422,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             // Do NOT remove a ship when we have RNB: the scanned SHIP is real and should be assigned; RNB is just an exception record.
           }
 
-          logger.log('Verify: orderNum=', orderNum, 'orderVariants=', orderVariants, 'returnBarcodes=', returnBarcodesUnique, 'shipBarcodes=', shipBarcodesUnique);
+          // Only pass returns that are on this customer's balance to the RPC. RNB returns must not be unassigned for this order (we only create RNB records).
+          const rnbBarcodeSet = new Set((returnsNotOnBalance || []).map((r) => r.barcode));
+          const returnBarcodesOnBalance = returnBarcodesUnique.filter((bc) => !rnbBarcodeSet.has(bc));
+
+          logger.log('Verify: orderNum=', orderNum, 'orderVariants=', orderVariants, 'returnBarcodes=', returnBarcodesUnique, 'returnBarcodesOnBalance=', returnBarcodesOnBalance, 'shipBarcodes=', shipBarcodesUnique);
 
           let recordId = originalId;
           if (typeof originalId === 'string') {
@@ -1427,7 +1441,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               customerId,
               customerName,
               shipBarcodes: shipBarcodesUnique,
-              returnBarcodes: returnBarcodesUnique,
+              returnBarcodes: returnBarcodesOnBalance,
               importRecordId: (!isScannedOnly && recordId) ? recordId : null,
               importTable: 'imported_invoices',
               orderNumber: orderNum || null,
@@ -1471,7 +1485,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                   dns_description: 'Return not on balance',
                   dns_order_number: orderNum,
                   bottle_id: null,
-                  bottle_barcode: null,
+                  bottle_barcode: rnb.barcode || null,
                   rental_start_date: new Date().toISOString().split('T')[0],
                   rental_end_date: null,
                   rental_amount: 10,

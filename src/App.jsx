@@ -143,6 +143,8 @@ const ScannedOrders = lazy(() => import('./pages/ScannedOrders'));
 const SupabaseOrders = lazy(() => import('./pages/management-reports/SupabaseOrders'));
 const UserManagement = lazy(() => import('./pages/UserManagement'));
 const ImportAssetBalance = lazy(() => import('./pages/ImportAssetBalance'));
+const ImportRentalAgreements = lazy(() => import('./pages/ImportRentalAgreements'));
+const SendYearlyLeaseEmails = lazy(() => import('./pages/SendYearlyLeaseEmails'));
 const IntegrationsPage = lazy(() => import('./pages/Integrations'));
 const BottleManagement = lazy(() => import('./pages/BottleManagement'));
 const AssetDetail = lazy(() => import('./pages/AssetDetail'));
@@ -356,6 +358,8 @@ function AppContent() {
                     <Route path="/role-permission-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/unified-role-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/import-asset-balance" element={<ImportAssetBalance />} />
+                    <Route path="/import-rental-agreements" element={<ImportRentalAgreements />} />
+                    <Route path="/send-yearly-lease-emails" element={<SendYearlyLeaseEmails />} />
                     <Route path="/import-approvals" element={<ImportApprovals />} />
                     <Route path="/import-approval/:id/detail" element={<ImportApprovalDetail />} />
                     <Route path="/verified-orders" element={<VerifiedOrders />} />
