@@ -568,7 +568,7 @@ export default function About() {
           textAlign: 'center',
           p: 6,
           borderRadius: 4,
-          background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)'
+          backgroundColor: '#fafafa'
         }}>
           <Typography variant="h3" fontWeight={700} sx={{ mb: 3 }}>
             Ready to Join Our Journey?
