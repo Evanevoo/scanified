@@ -1,8 +1,8 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, memo } from 'react';
 import { supabase } from '../supabase/client';
 import { useDebounce } from '../utils/performance';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, 
   Card, CardContent, Grid, Chip, IconButton, TextField, FormControl, InputLabel, Select, MenuItem,
@@ -10,7 +10,6 @@ import {
   Tooltip, Badge, Collapse, FormControlLabel, Checkbox
 } from '@mui/material';
 import {
-  Business as BusinessIcon,
   Person as PersonIcon,
   Home as HomeIcon,
   Edit as EditIcon,
@@ -51,6 +50,8 @@ const getStatusDescription = (assignedCustomer, customerType) => {
 
 // RNB = Return not on balance – do not count or bill (exception only)
 const isRNB = (r) => r?.is_dns === true && (r?.dns_description || '').includes('Return not on balance');
+// RNS = Return not scanned – reduces customer total, not billable
+const isRNS = (r) => r?.is_dns === true && (r?.dns_description || '').includes('Return not scanned');
 
 // Enhanced status mapping with colors and descriptions
 const ASSET_STATUS = {
@@ -68,9 +69,213 @@ const ASSET_STATUS = {
   }
 };
 
+// Memoized table body so search input doesn't re-render the whole table on every keystroke
+const RentalsTableBody = memo(function RentalsTableBody({
+  currentCustomers,
+  expandedCustomers,
+  toggleExpanded,
+  navigate,
+  setInvoiceDialog,
+  setEditDialog,
+  isRNB,
+  isRNS,
+}) {
+  return (
+    <>
+      {currentCustomers.length === 0 ? (
+        <TableRow>
+          <TableCell colSpan={8} align="center">
+            <Typography variant="body1" color="text.secondary" py={4}>
+              No customers found matching your filters
+            </Typography>
+          </TableCell>
+        </TableRow>
+      ) : (
+        currentCustomers.map(({ customer, rentals }, index) => (
+          <React.Fragment key={customer.CustomerListID}>
+            <TableRow
+              hover
+              sx={{
+                borderBottom: index < currentCustomers.length - 1 ? '3px solid #e0e0e0' : 'none',
+                '&:hover': {
+                  bgcolor: '#fafafa'
+                }
+              }}
+            >
+              <TableCell sx={{ py: 2.5 }}>
+                <Typography variant="body2" fontWeight="bold">
+                  {customer.name}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  ({customer.CustomerListID})
+                </Typography>
+                {customer.customer_type === 'VENDOR' && (
+                  <Chip
+                    label="NO CHARGE"
+                    size="small"
+                    color="secondary"
+                    sx={{ ml: 1, fontSize: 10, height: 20 }}
+                  />
+                )}
+              </TableCell>
+              <TableCell sx={{ py: 2.5 }}>
+                <Chip
+                  label={customer.customer_type || 'CUSTOMER'}
+                  color={customer.customer_type === 'VENDOR' ? 'secondary' : 'primary'}
+                  size="small"
+                  variant="outlined"
+                />
+              </TableCell>
+              <TableCell sx={{ py: 2.5 }}>
+                <Typography variant="h6" fontWeight="bold" color="primary">
+                  {rentals.filter(r => !isRNB(r) && !isRNS(r)).length}
+                </Typography>
+              </TableCell>
+              <TableCell sx={{ py: 2.5 }}>
+                <Typography variant="body2">
+                  {(() => {
+                    const billableRentals = rentals.filter(r => !isRNB(r) && !isRNS(r));
+                    const monthly = billableRentals.filter(r => r.rental_type === 'monthly').length;
+                    const yearly = billableRentals.filter(r => r.rental_type === 'yearly').length;
+                    if (monthly > 0 && yearly > 0) {
+                      return `${monthly} monthly, ${yearly} yearly`;
+                    }
+                    return billableRentals[0]?.rental_type || 'monthly';
+                  })()}
+                </Typography>
+              </TableCell>
+              <TableCell sx={{ py: 2.5 }}>
+                <Typography variant="body2" fontWeight="bold">
+                  {(() => {
+                    const amounts = [...new Set(rentals.map(r => (parseFloat(r.rental_amount) || 10).toFixed(2)))];
+                    const formatted = amounts.map(a => `$${a}`);
+                    return formatted.length > 1 ? formatted.join(', ') : formatted[0] || '$10.00';
+                  })()}
+                </Typography>
+              </TableCell>
+              <TableCell sx={{ py: 2.5 }}>
+                <Typography variant="body2">
+                  {rentals[0]?.tax_code || 'GST+PST'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  ({(rentals[0]?.tax_rate || 0.11) * 100}% tax)
+                </Typography>
+              </TableCell>
+              <TableCell sx={{ py: 2.5 }}>
+                <Typography variant="body2">
+                  {rentals[0]?.location || 'SASKATOON'}
+                </Typography>
+              </TableCell>
+              <TableCell sx={{ py: 2.5 }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => navigate(`/customer/${customer.CustomerListID}`)}
+                  sx={{ mr: 1 }}
+                >
+                  View Details
+                </Button>
+                {rentals.length > 0 && customer.customer_type !== 'VENDOR' && (
+                  <Tooltip title="Generate & Email Invoice">
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      onClick={() => setInvoiceDialog({ open: true, customer, rentals: rentals.filter((r) => !isRNB(r) && !isRNS(r)) })}
+                      sx={{ mr: 1 }}
+                    >
+                      <InvoiceIcon />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                <Tooltip title="Edit Rentals">
+                  <IconButton
+                    size="small"
+                    onClick={() => setEditDialog({ open: true, customer, rentals })}
+                  >
+                    <EditIcon />
+                  </IconButton>
+                </Tooltip>
+              </TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell
+                colSpan={8}
+                sx={{
+                  p: 0,
+                  borderBottom: index < currentCustomers.length - 1 ? '3px solid #e0e0e0' : 'none'
+                }}
+              >
+                <Box>
+                  <Box
+                    onClick={() => toggleExpanded(customer.CustomerListID)}
+                    sx={{
+                      p: 1.5,
+                      bgcolor: '#f5f5f5',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      '&:hover': {
+                        bgcolor: '#eeeeee'
+                      }
+                    }}
+                  >
+                    {expandedCustomers.has(customer.CustomerListID) ? (
+                      <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                    ) : (
+                      <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                    )}
+                    <Typography variant="caption" color="text.secondary" fontWeight="medium">
+                      Individual Assets ({rentals.length})
+                    </Typography>
+                  </Box>
+                  <Collapse in={expandedCustomers.has(customer.CustomerListID)}>
+                    {expandedCustomers.has(customer.CustomerListID) ? (
+                      <Box sx={{ p: 1.5, bgcolor: '#fafafa' }}>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+                          {rentals.map((rental, idx) => {
+                            const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || rental.bottle_barcode;
+                            const displayLabel = barcode || (rental.is_dns ? `${rental.dns_product_code || 'DNS'} - ${rental.dns_description || 'Not Scanned'}` : `Asset ${idx + 1}`);
+                            const bottleId = rental.bottles?.id || rental.bottle_id;
+                            return (
+                              <Chip
+                                key={rental.id || idx}
+                                label={displayLabel}
+                                size="small"
+                                variant="outlined"
+                                onClick={() => {
+                                  if (bottleId) navigate(`/bottle/${bottleId}`);
+                                }}
+                                sx={{
+                                  fontSize: 11,
+                                  cursor: 'pointer',
+                                  '&:hover': {
+                                    bgcolor: 'primary.light',
+                                    color: 'primary.contrastText',
+                                    borderColor: 'primary.main'
+                                  }
+                                }}
+                              />
+                            );
+                          })}
+                        </Box>
+                      </Box>
+                    ) : null}
+                  </Collapse>
+                </Box>
+              </TableCell>
+            </TableRow>
+          </React.Fragment>
+        ))
+      )}
+    </>
+  );
+});
+
 function RentalsImproved() {
   const { profile, organization } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   // State management
   const [loading, setLoading] = useState(true);
@@ -83,12 +288,12 @@ function RentalsImproved() {
   const [updatingRentals, setUpdatingRentals] = useState(false);
   const [exportingInvoices, setExportingInvoices] = useState(false);
   const [error, setError] = useState(null);
-  const [filters, setFilters] = useState({
+  const [filters] = useState({
     status: 'all',
-    customer_type: 'all',
-    search: ''
+    customer_type: 'all'
   });
-  const debouncedSearch = useDebounce(filters.search, 300);
+  const [searchInput, setSearchInput] = useState('');
+  const debouncedSearch = useDebounce(searchInput, 300);
   const [locations, setLocations] = useState([]);
   const [expandedCustomers, setExpandedCustomers] = useState(() => new Set());
 
@@ -96,8 +301,7 @@ function RentalsImproved() {
   const [stats, setStats] = useState({
     inHouse: 0,
     withVendors: 0,
-    rented: 0,
-    totalRevenue: 0
+    rented: 0
   });
 
   const fetchRentals = useCallback(async () => {
@@ -522,18 +726,10 @@ function RentalsImproved() {
       // - Assigned bottles with status "available" or customer-owned
       const inHouseTotal = unassignedBottles + bottlesWithVendors + assignedBottlesAvailable;
       
-      // Calculate monthly revenue from billable rentals only (exclude RNB – return not on balance)
-      const totalRevenue = filteredRentals.filter((r) => !isRNB(r)).reduce((sum, rental) => {
-        const baseAmount = rental.rental_amount || 0;
-        const taxAmount = baseAmount * (rental.tax_rate || 0);
-        return sum + baseAmount + taxAmount;
-      }, 0);
-
       setStats({ 
         inHouse: inHouseTotal,  // Unassigned + vendor bottles + assigned with status "available"
         withVendors: bottlesWithVendors,  // Bottles assigned to vendors
-        rented: rentedBottles,  // Bottles assigned to customers with status "rented"
-        totalRevenue 
+        rented: rentedBottles   // Bottles assigned to customers with status "rented"
       });
 
     } catch (err) {
@@ -670,11 +866,11 @@ function RentalsImproved() {
       const invoiceDateStr = fmt(invoiceDate);
       const dueDateStr = fmt(dueDate);
 
-      // Split each customer's rentals into monthly and yearly (exclude RNB – return not on balance – from billing)
+      // Split each customer's rentals into monthly and yearly (exclude RNB and RNS from billing)
       const monthlyEntries = [];
       const yearlyEntries = [];
       customers.forEach(({ customer, rentals }) => {
-        const billable = rentals.filter((r) => !isRNB(r));
+        const billable = rentals.filter((r) => !isRNB(r) && !isRNS(r));
         const monthlyRentals = billable.filter((r) => (r.rental_type || 'monthly') === 'monthly');
         const yearlyRentals = billable.filter((r) => r.rental_type === 'yearly');
         if (monthlyRentals.length > 0) {
@@ -777,6 +973,19 @@ function RentalsImproved() {
     return filteredCustomers;
   }, [filteredCustomers, activeTab]);
 
+  // Open edit dialog when navigated from CustomerDetail "Edit rental rates (per asset)"
+  useEffect(() => {
+    if (loading || !location.state?.openEditForCustomerId) return;
+    const customerId = location.state.openEditForCustomerId;
+    const found = filteredCustomers.find(
+      ({ customer }) => (customer?.CustomerListID || customer?.customer_id) === customerId
+    );
+    if (found) {
+      setEditDialog({ open: true, customer: found.customer, rentals: found.rentals || [] });
+      navigate('/rentals', { replace: true, state: {} });
+    }
+  }, [loading, location.state?.openEditForCustomerId, filteredCustomers, navigate]);
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -786,13 +995,13 @@ function RentalsImproved() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: { xs: 1.5, sm: 2, md: 3 }, width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
       {/* Header */}
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 2, mb: 3 }}>
         <Typography variant="h4" fontWeight="bold">
           Asset Management & Rentals
         </Typography>
-        <Box display="flex" gap={2}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>
           <Button
             variant="contained"
             startIcon={<DownloadIcon />}
@@ -836,11 +1045,11 @@ function RentalsImproved() {
       </Box>
 
       {/* Statistics Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={6}>
+          <Card sx={{ height: '100%' }}>
             <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="between">
+              <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
                   <Typography variant="h4" fontWeight="bold" color="primary">
                     {stats.inHouse}
@@ -856,32 +1065,10 @@ function RentalsImproved() {
             </CardContent>
           </Card>
         </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
+        <Grid item xs={12} sm={6} md={6}>
+          <Card sx={{ height: '100%' }}>
             <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="between">
-                <Box>
-                  <Typography variant="h4" fontWeight="bold" color="secondary">
-                    {stats.withVendors}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    With Vendors
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    (No Charge)
-                  </Typography>
-                </Box>
-                <BusinessIcon sx={{ fontSize: 40, color: '#9c27b0' }} />
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="between">
+              <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
                   <Typography variant="h4" fontWeight="bold" color="success.main">
                     {stats.rented}
@@ -898,88 +1085,42 @@ function RentalsImproved() {
             </CardContent>
           </Card>
         </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="between">
-                <Box>
-                  <Typography variant="h4" fontWeight="bold" color="success.main">
-                    ${stats.totalRevenue.toFixed(2)}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Monthly Revenue
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    From Rentals
-                  </Typography>
-                </Box>
-                <MoneyIcon sx={{ fontSize: 40, color: '#4caf50' }} />
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-
       </Grid>
 
       {/* Filters */}
       <Card sx={{ mb: 4 }}>
-        <CardContent sx={{ pt: 3  }}>
+        <CardContent sx={{ pt: 3 }}>
           <Typography variant="h6" gutterBottom sx={{ mb: 2 }}>Filters</Typography>
           <Grid container spacing={2} alignItems="flex-end">
-            <Grid item xs={12} sm={6} md={8.2}>
-              <TextField  
+            <Grid item xs={12} sm={12} md={6} lg={5}>
+              <TextField
                 fullWidth
                 label="Search by barcode or customer"
-                value={filters.search}
-                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 size="small"
               />
-            </Grid>
-            <Grid item xs={12} sm={6} md={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Asset Status</InputLabel>
-                <Select
-                  value={filters.status}
-                  onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-                  label="Asset Status"
-                >
-                  <MenuItem value="all">All Statuses</MenuItem>
-                  <MenuItem value="IN-HOUSE">In-House</MenuItem>
-                  <MenuItem value="RENTED">Rented</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={6} md={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Account Type</InputLabel>
-                <Select
-                  value={filters.customer_type}
-                  onChange={(e) => setFilters({ ...filters, customer_type: e.target.value })}
-                  label="Account Type"
-                >
-                  <MenuItem value="all">All Types</MenuItem>
-                  <MenuItem value="CUSTOMER">Customers Only</MenuItem>
-                  <MenuItem value="VENDOR">Vendors Only</MenuItem>
-                </Select>
-              </FormControl>
             </Grid>
           </Grid>
         </CardContent>
       </Card>
 
       {/* Tabs */}
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-        <Tabs 
-          value={activeTab} 
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3, overflowX: 'auto' }}>
+        <Tabs
+          value={activeTab}
           onChange={handleTabChange}
+          variant="scrollable"
+          scrollButtons="auto"
+          allowScrollButtonsMobile
           sx={{
+            minHeight: 48,
             '& .MuiTab-root': {
               textTransform: 'none',
-              fontSize: '0.95rem',
+              fontSize: { xs: '0.85rem', sm: '0.95rem' },
               fontWeight: 500,
               minHeight: 48,
-              px: 3,
+              px: { xs: 1.5, sm: 2, md: 3 },
               py: 1.5,
               '&.Mui-selected': {
                 fontWeight: 600,
@@ -1015,8 +1156,8 @@ function RentalsImproved() {
       </Box>
 
       {/* Customer Rentals Table */}
-      <TableContainer component={Paper}>
-        <Table>
+      <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
+        <Table sx={{ minWidth: 640 }}>
           <TableHead>
             <TableRow>
               <TableCell><strong>Customer</strong></TableCell>
@@ -1030,193 +1171,16 @@ function RentalsImproved() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {currentCustomers.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} align="center">
-                  <Typography variant="body1" color="text.secondary" py={4}>
-                    No customers found matching your filters
-                  </Typography>
-                </TableCell>
-              </TableRow>
-            ) : (
-              currentCustomers.map(({ customer, rentals }, index) => (
-                <React.Fragment key={customer.CustomerListID}>
-                  <TableRow 
-                    hover
-                    sx={{ 
-                      borderBottom: index < currentCustomers.length - 1 ? '3px solid #e0e0e0' : 'none',
-                      '&:hover': {
-                        bgcolor: '#fafafa'
-                      }
-                    }}
-                  >
-                    <TableCell sx={{ py: 2.5 }}>
-                      <Typography variant="body2" fontWeight="bold">
-                        {customer.name}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        ({customer.CustomerListID})
-                      </Typography>
-                      {/* Show vendor/customer indicator */}
-                      {customer.customer_type === 'VENDOR' && (
-                        <Chip
-                          label="NO CHARGE"
-                          size="small"
-                          color="secondary"
-                          sx={{ ml: 1, fontSize: 10, height: 20 }}
-                        />
-                      )}
-                    </TableCell>
-                    <TableCell sx={{ py: 2.5 }}>
-                      <Chip
-                        label={customer.customer_type || 'CUSTOMER'}
-                        color={customer.customer_type === 'VENDOR' ? 'secondary' : 'primary'}
-                        size="small"
-                        variant="outlined"
-                      />
-                    </TableCell>
-                    <TableCell sx={{ py: 2.5 }}>
-                      <Typography variant="h6" fontWeight="bold" color="primary">
-                        {rentals.filter(r => !isRNB(r)).length}
-                      </Typography>
-                    </TableCell>
-                    <TableCell sx={{ py: 2.5 }}>
-                      <Typography variant="body2">
-                        {(() => {
-                          const monthly = rentals.filter(r => r.rental_type === 'monthly').length;
-                          const yearly = rentals.filter(r => r.rental_type === 'yearly').length;
-                          if (monthly > 0 && yearly > 0) {
-                            return `${monthly} monthly, ${yearly} yearly`;
-                          }
-                          return rentals[0]?.rental_type || 'monthly';
-                        })()}
-                      </Typography>
-                    </TableCell>
-                    <TableCell sx={{ py: 2.5 }}>
-                      <Typography variant="body2" fontWeight="bold">
-                        {(() => {
-                          const amounts = [...new Set(rentals.map(r => (parseFloat(r.rental_amount) || 10).toFixed(2)))];
-                          const formatted = amounts.map(a => `$${a}`);
-                          return formatted.length > 1 ? formatted.join(', ') : formatted[0] || '$10.00';
-                        })()}
-                      </Typography>
-                    </TableCell>
-                    <TableCell sx={{ py: 2.5 }}>
-                      <Typography variant="body2">
-                        {rentals[0]?.tax_code || 'GST+PST'}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        ({(rentals[0]?.tax_rate || 0.11) * 100}% tax)
-                      </Typography>
-                    </TableCell>
-                    <TableCell sx={{ py: 2.5 }}>
-                      <Typography variant="body2">
-                        {rentals[0]?.location || 'SASKATOON'}
-                      </Typography>
-                    </TableCell>
-                    <TableCell sx={{ py: 2.5 }}>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={() => navigate(`/customer/${customer.CustomerListID}`)}
-                        sx={{ mr: 1 }}
-                      >
-                        View Details
-                      </Button>
-                      {rentals.length > 0 && customer.customer_type !== 'VENDOR' && (
-                        <Tooltip title="Generate & Email Invoice">
-                          <IconButton
-                            size="small"
-                            color="primary"
-                            onClick={() => setInvoiceDialog({ open: true, customer, rentals: rentals.filter((r) => !isRNB(r)) })}
-                            sx={{ mr: 1 }}
-                          >
-                            <InvoiceIcon />
-                          </IconButton>
-                        </Tooltip>
-                      )}
-                      <Tooltip title="Edit Rentals">
-                        <IconButton
-                          size="small"
-                          onClick={() => setEditDialog({ open: true, customer, rentals })}
-                        >
-                          <EditIcon />
-                        </IconButton>
-                      </Tooltip>
-                    </TableCell>
-                  </TableRow>
-                  {/* Expandable section for individual rentals */}
-                  <TableRow>
-                    <TableCell 
-                      colSpan={8} 
-                      sx={{ 
-                        p: 0,
-                        borderBottom: index < currentCustomers.length - 1 ? '3px solid #e0e0e0' : 'none'
-                      }}
-                    >
-                      <Box>
-                        <Box
-                          onClick={() => toggleExpanded(customer.CustomerListID)}
-                          sx={{
-                            p: 1.5,
-                            bgcolor: '#f5f5f5',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 1,
-                            '&:hover': {
-                              bgcolor: '#eeeeee'
-                            }
-                          }}
-                        >
-                          {expandedCustomers.has(customer.CustomerListID) ? (
-                            <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                          ) : (
-                            <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                          )}
-                          <Typography variant="caption" color="text.secondary" fontWeight="medium">
-                            Individual Assets ({rentals.length})
-                          </Typography>
-                        </Box>
-                        <Collapse in={expandedCustomers.has(customer.CustomerListID)}>
-                          {expandedCustomers.has(customer.CustomerListID) ? (
-                            <Box sx={{ p: 1.5, bgcolor: '#fafafa' }}>
-                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-                                {rentals.map((rental, idx) => {
-                                  const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || rental.bottle_barcode;
-                                  const displayLabel = barcode || (rental.is_dns ? `${rental.dns_product_code || 'DNS'} - ${rental.dns_description || 'Not Scanned'}` : `Asset ${idx + 1}`);
-                                  const bottleId = rental.bottles?.id || rental.bottle_id;
-                                  return (
-                                    <Chip
-                                      key={rental.id || idx}
-                                      label={displayLabel}
-                                      size="small"
-                                      variant="outlined"
-                                      onClick={() => {
-                                        if (bottleId) navigate(`/bottle/${bottleId}`);
-                                      }}
-                                      sx={{
-                                        fontSize: 11,
-                                        cursor: 'pointer',
-                                        '&:hover': {
-                                          bgcolor: 'primary.light',
-                                          color: 'primary.contrastText',
-                                          borderColor: 'primary.main'
-                                        }
-                                      }}
-                                    />
-                                  );
-                                })}
-                              </Box>
-                            </Box>
-                          ) : null}
-                        </Collapse>
-                      </Box>
-                    </TableCell>
-                  </TableRow>
-                </React.Fragment>
-              ))
-            )}
+            <RentalsTableBody
+              currentCustomers={currentCustomers}
+              expandedCustomers={expandedCustomers}
+              toggleExpanded={toggleExpanded}
+              navigate={navigate}
+              setInvoiceDialog={setInvoiceDialog}
+              setEditDialog={setEditDialog}
+              isRNB={isRNB}
+              isRNS={isRNS}
+            />
           </TableBody>
         </Table>
       </TableContainer>
@@ -1236,19 +1200,33 @@ function RentalsImproved() {
                 {editDialog.customer.name} ({editDialog.customer.CustomerListID})
               </Typography>
               <Typography variant="body2" color="text.secondary" gutterBottom>
-                Each bottle has its own rental type. New/extra bottles default to monthly until switched to yearly.
+                Set rental type and rate per asset. You can use different amounts per bottle (e.g. $10 for one, $9 for another).
               </Typography>
 
               <Grid container spacing={2} sx={{ mt: 1 }}>
                 {editDialog.rentals?.map((rental) => {
                   const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || rental.bottle_barcode || rental.id;
+                  const displayLabel = barcode || (rental.is_dns ? `${rental.dns_product_code || 'DNS'} – ${rental.dns_description || 'Not Scanned'}` : 'Bottle');
                   const rentalType = rental.rental_type || 'monthly';
+                  const amountStr = rental.rental_amount != null && rental.rental_amount !== '' ? String(rental.rental_amount) : '10';
                   return (
                     <Grid item xs={12} key={rental.id}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                        <Typography variant="body2" sx={{ minWidth: 120 }}>
-                          {barcode || 'Bottle'}
+                        <Typography variant="body2" sx={{ minWidth: 100 }}>
+                          {displayLabel}
                         </Typography>
+                        <TextField
+                          size="small"
+                          label="Rate ($)"
+                          type="number"
+                          inputProps={{ min: 0, step: 0.01 }}
+                          sx={{ width: 100 }}
+                          value={amountStr}
+                          onChange={(e) => setEditDialog(prev => ({
+                            ...prev,
+                            rentals: prev.rentals.map(r => r.id === rental.id ? { ...r, rental_amount: e.target.value } : r)
+                          }))}
+                        />
                         <FormControl size="small" sx={{ minWidth: 140 }}>
                           <InputLabel>Rental Type</InputLabel>
                           <Select
@@ -1273,15 +1251,6 @@ function RentalsImproved() {
               </Grid>
 
               <Grid container spacing={3} sx={{ mt: 2 }}>
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    fullWidth
-                    label="Rental Rate ($) – shared"
-                    type="number"
-                    value={editDialog.rental_amount ?? editDialog.rentals?.[0]?.rental_amount ?? 10}
-                    onChange={(e) => setEditDialog(prev => ({ ...prev, rental_amount: e.target.value }))}
-                  />
-                </Grid>
                 <Grid item xs={12} sm={6}>
                   <FormControl fullWidth>
                     <InputLabel>Tax Code</InputLabel>
@@ -1337,7 +1306,6 @@ function RentalsImproved() {
                 setUpdatingRentals(true);
                 const customerId = editDialog.customer.CustomerListID;
                 const customerName = editDialog.customer.name;
-                const sharedAmount = editDialog.rental_amount ?? editDialog.rentals?.[0]?.rental_amount ?? 10;
                 const sharedTaxCode = editDialog.tax_code ?? editDialog.rentals?.[0]?.tax_code ?? 'GST+PST';
                 const sharedLocation = editDialog.location ?? editDialog.rentals?.[0]?.location ?? 'SASKATOON';
 
@@ -1349,9 +1317,10 @@ function RentalsImproved() {
                   const newType = rental.rental_type || 'monthly';
                   const bottleId = rental.bottle_id || rental.bottles?.id;
                   let leaseAgreementId = rental.lease_agreement_id || null;
+                  const rentalAmount = parseFloat(rental.rental_amount) || 10;
 
                   if (newType === 'yearly' && !leaseAgreementId && bottleId) {
-                    // Create a per-bottle yearly lease for this rental
+                    // Create a per-bottle yearly lease for this rental (use this asset's rate)
                     const [numberData] = await getNextAgreementNumbers(organization?.id, 1);
                     if (!numberData) {
                       alert('Error creating lease: Failed to generate agreement number');
@@ -1361,7 +1330,7 @@ function RentalsImproved() {
                     const startDate = new Date();
                     const endDate = new Date();
                     endDate.setFullYear(endDate.getFullYear() + 1);
-                    const annualAmount = Math.round(parseFloat(sharedAmount) * 12 * 100) / 100;
+                    const annualAmount = Math.round(rentalAmount * 12 * 100) / 100;
                     const nextBilling = new Date();
                     nextBilling.setFullYear(nextBilling.getFullYear() + 1);
                     const { data: newLease, error: insertLeaseError } = await supabase
@@ -1402,7 +1371,7 @@ function RentalsImproved() {
                     .update({
                       rental_type: newType,
                       lease_agreement_id: leaseAgreementId,
-                      rental_amount: sharedAmount,
+                      rental_amount: rentalAmount,
                       tax_code: sharedTaxCode,
                       location: sharedLocation,
                     })

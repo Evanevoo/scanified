@@ -65,6 +65,7 @@ export default function InvoiceTemplateManager({ open, onClose, onSave, currentT
     // Payment settings
     tax_rate: 0.11,
     payment_terms: 'CREDIT CARD',
+    payment_terms_options: ['CREDIT CARD', 'Net 15', 'Net 30', 'Net 60', 'Due on receipt'],
     invoice_footer: '',
     
     // Email settings
@@ -537,12 +538,30 @@ export default function InvoiceTemplateManager({ open, onClose, onSave, currentT
               />
             </Grid>
             <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <InputLabel>Default Payment Terms</InputLabel>
+                <Select
+                  label="Default Payment Terms"
+                  value={template.payment_terms || ''}
+                  onChange={(e) => setTemplate({ ...template, payment_terms: e.target.value })}
+                >
+                  {(template.payment_terms_options || ['CREDIT CARD', 'Net 15', 'Net 30', 'Net 60', 'Due on receipt']).map((term) => (
+                    <MenuItem key={term} value={term}>{term}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} md={6}>
               <TextField
                 fullWidth
-                label="Payment Terms"
-                value={template.payment_terms}
-                onChange={(e) => setTemplate({ ...template, payment_terms: e.target.value })}
-                placeholder="CREDIT CARD, Net 30, etc."
+                label="Payment term options (comma-separated)"
+                value={Array.isArray(template.payment_terms_options) ? template.payment_terms_options.join(', ') : ''}
+                onChange={(e) => {
+                  const opts = e.target.value.split(',').map((s) => s.trim()).filter(Boolean);
+                  setTemplate({ ...template, payment_terms_options: opts.length ? opts : ['CREDIT CARD', 'Net 15', 'Net 30', 'Net 60', 'Due on receipt'] });
+                }}
+                placeholder="CREDIT CARD, Net 15, Net 30, Net 60, Due on receipt"
+                helperText="Options shown in the invoice dropdown. Edit to add or reorder."
               />
             </Grid>
 

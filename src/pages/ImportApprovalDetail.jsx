@@ -1457,6 +1457,24 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             const skipped = d.skipped || 0;
             const errors = d.errors || [];
 
+            // Close any existing RNB for barcodes we just shipped (bottle back in circulation)
+            if (shipBarcodesUnique.length > 0 && organization?.id) {
+              const list = shipBarcodesUnique.filter((b) => b != null && String(b).trim() !== '');
+              if (list.length > 0) {
+                await supabase
+                  .from('rentals')
+                  .update({
+                    rental_end_date: new Date().toISOString().split('T')[0],
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('organization_id', organization.id)
+                  .eq('is_dns', true)
+                  .ilike('dns_description', '%Return not on balance%')
+                  .is('rental_end_date', null)
+                  .in('bottle_barcode', list);
+              }
+            }
+
             if (errors.length > 0 && totalAssigned === 0) {
               setActionMessage(`Warning: ${errors.join('; ')}`);
             } else {
@@ -1497,6 +1515,47 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 });
               }
               setActionMessage((m) => (m || '') + ` ${returnsNotOnBalance.length} return(s) not on customer balance (RNB – see customer page).`);
+            }
+
+            // RNS (Return Not Scanned): invoice has return qty but no return scan (invoices don't have barcodes) – create one RNS per missing return, same pattern as DNS
+            const totalInvoicedReturns = (importData.rows || importData.line_items || []).reduce(
+              (sum, row) => sum + parseInt(row.qty_in || row.QtyIn || row.returned || row.Returned || row.return_qty || row.ReturnQty || 0, 10),
+              0
+            );
+            const rnsCount = Math.max(0, totalInvoicedReturns - returnBarcodesUnique.length);
+            if (rnsCount > 0 && organization?.id) {
+              let resolvedCustomerIdForRns = customerId;
+              if (!resolvedCustomerIdForRns && customerName) {
+                const { data: cust } = await supabase.from('customers').select('CustomerListID').eq('name', customerName).eq('organization_id', organization.id).limit(1).maybeSingle();
+                if (cust?.CustomerListID) resolvedCustomerIdForRns = cust.CustomerListID;
+              }
+              if (!resolvedCustomerIdForRns) resolvedCustomerIdForRns = customerName;
+              const firstReturnRow = (importData.rows || importData.line_items || []).find(
+                (row) => parseInt(row.qty_in || row.QtyIn || row.returned || row.Returned || row.return_qty || row.ReturnQty || 0, 10) > 0
+              );
+              const rnsProductCode = (firstReturnRow?.product_code || firstReturnRow?.description || 'RNS').toString().trim() || 'RNS';
+              for (let i = 0; i < rnsCount; i++) {
+                await supabase.from('rentals').insert({
+                  organization_id: organization.id,
+                  customer_id: resolvedCustomerIdForRns,
+                  customer_name: customerName,
+                  is_dns: true,
+                  dns_product_code: rnsProductCode,
+                  dns_description: 'Return not scanned',
+                  dns_order_number: orderNum,
+                  bottle_id: null,
+                  bottle_barcode: null,
+                  rental_start_date: new Date().toISOString().split('T')[0],
+                  rental_end_date: null,
+                  rental_amount: 10,
+                  rental_type: 'monthly',
+                  tax_code: 'GST+PST',
+                  tax_rate: 0.11,
+                  location: 'SASKATOON',
+                  status: 'active',
+                });
+              }
+              setActionMessage((m) => (m || '') + ` ${rnsCount} return(s) not scanned (RNS – see customer page, reduces total).`);
             }
 
             // DNS (Delivered Not Scanned): create rental rows for invoiced ship qty that wasn't scanned (same as ImportApprovals)

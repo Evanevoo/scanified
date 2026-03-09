@@ -91,11 +91,18 @@ export default function CustomerDetail() {
   const [parentCustomer, setParentCustomer] = useState(null); // { id, name, CustomerListID } when this customer is under a parent
   const [childCustomers, setChildCustomers] = useState([]);   // customers where parent_customer_id = this customer's id
   const [parentOptions, setParentOptions] = useState([]);     // for edit form "Under parent" selector
+  const [resolvingRnbId, setResolvingRnbId] = useState(null); // rental id being resolved (RNB close)
+  const [resolvingRnsId, setResolvingRnsId] = useState(null); // rental id being resolved (RNS close)
+  const [markingRnsRentalId, setMarkingRnsRentalId] = useState(null); // rental id for "Mark return not scanned"
 
-  // Combine physical bottles with DNS (Delivered Not Scanned) and RNB (Return not on balance) so total count is visible
+  // Combine physical bottles with DNS (Delivered Not Scanned), RNB (Return not on balance), and RNS (Return not scanned)
   const dnsRentals = useMemo(() => (locationAssets || []).filter(r => r.is_dns), [locationAssets]);
   const rnbRentals = useMemo(() => dnsRentals.filter(r => (r.dns_description || '').includes('Return not on balance')), [dnsRentals]);
-  const dnsOnlyRentals = useMemo(() => dnsRentals.filter(r => !(r.dns_description || '').includes('Return not on balance')), [dnsRentals]);
+  const rnsRentals = useMemo(() => dnsRentals.filter(r => (r.dns_description || '').includes('Return not scanned')), [dnsRentals]);
+  const dnsOnlyRentals = useMemo(() => dnsRentals.filter(r => {
+    const desc = r.dns_description || '';
+    return !desc.includes('Return not on balance') && !desc.includes('Return not scanned');
+  }), [dnsRentals]);
   const dnsSummaryByType = useMemo(() => {
     const byType = {};
     (dnsOnlyRentals || []).forEach(r => {
@@ -112,23 +119,171 @@ export default function CustomerDetail() {
     });
     return byType;
   }, [rnbRentals]);
+  const rnsSummaryByType = useMemo(() => {
+    const byType = {};
+    (rnsRentals || []).forEach(r => {
+      const type = r.dns_product_code || r.product_code || 'RNS';
+      byType[type] = (byType[type] || 0) + 1;
+    });
+    return byType;
+  }, [rnsRentals]);
   const displayBottleList = useMemo(() => {
     const physical = (customerAssets || []).map(a => ({ ...a, isDns: false }));
-    const dnsRows = dnsRentals.map(r => ({
+    const dnsRows = [...dnsOnlyRentals, ...rnbRentals].map(r => ({
       id: 'dns-' + r.id,
       serial_number: '—',
-      barcode_number: (r.dns_description || '').includes('Return not on balance')
-        ? (r.bottle_barcode || 'RNB')
-        : (r.bottle_barcode || 'DNS'),
+      barcode_number: (r.dns_description || '').includes('Return not on balance') ? (r.bottle_barcode || 'RNB') : (r.bottle_barcode || 'DNS'),
       type: r.dns_product_code || r.product_code || '—',
       description: r.dns_description || '',
       location: '—',
       isDns: true
     }));
     return [...physical, ...dnsRows];
-  }, [customerAssets, dnsRentals]);
-  // Total = physical + DNS only. RNB (return not on balance) is an exception record — don't add and don't subtract.
-  const totalBottleCount = Math.max(0, (customerAssets?.length || 0) + dnsOnlyRentals.length);
+  }, [customerAssets, dnsOnlyRentals, rnbRentals]);
+  // Total = physical + DNS only, minus RNS (return not scanned). RNB is exception — not added.
+  const totalBottleCount = Math.max(0, (customerAssets?.length || 0) + dnsOnlyRentals.length - rnsRentals.length);
+
+  const resolveRnb = async (rental) => {
+    if (!rental?.id || !customer?.organization_id) return;
+    setResolvingRnbId(rental.id);
+    try {
+      const { error } = await supabase
+        .from('rentals')
+        .update({
+          rental_end_date: new Date().toISOString().split('T')[0],
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', rental.id);
+      if (error) throw error;
+      const { data: rentalById } = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_id', id)
+        .eq('organization_id', customer.organization_id)
+        .is('rental_end_date', null);
+      const { data: rentalByName } = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_name', customer.name)
+        .eq('organization_id', customer.organization_id)
+        .is('rental_end_date', null)
+        .eq('is_dns', true);
+      const seen = new Set((rentalById || []).map((r) => r.id));
+      const merged = [...(rentalById || [])];
+      (rentalByName || []).forEach((r) => { if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); } });
+      setLocationAssets(merged);
+      setTransferMessage({ open: true, message: 'RNB resolved. It will no longer show on this customer.', severity: 'success' });
+    } catch (e) {
+      logger.error('Resolve RNB error:', e);
+      setTransferMessage({ open: true, message: e?.message || 'Failed to resolve RNB', severity: 'error' });
+    } finally {
+      setResolvingRnbId(null);
+    }
+  };
+
+  const resolveRns = async (rental) => {
+    if (!rental?.id || !customer?.organization_id) return;
+    setResolvingRnsId(rental.id);
+    try {
+      const { error } = await supabase
+        .from('rentals')
+        .update({
+          rental_end_date: new Date().toISOString().split('T')[0],
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', rental.id);
+      if (error) throw error;
+      const { data: rentalById } = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_id', id)
+        .eq('organization_id', customer.organization_id)
+        .is('rental_end_date', null);
+      const { data: rentalByName } = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_name', customer.name)
+        .eq('organization_id', customer.organization_id)
+        .is('rental_end_date', null)
+        .eq('is_dns', true);
+      const seen = new Set((rentalById || []).map((r) => r.id));
+      const merged = [...(rentalById || [])];
+      (rentalByName || []).forEach((r) => { if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); } });
+      setLocationAssets(merged);
+      setTransferMessage({ open: true, message: 'RNS resolved. It will no longer reduce this customer\'s total.', severity: 'success' });
+    } catch (e) {
+      logger.error('Resolve RNS error:', e);
+      setTransferMessage({ open: true, message: e?.message || 'Failed to resolve RNS', severity: 'error' });
+    } finally {
+      setResolvingRnsId(null);
+    }
+  };
+
+  const handleMarkReturnNotScanned = async (rental) => {
+    const bottle = !rental.is_dns && (customerAssets || []).find(
+      (b) => b.id === rental.bottle_id || (b.barcode_number || b.barcode) === rental.bottle_barcode
+    );
+    if (!bottle?.id || !customer?.organization_id) {
+      setTransferMessage({ open: true, message: 'Bottle not found for this rental.', severity: 'error' });
+      return;
+    }
+    setMarkingRnsRentalId(rental.id);
+    try {
+      const orgId = organization?.id || customer?.organization_id;
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: result, error: rpcError } = await supabase.rpc('return_bottles_to_warehouse', {
+        p_bottle_ids: [bottle.id],
+        p_organization_id: orgId,
+        p_user_id: user?.id || null,
+      });
+      if (rpcError) throw rpcError;
+      await supabase.from('bottle_scans').insert({
+        organization_id: orgId,
+        bottle_barcode: bottle.barcode_number || bottle.barcode,
+        mode: 'RETURN',
+        order_number: 'RNS',
+        customer_id: customer?.CustomerListID || null,
+        customer_name: customer?.name || null,
+        timestamp: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      });
+      const { data: customerAssetsData } = await supabase
+        .from('bottles')
+        .select('*')
+        .eq('assigned_customer', id)
+        .eq('organization_id', orgId);
+      setCustomerAssets(customerAssetsData || []);
+      const summary = {};
+      (customerAssetsData || []).forEach((b) => {
+        const type = b.type || b.description || 'Unknown';
+        summary[type] = (summary[type] || 0) + 1;
+      });
+      setBottleSummary(summary);
+      const { data: rentalById } = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_id', id)
+        .eq('organization_id', orgId)
+        .is('rental_end_date', null);
+      const { data: rentalByName } = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_name', customer.name)
+        .eq('organization_id', orgId)
+        .is('rental_end_date', null)
+        .eq('is_dns', true);
+      const seen = new Set((rentalById || []).map((r) => r.id));
+      const merged = [...(rentalById || [])];
+      (rentalByName || []).forEach((r) => { if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); } });
+      setLocationAssets(merged);
+      setTransferMessage({ open: true, message: 'Bottle marked as returned (not scanned). It will no longer show at this customer.', severity: 'success' });
+    } catch (e) {
+      logger.error('Mark return not scanned error:', e);
+      setTransferMessage({ open: true, message: e?.message || 'Failed to mark return not scanned', severity: 'error' });
+    } finally {
+      setMarkingRnsRentalId(null);
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -1115,8 +1270,23 @@ export default function CustomerDetail() {
                   label={`${type} RNB (${count})`}
                   color="error"
                   variant="outlined"
-                  sx={{ 
-                    fontWeight: 600, 
+                  sx={{
+                    fontWeight: 600,
+                    fontSize: '1rem',
+                    px: 2,
+                    py: 1,
+                    borderRadius: 2
+                  }}
+                />
+              ))}
+              {Object.entries(rnsSummaryByType).map(([type, count]) => (
+                <Chip
+                  key={`rns-${type}`}
+                  label={`${type} RNS (${count})`}
+                  color="default"
+                  variant="outlined"
+                  sx={{
+                    fontWeight: 600,
                     fontSize: '1rem',
                     px: 2,
                     py: 1,
@@ -1126,7 +1296,7 @@ export default function CustomerDetail() {
               ))}
             </Box>
             <Typography variant="body2" color="text.secondary" mt={2}>
-              Total bottles: {totalBottleCount} ({customerAssets.length} physical{dnsOnlyRentals.length > 0 ? ` + ${dnsOnlyRentals.length} DNS` : ''}{rnbRentals.length > 0 ? `, ${rnbRentals.length} RNB not counted` : ''})
+              Total bottles: {totalBottleCount} ({customerAssets.length} physical{dnsOnlyRentals.length > 0 ? ` + ${dnsOnlyRentals.length} DNS` : ''}{rnbRentals.length > 0 ? `, ${rnbRentals.length} RNB not counted` : ''}{rnsRentals.length > 0 ? ` − ${rnsRentals.length} RNS` : ''})
             </Typography>
           </Box>
         )}
@@ -1139,12 +1309,13 @@ export default function CustomerDetail() {
             <Typography variant="h5" fontWeight={700} color="primary">
               🏠 Currently Assigned Bottles ({totalBottleCount})
             </Typography>
-            {(dnsOnlyRentals.length > 0 || rnbRentals.length > 0) && (
+            {(dnsOnlyRentals.length > 0 || rnbRentals.length > 0 || rnsRentals.length > 0) && (
               <Typography variant="body2" color="text.secondary">
                 {customerAssets.length} physical
                 {dnsOnlyRentals.length > 0 ? ` + ${dnsOnlyRentals.length} DNS` : ''}
                 {rnbRentals.length > 0 ? ` (${rnbRentals.length} RNB return not on balance — not counted)` : ''}
-                {totalBottleCount !== customerAssets.length && dnsOnlyRentals.length > 0 && ` = ${totalBottleCount} total`}
+                {rnsRentals.length > 0 ? ` − ${rnsRentals.length} RNS` : ''}
+                {totalBottleCount !== customerAssets.length && (dnsOnlyRentals.length > 0 || rnsRentals.length > 0) && ` = ${totalBottleCount} total`}
               </Typography>
             )}
             {totalBottleCount === 0 && (
@@ -1344,10 +1515,23 @@ export default function CustomerDetail() {
 
       {/* Rental History */}
       <Paper elevation={3} sx={{ p: 4, borderRadius: 4 }}>
-        <Typography variant="h5" fontWeight={700} color="primary" mb={3}>
-          📋 Rental History ({locationAssets.length}{rnbRentals.length > 0 ? ` — ${totalBottleCount} billable` : ''})
-        </Typography>
-        
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2, mb: 3 }}>
+          <Typography variant="h5" fontWeight={700} color="primary">
+            📋 Rental History ({locationAssets.length}{rnbRentals.length > 0 ? ` — ${totalBottleCount} billable` : ''})
+          </Typography>
+          {locationAssets.length > 0 && (
+            <Button
+              component={Link}
+              to="/rentals"
+              state={id ? { openEditForCustomerId: id } : undefined}
+              variant="outlined"
+              size="small"
+            >
+              Edit rental rates (per asset)
+            </Button>
+          )}
+        </Box>
+
         {locationAssets.length === 0 ? (
           <Typography color="text.secondary">No rental history found for this customer.</Typography>
         ) : (
@@ -1369,12 +1553,13 @@ export default function CustomerDetail() {
                 {locationAssets.map((rental) => {
                   const isDNS = rental.is_dns === true;
                   const isRNB = isDNS && (rental.dns_description || '').includes('Return not on balance');
+                  const isRNS = isDNS && (rental.dns_description || '').includes('Return not scanned');
                   const bottle = !isDNS && (customerAssets || []).find(
                     (b) => b.id === rental.bottle_id || (b.barcode_number || b.barcode) === rental.bottle_barcode
                   );
                   const typeProduct = bottle ? (bottle.type || bottle.description || bottle.product_code) : (rental.cylinder?.type || 'Unknown');
                   return (
-                    <TableRow key={rental.id} hover sx={{ bgcolor: isRNB ? '#ffebee' : isDNS ? '#fff3cd' : 'inherit' }}>
+                    <TableRow key={rental.id} hover sx={{ bgcolor: isRNB ? '#ffebee' : isRNS ? '#f5f5f5' : isDNS ? '#fff3cd' : 'inherit' }}>
                       <TableCell>
                         {isRNB ? (
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -1383,6 +1568,8 @@ export default function CustomerDetail() {
                             </Typography>
                             <Chip label="RNB" color="error" size="small" sx={{ fontWeight: 'bold' }} />
                           </Box>
+                        ) : isRNS ? (
+                          <Chip label="RNS" color="default" size="small" sx={{ fontWeight: 'bold' }} />
                         ) : isDNS ? (
                           <Chip 
                             label="DNS" 
@@ -1416,7 +1603,7 @@ export default function CustomerDetail() {
                           variant="outlined"
                         />
                       </TableCell>
-                      <TableCell>${rental.rental_amount || 0}</TableCell>
+                      <TableCell>${(rental.rental_amount != null && rental.rental_amount !== '') ? Number(rental.rental_amount).toFixed(2) : '0.00'}</TableCell>
                       <TableCell>
                         <Chip 
                           label={rental.location || 'Unknown'} 
@@ -1428,12 +1615,60 @@ export default function CustomerDetail() {
                       <TableCell>{rental.rental_start_date || '-'}</TableCell>
                       <TableCell>
                         <Chip 
-                          label={isRNB ? 'RNB (Return not on balance)' : isDNS ? 'DNS (Not Scanned)' : (rental.status || 'Active')} 
-                          color={isRNB ? 'error' : isDNS ? 'warning' : (rental.status === 'at_home' ? 'warning' : 'success')}
+                          label={isRNB ? 'RNB (Return not on balance)' : isRNS ? 'RNS (Return not scanned)' : isDNS ? 'DNS (Not Scanned)' : (rental.status || 'Active')} 
+                          color={isRNB ? 'error' : isRNS ? 'default' : isDNS ? 'warning' : (rental.status === 'at_home' ? 'warning' : 'success')}
                           size="small"
                         />
                       </TableCell>
                       <TableCell>
+                        {isRNB && (
+                          <Tooltip title="Close this RNB so it no longer shows on the customer list">
+                            <span>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="secondary"
+                                disabled={resolvingRnbId === rental.id}
+                                onClick={() => resolveRnb(rental)}
+                                startIcon={resolvingRnbId === rental.id ? <CircularProgress size={14} /> : null}
+                              >
+                                {resolvingRnbId === rental.id ? 'Resolving…' : 'Resolve'}
+                              </Button>
+                            </span>
+                          </Tooltip>
+                        )}
+                        {isRNS && (
+                          <Tooltip title="Close this RNS so it no longer reduces the customer total">
+                            <span>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="inherit"
+                                disabled={resolvingRnsId === rental.id}
+                                onClick={() => resolveRns(rental)}
+                                startIcon={resolvingRnsId === rental.id ? <CircularProgress size={14} /> : null}
+                              >
+                                {resolvingRnsId === rental.id ? 'Resolving…' : 'Resolve'}
+                              </Button>
+                            </span>
+                          </Tooltip>
+                        )}
+                        {!isDNS && !isRNS && bottle && (
+                          <Tooltip title="Bottle was returned but return was not scanned. Mark it returned so it no longer shows at this customer.">
+                            <span>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="inherit"
+                                disabled={markingRnsRentalId === rental.id}
+                                onClick={() => handleMarkReturnNotScanned(rental)}
+                                startIcon={markingRnsRentalId === rental.id ? <CircularProgress size={14} /> : null}
+                              >
+                                {markingRnsRentalId === rental.id ? 'Marking…' : 'Mark return not scanned'}
+                              </Button>
+                            </span>
+                          </Tooltip>
+                        )}
                         {isDNS && !isRNB && (
                           <DNSConversionDialog
                             dnsRental={rental}

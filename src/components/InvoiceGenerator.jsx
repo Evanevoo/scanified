@@ -25,6 +25,7 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
   const [showPreview, setShowPreview] = useState(false);
   const [formData, setFormData] = useState({
     invoice_date: new Date().toISOString().split('T')[0],
+    invoice_number: '', // Editable; leave blank for auto-generated sequential number
     period_start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
     period_end: new Date().toISOString().split('T')[0],
     send_email: true,
@@ -32,7 +33,9 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
     sender_email: '', // Selected sender email
     custom_message: '',
     territory: '',
-    purchase_order: ''
+    purchase_order: '',
+    payment_terms: '', // e.g. CREDIT CARD, Net 30; leave blank to use template default
+    due_date: '' // leave blank for invoice date + 30 days
   });
   const [invoiceEmails, setInvoiceEmails] = useState([]);
   const [error, setError] = useState('');
@@ -46,10 +49,14 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
       try {
         const savedTemplate = localStorage.getItem(`invoiceTemplate_${organization.id}`);
         if (savedTemplate) {
-          setInvoiceTemplate(JSON.parse(savedTemplate));
+          const parsed = JSON.parse(savedTemplate);
+          setInvoiceTemplate(parsed);
+          if (customer) {
+            setFormData(prev => ({ ...prev, payment_terms: parsed.payment_terms ?? prev.payment_terms ?? '' }));
+          }
         } else {
           // Default template
-          setInvoiceTemplate({
+          const defaultTemplate = {
             primary_color: '#000000',
             secondary_color: '#666666',
             show_bill_to: true,
@@ -65,10 +72,15 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
             show_transactions: true,
             tax_rate: 0.11,
             payment_terms: 'CREDIT CARD',
+            payment_terms_options: ['CREDIT CARD', 'Net 15', 'Net 30', 'Net 60', 'Due on receipt'],
             invoice_footer: '',
             email_subject: `Your Invoice from ${organization.name}`,
             email_body: 'Please find your invoice attached.'
-          });
+          };
+          setInvoiceTemplate(defaultTemplate);
+          if (customer) {
+            setFormData(prev => ({ ...prev, payment_terms: defaultTemplate.payment_terms ?? prev.payment_terms ?? '' }));
+          }
         }
       } catch (error) {
         logger.error('Error loading invoice template:', error);
@@ -127,11 +139,12 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
 
       loadInvoiceEmails();
 
-      // Pre-populate customer email and address
+      // Pre-populate customer email and invoice number (if passed in); payment_terms set from template above
       if (customer) {
         setFormData(prev => ({
           ...prev,
-          email: customer.email || prev.email
+          email: customer.email || prev.email,
+          invoice_number: (existingInvoiceNumber != null && existingInvoiceNumber !== '') ? String(existingInvoiceNumber) : ''
         }));
       }
 
@@ -269,8 +282,21 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
     }
   }, [customerLeaseAgreement, open]);
 
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
+  // Parse YYYY-MM-DD as local date (avoid UTC midnight shifting to previous day in western timezones)
+  const parseLocalDate = (dateStr) => {
+    if (!dateStr) return null;
+    const str = typeof dateStr === 'string' ? dateStr : (dateStr instanceof Date ? dateStr.toISOString().split('T')[0] : '');
+    const parts = str.split('-').map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) return null;
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  };
+
+  const formatDate = (dateInput) => {
+    if (!dateInput) return '';
+    const date = typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)
+      ? parseLocalDate(dateInput)
+      : (dateInput instanceof Date ? dateInput : new Date(dateInput));
+    if (!date || isNaN(date.getTime())) return '';
     return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
   };
 
@@ -291,8 +317,8 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
     // Use customerLeaseAgreement from state if available
     // This ensures we have the latest lease agreement data
 
-    const startDate = new Date(formData.period_start);
-    const endDate = new Date(formData.period_end);
+    const startDate = parseLocalDate(formData.period_start) || new Date(formData.period_start);
+    const endDate = parseLocalDate(formData.period_end) || new Date(formData.period_end);
     
     // Calculate number of days in billing period (for display purposes only - not used in calculation)
     const rentalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
@@ -468,18 +494,9 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
     // Calculate billing period for display
     let displayBillingPeriodStart, displayBillingPeriodEnd;
     if (!isYearlyRental) {
-      // For monthly rentals, use the upcoming month
-      const invoiceDate = new Date(formData.invoice_date);
-      let billingStartYear = invoiceDate.getFullYear();
-      let billingStartMonth = invoiceDate.getMonth() + 1; // Month after invoice date
-      
-      if (billingStartMonth > 11) {
-        billingStartMonth = 0;
-        billingStartYear += 1;
-      }
-      
-      displayBillingPeriodStart = new Date(billingStartYear, billingStartMonth, 1);
-      displayBillingPeriodEnd = new Date(billingStartYear, billingStartMonth + 1, 0);
+      // For monthly rentals, use the period the user selected (Period Start / Period End)
+      displayBillingPeriodStart = startDate;
+      displayBillingPeriodEnd = endDate;
     } else {
       // For yearly rentals, calculate the actual billing period based on months being charged
       const invoiceDate = new Date(formData.invoice_date);
@@ -559,7 +576,7 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
         
         return {
           ...rental,
-          monthlyRate: monthlyRate,
+          monthlyRate: rateForLine, // Per-asset rate (rental_amount); used for line display and PDF
           lineTotal: lineTotal,
           daysHeld: daysHeld, // Actual days they've had the bottle (for RENT DAYS display)
           product_code: rental.product_code || rental.bottles?.product_code || rental.bottle?.product_code || rental.product_type || rental.bottles?.product_type || rental.bottle?.product_type
@@ -582,8 +599,9 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
       }
 
       const doc = new jsPDF();
-      // Use provided invoice number, existing invoice number, or generate a preview one
-      const invoiceNumber = invoiceNumberOverride || existingInvoiceNumber || `W${String(Date.now()).slice(-6)}`;
+      // Use: explicit override (from Download/Email) > form field > existingInvoiceNumber prop > preview fallback
+      const formNumber = (formData.invoice_number || '').trim();
+      const invoiceNumber = invoiceNumberOverride || (formNumber || existingInvoiceNumber) || `W${String(Date.now()).slice(-6)}`;
 
       // Calculate total with hazmat fee if applicable
       const hazmatFee = invoiceTemplate.hazmat_fee || 0;
@@ -763,13 +781,20 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
         periodValues.push(formData.territory || '');
       }
       
-      // Add TERMS
+      // Add TERMS (form override or template default)
       periodHeaders.push('TERMS');
-      periodValues.push(invoiceTemplate.payment_terms);
+      periodValues.push((formData.payment_terms || '').trim() || invoiceTemplate.payment_terms || '');
       
-      // Add DUE DATE
+      // Add DUE DATE (form override or invoice date + 30 days, using local dates to avoid timezone shift)
       periodHeaders.push('DUE DATE');
-      periodValues.push(formatDate(new Date(new Date(formData.invoice_date).getTime() + 30 * 24 * 60 * 60 * 1000)));
+      const dueDateForPdf = (formData.due_date || '').trim()
+        ? parseLocalDate(formData.due_date)
+        : (() => {
+            const invLocal = parseLocalDate(formData.invoice_date);
+            if (!invLocal) return null;
+            return new Date(invLocal.getFullYear(), invLocal.getMonth(), invLocal.getDate() + 30);
+          })();
+      periodValues.push(dueDateForPdf ? formatDate(dueDateForPdf) : formatDate(formData.invoice_date));
       
       // Add PURCHASE ORDER if enabled
       if (invoiceTemplate.show_purchase_order) {
@@ -863,7 +888,7 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
             ship: 0,
             return: 0,
             endCount: 0,
-            rate: invoiceData.monthlyRate,
+            rate: rental.monthlyRate, // Per-asset rate (first in group); total is sum of lineTotals
             total: 0,
             maxDaysHeld: 0 // Track the maximum days held for this product group
           };
@@ -1059,9 +1084,13 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
       setError('');
       setSuccess('');
 
-      // Generate sequential invoice number (same logic as handleEmailInvoice)
+      const customInvoiceNumber = (formData.invoice_number || '').trim();
+
+      // Use editable invoice number if provided; otherwise generate sequential
       let invoiceNumber;
-      try {
+      if (customInvoiceNumber) {
+        invoiceNumber = customInvoiceNumber;
+      } else try {
         // Get invoice settings for this organization
         let { data: invoiceSettings, error: settingsError } = await supabase
           .from('invoice_settings')
@@ -1225,10 +1254,14 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
       setSuccess('');
 
       const invoiceData = calculateInvoiceData();
-      
-      // Generate invoice number using invoice_settings - always sequential
+
+      const customInvoiceNumber = (formData.invoice_number || '').trim();
+
+      // Use editable invoice number if provided; otherwise generate sequential
       let invoiceNumber;
-      try {
+      if (customInvoiceNumber) {
+        invoiceNumber = customInvoiceNumber;
+      } else try {
         // Get invoice settings for this organization
         let { data: invoiceSettings, error: settingsError } = await supabase
           .from('invoice_settings')
@@ -1474,6 +1507,19 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
 
       // Store the invoice number for use in email and success messages
       const savedInvoiceNumber = invoiceNumber;
+
+      // If user entered a custom invoice number, keep next_invoice_number ahead of it to avoid reuse
+      if (customInvoiceNumber) {
+        const match = String(invoiceNumber).match(/\d+$/);
+        if (match) {
+          const num = parseInt(match[0], 10);
+          const { data: settings } = await supabase.from('invoice_settings').select('next_invoice_number').eq('organization_id', organization.id).single();
+          const currentNext = settings?.next_invoice_number ?? 0;
+          if (num >= currentNext) {
+            await supabase.from('invoice_settings').update({ next_invoice_number: num + 1 }).eq('organization_id', organization.id);
+          }
+        }
+      }
 
       // Save line items
       const lineItems = invoiceData.rentals.map((rental, index) => ({
@@ -1857,6 +1903,17 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
                 InputLabelProps={{ shrink: true }}
               />
             </Grid>
+
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Invoice Number"
+                placeholder="Leave blank for auto-generated number"
+                value={formData.invoice_number || ''}
+                onChange={(e) => setFormData({ ...formData, invoice_number: e.target.value })}
+                inputProps={{ maxLength: 32 }}
+              />
+            </Grid>
             
             <Grid item xs={12} sm={6}>
               <TextField
@@ -1898,6 +1955,45 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
                   label="Purchase Order"
                   value={formData.purchase_order}
                   onChange={(e) => setFormData({ ...formData, purchase_order: e.target.value })}
+                />
+              </Grid>
+            )}
+
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Payment Terms</InputLabel>
+                <Select
+                  label="Payment Terms"
+                  value={formData.payment_terms || ''}
+                  onChange={(e) => setFormData({ ...formData, payment_terms: e.target.value })}
+                >
+                  {(() => {
+                    const defaultOptions = ['CREDIT CARD', 'Net 15', 'Net 30', 'Net 60', 'Due on receipt'];
+                    const options = invoiceTemplate?.payment_terms_options?.length
+                      ? invoiceTemplate.payment_terms_options
+                      : defaultOptions;
+                    const current = (formData.payment_terms || '').trim();
+                    const optionsWithCurrent = current && !options.includes(current)
+                      ? [current, ...options]
+                      : options;
+                    return optionsWithCurrent.map((term) => (
+                      <MenuItem key={term} value={term}>{term}</MenuItem>
+                    ));
+                  })()}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {invoiceTemplate?.show_due_date !== false && (
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Due Date"
+                  type="date"
+                  value={formData.due_date || ''}
+                  onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                  helperText="Leave blank for invoice date + 30 days"
                 />
               </Grid>
             )}
@@ -2034,6 +2130,7 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
       currentTemplate={invoiceTemplate}
       onSave={(newTemplate) => {
         setInvoiceTemplate(newTemplate);
+        setFormData(prev => ({ ...prev, payment_terms: newTemplate.payment_terms ?? prev.payment_terms }));
         setSuccess('Template updated! Changes will be applied to this invoice.');
       }}
     />

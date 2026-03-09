@@ -377,19 +377,20 @@ export default function AssetDetail() {
 
         if (!rentalsError && rentalsData) {
           rentalsData.forEach(rental => {
-            // Add rental start (shipment)
+            const isRNB = rental.is_dns === true && (rental.dns_description || '').includes('Return not on balance');
+            // Add rental start (shipment) — RNB is not a delivery, show as RNB
             if (rental.rental_start_date) {
               allHistory.push({
                 id: `rental_start_${rental.id}`,
-                history_type: 'rental_start',
+                history_type: isRNB ? 'rental_rnb' : 'rental_start',
                 barcode_number: rental.bottle_barcode || barcodeNumber,
                 customer_id: rental.customer_id,
                 customer_name: rental.customer_name,
                 location: rental.location,
                 created_at: rental.rental_start_date,
-                action: 'SHIP',
-                mode: 'SHIP',
-                order_number: rental.order_number || null
+                action: isRNB ? 'RNB' : 'SHIP',
+                mode: isRNB ? 'RNB' : 'SHIP',
+                order_number: rental.dns_order_number || rental.order_number || null
               });
             }
             // Add rental end (return)
@@ -927,7 +928,9 @@ export default function AssetDetail() {
                   // Determine action type based on mode/action
                   let action = '';
                   const recordMode = record.mode;
-                  if (recordMode === 'SHIP' || record.action === 'SHIP' || record.history_type === 'rental_start') {
+                  if (recordMode === 'RNB' || record.action === 'RNB' || record.history_type === 'rental_rnb') {
+                    action = 'RNB (Return not on balance)';
+                  } else if (recordMode === 'SHIP' || record.action === 'SHIP' || record.history_type === 'rental_start') {
                     action = 'Delivery';
                   } else if (recordMode === 'RETURN' || record.action === 'RETURN' || record.history_type === 'rental_end') {
                     action = 'Return';
