@@ -63,7 +63,7 @@ export default function SendYearlyLeaseEmails() {
           .in('billing_frequency', ['annual', 'yearly', 'annually']),
         supabase
           .from('customers')
-          .select('id, name, CustomerListID, email, address, city, province, postal_code, contact_details')
+          .select('id, name, CustomerListID, email')
           .eq('organization_id', organization.id)
           .order('name'),
       ]);

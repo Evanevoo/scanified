@@ -676,6 +676,7 @@ export default function ImportApprovals() {
   const scannerRef = useRef(null);
   const scanTimeRef = useRef(null);
   const prevPathnameRef = useRef(location.pathname);
+  const silentRefetchRef = useRef(false);
 
   // Define handleSelectAll early to avoid initialization errors
   const handleSelectAll = () => {
@@ -712,11 +713,13 @@ export default function ImportApprovals() {
   // Initialize component with optimized loading
   useEffect(() => {
     const initializeData = async () => {
-      setLoading(true);
+      const isSilentRefetch = silentRefetchRef.current;
+      if (isSilentRefetch) silentRefetchRef.current = false;
+      if (!isSilentRefetch) setLoading(true);
       try {
         // Load critical data first (allScannedRows must be ready before cards render so Trk counts are correct)
         await Promise.all([
-          fetchData(),
+          fetchData(isSilentRefetch),
           fetchCustomers(),
           fetchScannedCounts(),
           fetchCylinders(),  // Load product code to group mapping
@@ -743,11 +746,10 @@ export default function ImportApprovals() {
     initializeData();
   }, [organization?.id, refetchTrigger]); // Re-fetch when organization or refetchTrigger changes
 
-  // When returning from detail (e.g. after unverify or sales order change), clear list and refetch
+  // When returning from detail (e.g. after verify/unverify or sales order change), refetch in background without clearing list or showing loading
   useEffect(() => {
     if (location.pathname === '/import-approvals' && location.state?.refetch) {
-      setPendingInvoices([]);
-      setLoading(true);
+      silentRefetchRef.current = true;
       setRefetchTrigger(prev => prev + 1);
       navigate(location.pathname, { replace: true, state: {} });
     }
@@ -786,11 +788,10 @@ export default function ImportApprovals() {
     }
   }, [ordersWithBottlesAtCustomers]);
 
-  // Enhanced data fetching with statistics
-  const fetchData = async () => {
+  // Enhanced data fetching with statistics (silent = true skips loading overlay for background refetch)
+  const fetchData = async (silent = false) => {
     try {
-      // fetchVerificationStats fetches imports, receipts, scans, and sets pendingInvoices
-      await fetchVerificationStats();
+      await fetchVerificationStats(silent);
     } catch (error) {
       setError('Failed to fetch data: ' + error.message);
     }
@@ -1113,15 +1114,15 @@ export default function ImportApprovals() {
     }
   }
 
-  async function fetchVerificationStats() {
+  async function fetchVerificationStats(silent = false) {
     try {
-      setLoading(true);
-      logger.debug('Starting data fetch');
+      if (!silent) setLoading(true);
+      logger.debug('Starting data fetch', silent ? '(silent)' : '');
       
       if (!organization || !organization.id) {
         logger.error('❌ No organization found');
         setError('No organization found. Please log in again.');
-        setLoading(false);
+        if (!silent) setLoading(false);
         return;
       }
       
@@ -1536,7 +1537,7 @@ export default function ImportApprovals() {
       logger.debug(`Data fetch completed in ${Date.now() - startTime}ms — ${cleanedRecords.length} records`);
       setVerificationStats(displayStats);
       setPendingInvoices(cleanedRecords);
-      setLoading(false);
+      if (!silent) setLoading(false);
       
       // Check bottles at customers in background (non-blocking)
       checkBottlesAtCustomersForAllOrders(cleanedRecords).catch(console.error);
@@ -1582,7 +1583,7 @@ export default function ImportApprovals() {
         logger.error('❌ Fallback also failed:', fallbackError);
       }
       
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
@@ -6642,6 +6643,8 @@ return (
       if (rpcResult.success) {
         const d = rpcResult.data || {};
         logger.debug(`RPC assignment succeeded: ${d.shipped || 0} shipped, ${d.returned || 0} returned, ${d.skipped || 0} skipped, ${d.created || 0} created`);
+        // Close any existing RNB for barcodes we just shipped (bottle back in circulation)
+        if (shipArr.length > 0) await closeRNBRentalsForBarcodes(shipArr);
         if (returnsNotOnBalance.length > 0) {
           for (const rnb of returnsNotOnBalance) {
             await createRNBRentalRecord(newCustomerName, newCustomerId, orderNumber, rnb.product_code || 'Unknown', rnb.barcode);
@@ -6654,6 +6657,21 @@ return (
       } else {
         logger.warn('RPC assignment failed, falling back to inline logic:', rpcResult.error);
         await assignBottlesToCustomerInline(record, newCustomerName, newCustomerId, orderNumber, shippedBarcodes, returnBarcodesOnBalance, rows);
+      }
+
+      // RNS (Return Not Scanned): invoice has return qty but no return scan – create one RNS per missing return
+      const totalInvoicedReturns = rows.reduce(
+        (sum, row) => sum + parseInt(row.qty_in || row.QtyIn || row.returned || row.Returned || row.return_qty || row.ReturnQty || 0, 10),
+        0
+      );
+      const rnsCount = Math.max(0, totalInvoicedReturns - retArr.length);
+      if (rnsCount > 0 && organization?.id) {
+        const firstReturnRow = rows.find((row) => parseInt(row.qty_in || row.QtyIn || row.returned || row.Returned || row.return_qty || row.ReturnQty || 0, 10) > 0);
+        const rnsProductCode = (firstReturnRow?.product_code || firstReturnRow?.description || 'RNS').toString().trim() || 'RNS';
+        for (let i = 0; i < rnsCount; i++) {
+          await createRNSRentalRecord(newCustomerName, newCustomerId, orderNumber, rnsProductCode);
+        }
+        setSnackbar((s) => (s || '') + (s ? ' ' : '') + `${rnsCount} return(s) not scanned (RNS – see customer page).`);
       }
 
       // DNS (Delivered Not Scanned) records are not handled by the RPC
@@ -6678,6 +6696,7 @@ return (
     const assignmentWarnings = [];
     const assignmentSuccesses = [];
     const processedBarcodes = new Set();
+    const fallbackShippedBarcodes = [];
 
     for (const barcode of returnedBarcodes) {
       if (processedBarcodes.has(barcode)) continue;
@@ -6768,7 +6787,7 @@ return (
           .eq('id', bottle.id);
         if (updateError) { assignmentWarnings.push(`Failed to assign bottle ${bottle.barcode_number}`); continue; }
         assignmentSuccesses.push(`Bottle ${bottle.barcode_number} assigned to ${newCustomerName}`);
-        await insertDeliveryScan(bottle.barcode_number, newCustomerName);
+        await insertDeliveryScan(bottle.barcode_number, newCustomerName, orderNumber);
         await createRentalRecord(bottle, newCustomerName, newCustomerId, null, orderNumber);
       } else if (isSameCustomer) {
         if (bottle.status !== 'rented') {
@@ -6803,10 +6822,12 @@ return (
               last_verified_order: orderNumber,
             }).eq('id', bottle.id);
             assignmentSuccesses.push(`Bottle ${bottle.barcode_number} assigned to ${newCustomerName}`);
-            await insertDeliveryScan(bottle.barcode_number, newCustomerName);
+            fallbackShippedBarcodes.push(bottle.barcode_number);
+            await insertDeliveryScan(bottle.barcode_number, newCustomerName, orderNumber);
             await createRentalRecord(bottle, newCustomerName, newCustomerId, row, orderNumber);
           } else if (isSameCustomer) {
             if (bottle.status !== 'rented') await supabase.from('bottles').update({ status: 'rented', last_verified_order: orderNumber }).eq('id', bottle.id);
+            fallbackShippedBarcodes.push(bottle.barcode_number);
             await createRentalRecord(bottle, newCustomerName, newCustomerId, row, orderNumber);
           } else {
             assignmentWarnings.push(`Bottle ${bottle.barcode_number} already at another customer; not reassigning.`);
@@ -6814,6 +6835,10 @@ return (
         }
       }
     }
+
+    // Close any RNB for barcodes we just shipped (main loop + fallback)
+    const allShippedBarcodes = [...Array.from(shippedBarcodes), ...fallbackShippedBarcodes];
+    if (allShippedBarcodes.length > 0) await closeRNBRentalsForBarcodes(allShippedBarcodes);
 
     if (assignmentSuccesses.length > 0) logger.debug(`Inline: assigned ${assignmentSuccesses.length} bottle(s)`);
     if (assignmentWarnings.length > 0) {
@@ -6823,14 +6848,16 @@ return (
   }
 
 
-  // Insert a scan record so bottle Movement History shows the delivery (inline path has no RPC audit trail)
-  async function insertDeliveryScan(barcodeNumber, customerName) {
+  // Insert a scan record so bottle Movement History shows the delivery (inline path has no RPC audit trail).
+  // Always use the current run orderNumber so scans are not tagged with the bottle's previous rental order.
+  async function insertDeliveryScan(barcodeNumber, customerName, orderNumber = null) {
     if (!organization?.id || !barcodeNumber) return;
     try {
       await supabase.from('bottle_scans').insert({
         organization_id: organization.id,
         bottle_barcode: barcodeNumber,
         mode: 'SHIP',
+        order_number: orderNumber ?? null,
         customer_name: customerName || 'Customer',
         timestamp: new Date().toISOString(),
         created_at: new Date().toISOString(),
@@ -6948,6 +6975,27 @@ return (
     }
   }
 
+  // Close any RNB (Return not on balance) rentals for these barcodes when we ship them (bottle back in circulation).
+  async function closeRNBRentalsForBarcodes(barcodes) {
+    if (!organization?.id || !barcodes?.length) return;
+    const list = Array.isArray(barcodes) ? [...barcodes] : Array.from(barcodes);
+    const nonEmpty = list.filter((b) => b != null && String(b).trim() !== '');
+    if (nonEmpty.length === 0) return;
+    const { error } = await supabase
+      .from('rentals')
+      .update({
+        rental_end_date: new Date().toISOString().split('T')[0],
+        updated_at: new Date().toISOString(),
+      })
+      .eq('organization_id', organization.id)
+      .eq('is_dns', true)
+      .ilike('dns_description', '%Return not on balance%')
+      .is('rental_end_date', null)
+      .in('bottle_barcode', nonEmpty);
+    if (error) logger.warn('closeRNBRentalsForBarcodes error:', error);
+    else logger.debug('Closed RNB rentals for shipped barcodes:', nonEmpty.length);
+  }
+
   // Create RNB (Return not on balance) record – return was scanned but bottle was not at this customer (like DNS for returns)
   async function createRNBRentalRecord(customerName, customerId, orderNumber, productCode, scannedBarcode = null) {
     if (!organization?.id || !customerName) return;
@@ -6991,6 +7039,52 @@ return (
       else logger.debug('Created RNB record for', productCode, orderNumber);
     } catch (err) {
       logger.error('createRNBRentalRecord error:', err);
+    }
+  }
+
+  // Create RNS (Return not scanned) record – invoice has return qty but no return scan (no barcode); reduces customer total, not billable
+  async function createRNSRentalRecord(customerName, customerId, orderNumber, productCode) {
+    if (!organization?.id || !customerName) return;
+    try {
+      let resolvedCustomerId = customerId;
+      if (!resolvedCustomerId && customerName) {
+        const { data: cust } = await supabase
+          .from('customers')
+          .select('CustomerListID')
+          .eq('name', customerName)
+          .eq('organization_id', organization.id)
+          .limit(1)
+          .maybeSingle();
+        if (cust?.CustomerListID) resolvedCustomerId = cust.CustomerListID;
+      }
+      if (!resolvedCustomerId) resolvedCustomerId = customerName;
+      const { error } = await supabase
+        .from('rentals')
+        .insert({
+          organization_id: organization.id,
+          customer_id: resolvedCustomerId,
+          customer_name: customerName,
+          is_dns: true,
+          dns_product_code: productCode,
+          dns_description: 'Return not scanned',
+          dns_order_number: orderNumber,
+          bottle_id: null,
+          bottle_barcode: null,
+          rental_start_date: new Date().toISOString().split('T')[0],
+          rental_end_date: null,
+          rental_amount: 10,
+          rental_type: 'monthly',
+          tax_code: 'GST+PST',
+          tax_rate: 0.11,
+          location: 'SASKATOON',
+          status: 'active',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+      if (error) logger.error('Error creating RNS rental:', error);
+      else logger.debug('Created RNS record for', productCode, orderNumber);
+    } catch (err) {
+      logger.error('createRNSRentalRecord error:', err);
     }
   }
 

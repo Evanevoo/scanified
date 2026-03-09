@@ -384,7 +384,7 @@ export default function WebScanning() {
         logger.warn('Failed to create scan record:', scanError);
       }
     } else {
-      // Queue for offline sync
+      // Queue for offline sync (include orderNumber so synced scans use current run order, not bottle's rental)
       setOfflineQueue(prev => [...prev, {
         barcode,
         mode,
@@ -392,7 +392,8 @@ export default function WebScanning() {
         timestamp: new Date().toISOString(),
         customerInfo,
         location,
-        notes: proofOfDelivery.notes
+        notes: proofOfDelivery.notes,
+        orderNumber: deliveryInfo?.orderNumber ?? null
       }]);
     }
 

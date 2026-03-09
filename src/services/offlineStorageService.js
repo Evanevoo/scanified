@@ -209,7 +209,10 @@ const actionToMode = (action) => {
 };
 
 /**
- * Sync scan operation
+ * Sync scan operation.
+ * IMPORTANT: operation.data.order_number must be the current run/session order (e.g. 72359),
+ * NEVER the bottle's rental_order_number. Using the bottle's order for RETURN scans causes
+ * the wrong order (e.g. S47820) to appear on scans when the user actually scanned under 72359.
  */
 const syncScanOperation = async (supabase, operation) => {
   logger.log('Syncing scan operation:', {
