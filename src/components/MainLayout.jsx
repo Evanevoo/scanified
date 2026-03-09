@@ -243,7 +243,7 @@ export default function MainLayout({ children }) {
       height: '100vh',
       width: '100vw',
       position: 'relative',
-      background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+      backgroundColor: '#fff',
       overflow: 'hidden',
       // Tablet-specific optimizations
       '@media (min-width: 768px) and (max-width: 1024px)': {
@@ -252,17 +252,6 @@ export default function MainLayout({ children }) {
         }
       }
     }}>
-      {/* Background overlay for depth */}
-      <Box sx={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'radial-gradient(ellipse at 60% 0%, rgba(66,165,245,0.12) 0%, rgba(25,118,210,0.08) 60%, transparent 100%)',
-        zIndex: 0,
-        pointerEvents: 'none',
-      }} />
       {!isOwnerPortal && (
         <Drawer
           variant="permanent"

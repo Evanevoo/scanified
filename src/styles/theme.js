@@ -9,9 +9,9 @@ const brandColors = {
   error: '#EF4444',
   info: '#3B82F6',
   background: {
-    default: '#F8FAFC',
+    default: '#FFFFFF',
     paper: '#FFFFFF',
-    gradient: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)'
+    gradient: 'linear-gradient(135deg, #ffffff 0%, #f5f5f5 100%)'
   },
   text: {
     primary: '#1F2937',

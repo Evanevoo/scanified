@@ -161,7 +161,7 @@ export const modernTheme = createTheme({
       contrastText: '#ffffff',
     },
     background: {
-      default: '#f8fafc',
+      default: '#ffffff',
       paper: '#ffffff',
     },
     text: {

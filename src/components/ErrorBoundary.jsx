@@ -54,10 +54,10 @@ class ErrorBoundary extends React.Component {
             alignItems="center"
             justifyContent="center"
             minHeight="100vh"
-            bgcolor="#f8fafc"
+            bgcolor="#fff"
             p={3}
             sx={{
-              background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+              backgroundColor: '#fff',
             }}
           >
             <Paper
@@ -67,7 +67,7 @@ class ErrorBoundary extends React.Component {
                 maxWidth: 500,
                 textAlign: 'center',
                 borderRadius: 3,
-                border: '1px solid #e2e8f0',
+                border: '1px solid #e5e7eb',
                 position: 'relative',
                 overflow: 'hidden',
                 animation: 'slideUp 0.6s ease-out',
@@ -206,7 +206,7 @@ class ErrorBoundary extends React.Component {
                       bgcolor: 'grey.100',
                       p: 2,
                       borderRadius: 1,
-                      border: '1px solid #e2e8f0',
+                      border: '1px solid #e5e7eb',
                       fontFamily: 'monospace'
                     }}>
                       {this.state.error.toString()}
