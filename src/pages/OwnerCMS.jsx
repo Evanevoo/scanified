@@ -390,7 +390,7 @@ export default function OwnerCMS() {
         </Alert>
       )}
 
-      <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Container maxWidth="lg" sx={{ py: 2 }}>
         <Grid container spacing={4}>
           {/* Sidebar */}
           <Grid item xs={12} md={3}>

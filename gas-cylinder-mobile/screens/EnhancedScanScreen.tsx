@@ -810,6 +810,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       logger.log('📷 Barcode not in scan region');
       setScanFeedback(' ');
       setTimeout(() => setScanFeedback(''), 2000);
+      processingBarcodesRef.current.delete(data);
       return;
     }
 
@@ -1034,6 +1035,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       const minInterval = scanSpeed === 'rapid' ? 300 : scanSpeed === 'fast' ? 500 : 800;
       
       if (timeSinceLastScan < minInterval) {
+        processingBarcodesRef.current.delete(data); // Allow same barcode to be scanned again
         return; // Too fast, ignore scan
       }
     }

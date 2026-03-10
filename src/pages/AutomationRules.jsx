@@ -309,7 +309,7 @@ export default function AutomationRules() {
   };
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
+    <Container maxWidth="lg" sx={{ py: 2 }}>
       <Typography variant="h4" gutterBottom>
         Automation Rules
       </Typography>

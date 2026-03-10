@@ -211,7 +211,7 @@ export default function TransferFromCustomers() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f5f5', py: 4 }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f5f5', py: 2 }}>
       <Box maxWidth="1400px" mx="auto" px={3}>
         
         {/* Header */}

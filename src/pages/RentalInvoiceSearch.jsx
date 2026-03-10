@@ -141,7 +141,7 @@ export default function RentalInvoiceSearch() {
   const formatDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '—');
 
   return (
-    <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: '100%' }}>
+    <Box sx={{ p: { xs: 1.5, sm: 2 }, maxWidth: '100%' }}>
       <Box sx={{ mb: 3 }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
           <Box>

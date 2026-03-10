@@ -222,19 +222,28 @@ function BottlesForDay({ profile }) {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
 
-  // Format fill date/time: show in scanner timezone when available, otherwise browser local
+  // Format fill date/time: show in scanner timezone when available, otherwise browser local.
+  // If the value is date-only or midnight UTC (e.g. from a DATE column), show date only to avoid
+  // midnight UTC appearing as "6:00 PM" in timezones behind UTC (e.g. Saskatchewan).
   const formatFillDate = (bottle) => {
     if (!bottle?.fill_date) return null;
-    const d = new Date(bottle.fill_date);
+    const raw = bottle.fill_date;
+    const d = new Date(raw);
     if (Number.isNaN(d.getTime())) return null;
+    const dateOnlyString = typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim());
+    const midnightUtc = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
+    const isDateOnly = dateOnlyString || midnightUtc;
     const tz = bottle.fill_timezone;
+    const opts = isDateOnly
+      ? { dateStyle: 'medium' }
+      : { dateStyle: 'medium', timeStyle: 'short' };
     try {
       if (tz) {
-        return d.toLocaleString(undefined, { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' });
+        return d.toLocaleString(undefined, { timeZone: tz, ...opts });
       }
-      return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+      return d.toLocaleString(undefined, opts);
     } catch {
-      return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+      return d.toLocaleString(undefined, opts);
     }
   };
   const formatFillDateTzLabel = (bottle) => {
@@ -343,7 +352,7 @@ function BottlesForDay({ profile }) {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
+      <Paper elevation={0} sx={{ width: '100%', p: { xs: 1.5, md: 2.5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
           <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>
             Fill History

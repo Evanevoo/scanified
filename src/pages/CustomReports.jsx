@@ -219,10 +219,10 @@ export default function CustomReports() {
   });
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 4 }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 2 }}>
       <Paper elevation={0} sx={{ 
         width: '100%', 
-        p: { xs: 2, md: 4 }, 
+        p: { xs: 1.5, md: 2.5 }, 
         borderRadius: 2, 
         boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', 
         border: '1px solid var(--divider)', 

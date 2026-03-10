@@ -150,7 +150,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
     }
 
     if (trimmedBarcode.length < 4) {
-      return { isValid: false, errorMessage: 'Barcode too short' };
+      return { isValid: false, errorMessage: 'Scan not recognized. Please ensure the full barcode is in frame and try again.' };
     }
 
     if (trimmedBarcode.length > 50) {

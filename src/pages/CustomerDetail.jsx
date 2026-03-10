@@ -770,6 +770,12 @@ export default function CustomerDetail() {
     setSaving(true);
     setSaveError(null);
     setSaveSuccess(false);
+    const newCustomerListID = (editForm.CustomerListID || '').trim();
+    if (!newCustomerListID) {
+      setSaveError('Customer ID is required.');
+      setSaving(false);
+      return;
+    }
     // Normalize barcode: trim whitespace only (organizations control format)
     const normalizedBarcode = (editForm.barcode || '')
       .toString()
@@ -793,6 +799,10 @@ export default function CustomerDetail() {
       // Include barcode if provided (empty string allowed to clear)
       barcode: normalizedBarcode || null
     };
+    const customerIdChanged = newCustomerListID !== id;
+    if (customerIdChanged) {
+      updateFields.CustomerListID = newCustomerListID;
+    }
     const { error } = await supabase
       .from('customers')
       .update(updateFields)
@@ -801,6 +811,12 @@ export default function CustomerDetail() {
       setSaveError(error.message);
       setSaving(false);
       return;
+    }
+    if (customerIdChanged) {
+      const orgId = customer.organization_id;
+      await supabase.from('bottles').update({ assigned_customer: newCustomerListID }).eq('assigned_customer', id).eq('organization_id', orgId);
+      await supabase.from('rentals').update({ customer_id: newCustomerListID }).eq('customer_id', id).eq('organization_id', orgId);
+      navigate(`/customer/${newCustomerListID}`, { replace: true });
     }
     setCustomer({ ...customer, ...updateFields });
     if (updateFields.parent_customer_id) {
@@ -878,7 +894,19 @@ export default function CustomerDetail() {
         <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={3}>
           <Box>
             <Typography variant="body2" color="text.secondary">Customer ID</Typography>
-            <Typography variant="body1" fontWeight={600} fontFamily="monospace" sx={{ mb: 2 }}>{customer.CustomerListID}</Typography>
+            {editing ? (
+              <TextField
+                name="CustomerListID"
+                value={editForm.CustomerListID || ''}
+                onChange={handleEditChange}
+                size="small"
+                label="Customer number"
+                sx={{ mb: 2, minWidth: 200 }}
+                helperText="Changing this updates bottle assignments and rentals that reference this customer."
+              />
+            ) : (
+              <Typography variant="body1" fontWeight={600} fontFamily="monospace" sx={{ mb: 2 }}>{customer.CustomerListID}</Typography>
+            )}
             <Typography variant="body2" color="text.secondary">Part of (parent customer)</Typography>
             {editing ? (
               <Autocomplete

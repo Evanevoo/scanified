@@ -310,14 +310,14 @@ export default function UserInvites() {
 
   if (loading) {
     return (
-      <Container sx={{ py: 4, textAlign: 'center' }}>
+      <Container sx={{ py: 2, textAlign: 'center' }}>
         <CircularProgress />
       </Container>
     );
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
+    <Container maxWidth="lg" sx={{ py: 2 }}>
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography variant="h4" fontWeight="bold">
           User Invitations

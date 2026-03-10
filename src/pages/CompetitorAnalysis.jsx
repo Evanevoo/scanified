@@ -212,7 +212,7 @@ export default function CompetitorAnalysis() {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
-      <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Container maxWidth="lg" sx={{ py: 2 }}>
         {/* Header */}
         <Box sx={{ textAlign: 'center', mb: 6 }}>
           <Typography variant="h3" fontWeight={700} gutterBottom>

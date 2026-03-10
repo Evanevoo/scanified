@@ -410,7 +410,7 @@ export default function IntegrationSettings() {
   };
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
+    <Container maxWidth="lg" sx={{ py: 2 }}>
       <Typography variant="h4" gutterBottom>
         Integration Settings
       </Typography>

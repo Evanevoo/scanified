@@ -20,7 +20,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.evanevoo.scanifiedmobile",
-      buildNumber: "103",
+      buildNumber: "104",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSCameraUsageDescription: "Scanified uses your camera to scan asset barcodes for inventory management and tracking purposes.",

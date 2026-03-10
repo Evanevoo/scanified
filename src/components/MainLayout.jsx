@@ -445,7 +445,9 @@ export default function MainLayout({ children }) {
         component="main"
         sx={{
           flexGrow: 1,
-          p: { xs: 2, sm: 3 },
+          pt: 0,
+          px: { xs: 1.5, sm: 2 },
+          pb: { xs: 1.5, sm: 2 },
           width: isOwnerPortal ? '100vw' : `calc(100vw - ${sidebarCollapsed ? collapsedWidth : drawerWidth}px)`,
           bgcolor: 'transparent',
           height: '100vh',
@@ -459,7 +461,8 @@ export default function MainLayout({ children }) {
           // Tablet optimizations
           '@media (min-width: 768px) and (max-width: 1024px)': {
             width: isOwnerPortal ? '100vw' : `calc(100vw - ${sidebarCollapsed ? collapsedWidth : 240}px)`,
-            p: 2,
+            px: 2,
+            pb: 2,
           }
         }}
       >
