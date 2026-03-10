@@ -323,7 +323,7 @@ export default function Home() {
   }
 
   return (
-    <Box sx={{ p: { xs: 3, sm: 4 }, backgroundColor: 'transparent', minHeight: '100%' }}>
+    <Box sx={{ p: { xs: 2, sm: 2.5 }, backgroundColor: 'transparent', minHeight: '100%' }}>
       {/* Welcome Section */}
       <Box sx={{ mb: 4, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.5 }}>
         <Typography variant="h4" sx={{ fontWeight: 600, color: '#1a1a1a', fontSize: '1.75rem', letterSpacing: '-0.02em' }}>

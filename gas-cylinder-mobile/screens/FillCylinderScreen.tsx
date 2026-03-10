@@ -381,37 +381,52 @@ export default function FillCylinderScreen() {
         return;
       }
 
-      // Check if scanning as "full" and bottle is still at a customer (Android doesn't check status)
+      // Check if scanning as "full" and bottle is still at a customer. Only warn when there's an
+      // active rental (rental_end_date null). If the rental was already closed (history shows Return)
+      // but the bottle row still has old customer name, allow without warning.
       if (selectedStatus === 'full') {
-        const isAtCustomer = bottleData.assigned_customer || bottleData.customer_name;
-        logger.log('📷 Checking customer: isAtCustomer=', isAtCustomer);
-        
-        // If bottle has a customer assignment, show warning
-        if (isAtCustomer) {
-          logger.log('⚠️ WARNING: Bottle still at customer - showing alert');
-          Alert.alert(
-            '⚠️ Bottle Still at Customer',
-            `This ${assetConfig?.assetDisplayName?.toLowerCase() || 'bottle'} (${barcode}) is still assigned to customer "${bottleData.customer_name || 'Unknown'}" and was never scanned as empty.\n\nPlease scan it as empty first when it returns from the customer, then scan as full after refilling.`,
-            [
-              { 
-                text: 'Cancel', 
-                style: 'cancel',
-                onPress: () => {
-                  processingBarcodesRef.current.delete(barcode);
-                  setIsProcessing(false);
-                  setLastScannedBarcode('');
-                  lastScannedBarcodeRef.current = '';
+        const hasCustomerAssignment = bottleData.assigned_customer || bottleData.customer_name;
+        if (hasCustomerAssignment) {
+          const { data: activeRental } = await supabase
+            .from('rentals')
+            .select('id')
+            .eq('organization_id', profile?.organization_id)
+            .is('rental_end_date', null)
+            .or(`bottle_id.eq.${bottleData.id},bottle_barcode.eq.${bottleData.barcode_number}`)
+            .limit(1)
+            .maybeSingle();
+          const hasActiveRental = !!activeRental;
+          logger.log('📷 Customer assignment:', hasCustomerAssignment, 'Active rental:', hasActiveRental);
+
+          if (hasActiveRental) {
+            const customerName = bottleData.customer_name || 'Unknown';
+            logger.log('⚠️ WARNING: Bottle still at customer (active rental) - showing alert');
+            Alert.alert(
+              'Still assigned to a customer',
+              `This ${assetConfig?.assetDisplayName?.toLowerCase() || 'bottle'} is still assigned to the customer "${customerName}" in the system (it was not scanned as returned/empty yet).\n\nTo keep the usual flow: scan it as empty when it returns, then as full after refilling.\n\nIf the bottle is already back and refilled, tap "Add Anyway" to mark it full and update location.`,
+              [
+                { 
+                  text: 'Cancel', 
+                  style: 'cancel',
+                  onPress: () => {
+                    processingBarcodesRef.current.delete(barcode);
+                    setIsProcessing(false);
+                    setLastScannedBarcode('');
+                    lastScannedBarcodeRef.current = '';
+                  }
+                },
+                { 
+                  text: 'Add Anyway', 
+                  onPress: () => {
+                    addBottleToScannedList(bottleData);
+                  }
                 }
-              },
-              { 
-                text: 'Add Anyway', 
-                onPress: () => {
-                  addBottleToScannedList(bottleData);
-                }
-              }
-            ]
-          );
-          return;
+              ]
+            );
+            return;
+          }
+          // No active rental: return was already processed (history shows Return) but bottle row
+          // may still have stale customer name — allow locate as full without warning.
         }
       }
 

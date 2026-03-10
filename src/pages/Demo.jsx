@@ -154,7 +154,7 @@ export default function Demo() {
         </Container>
       </Box>
 
-      <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Container maxWidth="lg" sx={{ py: 2 }}>
         {/* Demo Overview */}
         <Box sx={{ textAlign: 'center', mb: 6 }}>
           <Typography variant="h3" fontWeight={700} sx={{ mb: 2, color: '#000000' }}>

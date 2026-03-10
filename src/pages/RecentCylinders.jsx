@@ -101,8 +101,8 @@ export default function RecentCylinders() {
 
   if (authLoading || loading) {
     return (
-      <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 4 }}>
-        <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 4 }, borderRadius: 2, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)' }}>
+      <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 2 }}>
+        <Paper elevation={0} sx={{ width: '100%', p: { xs: 1.5, md: 2.5 }, borderRadius: 2, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)' }}>
           <Box display="flex" alignItems="center" mb={3}>
             <ArrowBackIcon color="action" />
             <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1, ml: 2 }}>
@@ -133,8 +133,8 @@ export default function RecentCylinders() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 4 }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 4 }, borderRadius: 2, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 2 }}>
+      <Paper elevation={0} sx={{ width: '100%', p: { xs: 1.5, md: 2.5 }, borderRadius: 2, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)' }}>
         <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2} mb={3}>
           <Box display="flex" alignItems="center">
             <IconButton onClick={() => navigate(-1)} sx={{ mr: 2 }} aria-label="Go back">

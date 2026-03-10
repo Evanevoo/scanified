@@ -98,7 +98,7 @@ export default function ImportedInvoiceDetail() {
         <div>Fetched invoice object:</div>
         <pre style={{ maxHeight: 200, overflow: 'auto', background: '#f7f7f7', borderRadius: 4, padding: 8 }}>{JSON.stringify(invoice, null, 2)}</pre>
       </Paper>
-      <Paper elevation={4} sx={{ p: { xs: 2, md: 4 }, borderRadius: 3, mb: 4 }}>
+      <Paper elevation={4} sx={{ p: { xs: 1.5, md: 2.5 }, borderRadius: 3, mb: 4 }}>
         <Grid container spacing={4}>
           {/* Main Info */}
           <Grid item xs={12} md={9}>

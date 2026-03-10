@@ -965,17 +965,20 @@ export default function AssetDetail() {
                   const description = asset.description || record.description || '';
                   const barcode = asset.barcode_number || record.barcode_number || record.bottle_barcode || '';
                   
-                  // Format date
-                  const dateStr = record.created_at 
-                    ? new Date(record.created_at).toLocaleDateString('en-US', { 
-                        month: 'numeric', 
-                        day: 'numeric', 
-                        year: 'numeric',
-                        hour: 'numeric',
-                        minute: '2-digit',
-                        hour12: true
-                      })
-                    : '-';
+                  // Format date; show date-only when value is date-only or midnight UTC to avoid
+                  // midnight UTC displaying as "6:00 PM" in timezones behind UTC (e.g. Saskatchewan)
+                  const rawDate = record.created_at;
+                  let dateStr = '-';
+                  if (rawDate) {
+                    const d = new Date(rawDate);
+                    const dateOnlyString = typeof rawDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rawDate.trim());
+                    const midnightUtc = !Number.isNaN(d.getTime()) && d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
+                    if (dateOnlyString || midnightUtc) {
+                      dateStr = d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
+                    } else {
+                      dateStr = d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+                    }
+                  }
                   
                   return (
                     <tr key={record.id || index} style={{ borderBottom: '1px solid #e0e0e0' }}>

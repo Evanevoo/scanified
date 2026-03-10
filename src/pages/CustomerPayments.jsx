@@ -326,7 +326,7 @@ export default function CustomerPayments() {
   return (
     <Elements stripe={stripePromise}>
       <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
-        <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Container maxWidth="lg" sx={{ py: 2 }}>
           {/* Header */}
           <Box sx={{ mb: 4 }}>
             <Typography variant="h4" fontWeight={700} gutterBottom>

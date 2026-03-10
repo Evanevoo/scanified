@@ -493,7 +493,7 @@ export default function OAuthOrganizationLink() {
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="md" sx={{ py: 4 }}>
+      <Container maxWidth="md" sx={{ py: 2 }}>
         <Paper sx={{ p: 4 }}>
           <Typography variant="h4" align="center" gutterBottom>
             Connect to Organization
