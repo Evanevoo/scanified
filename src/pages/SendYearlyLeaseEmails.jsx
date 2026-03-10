@@ -105,28 +105,45 @@ export default function SendYearlyLeaseEmails() {
   }, [fetchData]);
 
   useEffect(() => {
-    if (!organization?.id || !rows.length) return;
+    if (!organization?.id) return;
     const loadOrgSettings = async () => {
+      let emails = [];
+      let defaultSender = '';
       try {
         const { data: orgData } = await supabase
           .from('organizations')
           .select('invoice_emails, default_invoice_email, email')
           .eq('id', organization.id)
           .single();
-        let emails = [];
         if (orgData?.invoice_emails && Array.isArray(orgData.invoice_emails)) {
           emails = orgData.invoice_emails;
         } else if (orgData?.email) {
           emails = [orgData.email];
         }
-        if (user?.email) emails = [...new Set([...emails, user.email])];
-        if (profile?.email) emails = [...new Set([...emails, profile.email])];
-        setInvoiceEmails(emails.filter(Boolean));
-        setSenderEmail(orgData?.default_invoice_email || orgData?.email || user?.email || profile?.email || emails[0] || '');
+        defaultSender = orgData?.default_invoice_email || orgData?.email || '';
+      } catch (e) {
+        logger.error('Load org settings:', e);
+      }
+      // Always include logged-in user's email so sender is never empty
+      if (user?.email) emails = [...new Set([user.email, ...emails])];
+      if (profile?.email) emails = [...new Set([profile.email, ...emails])];
+      const filtered = emails.filter(Boolean);
+      setInvoiceEmails(filtered);
+      setSenderEmail(prev => defaultSender || user?.email || profile?.email || filtered[0] || prev || '');
 
+      if (organization?.name) {
         const savedTemplate = localStorage.getItem(`invoiceTemplate_${organization.id}`);
         if (savedTemplate) {
-          setInvoiceTemplate(JSON.parse(savedTemplate));
+          try {
+            setInvoiceTemplate(JSON.parse(savedTemplate));
+          } catch (_) {
+            setInvoiceTemplate({
+              primary_color: '#000000',
+              payment_terms: 'Net 30',
+              email_subject: `Your yearly lease invoice from ${organization.name}`,
+              email_body: 'Please find your yearly lease invoice attached.',
+            });
+          }
         } else {
           setInvoiceTemplate({
             primary_color: '#000000',
@@ -135,8 +152,6 @@ export default function SendYearlyLeaseEmails() {
             email_body: 'Please find your yearly lease invoice attached.',
           });
         }
-      } catch (e) {
-        logger.error('Load org settings:', e);
       }
     };
     loadOrgSettings();
@@ -368,11 +383,12 @@ export default function SendYearlyLeaseEmails() {
         <FormControl size="small" sx={{ minWidth: 280, mr: 2 }}>
           <InputLabel>Sender email</InputLabel>
           <Select
-            value={senderEmail}
+            value={senderEmail || (user?.email || profile?.email || '')}
             label="Sender email"
             onChange={(e) => setSenderEmail(e.target.value)}
+            displayEmpty
           >
-            {invoiceEmails.map((em) => (
+            {[...new Set([senderEmail || user?.email || profile?.email, ...invoiceEmails].filter(Boolean))].map((em) => (
               <MenuItem key={em} value={em}>{em}</MenuItem>
             ))}
           </Select>
