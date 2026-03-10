@@ -243,7 +243,7 @@ export default function MainLayout({ children }) {
       height: '100vh',
       width: '100vw',
       position: 'relative',
-      backgroundColor: '#fff',
+      backgroundColor: '#f6f5f3',
       overflow: 'hidden',
       // Tablet-specific optimizations
       '@media (min-width: 768px) and (max-width: 1024px)': {
@@ -286,14 +286,14 @@ export default function MainLayout({ children }) {
         elevation={0}
         sx={{
           zIndex: (theme) => theme.zIndex.drawer + 1,
-          bgcolor: 'background.paper',
+          bgcolor: '#fff',
           color: '#111',
           boxShadow: 'none',
-          border: 'none',
+          borderBottom: '1px solid rgba(0,0,0,0.06)',
           minHeight: 64,
         }}
       >
-        <Toolbar sx={{ minHeight: 64, px: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', gap: 2 }}>
+        <Toolbar sx={{ minHeight: 64, px: { xs: 2, sm: 3 }, display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'transparent', gap: 2 }}>
           {/* Logo and Company Name */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
             <Box 
@@ -301,15 +301,15 @@ export default function MainLayout({ children }) {
                 height: 40, 
                 width: 40, 
                 borderRadius: 2, 
-                background: organization?.logo_url ? 'transparent' : primaryColor,
+                background: organization?.logo_url ? 'transparent' : `linear-gradient(135deg, ${primaryColor} 0%, ${primaryColor}dd 100%)`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: '#fff',
                 fontSize: '20px',
-                fontWeight: 'bold',
+                fontWeight: 700,
                 flexShrink: 0,
-                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
                 overflow: 'hidden',
                 position: 'relative'
               }}
@@ -332,7 +332,7 @@ export default function MainLayout({ children }) {
                 organization?.name?.charAt(0)?.toUpperCase() || 'W'
               )}
             </Box>
-            <Typography variant="h6" sx={{ fontWeight: 700, color: '#111', fontSize: '18px', display: { xs: 'none', sm: 'block' } }}>
+            <Typography variant="h6" sx={{ fontWeight: 600, color: '#1a1a1a', fontSize: '1.1rem', letterSpacing: '-0.01em', display: { xs: 'none', sm: 'block' } }}>
               {organization?.name || 'WeldCor'}
             </Typography>
           </Box>
@@ -347,21 +347,20 @@ export default function MainLayout({ children }) {
                     key={link.label}
                     onClick={() => navigate(link.to)}
                     sx={{
-                    color: location.pathname === link.to ? primaryColor : '#111',
-                    fontWeight: location.pathname === link.to ? 700 : 500,
-                    fontFamily: 'Inter, sans-serif',
-                    fontSize: '0.875rem',
-                    textTransform: 'none',
-                    px: 2,
-                    py: 1,
-                    minHeight: 48,
-                    borderRadius: 0,
-                    borderBottom: location.pathname === link.to ? `2px solid ${primaryColor}` : '2px solid transparent',
-                    transition: 'all 0.2s',
-                    '&:hover': {
-                      color: primaryColor,
-                      backgroundColor: 'transparent',
-                    },
+                      color: location.pathname === link.to ? primaryColor : '#374151',
+                      fontWeight: location.pathname === link.to ? 600 : 500,
+                      fontSize: '0.875rem',
+                      textTransform: 'none',
+                      px: 2,
+                      py: 1,
+                      minHeight: 48,
+                      borderRadius: 1,
+                      borderBottom: location.pathname === link.to ? `2px solid ${primaryColor}` : '2px solid transparent',
+                      transition: 'color 0.2s, border-color 0.2s',
+                      '&:hover': {
+                        color: primaryColor,
+                        backgroundColor: 'rgba(0,0,0,0.03)',
+                      },
                     }}
                   >
                     {link.label}
@@ -433,11 +432,11 @@ export default function MainLayout({ children }) {
             </Box>
             
             {/* Icon Buttons */}
-            <IconButton sx={{ color: '#111', width: 40, height: 40, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' } }} aria-label="Notifications">
-              <NotificationsIcon />
+            <IconButton sx={{ color: '#374151', width: 40, height: 40, borderRadius: 1.5, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)', color: '#111' } }} aria-label="Notifications">
+              <NotificationsIcon fontSize="small" />
             </IconButton>
-            <IconButton sx={{ color: '#111', width: 40, height: 40, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
-              <SettingsIcon />
+            <IconButton sx={{ color: '#374151', width: 40, height: 40, borderRadius: 1.5, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)', color: '#111' } }} onClick={() => navigate('/settings')} aria-label="Settings">
+              <SettingsIcon fontSize="small" />
             </IconButton>
           </Box>
         </Toolbar>
@@ -446,7 +445,7 @@ export default function MainLayout({ children }) {
         component="main"
         sx={{
           flexGrow: 1,
-          p: 3,
+          p: { xs: 2, sm: 3 },
           width: isOwnerPortal ? '100vw' : `calc(100vw - ${sidebarCollapsed ? collapsedWidth : drawerWidth}px)`,
           bgcolor: 'transparent',
           height: '100vh',
@@ -460,7 +459,7 @@ export default function MainLayout({ children }) {
           // Tablet optimizations
           '@media (min-width: 768px) and (max-width: 1024px)': {
             width: isOwnerPortal ? '100vw' : `calc(100vw - ${sidebarCollapsed ? collapsedWidth : 240}px)`,
-            p: 2, // Reduce padding on tablet
+            p: 2,
           }
         }}
       >
@@ -470,8 +469,8 @@ export default function MainLayout({ children }) {
           width: '100%',
           bgcolor: '#fff',
           p: 0,
-          borderRadius: 0,
-          boxShadow: 'none',
+          borderRadius: 2,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
           minHeight: 'calc(100vh - 64px)',
           overflow: 'auto',
         }}>

@@ -4,10 +4,10 @@ import { supabase } from '../supabase/client';
 import { useDebounce } from '../utils/performance';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, 
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
   Card, CardContent, Grid, Chip, IconButton, TextField, FormControl, InputLabel, Select, MenuItem,
   Alert, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions, Tabs, Tab,
-  Tooltip, Badge, Collapse, FormControlLabel, Checkbox
+  Tooltip, Badge, Collapse, FormControlLabel, Checkbox, Menu, ListItemIcon, ListItemText
 } from '@mui/material';
 import {
   Person as PersonIcon,
@@ -20,7 +20,8 @@ import {
   Receipt as InvoiceIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
-  Email as EmailIcon
+  Email as EmailIcon,
+  KeyboardArrowDown as KeyboardArrowDownIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 import InvoiceGenerator from '../components/InvoiceGenerator';
@@ -287,6 +288,7 @@ function RentalsImproved() {
   const [bulkEmailDialogOpen, setBulkEmailDialogOpen] = useState(false);
   const [updatingRentals, setUpdatingRentals] = useState(false);
   const [exportingInvoices, setExportingInvoices] = useState(false);
+  const [exportMenuAnchor, setExportMenuAnchor] = useState(null);
   const [error, setError] = useState(null);
   const [filters] = useState({
     status: 'all',
@@ -997,50 +999,84 @@ function RentalsImproved() {
   return (
     <Box sx={{ p: { xs: 1.5, sm: 2, md: 3 }, width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 2, mb: 3 }}>
-        <Typography variant="h4" fontWeight="bold">
-          Asset Management & Rentals
-        </Typography>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>
-          <Button
-            variant="contained"
-            startIcon={<DownloadIcon />}
-            onClick={() => exportToCSV(filteredCustomers)}
-            disabled={filteredCustomers.length === 0}
-          >
-            Export Rentals CSV
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={exportingInvoices ? <CircularProgress size={18} /> : <MoneyIcon />}
-            onClick={() => exportInvoices(filteredCustomers)}
-            disabled={filteredCustomers.length === 0 || exportingInvoices}
-          >
-            {exportingInvoices ? 'Exporting...' : 'Export QuickBooks Invoices'}
-          </Button>
-          <Button
-            variant="outlined"
-            component={Link}
-            to="/send-yearly-lease-emails"
-            startIcon={<EmailIcon />}
-          >
-            Send yearly lease emails
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<EmailIcon />}
-            onClick={() => {
-              const customersWithRentals = filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer?.customer_type !== 'VENDOR');
-              if (customersWithRentals.length === 0) {
-                alert('No customers with active rentals found');
-                return;
-              }
-              setBulkEmailDialogOpen(true);
-            }}
-            disabled={filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer?.customer_type !== 'VENDOR').length === 0}
-          >
-            Bulk Email Invoices
-          </Button>
+      <Box sx={{ mb: 3 }}>
+        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 2 }}>
+          <Box>
+            <Typography variant="h4" fontWeight="bold">
+              Asset Management & Rentals
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              <Link to="/rental/invoice-search" style={{ color: 'inherit', textDecoration: 'none', fontWeight: 500 }}>
+                Billing & accounting →
+              </Link>
+              {' '}Invoice search, QuickBooks export, lease billing
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center' }}>
+            <Button
+              variant="outlined"
+              size="medium"
+              onClick={(e) => setExportMenuAnchor(e.currentTarget)}
+              endIcon={<KeyboardArrowDownIcon />}
+              startIcon={<DownloadIcon />}
+              disabled={filteredCustomers.length === 0}
+            >
+              Export
+            </Button>
+            <Menu
+              anchorEl={exportMenuAnchor}
+              open={Boolean(exportMenuAnchor)}
+              onClose={() => setExportMenuAnchor(null)}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+            >
+              <MenuItem
+                onClick={() => {
+                  exportToCSV(filteredCustomers);
+                  setExportMenuAnchor(null);
+                }}
+                disabled={filteredCustomers.length === 0}
+              >
+                <ListItemIcon><DownloadIcon fontSize="small" /></ListItemIcon>
+                <ListItemText>Rentals CSV</ListItemText>
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  exportInvoices(filteredCustomers);
+                  setExportMenuAnchor(null);
+                }}
+                disabled={filteredCustomers.length === 0 || exportingInvoices}
+              >
+                <ListItemIcon>{exportingInvoices ? <CircularProgress size={18} /> : <MoneyIcon fontSize="small" />}</ListItemIcon>
+                <ListItemText>{exportingInvoices ? 'Exporting…' : 'QuickBooks CSV'}</ListItemText>
+              </MenuItem>
+            </Menu>
+            <Button
+              variant="outlined"
+              size="medium"
+              component={Link}
+              to="/send-yearly-lease-emails"
+              startIcon={<EmailIcon />}
+            >
+              Yearly lease emails
+            </Button>
+            <Button
+              variant="contained"
+              size="medium"
+              startIcon={<EmailIcon />}
+              onClick={() => {
+                const customersWithRentals = filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer?.customer_type !== 'VENDOR');
+                if (customersWithRentals.length === 0) {
+                  alert('No customers with active rentals found');
+                  return;
+                }
+                setBulkEmailDialogOpen(true);
+              }}
+              disabled={filteredCustomers.filter(c => c.rentals && c.rentals.length > 0 && c.customer?.customer_type !== 'VENDOR').length === 0}
+            >
+              Bulk Email Invoices
+            </Button>
+          </Box>
         </Box>
       </Box>
 

@@ -212,34 +212,39 @@ borderColor: 'divider',
 
           {/* Main Menu */}
           <List>
-            {ownerMenuItems.map((item) => (
-              <ListItem key={item.path} disablePadding>
-                <ListItemButton
-                  selected={isActive(item.path)}
-                  onClick={() => handleNavigation(item.path)}
-                  sx={{
-                    '&.Mui-selected': {
-                      backgroundColor: 'primary.light',
-                      '&:hover': {
-                        backgroundColor: 'primary.light',
+            {ownerMenuItems.map((item) => {
+              const active = isActive(item.path);
+              return (
+                <ListItem key={item.path} disablePadding sx={{ px: 2, py: 0.25 }}>
+                  <ListItemButton
+                    selected={active}
+                    onClick={() => handleNavigation(item.path)}
+                    sx={{
+                      py: 1.1,
+                      px: 1.5,
+                      borderRadius: 2,
+                      backgroundColor: active ? `${primaryColor}14` : 'transparent',
+                      color: active ? primaryColor : '#374151',
+                      borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
+                      '&.Mui-selected': {
+                        backgroundColor: `${primaryColor}14`,
+                        color: primaryColor,
+                        '&:hover': { backgroundColor: `${primaryColor}1e` },
                       },
-                    },
-                  }}
-                >
-                  <ListItemIcon sx={{ color: isActive(item.path) ? 'primary.main' : 'inherit' }}>
-                    {item.icon}
-                  </ListItemIcon>
-                  <ListItemText 
-                    primary={item.title}
-                    sx={{ 
-                      '& .MuiListItemText-primary': {
-                        fontWeight: isActive(item.path) ? 600 : 400,
-                      }
+                      '&:hover': { backgroundColor: active ? `${primaryColor}1e` : 'rgba(0,0,0,0.04)' },
                     }}
-                  />
-                </ListItemButton>
-              </ListItem>
-            ))}
+                  >
+                    <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>
+                      {item.icon}
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary={item.title}
+                      primaryTypographyProps={{ fontWeight: active ? 600 : 500, fontSize: '0.875rem' }}
+                    />
+                  </ListItemButton>
+                </ListItem>
+              );
+            })}
           </List>
       </Box>
     );
@@ -344,17 +349,17 @@ borderColor: 'divider',
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      backgroundColor: '#F5F5F5', // Light gray background like in the image
-      borderRight: 'none'
+      backgroundColor: '#fff',
+      borderRight: '1px solid rgba(0,0,0,0.06)',
     }}>
         {/* Sidebar collapse toggle */}
         {onToggleCollapse && (
-          <Box sx={{ p: 1, display: 'flex', justifyContent: isCollapsed ? 'center' : 'flex-end' }}>
+          <Box sx={{ py: 1.5, px: 1, display: 'flex', justifyContent: isCollapsed ? 'center' : 'flex-end' }}>
             <Tooltip title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
               <IconButton
                 size="small"
                 onClick={onToggleCollapse}
-                sx={{ color: '#6B7280', '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' } }}
+                sx={{ color: '#6b7280', borderRadius: 1.5, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' } }}
               >
                 {isCollapsed ? <ChevronRight /> : <ChevronLeft />}
               </IconButton>
@@ -364,16 +369,7 @@ borderColor: 'divider',
 
         {/* Search */}
         {!isCollapsed && (
-          <Box sx={{ 
-            p: 2.5, 
-            backgroundColor: 'background.paper',
-            border: 'none',
-            borderBottom: 'none',
-            borderTop: 'none',
-            borderLeft: 'none',
-            borderRight: 'none',
-            boxShadow: 'none'
-          }}>
+          <Box sx={{ px: 2, pb: 2 }}>
             <TextField
               size="small"
               variant="outlined"
@@ -384,52 +380,25 @@ borderColor: 'divider',
               sx={{
                 '& .MuiOutlinedInput-root': {
                   borderRadius: 2,
-                  backgroundColor: 'background.default',
-                  border: 'none !important',
-                  borderLeft: 'none !important',
-                  borderRight: 'none !important',
-                  borderTop: 'none !important',
-                  borderBottom: 'none !important',
-                  outline: 'none !important',
-                  boxShadow: 'none !important',
+                  backgroundColor: '#f6f5f3',
+                  fontSize: '0.875rem',
                   '& fieldset': {
-                    borderColor: '#e1e5e9 !important',
-                    borderWidth: '1px !important',
-                    borderStyle: 'solid !important',
-                    borderLeftWidth: '1px !important',
-                    borderRightWidth: '1px !important',
-                    borderTopWidth: '1px !important',
-                    borderBottomWidth: '1px !important',
-                  },
-                  '&:hover fieldset': {
-                    borderColor: 'primary.main !important',
-                    borderWidth: '1px !important',
-                  },
-                  '&.Mui-focused fieldset': {
-                    borderColor: 'primary.main !important',
-                    borderWidth: '1px !important',
+                    borderColor: 'transparent',
                   },
                   '&:hover': {
-                    backgroundColor: '#ffffff'
+                    backgroundColor: '#eeedeb',
                   },
                   '&.Mui-focused': {
-                    backgroundColor: 'background.paper',
-                    boxShadow: '0 0 0 3px rgba(102, 126, 234, 0.1)'
-                  }
+                    backgroundColor: '#fff',
+                    boxShadow: `0 0 0 2px ${primaryColor}20`,
+                    '& fieldset': { borderColor: primaryColor },
+                  },
                 },
-                '& .MuiOutlinedInput-input': {
-                  border: 'none !important',
-                  borderLeft: 'none !important',
-                  borderRight: 'none !important',
-                  borderTop: 'none !important',
-                  borderBottom: 'none !important',
-                  outline: 'none !important',
-                }
               }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                    <SearchIcon fontSize="small" sx={{ color: '#6b7280' }} />
                   </InputAdornment>
                 ),
               }}
@@ -445,36 +414,37 @@ borderColor: 'divider',
               <React.Fragment key={sectionKey}>
                 {/* Section Header - clickable to collapse/expand section */}
                 {!isCollapsed ? (
-                  <ListItem disablePadding>
+                  <ListItem disablePadding sx={{ px: 2 }}>
                     <ListItemButton
                       onClick={() => toggleSection(sectionKey)}
                       sx={{ 
-                        px: 2.5, 
+                        px: 1.5, 
                         py: 1,
-                        minHeight: 36,
-                        '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' }
+                        minHeight: 32,
+                        borderRadius: 1.5,
+                        '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' },
                       }}
                     >
                       <Typography 
                         variant="caption" 
                         sx={{ 
-                          color: '#6B7280',
-                          fontSize: '11px',
+                          color: '#6b7280',
+                          fontSize: '0.7rem',
                           fontWeight: 600,
-                          letterSpacing: '0.5px',
+                          letterSpacing: '0.06em',
                           textTransform: 'uppercase',
                           flex: 1
                         }}
                       >
                         {section.title}
                       </Typography>
-                      {isSectionOpen ? <ExpandLess sx={{ fontSize: 18, color: '#6B7280' }} /> : <ExpandMore sx={{ fontSize: 18, color: '#6B7280' }} />}
+                      {isSectionOpen ? <ExpandLess sx={{ fontSize: 18, color: '#9ca3af' }} /> : <ExpandMore sx={{ fontSize: 18, color: '#9ca3af' }} />}
                     </ListItemButton>
                   </ListItem>
                 ) : (
                   <ListItem disablePadding>
-                    <Box sx={{ px: 2.5, py: 1, width: '100%' }}>
-                      <Typography variant="caption" sx={{ color: '#6B7280', fontSize: '11px', fontWeight: 600, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+                    <Box sx={{ px: 2, py: 0.75, width: '100%' }}>
+                      <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                         {section.title}
                       </Typography>
                     </Box>
@@ -483,38 +453,37 @@ borderColor: 'divider',
                 
                 {/* Section Items - collapsible when sidebar is expanded */}
                 <Collapse in={isCollapsed ? true : isSectionOpen} timeout="auto" unmountOnExit={false}>
-                <List component="div" disablePadding>
+                <List component="div" disablePadding sx={{ pb: 0.5 }}>
                   {section.items.map((item) => {
                     const active = isActive(item.path);
                     return (
-                      <ListItem key={item.path} disablePadding>
+                      <ListItem key={item.path} disablePadding sx={{ px: 2, py: 0.25 }}>
                         <ListItemButton
                           selected={active}
                           onClick={() => handleNavigation(item.path)}
                           sx={{
-                            py: 1.25,
-                            px: 2.5,
+                            py: 1.1,
+                            px: 1.5,
                             borderRadius: 2,
-                            mx: 1,
-                            mb: 0.5,
-                            backgroundColor: active ? primaryColor : 'transparent',
-                            color: active ? '#fff' : '#111',
-                            transition: 'all 0.2s ease',
+                            backgroundColor: active ? `${primaryColor}14` : 'transparent',
+                            color: active ? primaryColor : '#374151',
+                            borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
+                            transition: 'background-color 0.15s, color 0.15s',
                             '&:hover': {
-                              backgroundColor: active ? primaryColor : 'rgba(0,0,0,0.05)',
+                              backgroundColor: active ? `${primaryColor}1e` : 'rgba(0,0,0,0.04)',
                             },
                             '&.Mui-selected': {
-                              backgroundColor: primaryColor,
-                              color: '#fff',
+                              backgroundColor: `${primaryColor}14`,
+                              color: primaryColor,
                               '&:hover': {
-                                backgroundColor: primaryColor,
+                                backgroundColor: `${primaryColor}1e`,
                               },
                             },
                           }}
                         >
                           <ListItemIcon sx={{ minWidth: 36 }}>
                             <Box sx={{ 
-                              color: active ? '#fff' : '#6B7280',
+                              color: 'inherit',
                               fontSize: '20px',
                               display: 'flex',
                               alignItems: 'center',
@@ -529,19 +498,9 @@ borderColor: 'divider',
                               primaryTypographyProps={{
                                 variant: 'body2',
                                 fontWeight: active ? 600 : 500,
-                                color: active ? '#fff' : '#111',
-                                fontSize: '14px'
+                                fontSize: '0.875rem',
                               }}
                             />
-                          )}
-                          {active && !isCollapsed && (
-                            <Box sx={{ 
-                              width: 4, 
-                              height: 4, 
-                              borderRadius: '50%', 
-                              backgroundColor: '#fff',
-                              ml: 1
-                            }} />
                           )}
                         </ListItemButton>
                       </ListItem>
@@ -558,8 +517,8 @@ borderColor: 'divider',
         {!isCollapsed && profile && (
           <Box sx={{ 
             p: 2,
-            borderTop: '1px solid #E5E7EB',
-            backgroundColor: '#F5F5F5',
+            borderTop: '1px solid rgba(0,0,0,0.06)',
+            backgroundColor: '#fafaf9',
             mt: 'auto'
           }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -567,18 +526,19 @@ borderColor: 'divider',
                 sx={{ 
                   width: 36, 
                   height: 36, 
-                  bgcolor: '#D1D5DB',
-                  color: '#6B7280',
-                  fontSize: '14px'
+                  bgcolor: `${primaryColor}20`,
+                  color: primaryColor,
+                  fontSize: '0.875rem',
+                  fontWeight: 600,
                 }}
               >
                 {profile?.full_name?.charAt(0)?.toUpperCase() || 'U'}
               </Avatar>
               <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: '#111', fontSize: '14px' }}>
+                <Typography variant="body2" sx={{ fontWeight: 600, color: '#1a1a1a', fontSize: '0.875rem' }}>
                   {profile?.full_name || 'User'}
                 </Typography>
-                <Typography variant="caption" sx={{ color: '#6B7280', fontSize: '12px' }}>
+                <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.75rem' }}>
                   {getRoleDisplayName(actualRole)}
                 </Typography>
               </Box>
@@ -589,8 +549,9 @@ borderColor: 'divider',
                   navigate('/login');
                 }}
                 sx={{ 
-                  color: '#6B7280',
-                  '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' }
+                  color: '#6b7280',
+                  borderRadius: 1.5,
+                  '&:hover': { backgroundColor: 'rgba(0,0,0,0.06)' }
                 }}
               >
                 <Box component="svg" width="16" height="16" viewBox="0 0 16 16" fill="none">

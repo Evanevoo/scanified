@@ -163,6 +163,8 @@ const AutomationRules = lazy(() => import('./pages/AutomationRules'));
 const Locations = lazy(() => import('./pages/Locations'));
 const TransferFromCustomers = lazy(() => import('./pages/TransferFromCustomers.jsx'));
 const DailyUpdateAdmin = lazy(() => import('./pages/DailyUpdateAdmin'));
+const InvoiceDetail = lazy(() => import('./pages/InvoiceDetail'));
+const LeaseBillingDashboard = lazy(() => import('./pages/LeaseBillingDashboard'));
 
 // Analytics tracking component
 function AnalyticsTracker() {
@@ -380,6 +382,16 @@ function AppContent() {
                       </RoleProtectedRoute>
                     } />
                     <Route path="/payments" element={<CustomerPayments />} />
+                    <Route path="/invoice/:id" element={
+                      <Suspense fallback={<LoadingSpinner />}>
+                        <InvoiceDetail />
+                      </Suspense>
+                    } />
+                    <Route path="/lease-billing-dashboard" element={
+                      <Suspense fallback={<LoadingSpinner />}>
+                        <LeaseBillingDashboard />
+                      </Suspense>
+                    } />
                     <Route path="/support" element={<SupportCenter />} />
                     <Route path="/recent-cylinders" element={<RecentCylinders />} />
                     <Route path="/organization-tools" element={
