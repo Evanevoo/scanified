@@ -202,7 +202,17 @@ export default function AcceptInvite() {
   };
 
   const acceptInvite = async (user, inviteData, tokenToUse) => {
-    const inviteToken = tokenToUse ?? validatedToken ?? searchParams.get('token')?.trim();
+    let inviteToken = tokenToUse ?? validatedToken ?? searchParams.get('token');
+    if (typeof inviteToken === 'string') inviteToken = inviteToken.trim();
+    if (inviteToken?.includes('%')) {
+      try { inviteToken = decodeURIComponent(inviteToken); } catch (_) { /* use as-is */ }
+    }
+    if (!inviteToken || inviteToken.length < 10) {
+      setMessage('Invalid invite link. Please use the link from your invitation email.');
+      setStatus('error');
+      return;
+    }
+
     try {
       setStatus('accepting');
 
@@ -210,14 +220,19 @@ export default function AcceptInvite() {
       const displayName = authForm.name || user.user_metadata?.name || user.user_metadata?.full_name || '';
       const profilePayload = {
         id: user.id,
-        email: inviteData.email,
+        email: (inviteData.email || user.email || '').trim().toLowerCase(),
         full_name: displayName,
-        organization_id: inviteData.organization_id,
-        role: inviteData.role,
+        organization_id: inviteData.organization_id ?? null,
+        role: inviteData.role ?? 'user',
         is_active: true,
         deleted_at: null,
         disabled_at: null
       };
+      if (inviteData.organization_id == null) {
+        setMessage('Invalid invite: organization not found. Please request a new invite.');
+        setStatus('error');
+        return;
+      }
 
       const acceptResponse = await fetch('/.netlify/functions/fetch-invite-details', {
         method: 'POST',
@@ -225,16 +240,18 @@ export default function AcceptInvite() {
         body: JSON.stringify({ token: inviteToken, accept: true, profile: profilePayload })
       });
 
+      const payload = await acceptResponse.json().catch(() => ({}));
       if (!acceptResponse.ok) {
-        const payload = await acceptResponse.json().catch(() => ({}));
         const errMsg = payload.error || payload.message || 'Failed to accept invite';
+        const detail = payload.details || payload.hint;
+        const fullMsg = detail ? `${errMsg} (${detail})` : errMsg;
         // Fallback: profile may have been created by useAuth without org – try to fix from client
         try {
           const { error: updateErr } = await supabase
             .from('profiles')
             .update({
               organization_id: inviteData.organization_id,
-              role: inviteData.role,
+              role: inviteData.role ?? 'user',
               full_name: displayName,
               is_active: true,
               deleted_at: null,
@@ -248,7 +265,7 @@ export default function AcceptInvite() {
             return;
           }
         } catch (_) { /* ignore */ }
-        throw new Error(errMsg);
+        throw new Error(fullMsg);
       }
 
       setStatus('success');

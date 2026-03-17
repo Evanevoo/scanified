@@ -71,29 +71,55 @@ exports.handler = async (event) => {
     }
 
     if (shouldAccept) {
-      if (!profilePayload) {
+      if (!profilePayload || typeof profilePayload !== 'object') {
         return createResponse(event, 400, { error: 'Missing profile data for acceptance' });
       }
+      if (!profilePayload.id || !profilePayload.email || profilePayload.organization_id == null) {
+        return createResponse(event, 400, {
+          error: 'Invalid profile data: id, email, and organization_id are required'
+        });
+      }
 
-      // Normalize profile: profiles table uses full_name; accept name or full_name from client
+      // Normalize profile: profiles table uses full_name; accept name or full_name from client.
+      // Invite role can be a role name (e.g. 'Member') or a role_id UUID from UserManagement.
+      const roleValue = profilePayload.role ?? 'user';
+      const isRoleUuid = typeof roleValue === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(roleValue);
+      let roleForProfile = roleValue;
+      if (isRoleUuid) {
+        const { data: roleRow } = await supabase.from('roles').select('name').eq('id', roleValue).maybeSingle();
+        if (roleRow?.name) roleForProfile = roleRow.name;
+      }
       const profile = {
         id: profilePayload.id,
-        email: profilePayload.email,
-        full_name: profilePayload.full_name || profilePayload.name || '',
+        email: String(profilePayload.email).trim().toLowerCase(),
+        full_name: (profilePayload.full_name ?? profilePayload.name ?? '').trim() || null,
         organization_id: profilePayload.organization_id,
-        role: profilePayload.role,
+        role: roleForProfile,
         is_active: profilePayload.is_active !== false,
         deleted_at: profilePayload.deleted_at ?? null,
         disabled_at: profilePayload.disabled_at ?? null
       };
+      if (isRoleUuid) {
+        profile.role_id = roleValue;
+      } else if (profilePayload.role_id) {
+        profile.role_id = profilePayload.role_id;
+      }
 
       const { error: profileError } = await supabase
         .from('profiles')
         .upsert(profile, { onConflict: 'id' });
 
       if (profileError) {
-        console.error('Profile upsert error:', profileError);
-        return createErrorResponse(event, 500, 'Failed to create profile. Please try again.', profileError);
+        console.error('Profile upsert error:', profileError.code, profileError.message, profileError.details);
+        const isProduction = process.env.NODE_ENV === 'production' || process.env.CONTEXT === 'production';
+        const userMessage = 'Failed to create profile. Please try again.';
+        const body = { error: userMessage, success: false };
+        if (!isProduction && profileError) {
+          body.details = profileError.message;
+          body.code = profileError.code;
+          if (profileError.details) body.hint = profileError.details;
+        }
+        return createResponse(event, 500, body);
       }
 
       const { error: acceptError } = await supabase
