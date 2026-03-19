@@ -64,6 +64,7 @@ import {
   Error as ErrorIcon
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
+import { formatLocationDisplay } from '../utils/locationDisplay';
 import { useAuth } from '../hooks/useAuth';
 import { useDebounce, useOptimizedFetch } from '../utils/performance';
 import { FadeIn, SlideIn, SmoothButton, LoadingOverlay } from '../components/SmoothLoading';
@@ -335,7 +336,7 @@ export default function WebScanning() {
       case 'locate':
         // Just update location for locate
         updateData = {};
-        message = `Located at ${asset.location || 'Unknown location'}`;
+        message = `Located at ${asset.location ? formatLocationDisplay(asset.location) : 'Unknown location'}`;
         break;
 
       default:

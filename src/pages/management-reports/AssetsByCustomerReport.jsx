@@ -39,6 +39,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import { StatsSkeleton, TableSkeleton } from '../../components/SmoothLoading';
+import { formatLocationDisplay } from '../../utils/locationDisplay';
 
 export default function AssetsByCustomerReport() {
   const navigate = useNavigate();
@@ -247,7 +248,7 @@ export default function AssetsByCustomerReport() {
             bottle.product_code || 'N/A',
             bottle.description || 'N/A',
             bottle.status === 'empty' ? 'Empty' : 'Filled',
-            bottle.location || 'N/A',
+            (bottle.location ? formatLocationDisplay(bottle.location) : 'N/A'),
             bottle.last_updated || bottle.created_at || 'N/A'
           ]);
         });
@@ -562,7 +563,7 @@ export default function AssetsByCustomerReport() {
                                         color={bottle.status === 'empty' ? 'warning' : 'success'}
                                       />
                                     </TableCell>
-                                    <TableCell>{bottle.location || 'N/A'}</TableCell>
+                                    <TableCell>{bottle.location ? formatLocationDisplay(bottle.location) : 'N/A'}</TableCell>
                                     <TableCell>
                                       {bottle.last_updated ? 
                                         new Date(bottle.last_updated).toLocaleDateString() : 

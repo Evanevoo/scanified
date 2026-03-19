@@ -41,6 +41,7 @@ import {
 } from '@mui/icons-material';
 import { AssetTransferService } from '../services/assetTransferService';
 import { useAuth } from '../hooks/useAuth';
+import { formatLocationDisplay } from '../utils/locationDisplay';
 
 export default function TransferFromCustomers() {
   const { id } = useParams(); // Target customer ID
@@ -403,7 +404,7 @@ export default function TransferFromCustomers() {
                       </TableCell>
                       <TableCell>
                         <Chip 
-                          label={asset.location || 'Unknown'} 
+                          label={asset.location ? formatLocationDisplay(asset.location) : 'Unknown'} 
                           color="default" 
                           size="small"
                           variant="outlined"

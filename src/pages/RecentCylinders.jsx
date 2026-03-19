@@ -25,6 +25,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { TableSkeleton } from '../components/SmoothLoading';
+import { formatLocationDisplay } from '../utils/locationDisplay';
 
 const PAGE_SIZE = 50;
 
@@ -192,7 +193,7 @@ export default function RecentCylinders() {
                     <TableCell>
                       <Chip label={row.status || '—'} size="small" color={row.status === 'active' ? 'success' : 'default'} />
                     </TableCell>
-                    <TableCell>{row.location || '—'}</TableCell>
+                    <TableCell>{row.location ? formatLocationDisplay(row.location) : '—'}</TableCell>
                     <TableCell>{formatAddedDate(row.created_at)}</TableCell>
                     <TableCell align="right">
                       <Button size="small" onClick={() => navigate(`/bottle/${row.id}`)} endIcon={<OpenInNewIcon />} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>

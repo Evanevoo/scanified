@@ -86,6 +86,8 @@ import { supabase } from '../supabase/client';
 
 import { useNavigate } from 'react-router-dom';
 
+import { formatLocationDisplay } from '../utils/locationDisplay';
+
 import * as XLSX from 'xlsx';
 
 
@@ -2179,7 +2181,7 @@ const BottleManagement = () => {
 
                 <Typography variant="caption" color="text.secondary">Location</Typography>
 
-                <Typography variant="body2">{bottle.location || '-'}</Typography>
+                <Typography variant="body2">{bottle.location ? formatLocationDisplay(bottle.location) : '-'}</Typography>
 
               </Box>
 
