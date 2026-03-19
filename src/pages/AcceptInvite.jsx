@@ -139,8 +139,15 @@ export default function AcceptInvite() {
       setValidatedToken(token);
       setAuthForm({ ...authForm, email: inviteData.email });
 
+      const invitedEmail = (inviteData.email || '').trim().toLowerCase();
       if (user) {
-        await acceptInvite(user, inviteData, token);
+        const currentEmail = (user.email || '').trim().toLowerCase();
+        if (currentEmail === invitedEmail) {
+          await acceptInvite(user, inviteData, token);
+        } else {
+          setStatus('wrongAccount');
+          setMessage(currentEmail);
+        }
       } else {
         setStatus('needsAuth');
       }
@@ -224,9 +231,7 @@ export default function AcceptInvite() {
         full_name: displayName,
         organization_id: inviteData.organization_id ?? null,
         role: inviteData.role ?? 'user',
-        is_active: true,
-        deleted_at: null,
-        disabled_at: null
+        is_active: true
       };
       if (inviteData.organization_id == null) {
         setMessage('Invalid invite: organization not found. Please request a new invite.');
@@ -253,9 +258,7 @@ export default function AcceptInvite() {
               organization_id: inviteData.organization_id,
               role: inviteData.role ?? 'user',
               full_name: displayName,
-              is_active: true,
-              deleted_at: null,
-              disabled_at: null
+              is_active: true
             })
             .eq('id', user.id);
           if (!updateErr) {
@@ -289,6 +292,31 @@ export default function AcceptInvite() {
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <CircularProgress size={60} sx={{ mb: 3 }} />
             <Typography variant="h6">Loading invitation...</Typography>
+          </Box>
+        )}
+
+        {status === 'wrongAccount' && invite && (
+          <Box>
+            <ErrorIcon sx={{ fontSize: 48, color: 'warning.main', mb: 2 }} />
+            <Typography variant="h6" gutterBottom fontWeight="bold">
+              Wrong account
+            </Typography>
+            <Typography variant="body1" color="text.secondary" paragraph>
+              This invite was sent to <strong>{invite.email}</strong>. You're currently signed in as <strong>{message}</strong>.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" paragraph>
+              Sign out, then open this invite link again to create an account or sign in as {invite.email}.
+            </Typography>
+            <Button
+              variant="contained"
+              fullWidth
+              onClick={async () => {
+                await supabase.auth.signOut();
+                window.location.href = `/accept-invite?token=${searchParams.get('token')}`;
+              }}
+            >
+              Sign out and use invite for {invite.email}
+            </Button>
           </Box>
         )}
 
@@ -327,7 +355,7 @@ export default function AcceptInvite() {
                   value={authForm.password}
                   onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
                   required
-                  helperText="At least 6 characters"
+                  helperText="At least 6 characters. You'll use this password to sign in next time."
                 />
 
                 <Button

@@ -101,16 +101,16 @@ export default function RecentCylinders() {
 
   if (authLoading || loading) {
     return (
-      <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 2 }}>
-        <Paper elevation={0} sx={{ width: '100%', p: { xs: 1.5, md: 2.5 }, borderRadius: 2, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)' }}>
-          <Box display="flex" alignItems="center" mb={3}>
+      <Box sx={{ p: { xs: 2, sm: 3 } }}>
+        <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+          <Box display="flex" alignItems="center" gap={2}>
             <ArrowBackIcon color="action" />
-            <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1, ml: 2 }}>
+            <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
               Recently Added Cylinders
             </Typography>
           </Box>
-          <TableSkeleton rows={10} columns={6} />
         </Paper>
+        <TableSkeleton rows={10} columns={6} />
       </Box>
     );
   }
@@ -119,7 +119,7 @@ export default function RecentCylinders() {
     return (
       <Box sx={{ p: 3 }}>
         <Alert severity="error">{error}</Alert>
-        <Button onClick={fetchRecentCylinders} sx={{ mt: 2 }}>Retry</Button>
+        <Button onClick={fetchRecentCylinders} sx={{ mt: 2, borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>Retry</Button>
       </Box>
     );
   }
@@ -133,22 +133,19 @@ export default function RecentCylinders() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 2 }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 1.5, md: 2.5 }, borderRadius: 2, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)' }}>
-        <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2} mb={3}>
-          <Box display="flex" alignItems="center">
-            <IconButton onClick={() => navigate(-1)} sx={{ mr: 2 }} aria-label="Go back">
-              <ArrowBackIcon />
-            </IconButton>
-            <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>
-              Recently Added Cylinders
-            </Typography>
-          </Box>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box display="flex" alignItems="center" gap={2}>
+          <IconButton onClick={() => navigate(-1)} aria-label="Go back">
+            <ArrowBackIcon />
+          </IconButton>
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+            Recently Added Cylinders
+          </Typography>
         </Box>
-        <Typography variant="body1" color="text.secondary" mb={3}>
-          Cylinders added to your organization, newest first (up to 200). Use search to filter.
-        </Typography>
+      </Paper>
 
+      <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <TextField
           fullWidth
           size="small"
@@ -162,13 +159,14 @@ export default function RecentCylinders() {
               </InputAdornment>
             )
           }}
-          sx={{ mb: 3, width: '100%' }}
+          sx={{ width: '100%' }}
         />
+      </Paper>
 
-        <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 1 }}>
+      <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
           <Table size="small" stickyHeader>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                 <TableCell><strong>Barcode</strong></TableCell>
                 <TableCell><strong>Serial</strong></TableCell>
                 <TableCell><strong>Product / Description</strong></TableCell>
@@ -197,7 +195,7 @@ export default function RecentCylinders() {
                     <TableCell>{row.location || '—'}</TableCell>
                     <TableCell>{formatAddedDate(row.created_at)}</TableCell>
                     <TableCell align="right">
-                      <Button size="small" onClick={() => navigate(`/bottle/${row.id}`)} endIcon={<OpenInNewIcon />}>
+                      <Button size="small" onClick={() => navigate(`/bottle/${row.id}`)} endIcon={<OpenInNewIcon />} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
                         View
                       </Button>
                     </TableCell>
@@ -212,7 +210,6 @@ export default function RecentCylinders() {
             Showing first {PAGE_SIZE} of {filteredCylinders.length} matching cylinders.
           </Typography>
         )}
-      </Paper>
     </Box>
   );
 }

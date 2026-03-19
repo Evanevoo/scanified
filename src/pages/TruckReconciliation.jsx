@@ -12,6 +12,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableContainer,
   TableHead,
   TableRow,
   Chip,
@@ -20,7 +21,9 @@ import {
   CardContent,
   IconButton,
   Tooltip,
-  LinearProgress,
+  Paper,
+  Stack,
+  CircularProgress,
   Stepper,
   Step,
   StepLabel,
@@ -39,18 +42,6 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 import { TruckReconciliationService } from '../services/truckReconciliationService';
-import { 
-  PageHeader, 
-  StyledCard, 
-  StatusChip,
-  InfoCard,
-  GridContainer,
-  PrimaryButton,
-  SecondaryButton,
-  StyledTableContainer,
-  EmptyState,
-  LoadingCard
-} from '../components/ui/StyledComponents';
 import logger from '../utils/logger';
 
 export default function TruckReconciliation() {
@@ -184,80 +175,98 @@ export default function TruckReconciliation() {
   ];
 
   if (loading) {
-    return <LoadingCard message="Loading truck reconciliation data..." />;
+    return (
+      <Box sx={{ p: { xs: 2, sm: 3 }, display: 'flex', justifyContent: 'center', py: 8 }}>
+        <CircularProgress />
+      </Box>
+    );
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <PageHeader
-        title="Truck Reconciliation"
-        subtitle="Manage delivery manifests and reconcile truck inventory"
-        actions={[
-          <SecondaryButton
-            startIcon={<ExportIcon />}
-            onClick={() => logger.log('Export data')}
-          >
-            Export
-          </SecondaryButton>,
-          <PrimaryButton
-            startIcon={<AddIcon />}
-            onClick={() => logger.log('Create manifest')}
-          >
-            Create Manifest
-          </PrimaryButton>
-        ]}
-      />
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>Truck Reconciliation</Typography>
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="outlined"
+              startIcon={<ExportIcon />}
+              onClick={() => logger.log('Export data')}
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+            >
+              Export
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => logger.log('Create manifest')}
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+            >
+              Create Manifest
+            </Button>
+          </Stack>
+        </Box>
+      </Paper>
 
       {/* Statistics Cards */}
-      <GridContainer columns={4} sx={{ mb: 3 }}>
-        <InfoCard
-          title="Total Manifests"
-          value={stats.totalManifests}
-          icon={<ManifestIcon />}
-          color="primary"
-        />
-        <InfoCard
-          title="Pending Reconciliation"
-          value={stats.pendingReconciliation}
-          icon={<WarningIcon />}
-          color="warning"
-        />
-        <InfoCard
-          title="Completed Today"
-          value={stats.completedToday}
-          icon={<CompleteIcon />}
-          color="success"
-        />
-        <InfoCard
-          title="Accuracy Rate"
-          value={`${stats.accuracyRate}%`}
-          icon={<TruckIcon />}
-          color="info"
-        />
-      </GridContainer>
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>Total Manifests</Typography>
+              <Typography variant="h4">{stats.totalManifests}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>Pending Reconciliation</Typography>
+              <Typography variant="h4" color="warning.main">{stats.pendingReconciliation}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>Completed Today</Typography>
+              <Typography variant="h4" color="success.main">{stats.completedToday}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>Accuracy Rate</Typography>
+              <Typography variant="h4" color="info.main">{`${stats.accuracyRate}%`}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
 
       {/* Manifests Table */}
-      <StyledCard>
+      <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <Typography variant="h6" sx={{ mb: 2 }}>
           Delivery Manifests
         </Typography>
 
         {manifests.length === 0 ? (
-          <EmptyState
-            icon={<ManifestIcon sx={{ fontSize: 48 }} />}
-            title="No manifests found"
-            subtitle="Create your first delivery manifest to get started"
-            action={
-              <PrimaryButton onClick={() => logger.log('Create manifest')}>
-                Create Manifest
-              </PrimaryButton>
-            }
-          />
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <ManifestIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2, display: 'block', mx: 'auto' }} />
+            <Typography variant="h6" color="text.secondary">No manifests found</Typography>
+            <Button
+              variant="contained"
+              onClick={() => logger.log('Create manifest')}
+              sx={{ mt: 2, borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+            >
+              Create Manifest
+            </Button>
+          </Box>
         ) : (
-          <StyledTableContainer>
+          <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
             <Table>
               <TableHead>
-                <TableRow>
+                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell>Manifest #</TableCell>
                   <TableCell>Driver</TableCell>
                   <TableCell>Date</TableCell>
@@ -278,33 +287,41 @@ export default function TruckReconciliation() {
                       {manifest.expected_out} / {manifest.expected_in}
                     </TableCell>
                     <TableCell>
-                      <StatusChip status={manifest.status} />
+                      <Chip
+                        label={manifest.status}
+                        size="small"
+                        color={manifest.status === 'completed' ? 'success' : manifest.status === 'pending' ? 'warning' : 'default'}
+                      />
                     </TableCell>
                     <TableCell>
                       {manifest.status === 'pending' ? (
-                        <PrimaryButton
+                        <Button
+                          variant="contained"
                           size="small"
                           onClick={() => handleStartReconciliation(manifest)}
+                          sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                         >
                           Reconcile
-                        </PrimaryButton>
+                        </Button>
                       ) : (
-                        <SecondaryButton
+                        <Button
+                          variant="outlined"
                           size="small"
                           startIcon={<ViewIcon />}
                           onClick={() => handleViewReconciliation(manifest)}
+                          sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                         >
                           View
-                        </SecondaryButton>
+                        </Button>
                       )}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </StyledTableContainer>
+          </TableContainer>
         )}
-      </StyledCard>
+      </Paper>
 
       {/* Reconciliation Dialog */}
       <Dialog
@@ -444,9 +461,9 @@ export default function TruckReconciliation() {
                   <Button onClick={() => setActiveStep(2)} sx={{ mr: 1 }}>
                     Back
                   </Button>
-                  <PrimaryButton onClick={handleCompleteReconciliation}>
+                  <Button variant="contained" onClick={handleCompleteReconciliation} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
                     Complete Reconciliation
-                  </PrimaryButton>
+                  </Button>
                 </Box>
               </StepContent>
             </Step>

@@ -1,7 +1,7 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
-  Box, Typography, Paper, Button, Grid, Card, CardContent, CardActions,
+  Box, Typography, Paper, Button, Grid, Card, CardContent, CardActions, Stack,
   Chip, IconButton, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, FormControl, InputLabel, Select, MenuItem, Alert, CircularProgress,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -673,28 +673,28 @@ export default function OrganizationTools() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">
-          {organization.name} - Data Tools
-        </Typography>
-        <Box>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+            {organization.name} - Data Tools
+          </Typography>
           <Button
             variant="outlined"
             startIcon={<RefreshIcon />}
             onClick={loadValidationResults}
             disabled={loading}
-            sx={{ mr: 1 }}
+            sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
           >
             Refresh
           </Button>
-        </Box>
-      </Box>
+        </Stack>
+      </Paper>
 
       {/* Data Health Overview */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                 {getValidationIcon(validationResults.customers.valid, validationResults.customers.invalid)}
@@ -710,7 +710,7 @@ export default function OrganizationTools() {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                 {getValidationIcon(validationResults.bottles.valid, validationResults.bottles.invalid)}
@@ -726,7 +726,7 @@ export default function OrganizationTools() {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                 {getValidationIcon(validationResults.deliveries.valid, validationResults.deliveries.invalid)}
@@ -742,7 +742,7 @@ export default function OrganizationTools() {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                 {getValidationIcon(validationResults.locations.valid, validationResults.locations.invalid)}
@@ -762,21 +762,19 @@ export default function OrganizationTools() {
       {/* Action Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} md={4}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                 <CloudDownloadIcon color="primary" sx={{ mr: 1 }} />
                 <Typography variant="h6">Export Data</Typography>
               </Box>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Export your organization's data in various formats for backup, analysis, or migration.
-              </Typography>
               <Button
                 variant="contained"
                 startIcon={<DownloadIcon />}
                 onClick={handleExportData}
                 disabled={loading}
                 fullWidth
+                sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
               >
                 {loading ? 'Exporting...' : 'Export Data'}
               </Button>
@@ -784,21 +782,19 @@ export default function OrganizationTools() {
           </Card>
         </Grid>
         <Grid item xs={12} md={4}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                 <AssessmentIcon color="primary" sx={{ mr: 1 }} />
                 <Typography variant="h6">Data Validation</Typography>
               </Box>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Validate your data integrity, check for issues, and ensure business rule compliance.
-              </Typography>
               <Button
                 variant="contained"
                 startIcon={<CheckIcon />}
                 onClick={loadValidationResults}
                 disabled={loading}
                 fullWidth
+                sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
               >
                 {loading ? 'Validating...' : 'Run Validation'}
               </Button>
@@ -806,21 +802,19 @@ export default function OrganizationTools() {
           </Card>
         </Grid>
         <Grid item xs={12} md={4}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                 <BuildIcon color="primary" sx={{ mr: 1 }} />
                 <Typography variant="h6">Data Cleanup</Typography>
               </Box>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Clean up duplicate records, fix data issues, and optimize your database.
-              </Typography>
               <Button
                 variant="contained"
                 startIcon={<DeleteIcon />}
                 onClick={handleRunCleanup}
                 disabled={loading}
                 fullWidth
+                sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
               >
                 Run Cleanup
               </Button>
@@ -830,7 +824,7 @@ export default function OrganizationTools() {
       </Grid>
 
       {/* Detailed Data Issues */}
-      <Card sx={{ mb: 3 }}>
+      <Card elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
             Detailed Data Analysis
@@ -900,10 +894,10 @@ export default function OrganizationTools() {
                             </Button>
                           )}
                         </Box>
-                        <TableContainer sx={{ maxHeight: 300 }}>
+                        <TableContainer sx={{ maxHeight: 300, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
                           <Table size="small">
                             <TableHead>
-                              <TableRow>
+                              <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                                 <TableCell><strong>Serial Number</strong></TableCell>
                                 <TableCell><strong>Barcode Number</strong></TableCell>
                                 <TableCell><strong>Gas Type</strong></TableCell>
@@ -1071,15 +1065,15 @@ export default function OrganizationTools() {
       </Card>
 
       {/* Data Summary Table */}
-      <Card sx={{ mb: 3 }}>
+      <Card elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
             Data Summary
           </Typography>
-          <TableContainer>
+          <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
             <Table>
               <TableHead>
-                <TableRow>
+                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell><strong>Data Type</strong></TableCell>
                   <TableCell align="right"><strong>Total Records</strong></TableCell>
                   <TableCell align="right"><strong>Valid Records</strong></TableCell>

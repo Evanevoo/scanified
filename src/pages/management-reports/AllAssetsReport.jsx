@@ -265,10 +265,6 @@ export default function AllAssetsReport() {
           </Button>
         </Box>
 
-        <Typography variant="body1" color="text.secondary" mb={4}>
-          Comprehensive view of all assets in your system with detailed information and filtering options.
-        </Typography>
-
         {/* Summary Cards */}
         <Grid container spacing={3} mb={4}>
           <Grid item xs={12} sm={6} md={2.4}>

@@ -14,7 +14,8 @@ import {
   Chip,
   IconButton,
   Divider,
-  Alert
+  Alert,
+  Stack
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -219,29 +220,17 @@ export default function CustomReports() {
   });
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 2 }}>
-      <Paper elevation={0} sx={{ 
-        width: '100%', 
-        p: { xs: 1.5, md: 2.5 }, 
-        borderRadius: 2, 
-        boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', 
-        border: '1px solid var(--divider)', 
-        bgcolor: 'var(--bg-main)' 
-      }}>
-        {/* Header */}
-        <Box display="flex" alignItems="center" mb={3}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box display="flex" alignItems="center">
           <IconButton onClick={() => navigate(-1)} sx={{ mr: 2 }}>
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>
+          <Typography variant="h3" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
             📊 Custom Reports
           </Typography>
         </Box>
-
-        <Typography variant="body1" color="text.secondary" mb={4}>
-          Access comprehensive reports for assets, customers, deliveries, and analytics. 
-          Use the search and category filters to find the reports you need.
-        </Typography>
+      </Paper>
 
         {/* Search and Filters */}
         <Box mb={4}>
@@ -288,10 +277,13 @@ export default function CustomReports() {
             {filteredReports.map((report) => (
               <Grid item xs={12} sm={6} md={4} key={report.id}>
                 <Card 
+                  elevation={0}
                   sx={{ 
                     height: '100%', 
                     display: 'flex', 
                     flexDirection: 'column',
+                    borderRadius: 2.5,
+                    border: '1px solid rgba(15, 23, 42, 0.08)',
                     transition: 'transform 0.2s, box-shadow 0.2s',
                     '&:hover': {
                       transform: 'translateY(-2px)',
@@ -326,6 +318,7 @@ export default function CustomReports() {
                       color={report.color}
                       onClick={() => navigate(report.path)}
                       startIcon={<ReportIcon />}
+                      sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                     >
                       View Report
                     </Button>
@@ -337,7 +330,7 @@ export default function CustomReports() {
         )}
 
         {/* Summary Stats */}
-        <Box mt={6} p={3} bgcolor="var(--bg-card)" borderRadius={2}>
+        <Paper elevation={0} sx={{ mt: 6, p: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Typography variant="h6" gutterBottom>
             Reports Summary
           </Typography>
@@ -365,8 +358,7 @@ export default function CustomReports() {
               </Typography>
             </Grid>
           </Grid>
-        </Box>
-      </Paper>
+        </Paper>
     </Box>
   );
 } 

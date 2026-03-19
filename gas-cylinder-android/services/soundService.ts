@@ -342,7 +342,10 @@ class SoundService {
   async cleanup(): Promise<void> {
     for (const [id, sound] of this.soundCache) {
       try {
-        sound.remove();
+        // Cache can hold null when load failed - avoid calling remove() on null (crashes on Android)
+        if (sound != null && typeof sound.remove === 'function') {
+          sound.remove();
+        }
       } catch (error) {
         logger.warn(`Failed to remove sound ${id}:`, error);
       }

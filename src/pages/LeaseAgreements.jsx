@@ -119,7 +119,7 @@ export default function LeaseAgreements() {
   const fetchCustomers = async () => {
     const { data, error } = await supabase
       .from('customers')
-      .select('CustomerListID, name')
+      .select('CustomerListID, name, payment_terms, location')
       .eq('organization_id', profile.organization_id)
       .order('name');
     if (error) throw error;
@@ -588,32 +588,52 @@ export default function LeaseAgreements() {
   }
 
   return (
-    <Box p={3}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" gutterBottom>
-          Lease Agreements
-        </Typography>
-        <Box display="flex" gap={2}>
-          <Button variant="outlined" startIcon={<DownloadIcon />} onClick={exportToCSV} disabled={filteredAgreements.length === 0}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper
+        elevation={0}
+        sx={{
+          p: { xs: 2.5, md: 3 },
+          mb: 3,
+          borderRadius: 3,
+          border: '1px solid rgba(15, 23, 42, 0.08)',
+          background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+        }}
+      >
+      <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} flexDirection={{ xs: 'column', md: 'row' }} gap={2}>
+        <Box>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1.25 }}>
+            <Chip label="Billing" color="primary" size="small" sx={{ borderRadius: 999, fontWeight: 700 }} />
+            <Chip label="Lease agreements" size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+          </Box>
+          <Typography variant="h4" gutterBottom sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em', mb: 0.5 }}>
+            Lease agreements workspace
+          </Typography>
+          <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 760 }}>
+            Manage annual lease agreements, monitor agreement health, and move directly into exports, renewal workflows, and billing history.
+          </Typography>
+        </Box>
+        <Box display="flex" gap={2} flexWrap="wrap">
+          <Button variant="outlined" startIcon={<DownloadIcon />} onClick={exportToCSV} disabled={filteredAgreements.length === 0} sx={{ borderRadius: 999, textTransform: 'none' }}>
             Export CSV
           </Button>
-          <Button variant="outlined" component={Link} to="/import-rental-agreements" startIcon={<UploadIcon />}>
+          <Button variant="outlined" component={Link} to="/import-rental-agreements" startIcon={<UploadIcon />} sx={{ borderRadius: 999, textTransform: 'none' }}>
             Import from TrackAbout
           </Button>
-          <Button variant="outlined" component={Link} to="/send-yearly-lease-emails" startIcon={<EmailIcon />}>
+          <Button variant="outlined" component={Link} to="/send-yearly-lease-emails" startIcon={<EmailIcon />} sx={{ borderRadius: 999, textTransform: 'none' }}>
             Send yearly lease emails
           </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={handleAddAgreement}>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={handleAddAgreement} sx={{ borderRadius: 999, textTransform: 'none' }}>
             New Agreement
           </Button>
         </Box>
       </Box>
+      </Paper>
 
       {/* Stats Cards */}
       <Grid container spacing={3} mb={3}>
         <Grid item xs={12} md={3}>
-          <Card>
-            <CardContent>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', height: '100%' }}>
+            <CardContent sx={{ p: 2.5 }}>
               <Box display="flex" alignItems="center">
                 <BusinessIcon color="primary" sx={{ mr: 2 }} />
                 <Box>
@@ -627,8 +647,8 @@ export default function LeaseAgreements() {
           </Card>
         </Grid>
         <Grid item xs={12} md={3}>
-          <Card>
-            <CardContent>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', height: '100%' }}>
+            <CardContent sx={{ p: 2.5 }}>
               <Box display="flex" alignItems="center">
                 <DateIcon color="success" sx={{ mr: 2 }} />
                 <Box>
@@ -642,8 +662,8 @@ export default function LeaseAgreements() {
           </Card>
         </Grid>
         <Grid item xs={12} md={3}>
-          <Card>
-            <CardContent>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', height: '100%' }}>
+            <CardContent sx={{ p: 2.5 }}>
               <Box display="flex" alignItems="center">
                 <MoneyIcon color="info" sx={{ mr: 2 }} />
                 <Box>
@@ -657,8 +677,8 @@ export default function LeaseAgreements() {
           </Card>
         </Grid>
         <Grid item xs={12} md={3}>
-          <Card>
-            <CardContent>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', height: '100%' }}>
+            <CardContent sx={{ p: 2.5 }}>
               <Box display="flex" alignItems="center">
                 <DateIcon color="warning" sx={{ mr: 2 }} />
                 <Box>
@@ -675,7 +695,7 @@ export default function LeaseAgreements() {
 
       {/* Quick Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
-        <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)}>
+        <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)} sx={{ '& .MuiTab-root': { textTransform: 'none', fontWeight: 700, minHeight: 52 } }}>
           <Tab label={`All (${agreements.length})`} />
           <Tab label={`Active (${stats.activeAgreements})`} />
           <Tab label={`Expired (${agreements.filter((a) => a.status === 'expired').length})`} />
@@ -684,7 +704,8 @@ export default function LeaseAgreements() {
       </Box>
 
       {/* Filters */}
-      <Box display="flex" gap={2} mb={3}>
+      <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+      <Box display="flex" gap={2} flexDirection={{ xs: 'column', md: 'row' }}>
         <TextField
           placeholder="Search by customer, agreement #, or bottle..."
           value={searchTerm}
@@ -696,7 +717,7 @@ export default function LeaseAgreements() {
               </InputAdornment>
             ),
           }}
-          sx={{ minWidth: 320 }}
+          sx={{ minWidth: { xs: '100%', md: 320 } }}
         />
         <FormControl sx={{ minWidth: 150 }}>
           <InputLabel>Status</InputLabel>
@@ -714,12 +735,13 @@ export default function LeaseAgreements() {
           </Select>
         </FormControl>
       </Box>
+      </Paper>
 
       {/* Agreements Table */}
-      <TableContainer component={Paper}>
+      <TableContainer component={Paper} sx={{ borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Table>
           <TableHead>
-            <TableRow>
+            <TableRow sx={{ backgroundColor: '#f8fafc' }}>
               <TableCell>Agreement #</TableCell>
               <TableCell>Customer</TableCell>
               <TableCell>Bottle</TableCell>
@@ -962,6 +984,7 @@ export default function LeaseAgreements() {
                           ...formData,
                           customer_id: newCustomerId,
                           customer_name: customer?.name || '',
+                          payment_terms: customer?.payment_terms || formData.payment_terms || 'Net 30',
                           bottle_id: null,
                           applyToAllBottles: false
                         });

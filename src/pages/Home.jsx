@@ -311,6 +311,55 @@ export default function Home() {
   const welcomeMessage = getWelcomeMessage();
   const quickActions = getQuickActions();
   const statCards = getStatCards();
+  const roleLabel = isAdmin() ? 'Administrator' : isManager() ? 'Manager' : 'Team Member';
+  const operationalHealth = [
+    {
+      label: 'Customer records',
+      value: stats.customers,
+      helper: 'Active customer accounts in your organization',
+      tone: 'default',
+    },
+    {
+      label: 'Tracked cylinders',
+      value: stats.cylinders,
+      helper: 'Inventory units currently in the system',
+      tone: 'default',
+    },
+    {
+      label: 'Active rentals',
+      value: stats.activeRentals,
+      helper: 'Billable rented assets assigned to customers',
+      tone: stats.activeRentals > 0 ? 'success' : 'default',
+    },
+    {
+      label: 'Recent activity items',
+      value: recentActivity.length,
+      helper: 'Events visible in the latest activity timeline',
+      tone: recentActivity.length > 0 ? 'info' : 'default',
+    },
+  ];
+  const priorityQueues = [
+    {
+      title: 'Orders awaiting review',
+      description: 'Approve imports and resolve exceptions before they slow the floor down.',
+      action: 'Open approvals',
+      path: '/import-approvals',
+    },
+    {
+      title: 'Inventory lookups',
+      description: 'Jump into assets, ownership, and movement history without leaving the workspace.',
+      action: 'Open inventory',
+      path: '/inventory',
+    },
+    {
+      title: isAdmin() ? 'Team and access controls' : 'Customer and rental workflows',
+      description: isAdmin()
+        ? 'Review users, role coverage, and configuration changes.'
+        : 'Move quickly between customer, rental, and daily operations workflows.',
+      action: isAdmin() ? 'Open admin' : 'Open customers',
+      path: isAdmin() ? '/settings?tab=team' : '/customers',
+    },
+  ];
 
 
   if (loading) {
@@ -323,29 +372,71 @@ export default function Home() {
   }
 
   return (
-    <Box sx={{ p: { xs: 2, sm: 2.5 }, backgroundColor: 'transparent', minHeight: '100%' }}>
-      {/* Welcome Section */}
-      <Box sx={{ mb: 4, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.5 }}>
-        <Typography variant="h4" sx={{ fontWeight: 600, color: '#1a1a1a', fontSize: '1.75rem', letterSpacing: '-0.02em' }}>
-          {welcomeMessage.title}
-        </Typography>
-        {welcomeMessage.chip && (
-          <Chip
-            label={welcomeMessage.chip.label}
-            size="small"
-            color={welcomeMessage.chip.color}
-            sx={{ fontWeight: 600, fontSize: '0.75rem' }}
-          />
-        )}
-      </Box>
-      <Typography variant="body1" sx={{ color: '#6b7280', fontSize: '0.9375rem', mb: 4 }}>
-        {welcomeMessage.subtitle}
-      </Typography>
+    <Box sx={{ p: { xs: 2, sm: 3 }, backgroundColor: 'transparent', minHeight: '100%' }}>
+      <Paper
+        elevation={0}
+        sx={{
+          p: { xs: 2.25, sm: 2.75 },
+          mb: 3.5,
+          borderRadius: 3,
+          border: '1px solid rgba(15, 23, 42, 0.08)',
+          background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+        }}
+      >
+        <Stack
+          direction={{ xs: 'column', md: 'row' }}
+          spacing={2}
+          justifyContent="space-between"
+          alignItems={{ xs: 'flex-start', md: 'center' }}
+        >
+          <Box>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              {roleLabel} {organization?.name ? `· ${organization.name}` : ''}
+            </Typography>
+            <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', fontSize: { xs: '1.6rem', sm: '2rem' }, letterSpacing: '-0.03em' }}>
+              {welcomeMessage.title}
+            </Typography>
+          </Box>
+          <Stack direction="row" spacing={1.25} alignItems="center">
+            <Tooltip title="Refresh dashboard">
+              <IconButton
+                onClick={fetchDashboardData}
+                sx={{
+                  borderRadius: 2,
+                  width: 44,
+                  height: 44,
+                  border: '1px solid rgba(15, 23, 42, 0.08)',
+                  backgroundColor: '#fff',
+                  '&:hover': { backgroundColor: '#f8fafc' },
+                }}
+              >
+                <RefreshIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => navigate('/customers')}
+              sx={{
+                borderRadius: 2.5,
+                px: 2,
+                py: 1.15,
+                textTransform: 'none',
+                fontWeight: 700,
+                backgroundColor: primaryColor,
+                boxShadow: 'none',
+                '&:hover': { backgroundColor: primaryColor, opacity: 0.92, boxShadow: 'none' },
+              }}
+            >
+              Add customer
+            </Button>
+          </Stack>
+        </Stack>
+      </Paper>
 
-      {/* Statistics Cards */}
-      <Grid container spacing={2.5} sx={{ mb: 4 }}>
-        {statCards.map((card, index) => (
-          <Grid item xs={12} sm={6} md={4} lg={2} key={index}>
+      <Grid container spacing={2} sx={{ mb: 3.5 }}>
+        {statCards.slice(0, 4).map((card, index) => (
+          <Grid item xs={12} sm={6} md={3} key={index}>
             <Card 
               onClick={card.onClick}
               elevation={0}
@@ -362,7 +453,7 @@ export default function Home() {
                 }
               }}
             >
-              <CardContent sx={{ p: 2.5 }}>
+              <CardContent sx={{ p: 2.25 }}>
                 <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 1.5 }}>
                   <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     {card.title}
@@ -393,16 +484,17 @@ export default function Home() {
       </Grid>
 
       <Grid container spacing={3}>
-        {/* Quick Actions */}
-        <Grid item xs={12} md={8}>
-          <Card elevation={0} sx={{ height: '100%', p: 3, borderRadius: 2, border: '1px solid rgba(0,0,0,0.06)' }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#1a1a1a', mb: 2, display: 'flex', alignItems: 'center', gap: 1.25, fontSize: '1rem' }}>
-              <Box sx={{ color: primaryColor, display: 'flex', alignItems: 'center' }}>
-                <WorkIcon fontSize="small" />
-              </Box>
-              Quick Actions
-            </Typography>
-            <Grid container spacing={1.5}>
+        <Grid item xs={12} xl={8}>
+          <Stack spacing={3}>
+            <Card elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} sx={{ mb: 2.5 }}>
+                <Box>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#0f172a', fontSize: '1rem' }}>
+                    Quick actions
+                  </Typography>
+                </Box>
+              </Stack>
+              <Grid container spacing={1.5}>
               {quickActions.map((action, index) => (
                 <Grid item xs={12} sm={6} md={4} key={index}>
                   <Button
@@ -425,8 +517,10 @@ export default function Home() {
                       fontWeight: 500,
                       fontSize: '0.875rem',
                       transition: 'background-color 0.15s, border-color 0.15s',
+                      backgroundColor: '#fcfcfd',
                       '&:hover': {
                         borderWidth: '1.5px',
+                        backgroundColor: '#fff',
                       },
                     }}
                   >
@@ -435,33 +529,115 @@ export default function Home() {
                 </Grid>
               ))}
             </Grid>
-          </Card>
+            </Card>
+
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <Card elevation={0} sx={{ height: '100%', p: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#0f172a', mb: 0.75 }}>
+                    Operational health
+                  </Typography>
+                  <Stack spacing={1.5}>
+                    {operationalHealth.map((item) => (
+                      <Box
+                        key={item.label}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: 2,
+                          p: 1.75,
+                          borderRadius: 2,
+                          backgroundColor: '#f8fafc',
+                          border: '1px solid rgba(15, 23, 42, 0.06)',
+                        }}
+                      >
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                            {item.label}
+                          </Typography>
+                        </Box>
+                        <Chip
+                          label={item.value}
+                          size="small"
+                          color={item.tone === 'success' ? 'success' : item.tone === 'info' ? 'info' : 'default'}
+                          sx={{ fontWeight: 700, minWidth: 52 }}
+                        />
+                      </Box>
+                    ))}
+                  </Stack>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Card elevation={0} sx={{ height: '100%', p: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#0f172a', mb: 0.75 }}>
+                    Priority queues
+                  </Typography>
+                  <Stack spacing={1.5}>
+                    {priorityQueues.map((queue) => (
+                      <Paper
+                        key={queue.title}
+                        variant="outlined"
+                        sx={{
+                          p: 2,
+                          borderRadius: 2.5,
+                          backgroundColor: '#ffffff',
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', mb: 0.5 }}>
+                          {queue.title}
+                        </Typography>
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={() => navigate(queue.path)}
+                          sx={{ px: 0, fontWeight: 700, textTransform: 'none' }}
+                        >
+                          {queue.action}
+                        </Button>
+                      </Paper>
+                    ))}
+                  </Stack>
+                </Card>
+              </Grid>
+            </Grid>
+          </Stack>
         </Grid>
 
-        {/* Recent Activity */}
-        <Grid item xs={12} md={4}>
-          <Card elevation={0} sx={{ height: '100%', p: 3, borderRadius: 2, border: '1px solid rgba(0,0,0,0.06)' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 2.5 }}>
-              <Box sx={{ color: primaryColor, display: 'flex', alignItems: 'center' }}>
-                <NotificationsIcon fontSize="small" />
+        <Grid item xs={12} xl={4}>
+          <Card elevation={0} sx={{ height: '100%', p: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2.5 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+                <Box sx={{ color: primaryColor, display: 'flex', alignItems: 'center' }}>
+                  <NotificationsIcon fontSize="small" />
+                </Box>
+                <Box>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#0f172a', fontSize: '1rem' }}>
+                    Activity timeline
+                  </Typography>
+                </Box>
               </Box>
-              <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#1a1a1a', fontSize: '1rem' }}>
-                Recent Activity
-              </Typography>
-            </Box>
+            </Stack>
             {recentActivity.length > 0 ? (
               <List dense disablePadding>
                 {recentActivity.map((activity, index) => (
-                  <ListItem key={index} sx={{ px: 0, py: 1.25, borderBottom: index < recentActivity.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+                  <ListItem key={index} sx={{ px: 0, py: 1.4, alignItems: 'flex-start', borderBottom: index < recentActivity.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
                     <ListItemIcon sx={{ minWidth: 40 }}>
                       <Avatar sx={{ width: 32, height: 32, bgcolor: `${primaryColor}20`, color: primaryColor, fontSize: '0.75rem', fontWeight: 600 }}>
                         {activity.profiles?.full_name?.charAt(0) || '?'}
                       </Avatar>
                     </ListItemIcon>
                     <ListItemText
-                      primary={`${activity.action} ${activity.table_name}`}
+                      primary={
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', mb: 0.35 }}>
+                            {activity.action}
+                          </Typography>
+                          <Typography variant="body2" sx={{ color: '#334155' }}>
+                            {activity.table_name}
+                          </Typography>
+                        </Box>
+                      }
                       secondary={`${activity.profiles?.full_name || 'Unknown'} · ${new Date(activity.created_at).toLocaleDateString()}`}
-                      primaryTypographyProps={{ variant: 'body2', fontWeight: 500, color: '#1a1a1a' }}
                       secondaryTypographyProps={{ variant: 'caption', color: '#6b7280' }}
                     />
                   </ListItem>
@@ -488,7 +664,7 @@ export default function Home() {
                   <line x1="12" y1="12" x2="16" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                 </Box>
                 <Typography variant="body2" sx={{ color: '#6b7280', fontSize: '0.875rem' }}>
-                  No recent activity. Activities will appear here once they occur.
+                  No recent activity yet. Activity, approvals, and scan events will appear here once work begins.
                 </Typography>
               </Box>
             )}

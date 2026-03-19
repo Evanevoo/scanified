@@ -334,7 +334,7 @@ export class NotificationService {
           platform: Platform.OS,
           device_model: Device.modelName || 'Unknown',
           os_version: Device.osVersion || 'Unknown',
-          app_version: '1.0.0', // You should get this from your app config
+          app_version: Constants.expoConfig?.version ?? '1.0.0',
           is_active: true,
           last_seen: new Date().toISOString(),
         }, {

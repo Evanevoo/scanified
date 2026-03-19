@@ -72,19 +72,35 @@ class StatsService {
    * Load today's statistics
    */
   private async loadTodayStats() {
+    const today = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; })();
+    const empty = this.createEmptyDayStats(today);
     try {
-      const today = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; })();
       const stored = await AsyncStorage.getItem(`daily_stats_${today}`);
-      
+
       if (stored) {
-        this.todayStats = JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        // Normalize in case stored data is malformed (prevents crash on property access)
+        this.todayStats = {
+          ...empty,
+          ...parsed,
+          date: parsed?.date || today,
+          scansCount: Number(parsed?.scansCount) || 0,
+          batchesCount: Number(parsed?.batchesCount) || 0,
+          duplicatesCount: Number(parsed?.duplicatesCount) || 0,
+          actionsBreakdown: { ...empty.actionsBreakdown, ...parsed?.actionsBreakdown },
+          customersScanned: Array.isArray(parsed?.customersScanned) ? parsed.customersScanned : [],
+          locationsVisited: Array.isArray(parsed?.locationsVisited) ? parsed.locationsVisited : [],
+          hoursActive: Number(parsed?.hoursActive) || 0,
+          averageScanTime: Number(parsed?.averageScanTime) || 0,
+          bestStreak: Number(parsed?.bestStreak) || 0,
+          achievements: Array.isArray(parsed?.achievements) ? parsed.achievements : [],
+        };
       } else {
-        this.todayStats = this.createEmptyDayStats(today);
+        this.todayStats = empty;
       }
     } catch (error) {
       logger.error('Error loading today stats:', error);
-      const today = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; })();
-      this.todayStats = this.createEmptyDayStats(today);
+      this.todayStats = empty;
     }
   }
 
@@ -95,7 +111,8 @@ class StatsService {
     try {
       const stored = await AsyncStorage.getItem('user_achievements');
       if (stored) {
-        this.achievements = JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        this.achievements = Array.isArray(parsed) ? parsed : [];
       }
     } catch (error) {
       logger.error('Error loading achievements:', error);
@@ -391,19 +408,21 @@ class StatsService {
           const stored = await AsyncStorage.getItem(`daily_stats_${dateStr}`);
           if (stored) {
             const dayStats: DailyStats = JSON.parse(stored);
-            totalScans += dayStats.scansCount;
-            weekStats.totalBatches += dayStats.batchesCount;
-            
-            dayStats.customersScanned.forEach(c => allCustomers.add(c));
-            dayStats.locationsVisited.forEach(l => allLocations.add(l));
-            weekStats.achievements.push(...dayStats.achievements);
-            
-            if (dayStats.scansCount > maxScans) {
-              maxScans = dayStats.scansCount;
+            const scans = Number(dayStats?.scansCount) || 0;
+            const batches = Number(dayStats?.batchesCount) || 0;
+            totalScans += scans;
+            weekStats.totalBatches += batches;
+
+            (dayStats?.customersScanned || []).forEach((c: string) => allCustomers.add(c));
+            (dayStats?.locationsVisited || []).forEach((l: string) => allLocations.add(l));
+            weekStats.achievements.push(...(dayStats?.achievements || []));
+
+            if (scans > maxScans) {
+              maxScans = scans;
               weekStats.mostProductiveDay = dateStr;
             }
-            
-            if (dayStats.scansCount > 0) daysWithData++;
+
+            if (scans > 0) daysWithData++;
           }
         } catch (error) {
           logger.warn(`Error loading stats for ${dateStr}:`, error);
@@ -520,7 +539,8 @@ class StatsService {
       
       if (stored) {
         const yesterdayStats: DailyStats = JSON.parse(stored);
-        const improvement = todayStats.scansCount - yesterdayStats.scansCount;
+        const yesterdayScans = Number(yesterdayStats?.scansCount) || 0;
+        const improvement = todayStats.scansCount - yesterdayScans;
         
         if (improvement > 0) {
           insights.push(`📈 You're ${improvement} scans ahead of yesterday!`);

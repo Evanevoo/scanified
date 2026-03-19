@@ -5,7 +5,7 @@ import {
   TextField, Dialog, DialogTitle, DialogContent, DialogActions, Grid,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Paper, Chip, IconButton, Tooltip, FormControl, InputLabel, Select,
-  MenuItem, Divider, Container
+  MenuItem, Divider
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -241,24 +241,21 @@ export default function OrganizationJoinCodes() {
 
   if (loading) {
     return (
-      <Container maxWidth="lg">
+      <Box sx={{ p: { xs: 2, sm: 3 } }}>
         <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
           <CircularProgress />
         </Box>
-      </Container>
+      </Box>
     );
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 3 }}>
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h4" gutterBottom>
-          Organization Join Codes
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+          Join Codes
         </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Generate secure, one-time numeric codes for users to join your organization.
-        </Typography>
-      </Box>
+      </Paper>
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
@@ -273,53 +270,52 @@ export default function OrganizationJoinCodes() {
       )}
 
       {/* Action Bar */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Box>
-              <Typography variant="h6" gutterBottom>
-                Active Join Codes
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {codes.filter(c => c.is_active && new Date(c.expires_at) > new Date()).length} active codes
-              </Typography>
-            </Box>
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <Button
-                variant="outlined"
-                startIcon={<RefreshIcon />}
-                onClick={fetchJoinCodes}
-              >
-                Refresh
-              </Button>
-              <Button
-                variant="outlined"
-                startIcon={<CleanupIcon />}
-                onClick={handleCleanupCodes}
-                disabled={cleaning}
-                color="warning"
-              >
-                {cleaning ? 'Cleaning...' : 'Cleanup Old'}
-              </Button>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => setCreateDialog({ ...createDialog, open: true })}
-              >
-                Generate Code
-              </Button>
-            </Box>
+      <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>
+              Active Join Codes
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {codes.filter(c => c.is_active && new Date(c.expires_at) > new Date()).length} active codes
+            </Typography>
           </Box>
-        </CardContent>
-      </Card>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={fetchJoinCodes}
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<CleanupIcon />}
+              onClick={handleCleanupCodes}
+              disabled={cleaning}
+              color="warning"
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+            >
+              {cleaning ? 'Cleaning...' : 'Cleanup Old'}
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setCreateDialog({ ...createDialog, open: true })}
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+            >
+              Generate Code
+            </Button>
+          </Box>
+        </Box>
+      </Paper>
 
       {/* Join Codes Table */}
-      <Card>
-        <CardContent>
-          <TableContainer>
+      <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
             <Table>
               <TableHead>
-                <TableRow>
+                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell>Code</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell>Role</TableCell>
@@ -442,9 +438,7 @@ export default function OrganizationJoinCodes() {
                 )}
               </TableBody>
             </Table>
-          </TableContainer>
-        </CardContent>
-      </Card>
+      </TableContainer>
 
       {/* Create Code Dialog */}
       <Dialog 
@@ -540,7 +534,7 @@ export default function OrganizationJoinCodes() {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateDialog({ ...createDialog, open: false })}>
+          <Button onClick={() => setCreateDialog({ ...createDialog, open: false })} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
             Cancel
           </Button>
           <Button 
@@ -548,6 +542,7 @@ export default function OrganizationJoinCodes() {
             onClick={handleCreateCode}
             disabled={creating}
             startIcon={creating ? <CircularProgress size={20} /> : <CodeIcon />}
+            sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
           >
             {creating ? 'Generating...' : 'Generate Code'}
           </Button>
@@ -555,9 +550,9 @@ export default function OrganizationJoinCodes() {
       </Dialog>
 
       {/* How to Use Section */}
-      <Card sx={{ mt: 3, bgcolor: 'info.light' }}>
+      <Card elevation={0} sx={{ mt: 3, bgcolor: 'info.light', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <CardContent>
-          <Typography variant="h6" gutterBottom>
+          <Typography variant="h6" gutterBottom sx={{ fontWeight: 700 }}>
             How to Use Join Codes
           </Typography>
           <Grid container spacing={2}>
@@ -597,6 +592,6 @@ export default function OrganizationJoinCodes() {
           </Grid>
         </CardContent>
       </Card>
-    </Container>
+    </Box>
   );
 }

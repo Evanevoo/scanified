@@ -4,7 +4,7 @@ import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination, Chip, IconButton,
-  Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, Autocomplete
+  Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, Autocomplete, Card, CardContent, Grid, Stack
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -510,28 +510,77 @@ function Customers({ profile }) {
   const filteredCustomers = customers;
 
   const pageCount = debouncedSearch.trim() ? 1 : Math.ceil(totalCount / rowsPerPage);
+  const selectedCount = selected.length;
+  const visibleAssetTotal = filteredCustomers.reduce((sum, customer) => sum + (assetCounts[customer.CustomerListID] || 0), 0);
+  const vendorCount = filteredCustomers.filter((customer) => customer.customer_type === 'VENDOR').length;
 
   if (!organization?.id) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
   if (loading) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
   if (error) return <Box p={4} color="error.main">Error: {error}</Box>;
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 1.5, md: 2.5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>Customers</Typography>
-          <Button
-            variant="contained"
-            color="secondary"
-            onClick={() => exportAllCustomersToCSV(organization.id)}
-            sx={{ ml: 2 }}
-          >
-            Export All Customers
-          </Button>
-        </Box>
-        
+    <Box sx={{ minHeight: '100%', bgcolor: 'transparent', py: 2, borderRadius: 0, overflow: 'visible' }}>
+      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 3 }, borderRadius: 3, boxShadow: 'none', border: '1px solid rgba(15, 23, 42, 0.08)', bgcolor: '#fcfcfb', overflow: 'visible' }}>
+        <Paper
+          elevation={0}
+          sx={{
+            p: { xs: 2.5, sm: 3 },
+            mb: 3,
+            borderRadius: 3,
+            border: '1px solid rgba(15, 23, 42, 0.08)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+          }}
+        >
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }}>
+            <Box>
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25, flexWrap: 'wrap' }}>
+                <Chip label="Customers" color="primary" size="small" sx={{ borderRadius: 999, fontWeight: 700 }} />
+                <Chip label={organization.name} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+              </Stack>
+              <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+                Customer workspace
+              </Typography>
+              <Typography variant="body1" sx={{ color: '#64748b', mt: 1, maxWidth: 760 }}>
+                Search, review, and manage customer relationships, hierarchy, and assigned asset counts from one place.
+              </Typography>
+            </Box>
+            <Button
+              variant="outlined"
+              onClick={() => exportAllCustomersToCSV(organization.id)}
+              sx={{ borderRadius: 2.5, textTransform: 'none', fontWeight: 700 }}
+            >
+              Export all customers
+            </Button>
+          </Stack>
+        </Paper>
+
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          {[
+            { label: 'Visible customers', value: filteredCustomers.length, helper: searchInput.trim() ? 'Search results in current view' : 'Customers loaded on this page' },
+            { label: 'Selected rows', value: selectedCount, helper: 'Available for bulk actions' },
+            { label: 'Visible assigned assets', value: visibleAssetTotal, helper: 'Asset totals shown in this result set' },
+            { label: 'Vendors in view', value: vendorCount, helper: 'Records currently marked as vendor' },
+          ].map((metric) => (
+            <Grid item xs={12} sm={6} lg={3} key={metric.label}>
+              <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', height: '100%' }}>
+                <CardContent sx={{ p: 2.25 }}>
+                  <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                    {metric.label}
+                  </Typography>
+                  <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', mt: 0.5, letterSpacing: '-0.03em' }}>
+                    {metric.value}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#64748b', mt: 0.75 }}>
+                    {metric.helper}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
         {/* Action Buttons */}
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+        <Paper elevation={0} sx={{ p: 2.5, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', backgroundColor: '#fff' }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={0}>
           <Box display="flex" gap={2}>
             <Button 
               variant="outlined" 
@@ -593,9 +642,11 @@ function Customers({ profile }) {
             </Button>
           </Box>
         </Box>
+        </Paper>
 
         {/* Search and Controls */}
-        <Box sx={{ mb: 3 }}>
+        <Paper elevation={0} sx={{ p: 2.5, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', backgroundColor: '#fff' }}>
+        <Box sx={{ mb: 0 }}>
           <Typography variant="h4" fontWeight={800} color="#1976d2" sx={{ mb: 2 }}>Customer Management</Typography>
           
           <Box display="flex" gap={2} alignItems="center" mb={3}>
@@ -655,12 +706,13 @@ function Customers({ profile }) {
             {locationFilter !== 'All' && ` (location: ${locationFilter})`}
           </Typography>
         </Box>
+        </Paper>
 
         {/* Customer Table */}
-        <TableContainer component={Paper} sx={{ borderRadius: 2, width: '100%', maxWidth: '100%', mb: 3 }}>
+        <TableContainer component={Paper} sx={{ borderRadius: 3, width: '100%', maxWidth: '100%', mb: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: 'none' }}>
           <Table size="medium" sx={{ width: '100%' }}>
             <TableHead>
-              <TableRow sx={{ background: '#fafbfc' }}>
+              <TableRow sx={{ background: '#f8fafc' }}>
                 <TableCell padding="checkbox">
                   <Checkbox
                     checked={customers.length > 0 && customers.every(c => selected.includes(c.CustomerListID))}
@@ -752,7 +804,7 @@ function Customers({ profile }) {
             </TableHead>
             <TableBody>
               {filteredCustomers.map((c) => (
-                <TableRow key={c.CustomerListID} sx={{ borderBottom: '1.5px solid #f0f0f0' }}>
+                <TableRow key={c.CustomerListID} sx={{ borderBottom: '1px solid rgba(15, 23, 42, 0.06)', '&:hover': { backgroundColor: '#fcfcfd' } }}>
                   <TableCell padding="checkbox">
                     <Checkbox
                       checked={selected.includes(c.CustomerListID)}

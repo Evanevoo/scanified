@@ -351,54 +351,54 @@ function BottlesForDay({ profile }) {
   if (error) return <Box p={4} color="error.main">Error: {error}</Box>;
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 1.5, md: 2.5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      {/* Header */}
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
             Fill History
           </Typography>
           <Button
             variant="outlined"
             startIcon={<ArrowBackIcon />}
             onClick={() => navigate('/home')}
-            sx={{ fontWeight: 700, borderRadius: 8, px: 3 }}
+            sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
           >
             Back to Dashboard
           </Button>
         </Box>
+      </Paper>
 
-        {/* Filters */}
-        <Box sx={{ mb: 3 }}>
-          <Box display="flex" gap={2} alignItems="center" mb={3} flexWrap="wrap">
-            <TextField
-              type="date"
-              label="Select Date"
-              value={selectedDate}
-              onChange={handleDateChange}
-              InputLabelProps={{ shrink: true }}
-              sx={{ minWidth: 200 }}
+      {/* Filters */}
+      <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+        <Box display="flex" gap={2} alignItems="center" flexWrap="wrap">
+          <TextField
+            type="date"
+            label="Select Date"
+            value={selectedDate}
+            onChange={handleDateChange}
+            InputLabelProps={{ shrink: true }}
+            sx={{ minWidth: 200 }}
+          />
+          <Box sx={{ flex: 1, width: '100%' }}>
+            <SearchInputWithIcon
+              placeholder="Search bottles by barcode, serial, customer..."
+              value={searchInput}
+              onChange={(e) => {
+                setSearchInput(e.target.value);
+              }}
+              onClear={() => setSearchInput('')}
+              className="w-full"
             />
-            <Box sx={{ flex: 1, width: '100%' }}>
-              <SearchInputWithIcon
-                placeholder="Search bottles by barcode, serial, customer..."
-                value={searchInput}
-                onChange={(e) => {
-                  setSearchInput(e.target.value);
-                }}
-                onClear={() => setSearchInput('')}
-                className="w-full"
-              />
-            </Box>
           </Box>
-          
-          <Typography variant="body2" color="text.secondary" mb={2}>
-            {searchInput.trim() 
-              ? `Found ${bottles.length} bottles matching "${searchInput}"`
-              : `Showing ${bottles.length} bottles processed on Fill Cylinder page for ${formatSelectedDate(selectedDate)}`
-            }
-            {' '}Fill times are shown in scanner timezone when available; otherwise in your local timezone.
-          </Typography>
         </Box>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+          {searchInput.trim() 
+            ? `Found ${bottles.length} bottles matching "${searchInput}"`
+            : `Showing ${bottles.length} bottles for ${formatSelectedDate(selectedDate)}`
+          }
+        </Typography>
+      </Paper>
 
         {/* Bottles Table */}
         {bottles.length === 0 ? (
@@ -411,10 +411,10 @@ function BottlesForDay({ profile }) {
             </Typography>
           </Box>
         ) : (
-          <TableContainer component={Paper} sx={{ borderRadius: 2, width: '100%', maxWidth: '100%', mb: 3 }}>
+          <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)', mb: 3 }}>
             <Table size="medium" sx={{ width: '100%' }}>
               <TableHead>
-                <TableRow sx={{ background: '#fafbfc' }}>
+                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell sx={{ fontWeight: 700 }}>Barcode</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Serial Number</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Product Code</TableCell>
@@ -554,7 +554,6 @@ function BottlesForDay({ profile }) {
             {error}
           </Alert>
         </Snackbar>
-      </Paper>
     </Box>
   );
 }

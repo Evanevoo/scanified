@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, CircularProgress, Alert, MenuItem, Select, InputLabel, FormControl, Chip, IconButton, Dialog, DialogTitle, DialogContent, DialogActions
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, CircularProgress, Alert, MenuItem, Select, InputLabel, FormControl, Chip, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Card, CardContent, Grid, Stack
 } from '@mui/material';
 import { Add, Remove, Edit, Save, Cancel } from '@mui/icons-material';
 
@@ -46,7 +46,31 @@ export default function ScannedOrders() {
   const { organization, profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
   const browserTz = typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone;
-  const userTimezone = profile?.preferences?.timezone || (browserTz && browserTz !== 'UTC' ? browserTz : undefined);
+  // Prefer profile timezone (Settings). Else browser TZ. Else UTC so scan times are consistent.
+  const displayTimezone = profile?.preferences?.timezone || browserTz || 'UTC';
+
+  // Parse DB timestamp as UTC. Supabase/Postgres often return ISO without Z (e.g. "2026-03-18T14:19:00");
+  // in JS that parses as LOCAL time and shows wrong. We always treat no-offset as UTC so display is correct.
+  const parseScanTime = (value) => {
+    if (value == null) return null;
+    if (typeof value === 'number' && Number.isFinite(value)) return new Date(value);
+    if (value instanceof Date) {
+      const t = value.getTime();
+      return Number.isNaN(t) ? null : new Date(t);
+    }
+    let s = typeof value === 'string' ? value.trim() : String(value);
+    if (!s) return null;
+    // Normalize Postgres "2026-03-18 14:19:00" to "2026-03-18T14:19:00"
+    if (/^\d{4}-\d{2}-\d{2}\s+\d/.test(s)) s = s.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d)/, '$1T$2');
+    // Supabase can return "+00" or "-00"; normalize to Z so we don't produce "...+00Z"
+    if (s.endsWith('+00') || s.endsWith('-00')) s = s.slice(0, -3) + 'Z';
+    const hasExplicitTz = s.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(s);
+    if (!hasExplicitTz) {
+      s = s.replace(/\.\d+$/, '') + 'Z';
+    }
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -128,7 +152,7 @@ export default function ScannedOrders() {
 
   const handleEdit = (order) => {
     if (!isAdmin) {
-      const scanTime = new Date(order.created_at);
+      const scanTime = parseScanTime(order.timestamp || order.created_at) || new Date(0);
       const now = new Date();
       const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
       if (hoursDiff > 24) {
@@ -165,7 +189,7 @@ export default function ScannedOrders() {
 
   const handleEnhancedEdit = (order) => {
     if (!isAdmin) {
-      const scanTime = new Date(order.created_at);
+      const scanTime = parseScanTime(order.timestamp || order.created_at) || new Date(0);
       const now = new Date();
       const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
       if (hoursDiff > 24) {
@@ -285,19 +309,112 @@ export default function ScannedOrders() {
     );
   });
 
+  const editableOrdersCount = filteredOrders.filter(order => {
+    const scanTime = parseScanTime(order.timestamp || order.created_at) || new Date(0);
+    const now = new Date();
+    const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
+    return isAdmin || hoursDiff <= 24;
+  }).length;
+
+  const workflowMetrics = [
+    {
+      label: 'Visible scans',
+      value: filteredOrders.length,
+      helper: 'Deduplicated order rows in the current view',
+    },
+    {
+      label: 'Orders loaded',
+      value: dedupedOrders.length,
+      helper: 'Latest scan per order, asset, and customer combination',
+    },
+    {
+      label: 'Editable now',
+      value: editableOrdersCount,
+      helper: isAdmin ? 'Admin access can revise all visible scans' : 'Standard users can edit scans from the last 24 hours',
+    },
+    {
+      label: 'Timezone',
+      value: displayTimezone,
+      helper: profile?.preferences?.timezone ? 'Using profile timezone from settings' : 'Using browser fallback timezone',
+    },
+  ];
+
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 1.5, md: 2.5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
-        <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Scanned Orders</Typography>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} gap={2}>
-          <TextField
-            size="small"
-            label="Search orders, customer, product code, asset..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            sx={{ minWidth: 260 }}
-          />
-        </Box>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 4, borderRadius: 0, overflow: 'visible' }}>
+      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 3 }, borderRadius: 3, boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)', border: '1px solid rgba(15, 23, 42, 0.08)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
+        <Paper
+          elevation={0}
+          sx={{
+            p: { xs: 2.5, md: 3 },
+            mb: 3,
+            borderRadius: 3,
+            border: '1px solid rgba(15, 23, 42, 0.08)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+          }}
+        >
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }}>
+            <Box>
+              <Stack direction="row" spacing={1} sx={{ mb: 1.25, flexWrap: 'wrap' }}>
+                <Chip label="Operations" color="primary" size="small" sx={{ borderRadius: 999, fontWeight: 700 }} />
+                <Chip label="Scanned orders" size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+              </Stack>
+              <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+                Scanned orders workspace
+              </Typography>
+              <Typography variant="body1" sx={{ color: '#64748b', mt: 1, maxWidth: 760 }}>
+                Review scan submissions, correct order metadata, and keep time-sensitive edits visible for the operations team.
+              </Typography>
+            </Box>
+            <Typography variant="body2" sx={{ color: '#64748b', maxWidth: 320 }}>
+              Scan times are shown in your timezone ({profile?.preferences?.timezone ? 'Settings' : 'browser'} -> {displayTimezone}).
+            </Typography>
+          </Stack>
+        </Paper>
+
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          {workflowMetrics.map((metric) => (
+            <Grid item xs={12} sm={6} lg={3} key={metric.label}>
+              <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', height: '100%' }}>
+                <CardContent sx={{ p: 2.25 }}>
+                  <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                    {metric.label}
+                  </Typography>
+                  <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', mt: 0.5, letterSpacing: '-0.03em' }}>
+                    {metric.value}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#64748b', mt: 0.75 }}>
+                    {metric.helper}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+
+        <Paper
+          elevation={0}
+          sx={{
+            p: { xs: 2, md: 2.5 },
+            mb: 3,
+            borderRadius: 2.5,
+            border: '1px solid rgba(15, 23, 42, 0.08)',
+          }}
+        >
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }}>
+            <TextField
+              size="small"
+              label="Search orders, customer, product code, asset..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              sx={{ minWidth: { xs: '100%', md: 320 } }}
+            />
+            <Chip
+              label={`${filteredOrders.length} visible row${filteredOrders.length === 1 ? '' : 's'}`}
+              variant="outlined"
+              sx={{ alignSelf: { xs: 'flex-start', md: 'center' }, borderRadius: 999, fontWeight: 700 }}
+            />
+          </Stack>
+        </Paper>
         {!organization && (
           <Alert severity="info" sx={{ mb: 2 }}>
             No organization is linked to your account. Scanned orders will appear here once your account is assigned to an organization.
@@ -308,10 +425,10 @@ export default function ScannedOrders() {
         ) : error ? (
           <Alert severity="error">Error: {error}</Alert>
         ) : (
-          <TableContainer component={Paper} sx={{ borderRadius: 2 }}>
+          <TableContainer component={Paper} sx={{ borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
             <Table size="small">
               <TableHead>
-                <TableRow>
+                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell>Scan ID</TableCell>
                   <TableCell>Order Number</TableCell>
                   <TableCell>Customer</TableCell>
@@ -325,7 +442,9 @@ export default function ScannedOrders() {
               </TableHead>
               <TableBody>
                 {filteredOrders.map(order => {
-                  const scanTime = new Date(order.created_at);
+                  // Use timestamp (actual scan time from device) when available; else created_at
+                  const scanTimeRaw = order.timestamp || order.created_at;
+                  const scanTime = parseScanTime(scanTimeRaw) || new Date(0);
                   const now = new Date();
                   const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
                   const isEditable = isAdmin || hoursDiff <= 24;
@@ -389,13 +508,17 @@ export default function ScannedOrders() {
                           size="small"
                         />
                       </TableCell>
-                      <TableCell>{order.created_at ? (() => {
+                      <TableCell>{scanTimeRaw && scanTime.getTime() ? (() => {
                         try {
-                          const opts = { dateStyle: 'medium', timeStyle: 'short' };
-                          if (userTimezone) opts.timeZone = userTimezone;
-                          return new Date(order.created_at).toLocaleString(undefined, opts);
+                          const opts = {
+                            dateStyle: 'medium',
+                            timeStyle: 'short',
+                            timeZone: displayTimezone,
+                            timeZoneName: 'short'
+                          };
+                          return scanTime.toLocaleString(undefined, opts);
                         } catch {
-                          return new Date(order.created_at).toLocaleString();
+                          return scanTime.toLocaleString();
                         }
                       })() : 'N/A'}</TableCell>
                       <TableCell>{users[order.user_id] || order.user_id || 'N/A'}</TableCell>

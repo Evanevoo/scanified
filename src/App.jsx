@@ -89,7 +89,6 @@ import Features from './pages/Features';
 import About from './pages/About';
 import CaseStudies from './pages/CaseStudies';
 import OwnerCMS from './pages/OwnerCMS';
-import CustomerPayments from './pages/CustomerPayments';
 import CompetitorAnalysis from './pages/CompetitorAnalysis';
 import Blog from './pages/Blog';
 import Security from './pages/Security';
@@ -164,7 +163,6 @@ const Locations = lazy(() => import('./pages/Locations'));
 const TransferFromCustomers = lazy(() => import('./pages/TransferFromCustomers.jsx'));
 const DailyUpdateAdmin = lazy(() => import('./pages/DailyUpdateAdmin'));
 const InvoiceDetail = lazy(() => import('./pages/InvoiceDetail'));
-const LeaseBillingDashboard = lazy(() => import('./pages/LeaseBillingDashboard'));
 
 // Analytics tracking component
 function AnalyticsTracker() {
@@ -234,7 +232,7 @@ function AppContent() {
                   <Route path="/" element={
                     loading ? <ModernLandingPage /> :
                     (sessionStorage.getItem('skip_org_redirect_once') ? <ModernLandingPage /> : (
-                      profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
+                      profile && organization ? <Navigate to="/home" replace /> :
                       profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
                       profile && !organization ? <Navigate to="/connect-organization" replace /> :
                       <ModernLandingPage />
@@ -257,7 +255,7 @@ function AppContent() {
                     <Suspense fallback={<LoadingSpinner />}>
                       {loading ? <LoginPage /> :
                         (sessionStorage.getItem('skip_org_redirect_once') ? <LoginPage /> : (
-                          profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
+                          profile && organization ? <Navigate to="/home" replace /> :
                           profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
                           profile && !organization ? <Navigate to="/connect-organization" replace /> :
                           <LoginPage />
@@ -381,15 +379,9 @@ function AppContent() {
                         <Billing />
                       </RoleProtectedRoute>
                     } />
-                    <Route path="/payments" element={<CustomerPayments />} />
                     <Route path="/invoice/:id" element={
                       <Suspense fallback={<LoadingSpinner />}>
                         <InvoiceDetail />
-                      </Suspense>
-                    } />
-                    <Route path="/lease-billing-dashboard" element={
-                      <Suspense fallback={<LoadingSpinner />}>
-                        <LeaseBillingDashboard />
                       </Suspense>
                     } />
                     <Route path="/support" element={<SupportCenter />} />
@@ -518,7 +510,8 @@ function AppContent() {
                   <Route path="*" element={
                     loading ? <Navigate to="/" replace /> :
                     (sessionStorage.getItem('skip_org_redirect_once') ? <Navigate to="/" replace /> : (
-                      profile && organization ? <Navigate to={profile?.role === 'owner' ? '/owner-portal' : '/home'} replace /> : 
+profile && organization ? <Navigate to="/home" replace /> :
+                      profile && !organization && profile.role === 'owner' ? <Navigate to="/owner-portal" replace /> :
                       profile && !organization ? <Navigate to="/connect-organization" replace /> :
                       <Navigate to="/" replace />
                     ))

@@ -1,5 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import {
+  Box,
+  Stack,
+  Typography,
+  Paper,
+  Button,
+  TextField,
+  Grid,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  CircularProgress,
+  Alert
+} from '@mui/material';
+import {
+  ArrowBack as ArrowBackIcon,
+  Edit as EditIcon
+} from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 
 export default function AssetHistory() {
@@ -78,87 +99,166 @@ export default function AssetHistory() {
     setLoading(false);
   };
 
-  if (loading) return <div>Loading...</div>;
-  if (error) return <div className="text-red-600">Error: {error}</div>;
-  if (!asset) return <div>Asset not found.</div>;
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box sx={{ p: { xs: 2, sm: 3 } }}>
+        <Alert severity="error">{error}</Alert>
+      </Box>
+    );
+  }
+
+  if (!asset) {
+    return (
+      <Box sx={{ p: { xs: 2, sm: 3 } }}>
+        <Alert severity="error">Asset not found.</Alert>
+      </Box>
+    );
+  }
 
   return (
-    <div className="max-w-5xl mx-auto mt-10 bg-gradient-to-br from-white via-blue-50 to-blue-100 shadow-2xl rounded-2xl p-8 border border-blue-100 w-full">
-      <button onClick={() => navigate(-1)} className="mb-4 bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded">Back</button>
-      <h2 className="text-2xl font-bold mb-4">Asset History</h2>
-      {/* Asset Overview */}
-      <div className="mb-6 p-4 bg-white/80 rounded-xl shadow border border-blue-100">
-        <div className="flex justify-between items-center mb-2">
-          <div className="font-bold text-blue-900 text-lg">{asset.description || 'Asset'}</div>
-          {!editMode && <button onClick={handleAssetEdit} className="bg-yellow-400 text-yellow-900 px-4 py-2 rounded shadow hover:bg-yellow-500">Edit Asset</button>}
-        </div>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box display="flex" alignItems="center" gap={1}>
+          <Button onClick={() => navigate(-1)} startIcon={<ArrowBackIcon />} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
+            Back
+          </Button>
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+            Asset History
+          </Typography>
+        </Box>
+      </Paper>
+
+      <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a' }}>
+            {asset.description || 'Asset'}
+          </Typography>
+          {!editMode && (
+            <Button variant="outlined" startIcon={<EditIcon />} onClick={handleAssetEdit} sx={{ textTransform: 'none' }}>
+              Edit Asset
+            </Button>
+          )}
+        </Box>
         {editMode ? (
-          <div className="grid grid-cols-2 gap-2 mb-2">
-            <input name="barcode_number" value={editForm.barcode_number || ''} onChange={handleAssetEditChange} placeholder="Barcode" className="border p-2 rounded" />
-            <input name="serial_number" value={editForm.serial_number || ''} onChange={handleAssetEditChange} placeholder="Serial Number" className="border p-2 rounded" />
-            <input name="category" value={editForm.category || ''} onChange={handleAssetEditChange} placeholder="Category" className="border p-2 rounded" />
-            <input name="group_name" value={editForm.group_name || ''} onChange={handleAssetEditChange} placeholder="Group" className="border p-2 rounded" />
-            <input name="type" value={editForm.type || ''} onChange={handleAssetEditChange} placeholder="Type" className="border p-2 rounded" />
-            <input name="description" value={editForm.description || ''} onChange={handleAssetEditChange} placeholder="Description" className="border p-2 rounded" />
-            <input name="gas_type" value={editForm.gas_type || ''} onChange={handleAssetEditChange} placeholder="Gas Type" className="border p-2 rounded" />
-            <input name="dock_stock" value={editForm.dock_stock || ''} onChange={handleAssetEditChange} placeholder="Dock Stock" className="border p-2 rounded" />
-          </div>
+          <>
+            <Grid container spacing={2} sx={{ mb: 2 }}>
+              <Grid item xs={12} sm={6}>
+                <TextField fullWidth size="small" name="barcode_number" label="Barcode" value={editForm.barcode_number || ''} onChange={handleAssetEditChange} />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField fullWidth size="small" name="serial_number" label="Serial Number" value={editForm.serial_number || ''} onChange={handleAssetEditChange} />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField fullWidth size="small" name="category" label="Category" value={editForm.category || ''} onChange={handleAssetEditChange} />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField fullWidth size="small" name="group_name" label="Group" value={editForm.group_name || ''} onChange={handleAssetEditChange} />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField fullWidth size="small" name="type" label="Type" value={editForm.type || ''} onChange={handleAssetEditChange} />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField fullWidth size="small" name="description" label="Description" value={editForm.description || ''} onChange={handleAssetEditChange} />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField fullWidth size="small" name="gas_type" label="Gas Type" value={editForm.gas_type || ''} onChange={handleAssetEditChange} />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField fullWidth size="small" name="dock_stock" label="Dock Stock" value={editForm.dock_stock || ''} onChange={handleAssetEditChange} />
+              </Grid>
+            </Grid>
+            <Stack direction="row" spacing={1}>
+              <Button variant="contained" onClick={handleAssetEditSave}>Save</Button>
+              <Button variant="outlined" onClick={() => { setEditMode(false); setEditForm(asset); }}>Cancel</Button>
+            </Stack>
+          </>
         ) : (
-          <div className="grid grid-cols-2 gap-2 mb-2">
-            <div><b>Barcode:</b> {asset.barcode_number ? (
-              <Link
-                to={`/bottle/${asset.id}`}
-                style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}
-              >
-                {asset.barcode_number}
-              </Link>
-            ) : ''}</div>
-            <div><b>Serial Number:</b> {asset.serial_number}</div>
-            <div><b>Category:</b> {asset.category}</div>
-            <div><b>Group:</b> {asset.group_name}</div>
-            <div><b>Type:</b> {asset.type}</div>
-            <div><b>Description:</b> {asset.description}</div>
-            <div><b>Gas Type:</b> {asset.gas_type}</div>
-            <div><b>Dock Stock:</b> {asset.dock_stock}</div>
-            <div><b>Status:</b> {asset.status || '-'}</div>
-            <div><b>Use State:</b> {asset.use_state || '-'}</div>
-          </div>
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="body2" color="text.secondary">Barcode</Typography>
+              <Typography variant="body1" fontWeight="bold">
+                {asset.barcode_number ? (
+                  <Link to={`/bottle/${asset.id}`} style={{ color: '#1976d2', textDecoration: 'underline' }}>
+                    {asset.barcode_number}
+                  </Link>
+                ) : '-'}
+              </Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="body2" color="text.secondary">Serial Number</Typography>
+              <Typography variant="body1" fontWeight="bold">{asset.serial_number || '-'}</Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="body2" color="text.secondary">Category</Typography>
+              <Typography variant="body1" fontWeight="bold">{asset.category || '-'}</Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="body2" color="text.secondary">Group</Typography>
+              <Typography variant="body1" fontWeight="bold">{asset.group_name || '-'}</Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="body2" color="text.secondary">Type</Typography>
+              <Typography variant="body1" fontWeight="bold">{asset.type || '-'}</Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="body2" color="text.secondary">Description</Typography>
+              <Typography variant="body1" fontWeight="bold">{asset.description || '-'}</Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="body2" color="text.secondary">Gas Type</Typography>
+              <Typography variant="body1" fontWeight="bold">{asset.gas_type || '-'}</Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="body2" color="text.secondary">Dock Stock</Typography>
+              <Typography variant="body1" fontWeight="bold">{asset.dock_stock || '-'}</Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="body2" color="text.secondary">Status</Typography>
+              <Typography variant="body1" fontWeight="bold">{asset.status || '-'}</Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="body2" color="text.secondary">Use State</Typography>
+              <Typography variant="body1" fontWeight="bold">{asset.use_state || '-'}</Typography>
+            </Grid>
+          </Grid>
         )}
-        {editMode && (
-          <div className="flex gap-2 mt-2">
-            <button onClick={handleAssetEditSave} className="bg-blue-600 text-white px-4 py-2 rounded">Save</button>
-            <button onClick={() => { setEditMode(false); setEditForm(asset); }} className="bg-gray-400 text-white px-4 py-2 rounded">Cancel</button>
-          </div>
-        )}
-      </div>
-      {/* Asset Record Log */}
-      <h3 className="font-bold mb-2 text-blue-800">Asset Record Log</h3>
-      <div className="mb-4 flex gap-2">
-        <input
-          type="text"
-          value={searchTerm}
-          onChange={e => setSearchTerm(e.target.value)}
-          placeholder="Search records by type, user, location, notes..."
-          className="border p-2 rounded w-80"
-        />
-      </div>
-      <div className="overflow-x-auto">
-        <table className="min-w-full bg-white border text-xs">
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Created</th>
-              <th>Submitted</th>
-              <th>User</th>
-              <th>Device</th>
-              <th>Location</th>
-              <th>Data</th>
-              <th>Associated Assets</th>
-              <th>Notes</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
+      </Paper>
+
+      <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a', mb: 2 }}>
+        Asset Record Log
+      </Typography>
+      <TextField
+        size="small"
+        value={searchTerm}
+        onChange={e => setSearchTerm(e.target.value)}
+        placeholder="Search records by type, user, location, notes..."
+        sx={{ mb: 2, width: { xs: '100%', sm: 320 } }}
+      />
+      <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow sx={{ backgroundColor: '#f8fafc' }}>
+              <TableCell>Type</TableCell>
+              <TableCell>Created</TableCell>
+              <TableCell>Submitted</TableCell>
+              <TableCell>User</TableCell>
+              <TableCell>Device</TableCell>
+              <TableCell>Location</TableCell>
+              <TableCell>Data</TableCell>
+              <TableCell>Associated Assets</TableCell>
+              <TableCell>Notes</TableCell>
+              <TableCell>Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
             {records.filter(r =>
               !searchTerm ||
               r.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -166,44 +266,48 @@ export default function AssetHistory() {
               r.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
               r.notes?.toLowerCase().includes(searchTerm.toLowerCase())
             ).map(record => (
-              <tr key={record.id} className={recordEditId === record.id ? 'bg-yellow-100' : ''}>
+              <TableRow key={record.id} sx={recordEditId === record.id ? { backgroundColor: '#fefce8' } : {}}>
                 {recordEditId === record.id ? (
                   <>
-                    <td><input name="type" value={recordEditForm.type || ''} onChange={handleRecordEditChange} className="border p-1 rounded w-24" /></td>
-                    <td>{recordEditForm.created_at}</td>
-                    <td>{recordEditForm.submitted_at}</td>
-                    <td><input name="user" value={recordEditForm.user || ''} onChange={handleRecordEditChange} className="border p-1 rounded w-24" /></td>
-                    <td><input name="device" value={recordEditForm.device || ''} onChange={handleRecordEditChange} className="border p-1 rounded w-24" /></td>
-                    <td><input name="location" value={recordEditForm.location || ''} onChange={handleRecordEditChange} className="border p-1 rounded w-24" /></td>
-                    <td><input name="data" value={recordEditForm.data || ''} onChange={handleRecordEditChange} className="border p-1 rounded w-24" /></td>
-                    <td><input name="associated_assets" value={recordEditForm.associated_assets || ''} onChange={handleRecordEditChange} className="border p-1 rounded w-24" /></td>
-                    <td><input name="notes" value={recordEditForm.notes || ''} onChange={handleRecordEditChange} className="border p-1 rounded w-24" /></td>
-                    <td>
-                      <button onClick={handleRecordEditSave} className="bg-blue-600 text-white px-2 py-1 rounded mr-1">Save</button>
-                      <button onClick={() => setRecordEditId(null)} className="bg-gray-400 text-white px-2 py-1 rounded">Cancel</button>
-                    </td>
+                    <TableCell><TextField size="small" name="type" value={recordEditForm.type || ''} onChange={handleRecordEditChange} sx={{ width: 100 }} /></TableCell>
+                    <TableCell>{recordEditForm.created_at}</TableCell>
+                    <TableCell>{recordEditForm.submitted_at}</TableCell>
+                    <TableCell><TextField size="small" name="user" value={recordEditForm.user || ''} onChange={handleRecordEditChange} sx={{ width: 100 }} /></TableCell>
+                    <TableCell><TextField size="small" name="device" value={recordEditForm.device || ''} onChange={handleRecordEditChange} sx={{ width: 100 }} /></TableCell>
+                    <TableCell><TextField size="small" name="location" value={recordEditForm.location || ''} onChange={handleRecordEditChange} sx={{ width: 100 }} /></TableCell>
+                    <TableCell><TextField size="small" name="data" value={recordEditForm.data || ''} onChange={handleRecordEditChange} sx={{ width: 100 }} /></TableCell>
+                    <TableCell><TextField size="small" name="associated_assets" value={recordEditForm.associated_assets || ''} onChange={handleRecordEditChange} sx={{ width: 100 }} /></TableCell>
+                    <TableCell><TextField size="small" name="notes" value={recordEditForm.notes || ''} onChange={handleRecordEditChange} sx={{ width: 100 }} /></TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={0.5}>
+                        <Button size="small" variant="contained" onClick={handleRecordEditSave}>Save</Button>
+                        <Button size="small" variant="outlined" onClick={() => setRecordEditId(null)}>Cancel</Button>
+                      </Stack>
+                    </TableCell>
                   </>
                 ) : (
                   <>
-                    <td>{record.type}</td>
-                    <td>{record.created_at}</td>
-                    <td>{record.submitted_at}</td>
-                    <td>{record.user}</td>
-                    <td>{record.device}</td>
-                    <td>{record.location}</td>
-                    <td>{record.data}</td>
-                    <td>{record.associated_assets}</td>
-                    <td>{record.notes}</td>
-                    <td>
-                      <button onClick={() => handleRecordEdit(record)} className="bg-yellow-400 text-yellow-900 px-2 py-1 rounded">Edit</button>
-                    </td>
+                    <TableCell>{record.type}</TableCell>
+                    <TableCell>{record.created_at}</TableCell>
+                    <TableCell>{record.submitted_at}</TableCell>
+                    <TableCell>{record.user}</TableCell>
+                    <TableCell>{record.device}</TableCell>
+                    <TableCell>{record.location}</TableCell>
+                    <TableCell>{record.data}</TableCell>
+                    <TableCell>{record.associated_assets}</TableCell>
+                    <TableCell>{record.notes}</TableCell>
+                    <TableCell>
+                      <Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => handleRecordEdit(record)} sx={{ textTransform: 'none' }}>
+                        Edit
+                      </Button>
+                    </TableCell>
                   </>
                 )}
-              </tr>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Box>
   );
-} 
+}

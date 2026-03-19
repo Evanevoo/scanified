@@ -423,7 +423,7 @@ export default function Settings() {
     ];
 
     const adminTabs = [];
-    if (profile?.role === 'admin' || profile?.role === 'owner') {
+    if (profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner') {
       adminTabs.push(
         { label: 'Invoice Template', icon: <ReceiptIcon />, id: 'invoice-template' },
         { label: 'Team', icon: <PeopleIcon />, id: 'team' },
@@ -1148,72 +1148,165 @@ export default function Settings() {
   return (
     <Box
       sx={{
-        minHeight: '100vh',
-        bgcolor: 'background.default',
-        py: { xs: 2, sm: 4 },
-        px: { xs: 1, sm: 2 },
+        minHeight: '100%',
+        bgcolor: 'transparent',
+        py: { xs: 2, sm: 3 },
+        px: { xs: 1.5, sm: 2.5 },
       }}
     >
       <Box sx={{ width: '100%' }}>
-        <Box sx={{ mb: { xs: 2, sm: 4 }, px: { xs: 2, sm: 0 } }}>
-          <Typography variant="h4" fontWeight={700} color="primary" sx={{ mb: 0.5 }}>
-            Settings
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            Manage your account, organization, and preferences
-          </Typography>
-        </Box>
-
-        <Card
+        <Paper
           elevation={0}
           sx={{
+            mb: 3,
+            p: { xs: 2.5, sm: 3 },
+            borderRadius: 3,
             border: '1px solid',
             borderColor: 'divider',
-            borderRadius: 3,
-            overflow: 'hidden',
+            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
           }}
         >
-          <Tabs
-            value={activeTab}
-            onChange={handleTabChange}
-            variant="scrollable"
-            scrollButtons="auto"
-            allowScrollButtonsMobile
-            sx={{
-              borderBottom: 1,
-              borderColor: 'divider',
-              px: { xs: 1, sm: 2 },
-              minHeight: 56,
-              '& .MuiTab-root': {
-                textTransform: 'none',
-                fontWeight: 600,
-                minHeight: 56,
-                py: 2,
-                px: { xs: 1.5, sm: 2 },
-                fontSize: { xs: '0.875rem', sm: '1rem' },
-                transition: 'none !important',
-                '&.Mui-selected': {
-                  color: 'primary.main',
-                },
-              },
-              '& .MuiTabs-indicator': {
-                height: 3,
-                borderRadius: '3px 3px 0 0',
-              },
-              '& .MuiTouchRipple-root': { display: 'none' },
-            }}
+          <Stack
+            direction={{ xs: 'column', md: 'row' }}
+            spacing={2}
+            justifyContent="space-between"
+            alignItems={{ xs: 'flex-start', md: 'center' }}
           >
-            {tabsConfig.map((tab, index) => (
-              <Tab
-                key={tab.id}
-                label={tab.label}
-                icon={tab.icon}
-                iconPosition="start"
-                disableRipple
-                sx={{ gap: 1 }}
-              />
-            ))}
-          </Tabs>
+            <Box>
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25, flexWrap: 'wrap' }}>
+                <Chip
+                  label={profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner' ? 'Admin workspace' : 'Personal workspace'}
+                  size="small"
+                  color="primary"
+                  sx={{ borderRadius: 999, fontWeight: 700 }}
+                />
+                {hasUnsavedChanges && (
+                  <Chip
+                    label="Unsaved changes"
+                    size="small"
+                    color="warning"
+                    sx={{ borderRadius: 999, fontWeight: 700 }}
+                  />
+                )}
+              </Stack>
+              <Typography variant="h4" fontWeight={700} sx={{ mb: 0.75, color: 'text.primary', letterSpacing: '-0.03em' }}>
+                Settings
+              </Typography>
+              <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 760 }}>
+                Manage your account, organization configuration, branding, formats, billing preferences, and support tools from one administrative workspace.
+              </Typography>
+            </Box>
+            <Stack direction={{ xs: 'row', sm: 'row' }} spacing={1}>
+              <Chip label={`${tabsConfig.length} sections`} variant="outlined" sx={{ borderRadius: 999 }} />
+              {organization?.name && <Chip label={organization.name} variant="outlined" sx={{ borderRadius: 999 }} />}
+            </Stack>
+          </Stack>
+        </Paper>
+
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={3} lg={2.8}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 1.5,
+                borderRadius: 3,
+                border: '1px solid',
+                borderColor: 'divider',
+                position: { md: 'sticky' },
+                top: { md: 16 },
+                backgroundColor: '#fcfcfb',
+              }}
+            >
+              <Typography variant="overline" sx={{ px: 1.25, color: 'text.secondary', fontWeight: 700, letterSpacing: '0.08em' }}>
+                Workspace sections
+              </Typography>
+              <Stack spacing={0.75} sx={{ mt: 1 }}>
+                {tabsConfig.map((tab, index) => (
+                  <Button
+                    key={tab.id}
+                    fullWidth
+                    startIcon={tab.icon}
+                    onClick={() => handleTabChange(null, index)}
+                    variant={activeTab === index ? 'contained' : 'text'}
+                    sx={{
+                      justifyContent: 'flex-start',
+                      textTransform: 'none',
+                      borderRadius: 2.5,
+                      py: 1.15,
+                      px: 1.5,
+                      fontWeight: 700,
+                      boxShadow: 'none',
+                    }}
+                  >
+                    {tab.label}
+                  </Button>
+                ))}
+              </Stack>
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12} md={9} lg={9.2}>
+            <Card
+              elevation={0}
+              sx={{
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 3,
+                overflow: 'hidden',
+                backgroundColor: '#fff',
+              }}
+            >
+              <Tabs
+                value={activeTab}
+                onChange={handleTabChange}
+                variant="scrollable"
+                scrollButtons="auto"
+                allowScrollButtonsMobile
+                sx={{
+                  display: { xs: 'flex', md: 'none' },
+                  borderBottom: 1,
+                  borderColor: 'divider',
+                  px: { xs: 1, sm: 2 },
+                  minHeight: 56,
+                  '& .MuiTab-root': {
+                    textTransform: 'none',
+                    fontWeight: 600,
+                    minHeight: 56,
+                    py: 2,
+                    px: { xs: 1.5, sm: 2 },
+                    fontSize: { xs: '0.875rem', sm: '1rem' },
+                    transition: 'none !important',
+                    '&.Mui-selected': {
+                      color: 'primary.main',
+                    },
+                  },
+                  '& .MuiTabs-indicator': {
+                    height: 3,
+                    borderRadius: '3px 3px 0 0',
+                  },
+                  '& .MuiTouchRipple-root': { display: 'none' },
+                }}
+              >
+                {tabsConfig.map((tab) => (
+                  <Tab
+                    key={tab.id}
+                    label={tab.label}
+                    icon={tab.icon}
+                    iconPosition="start"
+                    disableRipple
+                    sx={{ gap: 1 }}
+                  />
+                ))}
+              </Tabs>
+
+              <Box sx={{ borderBottom: { xs: 0, md: '1px solid' }, borderColor: 'divider', px: { xs: 2, sm: 3 }, py: 2.25 }}>
+                <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary', mb: 0.5 }}>
+                  {tabsConfig[activeTab]?.label || 'Settings'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Review and update the selected settings section. Changes stay scoped to this workspace.
+                </Typography>
+              </Box>
           
           {/* Profile Tab */}
           <TabPanel value={activeTab} index={0}>
@@ -1261,6 +1354,7 @@ export default function Settings() {
                       <MenuItem value="UTC">UTC</MenuItem>
                       <MenuItem value="America/New_York">Eastern (America/New_York)</MenuItem>
                       <MenuItem value="America/Chicago">Central (America/Chicago)</MenuItem>
+                      <MenuItem value="America/Regina">Saskatchewan (America/Regina)</MenuItem>
                       <MenuItem value="America/Denver">Mountain (America/Denver)</MenuItem>
                       <MenuItem value="America/Los_Angeles">Pacific (America/Los_Angeles)</MenuItem>
                       <MenuItem value="Europe/London">Europe/London</MenuItem>
@@ -1728,7 +1822,7 @@ export default function Settings() {
           </TabPanel>
 
           {/* Invoice Template Tab (Admin/Owner only) */}
-          {(profile?.role === 'admin' || profile?.role === 'owner') && (
+          {(profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner') && (
             <TabPanel value={activeTab} index={5}>
               <Box sx={{ width: '100%' }}>
                 <Typography variant="h4" gutterBottom>
@@ -2085,7 +2179,7 @@ export default function Settings() {
           )}
 
           {/* Team Tab (Admin/Owner only) */}
-          {(profile?.role === 'admin' || profile?.role === 'owner') && (
+          {(profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner') && (
             <TabPanel value={activeTab} index={6}>
               <UserManagement />
             </TabPanel>
@@ -2093,7 +2187,7 @@ export default function Settings() {
 
 
           {/* Assets Tab (Admin/Owner only) */}
-          {(profile?.role === 'admin' || profile?.role === 'owner') && (
+          {(profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner') && (
             <TabPanel value={activeTab} index={7}>
               <Box sx={{ width: '100%' }}>
                 <Typography variant="h4" gutterBottom>
@@ -2253,7 +2347,7 @@ export default function Settings() {
           )}
 
           {/* Barcodes Tab (Admin/Owner only) */}
-          {(profile?.role === 'admin' || profile?.role === 'owner') && (
+          {(profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner') && (
             <TabPanel value={activeTab} index={8}>
               <Box sx={{ width: '100%' }}>
                 <Typography variant="h4" gutterBottom sx={{ color: 'primary', fontWeight: 600 }}>
@@ -2726,7 +2820,9 @@ export default function Settings() {
             </DialogActions>
           </Dialog>
           
-        </Card>
+            </Card>
+          </Grid>
+        </Grid>
 
         {/* Invoice Template Manager Dialog */}
         <InvoiceTemplateManager

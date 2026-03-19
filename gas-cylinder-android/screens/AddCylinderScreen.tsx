@@ -275,7 +275,9 @@ export default function AddCylinderScreen() {
       setError('Add at least one bottle (barcode required).');
       return;
     }
-    if (!selectedGasType || !selectedLocation) {
+    const gasTypeStr = selectedGasType != null ? String(selectedGasType) : '';
+    const locationStr = selectedLocation != null ? String(selectedLocation) : '';
+    if (!gasTypeStr.trim() || !locationStr.trim()) {
       setError('Gas type and location are required for all bottles.');
       return;
     }
@@ -291,13 +293,13 @@ export default function AddCylinderScreen() {
       }
     }
 
-    const selectedGasTypeData = gasTypes.find(gt => gt.id.toString() === selectedGasType);
+    const selectedGasTypeData = gasTypes.find(gt => String(gt.id) === gasTypeStr);
     if (!selectedGasTypeData) {
       setError('Invalid gas type selected.');
       setLoading(false);
       return;
     }
-    const selectedLocationData = locations.find(loc => loc.id === selectedLocation);
+    const selectedLocationData = locations.find(loc => String(loc.id) === locationStr);
     if (!selectedLocationData) {
       setError('Invalid location selected.');
       setLoading(false);
@@ -545,8 +547,8 @@ export default function AddCylinderScreen() {
           ) : (
             <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <Picker
-                selectedValue={selectedLocation}
-                onValueChange={setSelectedLocation}
+                selectedValue={selectedLocation != null ? String(selectedLocation) : ''}
+                onValueChange={(value) => setSelectedLocation(value != null && value !== '' ? String(value) : '')}
                 style={[styles.picker, { color: colors.text }]}
                 enabled={true}
                 dropdownIconColor={colors.text}
@@ -556,7 +558,7 @@ export default function AddCylinderScreen() {
                   <Picker.Item 
                     key={location.id} 
                     label={location.name} 
-                    value={location.id} 
+                    value={String(location.id)} 
                   />
                 ))}
               </Picker>
@@ -568,10 +570,11 @@ export default function AddCylinderScreen() {
           <Text style={[styles.inputLabel, { color: colors.text }]}>Ownership</Text>
           <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Picker
-              selectedValue={selectedOwner}
+              selectedValue={selectedOwner != null ? String(selectedOwner) : ''}
               onValueChange={value => {
-                if (value === '__add_new__') setAddingOwner(true);
-                else setSelectedOwner(value);
+                const str = value != null ? String(value) : '';
+                if (str === '__add_new__') setAddingOwner(true);
+                else setSelectedOwner(str);
               }}
               style={[styles.picker, { color: colors.text }]}
               enabled={true}
@@ -579,7 +582,7 @@ export default function AddCylinderScreen() {
             >
               <Picker.Item label="Select Owner" value="" />
               {owners.map(owner => (
-                <Picker.Item key={owner.id} label={owner.name} value={owner.name} />
+                <Picker.Item key={owner.id} label={owner.name} value={String(owner.name)} />
               ))}
               <Picker.Item label="Add new owner..." value="__add_new__" />
             </Picker>

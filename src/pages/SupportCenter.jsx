@@ -7,7 +7,7 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   LinearProgress, Divider, Accordion, AccordionSummary, AccordionDetails,
   List, ListItem, ListItemText, ListItemIcon, Switch, FormControlLabel,
-  TextareaAutosize, Snackbar
+  TextareaAutosize, Snackbar, Stack
 } from '@mui/material';
 import {
   Support as SupportIcon,
@@ -297,37 +297,25 @@ export default function SupportCenter() {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" fontWeight={800} color="primary" mb={3}>
-        Support Center
-      </Typography>
-
-      {/* Header with actions */}
-      <Paper variant="outlined" sx={{ p: 3, mb: 3, borderRadius: 2 }}>
-        <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} sm={6}>
-            <Typography variant="h6" fontWeight={700}>
-              Support Tickets
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Get help with your gas cylinder management system
-            </Typography>
-          </Grid>
-          <Grid item xs={12} sm={6} sx={{ textAlign: 'right' }}>
-            <Button
-              onClick={() => setNewTicketDialog(true)}
-              variant="contained"
-              startIcon={<AddIcon />}
-              sx={{ borderRadius: 2, fontWeight: 700 }}
-            >
-              New Ticket
-            </Button>
-          </Grid>
-        </Grid>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+            Support Center
+          </Typography>
+          <Button
+            onClick={() => setNewTicketDialog(true)}
+            variant="contained"
+            startIcon={<AddIcon />}
+            sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+          >
+            New Ticket
+          </Button>
+        </Box>
       </Paper>
 
       {/* Search and filters */}
-      <Paper variant="outlined" sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+      <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} sm={6}>
             <TextField
@@ -361,6 +349,7 @@ export default function SupportCenter() {
               startIcon={<RefreshIcon />}
               variant="outlined"
               fullWidth
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
             >
               Refresh
             </Button>
@@ -377,7 +366,7 @@ export default function SupportCenter() {
         <Grid container spacing={2}>
           {filteredTickets.map((ticket) => (
             <Grid item xs={12} key={ticket.id}>
-              <Card variant="outlined" sx={{ borderRadius: 2 }}>
+              <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                 <CardContent>
                   <Grid container spacing={2} alignItems="center">
                     <Grid item xs={12} sm={8}>
@@ -413,6 +402,7 @@ export default function SupportCenter() {
                           variant="outlined"
                           startIcon={<ViewIcon />}
                           size="small"
+                          sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                         >
                           View Details
                         </Button>
@@ -423,6 +413,7 @@ export default function SupportCenter() {
                             color="primary"
                             startIcon={<RestoreIcon />}
                             size="small"
+                            sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                           >
                             Reopen
                           </Button>

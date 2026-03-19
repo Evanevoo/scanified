@@ -162,7 +162,9 @@ export default function CookieNotice() {
           borderTop: '1px solid #e2e8f0',
           boxShadow: '0 -4px 6px -1px rgba(0, 0, 0, 0.1)',
           zIndex: 9999,
-          p: 3
+          p: 3,
+          // NotificationLayer uses pointer-events: none on the full-screen root; re-enable hits on the banner.
+          pointerEvents: 'auto',
         }}
       >
         <Box sx={{ maxWidth: 'lg', mx: 'auto' }}>
@@ -218,6 +220,9 @@ export default function CookieNotice() {
         TransitionComponent={Transition}
         maxWidth="md"
         fullWidth
+        ModalProps={{
+          sx: { zIndex: 100000 },
+        }}
       >
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
-import { Box, Typography, Button, TextField, Table, TableBody, TableCell, TableHead, TableRow, Paper, Alert, CircularProgress } from '@mui/material';
+import { Box, Typography, Button, TextField, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Stack, Alert, CircularProgress } from '@mui/material';
 
 export default function RentalClassGroups() {
   const { organization } = useAuth();
@@ -92,30 +92,35 @@ export default function RentalClassGroups() {
 
   if (!organization?.id) {
     return (
-      <Box sx={{ p: 4 }}>
+      <Box sx={{ p: { xs: 2, sm: 3 } }}>
         <Alert severity="info">Select an organization to manage rental class groups.</Alert>
       </Box>
     );
   }
 
   return (
-    <Box sx={{ p: 4 }}>
-      <Button onClick={() => navigate(-1)} sx={{ mb: 2 }} variant="outlined">Back</Button>
-      <Typography variant="h5" fontWeight="bold" mb={3}>Rental Class Groups</Typography>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Button onClick={() => navigate(-1)} sx={{ mb: 2, borderRadius: 999, fontWeight: 700, textTransform: 'none' }} variant="outlined">Back</Button>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>Rental Class Groups</Typography>
+      </Paper>
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>{error}</Alert>}
-      <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', gap: 2, alignItems: 'flex-end', mb: 3, flexWrap: 'wrap' }}>
-        <TextField name="name" label="Name" value={form.name} onChange={handleChange} required size="small" sx={{ minWidth: 200 }} />
-        <TextField name="description" label="Description" value={form.description} onChange={handleChange} size="small" sx={{ minWidth: 280 }} />
-        <Button type="submit" variant="contained" disabled={saving}>{editingId ? 'Update' : 'Add'}</Button>
-        {editingId && <Button type="button" variant="outlined" onClick={() => { setEditingId(null); setForm({ name: '', description: '' }); }}>Cancel</Button>}
-      </Box>
-      <Paper>
+      <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+        <Stack component="form" onSubmit={handleSubmit} direction="row" flexWrap="wrap" gap={2} alignItems="flex-end">
+          <TextField name="name" label="Name" value={form.name} onChange={handleChange} required size="small" sx={{ minWidth: 200 }} />
+          <TextField name="description" label="Description" value={form.description} onChange={handleChange} size="small" sx={{ minWidth: 280 }} />
+          <Button type="submit" variant="contained" disabled={saving}>{editingId ? 'Update' : 'Add'}</Button>
+          {editingId && <Button type="button" variant="outlined" onClick={() => { setEditingId(null); setForm({ name: '', description: '' }); }}>Cancel</Button>}
+        </Stack>
+      </Paper>
+      <Paper elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         {loading ? (
           <Box display="flex" justifyContent="center" p={4}><CircularProgress /></Box>
         ) : (
+          <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
           <Table>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                 <TableCell><strong>Name</strong></TableCell>
                 <TableCell><strong>Description</strong></TableCell>
                 <TableCell><strong>Actions</strong></TableCell>
@@ -139,6 +144,7 @@ export default function RentalClassGroups() {
               )}
             </TableBody>
           </Table>
+          </TableContainer>
         )}
       </Paper>
     </Box>

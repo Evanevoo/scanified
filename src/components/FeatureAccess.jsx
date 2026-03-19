@@ -29,7 +29,7 @@ export default function FeatureAccess({
   // Check access based on different criteria
   const hasAccess = () => {
     // Owner always has access
-    if (profile?.role === 'owner') return true;
+    if (profile?.role === 'owner' || profile?.role === 'orgowner') return true;
 
     // Check admin only access
     if (adminOnly && !isAdmin()) return false;

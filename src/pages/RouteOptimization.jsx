@@ -2,11 +2,11 @@ import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Grid, Card, CardContent, CardActions,
-  Button, Chip, IconButton, TextField, InputAdornment,
+  Button, Chip, IconButton, TextField, InputAdornment, Stack,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Dialog, DialogTitle, DialogContent, DialogActions,
   Alert, CircularProgress, Avatar, Tooltip, Badge,
-  FormControl, InputLabel, Select, MenuItem, Container,
+  FormControl, InputLabel, Select, MenuItem,
   Accordion, AccordionSummary, AccordionDetails,
   List, ListItem, ListItemText, ListItemIcon,
   Divider, Switch, FormControlLabel, FormGroup,
@@ -108,6 +108,9 @@ export default function RouteOptimization() {
   const [activeTab, setActiveTab] = useState(0);
 
   useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'website-routes-pre-fix',hypothesisId:'W2',location:'src/pages/RouteOptimization.jsx:110',message:'RouteOptimization mounted',data:{path:window.location.pathname,profileRole:profile?.role || null,guardPath:window.__lastRoleProtectedRoute?.path || null,guardHasAccess:window.__lastRoleProtectedRoute?.hasAccess ?? null,canWriteRoutes:can('write:routes')},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (profile?.organization_id) {
       fetchData();
     }
@@ -319,44 +322,42 @@ export default function RouteOptimization() {
 
   if (loading) {
     return (
-      <Container maxWidth="lg" sx={{ py: 2 }}>
+      <Box sx={{ p: { xs: 2, sm: 3 } }}>
         <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
           <CircularProgress />
         </Box>
-      </Container>
+      </Box>
     );
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 2 }}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
       {/* Header */}
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
-        <Box>
-          <Typography variant="h4" gutterBottom>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
             Route Optimization
           </Typography>
-          <Typography variant="body1" color="text.secondary">
-            Optimize delivery routes for efficiency and cost savings
-          </Typography>
+          <Box>
+            <Button
+              variant="outlined"
+              startIcon={<SettingsIcon />}
+              onClick={() => setOptimizeDialog(true)}
+              sx={{ mr: 2, borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+            >
+              Optimize Routes
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setCreateRouteDialog(true)}
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+            >
+              New Route
+            </Button>
+          </Box>
         </Box>
-        <Box>
-          <Button
-            variant="outlined"
-            startIcon={<SettingsIcon />}
-            onClick={() => setOptimizeDialog(true)}
-            sx={{ mr: 2 }}
-          >
-            Optimize Routes
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setCreateRouteDialog(true)}
-          >
-            New Route
-          </Button>
-        </Box>
-      </Box>
+      </Paper>
 
       {/* Alerts */}
       {error && (
@@ -371,9 +372,9 @@ export default function RouteOptimization() {
       )}
 
       {/* Statistics Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
+      <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box display="flex" alignItems="center">
                 <RouteIcon color="primary" sx={{ mr: 2 }} />
@@ -388,7 +389,7 @@ export default function RouteOptimization() {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box display="flex" alignItems="center">
                 <TruckIcon color="warning" sx={{ mr: 2 }} />
@@ -403,7 +404,7 @@ export default function RouteOptimization() {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box display="flex" alignItems="center">
                 <PersonIcon color="success" sx={{ mr: 2 }} />
@@ -418,7 +419,7 @@ export default function RouteOptimization() {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box display="flex" alignItems="center">
                 <DirectionsIcon color="info" sx={{ mr: 2 }} />
@@ -435,7 +436,7 @@ export default function RouteOptimization() {
       </Grid>
 
       {/* Tabs */}
-      <Paper sx={{ mb: 4 }}>
+      <Paper elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <Tabs value={activeTab} onChange={(e, newValue) => setActiveTab(newValue)}>
           <Tab label="Active Routes" />
           <Tab label="Optimized Routes" />
@@ -446,15 +447,15 @@ export default function RouteOptimization() {
 
       {/* Tab Content */}
       {activeTab === 0 && (
-        <Paper sx={{ mb: 4 }}>
+        <Paper elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Box p={3}>
             <Typography variant="h6" gutterBottom>
               Active Routes
             </Typography>
-            <TableContainer>
+            <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
               <Table>
                 <TableHead>
-                  <TableRow>
+                  <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                     <TableCell>Route Name</TableCell>
                     <TableCell>Driver</TableCell>
                     <TableCell>Vehicle</TableCell>
@@ -530,7 +531,7 @@ export default function RouteOptimization() {
       )}
 
       {activeTab === 1 && (
-        <Paper sx={{ mb: 4 }}>
+        <Paper elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Box p={3}>
             <Typography variant="h6" gutterBottom>
               Optimized Routes
@@ -539,7 +540,7 @@ export default function RouteOptimization() {
               <Grid container spacing={3}>
                 {optimizedRoutes.map((route) => (
                   <Grid item xs={12} md={6} key={route.id}>
-                    <Card>
+                    <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                       <CardContent>
                         <Box display="flex" justifyContent="space-between" alignItems="start" mb={2}>
                           <Typography variant="h6">{route.name}</Typography>
@@ -596,10 +597,10 @@ export default function RouteOptimization() {
                         </Box>
                       </CardContent>
                       <CardActions>
-                        <Button size="small" startIcon={<ViewIcon />}>
+                        <Button size="small" startIcon={<ViewIcon />} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
                           View Details
                         </Button>
-                        <Button size="small" startIcon={<PlayIcon />} color="primary">
+                        <Button size="small" startIcon={<PlayIcon />} color="primary" sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
                           Accept Route
                         </Button>
                       </CardActions>
@@ -620,6 +621,7 @@ export default function RouteOptimization() {
                   variant="contained"
                   startIcon={<SettingsIcon />}
                   onClick={() => setOptimizeDialog(true)}
+                  sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                 >
                   Optimize Routes
                 </Button>
@@ -630,15 +632,15 @@ export default function RouteOptimization() {
       )}
 
       {activeTab === 2 && (
-        <Paper sx={{ mb: 4 }}>
+        <Paper elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Box p={3}>
             <Typography variant="h6" gutterBottom>
               Pending Deliveries
             </Typography>
-            <TableContainer>
+            <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
               <Table>
                 <TableHead>
-                  <TableRow>
+                  <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                     <TableCell>Customer</TableCell>
                     <TableCell>Address</TableCell>
                     <TableCell>Delivery Date</TableCell>
@@ -680,7 +682,7 @@ export default function RouteOptimization() {
                         {delivery.items?.length || 0}
                       </TableCell>
                       <TableCell>
-                        <Button size="small" startIcon={<AddIcon />}>
+                        <Button size="small" startIcon={<AddIcon />} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
                           Add to Route
                         </Button>
                       </TableCell>
@@ -694,14 +696,14 @@ export default function RouteOptimization() {
       )}
 
       {activeTab === 3 && (
-        <Paper sx={{ mb: 4 }}>
+        <Paper elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Box p={3}>
             <Typography variant="h6" gutterBottom>
               Route Analytics
             </Typography>
             <Grid container spacing={3}>
               <Grid item xs={12} md={6}>
-                <Card>
+                <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>
                       Performance Metrics
@@ -722,7 +724,7 @@ export default function RouteOptimization() {
                 </Card>
               </Grid>
               <Grid item xs={12} md={6}>
-                <Card>
+                <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>
                       Cost Analysis
@@ -998,6 +1000,6 @@ export default function RouteOptimization() {
           <Button onClick={handleCreateRoute} variant="contained">Create</Button>
         </DialogActions>
       </Dialog>
-    </Container>
+    </Box>
   );
 }

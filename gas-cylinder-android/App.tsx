@@ -64,6 +64,7 @@ import { soundService } from './services/soundService';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import UpdateModal from './components/UpdateModal';
 import SessionTimeoutWarning from './components/SessionTimeoutWarning';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const Stack = createNativeStackNavigator();
 
@@ -341,14 +342,16 @@ function AppContent() {
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <SettingsProvider>
-          <AssetProvider>
-            <AppContent />
-          </AssetProvider>
-        </SettingsProvider>
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <SettingsProvider>
+            <AssetProvider>
+              <AppContent />
+            </AssetProvider>
+          </SettingsProvider>
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }

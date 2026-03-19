@@ -183,7 +183,10 @@ export default function IndustryAnalyticsDashboard() {
   const StatCard = ({ title, value, icon, color = 'primary', trend, onClick }) => (
     <FadeIn>
       <Card 
+        elevation={0}
         sx={{ 
+          borderRadius: 2.5,
+          border: '1px solid rgba(15, 23, 42, 0.08)',
           cursor: onClick ? 'pointer' : 'default',
           transition: 'all 0.2s ease-in-out',
           '&:hover': onClick ? {
@@ -234,10 +237,10 @@ export default function IndustryAnalyticsDashboard() {
       {searchLoading ? (
         <TableSkeleton rows={5} columns={4} />
       ) : (
-        <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
+        <TableContainer component={Paper} elevation={0} sx={{ maxHeight: 400, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
           <Table stickyHeader>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                 <TableCell>Barcode</TableCell>
                 <TableCell>Serial</TableCell>
                 <TableCell>Customer</TableCell>
@@ -300,6 +303,7 @@ export default function IndustryAnalyticsDashboard() {
             size="small" 
             disabled={currentPage === 1}
             onClick={() => goToPage(currentPage - 1)}
+            sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
           >
             Previous
           </Button>
@@ -310,6 +314,7 @@ export default function IndustryAnalyticsDashboard() {
             size="small" 
             disabled={currentPage === totalPages}
             onClick={() => goToPage(currentPage + 1)}
+            sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
           >
             Next
           </Button>
@@ -362,35 +367,43 @@ export default function IndustryAnalyticsDashboard() {
   );
 
   return (
-    <Box p={3}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
       {/* Header */}
       <FadeIn>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Box>
-            <Typography variant="h4" fontWeight="bold" color="primary">
+        <Paper
+          elevation={0}
+          sx={{
+            p: { xs: 2.5, md: 3 },
+            mb: 3,
+            borderRadius: 3,
+            border: '1px solid rgba(15, 23, 42, 0.08)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+          }}
+        >
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
               Asset Tracking Dashboard
             </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Real-time visibility into your gas cylinder operations
-            </Typography>
+            <Box display="flex" gap={2}>
+              <SmoothButton
+                variant="outlined"
+                startIcon={<ScanIcon />}
+                onClick={() => navigate('/scan')}
+                sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+              >
+                Quick Scan
+              </SmoothButton>
+              <SmoothButton
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => navigate('/bottle-management')}
+                sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+              >
+                Add Asset
+              </SmoothButton>
+            </Box>
           </Box>
-          <Box display="flex" gap={2}>
-            <SmoothButton
-              variant="outlined"
-              startIcon={<ScanIcon />}
-              onClick={() => navigate('/scan')}
-            >
-              Quick Scan
-            </SmoothButton>
-            <SmoothButton
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => navigate('/bottle-management')}
-            >
-              Add Asset
-            </SmoothButton>
-          </Box>
-        </Box>
+        </Paper>
       </FadeIn>
 
       {/* Quick Stats */}
@@ -444,7 +457,7 @@ export default function IndustryAnalyticsDashboard() {
 
       {/* Quick Search */}
       <FadeIn delay={200}>
-        <Card sx={{ mb: 3 }}>
+        <Card elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>
               Quick Search
@@ -463,7 +476,7 @@ export default function IndustryAnalyticsDashboard() {
 
       {/* Main Content Tabs */}
       <FadeIn delay={300}>
-        <Card>
+        <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
             <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)}>
               <Tab label="Recent Activity" />

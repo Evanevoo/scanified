@@ -1521,27 +1521,24 @@ export default function Import() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <IconButton onClick={() => navigate(-1)}>
+          <IconButton onClick={() => navigate(-1)} sx={{ borderRadius: 999 }}>
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h4" fontWeight={800} color="primary">
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
             Import Data
           </Typography>
         </Box>
-      </Box>
+      </Paper>
 
       {/* Format Guide Card */}
-      <Card variant="outlined" sx={{ mb: 3 }}>
+      <Card elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <CardContent>
           <Typography variant="h6" fontWeight={600} color="primary" gutterBottom>
             Expected File Format
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Your file should be tab-separated (.txt) or comma-separated (.csv) with the following columns:
           </Typography>
           <Grid container spacing={2} sx={{ mb: 2 }}>
             <Grid item xs={12} md={6}>
@@ -1574,22 +1571,17 @@ export default function Import() {
               80000C33-1745333424A	Rockford Engineering Works Ltd.	06/06/2025	BCS68-300	64034	2	0
             </Typography>
           </Paper>
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-            <strong>Note:</strong> The system will automatically detect whether to process as invoices or sales receipts based on your data.
-          </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-            <strong>Tip:</strong> Preview is optional—you can map fields and click Import directly for faster workflow.
-          </Typography>
         </CardContent>
       </Card>
 
       {/* File Upload Card with Drag-and-Drop */}
       <Card
-        variant="outlined"
+        elevation={0}
         sx={{
           mb: 3,
-          border: '2px dashed',
-          borderColor: isDragging ? 'primary.main' : 'divider',
+          borderRadius: 2.5,
+          border: isDragging ? '2px dashed' : '1px solid rgba(15, 23, 42, 0.08)',
+          borderColor: isDragging ? 'primary.main' : undefined,
           bgcolor: isDragging ? 'action.hover' : 'background.paper',
           transition: 'border-color 0.2s, background-color 0.2s'
         }}
@@ -1696,7 +1688,7 @@ export default function Import() {
 
       {/* Field Mapping UI */}
       {columns.length > 0 && (
-        <Card variant="outlined" sx={{ mb: 3 }}>
+        <Card elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
               <Typography variant="h6" fontWeight={600}>
@@ -1767,7 +1759,7 @@ export default function Import() {
         const endIndex = useVirtual ? Math.min(preview.length, startIndex + PREVIEW_VISIBLE_ROWS) : Math.min(preview.length, 10);
         const visibleRows = preview.slice(startIndex, endIndex);
         return (
-          <Card variant="outlined" sx={{ mb: 3 }}>
+          <Card elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
                 <Typography variant="h6" fontWeight={600}>
@@ -1789,11 +1781,11 @@ export default function Import() {
               <TableContainer
                 ref={previewTableRef}
                 onScroll={(e) => setPreviewScrollTop(e.target.scrollTop)}
-                sx={{ maxHeight: useVirtual ? 420 : undefined, overflow: 'auto' }}
+                sx={{ maxHeight: useVirtual ? 420 : undefined, overflow: 'auto', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}
               >
                 <Table size="small" stickyHeader>
                   <TableHead>
-                    <TableRow>
+                    <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                       <TableCell sx={{ fontWeight: 600 }}>Customer ID</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Customer Name</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
@@ -1841,7 +1833,7 @@ export default function Import() {
 
         {/* Preview Summary */}
         {previewSummary && (
-          <Card variant="outlined" sx={{ mb: 3, bgcolor: 'background.paper' }}>
+          <Card elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', bgcolor: 'background.paper' }}>
             <CardContent>
               <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>Preview Summary</Typography>
               <Grid container spacing={2}>
@@ -2038,7 +2030,7 @@ export default function Import() {
 
         {/* Customer Import Report */}
         {customerImportReport && (
-          <Card variant="outlined" sx={{ mb: 3, bgcolor: 'grey.50' }}>
+          <Card elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', bgcolor: 'grey.50' }}>
             <CardContent>
               <Typography variant="subtitle1" fontWeight={600} gutterBottom>Customer Import Report</Typography>
               <Typography variant="body2" color="success.main" component="div">

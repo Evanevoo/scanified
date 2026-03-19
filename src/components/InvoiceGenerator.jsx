@@ -139,12 +139,14 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
 
       loadInvoiceEmails();
 
-      // Pre-populate customer email and invoice number (if passed in); payment_terms set from template above
+      // Pre-populate from customer when passed: email, invoice number, payment terms, purchase order (customer settings from Customer Detail > Rental tab override template defaults)
       if (customer) {
         setFormData(prev => ({
           ...prev,
           email: customer.email || prev.email,
-          invoice_number: (existingInvoiceNumber != null && existingInvoiceNumber !== '') ? String(existingInvoiceNumber) : ''
+          invoice_number: (existingInvoiceNumber != null && existingInvoiceNumber !== '') ? String(existingInvoiceNumber) : '',
+          payment_terms: (customer.payment_terms || '').trim() || prev.payment_terms,
+          purchase_order: (customer.purchase_order || '').trim() || prev.purchase_order
         }));
       }
 

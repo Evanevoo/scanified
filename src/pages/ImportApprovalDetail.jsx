@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
-import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Button, Grid, List, ListItem, ListItemText, Divider, Alert, Chip, IconButton, Tooltip, Card, CardContent, CardHeader, Accordion, AccordionSummary, AccordionDetails, Badge, Dialog, DialogTitle, DialogContent, DialogActions, TextField, FormControl, InputLabel, Select, MenuItem, Checkbox } from '@mui/material';
+import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Button, Grid, List, ListItem, ListItemText, Divider, Alert, Chip, IconButton, Tooltip, Card, CardContent, CardHeader, Accordion, AccordionSummary, AccordionDetails, Badge, Dialog, DialogTitle, DialogContent, DialogActions, TextField, FormControl, InputLabel, Select, MenuItem, Checkbox, Stack } from '@mui/material';
 import { ExpandMore as ExpandMoreIcon, Person as PersonIcon, Receipt as ReceiptIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon } from '@mui/icons-material';
 import { CardSkeleton } from '../components/SmoothLoading';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
@@ -2827,51 +2827,106 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     return importRecord.uploaded_by ?? '—';
   };
 
+  const detailMetrics = [
+    {
+      label: 'Status',
+      value: importRecord.status || 'pending',
+      helper: 'Current verification state for this import record',
+    },
+    {
+      label: 'Delivered assets',
+      value: scannedBottles.length + unassignedDeliveredBarcodes.length,
+      helper: 'Scanned and unassigned delivered assets on this order',
+    },
+    {
+      label: 'Returned assets',
+      value: returnedBottles.length + returned.length + unassignedReturnedBarcodes.length,
+      helper: 'Returned assets attached to the same verification record',
+    },
+    {
+      label: 'Selected assets',
+      value: selectedAssets.size,
+      helper: 'Assets currently selected for bulk asset actions',
+    },
+  ];
+
   return (
     <Box sx={{ 
       minHeight: '100vh', 
-      background: '#f5f5f5',
-      p: 3 
+      background: '#f8fafc',
+      p: { xs: 2, sm: 3 }
     }}>
       <Paper sx={{ 
         borderRadius: 3, 
         overflow: 'hidden', 
-        boxShadow: '0 2px 12px 0 rgba(16,24,40,0.06)',
+        boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)',
         background: 'var(--bg-main)',
-        border: '1px solid var(--divider)'
+        border: '1px solid rgba(15, 23, 42, 0.08)'
       }}>
-        {/* Header */}
-        <Box sx={{ 
-          background: 'var(--bg-main)', 
-          color: 'var(--text-main)', 
-          p: 3,
-          borderBottom: '1.5px solid var(--divider)'
-        }}>
-          <Button 
-            variant="outlined" 
-            sx={{ 
-              color: 'var(--accent)', 
-              borderColor: 'var(--accent)', 
-              mb: 2,
-              borderWidth: '2px',
-              '&:hover': { borderColor: 'var(--accent)', backgroundColor: 'var(--bg-card)' }
-            }} 
-            onClick={() => navigate(-1)}
+        <Box sx={{ p: { xs: 2.5, md: 3 } }}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: { xs: 2.5, md: 3 },
+              mb: 3,
+              borderRadius: 3,
+              border: '1px solid rgba(15, 23, 42, 0.08)',
+              background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+            }}
           >
-            Back
-          </Button>
-          {effectiveOrderNumber && (
-            <Typography variant="subtitle1" sx={{ opacity: 0.7, color: 'var(--text-main)' }}>
-              Invoice: {effectiveOrderNumber} | Customer: {importRecord?.data?.customer_name ?? importRecord?.data?.customer_id ?? filterCustomerName ?? filterCustomerId ?? '—'}
-            </Typography>
-          )}
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }}>
+              <Box>
+                <Stack direction="row" spacing={1} sx={{ mb: 1.25, flexWrap: 'wrap' }}>
+                  <Chip label="Operations" color="primary" size="small" sx={{ borderRadius: 999, fontWeight: 700 }} />
+                  <Chip label="Verification detail" size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+                  <Chip label={importRecord.status || 'pending'} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+                </Stack>
+                <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+                  {effectiveOrderNumber ? `Order ${effectiveOrderNumber}` : 'Verification detail'}
+                </Typography>
+                <Typography variant="body1" sx={{ color: '#64748b', mt: 1, maxWidth: 820 }}>
+                  Review import metadata, compare delivered and returned assets, and run record or asset corrections from a single verification detail workspace.
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#64748b', mt: 1.25 }}>
+                  Customer: {importRecord?.data?.customer_name ?? importRecord?.data?.customer_id ?? filterCustomerName ?? filterCustomerId ?? '—'}
+                </Typography>
+              </Box>
+              <Button
+                variant="outlined"
+                onClick={() => navigate(-1)}
+                sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+              >
+                Back
+              </Button>
+            </Stack>
+          </Paper>
+
+          <Grid container spacing={2} sx={{ mb: 3 }}>
+            {detailMetrics.map((metric) => (
+              <Grid item xs={12} sm={6} lg={3} key={metric.label}>
+                <Card elevation={0} sx={{ height: '100%', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+                  <CardContent sx={{ p: 2.5 }}>
+                    <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                      {metric.label}
+                    </Typography>
+                    <Typography variant="h4" sx={{ mt: 0.5, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+                      {metric.value}
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 0.75, color: '#64748b' }}>
+                      {metric.helper}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
         </Box>
 
         {/* Action Message */}
         {actionMessage && (
           <Alert 
             severity="info" 
-            sx={{ m: 2, borderRadius: 2, border: '1px solid #333' }}
+            sx={{ mx: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.12)' }}
             onClose={() => setActionMessage('')}
           >
             {actionMessage}
@@ -2882,9 +2937,10 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           <Grid container spacing={3} alignItems="flex-start">
             {/* Left: Delivery Info and Tables */}
             <Grid item xs={12} md={9}>
-              <Typography variant="h5" fontWeight={700} mb={3} color="black" sx={{ 
-                borderBottom: '3px solid #333', 
-                pb: 1
+              <Typography variant="h5" fontWeight={700} mb={3} sx={{ 
+                color: '#0f172a',
+                borderBottom: '1px solid rgba(15, 23, 42, 0.08)', 
+                pb: 1.25
               }}>
                 Delivery Information
               </Typography>
@@ -2895,8 +2951,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 p: 3, 
                 borderRadius: 2,
                 background: 'var(--bg-card)',
-                border: '1px solid var(--divider)',
-                boxShadow: '0 2px 8px 0 rgba(16,24,40,0.04)'
+                border: '1px solid rgba(15, 23, 42, 0.08)',
+                boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)'
               }}>
                 <Grid container spacing={2}>
                   <Grid item xs={12} sm={6} md={3}>
@@ -2993,8 +3049,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 mb: 4, 
                 borderRadius: 2, 
                 overflow: 'hidden',
-                border: '1px solid var(--divider)',
-                boxShadow: '0 2px 8px 0 rgba(16,24,40,0.04)'
+                border: '1px solid rgba(15, 23, 42, 0.08)',
+                boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)'
               }}>
                 <Table size="small">
                   <TableHead>
@@ -3107,8 +3163,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               <Paper sx={{ 
                 borderRadius: 2, 
                 overflow: 'hidden',
-                border: '1px solid var(--divider)',
-                boxShadow: '0 2px 8px 0 rgba(16,24,40,0.04)'
+                border: '1px solid rgba(15, 23, 42, 0.08)',
+                boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)'
               }}>
                 <Table size="small">
                   <TableHead>
@@ -3540,13 +3596,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             <Grid item xs={12} md={3}>
               {/* Record Options */}
               <Paper sx={{ 
-                p: 2, 
+                p: 2.5, 
                 mb: 3, 
-                borderRadius: 2,
+                borderRadius: 2.5,
                 background: 'var(--bg-card)',
                 color: 'var(--text-main)',
-                border: '1px solid var(--divider)',
-                boxShadow: '0 6px 20px rgba(0,0,0,0.1)'
+                border: '1px solid rgba(15, 23, 42, 0.08)',
+                boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)'
               }}>
                 <Typography variant="h6" fontWeight={700} mb={2} sx={{ 
                   color: 'var(--text-main)',
@@ -3603,12 +3659,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
               {/* Asset Options */}
               <Paper sx={{ 
-                p: 2, 
-                borderRadius: 2,
+                p: 2.5, 
+                borderRadius: 2.5,
                 background: 'var(--bg-card)',
                 color: 'var(--text-main)',
-                border: '1px solid var(--divider)',
-                boxShadow: '0 6px 20px rgba(0,0,0,0.1)'
+                border: '1px solid rgba(15, 23, 42, 0.08)',
+                boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)'
               }}>
                 <Typography variant="h6" fontWeight={700} mb={2} sx={{ 
                   color: 'var(--text-main)',

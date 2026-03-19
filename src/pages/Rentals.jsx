@@ -191,7 +191,13 @@ const RentalsTableBody = memo(function RentalsTableBody({
                 <Tooltip title="Edit Rentals">
                   <IconButton
                     size="small"
-                    onClick={() => setEditDialog({ open: true, customer, rentals })}
+                    onClick={() => setEditDialog({
+                      open: true,
+                      customer,
+                      rentals,
+                      location: customer?.location || rentals?.[0]?.location,
+                      tax_code: rentals?.[0]?.tax_code
+                    })}
                   >
                     <EditIcon />
                   </IconButton>
@@ -983,7 +989,13 @@ function RentalsImproved() {
       ({ customer }) => (customer?.CustomerListID || customer?.customer_id) === customerId
     );
     if (found) {
-      setEditDialog({ open: true, customer: found.customer, rentals: found.rentals || [] });
+      setEditDialog({
+        open: true,
+        customer: found.customer,
+        rentals: found.rentals || [],
+        location: found.customer?.location || found.rentals?.[0]?.location,
+        tax_code: found.rentals?.[0]?.tax_code
+      });
       navigate('/rentals', { replace: true, state: {} });
     }
   }, [loading, location.state?.openEditForCustomerId, filteredCustomers, navigate]);
@@ -998,14 +1010,29 @@ function RentalsImproved() {
 
   return (
     <Box sx={{ p: { xs: 1.5, sm: 2, md: 3 }, width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
-      {/* Header */}
-      <Box sx={{ mb: 3 }}>
+      <Paper
+        elevation={0}
+        sx={{
+          p: { xs: 2.5, md: 3 },
+          mb: 3,
+          borderRadius: 3,
+          border: '1px solid rgba(15, 23, 42, 0.08)',
+          background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+        }}
+      >
         <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 2 }}>
           <Box>
-            <Typography variant="h4" fontWeight="bold">
-              Asset Management & Rentals
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1.25 }}>
+              <Chip label="Billing" color="primary" size="small" sx={{ borderRadius: 999, fontWeight: 700 }} />
+              <Chip label="Rentals" size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+            </Box>
+            <Typography variant="h4" fontWeight="bold" sx={{ color: '#0f172a', letterSpacing: '-0.03em' }}>
+              Rental operations workspace
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            <Typography variant="body1" color="text.secondary" sx={{ mt: 1, maxWidth: 760 }}>
+              Track active rentals, review billable inventory, and move directly into invoicing or per-customer rate adjustments from one billing workspace.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               <Link to="/rental/invoice-search" style={{ color: 'inherit', textDecoration: 'none', fontWeight: 500 }}>
                 Billing & accounting →
               </Link>
@@ -1078,13 +1105,13 @@ function RentalsImproved() {
             </Button>
           </Box>
         </Box>
-      </Box>
+      </Paper>
 
       {/* Statistics Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={6}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent>
+          <Card elevation={0} sx={{ height: '100%', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+            <CardContent sx={{ p: 2.25 }}>
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
                   <Typography variant="h4" fontWeight="bold" color="primary">
@@ -1102,8 +1129,8 @@ function RentalsImproved() {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={6}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent>
+          <Card elevation={0} sx={{ height: '100%', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+            <CardContent sx={{ p: 2.25 }}>
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
                   <Typography variant="h4" fontWeight="bold" color="success.main">
@@ -1124,7 +1151,7 @@ function RentalsImproved() {
       </Grid>
 
       {/* Filters */}
-      <Card sx={{ mb: 4 }}>
+      <Card elevation={0} sx={{ mb: 4, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <CardContent sx={{ pt: 3 }}>
           <Typography variant="h6" gutterBottom sx={{ mb: 2 }}>Filters</Typography>
           <Grid container spacing={2} alignItems="flex-end">
@@ -1154,7 +1181,7 @@ function RentalsImproved() {
             '& .MuiTab-root': {
               textTransform: 'none',
               fontSize: { xs: '0.85rem', sm: '0.95rem' },
-              fontWeight: 500,
+              fontWeight: 700,
               minHeight: 48,
               px: { xs: 1.5, sm: 2, md: 3 },
               py: 1.5,
@@ -1192,10 +1219,10 @@ function RentalsImproved() {
       </Box>
 
       {/* Customer Rentals Table */}
-      <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
+      <TableContainer component={Paper} sx={{ overflowX: 'auto', borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Table sx={{ minWidth: 640 }}>
           <TableHead>
-            <TableRow>
+            <TableRow sx={{ backgroundColor: '#f8fafc' }}>
               <TableCell><strong>Customer</strong></TableCell>
               <TableCell><strong>Account Type</strong></TableCell>
               <TableCell><strong>Total Assets</strong></TableCell>
@@ -1381,7 +1408,7 @@ function RentalsImproved() {
                         end_date: endDate.toISOString().split('T')[0],
                         annual_amount: annualAmount,
                         billing_frequency: 'annual',
-                        payment_terms: 'Net 30',
+                        payment_terms: editDialog.customer?.payment_terms || 'Net 30',
                         tax_rate: 0.11,
                         bottle_id: bottleId,
                         status: 'active',

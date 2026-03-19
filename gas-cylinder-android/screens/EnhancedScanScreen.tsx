@@ -2,7 +2,7 @@ import logger from '../utils/logger';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   View, Text, TextInput, TouchableOpacity, Pressable, StyleSheet, FlatList, 
-  ActivityIndicator, Modal, Dimensions, Alert, SafeAreaView, ScrollView, Linking, Vibration 
+  ActivityIndicator, Modal, Dimensions, Alert, SafeAreaView, ScrollView, Linking, Vibration, Platform 
 } from 'react-native';
 import { supabase } from '../supabase';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -641,35 +641,24 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     };
   };
 
-  // Validate barcode format - More flexible for scanner variations
+  // Validate barcode format - Sales receipt / customer barcode (Code 39 often has * at start/end)
   const validateBarcodeFormat = async (barcode: string): Promise<{ isValid: boolean; error?: string }> => {
     if (!barcode || !barcode.trim()) {
       return { isValid: false, error: 'Empty barcode' };
     }
 
     const trimmed = barcode.trim();
-    
-    // More flexible pattern to handle scanner variations
-    // Accepts: % + 8 alphanumeric (case insensitive) + hyphen + 10 digits + optional letter
-    // Examples: %800006B3-1611180703A, %800005ca-1579809606A
-    const flexiblePattern = /^%[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?$/;
-    
-    if (!flexiblePattern.test(trimmed)) {
-      // Try without the % prefix
-      const withoutPrefix = trimmed.replace(/^%/, '');
-      const patternWithoutPrefix = /^[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?$/;
-      
-      if (patternWithoutPrefix.test(withoutPrefix)) {
-        return { isValid: true };
-      }
-      
-      return { 
-        isValid: false, 
-        error: `Invalid format. Expected: %800006B3-1611180703A or similar\nGot: ${trimmed}` 
-      };
+    // Strip Code 39 start/stop (* and %)
+    const stripped = trimmed.replace(/^[*%]+/, '').replace(/[*%]+$/, '');
+    // Core pattern: 8 hex - 10 digits - optional letter (e.g. 80000A62-1711404132A)
+    const corePattern = /^[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?$/;
+    if (corePattern.test(stripped)) {
+      return { isValid: true };
     }
-
-    return { isValid: true };
+    return {
+      isValid: false,
+      error: `Invalid format. Expected customer/sales receipt barcode (e.g. 80000A62-1711404132A or *%...*)\nGot: ${trimmed}`
+    };
   };
 
   // No separate "scan region by barcode" — use isBarcodeInScanArea(bounds) in the camera callback instead.
@@ -796,21 +785,22 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     // Show what was scanned for feedback
     setLastScanAttempt(data);
     
-    // Check if this is a sales receipt barcode (starts with %) or packing slip (9 digits)
+    // Check if this is a sales receipt / customer barcode (*%...* or %... or 8hex-10digits) or cylinder (9 digits)
+    const trimmedData = data.trim();
+    const looksLikeCustomerBarcode = /^[*%]*[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?[*%]*$/i.test(trimmedData);
     let validationResult: { isValid: boolean; error?: string; scannedValue?: string };
-    
-    if (data.trim().startsWith('%')) {
-      // Sales receipt format - use barcode format validation
-      logger.log('📷 Detected sales receipt barcode format (starts with %)');
+
+    if (looksLikeCustomerBarcode) {
+      logger.log('📷 Detected customer/sales receipt barcode format');
       const barcodeValidation = await validateBarcodeFormat(data);
       validationResult = {
         isValid: barcodeValidation.isValid,
         error: barcodeValidation.error,
-        scannedValue: data.trim()
+        scannedValue: trimmedData
       };
     } else {
-      // Packing slip format - use cylinder serial validation (9 digits)
-      logger.log('📷 Detected packing slip barcode format (9 digits)');
+      // Cylinder serial (9 digits) or other
+      logger.log('📷 Detected packing slip / cylinder barcode format');
       validationResult = validateCylinderSerial(data);
     }
     
@@ -833,6 +823,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
 
     // Use canonical barcode for cylinders (9-digit form) so DB lookups and duplicate checks use the same value
     const effectiveBarcode = (validationResult as { canonicalBarcode?: string }).canonicalBarcode ?? data;
+    const isCustomerBarcodeFormat = looksLikeCustomerBarcode;
 
     // Show processing feedback
     setScanFeedback('🔍 Processing barcode...');
@@ -1008,6 +999,14 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
             `Unknown barcodes can only be added in 9-digit format.\n\nScanned: "${effectiveBarcode}" (${(effectiveBarcode || data || '').trim().length} characters).`,
             [{ text: 'OK' }]
           );
+          processingBarcodesRef.current.delete(data);
+          return;
+        }
+        if (isCustomerBarcodeFormat) {
+          logger.log('📷 Customer barcode scanned in delivery – not a cylinder');
+          scannedBarcodesThisSessionRef.current.delete(sessionKey);
+          setScanFeedback('📷 Customer barcode – select customer on the previous screen');
+          setTimeout(() => { setScanFeedback(''); setLastScanAttempt(''); }, 4000);
           processingBarcodesRef.current.delete(data);
           return;
         }
@@ -2411,10 +2410,11 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
                 setOcrFoundCustomer(null);
               }}
               label={selectedAction === 'in' ? 'Scan to RETURN' : 'Scan to SHIP'}
-              validationPattern={/^[\dA-Za-z\-%]+$/}
+              validationPattern={/^[*\dA-Za-z\-%]+$/}
               style={{ flex: 1 }}
               hideLastScannedIndicator
-              disablePeriodicFocus
+              enableRegionOfInterest={Platform.OS === 'android'}
+              disablePeriodicFocus={Platform.OS === 'android'}
             />
 
           {/* Scanned Bottle Details - Centered in Middle */}

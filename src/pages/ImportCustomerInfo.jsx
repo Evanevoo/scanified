@@ -824,15 +824,13 @@ const ImportCustomerInfo = () => {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#fff', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 1.5, md: 2.5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid #eee', bgcolor: '#fff', overflow: 'visible' }}>
-        <Typography variant="h3" fontWeight={900} color="primary" mb={2} sx={{ letterSpacing: -1 }}>Import Customer Information</Typography>
-        
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>Import Customer Information</Typography>
+      </Paper>
+      <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2.5 }, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         {!showMapping && !preview.length && (
           <Box>
-            <Typography variant="body1" color="text.secondary" mb={3}>
-              Upload a CSV or Excel file with customer information. The system will automatically detect columns and match them to customer fields.
-            </Typography>
             
             <input
               type="file"
@@ -853,6 +851,7 @@ const ImportCustomerInfo = () => {
                   px: 4,
                   py: 1.5,
                   fontSize: 16,
+                  textTransform: 'none',
                   boxShadow: 'none',
                   ':hover': { bgcolor: '#222' }
                 }}
@@ -874,10 +873,6 @@ const ImportCustomerInfo = () => {
             <Typography variant="h5" fontWeight={700} color="primary" mb={3}>
               Column Mapping
             </Typography>
-            <Typography variant="body2" color="text.secondary" mb={3}>
-              Please confirm the column mapping for your customer data:
-            </Typography>
-            
             <Box display="grid" gridTemplateColumns="repeat(auto-fit, minmax(300px, 1fr))" gap={3} mb={4}>
               {ALLOWED_FIELDS.map(field => (
                 <Box key={field.key}>
@@ -912,6 +907,7 @@ const ImportCustomerInfo = () => {
                   px: 4,
                   py: 1.5,
                   fontSize: 16,
+                  textTransform: 'none',
                   boxShadow: 'none',
                   ':hover': { bgcolor: '#222' }
                 }}
@@ -926,7 +922,8 @@ const ImportCustomerInfo = () => {
                   fontWeight: 700,
                   px: 4,
                   py: 1.5,
-                  fontSize: 16
+                  fontSize: 16,
+                  textTransform: 'none'
                 }}
               >
                 Cancel
@@ -997,6 +994,7 @@ const ImportCustomerInfo = () => {
                   px: 4,
                   py: 1.5,
                   fontSize: 16,
+                  textTransform: 'none',
                   boxShadow: 'none',
                   ':hover': { bgcolor: '#222' }
                 }}
@@ -1012,7 +1010,8 @@ const ImportCustomerInfo = () => {
                   fontWeight: 700,
                   px: 4,
                   py: 1.5,
-                  fontSize: 16
+                  fontSize: 16,
+                  textTransform: 'none'
                 }}
               >
                 Cancel

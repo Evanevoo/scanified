@@ -630,13 +630,10 @@ export default function BarcodeGenerator() {
   };
 
   const renderSingleGeneration = () => (
-    <Card>
+    <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
       <CardContent>
         <Typography variant="h6" gutterBottom>
           Generate Individual Barcodes
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Generate barcodes one at a time with custom settings.
         </Typography>
 
         <Grid container spacing={3}>
@@ -708,6 +705,7 @@ export default function BarcodeGenerator() {
               onClick={handleSingleGenerate}
               disabled={loading}
               startIcon={loading ? <CircularProgress size={20} /> : <BarcodeIcon />}
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
             >
               Generate Barcodes
             </Button>
@@ -718,13 +716,10 @@ export default function BarcodeGenerator() {
   );
 
   const renderBulkGeneration = () => (
-    <Card>
+    <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
       <CardContent>
         <Typography variant="h6" gutterBottom>
           Bulk Barcode Generation
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Generate large quantities of barcodes efficiently.
         </Typography>
 
         <Grid container spacing={3}>
@@ -806,6 +801,7 @@ export default function BarcodeGenerator() {
               onClick={handleBulkGenerate}
               disabled={loading}
               startIcon={loading ? <CircularProgress size={20} /> : <BarcodeIcon />}
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
             >
               Generate Bulk Barcodes
             </Button>
@@ -816,13 +812,10 @@ export default function BarcodeGenerator() {
   );
 
   const renderExcelUpload = () => (
-    <Card>
+    <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
       <CardContent>
         <Typography variant="h6" gutterBottom>
-          📂 Import File & Generate Missing Barcodes
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Upload your customer Excel/CSV file. We'll detect customers without barcodes and generate them automatically.
+          Import File & Generate Missing Barcodes
         </Typography>
         
         <Alert severity="success" sx={{ mb: 3 }}>
@@ -960,10 +953,10 @@ export default function BarcodeGenerator() {
                   <Typography variant="h6" gutterBottom>
                     Customers Needing Barcodes ({customersWithoutBarcodes.length})
                   </Typography>
-                  <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 300 }}>
+                  <TableContainer component={Paper} elevation={0} sx={{ maxHeight: 300, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
                     <Table size="small" stickyHeader>
                       <TableHead>
-                        <TableRow>
+                        <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                           <TableCell>Customer Name</TableCell>
                           <TableCell>Current Barcode</TableCell>
                           <TableCell>Status</TableCell>
@@ -1090,7 +1083,7 @@ export default function BarcodeGenerator() {
 
   const renderResults = () => (
     generatedBarcodes.length > 0 && (
-      <Card sx={{ mt: 3 }}>
+      <Card elevation={0} sx={{ mt: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <CardContent>
           <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
             <Typography variant="h6">
@@ -1156,10 +1149,10 @@ export default function BarcodeGenerator() {
             </Stack>
           </Box>
 
-          <TableContainer component={Paper} variant="outlined">
+          <TableContainer component={Paper} elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
             <Table size="small">
               <TableHead>
-                <TableRow>
+                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell>Barcode</TableCell>
                   <TableCell>Serial</TableCell>
                   <TableCell>Type</TableCell>
@@ -1231,41 +1224,17 @@ export default function BarcodeGenerator() {
   );
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>
-        Barcode Generator
-      </Typography>
-      <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-        Generate barcodes for your {assetConfig?.assetTypePlural || 'assets'} to replace Excel workflows.
-        Integrates with QuickBooks and supports bulk operations.
-      </Typography>
-
-      {/* QuickBooks Desktop Setup Instructions */}
-      <Alert severity="success" sx={{ mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          🎯 QuickBooks Desktop + Zed Axis Setup Instructions
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+          Barcode Generator
         </Typography>
-        <Typography variant="body2" paragraph>
-          <strong>Step 1:</strong> Click "📂 Import & Generate" tab below, then import your customer Excel file (like "Sask.xls")
-        </Typography>
-        <Typography variant="body2" paragraph>
-          <strong>Step 2:</strong> System automatically detects customers without barcodes and generates them
-        </Typography>
-        <Typography variant="body2" paragraph>
-          <strong>Step 3:</strong> Download updated file or export as IIF format for QuickBooks Desktop
-        </Typography>
-        <Typography variant="body2" paragraph>
-          <strong>Step 4:</strong> Import IIF file to QuickBooks Desktop using Zed Axis (or import CSV manually)
-        </Typography>
-        <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'success.dark' }}>
-          ✅ This completely replaces your manual Excel barcode generation process!
-        </Typography>
-      </Alert>
+      </Paper>
 
       {/* Statistics */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={4}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
                 Total Generated
@@ -1277,7 +1246,7 @@ export default function BarcodeGenerator() {
           </Card>
         </Grid>
         <Grid item xs={12} sm={4}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
                 Customers with Barcodes
@@ -1289,7 +1258,7 @@ export default function BarcodeGenerator() {
           </Card>
         </Grid>
         <Grid item xs={12} sm={4}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
                 Last Generated

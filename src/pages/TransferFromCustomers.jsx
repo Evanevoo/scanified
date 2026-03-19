@@ -28,7 +28,8 @@ import {
   TextField,
   Snackbar,
   Tooltip,
-  ButtonGroup
+  ButtonGroup,
+  Stack
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
@@ -211,33 +212,26 @@ export default function TransferFromCustomers() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f5f5', py: 2 }}>
-      <Box maxWidth="1400px" mx="auto" px={3}>
-        
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
         {/* Header */}
-        <Box display="flex" alignItems="center" justifyContent="space-between" mb={4}>
+        <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
           <Box display="flex" alignItems="center" gap={2}>
             <Button
               startIcon={<ArrowBackIcon />}
               onClick={() => navigate(`/customer/${id}`)}
               variant="outlined"
-              sx={{ borderRadius: 999, fontWeight: 700, px: 4 }}
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none', px: 4 }}
             >
               Back to Customer
             </Button>
-            <Box>
-              <Typography variant="h4" fontWeight={900} color="primary" gutterBottom>
-                Transfer Bottles to {targetCustomer?.name}
-              </Typography>
-              <Typography variant="body1" color="text.secondary">
-                Select a source customer and transfer their bottles to {targetCustomer?.name}
-              </Typography>
-            </Box>
+            <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+              Transfer Bottles to {targetCustomer?.name}
+            </Typography>
           </Box>
-        </Box>
+        </Paper>
 
         {/* Customer Selection */}
-        <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4 }}>
+        <Paper elevation={0} sx={{ p: 4, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Typography variant="h6" fontWeight={700} color="primary" mb={3}>
             📋 Select Source Customer
           </Typography>
@@ -296,14 +290,11 @@ export default function TransferFromCustomers() {
 
         {/* Assets Table */}
         {selectedCustomer && (
-          <Paper elevation={3} sx={{ borderRadius: 4 }}>
+          <Paper elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" p={3}>
               <Box>
                 <Typography variant="h5" fontWeight={700} color="primary">
                   🔄 Available Assets ({filteredAssets.length})
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Select bottles to transfer from {selectedCustomer.name} to {targetCustomer?.name}
                 </Typography>
               </Box>
               
@@ -313,6 +304,7 @@ export default function TransferFromCustomers() {
                     <Button
                       onClick={handleSelectAllAssets}
                       startIcon={selectedAssets.length === availableAssets.length ? <DeselectIcon /> : <SelectAllIcon />}
+                      sx={{ fontWeight: 700, textTransform: 'none' }}
                     >
                       {selectedAssets.length === availableAssets.length ? 'Deselect All' : 'Select All'}
                     </Button>
@@ -322,6 +314,7 @@ export default function TransferFromCustomers() {
                       startIcon={<TransferWithinAStationIcon />}
                       color="primary"
                       variant="contained"
+                      sx={{ fontWeight: 700, textTransform: 'none' }}
                     >
                       Transfer Selected ({selectedAssets.length})
                     </Button>
@@ -362,16 +355,17 @@ export default function TransferFromCustomers() {
                   size="small"
                   onClick={() => setStatusFilter('all')}
                   variant="outlined"
+                  sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                 >
                   Clear Filter
                 </Button>
               )}
             </Box>
 
-            <TableContainer>
+            <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
               <Table>
                 <TableHead>
-                  <TableRow sx={{ backgroundColor: '#f5f7fa' }}>
+                  <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                     <TableCell padding="checkbox">
                       <Checkbox
                         indeterminate={selectedAssets.length > 0 && selectedAssets.length < availableAssets.length}
@@ -506,7 +500,6 @@ export default function TransferFromCustomers() {
             {message.message}
           </Alert>
         </Snackbar>
-      </Box>
     </Box>
   );
 }

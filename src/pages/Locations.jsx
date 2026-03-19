@@ -260,29 +260,28 @@ export default function Locations() {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 1.5, md: 2.5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-          <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>
-            📍 Location Management
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+            Locations
           </Typography>
-          <Button variant="contained" color="primary" onClick={() => setShowAddForm(v => !v)}>
+          <Button variant="contained" color="primary" onClick={() => setShowAddForm(v => !v)} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
             {showAddForm ? 'Cancel' : 'Add New Location'}
           </Button>
         </Box>
-        {showAddForm && (
-          <Box mb={3} display="flex" gap={2} alignItems="center">
+      </Paper>
+      {showAddForm && (
+        <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+          <Box display="flex" gap={2} alignItems="center">
             <TextField label="Name" value={newLocation.name} onChange={e => setNewLocation({ ...newLocation, name: e.target.value })} size="small" />
             <TextField label="Province" value={newLocation.province} onChange={e => setNewLocation({ ...newLocation, province: e.target.value })} size="small" />
             <TextField label="GST Rate (%)" type="number" value={newLocation.gst_rate} onChange={e => setNewLocation({ ...newLocation, gst_rate: e.target.value })} size="small" inputProps={{ step: 0.1, min: 0, max: 100 }} />
             <TextField label="PST Rate (%)" type="number" value={newLocation.pst_rate} onChange={e => setNewLocation({ ...newLocation, pst_rate: e.target.value })} size="small" inputProps={{ step: 0.1, min: 0, max: 100 }} />
-            <Button variant="contained" color="success" onClick={handleAddLocation} disabled={loading}>Add</Button>
+            <Button variant="contained" color="success" onClick={handleAddLocation} disabled={loading} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>Add</Button>
           </Box>
+        </Paper>
         )}
-        
-        <Typography variant="body1" color="text.secondary" mb={4}>
-          Manage tax rates for different locations. GST and PST rates can be customized per location.
-        </Typography>
 
         {loading ? (
           <Box display="flex" justifyContent="center" alignItems="center" minHeight={200}>
@@ -291,11 +290,10 @@ export default function Locations() {
         ) : (
           <>
             {/* Locations Table */}
-            <Paper elevation={3} sx={{ borderRadius: 4, overflow: 'hidden' }}>
-              <TableContainer>
+              <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
                 <Table>
                   <TableHead>
-                    <TableRow sx={{ backgroundColor: 'var(--bg-card)' }}>
+                    <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                       <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>Province</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>GST Rate (%)</TableCell>
@@ -396,17 +394,14 @@ export default function Locations() {
                   </TableBody>
                 </Table>
               </TableContainer>
-            </Paper>
           </>
         )}
 
-        {/* Snackbar for notifications */}
         <Snackbar open={snackbarOpen} autoHideDuration={6000} onClose={handleSnackbarClose}>
           <Alert onClose={handleSnackbarClose} severity={snackbarSeverity} sx={{ width: '100%' }}>
             {snackbarMsg}
           </Alert>
         </Snackbar>
-      </Paper>
     </Box>
   );
 } 

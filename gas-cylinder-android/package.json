@@ -1,7 +1,7 @@
 {
   "name": "assettrack-pro-android",
   "license": "0BSD",
-  "version": "1.0.45",
+  "version": "1.0.46",
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "expo start --android",
@@ -15,6 +15,10 @@
     "build:android-dev": "eas build --platform android --profile development",
     "build:android-preview": "eas build --platform android --profile preview",
     "submit:android": "eas submit --platform android",
+    "build:ios": "eas build --platform ios --profile production",
+    "build:ios-dev": "eas build --platform ios --profile development",
+    "build:ios-preview": "eas build --platform ios --profile preview",
+    "submit:ios": "eas submit --platform ios --latest",
     "ios": "expo run:ios"
   },
   "dependencies": {

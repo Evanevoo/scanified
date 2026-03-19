@@ -412,6 +412,7 @@ export default function ScanCylindersScreen() {
   const [orderError, setOrderError] = useState('');
   const [customerBarcodeError, setCustomerBarcodeError] = useState('');
   const [orderNumberMaxLength, setOrderNumberMaxLength] = useState<number>(20);
+  const [orderNumberRegex, setOrderNumberRegex] = useState<RegExp | null>(null);
   const navigation = useNavigation();
   const { colors } = useTheme();
   const listPaddingBottom = Platform.OS === 'android' ? Math.max(insets.bottom, 24) + 24 : insets.bottom + 16;
@@ -426,6 +427,8 @@ export default function ScanCylindersScreen() {
   const [showCustomerPopup, setShowCustomerPopup] = useState(false);
   const [showCustomerScan, setShowCustomerScan] = useState(false);
   const [showOrderScan, setShowOrderScan] = useState(false);
+  const [showEnterBarcodeModal, setShowEnterBarcodeModal] = useState(false);
+  const [enterBarcodeInput, setEnterBarcodeInput] = useState('');
   const [showSimpleTest, setShowSimpleTest] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
   const [focusTrigger, setFocusTrigger] = useState(0); // Used to trigger autofocus on tap
@@ -506,6 +509,12 @@ export default function ScanCylindersScreen() {
         try {
           const formats = await FormatValidationService.getOrganizationFormats(profile.organization_id);
           const orderFormat = formats.order_number_format;
+          try {
+            // Used to prevent misreads of sales order numbers during customer barcode scanning.
+            setOrderNumberRegex(new RegExp(orderFormat.pattern));
+          } catch (e) {
+            setOrderNumberRegex(null);
+          }
           
           // Extract max length from pattern
           const pattern = orderFormat.pattern;
@@ -543,6 +552,7 @@ export default function ScanCylindersScreen() {
         } catch (error) {
           logger.error('Error loading order format:', error);
           setOrderNumberMaxLength(20);
+          setOrderNumberRegex(null);
         }
       }
     };
@@ -1548,6 +1558,12 @@ export default function ScanCylindersScreen() {
               >
                 <Text style={styles.scanButtonText}>📷</Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                style={{ paddingVertical: 8, paddingHorizontal: 12, justifyContent: 'center' }}
+                onPress={() => setShowEnterBarcodeModal(true)}
+              >
+                <Text style={[styles.rescanButtonText, { color: colors.primary, fontSize: 14 }]}>Enter barcode</Text>
+              </TouchableOpacity>
             </View>
             {customerBarcodeError ? (
               <Text style={[styles.errorText, { color: colors.error }]}>{customerBarcodeError}</Text>
@@ -1661,6 +1677,15 @@ export default function ScanCylindersScreen() {
       {/* Camera Scanner - Customer */}
       {showCustomerScan && (
         <View style={{ flex: 1, backgroundColor: '#000' }}>
+        <TouchableOpacity
+          style={{ position: 'absolute', bottom: 40, left: 20, right: 20, zIndex: 10, paddingVertical: 12, alignItems: 'center' }}
+          onPress={() => {
+            setShowCustomerScan(false);
+            setShowEnterBarcodeModal(true);
+          }}
+        >
+          <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16 }}>Can't scan? Enter barcode</Text>
+        </TouchableOpacity>
         <ScanArea
             searchCustomerByName={async (names) => {
               const c = await searchCustomerByName(names);
@@ -1669,16 +1694,39 @@ export default function ScanCylindersScreen() {
             onCustomerFound={handleCustomerFound}
             onScanned={(data: string) => {
               const barcode = data?.trim();
+              logger.log('📷 Customer barcode scanned:', barcode || '(empty)');
               if (!barcode) return;
-              // Pass all barcodes to handleBarcodeScanned - customer IDs can be 8-10 digits
-              // or sales receipt format; filtering here caused valid scans to be dropped
+              // Only accept barcodes that look like customer/sales-receipt format (*%...* or 8hex-10digits-letter).
+              // Reject "random numbers" (order numbers, EAN misreads, etc.) that slipped through.
+              const looksLikeCustomerBarcode = /^[*Zz%]*[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?[*Zz%]*$/i.test(barcode);
+              if (!looksLikeCustomerBarcode) {
+                logger.log('🚫 Ignoring non-customer barcode (wrong format):', barcode);
+                return;
+              }
+              // If it also matches order number format and doesn't look like customer ID, ignore.
+              if (orderNumberRegex && orderNumberRegex.test(barcode)) {
+                logger.log('🚫 Ignoring order-number-shaped barcode during customer scan:', barcode);
+                return;
+              }
+
               handleBarcodeScanned({ data: barcode, type: 'camera', target: 'customer' });
             }}
             onClose={() => setShowCustomerScan(false)}
             label="Scan customer barcode"
-            validationPattern={/^[\dA-Za-z\-%]+$/}
+            // Allow * (Code 39 start/stop) so barcodes like *%80000DA5-1770254509A* pass validation.
+            validationPattern={/^[*\dA-Za-z\-%]+$/}
             style={{ flex: 1 }}
-            disablePeriodicFocus
+            // iOS: enable periodic focus so camera can lock onto paper (sales receipt). Android: disable to avoid blur.
+            disablePeriodicFocus={Platform.OS === 'android'}
+            // Only beep/callback for customer-shaped barcodes; silently ignore order number so no "reaction" until customer barcode is scanned.
+            acceptForFeedback={(barcode) => /^[*Zz%]*[0-9A-Fa-f]{8}-[0-9]{10}[A-Za-z]?[*Zz%]*$/i.test((barcode || '').trim())}
+            // Android: Code 39 only to avoid scanning order number. iOS: use all types so the camera can decode (format filter below rejects non-customer barcodes).
+            barcodeTypesOverride={Platform.OS === 'android' ? ['code39'] : undefined}
+            // ROI can be slightly off on iOS with expo-camera, causing missed scans.
+            // Keep ROI on Android (where we need it to avoid picking up the nearby SALESORDER_NUMBER).
+            enableRegionOfInterest={Platform.OS === 'android'}
+            holdTimeoutMs={400}
+            scanDelay={1200}
           />
         </View>
       )}
@@ -1702,6 +1750,49 @@ export default function ScanCylindersScreen() {
         />
         </View>
       )}
+
+      {/* Manual barcode entry when camera won't read paper (e.g. iOS sales receipt) */}
+      <Modal
+        visible={showEnterBarcodeModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowEnterBarcodeModal(false)}
+      >
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 }} onPress={() => setShowEnterBarcodeModal(false)}>
+          <Pressable style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 20 }} onPress={(e) => e.stopPropagation()}>
+            <Text style={[styles.customerName, { color: colors.text, marginBottom: 8 }]}>Enter customer barcode</Text>
+            <Text style={[styles.customerId, { color: colors.textSecondary, marginBottom: 12, fontSize: 13 }]}>
+              Type or paste the barcode from the sales receipt (e.g. 80000A62-1711404132A or *%80000A62-1711404132A*)
+            </Text>
+            <TextInput
+              style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 12, fontSize: 16, color: colors.text, marginBottom: 16 }}
+              placeholder="80000A62-1711404132A"
+              placeholderTextColor={colors.textSecondary}
+              value={enterBarcodeInput}
+              onChangeText={setEnterBarcodeInput}
+              autoCapitalize="characters"
+              autoCorrect={false}
+            />
+            <View style={{ flexDirection: 'row', gap: 12, justifyContent: 'flex-end' }}>
+              <TouchableOpacity onPress={() => { setShowEnterBarcodeModal(false); setEnterBarcodeInput(''); }}>
+                <Text style={[styles.rescanButtonText, { color: colors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ backgroundColor: colors.primary, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8 }}
+                onPress={() => {
+                  const barcode = enterBarcodeInput.trim();
+                  if (!barcode) return;
+                  setShowEnterBarcodeModal(false);
+                  setEnterBarcodeInput('');
+                  handleBarcodeScanned({ data: barcode, type: 'manual', target: 'customer' });
+                }}
+              >
+                <Text style={[styles.continueButtonText, { color: '#FFF' }]}>Find customer</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

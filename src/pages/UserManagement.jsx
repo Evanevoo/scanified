@@ -6,15 +6,18 @@ import { subscriptionService } from '../services/subscriptionService';
 import {
   Box, Paper, Typography, Table, TableHead, TableRow, TableCell, TableBody, TableContainer, TextField, Button, Select, MenuItem, Snackbar, Alert, Stack, Chip, LinearProgress, Dialog, DialogTitle, DialogContent, DialogActions, IconButton, Tooltip, FormControl, InputLabel
 } from '@mui/material';
-import { Delete as DeleteIcon, Edit as EditIcon, Add as AddIcon, ContentCopy as CopyIcon } from '@mui/icons-material';
+import { Delete as DeleteIcon, Edit as EditIcon, Add as AddIcon, ContentCopy as CopyIcon, Email as EmailIcon, LockReset as LockResetIcon } from '@mui/icons-material';
 import { usePermissions } from '../context/PermissionsContext';
+import { validateInput } from '../utils/security';
 
 // Helper function to get role display name
 const getRoleDisplayName = (user) => {
   // Try role from JOIN first (roles.name)
   if (user.roles?.name) return user.roles.name;
   
-  // Fallback to direct role field
+  // Fallback to direct role field (map known roles to display names)
+  if (user.role === 'orgowner') return 'Org Owner';
+  if (user.role === 'owner') return 'Platform Owner';
   if (user.role) return user.role;
   
   // Handle common role IDs/names
@@ -40,6 +43,8 @@ const getRoleColor = (roleName) => {
       return 'secondary';
     case 'owner':
       return 'error';
+    case 'orgowner':
+      return 'primary';
     case 'user':
       return 'default';
     default:
@@ -105,6 +110,8 @@ export default function UserManagement() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
+  const [resetSending, setResetSending] = useState(false);
+  const [setPasswordDialog, setSetPasswordDialog] = useState({ open: false, user: null, password: '', confirmPassword: '', saving: false });
   const [pendingInvites, setPendingInvites] = useState([]);
   const [loadingTimeout, setLoadingTimeout] = useState(false);
 
@@ -468,8 +475,14 @@ export default function UserManagement() {
     }
 
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'website-user-delete-pre-fix',hypothesisId:'W3',location:'src/pages/UserManagement.jsx:472',message:'Delete user started',data:{userId,userEmail,organizationId:organization?.id || null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       // Step 1: Delete from Supabase Auth (permanent deletion)
       const { error: authError } = await supabase.auth.admin.deleteUser(userId);
+      // #region agent log
+      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'website-user-delete-pre-fix',hypothesisId:'W3',location:'src/pages/UserManagement.jsx:479',message:'Delete user auth admin call completed',data:{userId,authDeleteSucceeded:!authError,authErrorMessage:authError?.message || null,authErrorCode:authError?.code || null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       
       if (authError) {
         logger.warn('Could not delete from auth (may not have admin privileges):', authError);
@@ -484,12 +497,18 @@ export default function UserManagement() {
         .delete()
         .eq('id', userId)
         .eq('organization_id', organization.id);
+      // #region agent log
+      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'website-user-delete-pre-fix',hypothesisId:'W3',location:'src/pages/UserManagement.jsx:488',message:'Delete user profile delete completed',data:{userId,profileDeleteSucceeded:!profileError,profileErrorMessage:profileError?.message || null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
 
       if (profileError) throw profileError;
 
       setSuccess(`User ${userEmail} has been PERMANENTLY DELETED from Supabase. They will need to create a new account to rejoin.`);
       fetchUsers();
     } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'website-user-delete-pre-fix',hypothesisId:'W3',location:'src/pages/UserManagement.jsx:499',message:'Delete user failed',data:{userId,errorMessage:err?.message || String(err)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       logger.error('Error deleting user:', err);
       setError(`Failed to delete user: ${err.message}`);
     }
@@ -514,6 +533,70 @@ export default function UserManagement() {
     navigator.clipboard.writeText(inviteLink);
     setSuccess('Invite link copied to clipboard!');
   }
+
+  const sendPasswordResetEmail = async (user) => {
+    setResetSending(true);
+    setError('');
+    try {
+      const redirectUrl = `${window.location.origin}/reset-password`;
+      const { error } = await supabase.auth.resetPasswordForEmail(user.email, { redirectTo: redirectUrl });
+      if (error) throw error;
+      setSuccess(`Password reset email sent to ${user.email}`);
+    } catch (err) {
+      logger.error('Error sending password reset email:', err);
+      setError(err.message || 'Failed to send reset email');
+    } finally {
+      setResetSending(false);
+    }
+  };
+
+  const openSetPasswordDialog = (user) => {
+    setSetPasswordDialog({ open: true, user, password: '', confirmPassword: '', saving: false });
+  };
+
+  const closeSetPasswordDialog = () => {
+    setSetPasswordDialog({ open: false, user: null, password: '', confirmPassword: '', saving: false });
+  };
+
+  const handleSetPasswordSubmit = async () => {
+    const { user, password, confirmPassword } = setPasswordDialog;
+    if (!user) return;
+    const validation = validateInput.validatePassword(password);
+    if (!validation.valid) {
+      setError(validation.message);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+    setSetPasswordDialog((prev) => ({ ...prev, saving: true }));
+    setError('');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated');
+      }
+      const res = await fetch('/.netlify/functions/admin-set-user-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ userId: user.id, newPassword: password })
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload.error || 'Failed to set password');
+      }
+      setSuccess(`Password updated for ${user.email}`);
+      closeSetPasswordDialog();
+    } catch (err) {
+      setError(err.message || 'Failed to set password');
+    } finally {
+      setSetPasswordDialog((prev) => ({ ...prev, saving: false }));
+    }
+  };
 
   function getRoleName(roleId) {
     const role = roles.find(r => r.id === roleId);
@@ -585,10 +668,12 @@ export default function UserManagement() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>
-        User Management
-      </Typography>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+          User Management
+        </Typography>
+      </Paper>
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -604,7 +689,7 @@ export default function UserManagement() {
 
       {/* Usage Information */}
       {usage && organization && (
-        <Paper sx={{ p: 2, mb: 3 }}>
+        <Paper elevation={0} sx={{ p: 2, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Typography variant="h6" gutterBottom>
             Organization Usage
           </Typography>
@@ -679,10 +764,10 @@ export default function UserManagement() {
       </Box>
 
       {/* Users Table */}
-      <TableContainer component={Paper}>
+      <TableContainer component={Paper} elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Table>
           <TableHead>
-            <TableRow>
+            <TableRow sx={{ backgroundColor: '#f8fafc' }}>
               <TableCell>Name</TableCell>
               <TableCell>Email</TableCell>
               <TableCell>Role</TableCell>
@@ -707,6 +792,27 @@ export default function UserManagement() {
                 </TableCell>
                 <TableCell>
                   <Stack direction="row" spacing={1}>
+                    <Tooltip title="Email reset password link">
+                      <span>
+                        <IconButton
+                          size="small"
+                          onClick={() => sendPasswordResetEmail(user)}
+                          disabled={resetSending}
+                        >
+                          <EmailIcon />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title="Set password">
+                      <span>
+                        <IconButton
+                          size="small"
+                          onClick={() => openSetPasswordDialog(user)}
+                        >
+                          <LockResetIcon />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
                     <Tooltip title="Edit User">
                       <span>
                         <IconButton
@@ -742,10 +848,10 @@ export default function UserManagement() {
       {pendingInvites.length > 0 && (
         <Box sx={{ mt: 4 }}>
           <Typography variant="h6" gutterBottom>Pending Invites</Typography>
-          <TableContainer component={Paper}>
+          <TableContainer component={Paper} elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
             <Table>
               <TableHead>
-                <TableRow>
+                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell>Email</TableCell>
                   <TableCell>Role</TableCell>
                   <TableCell>Sent</TableCell>
@@ -887,6 +993,42 @@ export default function UserManagement() {
             })}
           >
             Update User
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Set Password Dialog */}
+      <Dialog open={setPasswordDialog.open} onClose={closeSetPasswordDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>Set password for {setPasswordDialog.user?.email}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              fullWidth
+              label="New password"
+              type="password"
+              value={setPasswordDialog.password}
+              onChange={(e) => setSetPasswordDialog((prev) => ({ ...prev, password: e.target.value }))}
+              helperText="At least 8 characters with uppercase, lowercase, number and symbol"
+              autoComplete="new-password"
+            />
+            <TextField
+              fullWidth
+              label="Confirm password"
+              type="password"
+              value={setPasswordDialog.confirmPassword}
+              onChange={(e) => setSetPasswordDialog((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+              autoComplete="new-password"
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeSetPasswordDialog}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleSetPasswordSubmit}
+            disabled={setPasswordDialog.saving || !setPasswordDialog.password || !setPasswordDialog.confirmPassword}
+          >
+            {setPasswordDialog.saving ? 'Saving...' : 'Set password'}
           </Button>
         </DialogActions>
       </Dialog>

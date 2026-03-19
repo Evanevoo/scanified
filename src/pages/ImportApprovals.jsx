@@ -3861,18 +3861,18 @@ export default function ImportApprovals() {
 
   // Enhanced statistics dashboard
   const StatisticsCard = ({ title, value, color, icon, percentage }) => (
-    <Card sx={{ height: '100%' }}>
-      <CardContent>
+    <Card elevation={0} sx={{ height: '100%', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+      <CardContent sx={{ p: 2.5 }}>
         <Box display="flex" alignItems="center" justifyContent="space-between">
           <Box>
-            <Typography color="textSecondary" gutterBottom variant="h6">
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
               {title}
             </Typography>
-            <Typography variant="h4" color={color}>
+            <Typography variant="h4" color={color} sx={{ mt: 0.5, fontWeight: 700, letterSpacing: '-0.03em' }}>
               {value}
             </Typography>
             {percentage && (
-              <Typography variant="body2" color="textSecondary">
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                 {percentage}% of total
               </Typography>
             )}
@@ -3886,30 +3886,51 @@ export default function ImportApprovals() {
   );
 
   return (
-    <Box sx={{ p: 3 }}>
-      {/* Enhanced Header */}
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper
+        elevation={0}
+        sx={{
+          p: { xs: 2.5, md: 3 },
+          mb: 3,
+          borderRadius: 3,
+          border: '1px solid rgba(15, 23, 42, 0.08)',
+          background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+        }}
+      >
+      <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} flexDirection={{ xs: 'column', md: 'row' }} gap={2}>
         <Box>
-          <Typography variant="h4" gutterBottom>
-            Order Verification
+          <Stack direction="row" spacing={1} sx={{ mb: 1.25, flexWrap: 'wrap' }}>
+            <Chip label="Operations" color="primary" size="small" sx={{ borderRadius: 999, fontWeight: 700 }} />
+            <Chip label="Order verification" size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+          </Stack>
+          <Typography variant="h4" gutterBottom sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em', mb: 0.5 }}>
+            Order verification workspace
+          </Typography>
+          <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 760 }}>
+            Review imported orders, compare them against scan activity, and move exceptions through the verification workflow without losing operational context.
           </Typography>
         </Box>
-        <Box display="flex" gap={2}>
+        <Box display="flex" gap={2} flexWrap="wrap">
           <Button
             startIcon={<RefreshIcon />}
             onClick={fetchData}
             disabled={loading}
+            variant="outlined"
+            sx={{ borderRadius: 999, textTransform: 'none' }}
           >
             Refresh
           </Button>
           <Button
             startIcon={<SettingsIcon />}
             onClick={() => setSettingsDialog({ open: true })}
+            variant="contained"
+            sx={{ borderRadius: 999, textTransform: 'none' }}
           >
             Settings
           </Button>
         </Box>
       </Box>
+      </Paper>
 
       {/* Statistics Dashboard */}
       <Grid container spacing={3} mb={3}>
@@ -3934,7 +3955,7 @@ export default function ImportApprovals() {
       </Grid>
 
       {/* Enhanced Filters and Controls */}
-      <Paper sx={{ p: 2, mb: 3 }}>
+      <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
           <SearchInputWithIcon
             placeholder="Search Records"
@@ -4010,7 +4031,7 @@ export default function ImportApprovals() {
       </Paper>
 
       {/* Import Records Header */}
-      <Paper sx={{ mb: 3, p: 2 }}>
+      <Paper elevation={0} sx={{ mb: 3, p: { xs: 2, md: 2.5 }, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <Box display="flex" alignItems="center" justifyContent="space-between">
           <Box>
             <Typography variant="h6" fontWeight={600}>
@@ -4047,7 +4068,7 @@ export default function ImportApprovals() {
 
       {/* Bulk Actions Bar */}
       {visibleSelectedRecords.length > 0 && (
-        <Paper sx={{ p: 2, mb: 2, backgroundColor: 'action.selected' }}>
+        <Paper elevation={0} sx={{ p: 2, mb: 2, backgroundColor: 'action.selected', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Box display="flex" alignItems="center" gap={2}>
             <Typography variant="body2">
               {visibleSelectedRecords.length} record(s) selected
