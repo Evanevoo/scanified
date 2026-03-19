@@ -33,6 +33,7 @@ import {
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { useDynamicAssetTerms } from '../hooks/useDynamicAssetTerms';
+import { formatLocationDisplay, normalizeLocationKey } from '../utils/locationDisplay';
 
 // Same derivation as Inventory (Assets) page - group by product_code when present so one row per code
 function deriveInventoryGasTypes(bottles) {
@@ -811,15 +812,15 @@ export default function AssetDetail() {
               {(() => {
                 // If bottle is assigned to a customer, show customer's location first
                 if (customerData?.location) {
-                  return customerData.location;
+                  return formatLocationDisplay(customerData.location);
                 }
                 // Otherwise show bottle's location
-                return asset.location || '-';
+                return asset.location ? formatLocationDisplay(asset.location) : '-';
               })()}
             </Typography>
-            {customerData?.location && asset.location && customerData.location !== asset.location && (
+            {customerData?.location && asset.location && normalizeLocationKey(customerData.location) !== normalizeLocationKey(asset.location) && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                (Bottle location: {asset.location})
+                (Bottle location: {formatLocationDisplay(asset.location)})
               </Typography>
             )}
           </Grid>
@@ -863,7 +864,11 @@ export default function AssetDetail() {
               Customer Location
             </Typography>
             <Typography variant="body1" fontWeight="bold">
-              {customerData?.location || customerData?.city || '-'}
+              {customerData?.location
+                ? formatLocationDisplay(customerData.location)
+                : customerData?.city
+                  ? formatLocationDisplay(customerData.city)
+                  : '-'}
             </Typography>
           </Grid>
           <Grid item xs={12} md={6}>

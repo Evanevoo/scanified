@@ -26,6 +26,7 @@ import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 import { deliveryService } from '../services/deliveryService';
 import { CustomerBillingService } from '../services/CustomerBillingService';
+import { formatLocationDisplay } from '../utils/locationDisplay';
 
 function CustomerDashboard({ customer, stats }) {
   return (
@@ -302,7 +303,7 @@ function CylinderTracking({ customerId }) {
                       Location:
                     </Typography>
                     <Typography variant="body2">
-                      {cylinder.location || 'Unknown'}
+                      {cylinder.location ? formatLocationDisplay(cylinder.location) : 'Unknown'}
                     </Typography>
                   </Box>
                   
@@ -330,7 +331,7 @@ function CylinderTracking({ customerId }) {
                       startIcon={<TrackIcon />}
                       onClick={() => {
                         // Show detailed tracking info in an alert (temporary solution)
-                        alert(`Cylinder Details:\n\nBarcode: ${cylinder.barcode_number}\nProduct: ${cylinder.product_type}\nStatus: ${cylinder.status}\nLocation: ${cylinder.location || 'Unknown'}\nDays at Location: ${cylinder.days_at_location || 0}\nLast Updated: ${new Date(cylinder.updated_at).toLocaleString()}`);
+                        alert(`Cylinder Details:\n\nBarcode: ${cylinder.barcode_number}\nProduct: ${cylinder.product_type}\nStatus: ${cylinder.status}\nLocation: ${cylinder.location ? formatLocationDisplay(cylinder.location) : 'Unknown'}\nDays at Location: ${cylinder.days_at_location || 0}\nLast Updated: ${new Date(cylinder.updated_at).toLocaleString()}`);
                       }}
                     >
                       View Details

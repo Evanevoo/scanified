@@ -27,6 +27,7 @@ import { useAuth } from '../hooks/useAuth';
 import InvoiceGenerator from '../components/InvoiceGenerator';
 import BulkInvoiceEmailDialog from '../components/BulkInvoiceEmailDialog';
 import { getNextInvoiceNumbers, getNextAgreementNumbers, toCsv, downloadFile } from '../utils/invoiceUtils';
+import { formatLocationDisplay } from '../utils/locationDisplay';
 
 // Business logic functions to determine asset status
 const getAssetStatus = (assignedCustomer, customerType) => {
@@ -164,7 +165,7 @@ const RentalsTableBody = memo(function RentalsTableBody({
               </TableCell>
               <TableCell sx={{ py: 2.5 }}>
                 <Typography variant="body2">
-                  {rentals[0]?.location || 'SASKATOON'}
+                  {formatLocationDisplay(rentals[0]?.location || 'SASKATOON')}
                 </Typography>
               </TableCell>
               <TableCell sx={{ py: 2.5 }}>

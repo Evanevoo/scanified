@@ -38,6 +38,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import { StatsSkeleton, TableSkeleton } from '../../components/SmoothLoading';
+import { formatLocationDisplay } from '../../utils/locationDisplay';
 
 export default function AllAssetsReport() {
   const navigate = useNavigate();
@@ -153,7 +154,7 @@ export default function AllAssetsReport() {
         asset.product_code || 'N/A',
         asset.description || 'N/A',
         asset.status || 'N/A',
-        asset.location || 'N/A',
+        (asset.location ? formatLocationDisplay(asset.location) : 'N/A'),
         asset.customers?.name || 'Unassigned',
         asset.customers?.phone || 'N/A',
         new Date(asset.created_at).toLocaleDateString(),
@@ -443,7 +444,7 @@ export default function AllAssetsReport() {
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2">
-                        {asset.location || 'Not specified'}
+                        {asset.location ? formatLocationDisplay(asset.location) : 'Not specified'}
                       </Typography>
                     </TableCell>
                     <TableCell>

@@ -39,6 +39,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
+import { formatLocationDisplay } from '../utils/locationDisplay';
 
 export default function OwnershipManagement() {
   const { organization } = useAuth();
@@ -542,7 +543,7 @@ export default function OwnershipManagement() {
                         color={bottle.status === 'available' ? 'success' : 'default'}
                       />
                     </TableCell>
-                    <TableCell sx={{ whiteSpace: 'nowrap', px: 2 }}>{bottle.location || '-'}</TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap', px: 2 }}>{bottle.location ? formatLocationDisplay(bottle.location) : '-'}</TableCell>
                   </TableRow>
                 ))}
                 {filteredBottles.length === 0 && (

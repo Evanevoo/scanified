@@ -56,6 +56,7 @@ import { AssetTransferService } from '../services/assetTransferService';
 import { useAuth } from '../hooks/useAuth';
 import DNSConversionDialog from '../components/DNSConversionDialog';
 import BarcodeDisplay from '../components/BarcodeDisplay';
+import { formatLocationDisplay, normalizeLocationKey } from '../utils/locationDisplay';
 
 // Helper to check if a string looks like an address
 function looksLikeAddress(str) {
@@ -968,7 +969,7 @@ export default function CustomerDetail() {
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25, flexWrap: 'wrap' }}>
               <Chip label="Customer detail" color="primary" size="small" sx={{ borderRadius: 999, fontWeight: 700 }} />
               <Chip label={customer.customer_type || 'CUSTOMER'} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
-              <Chip label={customer.location || 'SASKATOON'} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+              <Chip label={formatLocationDisplay(customer.location || 'SASKATOON')} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
             </Stack>
             <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
               {customer.name}
@@ -1218,7 +1219,7 @@ export default function CustomerDetail() {
             ) : (
               <Typography component="div" variant="body1" sx={{ mb: 2 }}>
                 <Chip 
-                  label={customer.location || 'SASKATOON'} 
+                  label={formatLocationDisplay(customer.location || 'SASKATOON')} 
                   color="primary" 
                   size="small"
                   variant="outlined"
@@ -1640,7 +1641,7 @@ export default function CustomerDetail() {
               </TableHead>
               <TableBody>
                 {displayBottleList
-                  .filter(asset => asset.isDns || locationFilter === 'all' || asset.location === locationFilter)
+                  .filter(asset => asset.isDns || locationFilter === 'all' || normalizeLocationKey(asset.location) === normalizeLocationKey(locationFilter))
                   .map((asset) => (
                   <TableRow key={asset.id} hover selected={!asset.isDns && selectedAssets.includes(asset.id)} sx={asset.isDns ? { backgroundColor: 'action.hover' } : undefined}>
                     <TableCell padding="checkbox">
@@ -1670,7 +1671,10 @@ export default function CustomerDetail() {
                     <TableCell>{asset.type || asset.description || 'Unknown'}</TableCell>
                     <TableCell>
                       <Chip 
-                        label={asset.location || customer?.city || customer?.name || 'Unknown'} 
+                        label={(() => {
+                          const raw = asset.location || customer?.city || customer?.name || 'Unknown';
+                          return raw === 'Unknown' ? raw : formatLocationDisplay(raw);
+                        })()} 
                         color="primary" 
                         size="small"
                         variant="outlined"
@@ -1801,7 +1805,7 @@ export default function CustomerDetail() {
                       <TableCell>${(rental.rental_amount != null && rental.rental_amount !== '') ? Number(rental.rental_amount).toFixed(2) : '0.00'}</TableCell>
                       <TableCell>
                         <Chip 
-                          label={rental.location || 'Unknown'} 
+                          label={rental.location ? formatLocationDisplay(rental.location) : 'Unknown'} 
                           color="secondary" 
                           size="small"
                           variant="outlined"
@@ -2303,7 +2307,7 @@ export default function CustomerDetail() {
             </Box>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Tax region</Typography>
-              <Typography variant="body2" color="text.secondary">{customer?.location || 'SSK'}</Typography>
+              <Typography variant="body2" color="text.secondary">{customer?.location ? formatLocationDisplay(customer.location) : 'SSK'}</Typography>
             </Box>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Rental bill format</Typography>

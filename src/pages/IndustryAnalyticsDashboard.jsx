@@ -46,6 +46,7 @@ import { useDebounce, useOptimizedFetch, usePagination } from '../utils/performa
 import { FadeIn, SlideIn, StatsSkeleton, TableSkeleton, SmoothButton } from '../components/SmoothLoading';
 import { useNavigate } from 'react-router-dom';
 import { SearchInputWithIcon } from '../components/ui/search-input-with-icon';
+import { formatLocationDisplay } from '../utils/locationDisplay';
 
 export default function IndustryAnalyticsDashboard() {
   const { profile } = useAuth();
@@ -268,7 +269,7 @@ export default function IndustryAnalyticsDashboard() {
                     </TableCell>
                     <TableCell>
                       <Chip 
-                        label={bottle.location || 'Unknown'} 
+                        label={bottle.location ? formatLocationDisplay(bottle.location) : 'Unknown'} 
                         size="small"
                         color={bottle.location ? 'success' : 'warning'}
                       />

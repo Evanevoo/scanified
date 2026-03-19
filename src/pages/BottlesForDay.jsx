@@ -12,6 +12,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useAuth } from '../hooks/useAuth';
+import { formatLocationDisplay } from '../utils/locationDisplay';
 
 function BottlesForDayErrorFallback({ error, resetErrorBoundary }) {
   return (
@@ -444,7 +445,7 @@ function BottlesForDay({ profile }) {
                         </Typography>
                       ) : 'N/A'}
                     </TableCell>
-                    <TableCell>{bottle.location || 'N/A'}</TableCell>
+                    <TableCell>{bottle.location ? formatLocationDisplay(bottle.location) : 'N/A'}</TableCell>
                     <TableCell>
                       <Chip 
                         label={bottle.status || 'N/A'} 

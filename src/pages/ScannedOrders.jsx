@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
+import { usePermissions } from '../context/PermissionsContext';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, CircularProgress, Alert, MenuItem, Select, InputLabel, FormControl, Chip, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Card, CardContent, Grid, Stack
 } from '@mui/material';
@@ -44,7 +45,9 @@ function AssetWithWarning({ asset, currentCustomer }) {
 
 export default function ScannedOrders() {
   const { organization, profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
+  const { isAdmin: isElevatedRole } = usePermissions();
+  /** Admin, org owner, and platform owner can edit scans after the 24h window (uses resolved role from permissions). */
+  const canBypassScanEditWindow = isElevatedRole();
   const browserTz = typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone;
   // Prefer profile timezone (Settings). Else browser TZ. Else UTC so scan times are consistent.
   const displayTimezone = profile?.preferences?.timezone || browserTz || 'UTC';
@@ -151,7 +154,7 @@ export default function ScannedOrders() {
   }, [selectedOrg, orders]);
 
   const handleEdit = (order) => {
-    if (!isAdmin) {
+    if (!canBypassScanEditWindow) {
       const scanTime = parseScanTime(order.timestamp || order.created_at) || new Date(0);
       const now = new Date();
       const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
@@ -188,7 +191,7 @@ export default function ScannedOrders() {
   };
 
   const handleEnhancedEdit = (order) => {
-    if (!isAdmin) {
+    if (!canBypassScanEditWindow) {
       const scanTime = parseScanTime(order.timestamp || order.created_at) || new Date(0);
       const now = new Date();
       const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
@@ -313,7 +316,7 @@ export default function ScannedOrders() {
     const scanTime = parseScanTime(order.timestamp || order.created_at) || new Date(0);
     const now = new Date();
     const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
-    return isAdmin || hoursDiff <= 24;
+    return canBypassScanEditWindow || hoursDiff <= 24;
   }).length;
 
   const workflowMetrics = [
@@ -330,7 +333,9 @@ export default function ScannedOrders() {
     {
       label: 'Editable now',
       value: editableOrdersCount,
-      helper: isAdmin ? 'Admin access can revise all visible scans' : 'Standard users can edit scans from the last 24 hours',
+      helper: canBypassScanEditWindow
+        ? 'Admin / owner can revise all visible scans (no 24h limit)'
+        : 'Standard users can edit scans from the last 24 hours',
     },
     {
       label: 'Timezone',
@@ -447,7 +452,7 @@ export default function ScannedOrders() {
                   const scanTime = parseScanTime(scanTimeRaw) || new Date(0);
                   const now = new Date();
                   const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
-                  const isEditable = isAdmin || hoursDiff <= 24;
+                  const isEditable = canBypassScanEditWindow || hoursDiff <= 24;
                   
                   return (
                     <TableRow 
