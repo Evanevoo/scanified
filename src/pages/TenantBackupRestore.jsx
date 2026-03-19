@@ -52,7 +52,7 @@ export default function TenantBackupRestore() {
   const [dryRun, setDryRun] = useState(true);
   const [restoring, setRestoring] = useState(false);
 
-  const isAdmin = profile?.role === 'admin' || profile?.role === 'owner';
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner';
 
   useEffect(() => {
     if (isAdmin && organization?.id) {
@@ -222,15 +222,13 @@ export default function TenantBackupRestore() {
   }
 
   return (
-    <Box sx={{ p: 3, width: '100%' }}>
-      <Typography variant="h4" fontWeight={700} color="primary" gutterBottom>
-        <BackupIcon sx={{ mr: 2, verticalAlign: 'middle' }} />
-        Tenant Backup & Restore
-      </Typography>
-
-      <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
-        Manage daily backups and restore tenant data in case of data loss.
-      </Typography>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+          <BackupIcon sx={{ mr: 2, verticalAlign: 'middle' }} />
+          Tenant Backup & Restore
+        </Typography>
+      </Paper>
 
       {message && (
         <Alert 
@@ -245,7 +243,7 @@ export default function TenantBackupRestore() {
       <Grid container spacing={3}>
         {/* Backup Actions */}
         <Grid item xs={12} md={6}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 <BackupIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
@@ -287,7 +285,7 @@ export default function TenantBackupRestore() {
 
         {/* Restore Actions */}
         <Grid item xs={12} md={6}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 <RestoreIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
@@ -326,7 +324,7 @@ export default function TenantBackupRestore() {
 
         {/* Available Backups */}
         <Grid item xs={12}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6">
@@ -349,10 +347,10 @@ export default function TenantBackupRestore() {
                   No backups found. Create a backup to get started.
                 </Alert>
               ) : (
-                <TableContainer component={Paper} variant="outlined">
+                <TableContainer component={Paper} elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
                   <Table>
                     <TableHead>
-                      <TableRow>
+                      <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                         <TableCell><strong>Backup Date</strong></TableCell>
                         <TableCell><strong>Created</strong></TableCell>
                         <TableCell><strong>Actions</strong></TableCell>
@@ -397,7 +395,7 @@ export default function TenantBackupRestore() {
 
         {/* Backup History */}
         <Grid item xs={12}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 <HistoryIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
@@ -407,10 +405,10 @@ export default function TenantBackupRestore() {
               {backupHistory.length === 0 ? (
                 <Alert severity="info">No backup history available.</Alert>
               ) : (
-                <TableContainer component={Paper} variant="outlined" sx={{ mt: 2 }}>
+                <TableContainer component={Paper} elevation={0} sx={{ mt: 2, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
                   <Table>
                     <TableHead>
-                      <TableRow>
+                      <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                         <TableCell><strong>Type</strong></TableCell>
                         <TableCell><strong>Status</strong></TableCell>
                         <TableCell><strong>Records</strong></TableCell>

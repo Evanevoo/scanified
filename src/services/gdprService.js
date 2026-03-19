@@ -75,7 +75,7 @@ export const gdprService = {
       }
 
       // Export organization data (if user is admin/owner)
-      if (profileData?.role === 'admin' || profileData?.role === 'owner') {
+      if (profileData?.role === 'admin' || profileData?.role === 'owner' || profileData?.role === 'orgowner') {
         // Export customers
         const { data: customersData, error: customersError } = await supabase
           .from('customers')

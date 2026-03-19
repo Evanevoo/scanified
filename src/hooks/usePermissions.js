@@ -15,10 +15,25 @@ export function usePermissions() {
       return;
     }
 
-    // The top-level 'owner' has all permissions implicitly
+    // Platform owner (Scanified) has all permissions
     if (profile.role === 'owner') {
-      setPermissions(['*']); // Using '*' to signify all permissions
-      setIsOrgAdmin(true); // Owner is also an admin
+      setPermissions(['*']);
+      setIsOrgAdmin(true);
+      setLoading(false);
+      return;
+    }
+
+    // Org owner - same as admin within their organization
+    if (profile.role === 'orgowner') {
+      setPermissions([
+        'manage:users', 'manage:billing', 'manage:roles', 'manage:organization', 'manage:settings',
+        'read:customers', 'write:customers', 'delete:customers',
+        'read:cylinders', 'write:cylinders', 'delete:cylinders',
+        'read:invoices', 'write:invoices', 'delete:invoices',
+        'read:rentals', 'write:rentals', 'read:analytics', 'read:reports',
+        'update:cylinder_location'
+      ]);
+      setIsOrgAdmin(true);
       setLoading(false);
       return;
     }
@@ -110,7 +125,7 @@ export function usePermissions() {
   };
 
   const isAdmin = () => {
-    return profile?.role === 'owner' || profile?.role === 'admin' || isOrgAdmin;
+    return profile?.role === 'owner' || profile?.role === 'orgowner' || profile?.role === 'admin' || isOrgAdmin;
   };
 
   const isManager = () => {

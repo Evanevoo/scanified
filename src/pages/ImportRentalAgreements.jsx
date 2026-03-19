@@ -27,6 +27,7 @@ import {
   Grid,
   Card,
   CardContent,
+  Stack,
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
@@ -430,19 +431,20 @@ export default function ImportRentalAgreements() {
   };
 
   return (
-    <Box sx={{ p: 2, maxWidth: 1600, mx: 'auto' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-        <Button startIcon={<ArrowBackIcon />} component={Link} to="/lease-agreements">
-          Back
-        </Button>
-        <Typography variant="h6">Import TrackAbout Rental Agreements</Typography>
-      </Box>
-
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            Upload an export of <strong>Expiring Asset Agreements</strong> from TrackAbout (CSV or Excel). Map columns, assign each row to one of your customers, then import as lease agreements.
+    <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 1600, mx: 'auto' }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Button startIcon={<ArrowBackIcon />} component={Link} to="/lease-agreements" sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
+            Back
+          </Button>
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+            Import TrackAbout Rental Agreements
           </Typography>
+        </Box>
+      </Paper>
+
+      <Card elevation={0} sx={{ mb: 2, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+        <CardContent>
           <Box
             onDrop={handleDrop}
             onDragOver={handleDragOver}
@@ -467,7 +469,7 @@ export default function ImportRentalAgreements() {
                 component="span"
                 variant="outlined"
                 startIcon={<CloudUploadIcon />}
-                sx={{ cursor: 'pointer' }}
+                sx={{ cursor: 'pointer', borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
               >
                 Choose file
               </Button>
@@ -488,7 +490,7 @@ export default function ImportRentalAgreements() {
       )}
 
       {columns.length > 0 && (
-        <Paper sx={{ p: 2, mb: 2 }}>
+        <Paper elevation={0} sx={{ p: 2, mb: 2, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Typography variant="subtitle2" gutterBottom>
             Column mapping (TrackAbout)
           </Typography>
@@ -513,14 +515,14 @@ export default function ImportRentalAgreements() {
               </Grid>
             ))}
           </Grid>
-          <Button size="small" onClick={() => runCustomerMatching()} disabled={matching || preview.length === 0} sx={{ mt: 2 }}>
+          <Button size="small" onClick={() => runCustomerMatching()} disabled={matching || preview.length === 0} sx={{ mt: 2, borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
             {matching ? 'Matching…' : 'Re-match customers'}
           </Button>
         </Paper>
       )}
 
       {preview.length > 0 && (
-        <Paper sx={{ overflow: 'auto' }}>
+        <Paper elevation={0} sx={{ overflow: 'auto', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
             <Typography variant="subtitle1">
               Preview & assign customer ({preview.length} row{preview.length !== 1 ? 's' : ''})
@@ -539,16 +541,17 @@ export default function ImportRentalAgreements() {
                 onClick={handleImport}
                 disabled={importing}
                 startIcon={importing ? null : <CheckCircleIcon />}
+                sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
               >
                 {importing ? `Importing… ${importProgress}%` : 'Import as lease agreements'}
               </Button>
             )}
           </Box>
           {importing && <LinearProgress variant="determinate" value={importProgress} sx={{ mx: 2 }} />}
-          <TableContainer sx={{ maxHeight: 480 }}>
+          <TableContainer sx={{ maxHeight: 480, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
             <Table size="small" stickyHeader>
               <TableHead>
-                <TableRow>
+                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell>#</TableCell>
                   <TableCell>End Date</TableCell>
                   <TableCell>Customer (from file)</TableCell>

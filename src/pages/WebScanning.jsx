@@ -6,6 +6,7 @@ import {
   Grid,
   Card,
   CardContent,
+  Stack,
   Button,
   TextField,
   FormControl,
@@ -551,7 +552,7 @@ export default function WebScanning() {
 
   const StatCard = ({ title, value, icon, color = 'primary', subtitle }) => (
     <FadeIn>
-      <Card>
+      <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <CardContent>
           <Box display="flex" alignItems="center" justifyContent="space-between">
             <Box>
@@ -629,45 +630,44 @@ export default function WebScanning() {
   );
 
   return (
-    <Box p={3}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
       {/* Header */}
       <FadeIn>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Box>
-            <Typography variant="h4" fontWeight="bold" color="primary">
+        <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
               Web Scanning Terminal
             </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Professional barcode scanning with real-time tracking
-            </Typography>
+            <Box display="flex" gap={2} alignItems="center">
+              <Chip
+                icon={isOnline ? <WifiIcon /> : <WifiOffIcon />}
+                label={isOnline ? 'Online' : 'Offline'}
+                color={isOnline ? 'success' : 'warning'}
+              />
+              {offlineQueue.length > 0 && (
+                <Badge badgeContent={offlineQueue.length} color="warning">
+                  <SyncIcon />
+                </Badge>
+              )}
+              <SmoothButton
+                variant="outlined"
+                onClick={clearScans}
+                disabled={scannedItems.length === 0}
+                sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+              >
+                Clear All
+              </SmoothButton>
+              <SmoothButton
+                variant="outlined"
+                onClick={exportScans}
+                disabled={scannedItems.length === 0}
+                sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+              >
+                Export CSV
+              </SmoothButton>
+            </Box>
           </Box>
-          <Box display="flex" gap={2} alignItems="center">
-            <Chip
-              icon={isOnline ? <WifiIcon /> : <WifiOffIcon />}
-              label={isOnline ? 'Online' : 'Offline'}
-              color={isOnline ? 'success' : 'warning'}
-            />
-            {offlineQueue.length > 0 && (
-              <Badge badgeContent={offlineQueue.length} color="warning">
-                <SyncIcon />
-              </Badge>
-            )}
-            <SmoothButton
-              variant="outlined"
-              onClick={clearScans}
-              disabled={scannedItems.length === 0}
-            >
-              Clear All
-            </SmoothButton>
-            <SmoothButton
-              variant="outlined"
-              onClick={exportScans}
-              disabled={scannedItems.length === 0}
-            >
-              Export CSV
-            </SmoothButton>
-          </Box>
-        </Box>
+        </Paper>
       </FadeIn>
 
       {/* Stats Cards */}
@@ -711,7 +711,7 @@ export default function WebScanning() {
 
       {/* Scan Mode Selection */}
       <FadeIn delay={200}>
-        <Card sx={{ mb: 3 }}>
+        <Card elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>
               Scan Mode
@@ -725,6 +725,7 @@ export default function WebScanning() {
                     color={mode.color}
                     startIcon={mode.icon}
                     onClick={() => setActiveMode(mode.value)}
+                    sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                   >
                     {mode.label}
                   </SmoothButton>
@@ -740,7 +741,7 @@ export default function WebScanning() {
         <Grid container spacing={3}>
           {/* Scanner */}
           <Grid item xs={12} md={6}>
-            <Card>
+            <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
               <CardContent>
                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                   <Typography variant="h6">
@@ -751,6 +752,7 @@ export default function WebScanning() {
                     color={scannerActive ? 'error' : 'primary'}
                     startIcon={scannerActive ? <CloseIcon /> : <ScanIcon />}
                     onClick={() => setScannerActive(!scannerActive)}
+                    sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                   >
                     {scannerActive ? 'Stop' : 'Start'} Scanner
                   </SmoothButton>
@@ -809,6 +811,7 @@ export default function WebScanning() {
                             size="small"
                             onClick={handleManualEntry}
                             disabled={!manualEntry.trim()}
+                            sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                           >
                             Scan
                           </SmoothButton>
@@ -824,7 +827,7 @@ export default function WebScanning() {
 
           {/* Recent Scans */}
           <Grid item xs={12} md={6}>
-            <Card>
+            <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
                   Recent Scans
@@ -883,7 +886,7 @@ export default function WebScanning() {
 
       {/* Scan Results Table */}
       <FadeIn delay={400}>
-        <Card sx={{ mt: 3 }}>
+        <Card elevation={0} sx={{ mt: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <CardContent>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
               <Typography variant="h6">
@@ -898,10 +901,10 @@ export default function WebScanning() {
               />
             </Box>
             
-            <TableContainer>
+            <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
               <Table>
                 <TableHead>
-                  <TableRow>
+                  <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                     <TableCell>Barcode</TableCell>
                     <TableCell>Status</TableCell>
                     <TableCell>Mode</TableCell>
@@ -976,7 +979,7 @@ export default function WebScanning() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setAssetDialog(false)}>Close</Button>
+          <Button onClick={() => setAssetDialog(false)} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>Close</Button>
         </DialogActions>
       </Dialog>
     </Box>

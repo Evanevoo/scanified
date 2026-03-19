@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Card, CardContent, Alert } from '@mui/material';
+import { Box, Paper, Typography, Card, CardContent, Alert } from '@mui/material';
 import { TableSkeleton } from '../../components/SmoothLoading';
 
 export default function LostAssetsReport() {
@@ -8,20 +8,38 @@ export default function LostAssetsReport() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    // Simulate async fetch
     setLoading(true);
     setTimeout(() => {
-      // TODO: Replace with real fetch from Supabase
-      setLostAssets([]); // Empty for now
+      setLostAssets([]);
       setLoading(false);
     }, 1200);
   }, []);
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" fontWeight={700} mb={3}>Lost Assets</Typography>
-      <Card>
-        <CardContent>
+    <Box sx={{ p: { xs: 2, sm: 3 }, bgcolor: '#f8fafc', minHeight: '100%' }}>
+      <Paper
+        elevation={0}
+        sx={{
+          p: { xs: 2, sm: 3 },
+          borderRadius: 2,
+          border: '1px solid rgba(15, 23, 42, 0.08)',
+          background: 'linear-gradient(135deg, #f8fafc 0%, #eef2ff 55%, #f8fafc 100%)',
+          mb: 2,
+        }}
+      >
+        <Typography variant="h5" fontWeight={800} sx={{ letterSpacing: -0.5, color: '#0f172a' }}>
+          Lost assets
+        </Typography>
+      </Paper>
+      <Card
+        elevation={0}
+        sx={{
+          borderRadius: 2,
+          border: '1px solid rgba(15, 23, 42, 0.08)',
+          boxShadow: '0 2px 12px rgba(15, 23, 42, 0.04)',
+        }}
+      >
+        <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
           {loading ? (
             <TableSkeleton rows={5} columns={4} />
           ) : error ? (
@@ -29,10 +47,12 @@ export default function LostAssetsReport() {
           ) : lostAssets.length === 0 ? (
             <Alert severity="info">No lost assets found.</Alert>
           ) : (
-            <div>/* Render lost assets table here */</div>
+            <Typography variant="body2" color="text.secondary">
+              Table view coming soon.
+            </Typography>
           )}
         </CardContent>
       </Card>
     </Box>
   );
-} 
+}

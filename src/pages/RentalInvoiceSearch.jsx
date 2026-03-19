@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import {
   Box,
@@ -141,31 +141,20 @@ export default function RentalInvoiceSearch() {
   const formatDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '—');
 
   return (
-    <Box sx={{ p: { xs: 1.5, sm: 2 }, maxWidth: '100%' }}>
-      <Box sx={{ mb: 3 }}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
-          <Box>
-            <Typography variant="h5" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <AccountBalanceIcon color="primary" />
-              Billing & accounting
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              Search and export rental invoices. QuickBooks CSV and lease billing are on the{' '}
-              <Link to="/rentals" style={{ fontWeight: 500 }}>Rentals</Link> page (Export menu) and{' '}
-              <Link to="/lease-billing-dashboard" style={{ fontWeight: 500 }}>Lease billing dashboard</Link>.
-            </Typography>
-          </Box>
+          <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em', display: 'flex', alignItems: 'center', gap: 1 }}>
+            <AccountBalanceIcon color="primary" />
+            Billing & accounting
+          </Typography>
           <Button variant="outlined" size="small" startIcon={<RefreshIcon />} onClick={() => fetchInvoices()} disabled={loading}>
             Refresh
           </Button>
         </Stack>
-      </Box>
+      </Paper>
 
-      <Card elevation={0} sx={{ mb: 3, borderRadius: 2, border: '1px solid rgba(0,0,0,0.06)' }}>
-        <CardContent>
-          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 2 }}>
-            Filter by date, customer, or invoice number, then export to CSV.
-          </Typography>
+      <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Stack direction={{ xs: 'column', sm: 'row' }} flexWrap="wrap" gap={2} alignItems="flex-end">
             <TextField
               size="small"
@@ -233,8 +222,7 @@ export default function RentalInvoiceSearch() {
               {exporting ? 'Exporting…' : 'Export to CSV'}
             </Button>
           </Stack>
-        </CardContent>
-      </Card>
+      </Paper>
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
@@ -242,7 +230,7 @@ export default function RentalInvoiceSearch() {
         </Alert>
       )}
 
-      <Card elevation={0} sx={{ borderRadius: 2, border: '1px solid rgba(0,0,0,0.06)' }}>
+      <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <CardContent sx={{ p: 0 }}>
           {loading ? (
             <TableSkeleton rows={8} columns={8} />
@@ -253,10 +241,10 @@ export default function RentalInvoiceSearch() {
               </Typography>
             </Box>
           ) : (
-            <TableContainer>
+            <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
               <Table size="small" stickyHeader>
                 <TableHead>
-                  <TableRow>
+                  <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                     <TableCell sx={{ fontWeight: 600 }}>Invoice #</TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>Customer</TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>

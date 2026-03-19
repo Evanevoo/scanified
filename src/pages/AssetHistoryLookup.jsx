@@ -59,27 +59,24 @@ export default function AssetHistoryLookup() {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-        <IconButton onClick={() => navigate(-1)}>
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h4" fontWeight={800} color="primary">
-          Asset History Lookup
-        </Typography>
-      </Box>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <IconButton onClick={() => navigate(-1)}>
+            <ArrowBackIcon />
+          </IconButton>
+          <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+            Asset History Lookup
+          </Typography>
+        </Box>
+      </Paper>
 
-      {/* Search Card */}
-      <Card variant="outlined" sx={{ width: '100%' }}>
+      <Card elevation={0} sx={{ width: '100%', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <CardContent sx={{ p: 4 }}>
           <Box sx={{ textAlign: 'center', mb: 3 }}>
             <HistoryIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
             <Typography variant="h6" fontWeight={600} color="text.secondary" gutterBottom>
               Quick Asset History Search
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Enter a barcode or serial number to view the complete history and details of any asset
             </Typography>
           </Box>
 
@@ -161,16 +158,11 @@ export default function AssetHistoryLookup() {
               onClick={handleSearch}
               disabled={!search.trim()}
               fullWidth
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
             >
               Lookup Asset History
             </Button>
           </Stack>
-
-          <Box sx={{ mt: 3, p: 2, bgcolor: 'info.light', borderRadius: 1 }}>
-            <Typography variant="caption" color="info.contrastText">
-              💡 Tip: You can search by any asset identifier including barcodes, serial numbers, or asset IDs
-            </Typography>
-          </Box>
         </CardContent>
       </Card>
     </Box>

@@ -46,11 +46,12 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   
   const [searchTerm, setSearchTerm] = useState('');
   const [sections, setSections] = useState({
-    core: false,
-    operations: false,
-    inventory: false,
-    analytics: false,
-    advanced: false,
+    dashboard: true,
+    operations: true,
+    customers: true,
+    inventory: true,
+    billing: false,
+    reports: false,
     admin: false
   });
   const navigate = useNavigate();
@@ -149,7 +150,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
     );
   }
 
-  // Owner gets special navigation ONLY if they don't have an organization
+  // Platform owner (Scanified) gets special navigation - role 'owner' with no org
   if (normalizeRole(actualRole) === 'owner' && !organization) {
     const ownerMenuItems = [
       {
@@ -252,47 +253,37 @@ borderColor: 'divider',
 
   // Organized menu structure
   const menuSections = {
-    admin: {
-      title: 'Administration',
-      icon: <AdminPanelSettings />,
-      items: [
-        { title: 'Import Data', path: '/import', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Import Customers', path: '/import-customer-info', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Import Asset Balance', path: '/import-asset-balance', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Import Rental Agreements', path: '/import-rental-agreements', icon: <AssignmentIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Order Verification', path: '/import-approvals', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Verified Orders', path: '/verified-orders', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Organization Tools', path: '/organization-tools', icon: <BuildIcon />, roles: ['admin', 'manager'] },
-              { title: 'User Management', path: '/settings?tab=team', icon: <AdminPanelSettings />, roles: ['admin', 'manager'] },
-        { title: 'Join Codes', path: '/organization-join-codes', icon: <QrCodeIcon />, roles: ['admin', 'manager'] },
-        { title: 'Role & Permission Management', path: '/role-management', icon: <ShieldIcon />, roles: ['admin'] },
-        { title: 'Bulk Rental Pricing', path: '/bulk-rental-pricing', icon: <CalculatorIcon />, roles: ['admin', 'manager'] },
-        { title: 'Billing', path: '/billing', icon: <Payment />, roles: ['admin'] },
-        { title: 'Settings', path: '/settings', icon: <Settings />, roles: ['admin'] },
-        { title: 'Support Center', path: '/support', icon: <Support />, roles: ['admin', 'user', 'manager'] }
-      ]
-    },
-    core: {
-      title: 'Core',
+    dashboard: {
+      title: 'Dashboard',
       icon: <HomeIcon />,
       items: [
-        { title: 'Dashboard', path: '/home', icon: <Dashboard />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Overview', path: '/home', icon: <Dashboard />, roles: ['admin', 'user', 'manager'] },
         { title: 'Industry Analytics', path: '/industry-analytics', icon: <Analytics />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Customers', path: '/customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Locations', path: '/locations', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] }
+        { title: 'Favorites', path: '/favorites', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] }
       ]
     },
     operations: {
       title: 'Operations',
       icon: <LocalShipping />,
       items: [
+        { title: 'Import Data', path: '/import', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
         { title: 'Bottles for Day', path: '/bottles-for-day', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Rentals', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
         { title: 'Scanned Orders', path: '/scanned-orders', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Order Verification', path: '/import-approvals', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Truck Reconciliation', path: '/truck-reconciliation', icon: <TruckIcon />, roles: ['admin', 'manager'] },
+        { title: 'Workflow Automation', path: '/workflow-automation', icon: <AutomationIcon />, roles: ['admin', 'manager'] },
+        { title: 'Route Optimization', path: '/route-optimization', icon: <RouteOptimizationIcon />, roles: ['admin', 'manager'] },
+      ]
+    },
+    customers: {
+      title: 'Customers',
+      icon: <People />,
+      items: [
+        { title: 'Customer List', path: '/customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Locations', path: '/locations', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Rentals', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
         { title: 'Lease Agreements', path: '/lease-agreements', icon: <WorkIcon />, roles: ['admin', 'manager'] },
-        { title: 'Generate Customer ID', path: '/generateid', icon: <IntegrationIcon />, roles: ['owner'] },
-        { title: 'Barcode Generator', path: '/barcode-generator', icon: <QrCodeIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Accounting Integration', path: '/owner-portal/integration-settings', icon: <IntegrationIcon />, roles: ['owner'] }
+        { title: 'Join Codes', path: '/organization-join-codes', icon: <QrCodeIcon />, roles: ['admin', 'manager'] }
       ]
     },
     inventory: {
@@ -306,19 +297,41 @@ borderColor: 'divider',
         { title: 'Recently Added Cylinders', path: '/recent-cylinders', icon: <Inventory />, roles: ['admin', 'user', 'manager'] }
       ]
     },
-    analytics: {
-      title: 'Analytics & Reports',
-      icon: <Analytics />,
+    billing: {
+      title: 'Billing',
+      icon: <Payment />,
       items: [
-        { title: 'Custom Reports', path: '/custom-reports', icon: <ReportIcon />, roles: ['admin', 'user', 'manager'] }
+        { title: 'Billing Workspace', path: '/billing', icon: <Payment />, roles: ['admin', 'user', 'manager'] }
+      ]
+    },
+    reports: {
+      title: 'Reports',
+      icon: <ReportIcon />,
+      items: [
+        { title: 'Custom Reports', path: '/custom-reports', icon: <ReportIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Report Library', path: '/reports', icon: <Assessment />, roles: ['admin', 'user', 'manager'] }
+      ]
+    },
+    admin: {
+      title: 'Admin',
+      icon: <AdminPanelSettings />,
+      items: [
+        { title: 'Team', path: '/settings?tab=team', icon: <AdminPanelSettings />, roles: ['admin', 'manager'] },
+        { title: 'Organization Tools', path: '/organization-tools', icon: <BuildIcon />, roles: ['admin', 'manager'] },
+        { title: 'Roles & Permissions', path: '/role-management', icon: <ShieldIcon />, roles: ['admin'] },
+        { title: 'Settings', path: '/settings', icon: <Settings />, roles: ['admin'] },
+        { title: 'Support Center', path: '/support', icon: <Support />, roles: ['admin', 'user', 'manager'] }
       ]
     }
   };
 
   // Filter items based on user role and search (case-insensitive)
+  // Org owners (role 'orgowner') see same menu as admin, plus owner-only items
+  const isOrgOwnerRole = normalizeRole(actualRole) === 'orgowner';
   const filteredSections = Object.entries(menuSections).reduce((acc, [key, section]) => {
     const filteredItems = section.items.filter(item => {
-      const hasRole = item.roles.some(role => normalizeRole(role) === normalizeRole(actualRole));
+      const hasRole = item.roles.some(role => normalizeRole(role) === normalizeRole(actualRole))
+        || (isOrgOwnerRole && item.roles.some(role => ['admin', 'owner'].includes(normalizeRole(role))));
       const matchesSearch = !searchTerm || 
         item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.path.toLowerCase().includes(searchTerm.toLowerCase());
@@ -338,7 +351,8 @@ borderColor: 'divider',
       case 'admin': return 'Administrator';
       case 'manager': return 'Manager';
       case 'user': return 'User';
-      case 'owner': return 'Owner';
+      case 'owner': return 'Platform Owner';
+      case 'orgowner': return 'Org Owner';
       default: return role;
     }
   };
@@ -364,6 +378,53 @@ borderColor: 'divider',
                 {isCollapsed ? <ChevronRight /> : <ChevronLeft />}
               </IconButton>
             </Tooltip>
+          </Box>
+        )}
+
+        {!isCollapsed && (
+          <Box sx={{ px: 2, pb: 2 }}>
+            <Box
+              sx={{
+                px: 1.5,
+                py: 1.5,
+                borderRadius: 3,
+                border: '1px solid rgba(15, 23, 42, 0.08)',
+                background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
+                <Avatar
+                  src={organization?.logo_url || undefined}
+                  sx={{
+                    width: 38,
+                    height: 38,
+                    bgcolor: `${primaryColor}20`,
+                    color: primaryColor,
+                    fontWeight: 700,
+                  }}
+                >
+                  {organization?.name?.charAt(0)?.toUpperCase() || 'O'}
+                </Avatar>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, color: '#111827' }} noWrap>
+                    {organization?.name || 'Organization'}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#64748b' }} noWrap>
+                    Signed-in workspace
+                  </Typography>
+                </Box>
+              </Box>
+              <Chip
+                size="small"
+                label={getRoleDisplayName(actualRole)}
+                sx={{
+                  borderRadius: 999,
+                  backgroundColor: `${primaryColor}14`,
+                  color: primaryColor,
+                  fontWeight: 600,
+                }}
+              />
+            </Box>
           </Box>
         )}
 

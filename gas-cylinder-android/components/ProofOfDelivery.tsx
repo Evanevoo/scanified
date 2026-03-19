@@ -131,11 +131,14 @@ export default function ProofOfDelivery({
           accuracy: Location.Accuracy.High,
           timeout: 10000
         });
-        setGpsLocation({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          accuracy: location.coords.accuracy
-        });
+        const coords = location?.coords;
+        if (coords != null) {
+          setGpsLocation({
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            accuracy: coords.accuracy ?? 0
+          });
+        }
       }
     } catch (error) {
       logger.error('Location error:', error);

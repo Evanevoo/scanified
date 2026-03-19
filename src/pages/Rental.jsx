@@ -1,4 +1,5 @@
 import React from 'react';
+import { Box } from '@mui/material';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import RentalSidebar from '../components/RentalSidebar';
 import RentalClassGroups from './RentalClassGroups';
@@ -17,9 +18,9 @@ import AssignAssetTypesToRentalClasses from './AssignAssetTypesToRentalClasses';
 
 export default function Rental() {
   return (
-    <div className="flex min-h-screen">
+    <Box sx={{ display: 'flex', minHeight: '100%', bgcolor: '#f8fafc', alignItems: 'stretch' }}>
       <RentalSidebar />
-      <div className="flex-1">
+      <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
         <Routes>
           <Route path="/class-groups" element={<RentalClassGroups />} />
           <Route path="/classes" element={<RentalClasses />} />
@@ -36,7 +37,7 @@ export default function Rental() {
           <Route path="/assign-asset-types" element={<AssignAssetTypesToRentalClasses />} />
           <Route path="*" element={<Navigate to="/rental/class-groups" />} />
         </Routes>
-      </div>
-    </div>
+      </Box>
+    </Box>
   );
 } 

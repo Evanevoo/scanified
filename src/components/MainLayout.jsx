@@ -1,45 +1,27 @@
 import logger from '../utils/logger';
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
-import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
 import IconButton from '@mui/material/IconButton';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
-import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
-import MenuOpenIcon from '@mui/icons-material/MenuOpen';
-import MenuIcon from '@mui/icons-material/Menu';
-import PeopleIcon from '@mui/icons-material/People';
-import LocationOnIcon from '@mui/icons-material/LocationOn';
-import SwapVertIcon from '@mui/icons-material/SwapVert';
-import AssignmentIcon from '@mui/icons-material/Assignment';
-import BusinessIcon from '@mui/icons-material/Business';
-import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import Button from '@mui/material/Button';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
-import CircularProgress from '@mui/material/CircularProgress';
 import SettingsIcon from '@mui/icons-material/SettingsOutlined';
 import LogoutIcon from '@mui/icons-material/LogoutOutlined';
-import SearchIcon from '@mui/icons-material/Search';
 import NotificationsIcon from '@mui/icons-material/Notifications';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { useTheme } from '../context/ThemeContext';
 import GlobalImportProgress from './GlobalImportProgress';
 import ImportNotification from './ImportNotification';
 import { useOwnerAccess } from '../hooks/useOwnerAccess';
 import { supabase } from '../supabase/client';
-import { usePermissions } from '../context/PermissionsContext';
 import { useAuth } from '../hooks/useAuth';
-import { useAssetConfig } from '../hooks/useAssetConfig';
-import TextField from '@mui/material/TextField';
 import Sidebar from './Sidebar';
-import InputAdornment from '@mui/material/InputAdornment';
 import Paper from '@mui/material/Paper';
 import { SearchInputWithIcon } from './ui/search-input-with-icon';
 
@@ -48,11 +30,9 @@ const drawerWidth = 280;
 const collapsedWidth = 72;
 
 export default function MainLayout({ children }) {
-  const { profile, organization, signOut } = useAuth();
-  const { config: assetConfig } = useAssetConfig();
+  const { profile, organization } = useAuth();
   const { organizationColors } = useTheme();
   const primaryColor = organizationColors?.primary || '#40B5AD';
-  const [integrationsOpen, setIntegrationsOpen] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
@@ -61,15 +41,12 @@ export default function MainLayout({ children }) {
   const searchRef = useRef();
   const navigate = useNavigate();
   const location = useLocation();
-  const { isDarkMode } = useTheme();
-  const permissions = usePermissions();
-  const { can } = permissions || { can: () => false };
   const { isOwner } = useOwnerAccess();
   const isOwnerPortal = profile?.role === 'owner' && location.pathname.startsWith('/owner-portal');
 
-  // Top navigation links - only show for organizations, not for owner
-  const topNavLinks = profile?.role === 'owner' 
-    ? [] 
+  // Top navigation — classic tab bar (pre–post-login redesign); hidden for platform owner
+  const topNavLinks = profile?.role === 'owner'
+    ? []
     : [
         { label: 'Home', to: '/home' },
         { label: 'Inventory', to: '/inventory' },
@@ -200,6 +177,15 @@ export default function MainLayout({ children }) {
     }
   };
 
+  const isTopNavActive = (to) => {
+    const path = location.pathname;
+    if (to === '/home') return path === '/home';
+    if (to === '/inventory') return path.startsWith('/inventory') || path.startsWith('/assets');
+    if (to === '/import-approvals') return path.startsWith('/import-approval');
+    if (to === '/rentals') return path.startsWith('/rentals') || path.startsWith('/lease-agreements');
+    return path === to || path.startsWith(`${to}/`);
+  };
+
   const handleLogout = async () => {
     logger.log('MainLayout: Logout button clicked');
     setLogoutLoading(true);
@@ -243,7 +229,7 @@ export default function MainLayout({ children }) {
       height: '100vh',
       width: '100vw',
       position: 'relative',
-      backgroundColor: '#f6f5f3',
+      backgroundColor: '#fff',
       overflow: 'hidden',
       // Tablet-specific optimizations
       '@media (min-width: 768px) and (max-width: 1024px)': {
@@ -286,43 +272,42 @@ export default function MainLayout({ children }) {
         elevation={0}
         sx={{
           zIndex: (theme) => theme.zIndex.drawer + 1,
-          bgcolor: '#fff',
+          bgcolor: 'background.paper',
           color: '#111',
           boxShadow: 'none',
-          borderBottom: '1px solid rgba(0,0,0,0.06)',
+          border: 'none',
           minHeight: 64,
         }}
       >
-        <Toolbar sx={{ minHeight: 64, px: { xs: 2, sm: 3 }, display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'transparent', gap: 2 }}>
-          {/* Logo and Company Name */}
+        <Toolbar sx={{ minHeight: 64, px: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', gap: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-            <Box 
-              sx={{ 
-                height: 40, 
-                width: 40, 
-                borderRadius: 2, 
-                background: organization?.logo_url ? 'transparent' : `linear-gradient(135deg, ${primaryColor} 0%, ${primaryColor}dd 100%)`,
+            <Box
+              sx={{
+                height: 40,
+                width: 40,
+                borderRadius: 2,
+                background: organization?.logo_url ? 'transparent' : primaryColor,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: '#fff',
                 fontSize: '20px',
-                fontWeight: 700,
+                fontWeight: 'bold',
                 flexShrink: 0,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
                 overflow: 'hidden',
-                position: 'relative'
+                position: 'relative',
               }}
             >
               {organization?.logo_url ? (
-                <img 
-                  src={organization.logo_url} 
-                  alt="Logo" 
-                  style={{ 
-                    width: '100%', 
-                    height: '100%', 
-                    objectFit: 'contain', 
-                    borderRadius: 2 
+                <img
+                  src={organization.logo_url}
+                  alt="Logo"
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'contain',
+                    borderRadius: 8,
                   }}
                   onError={(e) => {
                     e.target.style.display = 'none';
@@ -332,47 +317,48 @@ export default function MainLayout({ children }) {
                 organization?.name?.charAt(0)?.toUpperCase() || 'W'
               )}
             </Box>
-            <Typography variant="h6" sx={{ fontWeight: 600, color: '#1a1a1a', fontSize: '1.1rem', letterSpacing: '-0.01em', display: { xs: 'none', sm: 'block' } }}>
+            <Typography variant="h6" sx={{ fontWeight: 700, color: '#111', fontSize: '18px', display: { xs: 'none', sm: 'block' } }}>
               {organization?.name || 'WeldCor'}
             </Typography>
           </Box>
 
-          {/* Right Section: Navigation Tabs, Search Bar, and Icons */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, justifyContent: 'flex-end' }}>
-            {/* Navigation Links */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, justifyContent: 'flex-end', minWidth: 0 }}>
             {topNavLinks.length > 0 && (
-              <Box sx={{ display: 'flex', gap: 0 }}>
-                {topNavLinks.map(link => (
+              <Box sx={{ display: { xs: 'none', md: 'flex' }, gap: 0, flexShrink: 0 }}>
+                {topNavLinks.map((link) => {
+                  const active = isTopNavActive(link.to);
+                  return (
                   <Button
                     key={link.label}
                     onClick={() => navigate(link.to)}
                     sx={{
-                      color: location.pathname === link.to ? primaryColor : '#374151',
-                      fontWeight: location.pathname === link.to ? 600 : 500,
+                      color: active ? primaryColor : '#111',
+                      fontWeight: active ? 700 : 500,
+                      fontFamily: 'Inter, sans-serif',
                       fontSize: '0.875rem',
                       textTransform: 'none',
                       px: 2,
                       py: 1,
                       minHeight: 48,
-                      borderRadius: 1,
-                      borderBottom: location.pathname === link.to ? `2px solid ${primaryColor}` : '2px solid transparent',
-                      transition: 'color 0.2s, border-color 0.2s',
+                      borderRadius: 0,
+                      borderBottom: active ? `2px solid ${primaryColor}` : '2px solid transparent',
+                      transition: 'all 0.2s',
                       '&:hover': {
                         color: primaryColor,
-                        backgroundColor: 'rgba(0,0,0,0.03)',
+                        backgroundColor: 'transparent',
                       },
                     }}
                   >
                     {link.label}
                   </Button>
-                ))}
+                );
+                })}
               </Box>
             )}
-            
-            {/* Search Bar - Next to Navigation Buttons */}
-            <Box sx={{ width: '100%', maxWidth: 400, position: 'relative' }} ref={searchRef}>
+
+            <Box sx={{ width: '100%', maxWidth: 400, position: 'relative', minWidth: 0 }} ref={searchRef}>
               <SearchInputWithIcon
-                placeholder="Search customers, bottles, orders..."
+                placeholder="Search customers, assets, orders..."
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
@@ -430,14 +416,27 @@ export default function MainLayout({ children }) {
                 </Paper>
               )}
             </Box>
-            
-            {/* Icon Buttons */}
-            <IconButton sx={{ color: '#374151', width: 40, height: 40, borderRadius: 1.5, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)', color: '#111' } }} aria-label="Notifications">
-              <NotificationsIcon fontSize="small" />
+
+            <IconButton sx={{ color: '#111', width: 40, height: 40, flexShrink: 0, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' } }} aria-label="Notifications">
+              <NotificationsIcon />
             </IconButton>
-            <IconButton sx={{ color: '#374151', width: 40, height: 40, borderRadius: 1.5, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)', color: '#111' } }} onClick={() => navigate('/settings')} aria-label="Settings">
-              <SettingsIcon fontSize="small" />
+            <IconButton sx={{ color: '#111', width: 40, height: 40, flexShrink: 0, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
+              <SettingsIcon />
             </IconButton>
+            <Button
+              onClick={handleLogout}
+              startIcon={<LogoutIcon fontSize="small" />}
+              disabled={logoutLoading}
+              sx={{
+                textTransform: 'none',
+                display: { xs: 'none', sm: 'inline-flex' },
+                fontWeight: 600,
+                color: '#111',
+                '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' },
+              }}
+            >
+              {logoutLoading ? 'Signing out...' : 'Sign out'}
+            </Button>
           </Box>
         </Toolbar>
       </AppBar>
@@ -445,9 +444,7 @@ export default function MainLayout({ children }) {
         component="main"
         sx={{
           flexGrow: 1,
-          pt: 0,
-          px: { xs: 1.5, sm: 2 },
-          pb: { xs: 1.5, sm: 2 },
+          p: 3,
           width: isOwnerPortal ? '100vw' : `calc(100vw - ${sidebarCollapsed ? collapsedWidth : drawerWidth}px)`,
           bgcolor: 'transparent',
           height: '100vh',
@@ -458,11 +455,9 @@ export default function MainLayout({ children }) {
           alignItems: 'stretch',
           overflow: 'hidden',
           transition: 'width 0.3s ease',
-          // Tablet optimizations
           '@media (min-width: 768px) and (max-width: 1024px)': {
             width: isOwnerPortal ? '100vw' : `calc(100vw - ${sidebarCollapsed ? collapsedWidth : 240}px)`,
-            px: 2,
-            pb: 2,
+            p: 2,
           }
         }}
       >
@@ -472,8 +467,8 @@ export default function MainLayout({ children }) {
           width: '100%',
           bgcolor: '#fff',
           p: 0,
-          borderRadius: 2,
-          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+          borderRadius: 0,
+          boxShadow: 'none',
           minHeight: 'calc(100vh - 64px)',
           overflow: 'auto',
         }}>

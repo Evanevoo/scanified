@@ -74,7 +74,15 @@ class OfflineModeService {
     try {
       const data = await AsyncStorage.getItem('offline_data');
       if (data) {
-        this.offlineData = JSON.parse(data);
+        const parsed = JSON.parse(data);
+        // Guard against corrupted or malformed stored data (prevents crash on .length access)
+        this.offlineData = {
+          scans: Array.isArray(parsed?.scans) ? parsed.scans : [],
+          customers: Array.isArray(parsed?.customers) ? parsed.customers : [],
+          cylinders: Array.isArray(parsed?.cylinders) ? parsed.cylinders : [],
+          rentals: Array.isArray(parsed?.rentals) ? parsed.rentals : [],
+          fills: Array.isArray(parsed?.fills) ? parsed.fills : [],
+        };
         logger.log('📱 Offline data loaded:', {
           scans: this.offlineData.scans.length,
           customers: this.offlineData.customers.length,

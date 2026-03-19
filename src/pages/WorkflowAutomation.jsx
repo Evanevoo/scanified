@@ -1,7 +1,7 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
-  Box, Paper, Typography, Button, Grid, Card, CardContent,
+  Box, Paper, Typography, Button, Grid, Card, CardContent, Stack,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Chip, IconButton, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, FormControl, InputLabel, Select, MenuItem, Alert,
@@ -135,7 +135,7 @@ function WorkflowBuilder({ onWorkflowCreated }) {
   };
 
   return (
-    <Paper sx={{ p: 3, mb: 3 }}>
+    <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
       <Typography variant="h6" gutterBottom>
         <AutomationIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
         Workflow Builder
@@ -202,7 +202,7 @@ function WorkflowBuilder({ onWorkflowCreated }) {
             </Typography>
             
             {workflowData.triggers.map((trigger, index) => (
-              <Card key={trigger.id} sx={{ mb: 2, p: 2 }}>
+              <Card key={trigger.id} elevation={0} sx={{ mb: 2, p: 2, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                 <Grid container spacing={2}>
                   <Grid item xs={12} sm={4}>
                     <FormControl fullWidth>
@@ -283,7 +283,7 @@ function WorkflowBuilder({ onWorkflowCreated }) {
               variant="outlined"
               onClick={addTrigger}
               startIcon={<AddIcon />}
-              sx={{ mb: 2 }}
+              sx={{ mb: 2, borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
             >
               Add Trigger
             </Button>
@@ -312,7 +312,7 @@ function WorkflowBuilder({ onWorkflowCreated }) {
             </Typography>
 
             {workflowData.conditions.map((condition, index) => (
-              <Card key={condition.id} sx={{ mb: 2, p: 2 }}>
+              <Card key={condition.id} elevation={0} sx={{ mb: 2, p: 2, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                 <Grid container spacing={2}>
                   <Grid item xs={12} sm={4}>
                     <TextField
@@ -366,7 +366,7 @@ function WorkflowBuilder({ onWorkflowCreated }) {
               variant="outlined"
               onClick={addCondition}
               startIcon={<AddIcon />}
-              sx={{ mb: 2 }}
+              sx={{ mb: 2, borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
             >
               Add Condition
             </Button>
@@ -395,7 +395,7 @@ function WorkflowBuilder({ onWorkflowCreated }) {
             </Typography>
 
             {workflowData.actions.map((action, index) => (
-              <Card key={action.id} sx={{ mb: 2, p: 2 }}>
+              <Card key={action.id} elevation={0} sx={{ mb: 2, p: 2, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                 <Grid container spacing={2}>
                   <Grid item xs={12} sm={6}>
                     <FormControl fullWidth>
@@ -491,7 +491,7 @@ function WorkflowBuilder({ onWorkflowCreated }) {
               variant="outlined"
               onClick={addAction}
               startIcon={<AddIcon />}
-              sx={{ mb: 2 }}
+              sx={{ mb: 2, borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
             >
               Add Action
             </Button>
@@ -520,7 +520,7 @@ function WorkflowBuilder({ onWorkflowCreated }) {
               Workflow Summary
             </Typography>
             
-            <Card sx={{ p: 2, mb: 2 }}>
+            <Card elevation={0} sx={{ p: 2, mb: 2, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
               <Typography variant="subtitle1" gutterBottom>
                 <strong>{workflowData.name}</strong> ({workflowData.type})
               </Typography>
@@ -555,7 +555,7 @@ function WorkflowBuilder({ onWorkflowCreated }) {
                 onClick={createWorkflow}
                 disabled={loading}
                 startIcon={loading ? <CircularProgress size={20} /> : <CheckIcon />}
-                sx={{ mr: 1 }}
+                sx={{ mr: 1, borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
               >
                 Create Workflow
               </Button>
@@ -619,7 +619,7 @@ function WorkflowExecutionHistory({ workflows }) {
   }
 
   return (
-    <Paper sx={{ p: 3 }}>
+    <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
       <Typography variant="h6" gutterBottom>
         <TimelineIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
         Execution History
@@ -735,22 +735,25 @@ function WorkflowAutomation() {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">Workflow Automation</Typography>
-        <Button
-          variant="contained"
-          startIcon={<AutomationIcon />}
-          onClick={() => setActiveTab(0)}
-        >
-          Create Workflow
-        </Button>
-      </Box>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>Workflow Automation</Typography>
+          <Button
+            variant="contained"
+            startIcon={<AutomationIcon />}
+            onClick={() => setActiveTab(0)}
+            sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+          >
+            Create Workflow
+          </Button>
+        </Box>
+      </Paper>
 
       {/* Statistics Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
                 Total Workflows
@@ -760,7 +763,7 @@ function WorkflowAutomation() {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
                 Active Workflows
@@ -770,7 +773,7 @@ function WorkflowAutomation() {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
                 Maintenance
@@ -780,7 +783,7 @@ function WorkflowAutomation() {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
                 Compliance
@@ -792,7 +795,7 @@ function WorkflowAutomation() {
       </Grid>
 
       {/* Tabs */}
-      <Paper sx={{ mb: 3 }}>
+      <Paper elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <Tabs value={activeTab} onChange={(e, newValue) => setActiveTab(newValue)}>
           <Tab label="Create Workflow" />
           <Tab label="Active Workflows" />
@@ -806,11 +809,10 @@ function WorkflowAutomation() {
       )}
 
       {activeTab === 1 && (
-        <Paper>
-          <TableContainer>
+          <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
             <Table>
               <TableHead>
-                <TableRow>
+                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell>Name</TableCell>
                   <TableCell>Type</TableCell>
                   <TableCell>Status</TableCell>
@@ -866,7 +868,6 @@ function WorkflowAutomation() {
               </TableBody>
             </Table>
           </TableContainer>
-        </Paper>
       )}
 
       {activeTab === 2 && (

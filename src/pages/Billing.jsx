@@ -1012,19 +1012,20 @@ export default function Billing() {
   const isOnTrial = subscription?.subscription_status === 'trial';
 
   return (
-    <Box sx={{ width: '100%', mt: 8, mb: 4, px: 3 }}>
-      <Paper elevation={3} sx={{ p: 4, borderRadius: 4, bgcolor: 'background.default' }}>
-        <Stack direction="row" alignItems="center" spacing={2} mb={4}>
-          <IconButton color="primary" onClick={() => navigate('/settings')}>
-            <ArrowBackIcon />
-          </IconButton>
-          <IconButton color="primary" onClick={() => navigate('/home')}>
-            <DashboardIcon />
-          </IconButton>
-          <Typography variant="h4" fontWeight={700}>
-            Billing & Subscription
-          </Typography>
-        </Stack>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+        <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+          <Stack direction="row" alignItems="center" spacing={2}>
+            <IconButton color="primary" onClick={() => navigate('/settings')}>
+              <ArrowBackIcon />
+            </IconButton>
+            <IconButton color="primary" onClick={() => navigate('/home')}>
+              <DashboardIcon />
+            </IconButton>
+            <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+              Billing & Subscription
+            </Typography>
+          </Stack>
+        </Paper>
 
         {import.meta.env.DEV && (
           <Alert severity="info" sx={{ mb: 3 }}>
@@ -1042,7 +1043,7 @@ export default function Billing() {
 
         {/* Trial Status */}
         {isOnTrial && (
-          <Card sx={{ mb: 4, bgcolor: trialDaysRemaining <= 3 ? 'warning.light' : 'info.light' }}>
+          <Card elevation={0} sx={{ mb: 4, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', bgcolor: trialDaysRemaining <= 3 ? 'warning.light' : 'info.light' }}>
             <CardContent>
               <Box display="flex" alignItems="center" gap={2}>
                 <ScheduleIcon color={trialDaysRemaining <= 3 ? 'warning' : 'info'} />
@@ -1066,6 +1067,7 @@ export default function Billing() {
                   variant="contained" 
                   color="primary"
                   onClick={() => setShowUpgradeDialog(true)}
+                  sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                 >
                   Select Plan
                 </Button>
@@ -1076,7 +1078,7 @@ export default function Billing() {
 
         {/* Current Subscription Status */}
         {currentPlan && (
-          <Card sx={{ mb: 4 }}>
+          <Card elevation={0} sx={{ mb: 4, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <CardContent>
               <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                 <Typography variant="h6">Current Plan</Typography>
@@ -1160,6 +1162,7 @@ export default function Billing() {
                   startIcon={<CancelIcon />}
                   onClick={() => setCancelDialog(true)}
                   disabled={isSubscriptionCancelled}
+                  sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                 >
                   Cancel Subscription
                 </Button>
@@ -1168,6 +1171,7 @@ export default function Billing() {
                   color="primary"
                   startIcon={<RefreshIcon />}
                   onClick={() => setShowUpgradeDialog(true)}
+                  sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                 >
                   Change Plan
                 </Button>
@@ -1177,19 +1181,13 @@ export default function Billing() {
         )}
 
         {/* Contact for Pricing */}
-        <Card sx={{ mb: 4, bgcolor: 'primary.light', color: 'primary.contrastText' }}>
+        <Card elevation={0} sx={{ mb: 4, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', bgcolor: 'primary.light', color: 'primary.contrastText' }}>
           <CardContent>
             <Box display="flex" alignItems="center" gap={2} mb={2}>
               <BusinessIcon sx={{ fontSize: 40 }} />
-              <Box>
-                <Typography variant="h5" fontWeight={600}>
-                  Contact Us for Pricing
-                </Typography>
-                <Typography variant="body1">
-                  All organizations must contact us to discuss pricing and subscription options. 
-                  We'll work with you to find the perfect plan for your needs.
-                </Typography>
-              </Box>
+              <Typography variant="h5" fontWeight={600}>
+                Contact Us for Pricing
+              </Typography>
             </Box>
             
             <Grid container spacing={2} sx={{ mt: 2 }}>
@@ -1201,7 +1199,7 @@ export default function Billing() {
                   size="large"
                   startIcon={<SupportIcon />}
                   onClick={() => navigate('/contact')}
-                  sx={{ py: 2 }}
+                  sx={{ py: 2, borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                 >
                   Contact Sales Team
                 </Button>
@@ -1214,7 +1212,7 @@ export default function Billing() {
                   size="large"
                   startIcon={<EmailIcon />}
                   onClick={() => window.open('mailto:sales@gasboss.com', '_blank')}
-                  sx={{ py: 2 }}
+                  sx={{ py: 2, borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                 >
                   Email Sales
                 </Button>
@@ -1240,11 +1238,13 @@ export default function Billing() {
             return (
               <Grid item xs={12} md={4} key={plan.id}>
                 <Card 
+                  elevation={0}
                   sx={{ 
                     height: '100%',
                     position: 'relative',
-                    border: currentPlan?.id === plan.id ? 2 : 1,
-                    borderColor: currentPlan?.id === plan.id ? 'primary.main' : 'divider',
+                    borderRadius: 2.5,
+                    border: '1px solid rgba(15, 23, 42, 0.08)',
+                    ...(currentPlan?.id === plan.id && { border: 2, borderColor: 'primary.main' }),
                     '&:hover': {
                       boxShadow: 6,
                       transform: 'translateY(-2px)',
@@ -1327,6 +1327,7 @@ export default function Billing() {
                       fullWidth
                       onClick={() => navigate('/contact')}
                       disabled={currentPlan?.id === plan.id}
+                      sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
                     >
                       {currentPlan?.id === plan.id ? 'Current Plan' : 'Contact Sales'}
                     </Button>
@@ -1909,7 +1910,6 @@ export default function Billing() {
             </Button>
           </DialogActions>
         </Dialog>
-      </Paper>
     </Box>
   );
 }

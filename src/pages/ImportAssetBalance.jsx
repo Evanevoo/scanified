@@ -125,16 +125,18 @@ export default function ImportAssetBalance() {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-        <IconButton onClick={() => navigate(-1)}>
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h4" fontWeight={800} color="primary">
-          Import Asset Balance
-        </Typography>
-      </Box>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <IconButton onClick={() => navigate(-1)}>
+            <ArrowBackIcon />
+          </IconButton>
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+            Import Asset Balance
+          </Typography>
+        </Box>
+      </Paper>
 
       {loading && <LinearProgress sx={{ mb: 3 }} />}
 
@@ -151,13 +153,10 @@ export default function ImportAssetBalance() {
       )}
 
       {/* File Upload Card */}
-      <Card variant="outlined" sx={{ mb: 3 }}>
+      <Card elevation={0} sx={{ mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <CardContent>
           <Typography variant="h6" fontWeight={600} gutterBottom>
             Upload Asset Balance File
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Upload an Excel file (.xlsx, .xls) or CSV file containing asset balance data
           </Typography>
           
           <Stack direction="row" spacing={2} alignItems="center">
@@ -166,6 +165,7 @@ export default function ImportAssetBalance() {
               component="label"
               startIcon={<UploadIcon />}
               disabled={loading}
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
             >
               Choose File
               <input
@@ -195,6 +195,7 @@ export default function ImportAssetBalance() {
               onClick={handleImport}
               disabled={!file || !preview.length || loading}
               startIcon={loading ? <LinearProgress size={16} /> : <CheckCircleIcon />}
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
             >
               {loading ? 'Importing...' : 'Import'}
             </Button>
@@ -204,7 +205,7 @@ export default function ImportAssetBalance() {
 
       {/* Preview Card */}
       {preview.length > 0 && (
-        <Card variant="outlined">
+        <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
               <Typography variant="h6" fontWeight={600}>
@@ -218,10 +219,10 @@ export default function ImportAssetBalance() {
               />
             </Box>
             
-            <TableContainer>
+            <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
               <Table size="small">
                 <TableHead>
-                  <TableRow>
+                  <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                     {Object.keys(preview[0]).map(key => (
                       <TableCell key={key} sx={{ fontWeight: 600 }}>
                         {key}

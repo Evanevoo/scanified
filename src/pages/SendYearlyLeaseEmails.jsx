@@ -361,13 +361,15 @@ export default function SendYearlyLeaseEmails() {
   }
 
   return (
-    <Box sx={{ p: 2, maxWidth: 1200, mx: 'auto' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-        <Button startIcon={<ArrowBackIcon />} component={Link} to="/lease-agreements">
-          Back
-        </Button>
-        <Typography variant="h6">Send Yearly Lease Agreement Emails</Typography>
-      </Box>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Button startIcon={<ArrowBackIcon />} component={Link} to="/lease-agreements" sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
+            Back
+          </Button>
+          <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>Send Yearly Lease Agreement Emails</Typography>
+        </Box>
+      </Paper>
 
       {error && (
         <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 2 }}>
@@ -375,11 +377,7 @@ export default function SendYearlyLeaseEmails() {
         </Alert>
       )}
 
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Select yearly lease agreements and send the yearly invoice by email. Each recipient must have an email address (edit in the table if needed).
-      </Typography>
-
-      <Paper sx={{ mb: 2, p: 2 }}>
+      <Paper elevation={0} sx={{ mb: 2, p: 2, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <FormControl size="small" sx={{ minWidth: 280, mr: 2 }}>
           <InputLabel>Sender email</InputLabel>
           <Select
@@ -405,10 +403,10 @@ export default function SendYearlyLeaseEmails() {
         />
       </Paper>
 
-      <TableContainer component={Paper}>
+      <TableContainer component={Paper} elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Table size="small">
           <TableHead>
-            <TableRow>
+            <TableRow sx={{ backgroundColor: '#f8fafc' }}>
               <TableCell padding="checkbox">
                 <Checkbox
                   indeterminate={selected.size > 0 && selected.size < rows.length}
@@ -490,6 +488,7 @@ export default function SendYearlyLeaseEmails() {
           startIcon={<EmailIcon />}
           onClick={handleSendSelected}
           disabled={sending || selectedWithEmail.length === 0}
+          sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
         >
           Send selected ({selectedWithEmail.length})
         </Button>

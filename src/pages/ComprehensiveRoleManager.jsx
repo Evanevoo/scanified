@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions, Alert, CircularProgress,
-  Chip, IconButton, Tooltip, Grid, Snackbar, Card, CardContent, CardHeader, Divider,
+  Chip, IconButton, Tooltip, Grid, Snackbar, Card, CardContent, CardHeader, Divider, Stack,
   Tabs, Tab, FormControl, InputLabel, Select, MenuItem, Switch, FormControlLabel,
   Accordion, AccordionSummary, AccordionDetails, Checkbox, FormGroup, List, ListItem, ListItemText
 } from '@mui/material';
@@ -531,26 +531,22 @@ export default function ComprehensiveRoleManager() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" gutterBottom>
-          Role & Permission Management
-        </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => setEditDialog({ open: true, role: null, isNew: true })}
-        >
-          Add Role
-        </Button>
-      </Box>
-
-      <Alert severity="info" sx={{ mb: 3 }}>
-        <Typography variant="body2">
-          <strong>Comprehensive Role Management:</strong> Create and manage roles, then configure their permissions.
-          Role names are case-insensitive and automatically normalized.
-        </Typography>
-      </Alert>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+            Role & Permission Management
+          </Typography>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => setEditDialog({ open: true, role: null, isNew: true })}
+            sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+          >
+            Add Role
+          </Button>
+        </Stack>
+      </Paper>
 
       <Tabs value={currentTab} onChange={(e, newValue) => setCurrentTab(newValue)} sx={{ mb: 3 }}>
         <Tab label="Manage Roles" />
@@ -559,10 +555,10 @@ export default function ComprehensiveRoleManager() {
 
       {/* Tab 1: Manage Roles */}
       {currentTab === 0 && (
-        <TableContainer component={Paper}>
+        <TableContainer component={Paper} elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
           <Table>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                 <TableCell>Role</TableCell>
                 <TableCell>Display Name</TableCell>
                 <TableCell>Description</TableCell>
@@ -646,7 +642,7 @@ export default function ComprehensiveRoleManager() {
         <Grid container spacing={3}>
           {rolePermissions.map((rolePermission) => (
             <Grid item xs={12} key={rolePermission.role_name}>
-              <Card>
+              <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                 <CardHeader
                   avatar={getRoleIcon(rolePermission.role_name)}
                   title={rolePermission.display_name || rolePermission.role_name}

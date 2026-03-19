@@ -1,6 +1,7 @@
 import logger from '../utils/logger';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { View, ActivityIndicator } from 'react-native';
 
 interface Settings {
@@ -119,14 +120,34 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const clearAllData = async () => {
     try {
-      // Clear all AsyncStorage data
-      const keys = await AsyncStorage.getAllKeys();
-      await AsyncStorage.multiRemove(keys);
-      
-      // Reset settings to defaults
+      let keys: string[] = [];
+      try {
+        keys = await AsyncStorage.getAllKeys();
+      } catch (keysError) {
+        logger.error('Error getting storage keys (Android cache/storage issue):', keysError);
+        // Fallback: clear known app keys to avoid crash loops
+        keys = [
+          'app_settings', 'app-theme', 'app-dark-mode', 'sound_settings',
+          'customization_settings', 'offline_scans', 'last_sync_time',
+          'rememberedEmail', 'pending_invite_token',
+        ];
+      }
+      try {
+        if (keys.length > 0) {
+          await AsyncStorage.multiRemove(keys);
+        }
+      } catch (removeError) {
+        logger.error('Error in multiRemove, trying key-by-key:', removeError);
+        for (const key of keys) {
+          try {
+            await AsyncStorage.removeItem(key);
+          } catch (_) {
+            // ignore per-key failures
+          }
+        }
+      }
       setSettings(defaultSettings);
       await saveSettings(defaultSettings);
-      
       return true;
     } catch (error) {
       logger.error('Error clearing data:', error);
@@ -148,7 +169,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const getDebugInfo = () => {
     return JSON.stringify({
       settings,
-      appVersion: '1.0.0',
+      appVersion: Constants.expoConfig?.version ?? '1.0.0',
       timestamp: new Date().toISOString(),
       storageKeys: AsyncStorage.getAllKeys().then(keys => keys.length),
     }, null, 2);

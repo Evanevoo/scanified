@@ -32,7 +32,11 @@ import {
   Autocomplete,
   Snackbar,
   ButtonGroup,
-  Tooltip
+  Tooltip,
+  Tabs,
+  Tab,
+  Grid,
+  Stack
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import HomeIcon from '@mui/icons-material/Home';
@@ -43,6 +47,10 @@ import WarehouseIcon from '@mui/icons-material/Warehouse';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import HistoryIcon from '@mui/icons-material/History';
 import SpeedIcon from '@mui/icons-material/Speed';
+import ReceiptIcon from '@mui/icons-material/Receipt';
+import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import SettingsIcon from '@mui/icons-material/Settings';
+import EditIcon from '@mui/icons-material/Edit';
 import { TableSkeleton, CardSkeleton } from '../components/SmoothLoading';
 import { AssetTransferService } from '../services/assetTransferService';
 import { useAuth } from '../hooks/useAuth';
@@ -91,6 +99,20 @@ export default function CustomerDetail() {
   const [parentCustomer, setParentCustomer] = useState(null); // { id, name, CustomerListID } when this customer is under a parent
   const [childCustomers, setChildCustomers] = useState([]);   // customers where parent_customer_id = this customer's id
   const [parentOptions, setParentOptions] = useState([]);     // for edit form "Under parent" selector
+  const [customerDetailTab, setCustomerDetailTab] = useState(0); // 0 = Customer Info, 1 = Rental
+  const [customerPricing, setCustomerPricing] = useState(null); // customer-specific pricing for this customer
+  const [rentalSettingsDialog, setRentalSettingsDialog] = useState(false);
+  const [rentalSettingsForm, setRentalSettingsForm] = useState({
+    payment_terms: '',
+    purchase_order: '',
+    purchase_order_required: true,
+    tax_region: '',
+    daily_calculation_method: 'start_of_day',
+    minimum_billable_amount: '5.00',
+    rental_bill_format: 'default',
+    tax_status: 'default'
+  });
+  const [rentalSettingsSaving, setRentalSettingsSaving] = useState(false);
   const [resolvingRnbId, setResolvingRnbId] = useState(null); // rental id being resolved (RNB close)
   const [resolvingRnsId, setResolvingRnsId] = useState(null); // rental id being resolved (RNS close)
   const [markingRnsRentalId, setMarkingRnsRentalId] = useState(null); // rental id for "Mark return not scanned"
@@ -431,6 +453,22 @@ export default function CustomerDetail() {
     return () => { cancelled = true; };
   }, [editing, organization?.id, customer?.id]);
 
+  // Load customer-specific pricing when customer is set (for Rental tab)
+  useEffect(() => {
+    if (!customer?.CustomerListID || !organization?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('customer_pricing')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .eq('customer_id', customer.CustomerListID)
+        .maybeSingle();
+      if (!cancelled) setCustomerPricing(data || null);
+    })();
+    return () => { cancelled = true; };
+  }, [customer?.CustomerListID, organization?.id]);
+
   // Enhanced transfer functionality functions
   const handleSelectAsset = (assetId) => {
     setSelectedAssets(prev => 
@@ -766,6 +804,45 @@ export default function CustomerDetail() {
     setEditForm({ ...editForm, [e.target.name]: e.target.value });
   };
 
+  const handleOpenRentalSettings = () => {
+    setRentalSettingsForm({
+      payment_terms: customer?.payment_terms ?? '',
+      purchase_order: customer?.purchase_order ?? '',
+      purchase_order_required: customer?.purchase_order_required !== false,
+      tax_region: customer?.location || customer?.tax_region || 'SASKATOON',
+      daily_calculation_method: customer?.daily_calculation_method || 'start_of_day',
+      minimum_billable_amount: customer?.minimum_billable_amount ?? '5.00',
+      rental_bill_format: customer?.rental_bill_format || 'default',
+      tax_status: customer?.tax_status || 'default'
+    });
+    setRentalSettingsDialog(true);
+  };
+
+  const handleSaveRentalSettings = async () => {
+    setRentalSettingsSaving(true);
+    try {
+      // Persist fields that exist on customers table; location doubles as tax region
+      const updateFields = {
+        payment_terms: rentalSettingsForm.payment_terms || null,
+        purchase_order: rentalSettingsForm.purchase_order || null,
+        location: rentalSettingsForm.tax_region || customer?.location
+      };
+      const { error } = await supabase
+        .from('customers')
+        .update(updateFields)
+        .eq('CustomerListID', id);
+      if (error) throw error;
+      setCustomer(prev => prev ? { ...prev, ...updateFields } : prev);
+      setRentalSettingsDialog(false);
+      setTransferMessage({ open: true, message: 'Rental settings saved.', severity: 'success' });
+    } catch (e) {
+      logger.error('Save rental settings error:', e);
+      setTransferMessage({ open: true, message: e?.message || 'Failed to save rental settings', severity: 'error' });
+    } finally {
+      setRentalSettingsSaving(false);
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setSaveError(null);
@@ -851,23 +928,113 @@ export default function CustomerDetail() {
     </Box>
   );
 
-  return (
-    <Box sx={{ p: 4, width: '100%' }}>
-      <Button
-        startIcon={<ArrowBackIcon />}
-        onClick={() => navigate(-1)}
-        variant="outlined"
-        sx={{ mb: 4, borderRadius: 999, fontWeight: 700, px: 4 }}
-      >
-        Back
-      </Button>
-      
-      <Typography variant="h3" fontWeight={900} color="primary" mb={3} sx={{ letterSpacing: -1 }}>
-        Customer Details
-      </Typography>
+  const detailMetrics = [
+    {
+      label: 'Assigned bottles',
+      value: totalBottleCount,
+      helper: 'Inventory and rental exceptions included in the customer total',
+    },
+    {
+      label: 'Physical assets',
+      value: customerAssets.length,
+      helper: 'Containers physically assigned to this account',
+    },
+    {
+      label: 'Child locations',
+      value: childCustomers.length,
+      helper: 'Subsidiary locations or departments linked here',
+    },
+    {
+      label: 'Open rentals',
+      value: locationAssets.length,
+      helper: 'Live rental rows attached to this customer',
+    },
+  ];
 
+  return (
+    <Box sx={{ p: { xs: 2, sm: 3 }, width: '100%' }}>
+      <Paper
+        elevation={0}
+        sx={{
+          p: { xs: 2.5, sm: 3 },
+          mb: 3,
+          borderRadius: 3,
+          border: '1px solid rgba(15, 23, 42, 0.08)',
+          background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+        }}
+      >
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }}>
+          <Box>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25, flexWrap: 'wrap' }}>
+              <Chip label="Customer detail" color="primary" size="small" sx={{ borderRadius: 999, fontWeight: 700 }} />
+              <Chip label={customer.customer_type || 'CUSTOMER'} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+              <Chip label={customer.location || 'SASKATOON'} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+            </Stack>
+            <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+              {customer.name}
+            </Typography>
+            <Typography variant="body1" sx={{ color: '#64748b', mt: 1, maxWidth: 760 }}>
+              Review customer identity, structure, assigned inventory, rental activity, and transfer actions from one operational detail workspace.
+            </Typography>
+          </Box>
+          <Button
+            startIcon={<ArrowBackIcon />}
+            onClick={() => navigate(-1)}
+            variant="outlined"
+            sx={{ borderRadius: 999, fontWeight: 700, px: 3, textTransform: 'none' }}
+          >
+            Back
+          </Button>
+        </Stack>
+      </Paper>
+
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        {detailMetrics.map((metric) => (
+          <Grid item xs={12} sm={6} lg={3} key={metric.label}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2.25,
+                borderRadius: 2.5,
+                border: '1px solid rgba(15, 23, 42, 0.08)',
+                height: '100%',
+                backgroundColor: '#fff',
+              }}
+            >
+              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                {metric.label}
+              </Typography>
+              <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', mt: 0.5, letterSpacing: '-0.03em' }}>
+                {metric.value}
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#64748b', mt: 0.75 }}>
+                {metric.helper}
+              </Typography>
+            </Paper>
+          </Grid>
+        ))}
+      </Grid>
+
+      <Tabs
+        value={customerDetailTab}
+        onChange={(_, v) => setCustomerDetailTab(v)}
+        sx={{
+          mb: 3,
+          borderBottom: 1,
+          borderColor: 'divider',
+          '& .MuiTab-root': { fontWeight: 700, textTransform: 'none', minHeight: 52 },
+          '& .Mui-selected': { color: 'primary.main' }
+        }}
+      >
+        <Tab label="Customer Info" id="customer-detail-tab-0" aria-controls="customer-detail-tabpanel-0" />
+        <Tab label="Rental" id="customer-detail-tab-1" aria-controls="customer-detail-tabpanel-1" />
+      </Tabs>
+
+      {/* Tab 0: Customer Info */}
+      {customerDetailTab === 0 && (
+      <>
       {/* Customer Information */}
-      <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4, border: '1.5px solid #e0e0e0', boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)' }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 4 }, mb: 4, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Box display="flex" alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between" flexDirection={{ xs: 'column', md: 'row' }} mb={2}>
           <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
             <Typography variant="h5" fontWeight={700} color="primary">
@@ -1176,7 +1343,7 @@ export default function CustomerDetail() {
 
       {/* Transfer Information & Quick Actions */}
       {customerAssets.length === 0 && (
-        <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4, backgroundColor: '#f8f9ff', border: '1px solid #e3e8ff' }}>
+        <Paper elevation={0} sx={{ p: { xs: 2.5, md: 4 }, mb: 4, borderRadius: 3, backgroundColor: '#f8fafc', border: '1px solid rgba(59, 130, 246, 0.16)' }}>
           <Typography variant="h6" fontWeight={700} color="primary" mb={2}>
             📦 Bottle Assignment & Transfer Options
           </Typography>
@@ -1237,7 +1404,7 @@ export default function CustomerDetail() {
       )}
 
       {/* Bottle Rental Summary */}
-      <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4, border: '1.5px solid #e0e0e0', boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)' }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 4 }, mb: 4, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Box display="flex" alignItems="center" justifyContent="space-between" mb={3}>
           <Typography variant="h5" fontWeight={700} color="primary">
             📊 Bottle Rental Summary
@@ -1331,7 +1498,7 @@ export default function CustomerDetail() {
       </Paper>
 
       {/* Currently Assigned Bottles (physical + DNS so we know how many the customer has) */}
-      <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4 }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 4 }, mb: 4, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
           <Box>
             <Typography variant="h5" fontWeight={700} color="primary">
@@ -1452,10 +1619,10 @@ export default function CustomerDetail() {
             </Alert>
           </Box>
         ) : (
-          <TableContainer>
+          <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <Table>
               <TableHead>
-                <TableRow sx={{ backgroundColor: '#f5f7fa' }}>
+                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell padding="checkbox" sx={{ fontWeight: 700 }}>
                     <Checkbox
                       indeterminate={selectedAssets.length > 0 && selectedAssets.length < customerAssets.length}
@@ -1542,7 +1709,7 @@ export default function CustomerDetail() {
       </Paper>
 
       {/* Rental History */}
-      <Paper elevation={3} sx={{ p: 4, borderRadius: 4 }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 4 }, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2, mb: 3 }}>
           <Typography variant="h5" fontWeight={700} color="primary">
             📋 Rental History ({locationAssets.length}{rnbRentals.length > 0 ? ` — ${totalBottleCount} billable` : ''})
@@ -1563,10 +1730,10 @@ export default function CustomerDetail() {
         {locationAssets.length === 0 ? (
           <Typography color="text.secondary">No rental history found for this customer.</Typography>
         ) : (
-          <TableContainer>
+          <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
             <Table>
               <TableHead>
-                <TableRow sx={{ backgroundColor: '#f5f7fa' }}>
+                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell sx={{ fontWeight: 700 }}>Serial/Barcode</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Type/Product</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Rental Type</TableCell>
@@ -2067,6 +2234,156 @@ export default function CustomerDetail() {
             startIcon={transferLoading ? <CircularProgress size={16} /> : <WarehouseIcon />}
           >
             {transferLoading ? 'Transferring...' : 'Confirm Transfer to Warehouse'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      </>
+      )}
+
+      {/* Tab 1: Rental settings (TrackAbout-style) - theme matches Customer Info paper */}
+      {customerDetailTab === 1 && (
+        <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4, border: '1.5px solid', borderColor: 'divider', boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)' }}>
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+            <Typography variant="h5" fontWeight={700} color="primary">Rental</Typography>
+            <Button variant="outlined" startIcon={<EditIcon />} onClick={handleOpenRentalSettings} sx={{ borderRadius: 2, fontWeight: 700 }}>
+              Edit rental settings
+            </Button>
+          </Box>
+          <Divider sx={{ mb: 3 }} />
+
+          <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mb: 2 }}>Rental rates</Typography>
+          <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="body2">Rental rate bracket</Typography>
+              <Button component={Link} to="/rental/classes" size="small" variant="text" color="primary">Standard Rates — View</Button>
+            </Box>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="body2">Customer-specific rates</Typography>
+              {customerPricing ? (
+                <Button component={Link} to="/rentals" state={{ openEditForCustomerId: id }} size="small" variant="text" color="primary">View</Button>
+              ) : (
+                <Button component={Link} to="/rentals" state={{ openEditForCustomerId: id }} size="small" variant="text" color="primary">None set — Create new</Button>
+              )}
+            </Box>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="body2">Daily calculation method</Typography>
+              <Typography variant="body2" color="text.secondary">{rentalSettingsForm.daily_calculation_method === 'end_of_day' ? 'End of day' : 'Default (start of day)'}</Typography>
+            </Box>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="body2">Minimum billable amount</Typography>
+              <Typography variant="body2" color="text.secondary">${rentalSettingsForm.minimum_billable_amount}, Default</Typography>
+            </Box>
+          </Box>
+
+          <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mt: 3, mb: 2 }}>Other billing methods</Typography>
+          <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="body2">Flat fees</Typography>
+              <Button component={Link} to="/rental/flat-fees" size="small" variant="text" color="primary">Default — Edit</Button>
+            </Box>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="body2">Asset agreements</Typography>
+              <Typography variant="body2" color="text.secondary">None set — Add</Typography>
+            </Box>
+          </Box>
+
+          <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mt: 3, mb: 2 }}>Other settings</Typography>
+          <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="body2">Payment terms</Typography>
+              <Typography variant="body2" color="text.secondary">{customer?.payment_terms || 'Not set'}</Typography>
+            </Box>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider', bgcolor: customer?.purchase_order ? 'transparent' : 'warning.light', px: 1.5, borderRadius: 1 }}>
+              <Typography variant="body2">Purchase order</Typography>
+              <Typography variant="body2" fontWeight={customer?.purchase_order ? 400 : 600}>
+                {customer?.purchase_order ? `${customer.purchase_order} (Required)` : 'Not set (Required)'}
+              </Typography>
+              <Button size="small" variant="text" color="primary" onClick={handleOpenRentalSettings}>Change</Button>
+            </Box>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="body2">Tax region</Typography>
+              <Typography variant="body2" color="text.secondary">{customer?.location || 'SSK'}</Typography>
+            </Box>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="body2">Rental bill format</Typography>
+              <Typography variant="body2" color="text.secondary">Default</Typography>
+            </Box>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="body2">Tax status</Typography>
+              <Typography variant="body2" color="text.secondary">Default</Typography>
+            </Box>
+          </Box>
+        </Paper>
+      )}
+
+      {/* Rental Settings Edit Dialog - theme matches app dialogs */}
+      <Dialog open={rentalSettingsDialog} onClose={() => setRentalSettingsDialog(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
+        <DialogTitle sx={{ fontWeight: 700 }}>Rental settings</DialogTitle>
+        <DialogContent sx={{ pt: 1 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Payment terms</InputLabel>
+              <Select
+                value={rentalSettingsForm.payment_terms || ''}
+                onChange={(e) => setRentalSettingsForm(f => ({ ...f, payment_terms: e.target.value }))}
+                label="Payment terms"
+              >
+                <MenuItem value="">Not set</MenuItem>
+                <MenuItem value="CREDIT CARD">Credit card</MenuItem>
+                <MenuItem value="Net 15">Net 15</MenuItem>
+                <MenuItem value="Net 30">Net 30</MenuItem>
+                <MenuItem value="Net 60">Net 60</MenuItem>
+                <MenuItem value="Due on receipt">Due on receipt</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              fullWidth
+              size="small"
+              label="Purchase order (required)"
+              value={rentalSettingsForm.purchase_order || ''}
+              onChange={(e) => setRentalSettingsForm(f => ({ ...f, purchase_order: e.target.value }))}
+              placeholder="e.g. P000021880"
+            />
+            <FormControl fullWidth size="small">
+              <InputLabel>Tax region</InputLabel>
+              <Select
+                value={rentalSettingsForm.tax_region || 'SASKATOON'}
+                onChange={(e) => setRentalSettingsForm(f => ({ ...f, tax_region: e.target.value }))}
+                label="Tax region"
+              >
+                <MenuItem value="SASKATOON">SASKATOON (SSK)</MenuItem>
+                <MenuItem value="REGINA">REGINA</MenuItem>
+                <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
+                <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl fullWidth size="small">
+              <InputLabel>Daily calculation method</InputLabel>
+              <Select
+                value={rentalSettingsForm.daily_calculation_method || 'start_of_day'}
+                onChange={(e) => setRentalSettingsForm(f => ({ ...f, daily_calculation_method: e.target.value }))}
+                label="Daily calculation method"
+              >
+                <MenuItem value="start_of_day">Default (start of day)</MenuItem>
+                <MenuItem value="end_of_day">End of day</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              fullWidth
+              size="small"
+              type="number"
+              inputProps={{ min: 0, step: 0.01 }}
+              label="Minimum billable amount ($)"
+              value={rentalSettingsForm.minimum_billable_amount || ''}
+              onChange={(e) => setRentalSettingsForm(f => ({ ...f, minimum_billable_amount: e.target.value }))}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRentalSettingsDialog(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleSaveRentalSettings} disabled={rentalSettingsSaving}>
+            {rentalSettingsSaving ? <CircularProgress size={20} /> : 'Save'}
           </Button>
         </DialogActions>
       </Dialog>

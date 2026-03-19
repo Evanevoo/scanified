@@ -3,12 +3,12 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
+  Stack,
   Typography,
   Paper,
   Grid,
   Chip,
   Button,
-  IconButton,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -665,7 +665,7 @@ export default function AssetDetail() {
 
   if (!asset) {
     return (
-      <Box p={3}>
+      <Box sx={{ p: { xs: 2, sm: 3 } }}>
         <Alert severity="error">Asset not found</Alert>
       </Box>
     );
@@ -674,61 +674,63 @@ export default function AssetDetail() {
   const assetTitle = isReady ? terms.asset : 'Asset';
 
   return (
-    <Box p={3}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
       {/* Header */}
-      <Box display="flex" alignItems="center" mb={3}>
-        <IconButton onClick={() => navigate('/inventory-management')} sx={{ mr: 2 }}>
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h4" component="h1">
-          {assetTitle} Detail
-        </Typography>
-        <Box flexGrow={1} />
-        <Button
-          variant="outlined"
-          startIcon={<HistoryIcon />}
-          onClick={() => {
-            const historyId = asset.barcode_number || asset.serial_number || id;
-            navigate(`/assets/${historyId}/history`);
-          }}
-          sx={{ mr: 1 }}
-        >
-          View History
-        </Button>
-        <Button
-          variant="outlined"
-          startIcon={<EditIcon />}
-          onClick={() => {
-            // Reset editData to current asset when opening edit dialog (only editable fields)
-            if (asset) {
-              setEditData({
-                barcode_number: asset.barcode_number || '',
-                serial_number: asset.serial_number || '',
-                product_code: asset.product_code || '',
-                gas_type: asset.gas_type || '',
-                status: asset.status || 'available',
-                location: asset.location || '',
-                assigned_customer: asset.assigned_customer || '',
-                customer_name: asset.customer_name || '',
-                ownership: asset.ownership || '',
-                description: asset.description || ''
-              });
-            }
-            setEditDialog(true);
-          }}
-          sx={{ mr: 1 }}
-        >
-          Edit
-        </Button>
-        <Button
-          variant="outlined"
-          color="error"
-          startIcon={<DeleteIcon />}
-          onClick={handleDelete}
-        >
-          Delete
-        </Button>
-      </Box>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Box display="flex" alignItems="center" flexWrap="wrap" gap={1}>
+          <Button onClick={() => navigate('/inventory-management')} startIcon={<ArrowBackIcon />} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
+            Back
+          </Button>
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+            {assetTitle} Detail
+          </Typography>
+          <Box flexGrow={1} />
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="outlined"
+              startIcon={<HistoryIcon />}
+              onClick={() => {
+                const historyId = asset.barcode_number || asset.serial_number || id;
+                navigate(`/assets/${historyId}/history`);
+              }}
+            >
+              View History
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<EditIcon />}
+              onClick={() => {
+                // Reset editData to current asset when opening edit dialog (only editable fields)
+                if (asset) {
+                  setEditData({
+                    barcode_number: asset.barcode_number || '',
+                    serial_number: asset.serial_number || '',
+                    product_code: asset.product_code || '',
+                    gas_type: asset.gas_type || '',
+                    status: asset.status || 'available',
+                    location: asset.location || '',
+                    assigned_customer: asset.assigned_customer || '',
+                    customer_name: asset.customer_name || '',
+                    ownership: asset.ownership || '',
+                    description: asset.description || ''
+                  });
+                }
+                setEditDialog(true);
+              }}
+            >
+              Edit
+            </Button>
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteIcon />}
+              onClick={handleDelete}
+            >
+              Delete
+            </Button>
+          </Stack>
+        </Box>
+      </Paper>
 
       {/* Error/Success Messages */}
       {error && (
@@ -743,7 +745,7 @@ export default function AssetDetail() {
       )}
 
       {/* Asset Information */}
-      <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
+      <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <Typography variant="h6" gutterBottom>
           Basic Information
         </Typography>
@@ -835,7 +837,7 @@ export default function AssetDetail() {
 
       {/* Customer Assignment */}
       {asset.assigned_customer && (
-        <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
+        <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Typography variant="h6" gutterBottom>
             Customer Assignment
           </Typography>
@@ -885,7 +887,7 @@ export default function AssetDetail() {
       )}
 
       {/* Movement History Section */}
-      <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
+      <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
           <Typography variant="h6">
             Movement History
@@ -907,10 +909,10 @@ export default function AssetDetail() {
             <CircularProgress size={24} />
           </Box>
         ) : movementHistory.length > 0 ? (
-          <Box sx={{ overflowX: 'auto' }}>
+          <Box sx={{ overflowX: 'auto', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
               <thead>
-                <tr style={{ backgroundColor: '#f5f5f5', borderBottom: '2px solid #e0e0e0' }}>
+                <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #e0e0e0' }}>
                   <th style={{ padding: '8px', textAlign: 'left', fontWeight: 600 }}>Date</th>
                   <th style={{ padding: '8px', textAlign: 'left', fontWeight: 600 }}>Action</th>
                   <th style={{ padding: '8px', textAlign: 'left', fontWeight: 600 }}>Resulting Location</th>
@@ -1025,7 +1027,7 @@ export default function AssetDetail() {
 
       {/* Exceptions Section */}
       {exceptions.length > 0 && (
-        <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
+        <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Typography variant="h6" gutterBottom>
             Exceptions on this asset
           </Typography>

@@ -333,44 +333,36 @@ export default function OwnershipManagement() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
         {/* Header */}
-        <Box 
-          display="flex" 
-          justifyContent="space-between" 
-          alignItems={{ xs: 'flex-start', md: 'center' }}
-          flexDirection={{ xs: 'column', md: 'row' }}
-          gap={2}
-          mb={3}
-        >
-          <Box>
-            <Typography variant="h4" fontWeight={700} gutterBottom>
+        <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+          <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} flexDirection={{ xs: 'column', md: 'row' }} gap={2}>
+            <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
               Ownership Management
             </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Manage bottle ownership values and assignments
-            </Typography>
+            <Box display="flex" gap={2} flexWrap="wrap">
+              <Button
+                variant="outlined"
+                startIcon={<SwapIcon />}
+                onClick={() => setBulkChangeDialog(true)}
+                disabled={selectedBottles.size === 0}
+                size="small"
+                sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+              >
+                Change Ownership ({selectedBottles.size})
+              </Button>
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => setAddDialog(true)}
+                size="small"
+                sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+              >
+                Add Ownership Value
+              </Button>
+            </Box>
           </Box>
-          <Box display="flex" gap={2} flexWrap="wrap">
-            <Button
-              variant="outlined"
-              startIcon={<SwapIcon />}
-              onClick={() => setBulkChangeDialog(true)}
-              disabled={selectedBottles.size === 0}
-              size="small"
-            >
-              Change Ownership ({selectedBottles.size})
-            </Button>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => setAddDialog(true)}
-              size="small"
-            >
-              Add Ownership Value
-            </Button>
-          </Box>
-        </Box>
+        </Paper>
 
         {error && (
           <Alert severity="error" sx={{ mb: 3 }}>
@@ -381,7 +373,7 @@ export default function OwnershipManagement() {
         {/* Stats Cards */}
         <Grid container spacing={2} sx={{ mb: 3, width: '100%' }}>
           <Grid item xs={12} sm={6} md={4}>
-            <Card sx={{ height: '100%' }}>
+            <Card elevation={0} sx={{ height: '100%', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
               <CardContent>
                 <Typography variant="h6" color="text.secondary" gutterBottom>
                   Total Bottles
@@ -393,7 +385,7 @@ export default function OwnershipManagement() {
             </Card>
           </Grid>
           <Grid item xs={12} sm={6} md={4}>
-            <Card sx={{ height: '100%' }}>
+            <Card elevation={0} sx={{ height: '100%', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
               <CardContent>
                 <Typography variant="h6" color="text.secondary" gutterBottom>
                   Ownership Values
@@ -405,7 +397,7 @@ export default function OwnershipManagement() {
             </Card>
           </Grid>
           <Grid item xs={12} sm={6} md={4}>
-            <Card sx={{ height: '100%' }}>
+            <Card elevation={0} sx={{ height: '100%', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
               <CardContent>
                 <Typography variant="h6" color="text.secondary" gutterBottom>
                   Unassigned
@@ -419,7 +411,7 @@ export default function OwnershipManagement() {
         </Grid>
 
         {/* Ownership Values Section */}
-        <Paper sx={{ p: 3, mb: 3, width: '100%', boxSizing: 'border-box' }}>
+        <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, width: '100%', boxSizing: 'border-box', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Typography variant="h6" fontWeight={600} gutterBottom>
             Ownership Values
           </Typography>
@@ -448,7 +440,7 @@ export default function OwnershipManagement() {
         </Paper>
 
         {/* Filters */}
-        <Paper sx={{ p: 2, mb: 3, width: '100%', boxSizing: 'border-box' }}>
+        <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, width: '100%', boxSizing: 'border-box', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Grid container spacing={2} alignItems="flex-end">
             <Grid item xs={12} sm={6} md={4}>
               <FormControl fullWidth size="small">
@@ -487,11 +479,10 @@ export default function OwnershipManagement() {
         </Paper>
 
         {/* Bottles Table */}
-        <Paper sx={{ overflow: 'auto', width: '100%', boxSizing: 'border-box' }}>
-          <TableContainer sx={{ maxHeight: 'calc(100vh - 500px)' }}>
+        <TableContainer sx={{ maxHeight: 'calc(100vh - 500px)', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
             <Table stickyHeader size="small">
               <TableHead>
-                <TableRow>
+                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell padding="checkbox" sx={{ width: 48, fontWeight: 600, px: 1 }}>
                     <Checkbox
                       checked={selectedBottles.size === filteredBottles.length && filteredBottles.length > 0}
@@ -565,8 +556,7 @@ export default function OwnershipManagement() {
                 )}
               </TableBody>
             </Table>
-          </TableContainer>
-        </Paper>
+        </TableContainer>
 
         {/* Add Ownership Dialog */}
         <Dialog open={addDialog} onClose={() => setAddDialog(false)} maxWidth="sm" fullWidth>

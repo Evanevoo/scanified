@@ -34,6 +34,10 @@ interface ScanAreaProps {
   hideLastScannedIndicator?: boolean;
   /** When true, disables the periodic autofocus toggle on Android (avoids blur when pointing at barcode). Use for customer barcode scanning. */
   disablePeriodicFocus?: boolean;
+  /** When set, only these barcode types are decoded (e.g. ['code39'] for customer barcode only). Reduces misreads from order numbers / other symbologies. */
+  barcodeTypesOverride?: string[];
+  /** When provided, only barcodes for which this returns true get success feedback and onScanned. Others are silently ignored (no beep, no error). Use so order number doesn't trigger a "reaction" when scanning for customer barcode. */
+  acceptForFeedback?: (barcode: string) => boolean;
 }
 
 // Extract potential customer names from OCR text (exclude barcodes, numbers, short words)
@@ -67,6 +71,8 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   hideScanningLine = false,
   hideLastScannedIndicator = false,
   disablePeriodicFocus = false,
+  barcodeTypesOverride,
+  acceptForFeedback,
 }) => {
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraReady, setCameraReady] = useState(false); // Defer mount to prevent Android crash
@@ -76,6 +82,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   const [lastScanned, setLastScanned] = useState('');
   const [error, setError] = useState('');
   const [pendingBarcode, setPendingBarcode] = useState<string | null>(null);
+  const pendingBarcodeRef = useRef<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const [focusTrigger, setFocusTrigger] = useState(0);
@@ -171,13 +178,27 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   };
 
   const handleBarcodeScanned = (event: any) => {
-    if (isProcessing || scanned) return;
+    if (scanned) return;
 
     const barcode = event.data?.trim();
     if (!barcode) return;
 
+    // When we're inside the "hold" window, accept new scan events and keep the most complete candidate.
+    // This prevents confirming the first partial read (common on Android scanners).
+    if (isProcessing) {
+      const validation = validateBarcode(barcode);
+      if (!validation.isValid) return;
+
+      const current = pendingBarcodeRef.current;
+      if (!current || barcode.length > current.length) {
+        pendingBarcodeRef.current = barcode;
+        setPendingBarcode(barcode);
+      }
+      return;
+    }
+
     // Prevent duplicate scans of the same barcode
-    if (pendingBarcode === barcode) {
+    if (pendingBarcodeRef.current === barcode) {
       return;
     }
 
@@ -185,35 +206,39 @@ const ScanArea: React.FC<ScanAreaProps> = ({
     if (holdTimeout.current) clearTimeout(holdTimeout.current);
     if (scanCooldown.current) clearTimeout(scanCooldown.current);
 
-    setIsProcessing(true);
-    setPendingBarcode(barcode);
-
-    // Validate barcode
     const validation = validateBarcode(barcode);
     
     if (!validation.isValid) {
       const errorMsg = validation.errorMessage || 'Invalid barcode';
       setError(errorMsg);
-      setScanned(true);
       feedbackService.scanError(errorMsg).catch((e) => logger.log('Feedback error:', e));
 
-      // Clear error after delay
+      // Clear error after delay; do not lock the scanner for invalid reads.
       setTimeout(() => {
-        setScanned(false);
         setError('');
-        setIsProcessing(false);
         setPendingBarcode(null);
-      }, 2000);
+        pendingBarcodeRef.current = null;
+      }, 1500);
       return;
     }
+
+    // Optional: only accept this barcode for feedback/callback (e.g. ignore order number when scanning for customer).
+    if (acceptForFeedback && !acceptForFeedback(barcode)) {
+      return;
+    }
+
+    setIsProcessing(true);
+    pendingBarcodeRef.current = barcode;
+    setPendingBarcode(barcode);
 
     // Require the barcode to be stable for a short time to prevent misreads
     holdTimeout.current = setTimeout(() => {
       setScanned(true);
-      setLastScanned(barcode);
+      const finalBarcode = pendingBarcodeRef.current || barcode;
+      setLastScanned(finalBarcode);
       setError('');
       feedbackService.scanSuccess(barcode).catch((e) => logger.log('Feedback error:', e));
-      onScanned(barcode);
+      onScanned(finalBarcode);
       lastBarcodeScanTimeRef.current = Date.now();
 
       // Set cooldown period to prevent rapid re-scanning
@@ -221,6 +246,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
         setScanned(false);
         setIsProcessing(false);
         setPendingBarcode(null);
+        pendingBarcodeRef.current = null;
       }, scanDelay);
     }, holdTimeoutMs);
   };
@@ -244,6 +270,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
 
     setIsOcrProcessing(true);
     try {
+      if (!cameraRef.current) return;
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.6, shutterSound: false });
       if (!photo?.uri) return;
 
@@ -277,12 +304,24 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   }, []);
 
   // Calculate region of interest for better scanning
-  const regionOfInterest = enableRegionOfInterest ? {
-    x: 0.1, // 10% from left
-    y: 0.35, // 35% from top
-    width: 0.8, // 80% width
-    height: 0.3, // 30% height
-  } : undefined;
+  // IMPORTANT:
+  // The camera scanner ROI must line up with the visible scan frame.
+  // If the ROI is too large, the scanner can “catch” a nearby barcode
+  // (e.g. SALESORDER) while the user is targeting the customer barcode.
+  const frameTopPercent = 30;
+  const frameWidthPx = Math.min(320, screenWidth * 0.88);
+  const frameHeightPx = Math.min(150, screenHeight * 0.2);
+  const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+  const frameWidthRatio = screenWidth > 0 ? clamp01(frameWidthPx / screenWidth) : 0.8;
+  const frameHeightRatio = screenHeight > 0 ? clamp01(frameHeightPx / screenHeight) : 0.2;
+  const scanningRegionOfInterest = enableRegionOfInterest
+    ? {
+        x: clamp01(0.5 - frameWidthRatio / 2),
+        y: clamp01(frameTopPercent / 100),
+        width: frameWidthRatio,
+        height: frameHeightRatio,
+      }
+    : undefined;
 
   return (
     <View style={[styles.wrapper, style]}>
@@ -331,39 +370,32 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                       setAutofocusMode('off');
                       setTimeout(() => setAutofocusMode('on'), FOCUS_OFF_MS);
                     };
-                    if (Platform.OS === 'android') {
-                      focusTimeoutsRef.current.forEach((id) => clearTimeout(id));
-                      focusTimeoutsRef.current = [];
-                      if (!disablePeriodicFocus) {
-                        // First trigger after a short delay so preview is stable
-                        focusTimeoutsRef.current.push(setTimeout(triggerFocus, 100));
-                        // Dense burst over ~2.5s so focus locks quickly and stays sharp
-                        [350, 650, 1000, 1400, 1900, 2500].forEach((ms) => {
-                          focusTimeoutsRef.current.push(setTimeout(triggerFocus, ms));
-                        });
-                        // Re-trigger focus every second so it stays sharp all the time (Add Cylinders, etc.)
-                        if (focusIntervalRef.current) clearInterval(focusIntervalRef.current as ReturnType<typeof setInterval>);
-                        focusIntervalRef.current = setInterval(triggerFocus, 1000);
-                      }
-                      // When disablePeriodicFocus: rely on continuous autofocus only (tap-to-focus still works)
+                    focusTimeoutsRef.current.forEach((id) => clearTimeout(id));
+                    focusTimeoutsRef.current = [];
+                    // Let the preview stabilize before we start focus cycles (reduces initial glitch).
+                    const FOCUS_START_DELAY_MS = 600;
+                    if (!disablePeriodicFocus) {
+                      // Fewer, later focus triggers so the first ~2s aren't a constant glitch; then 1s interval.
+                      focusTimeoutsRef.current.push(setTimeout(triggerFocus, FOCUS_START_DELAY_MS));
+                      [1400, 2500].forEach((ms) => {
+                        focusTimeoutsRef.current.push(setTimeout(triggerFocus, FOCUS_START_DELAY_MS + ms));
+                      });
+                      if (focusIntervalRef.current) clearInterval(focusIntervalRef.current as ReturnType<typeof setInterval>);
+                      focusIntervalRef.current = setInterval(triggerFocus, 1000);
                     } else {
-                      triggerFocus();
+                      focusTimeoutsRef.current.push(setTimeout(triggerFocus, FOCUS_START_DELAY_MS));
                     }
-                    // Fade out "Starting camera..." overlay so preview appears smoothly
-                    Animated.timing(overlayOpacity, { toValue: 0, duration: 250, useNativeDriver: true }).start(() => setPreviewReady(true));
+                    // Keep overlay a bit longer so init glitch is hidden, then fade smoothly.
+                    const overlayDelayMs = 400;
+                    focusTimeoutsRef.current.push(setTimeout(() => {
+                      Animated.timing(overlayOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => setPreviewReady(true));
+                    }, overlayDelayMs));
                   }}
                   animateShutter={false}
                   barcodeScannerSettings={{
-                    barcodeTypes: ['code128', 'code39', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14', 'qr', 'aztec', 'datamatrix', 'pdf417'],
-                    // Aligned with visual scanning frame (30% from top)
-                    ...(enableRegionOfInterest ? {
-                      regionOfInterest: {
-                        x: 0.1,
-                        y: 0.30,
-                        width: 0.8,
-                        height: 0.32,
-                      },
-                    } : {}),
+                    barcodeTypes: barcodeTypesOverride ?? ['code128', 'code39', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14', 'qr', 'aztec', 'datamatrix', 'pdf417'],
+                    // Aligned with the visible scan frame.
+                    ...(scanningRegionOfInterest ? { regionOfInterest: scanningRegionOfInterest } : {}),
                   }}
                   onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
                 />
@@ -412,9 +444,6 @@ const ScanArea: React.FC<ScanAreaProps> = ({
 
               {/* Enhanced scanning overlay - responsive, aligned with barcode scan region */}
               {enableRegionOfInterest && (() => {
-                const frameWidth = Math.min(320, screenWidth * 0.88);
-                const frameHeight = Math.min(150, screenHeight * 0.2);
-                const frameTopPercent = 30;
                 return (
                   <>
                     <View style={[
@@ -422,19 +451,19 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                       {
                         top: `${frameTopPercent}%`,
                         left: '50%',
-                        width: frameWidth,
-                        height: frameHeight,
-                        transform: [{ translateX: -frameWidth / 2 }],
+                        width: frameWidthPx,
+                        height: frameHeightPx,
+                        transform: [{ translateX: -frameWidthPx / 2 }],
                       }
                     ]} />
                     {isProcessing && !hideScanningLine && (
                       <View style={[
                         styles.scanningLine,
                         {
-                          top: `${frameTopPercent + (frameHeight / screenHeight) * 50}%`,
+                          top: `${frameTopPercent + frameHeightRatio * 50}%`,
                           left: '50%',
-                          width: frameWidth,
-                          transform: [{ translateX: -frameWidth / 2 }],
+                          width: frameWidthPx,
+                          transform: [{ translateX: -frameWidthPx / 2 }],
                         }
                       ]} />
                     )}

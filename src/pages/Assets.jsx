@@ -2,7 +2,7 @@ import logger from '../utils/logger';
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabase/client';
 import { 
-  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, TextField, Alert, Button
+  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, TextField, Alert, Button, Card, CardContent, Grid, Stack, Chip
 } from '@mui/material';
 import { useAuth } from '../hooks/useAuth';
 
@@ -332,11 +332,19 @@ export default function Assets() {
       // Removed all_bottles to prevent storage quota issues
     };
   });
+  const inventoryMetrics = {
+    assetTypes: assetRows.length,
+    totalBottles: assetRows.reduce((sum, row) => sum + row.total, 0),
+    available: assetRows.reduce((sum, row) => sum + row.available, 0),
+    rented: assetRows.reduce((sum, row) => sum + row.rented, 0),
+    maintenance: assetRows.reduce((sum, row) => sum + row.maintenance, 0),
+    lost: assetRows.reduce((sum, row) => sum + row.lost, 0),
+  };
 
 
   if (loading) return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 1.5, md: 2.5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
+    <Box sx={{ minHeight: '100%', bgcolor: 'transparent', py: 2, borderRadius: 0, overflow: 'visible' }}>
+      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 3 }, borderRadius: 3, boxShadow: 'none', border: '1px solid rgba(15, 23, 42, 0.08)', bgcolor: '#fcfcfb', overflow: 'visible' }}>
         <Box p={4} textAlign="center">
           <CircularProgress />
         </Box>
@@ -345,30 +353,89 @@ export default function Assets() {
   );
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 1.5, md: 2.5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Box>
-            <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>Bottle Inventory</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Organization: <strong>{organization?.name}</strong>
-            </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-              View-only inventory overview of physical bottles (containers) that hold gas assets
-            </Typography>
-          </Box>
-        </Box>
+    <Box sx={{ minHeight: '100%', bgcolor: 'transparent', py: 2, borderRadius: 0, overflow: 'visible' }}>
+      <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 3 }, borderRadius: 3, boxShadow: 'none', border: '1px solid rgba(15, 23, 42, 0.08)', bgcolor: '#fcfcfb', overflow: 'visible' }}>
+        <Paper
+          elevation={0}
+          sx={{
+            p: { xs: 2.5, sm: 3 },
+            mb: 3,
+            borderRadius: 3,
+            border: '1px solid rgba(15, 23, 42, 0.08)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+          }}
+        >
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }}>
+            <Box>
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25, flexWrap: 'wrap' }}>
+                <Chip label="Inventory" color="primary" size="small" sx={{ borderRadius: 999, fontWeight: 700 }} />
+                <Chip label={organization?.name || organizationName || 'Organization'} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+              </Stack>
+              <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+                Bottle inventory
+              </Typography>
+              <Typography variant="body1" sx={{ color: '#64748b', mt: 1, maxWidth: 760 }}>
+                Review physical inventory by gas type, container size, and current status across the organization.
+              </Typography>
+            </Box>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
+              <Button
+                variant="outlined"
+                onClick={() => exportSummaryByType(filteredBottles)}
+                sx={{ borderRadius: 2.5, textTransform: 'none', fontWeight: 700 }}
+              >
+                Export summary
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={() => exportAllBottlesToCSV(organization.id)}
+                sx={{ borderRadius: 2.5, textTransform: 'none', fontWeight: 700 }}
+              >
+                Export inventory
+              </Button>
+            </Stack>
+          </Stack>
+        </Paper>
+
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          {[
+            { label: 'Asset types', value: inventoryMetrics.assetTypes, helper: 'Grouped inventory categories' },
+            { label: 'Total bottles', value: inventoryMetrics.totalBottles, helper: 'Physical containers currently tracked' },
+            { label: 'Available', value: inventoryMetrics.available, helper: 'Ready for allocation or movement' },
+            { label: 'Rented', value: inventoryMetrics.rented, helper: 'Currently assigned to customers' },
+            { label: 'Maintenance', value: inventoryMetrics.maintenance, helper: 'Temporarily unavailable for service' },
+            { label: 'Lost', value: inventoryMetrics.lost, helper: 'Flagged as lost or missing' },
+          ].map((metric) => (
+            <Grid item xs={12} sm={6} lg={2} key={metric.label}>
+              <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', height: '100%' }}>
+                <CardContent sx={{ p: 2.25 }}>
+                  <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                    {metric.label}
+                  </Typography>
+                  <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', mt: 0.5, letterSpacing: '-0.03em' }}>
+                    {metric.value}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#64748b', mt: 0.75 }}>
+                    {metric.helper}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
 
         {/* Filters */}
-        <Box display="flex" gap={2} mb={3} flexWrap="wrap">
+        <Paper elevation={0} sx={{ p: 2.5, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', backgroundColor: '#fff' }}>
+        <Box display="flex" gap={2} mb={0} flexWrap="wrap" alignItems="center">
           <TextField
             size="small"
             label="Search bottles, barcode, gas type..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            sx={{ minWidth: 260 }}
+            sx={{ minWidth: 280 }}
           />
         </Box>
+        </Paper>
 
         {error && (
           <Alert severity="error" sx={{ mb: 3 }}>
@@ -377,11 +444,11 @@ export default function Assets() {
         )}
 
 
-        <Paper elevation={2} sx={{ borderRadius: 2 }}>
+        <Paper elevation={0} sx={{ borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: 'none' }}>
           <TableContainer>
             <Table>
               <TableHead>
-                <TableRow>
+                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell sx={{ fontWeight: 700 }}>Gas Type</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Bottle Sizes</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Available Bottles</TableCell>
@@ -393,7 +460,7 @@ export default function Assets() {
               </TableHead>
               <TableBody>
                 {assetRows.map(row => (
-                  <TableRow key={row.gasType}>
+                  <TableRow key={row.gasType} sx={{ '&:hover': { backgroundColor: '#fcfcfd' } }}>
                     <TableCell>
                       <Typography variant="body1" sx={{ fontWeight: 600, color: 'primary.main' }}>
                         {row.gasType}

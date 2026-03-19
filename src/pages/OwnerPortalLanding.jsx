@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   Box, Typography, Grid, Card, CardContent, CardActions, Button,
   Chip, Avatar, Divider, Alert
@@ -30,7 +30,18 @@ import { useAuth } from '../hooks/useAuth';
 
 export default function OwnerPortalLanding() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, profile, organization } = useAuth();
+
+  // Org owners (role 'orgowner') or anyone with an org should use org dashboard, not platform owner portal
+  useEffect(() => {
+    if (profile?.role === 'orgowner' || profile?.organization_id || organization) {
+      navigate('/home', { replace: true });
+    }
+  }, [profile?.role, profile?.organization_id, organization, navigate]);
+
+  if (profile?.role === 'orgowner' || profile?.organization_id || organization) {
+    return null; // Redirecting to /home
+  }
 
   const quickActions = [
     {

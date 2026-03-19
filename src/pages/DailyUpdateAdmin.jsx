@@ -10,7 +10,8 @@ import {
   Card,
   CardContent,
   Grid,
-  Chip
+  Chip,
+  Stack
 } from '@mui/material';
 import { 
   Update as UpdateIcon,
@@ -171,19 +172,12 @@ export default function DailyUpdateAdmin() {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg-main)', py: 8, borderRadius: 0, overflow: 'visible' }}>
-      <Paper elevation={0} sx={{ width: '100%', p: { xs: 1.5, md: 2.5 }, borderRadius: 0, boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)', border: '1px solid var(--divider)', bgcolor: 'var(--bg-main)', overflow: 'visible' }}>
-        
-        {/* Header */}
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
-          <Box>
-            <Typography variant="h3" fontWeight={900} color="primary" sx={{ letterSpacing: -1 }}>
-              📅 Daily Update Admin
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Organization: <strong>{organization?.name}</strong>
-            </Typography>
-          </Box>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+            Daily Update Admin
+          </Typography>
           <Button
             variant="contained"
             color="primary"
@@ -191,16 +185,18 @@ export default function DailyUpdateAdmin() {
             onClick={runDailyUpdate}
             disabled={loading}
             size="large"
+            sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
           >
             {loading ? 'Updating...' : 'Run Daily Update'}
           </Button>
-        </Box>
+        </Stack>
+      </Paper>
 
         {/* Stats Cards */}
         {bottleStats && (
           <Grid container spacing={3} mb={4}>
             <Grid item xs={12} sm={6} md={3}>
-              <Card>
+              <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                 <CardContent>
                   <Typography variant="h4" color="primary" fontWeight="bold">
                     {bottleStats.total}
@@ -212,7 +208,7 @@ export default function DailyUpdateAdmin() {
               </Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <Card>
+              <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                 <CardContent>
                   <Typography variant="h4" color="success.main" fontWeight="bold">
                     {bottleStats.updatedToday}
@@ -224,7 +220,7 @@ export default function DailyUpdateAdmin() {
               </Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <Card>
+              <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                 <CardContent>
                   <Typography variant="h4" color="info.main" fontWeight="bold">
                     {bottleStats.averageDays}
@@ -236,7 +232,7 @@ export default function DailyUpdateAdmin() {
               </Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <Card>
+              <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                 <CardContent>
                   <Typography variant="h4" color="warning.main" fontWeight="bold">
                     {bottleStats.maxDays}
@@ -251,7 +247,7 @@ export default function DailyUpdateAdmin() {
         )}
 
         {/* Last Update Status */}
-        <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
+        <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Typography variant="h6" gutterBottom>
             <ScheduleIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
             Last Update Status
@@ -303,7 +299,7 @@ export default function DailyUpdateAdmin() {
         )}
 
         {/* Instructions */}
-        <Paper elevation={1} sx={{ p: 3, bgcolor: 'grey.50' }}>
+        <Paper elevation={0} sx={{ p: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Typography variant="h6" gutterBottom>
             📋 How It Works
           </Typography>
@@ -320,7 +316,6 @@ export default function DailyUpdateAdmin() {
             <strong>Note:</strong> Bottles that were already updated today will be skipped to prevent double-counting.
           </Typography>
         </Paper>
-      </Paper>
     </Box>
   );
 }

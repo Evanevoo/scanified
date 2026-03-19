@@ -800,20 +800,17 @@ export default function VerifiedOrders() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
       {/* Header */}
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h4" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+        <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em', display: 'flex', alignItems: 'center', gap: 1 }}>
           <VerifiedIcon color="success" />
           Verified Orders
         </Typography>
-        <Typography variant="body2" color="text.secondary">
-          View and manage orders that have been verified. You can unverify orders if needed.
-        </Typography>
-      </Box>
+      </Paper>
 
       {/* Filters */}
-      <Paper sx={{ p: 2, mb: 2 }}>
+      <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
           <TextField
             label="Search"
@@ -865,10 +862,10 @@ export default function VerifiedOrders() {
       </Paper>
 
       {/* Orders Table */}
-      <TableContainer component={Paper}>
+      <TableContainer component={Paper} elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Table>
           <TableHead>
-            <TableRow>
+            <TableRow sx={{ backgroundColor: '#f8fafc' }}>
               <TableCell>Type</TableCell>
               <TableCell>Order #</TableCell>
               <TableCell>Customer</TableCell>

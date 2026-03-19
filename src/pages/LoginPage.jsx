@@ -47,7 +47,7 @@ function LoginPage() {
         // Full authenticated user with organization
         navigate('/home');
       } else if (user && profile && !organization && profile.role === 'owner') {
-        // Platform owner without organization
+        // Platform owner without organization (Scanified only)
         navigate('/owner-portal');
       } else if (user && profile && !organization && profile.role !== 'owner') {
         // Check if there's a redirect flag set
@@ -365,10 +365,19 @@ function LoginPage() {
         display: 'flex', 
         alignItems: 'center', 
         justifyContent: 'center',
-        bgcolor: '#f5f5f5',
+        bgcolor: '#f1f5f9',
         p: 3
       }}>
-        <Card sx={{ maxWidth: 500, width: '100%' }}>
+        <Card
+          elevation={0}
+          sx={{
+            maxWidth: 500,
+            width: '100%',
+            borderRadius: 2,
+            border: '1px solid rgba(15, 23, 42, 0.08)',
+            boxShadow: '0 4px 24px rgba(15, 23, 42, 0.06)',
+          }}
+        >
           <CardContent sx={{ p: 4 }}>
             <Typography variant="h5" gutterBottom>
               Organization Required
@@ -382,6 +391,8 @@ function LoginPage() {
                 fullWidth
                 onClick={() => navigate('/register')}
                 sx={{
+                  borderRadius: 999,
+                  py: 1.25,
                   backgroundColor: '#40B5AD',
                   '&:hover': {
                     backgroundColor: '#2D8B85',
@@ -395,6 +406,8 @@ function LoginPage() {
                 fullWidth
                 onClick={() => navigate('/contact')}
                 sx={{
+                  borderRadius: 999,
+                  py: 1.25,
                   borderColor: '#48C9B0',
                   color: '#48C9B0',
                   '&:hover': {
@@ -431,23 +444,23 @@ function LoginPage() {
       display: 'flex', 
       alignItems: 'center', 
       justifyContent: 'center',
-      backgroundColor: '#FFFFFF',
+      background: 'linear-gradient(180deg, #f1f5f9 0%, #f8fafc 45%, #ffffff 100%)',
       p: 3
     }}>
-      <Card sx={{ 
-        maxWidth: 400, 
-        width: '100%',
-        border: '2px solid #000000',
-        borderRadius: '8px',
-        boxShadow: 'none'
-      }}>
+      <Card
+        elevation={0}
+        sx={{
+          maxWidth: 400,
+          width: '100%',
+          border: '1px solid rgba(15, 23, 42, 0.08)',
+          borderRadius: 2,
+          boxShadow: '0 4px 24px rgba(15, 23, 42, 0.06)',
+        }}
+      >
         <CardContent sx={{ p: 4 }}>
-          <Box sx={{ textAlign: 'center', mb: 4 }}>
-            <Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 700, color: '#000000' }}>
-              Welcome Back
-            </Typography>
-            <Typography variant="body2" sx={{ color: '#6B7280' }}>
-              Sign in to your account to continue
+          <Box sx={{ textAlign: 'center', mb: 3 }}>
+            <Typography variant="h4" component="h1" sx={{ fontWeight: 800, color: '#0f172a', letterSpacing: -0.5 }}>
+              Welcome back
             </Typography>
           </Box>
 
@@ -469,20 +482,21 @@ function LoginPage() {
               autoFocus
               sx={{
                 '& .MuiOutlinedInput-root': {
-                  borderColor: '#000000',
+                  borderRadius: 2,
                   '& fieldset': {
-                    borderColor: '#000000',
-                    borderWidth: '2px'
+                    borderColor: 'rgba(15, 23, 42, 0.18)',
+                    borderWidth: '1px'
                   },
                   '&:hover fieldset': {
-                    borderColor: '#000000',
+                    borderColor: 'rgba(15, 23, 42, 0.28)',
                   },
                   '&.Mui-focused fieldset': {
-                    borderColor: '#000000',
+                    borderColor: '#0f172a',
+                    borderWidth: '1px',
                   }
                 },
                 '& .MuiInputLabel-root.Mui-focused': {
-                  color: '#000000'
+                  color: '#0f172a'
                 }
               }}
             />
@@ -496,20 +510,21 @@ function LoginPage() {
               autoComplete="current-password"
               sx={{
                 '& .MuiOutlinedInput-root': {
-                  borderColor: '#000000',
+                  borderRadius: 2,
                   '& fieldset': {
-                    borderColor: '#000000',
-                    borderWidth: '2px'
+                    borderColor: 'rgba(15, 23, 42, 0.18)',
+                    borderWidth: '1px'
                   },
                   '&:hover fieldset': {
-                    borderColor: '#000000',
+                    borderColor: 'rgba(15, 23, 42, 0.28)',
                   },
                   '&.Mui-focused fieldset': {
-                    borderColor: '#000000',
+                    borderColor: '#0f172a',
+                    borderWidth: '1px',
                   }
                 },
                 '& .MuiInputLabel-root.Mui-focused': {
-                  color: '#000000'
+                  color: '#0f172a'
                 }
               }}
             />
@@ -520,11 +535,11 @@ function LoginPage() {
                 onClick={() => setForgotPasswordOpen(true)}
                 sx={{ 
                   cursor: 'pointer',
-                  color: '#000000',
-                  fontWeight: 500,
+                  color: '#475569',
+                  fontWeight: 600,
                   '&:hover': {
                     textDecoration: 'underline',
-                    color: '#374151'
+                    color: '#0f172a'
                   }
                 }}
               >
@@ -540,17 +555,18 @@ function LoginPage() {
               disabled={loadingLocal}
               sx={{ 
                 mb: 2,
-                backgroundColor: '#000000',
+                borderRadius: 999,
+                py: 1.35,
+                backgroundColor: '#0f172a',
                 color: '#FFFFFF',
                 fontWeight: 600,
-                border: '2px solid #000000',
+                boxShadow: 'none',
                 '&:hover': {
-                  backgroundColor: '#1F2937',
-                  borderColor: '#1F2937',
+                  backgroundColor: '#1e293b',
+                  boxShadow: 'none',
                 },
                 '&:disabled': {
-                  backgroundColor: '#9CA3AF',
-                  borderColor: '#9CA3AF',
+                  backgroundColor: '#94a3b8',
                   color: '#FFFFFF'
                 }
               }}
@@ -564,42 +580,30 @@ function LoginPage() {
           </Divider>
 
           <Box sx={{ textAlign: 'center' }}>
-            <Typography variant="body2" sx={{ color: '#6B7280', mb: 2 }}>
-              Don't have an account?
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <Button
-                variant="outlined"
-                size="large"
-                fullWidth
-                onClick={() => {
-                  sessionStorage.setItem('redirect_after_login', '/connect-organization');
-                  setSignupDialog(true);
-                }}
-                sx={{ 
-                  mb: 1,
-                  backgroundColor: '#FFFFFF',
-                  color: '#000000',
-                  border: '2px solid #000000',
-                  fontWeight: 600,
-                  '&:hover': {
-                    backgroundColor: '#000000',
-                    color: '#FFFFFF',
-                    borderColor: '#000000',
-                  }
-                }}
-              >
-                Create Free Account
-              </Button>
-              <Typography variant="caption" sx={{ color: '#6B7280', display: 'block', textAlign: 'center' }}>
-                Join an existing organization or start your own
-              </Typography>
-            </Box>
-            <Box sx={{ mt: 2, textAlign: 'center' }}>
-              <Typography variant="body2" sx={{ color: '#6B7280' }}>
-                Already have an account? Sign in above
-              </Typography>
-            </Box>
+            <Button
+              variant="outlined"
+              size="large"
+              fullWidth
+              onClick={() => {
+                sessionStorage.setItem('redirect_after_login', '/connect-organization');
+                setSignupDialog(true);
+              }}
+              sx={{ 
+                mb: 1,
+                borderRadius: 999,
+                py: 1.25,
+                backgroundColor: '#FFFFFF',
+                color: '#0f172a',
+                border: '1px solid rgba(15, 23, 42, 0.2)',
+                fontWeight: 600,
+                '&:hover': {
+                  backgroundColor: '#f8fafc',
+                  borderColor: 'rgba(15, 23, 42, 0.35)',
+                }
+              }}
+            >
+              Create free account
+            </Button>
           </Box>
 
           <Box sx={{ mt: 3, textAlign: 'center' }}>
@@ -611,11 +615,11 @@ function LoginPage() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 1,
-                color: '#000000',
-                fontWeight: 500,
+                color: '#475569',
+                fontWeight: 600,
                 '&:hover': {
                   textDecoration: 'underline',
-                  color: '#374151'
+                  color: '#0f172a'
                 }
               }}
             >
@@ -623,17 +627,16 @@ function LoginPage() {
                 size="small" 
                 sx={{ 
                   padding: 0,
-                  color: '#000000',
+                  color: 'inherit',
                   '&:hover': {
-                    color: '#374151',
-                    backgroundColor: 'rgba(0, 0, 0, 0.05)'
+                    backgroundColor: 'rgba(15, 23, 42, 0.06)'
                   }
                 }}
               >
                 <ArrowBackIcon />
               </IconButton>
-              <Typography variant="body2" sx={{ color: '#000000', fontWeight: 500 }}>
-                Back to Home
+              <Typography variant="body2" sx={{ color: 'inherit', fontWeight: 600 }}>
+                Back to home
               </Typography>
             </Box>
           </Box>
@@ -648,17 +651,15 @@ function LoginPage() {
         fullWidth
         PaperProps={{
           sx: {
-            border: '2px solid #000000',
-            borderRadius: '8px'
+            border: '1px solid rgba(15, 23, 42, 0.08)',
+            borderRadius: 2,
+            boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',
           }
         }}
       >
-        <DialogTitle sx={{ color: '#000000', fontWeight: 700 }}>Reset Password</DialogTitle>
+        <DialogTitle sx={{ color: '#0f172a', fontWeight: 800 }}>Reset password</DialogTitle>
         <form onSubmit={handleForgotPassword}>
           <DialogContent>
-            <Typography variant="body2" sx={{ mb: 2, color: '#6B7280' }}>
-              Enter your email address and we'll send you a link to reset your password.
-            </Typography>
             {resetError && (
               <Alert severity="error" sx={{ mb: 2, border: '1px solid #EF4444', backgroundColor: '#FEE2E2', color: '#991B1B' }}>
                 {resetError}
@@ -674,19 +675,20 @@ function LoginPage() {
               autoFocus
               sx={{
                 '& .MuiOutlinedInput-root': {
+                  borderRadius: 2,
                   '& fieldset': {
-                    borderColor: '#000000',
-                    borderWidth: '2px'
+                    borderColor: 'rgba(15, 23, 42, 0.18)',
+                    borderWidth: '1px'
                   },
                   '&:hover fieldset': {
-                    borderColor: '#000000',
+                    borderColor: 'rgba(15, 23, 42, 0.28)',
                   },
                   '&.Mui-focused fieldset': {
-                    borderColor: '#000000',
+                    borderColor: '#0f172a',
                   }
                 },
                 '& .MuiInputLabel-root.Mui-focused': {
-                  color: '#000000'
+                  color: '#0f172a'
                 }
               }}
             />
@@ -695,14 +697,15 @@ function LoginPage() {
             <Button 
               onClick={handleCloseForgotPassword}
               color="inherit"
+              sx={{ borderRadius: 999 }}
             >
               Cancel
             </Button>
             <Button 
               type="submit" 
               variant="contained" 
-              color="primary"
               disabled={resetLoading}
+              sx={{ borderRadius: 999, px: 3, backgroundColor: '#0f172a', '&:hover': { backgroundColor: '#1e293b' } }}
             >
               {resetLoading ? <CircularProgress size={20} /> : 'Send Reset Link'}
             </Button>
@@ -726,14 +729,8 @@ function LoginPage() {
         fullWidth
       >
         <form onSubmit={handleSignup}>
-          <DialogTitle>Create Your Free Account</DialogTitle>
+          <DialogTitle sx={{ fontWeight: 800 }}>Create account</DialogTitle>
           <DialogContent>
-            <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mb: 2 }}>
-              {signupData.organizationName 
-                ? `Create an account to set up "${signupData.organizationName}"`
-                : "Create an account to join an organization or start your own"
-              }
-            </Typography>
             {signupError && (
               <Alert severity="error" sx={{ mb: 2 }}>
                 {signupError}
@@ -808,16 +805,18 @@ function LoginPage() {
               sx={{ mb: 2 }}
             />
             <Alert severity="info" sx={{ mt: 2 }}>
-              After creating your account, you'll receive a confirmation email. Once confirmed, you can sign in. {signupData.organizationName ? 'Your organization will be created automatically.' : 'You can then join an existing organization or create your own.'}
+              Check your email to confirm, then sign in.
             </Alert>
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setSignupDialog(false)}>Cancel</Button>
+          <DialogActions sx={{ px: 3, pb: 2 }}>
+            <Button onClick={() => setSignupDialog(false)} sx={{ borderRadius: 999 }}>Cancel</Button>
             <Button 
               type="submit" 
               variant="contained" 
               disabled={signupLoading || !signupData.name || !signupData.email || !signupData.password || !validateInput.validatePassword(signupData.password).valid}
               sx={{
+                borderRadius: 999,
+                px: 3,
                 backgroundColor: '#40B5AD',
                 '&:hover': {
                   backgroundColor: '#2D8B85',

@@ -50,7 +50,9 @@ import {
 
   TablePagination,
 
-  Chip
+  Chip,
+
+  Stack
 
 } from '@mui/material';
 
@@ -1921,121 +1923,133 @@ const BottleManagement = () => {
 
   return (
 
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
 
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
 
-        <Typography variant="h4">Bottle Management</Typography>
+        <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
 
-        <Box display="flex" gap={2}>
+          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>Bottle Management</Typography>
 
-          <Button
+          <Box display="flex" gap={2} flexWrap="wrap">
 
-            variant="outlined"
+            <Button
 
-            color="error"
+              variant="outlined"
 
-            startIcon={<DeleteIcon />}
+              color="error"
 
-            onClick={handleDeleteAllBottles}
+              startIcon={<DeleteIcon />}
 
-            disabled={loading}
+              onClick={handleDeleteAllBottles}
 
-          >
+              disabled={loading}
 
-            Delete All Bottles
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
 
-          </Button>
+            >
 
-          <Button
+              Delete All Bottles
 
-            variant="outlined"
+            </Button>
 
-            color="warning"
+            <Button
 
-            startIcon={<PersonAddIcon />}
+              variant="outlined"
 
-            onClick={handleCreateMissingCustomers}
+              color="warning"
 
-            sx={{ mr: 1 }}
+              startIcon={<PersonAddIcon />}
 
-          >
+              onClick={handleCreateMissingCustomers}
 
-            Create Missing Customers
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
 
-          </Button>
+            >
 
-          <Button
+              Create Missing Customers
 
-            variant="contained"
+            </Button>
 
-            startIcon={<UploadIcon />}
+            <Button
 
-            onClick={() => setUploadDialog(true)}
+              variant="contained"
 
-          >
+              startIcon={<UploadIcon />}
 
-            Upload Bottles
+              onClick={() => setUploadDialog(true)}
 
-          </Button>
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+
+            >
+
+              Upload Bottles
+
+            </Button>
+
+          </Box>
 
         </Box>
 
-      </Box>
+      </Paper>
 
 
 
       {/* Filters */}
 
-      <Box display="flex" gap={2} mb={3}>
+      <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
 
-        <TextField
+        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
 
-          label="Search bottles"
+          <TextField
 
-          placeholder="Search by barcode, serial, customer, or description"
+            label="Search bottles"
 
-          value={searchTerm}
+            placeholder="Search by barcode, serial, customer, or description"
 
-          onChange={(e) => {
+            value={searchTerm}
 
-            setSearchTerm(e.target.value);
+            onChange={(e) => {
 
-            handleChangePage(null, 0); // Reset to first page when searching
+              setSearchTerm(e.target.value);
 
-          }}
+              handleChangePage(null, 0);
 
-          size="small"
+            }}
 
-          sx={{ minWidth: 300 }}
+            size="small"
 
-        />
+            sx={{ minWidth: 300 }}
 
-        <FormControl size="small" sx={{ minWidth: 120 }}>
+          />
 
-          <InputLabel>Status</InputLabel>
+          <FormControl size="small" sx={{ minWidth: 120 }}>
 
-          <Select
+            <InputLabel>Status</InputLabel>
 
-            value={statusFilter}
+            <Select
 
-            label="Status"
+              value={statusFilter}
 
-            onChange={(e) => setStatusFilter(e.target.value)}
+              label="Status"
 
-          >
+              onChange={(e) => setStatusFilter(e.target.value)}
 
-            <MenuItem value="all">All</MenuItem>
+            >
 
-            <MenuItem value="available">Available</MenuItem>
+              <MenuItem value="all">All</MenuItem>
 
-            <MenuItem value="rented">Rented</MenuItem>
+              <MenuItem value="available">Available</MenuItem>
 
-          </Select>
+              <MenuItem value="rented">Rented</MenuItem>
 
-        </FormControl>
+            </Select>
 
-      </Box>
+          </FormControl>
+
+        </Stack>
+
+      </Paper>
 
 
 

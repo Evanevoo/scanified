@@ -89,15 +89,14 @@ exports.handler = async (event) => {
         const { data: roleRow } = await supabase.from('roles').select('name').eq('id', roleValue).maybeSingle();
         if (roleRow?.name) roleForProfile = roleRow.name;
       }
+      // Only include columns that exist on profiles (schema may not have deleted_at/disabled_at)
       const profile = {
         id: profilePayload.id,
         email: String(profilePayload.email).trim().toLowerCase(),
         full_name: (profilePayload.full_name ?? profilePayload.name ?? '').trim() || null,
         organization_id: profilePayload.organization_id,
         role: roleForProfile,
-        is_active: profilePayload.is_active !== false,
-        deleted_at: profilePayload.deleted_at ?? null,
-        disabled_at: profilePayload.disabled_at ?? null
+        is_active: profilePayload.is_active !== false
       };
       if (isRoleUuid) {
         profile.role_id = roleValue;
