@@ -66,6 +66,39 @@ import QuantityDiscrepancyDetector from '../components/QuantityDiscrepancyDetect
 import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
 
+/** Normalize numeric SO strings so 071760 matches 71760; alphanumeric (e.g. S47852) stays trimmed only. */
+function normalizeOrderNumForApproval(num) {
+  if (num == null || num === '') return '';
+  const s = String(num).trim();
+  if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
+  return s;
+}
+
+/**
+ * One Import / scanned-only card per order + customer name. Omits customer_id from the key because
+ * SHIP rows often include ID while RETURN rows do not — that used to split the same PO into two cards.
+ */
+function bottleScanOrderCustomerGroupKey(scan) {
+  const orderRaw = scan.order_number?.toString().trim();
+  if (!orderRaw) return null;
+  const orderNum = normalizeOrderNumForApproval(orderRaw);
+  const customerKey = (scan.customer_name || scan.customer || 'Unknown Customer')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  return `${orderNum}\t${customerKey}`;
+}
+
+/** Prefer a row that has customer_list id so merged SHIP+RETURN groups keep IDs for import card matching. */
+function preferScanWithCustomerId(scans) {
+  if (!scans?.length) return null;
+  const withId = scans.find((s) =>
+    (s.customer_id || s.CustomerID || s.CustomerId || s.CustomerListID)?.toString?.().trim()
+  );
+  return withId || scans[0];
+}
+
 // Enhanced status definitions for verification states
 const VERIFICATION_STATES = {
   PENDING: { 
@@ -1230,14 +1263,11 @@ export default function ImportApprovals() {
       // Keep card line items in sync: use this same merge so getDetailedLineItems sees BCS62-300 etc.
       setAllScannedRows(allScannedRows);
       
-      // Group scanned rows by order AND customer so each card has one customer
+      // Group scanned rows by order + customer name (not customer_id) so SHIP/RETURN pairs stay on one card
       const orderAndCustomerGroups = {};
       allScannedRows.forEach(scan => {
-        const orderNum = scan.order_number?.toString().trim();
-        if (!orderNum) return;
-        const customerName = (scan.customer_name || scan.customer || 'Unknown Customer').toString().trim();
-        const customerId = (scan.customer_id || scan.CustomerID || scan.CustomerId || scan.CustomerListID || '').toString().trim();
-        const groupKey = `${orderNum}\t${customerName}\t${customerId}`;
+        const groupKey = bottleScanOrderCustomerGroupKey(scan);
+        if (!groupKey) return;
         if (!orderAndCustomerGroups[groupKey]) {
           orderAndCustomerGroups[groupKey] = [];
         }
@@ -1245,14 +1275,6 @@ export default function ImportApprovals() {
       });
       const orderGroups = orderAndCustomerGroups;
       const processStartTime = Date.now();
-      
-      // Normalize order number so "71760" and "071760" match (used for approved-order and scanned-only filtering)
-      const normalizeOrderNumForApproval = (num) => {
-        if (num == null || num === '') return '';
-        const s = String(num).trim();
-        if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
-        return s;
-      };
 
       // Check which orders are approved (from imported_invoices/receipts) - do not show as scanned-only
       const approvedOrderNumbers = new Set();
@@ -1346,7 +1368,7 @@ export default function ImportApprovals() {
           })
           .map(([groupKey, scans]) => {
         const orderNumber = groupKey.split('\t')[0];
-        const firstScan = scans[0];
+        const firstScan = preferScanWithCustomerId(scans);
         const customerName = firstScan.customer_name || firstScan.customer || 'Unknown Customer';
         const customerId = firstScan.customer_id || firstScan.CustomerID || firstScan.CustomerId || firstScan.CustomerListID || null;
         const hasMatchingImport = importOrderNumbers.has(orderNumber);
@@ -1789,14 +1811,11 @@ export default function ImportApprovals() {
 
       logger.debug('📋 Imported order numbers:', Array.from(importedOrderNumbers));
 
-      // Group scanned rows by order AND customer
+      // Group scanned rows by order + customer name (same as main fetch — avoid splitting SHIP/RETURN when ID differs)
       const orderGroups = {};
       allScannedRows.forEach(scan => {
-        const orderNum = scan.order_number?.toString().trim();
-        if (!orderNum) return;
-        const customerName = (scan.customer_name || scan.customer || 'Unknown Customer').toString().trim();
-        const customerId = (scan.customer_id || scan.CustomerID || scan.CustomerId || scan.CustomerListID || '').toString().trim();
-        const groupKey = `${orderNum}\t${customerName}\t${customerId}`;
+        const groupKey = bottleScanOrderCustomerGroupKey(scan);
+        if (!groupKey) return;
         if (!orderGroups[groupKey]) orderGroups[groupKey] = [];
         orderGroups[groupKey].push(scan);
       });
@@ -1835,7 +1854,7 @@ export default function ImportApprovals() {
             if (approvedOrderNumbers.has(orderNumber)) {
               return null;
             }
-          const firstScan = scans[0];
+          const firstScan = preferScanWithCustomerId(scans);
           const customerName = firstScan.customer_name || firstScan.customer || 'Unknown Customer';
           const customerId = firstScan.customer_id || firstScan.CustomerID || firstScan.CustomerId || firstScan.CustomerListID || null;
           const safeCustomerSuffix = (customerId || customerName || 'u').toString().replace(/[\t\n]/g, '_').slice(0, 80);
@@ -3156,11 +3175,13 @@ export default function ImportApprovals() {
   }
 
   function getShippedQuantity(lineItem) {
-    return parseInt(lineItem.qty_out || lineItem.QtyOut || lineItem.shipped || lineItem.Shipped || lineItem.quantity || 0, 10);
+    // Prefer invoice-native fields first; qty_out is scan-derived and should be fallback only.
+    return parseInt(lineItem.shipped || lineItem.Shipped || lineItem.quantity || lineItem.qty_out || lineItem.QtyOut || 0, 10);
   }
 
   function getReturnedQuantity(lineItem) {
-    return parseInt(lineItem.qty_in || lineItem.QtyIn || lineItem.returned || lineItem.Returned || lineItem.return_qty || lineItem.ReturnQty || 0, 10);
+    // Prefer invoice-native fields first; qty_in is scan-derived and should be fallback only.
+    return parseInt(lineItem.returned || lineItem.Returned || lineItem.return_qty || lineItem.ReturnQty || lineItem.qty_in || lineItem.QtyIn || 0, 10);
   }
 
   function getHighlightInfo(lineItem, productInfo) {

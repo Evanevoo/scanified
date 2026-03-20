@@ -57,6 +57,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const [bottleTypes, setBottleTypes] = useState({ types: [], groupNames: [], categories: [], productCodes: [], ownerships: [], typeDefaults: {} });
   const [assignBottleForm, setAssignBottleForm] = useState({ type: '', group_name: '', description: '', category: '', product_code: '', ownership: '' });
   const [assignBottleSaving, setAssignBottleSaving] = useState(false);
+  const [assignBottleError, setAssignBottleError] = useState('');
   const [refreshScannedBottlesTrigger, setRefreshScannedBottlesTrigger] = useState(0);
   
   // Asset Options state
@@ -514,23 +515,31 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             mode: s.mode
           })));
           
-          // Process bottle_scans - SHIP and RETURN are independent; newest per (barcode+modeType) wins.
+          // Process bottle_scans - SHIP and RETURN are independent; newest per (order+barcode+modeType) wins.
           const normModeType = (mode) => {
             const m = (mode || '').toString().toUpperCase();
             return (m === 'SHIP' || m === 'DELIVERY') ? 'SHIP' : 'RETURN';
           };
-          const bottleScanMap = new Map(); // key: barcode+modeType
+          const normOrder = (o) => (o == null || o === '') ? '' : String(o).trim();
+          const bottleScanMap = new Map(); // key: order+barcode+modeType
           
           (matchingBottleScans || []).forEach(scan => {
             if (scan.bottle_barcode) {
               const modeType = normModeType(scan.mode);
-              const mapKey = `${scan.bottle_barcode}\t${modeType}`;
+              const orderKey = normOrder(scan.order_number);
+              const mapKey = `${orderKey}\t${scan.bottle_barcode}\t${modeType}`;
               const isDeliveredScan = modeType === 'SHIP';
               const existing = bottleScanMap.get(mapKey);
               const newTime = new Date(scan.created_at || 0).getTime();
               const existingTime = existing ? new Date(existing.created_at || 0).getTime() : -1;
               if (!existing || newTime >= existingTime) {
-                bottleScanMap.set(mapKey, { barcode: scan.bottle_barcode, mode: scan.mode, isDelivered: isDeliveredScan, created_at: scan.created_at });
+                bottleScanMap.set(mapKey, {
+                  order: orderKey,
+                  barcode: scan.bottle_barcode,
+                  mode: scan.mode,
+                  isDelivered: isDeliveredScan,
+                  created_at: scan.created_at
+                });
               }
             }
           });
@@ -555,26 +564,35 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         
         // Most recent scan wins: same bottle scanned both SHIP and RETURN (correction) → show only under the mode that was scanned last
         const normB = (b) => (b == null || b === '') ? '' : String(b).trim().replace(/^0+/, '') || String(b).trim();
-        const barcodeToLatestMode = new Map(); // normBarcode -> { mode: 'SHIP'|'RETURN', time }
+        const barcodeToLatestMode = new Map(); // order+normBarcode -> { mode: 'SHIP'|'RETURN', time }
         barcodeToModeMap.forEach((info, mapKey) => {
           const parts = mapKey.split('\t');
-          const barcode = parts[0];
-          const modeType = parts[1];
+          const order = parts[0] || '';
+          const barcode = parts[1] || '';
+          const modeType = parts[2] || '';
           const nb = normB(barcode);
+          const orderBarcodeKey = `${order}\t${nb}`;
           const time = new Date(info.created_at || 0).getTime();
-          const existing = barcodeToLatestMode.get(nb);
+          const existing = barcodeToLatestMode.get(orderBarcodeKey);
           if (!existing || time >= existing.time) {
-            barcodeToLatestMode.set(nb, { mode: modeType, time });
+            barcodeToLatestMode.set(orderBarcodeKey, { mode: modeType, time });
           }
         });
         [...deliveredBarcodes].forEach(b => {
           const nb = normB(b);
-          const latest = barcodeToLatestMode.get(nb);
+          // Preserve existing behavior for "single order in detail", but avoid cross-order bleed.
+          const latest = [...barcodeToLatestMode.entries()]
+            .filter(([k]) => k.endsWith(`\t${nb}`))
+            .map(([, v]) => v)
+            .sort((a, b) => b.time - a.time)[0];
           if (latest && latest.mode === 'RETURN') deliveredBarcodes.delete(b);
         });
         [...returnedBarcodes].forEach(b => {
           const nb = normB(b);
-          const latest = barcodeToLatestMode.get(nb);
+          const latest = [...barcodeToLatestMode.entries()]
+            .filter(([k]) => k.endsWith(`\t${nb}`))
+            .map(([, v]) => v)
+            .sort((a, b) => b.time - a.time)[0];
           if (latest && latest.mode === 'SHIP') returnedBarcodes.delete(b);
         });
         logger.log(`📦 After most-recent-wins: Delivered ${deliveredBarcodes.size}, Returned ${returnedBarcodes.size}`);
@@ -3140,7 +3158,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{barcode}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} />
                               <TableCell>
-                                <Button size="small" variant="contained" color="primary" onClick={() => { setAssignBottleForm({ type: '', group_name: '', description: '', category: '', product_code: '', ownership: '' }); setAssignBottleDialog({ open: true, barcode, section: 'delivered' }); }}>
+                                <Button size="small" variant="contained" color="primary" onClick={() => { setAssignBottleError(''); setAssignBottleForm({ type: '', group_name: '', description: '', category: '', product_code: '', ownership: '' }); setAssignBottleDialog({ open: true, barcode, section: 'delivered' }); }}>
                                   Assign to type
                                 </Button>
                               </TableCell>
@@ -3292,7 +3310,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{barcode}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} />
                               <TableCell>
-                                <Button size="small" variant="contained" color="primary" onClick={() => { setAssignBottleForm({ type: '', group_name: '', description: '', category: '', product_code: '', ownership: '' }); setAssignBottleDialog({ open: true, barcode, section: 'returned' }); }}>
+                                <Button size="small" variant="contained" color="primary" onClick={() => { setAssignBottleError(''); setAssignBottleForm({ type: '', group_name: '', description: '', category: '', product_code: '', ownership: '' }); setAssignBottleDialog({ open: true, barcode, section: 'returned' }); }}>
                                   Assign to type
                                 </Button>
                               </TableCell>
@@ -3307,13 +3325,14 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             </Grid>
 
             {/* Assign to type dialog for unassigned scanned barcodes */}
-            <Dialog open={assignBottleDialog.open} onClose={() => setAssignBottleDialog({ open: false, barcode: null, section: null })} maxWidth="sm" fullWidth>
+            <Dialog open={assignBottleDialog.open} onClose={() => { setAssignBottleError(''); setAssignBottleDialog({ open: false, barcode: null, section: null }); }} maxWidth="sm" fullWidth>
               <DialogTitle>Assign barcode to type</DialogTitle>
               <DialogContent>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                   This barcode was scanned during delivery but is not in the system. Create a bottle record and assign a type so it appears in the order.
                 </Typography>
                 <TextField label="Barcode" value={assignBottleDialog.barcode || ''} fullWidth sx={{ mb: 2 }} InputProps={{ readOnly: true }} />
+                {assignBottleError ? <Alert severity="error" sx={{ mb: 2 }}>{assignBottleError}</Alert> : null}
                 <FormControl fullWidth sx={{ mb: 2 }}>
                   <InputLabel>Type</InputLabel>
                   <Select
@@ -3372,15 +3391,22 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 <Button 
                   variant="contained" 
                   onClick={async () => {
-                    if (!assignBottleDialog.barcode || !organization?.id) return;
-                    if (!assignBottleForm.type?.trim()) {
-                      setActionMessage('Please select a type');
-                      setTimeout(() => setActionMessage(''), 3000);
+                    if (!assignBottleDialog.barcode) {
+                      setAssignBottleError('Missing barcode. Please close and reopen this dialog.');
                       return;
                     }
+                    if (!organization?.id) {
+                      setAssignBottleError('Organization is missing for your account. Please refresh and try again.');
+                      return;
+                    }
+                    if (!assignBottleForm.type?.trim()) {
+                      setAssignBottleError('Please select a type.');
+                      return;
+                    }
+                    setAssignBottleError('');
                     setAssignBottleSaving(true);
                     try {
-                      const { error } = await supabase.from('bottles').insert([{
+                      const payload = {
                         barcode_number: assignBottleDialog.barcode,
                         organization_id: organization.id,
                         type: assignBottleForm.type.trim(),
@@ -3389,15 +3415,34 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                         category: assignBottleForm.category?.trim() || null,
                         product_code: assignBottleForm.product_code?.trim() || null,
                         ownership: assignBottleForm.ownership?.trim() || null,
-                        status: 'in_stock',
-                      }]);
-                      if (error) throw error;
+                        // Keep status within bottles_status_check allowed values.
+                        status: 'empty',
+                      };
+                      const { error } = await supabase.from('bottles').insert([payload]);
+                      if (error) {
+                        const isDuplicate = String(error.code || '') === '23505' || String(error.message || '').toLowerCase().includes('duplicate');
+                        if (!isDuplicate) throw error;
+                        const { error: updateError } = await supabase
+                          .from('bottles')
+                          .update({
+                            type: payload.type,
+                            group_name: payload.group_name,
+                            description: payload.description,
+                            category: payload.category,
+                            product_code: payload.product_code,
+                            ownership: payload.ownership,
+                          })
+                          .eq('organization_id', organization.id)
+                          .eq('barcode_number', assignBottleDialog.barcode);
+                        if (updateError) throw updateError;
+                      }
                       setActionMessage('Bottle created successfully. Refreshing list...');
+                      setAssignBottleError('');
                       setAssignBottleDialog({ open: false, barcode: null, section: null });
                       setRefreshScannedBottlesTrigger(prev => prev + 1);
                     } catch (e) {
                       logger.error('Error creating bottle:', e);
-                      setActionMessage(e?.message || 'Failed to create bottle');
+                      setAssignBottleError(e?.message || 'Failed to create bottle');
                     } finally {
                       setAssignBottleSaving(false);
                       setTimeout(() => setActionMessage(''), 4000);

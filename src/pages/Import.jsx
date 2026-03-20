@@ -29,8 +29,8 @@ const FIELD_DEFINITIONS = {
       { key: 'date', label: 'Date', aliases: ['invoicedate', 'invoice date', 'txndate', 'txn_date', 'transaction date', 'order date'] },
       { key: 'product_code', label: 'Product Code', aliases: ['productcode', 'product code', 'assettype', 'asset type', 'item', 'item code', 'product', 'sku'] },
       { key: 'invoice_number', label: 'Invoice Number', aliases: ['invoicenumber', 'invoice number', 'invoice no', 'invoiceno', 'sales order number', 'salesordernumber', 'order number', 'ordernumber', 'ref', 'reference'] },
-      { key: 'qty_out', label: 'Qty Out', aliases: ['qtyout', 'qty out', 'quantity shipped', 'quantityshipped', 'shipped', 'out', 'qty shipped'] },
-      { key: 'qty_in', label: 'Qty In', aliases: ['qtyin', 'qty in', 'quantity returned', 'quantityreturned', 'returned', 'in', 'qty returned'] },
+      { key: 'qty_out', label: 'Qty Out', aliases: ['qtyout', 'qty out', 'quantity shipped', 'quantityshipped', 'shipped', 'qty shipped'] },
+      { key: 'qty_in', label: 'Qty In', aliases: ['qtyin', 'qty in', 'quantity returned', 'quantityreturned', 'returned', 'qty returned'] },
     ],
     OPTIONAL_FIELDS: [
       { key: 'description', label: 'Description', aliases: ['desc', 'itemdesc', 'linedesc', 'item description', 'product description'] },
@@ -46,8 +46,8 @@ const FIELD_DEFINITIONS = {
       { key: 'date', label: 'Date', aliases: ['receiptdate', 'receipt date', 'txndate', 'txn_date', 'transaction date', 'order date'] },
       { key: 'product_code', label: 'Product Code', aliases: ['productcode', 'product code', 'assettype', 'asset type', 'item', 'item code', 'product', 'sku'] },
       { key: 'sales_receipt_number', label: 'Sales Receipt Number', aliases: ['salesreceiptnumber', 'sales receipt number', 'receipt number', 'receiptnumber', 'refnumber', 'ref number', 'ref_no', 'ref no', 'sales order number', 'salesordernumber', 'order number', 'ordernumber'] },
-      { key: 'qty_out', label: 'Qty Out', aliases: ['qtyout', 'qty out', 'quantity shipped', 'quantityshipped', 'shipped', 'out', 'qty shipped'] },
-      { key: 'qty_in', label: 'Qty In', aliases: ['qtyin', 'qty in', 'quantity returned', 'quantityreturned', 'returned', 'in', 'qty returned'] },
+      { key: 'qty_out', label: 'Qty Out', aliases: ['qtyout', 'qty out', 'quantity shipped', 'quantityshipped', 'shipped', 'qty shipped'] },
+      { key: 'qty_in', label: 'Qty In', aliases: ['qtyin', 'qty in', 'quantity returned', 'quantityreturned', 'returned', 'qty returned'] },
     ],
     OPTIONAL_FIELDS: [
       { key: 'description', label: 'Description', aliases: ['desc', 'itemdesc', 'linedesc', 'item description', 'product description'] },
@@ -124,8 +124,8 @@ export default function Import() {
     { key: 'date', label: 'Date', aliases: ['invoicedate', 'invoice date', 'receiptdate', 'receipt date', 'txndate', 'txn_date', 'transaction date', 'order date'] },
     { key: 'product_code', label: 'Product Code', aliases: ['productcode', 'product code', 'assettype', 'asset type', 'item', 'item code', 'product', 'sku'] },
     { key: 'reference_number', label: 'Reference Number', aliases: ['invoicenumber', 'invoice number', 'invoice no', 'invoiceno', 'salesreceiptnumber', 'sales receipt number', 'receipt number', 'receiptnumber', 'sales order number', 'salesordernumber', 'order number', 'ordernumber', 'ref', 'reference', 'refnumber', 'ref number', 'ref_no', 'ref no'] },
-    { key: 'qty_out', label: 'Qty Out', aliases: ['qtyout', 'qty out', 'quantity shipped', 'quantityshipped', 'shipped', 'out', 'qty shipped'] },
-    { key: 'qty_in', label: 'Qty In', aliases: ['qtyin', 'qty in', 'quantity returned', 'quantityreturned', 'returned', 'in', 'qty returned'] },
+    { key: 'qty_out', label: 'Qty Out', aliases: ['qtyout', 'qty out', 'quantity shipped', 'quantityshipped', 'shipped', 'qty shipped'] },
+    { key: 'qty_in', label: 'Qty In', aliases: ['qtyin', 'qty in', 'quantity returned', 'quantityreturned', 'returned', 'qty returned'] },
   ];
 
   const OPTIONAL_FIELDS = [
@@ -154,6 +154,18 @@ export default function Import() {
       }
     } catch {}
     return null;
+  }
+
+  function sanitizeQuantityMappings(mappingObj) {
+    if (!mappingObj) return mappingObj;
+    const next = { ...mappingObj };
+    const invalidQtyColumn = (col) => {
+      if (!col) return false;
+      return /(invoice|reference|order|customer|product|date)/i.test(String(col));
+    };
+    if (invalidQtyColumn(next.qty_out)) delete next.qty_out;
+    if (invalidQtyColumn(next.qty_in)) delete next.qty_in;
+    return next;
   }
 
   const clearFileState = useCallback(() => {
@@ -206,7 +218,7 @@ export default function Import() {
       const savedMapping = loadSavedMapping(detectedColumns);
       let autoMap = {};
       if (savedMapping) {
-        autoMap = savedMapping;
+        autoMap = sanitizeQuantityMappings(savedMapping);
       } else {
         // Improved auto-mapping logic
         ALL_FIELDS.forEach(field => {
@@ -231,6 +243,8 @@ export default function Import() {
               if (normCol.includes(normKey) || normKey.includes(normCol)) return true;
               if (field.aliases) {
                 return field.aliases.some(alias => {
+                  // Prevent overly broad alias matches like "in"/"out" from binding to invoice/order columns.
+                  if ((field.key === 'qty_in' || field.key === 'qty_out') && alias.length <= 3) return false;
                   const normAlias = alias.toLowerCase().replace(/\s|_/g, '');
                   return normCol.includes(normAlias) || normAlias.includes(normCol);
                 });
@@ -265,15 +279,23 @@ export default function Import() {
               found = detectedColumns.find(col => 
                 col.toLowerCase().includes('invoice') || col.toLowerCase().includes('order') || col.toLowerCase().includes('number'));
             }
-            if (field.key === 'qty_out' && detectedColumns.some(col => 
-              col.toLowerCase().includes('shipped') || col.toLowerCase().includes('out'))) {
-              found = detectedColumns.find(col => 
-                col.toLowerCase().includes('shipped') || col.toLowerCase().includes('out'));
+            const isQtyOutColumn = (col) => {
+              const c = col.toLowerCase();
+              const excluded = /(customer|invoice|reference|order|product|date)/.test(c);
+              if (excluded) return false;
+              return /(qty[\s_]*out|quantity[\s_]*shipped|shipped|delivered)/.test(c);
+            };
+            const isQtyInColumn = (col) => {
+              const c = col.toLowerCase();
+              const excluded = /(customer|invoice|reference|order|product|date)/.test(c);
+              if (excluded) return false;
+              return /(qty[\s_]*in|quantity[\s_]*returned|returned|return)/.test(c);
+            };
+            if (field.key === 'qty_out' && detectedColumns.some(isQtyOutColumn)) {
+              found = detectedColumns.find(isQtyOutColumn);
             }
-            if (field.key === 'qty_in' && detectedColumns.some(col => 
-              col.toLowerCase().includes('returned') || col.toLowerCase().includes('in'))) {
-              found = detectedColumns.find(col => 
-                col.toLowerCase().includes('returned') || col.toLowerCase().includes('in'));
+            if (field.key === 'qty_in' && detectedColumns.some(isQtyInColumn)) {
+              found = detectedColumns.find(isQtyInColumn);
             }
           }
           
@@ -548,6 +570,143 @@ export default function Import() {
     return s;
   }
 
+  function normalizeProductCode(code) {
+    if (code == null || code === '') return '';
+    return String(code).trim();
+  }
+
+  function getOrderVariants(orderNumber) {
+    const raw = String(orderNumber ?? '').trim();
+    const norm = normalizeOrderNum(raw);
+    return [...new Set([raw, norm].filter(Boolean))];
+  }
+
+  function toScanType(scan) {
+    const mode = (scan?.mode || '').toString().toUpperCase();
+    const action = (scan?.action || '').toString().toLowerCase();
+    const scanType = (scan?.scan_type || '').toString().toLowerCase();
+    if (mode === 'SHIP' || mode === 'DELIVERY' || mode === 'OUT' || action === 'out' || scanType === 'delivery') return 'out';
+    if (mode === 'RETURN' || mode === 'PICKUP' || mode === 'IN' || action === 'in' || scanType === 'pickup') return 'in';
+    return 'out';
+  }
+
+  function getOrderNumberFromImportData(data) {
+    if (!data) return '';
+    const top = data.order_number || data.reference_number || data.invoice_number || data.sales_receipt_number || data?.summary?.reference_number;
+    if (top) return String(top).trim();
+    const firstRow = data.rows?.[0] || data.line_items?.[0] || null;
+    if (!firstRow) return '';
+    return String(firstRow.order_number || firstRow.invoice_number || firstRow.reference_number || firstRow.sales_receipt_number || '').trim();
+  }
+
+  function buildInvoiceQtyByProduct(rows) {
+    const qtyByProduct = new Map();
+    (rows || []).forEach((row) => {
+      const product = normalizeProductCode(row.product_code || row.ProductCode || row.item || row.Item);
+      if (!product) return;
+      const shipped = parseInt(row.shipped || row.Shipped || row.quantity || row.qty_out || row.QtyOut || 0, 10) || 0;
+      const returned = parseInt(row.returned || row.Returned || row.return_qty || row.ReturnQty || row.qty_in || row.QtyIn || 0, 10) || 0;
+      const prev = qtyByProduct.get(product) || { shipped: 0, returned: 0 };
+      prev.shipped += shipped;
+      prev.returned += returned;
+      qtyByProduct.set(product, prev);
+    });
+    return qtyByProduct;
+  }
+
+  async function checkTrackedMatchesInvoiceForRecord({ recordId, table, organizationId }) {
+    const { data: record, error: recordError } = await supabase
+      .from(table)
+      .select('id, data, status')
+      .eq('id', recordId)
+      .eq('organization_id', organizationId)
+      .single();
+    if (recordError || !record) return false;
+    if (record.status === 'approved' || record.status === 'verified' || record.status === 'rejected') return false;
+
+    const data = typeof record.data === 'string' ? JSON.parse(record.data) : record.data;
+    const rows = data?.rows || data?.line_items || [];
+    if (!rows.length) return false;
+
+    const orderNumber = getOrderNumberFromImportData(data);
+    if (!orderNumber) return false;
+
+    const invoiceQtyByProduct = buildInvoiceQtyByProduct(rows);
+    if (invoiceQtyByProduct.size === 0) return false;
+
+    const orderVariants = getOrderVariants(orderNumber);
+    const { data: scans, error: scansError } = await supabase
+      .from('bottle_scans')
+      .select('bottle_barcode, barcode_number, product_code, mode, action, scan_type, created_at, timestamp, order_number')
+      .in('order_number', orderVariants)
+      .eq('organization_id', organizationId);
+    if (scansError) return false;
+
+    const scanRows = scans || [];
+    const barcodes = [...new Set(scanRows.map(s => (s.bottle_barcode || s.barcode_number || '').toString().trim()).filter(Boolean))];
+    let barcodeToProduct = {};
+    if (barcodes.length > 0) {
+      const { data: bottles } = await supabase
+        .from('bottles')
+        .select('barcode_number, product_code')
+        .eq('organization_id', organizationId)
+        .in('barcode_number', barcodes);
+      (bottles || []).forEach((b) => {
+        const bc = (b.barcode_number || '').toString().trim();
+        if (bc) barcodeToProduct[bc] = normalizeProductCode(b.product_code);
+      });
+    }
+
+    // Most recent scan wins per barcode for the selected order.
+    const latestByBarcode = new Map();
+    scanRows.forEach((scan) => {
+      const bc = (scan.bottle_barcode || scan.barcode_number || '').toString().trim();
+      if (!bc) return;
+      const time = new Date(scan.created_at || scan.timestamp || 0).getTime();
+      const existing = latestByBarcode.get(bc);
+      if (!existing || time >= existing.time) latestByBarcode.set(bc, { scan, time });
+    });
+
+    const trackedQtyByProduct = new Map();
+    latestByBarcode.forEach(({ scan }) => {
+      const bc = (scan.bottle_barcode || scan.barcode_number || '').toString().trim();
+      const product = normalizeProductCode(scan.product_code) || barcodeToProduct[bc];
+      if (!product) return;
+      const type = toScanType(scan);
+      const prev = trackedQtyByProduct.get(product) || { shipped: 0, returned: 0 };
+      if (type === 'in') prev.returned += 1;
+      else prev.shipped += 1;
+      trackedQtyByProduct.set(product, prev);
+    });
+
+    for (const [product, invoiceQty] of invoiceQtyByProduct.entries()) {
+      const tracked = trackedQtyByProduct.get(product) || { shipped: 0, returned: 0 };
+      if (invoiceQty.shipped !== tracked.shipped || invoiceQty.returned !== tracked.returned) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  async function autoApproveImportedRecords({ table, recordIds, organizationId }) {
+    const ids = [...new Set((recordIds || []).filter(Boolean))];
+    if (!ids.length) return 0;
+    let approvedCount = 0;
+    for (const id of ids) {
+      const matches = await checkTrackedMatchesInvoiceForRecord({ recordId: id, table, organizationId });
+      if (!matches) continue;
+      const { error } = await supabase
+        .from(table)
+        .update({ approved_at: new Date().toISOString(), status: 'approved', auto_approved: true })
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .eq('status', 'pending');
+      if (!error) approvedCount += 1;
+    }
+    return approvedCount;
+  }
+
   // Return a Map of normalized order number -> { id, status } for existing records.
   // Used to skip insert for new imports, skip already-verified, and UPDATE only pending on re-import.
   async function getExistingOrderRecordsForOrg(type, organizationId) {
@@ -644,6 +803,7 @@ export default function Import() {
 
       const BATCH = 50;
       let inserted = 0;
+      const insertedIds = [];
       for (let i = 0; i < insertPayloads.length; i += BATCH) {
         const batch = insertPayloads.slice(i, i + BATCH);
         const { data, error: importError } = await supabase
@@ -653,20 +813,25 @@ export default function Import() {
         if (importError) {
           if (importError.message.includes('row-level security policy')) {
             for (const payload of batch) {
-              const { error: singleError } = await supabase
+              const { data: singleInsertData, error: singleError } = await supabase
                 .from('imported_invoices')
                 .insert({ ...payload, uploaded_by: undefined })
                 .select('id');
-              if (!singleError) inserted++;
+              if (!singleError) {
+                inserted++;
+                if (singleInsertData?.[0]?.id) insertedIds.push(singleInsertData[0].id);
+              }
             }
           } else throw new Error(importError.message);
         } else {
           inserted += (data?.length ?? 0);
+          (data || []).forEach(row => { if (row?.id) insertedIds.push(row.id); });
         }
       }
 
       // Re-import: update existing records with new rows so RTN Inv / SHP Inv etc. reflect the new file
       let updated = 0;
+      const updatedIds = [];
       const { data: existingRows } = await supabase
         .from('imported_invoices')
         .select('id, data')
@@ -695,14 +860,24 @@ export default function Import() {
           .update({ data: newData })
           .eq('id', existing.id)
           .eq('organization_id', userProfile.organization_id);
-        if (!updateError) updated++;
+        if (!updateError) {
+          updated++;
+          updatedIds.push(existing.id);
+        }
         else logger.warn('Failed to update existing invoice on re-import:', updateError);
       }
+
+      const autoApproved = await autoApproveImportedRecords({
+        table: 'imported_invoices',
+        recordIds: [...insertedIds, ...updatedIds],
+        organizationId: userProfile.organization_id
+      });
 
       const message = (() => {
         const parts = [];
         if (inserted > 0) parts.push(`${inserted} new invoice(s) added`);
         if (updated > 0) parts.push(`${updated} existing pending order(s) updated`);
+        if (autoApproved > 0) parts.push(`${autoApproved} auto-approved (Inv matches Trk)`);
         if (skippedVerifiedCount > 0) parts.push(`${skippedVerifiedCount} already verified (skipped)`);
         if (parts.length === 0) return 'No new imports. All orders already exist (updated or already verified).';
         return `Import submitted. ${parts.join('. ')}`;
@@ -782,6 +957,7 @@ export default function Import() {
 
       const BATCH = 50;
       let inserted = 0;
+      const insertedIds = [];
       for (let i = 0; i < insertPayloads.length; i += BATCH) {
         const batch = insertPayloads.slice(i, i + BATCH);
         const { data, error: importError } = await supabase
@@ -791,20 +967,25 @@ export default function Import() {
         if (importError) {
           if (importError.message.includes('row-level security policy')) {
             for (const payload of batch) {
-              const { error: singleError } = await supabase
+              const { data: singleInsertData, error: singleError } = await supabase
                 .from('imported_sales_receipts')
                 .insert({ ...payload, uploaded_by: undefined })
                 .select('id');
-              if (!singleError) inserted++;
+              if (!singleError) {
+                inserted++;
+                if (singleInsertData?.[0]?.id) insertedIds.push(singleInsertData[0].id);
+              }
             }
           } else throw new Error(importError.message);
         } else {
           inserted += (data?.length ?? 0);
+          (data || []).forEach(row => { if (row?.id) insertedIds.push(row.id); });
         }
       }
 
       // Re-import: update existing records with new rows (preserve verified_order_numbers etc.)
       let updated = 0;
+      const updatedIds = [];
       const { data: existingReceiptRows } = await supabase
         .from('imported_sales_receipts')
         .select('id, data')
@@ -833,14 +1014,24 @@ export default function Import() {
           .update({ data: newData })
           .eq('id', existing.id)
           .eq('organization_id', userProfile.organization_id);
-        if (!updateError) updated++;
+        if (!updateError) {
+          updated++;
+          updatedIds.push(existing.id);
+        }
         else logger.warn('Failed to update existing receipt on re-import:', updateError);
       }
+
+      const autoApproved = await autoApproveImportedRecords({
+        table: 'imported_sales_receipts',
+        recordIds: [...insertedIds, ...updatedIds],
+        organizationId: userProfile.organization_id
+      });
 
       const message = (() => {
         const parts = [];
         if (inserted > 0) parts.push(`${inserted} new receipt(s) added`);
         if (updated > 0) parts.push(`${updated} existing pending order(s) updated`);
+        if (autoApproved > 0) parts.push(`${autoApproved} auto-approved (Inv matches Trk)`);
         if (skippedVerifiedCount > 0) parts.push(`${skippedVerifiedCount} already verified (skipped)`);
         if (parts.length === 0) return 'No new imports. All orders already exist (updated or already verified).';
         return `Import submitted. ${parts.join('. ')}`;
