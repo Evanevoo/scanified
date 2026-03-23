@@ -4,7 +4,7 @@ import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination, Chip, IconButton,
-  Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, Autocomplete, Card, CardContent, Grid, Stack
+  Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, Autocomplete, Card, CardContent, Grid, Stack, FormControlLabel
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -69,6 +69,41 @@ function exportToCSV(customers) {
   URL.revokeObjectURL(url);
 }
 
+/** Distinct CustomerListIDs that have at least one bottle assigned (paginates bottle rows). */
+async function fetchCustomerIdsWithAssignedBottles(organizationId) {
+  const seen = new Set();
+  const pageSize = 1000;
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from('bottles')
+      .select('assigned_customer')
+      .eq('organization_id', organizationId)
+      .not('assigned_customer', 'is', null)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data?.length) break;
+    for (const row of data) {
+      const id = row.assigned_customer;
+      if (id != null && String(id).trim() !== '') seen.add(String(id).trim());
+    }
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return Array.from(seen);
+}
+
+function compareCustomerRows(a, b, sortField, sortDirection) {
+  const dir = sortDirection === 'asc' ? 1 : -1;
+  const va = a[sortField];
+  const vb = b[sortField];
+  if (va == null && vb == null) return 0;
+  if (va == null) return 1 * dir;
+  if (vb == null) return -1 * dir;
+  if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+  return String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: 'base' }) * dir;
+}
+
 async function exportAllCustomersToCSV(organizationId) {
   try {
     const { data: allCustomers, error } = await supabase
@@ -105,6 +140,7 @@ function Customers({ profile }) {
   const [sortField, setSortField] = useState('name'); // Field to sort by
   const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
   const [locationFilter, setLocationFilter] = useState('All');
+  const [withAssignedAssetsOnly, setWithAssignedAssetsOnly] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
@@ -133,48 +169,104 @@ function Customers({ profile }) {
     const isInitialLoad = !initialLoadDone.current;
     if (isInitialLoad) setLoading(true);
     try {
-      // Build base query
-      let query = supabase
-        .from('customers')
-        .select('*', { count: 'exact' })
-        .eq('organization_id', organization.id);
-
-      // Apply location filter
-      if (locationFilter !== 'All') {
-        query = query.eq('location', locationFilter);
-      }
-
-      // Apply search filter if search term exists
-      if (searchTerm.trim()) {
+      const applySearchOr = (q) => {
+        if (!searchTerm.trim()) return q;
         const searchLower = searchTerm.toLowerCase();
-        query = query.or(`name.ilike.%${searchLower}%,CustomerListID.ilike.%${searchLower}%,contact_details.ilike.%${searchLower}%,phone.ilike.%${searchLower}%,city.ilike.%${searchLower}%,postal_code.ilike.%${searchLower}%`);
-      }
+        return q.or(
+          `name.ilike.%${searchLower}%,CustomerListID.ilike.%${searchLower}%,contact_details.ilike.%${searchLower}%,phone.ilike.%${searchLower}%,city.ilike.%${searchLower}%,postal_code.ilike.%${searchLower}%`
+        );
+      };
 
-      // Apply sorting
-      const orderDirection = sortDirection === 'asc' ? 'asc' : 'desc';
-      query = query.order(sortField, { ascending: sortDirection === 'asc' });
+      let data;
+      let count;
+      let error = null;
 
-      // If searching, get all results; otherwise use pagination
-      let data, error, count;
-      if (searchTerm.trim()) {
-        // When searching, get all matching results
-        const result = await query;
-        data = result.data;
-        error = result.error;
-        count = result.count;
+      if (withAssignedAssetsOnly) {
+        const withAssetsIds = await fetchCustomerIdsWithAssignedBottles(organization.id);
+        if (withAssetsIds.length === 0) {
+          setCustomers([]);
+          setTotalCount(0);
+          setAssetCounts({});
+          setParentNames({});
+          initialLoadDone.current = true;
+          setLoading(false);
+          return;
+        }
+        // Chunk .in() lists so URLs stay within PostgREST limits for large orgs
+        const CHUNK = 200;
+        const chunks = [];
+        for (let i = 0; i < withAssetsIds.length; i += CHUNK) {
+          chunks.push(withAssetsIds.slice(i, i + CHUNK));
+        }
+        const chunkResults = await Promise.all(
+          chunks.map((chunk) => {
+            let q = supabase
+              .from('customers')
+              .select('*')
+              .eq('organization_id', organization.id)
+              .in('CustomerListID', chunk);
+            if (locationFilter !== 'All') q = q.eq('location', locationFilter);
+            q = applySearchOr(q);
+            return q;
+          })
+        );
+        const seen = new Set();
+        const merged = [];
+        for (const res of chunkResults) {
+          if (res.error) {
+            error = res.error;
+            break;
+          }
+          for (const c of res.data || []) {
+            if (!seen.has(c.CustomerListID)) {
+              seen.add(c.CustomerListID);
+              merged.push(c);
+            }
+          }
+        }
+        if (error) {
+          logger.error('Error fetching customers (with assets filter):', error);
+          throw error;
+        }
+        merged.sort((a, b) => compareCustomerRows(a, b, sortField, sortDirection));
+        count = merged.length;
+        if (searchTerm.trim()) {
+          data = merged;
+        } else {
+          const from = (page - 1) * rowsPerPage;
+          data = merged.slice(from, from + rowsPerPage);
+        }
       } else {
-        // When not searching, use pagination
-        const from = (page - 1) * rowsPerPage;
-        const to = from + rowsPerPage - 1;
-        const result = await query.range(from, to);
-        data = result.data;
-        error = result.error;
-        count = result.count;
-      }
+        let query = supabase
+          .from('customers')
+          .select('*', { count: 'exact' })
+          .eq('organization_id', organization.id);
 
-      if (error) {
-        logger.error('Error fetching customers:', error);
-        throw error;
+        if (locationFilter !== 'All') {
+          query = query.eq('location', locationFilter);
+        }
+
+        query = applySearchOr(query);
+        query = query.order(sortField, { ascending: sortDirection === 'asc' });
+
+        if (searchTerm.trim()) {
+          const result = await query;
+          data = result.data;
+          error = result.error;
+          count = result.count;
+        } else {
+          const from = (page - 1) * rowsPerPage;
+          const to = from + rowsPerPage - 1;
+          const result = await query.range(from, to);
+          data = result.data;
+          error = result.error;
+          count = result.count;
+        }
+
+        if (error) {
+          logger.error('Error fetching customers:', error);
+          throw error;
+        }
       }
 
       logger.log('Customers fetched successfully:', data?.length || 0, 'Total count:', count);
@@ -240,7 +332,7 @@ function Customers({ profile }) {
   // Initial load and pagination changes - use debouncedSearch instead of empty string
   useEffect(() => {
     fetchCustomers(debouncedSearch);
-  }, [organization, locationFilter, page, rowsPerPage, sortField, sortDirection, debouncedSearch]);
+  }, [organization, locationFilter, withAssignedAssetsOnly, page, rowsPerPage, sortField, sortDirection, debouncedSearch]);
 
   // Load parent customer options when Add dialog opens (for "Under parent" selector)
   useEffect(() => {
@@ -673,7 +765,10 @@ function Customers({ profile }) {
             <FormControl size="small" sx={{ minWidth: 150 }}>
               <Select
                 value={locationFilter}
-                onChange={(e) => setLocationFilter(e.target.value)}
+                onChange={(e) => {
+                  setLocationFilter(e.target.value);
+                  setPage(1);
+                }}
                 displayEmpty
               >
                 <MenuItem value="All">All Locations</MenuItem>
@@ -683,6 +778,20 @@ function Customers({ profile }) {
                 <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
               </Select>
             </FormControl>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={withAssignedAssetsOnly}
+                  onChange={(e) => {
+                    setWithAssignedAssetsOnly(e.target.checked);
+                    setPage(1);
+                  }}
+                  color="primary"
+                />
+              }
+              label={<Typography variant="body2">With assigned assets only</Typography>}
+              sx={{ ml: 0, mr: 0, whiteSpace: 'nowrap' }}
+            />
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <InputLabel>Rows per page</InputLabel>
               <Select 
@@ -704,6 +813,7 @@ function Customers({ profile }) {
               : `Showing ${customers.length} of ${totalCount} customers`
             }
             {locationFilter !== 'All' && ` (location: ${locationFilter})`}
+            {withAssignedAssetsOnly && ' · showing customers with at least one bottle assigned'}
           </Typography>
         </Box>
         </Paper>
