@@ -57,6 +57,7 @@ import { useAuth } from '../hooks/useAuth';
 import DNSConversionDialog from '../components/DNSConversionDialog';
 import BarcodeDisplay from '../components/BarcodeDisplay';
 import { formatLocationDisplay, normalizeLocationKey } from '../utils/locationDisplay';
+import { summarizeBottlesByType, getBottleSummaryGroupKey } from '../utils/bottleInventoryGrouping';
 
 // Helper to check if a string looks like an address
 function looksLikeAddress(str) {
@@ -136,9 +137,12 @@ export default function CustomerDetail() {
   }, [dnsOnlyRentals]);
   const rnbSummaryByType = useMemo(() => {
     const byType = {};
-    (rnbRentals || []).forEach(r => {
-      const type = r.dns_product_code || r.product_code || 'RNB';
-      byType[type] = (byType[type] || 0) + 1;
+    (rnbRentals || []).forEach((r) => {
+      const pc = (r.dns_product_code || r.product_code || '').trim();
+      const key = pc
+        ? getBottleSummaryGroupKey({ product_code: pc, type: '', description: '', gas_type: '' })
+        : 'RNB';
+      byType[key] = (byType[key] || 0) + 1;
     });
     return byType;
   }, [rnbRentals]);
@@ -276,12 +280,7 @@ export default function CustomerDetail() {
         .eq('assigned_customer', id)
         .eq('organization_id', orgId);
       setCustomerAssets(customerAssetsData || []);
-      const summary = {};
-      (customerAssetsData || []).forEach((b) => {
-        const type = b.type || b.description || 'Unknown';
-        summary[type] = (summary[type] || 0) + 1;
-      });
-      setBottleSummary(summary);
+      setBottleSummary(summarizeBottlesByType(customerAssetsData || []));
       const { data: rentalById } = await supabase
         .from('rentals')
         .select('*')
@@ -362,13 +361,7 @@ export default function CustomerDetail() {
         if (customerAssetsError) throw customerAssetsError;
         setCustomerAssets(customerAssetsData || []);
         
-        // Calculate bottle summary by type
-        const summary = {};
-        (customerAssetsData || []).forEach(bottle => {
-          const type = bottle.type || bottle.description || 'Unknown';
-          summary[type] = (summary[type] || 0) + 1;
-        });
-        setBottleSummary(summary);
+        setBottleSummary(summarizeBottlesByType(customerAssetsData || []));
         
         // Get all rentals (active only). Match by customer_id (CustomerListID) and by customer_name so we don't miss any.
         const { data: rentalById, error: rentalError } = await supabase
@@ -590,12 +583,7 @@ export default function CustomerDetail() {
       if (!customerAssetsError) {
         setCustomerAssets(customerAssetsData || []);
 
-        const summary = {};
-        (customerAssetsData || []).forEach(bottle => {
-          const type = bottle.type || bottle.description || 'Unknown';
-          summary[type] = (summary[type] || 0) + 1;
-        });
-        setBottleSummary(summary);
+        setBottleSummary(summarizeBottlesByType(customerAssetsData || []));
       }
 
       setSelectedAssets([]);
@@ -772,13 +760,7 @@ export default function CustomerDetail() {
         if (!customerAssetsError) {
           setCustomerAssets(customerAssetsData || []);
           
-          // Recalculate bottle summary
-          const summary = {};
-          (customerAssetsData || []).forEach(bottle => {
-            const type = bottle.type || bottle.description || 'Unknown';
-            summary[type] = (summary[type] || 0) + 1;
-          });
-          setBottleSummary(summary);
+          setBottleSummary(summarizeBottlesByType(customerAssetsData || []));
         }
         
         setSelectedAssets([]);

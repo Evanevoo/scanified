@@ -6,6 +6,14 @@ import {
 } from '@mui/material';
 import { useAuth } from '../hooks/useAuth';
 
+function normalizeFillStatus(status) {
+  const value = (status || '').toString().trim().toLowerCase();
+  if (!value) return 'unknown';
+  if (value === 'empty') return 'empty';
+  if (['full', 'filled', 'available'].includes(value)) return 'full';
+  return 'unknown';
+}
+
 function exportBottlesToCSV(bottles) {
   if (!bottles.length) return;
   
@@ -147,6 +155,7 @@ function exportSummaryByType(bottles) {
 
 export default function Assets() {
   const [bottles, setBottles] = useState([]);
+  const [rnbCount, setRnbCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
@@ -183,13 +192,26 @@ export default function Assets() {
         return;
       }
 
-      const { data, error } = await supabase
-        .from('bottles')
-        .select('*')
-        .eq('organization_id', organization.id)
-        .order('barcode_number');
+      const [bottlesResponse, rnbResponse] = await Promise.all([
+        supabase
+          .from('bottles')
+          .select('*')
+          .eq('organization_id', organization.id)
+          .order('barcode_number'),
+        supabase
+          .from('rentals')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organization.id)
+          .eq('is_dns', true)
+          .is('rental_end_date', null)
+          .ilike('dns_description', '%Return not on balance%')
+      ]);
+
+      const { data, error } = bottlesResponse;
+      const { count: activeRnbCount, error: rnbError } = rnbResponse;
       
       if (error) throw error;
+      if (rnbError) throw rnbError;
       
       // All bottles should be from the same organization now
       const bottlesWithOrg = (data || []).map(bottle => ({
@@ -198,6 +220,7 @@ export default function Assets() {
       }));
       
       setBottles(bottlesWithOrg);
+      setRnbCount(activeRnbCount || 0);
     } catch (err) {
       logger.error('Error fetching bottles:', err);
       setError(err.message);
@@ -225,8 +248,11 @@ export default function Assets() {
   const assetTypes = useMemo(() => {
     const assetMap = new Map();
 
-    function cleanedLabel(bottle) {
-      let gasType = bottle.description || bottle.product_code || bottle.gas_type || bottle.type;
+    function cleanedLabel(bottle, { includeProductCodeFallback = true } = {}) {
+      let gasType = bottle.description || bottle.gas_type || bottle.type;
+      if (!gasType && includeProductCodeFallback) {
+        gasType = bottle.product_code;
+      }
       if (gasType) {
         gasType = gasType
           .replace(/^AVIATOR\s+/i, '')
@@ -237,18 +263,22 @@ export default function Assets() {
           .replace(/\s+ASSETS.*$/i, '')
           .trim();
         if (gasType.length < 3) {
-          gasType = bottle.description || bottle.product_code || bottle.gas_type || bottle.type;
+          gasType = bottle.description || bottle.gas_type || bottle.type || (includeProductCodeFallback ? bottle.product_code : '');
         }
       }
       return gasType || 'Unknown Gas Type';
     }
 
-    bottles.forEach(bottle => {
-      const hasProductCode = bottle.product_code && bottle.product_code.trim();
-      const normalizedCode = hasProductCode ? bottle.product_code.trim() : null;
+    function normalizedGroupKey(bottle) {
+      // Prefer descriptive fields first so "BAR300" and "ARGON BOTTLE - SIZE 300"
+      // can resolve to the same gas/size grouping when they represent the same asset.
+      const descriptive = cleanedLabel(bottle, { includeProductCodeFallback: false });
+      const base = descriptive || bottle.product_code || cleanedLabel(bottle);
+      return (base || 'Unknown Gas Type').toString().trim().toUpperCase();
+    }
 
-      // Group by product_code when present so BOX300-16PK is always one row regardless of description/gas_type
-      const groupingKey = normalizedCode || cleanedLabel(bottle);
+    bottles.forEach(bottle => {
+      const groupingKey = normalizedGroupKey(bottle);
 
       if (!assetMap.has(groupingKey)) {
         assetMap.set(groupingKey, []);
@@ -272,6 +302,9 @@ export default function Assets() {
 
   // For each gas type, show bottle inventory (counting physical bottles)
   const assetRows = assetTypes.map(({ gasType, bottles: bottlesOfType }) => {
+    const full = bottlesOfType.filter(b => normalizeFillStatus(b.status) === 'full').length;
+    const empty = bottlesOfType.filter(b => normalizeFillStatus(b.status) === 'empty').length;
+
     // Count bottles by status - these are the physical containers we track
     // FIXED: Use mutually exclusive logic to prevent double counting
     const available = bottlesOfType.filter(b => 
@@ -319,6 +352,8 @@ export default function Assets() {
       gasType: gasType,
       product_code: sample.product_code || '',
       sizeInfo: sizeInfo,
+      full: full,
+      empty: empty,
       available: available,
       rented: rented,
       maintenance: maintenance,
@@ -335,6 +370,9 @@ export default function Assets() {
   const inventoryMetrics = {
     assetTypes: assetRows.length,
     totalBottles: assetRows.reduce((sum, row) => sum + row.total, 0),
+    totalBottlesDisplay: `${assetRows.reduce((sum, row) => sum + row.total, 0)} (${assetRows.reduce((sum, row) => sum + row.total, 0)} physical, ${rnbCount} RNB not counted)`,
+    full: assetRows.reduce((sum, row) => sum + row.full, 0),
+    empty: assetRows.reduce((sum, row) => sum + row.empty, 0),
     available: assetRows.reduce((sum, row) => sum + row.available, 0),
     rented: assetRows.reduce((sum, row) => sum + row.rented, 0),
     maintenance: assetRows.reduce((sum, row) => sum + row.maintenance, 0),
@@ -375,7 +413,7 @@ export default function Assets() {
                 Bottle inventory
               </Typography>
               <Typography variant="body1" sx={{ color: '#64748b', mt: 1, maxWidth: 760 }}>
-                Review physical inventory by gas type, container size, and current status across the organization.
+                Check full vs empty bottle counts per gas type, plus other inventory statuses across the organization.
               </Typography>
             </Box>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
@@ -400,13 +438,14 @@ export default function Assets() {
         <Grid container spacing={2} sx={{ mb: 3 }}>
           {[
             { label: 'Asset types', value: inventoryMetrics.assetTypes, helper: 'Grouped inventory categories' },
-            { label: 'Total bottles', value: inventoryMetrics.totalBottles, helper: 'Physical containers currently tracked' },
+            { label: 'Total bottles', value: inventoryMetrics.totalBottlesDisplay, helper: 'Physical bottles + RNB context' },
+            { label: 'Full', value: inventoryMetrics.full, helper: 'Bottles ready for delivery/use' },
+            { label: 'Empty', value: inventoryMetrics.empty, helper: 'Bottles to refill or return' },
             { label: 'Available', value: inventoryMetrics.available, helper: 'Ready for allocation or movement' },
             { label: 'Rented', value: inventoryMetrics.rented, helper: 'Currently assigned to customers' },
             { label: 'Maintenance', value: inventoryMetrics.maintenance, helper: 'Temporarily unavailable for service' },
-            { label: 'Lost', value: inventoryMetrics.lost, helper: 'Flagged as lost or missing' },
           ].map((metric) => (
-            <Grid item xs={12} sm={6} lg={2} key={metric.label}>
+            <Grid item xs={12} sm={6} lg={3} key={metric.label}>
               <Card elevation={0} sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', height: '100%' }}>
                 <CardContent sx={{ p: 2.25 }}>
                   <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
@@ -451,6 +490,8 @@ export default function Assets() {
                 <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell sx={{ fontWeight: 700 }}>Gas Type</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Bottle Sizes</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Full Bottles</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Empty Bottles</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Available Bottles</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Rented Bottles</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Maintenance</TableCell>
@@ -480,6 +521,28 @@ export default function Assets() {
                           {row.sizes.slice(0, 3).join(', ')} +{row.sizes.length - 3} more
                         </Typography>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      <Typography
+                        variant="body1"
+                        sx={{
+                          fontWeight: 700,
+                          color: row.full > 0 ? 'success.main' : 'text.secondary'
+                        }}
+                      >
+                        {row.full}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography
+                        variant="body1"
+                        sx={{
+                          fontWeight: 700,
+                          color: row.empty > 0 ? 'warning.main' : 'text.secondary'
+                        }}
+                      >
+                        {row.empty}
+                      </Typography>
                     </TableCell>
                     <TableCell>
                       <Typography 
