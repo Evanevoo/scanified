@@ -1,0 +1,30 @@
+# Scanified QuickBooks Web Connector — SOAP API (Node).
+#
+# New on Render: Blueprint → connect repo → deploy.
+# Then in the Render service → Environment, add:
+#   PUBLIC_BASE_URL = https://<your-service-name>.onrender.com
+#   QBWC_PASSWORD   = strong password (same one you type in Web Connector)
+#   QBWC_OWNER_ID   = stable GUID (optional; keep if you already registered the app in QBWC)
+#   QBWC_FILE_ID    = stable GUID (optional)
+#
+# Netlify (www.scanified.com): set QBWC_APP_URL to PUBLIC_BASE_URL + /soap
+
+services:
+  - type: web
+    name: scanified-qbwc
+    runtime: node
+    rootDir: qbwc-server
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20.19.0"
+      - key: HOST
+        value: 0.0.0.0
+      - key: SOAP_PATH
+        value: /soap
+      - key: APP_SUPPORT_URL
+        value: https://www.scanified.com/support
+      - key: QBWC_USERNAME
+        value: scanified
