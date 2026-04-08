@@ -14,6 +14,39 @@
   # Email credentials should be set in Netlify Dashboard environment variables, NOT in this file
   # Required: EMAIL_USER, EMAIL_PASSWORD, EMAIL_FROM
 
+# Canonical host: apex → www (also set SITE_URL=https://www.scanified.com in Netlify env)
+[[redirects]]
+  conditions = {Host = ["scanified.com"]}
+  from = "/*"
+  to = "https://www.scanified.com/:splat"
+  status = 301
+  force = true
+
+# Prerendering: bots that execute JS still get full SPA; for richer snippets consider a prerender service.
+# Optional Netlify UI: Site settings → Build & deploy → Post processing → Prerendering (if available on plan).
+
+[[headers]]
+  for = "/demo"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/particle-demo"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/test-landing"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+# QuickBooks Web Connector: serve .qwc XML (must be before SPA catch-all)
+[[redirects]]
+  from = "/qwc"
+  to = "/.netlify/functions/qwc"
+  status = 200
+  force = true
+
 # Catch-all redirect for SPA
 # Note: Netlify automatically excludes /.netlify/functions/* from redirects
 [[redirects]]
