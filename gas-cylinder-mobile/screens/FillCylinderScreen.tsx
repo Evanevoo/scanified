@@ -2,7 +2,7 @@ import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, 
-  Modal, Alert, ScrollView, SafeAreaView, Linking, Vibration, TextInput, Pressable, Platform, Dimensions 
+  Modal, Alert, ScrollView, SafeAreaView, Linking, Vibration, TextInput, Pressable, Dimensions
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { supabase } from '../supabase';
@@ -250,10 +250,7 @@ export default function FillCylinderScreen() {
       }
       setCurrentStep(3);
       setError('');
-      // On iOS, don't auto-open scanner so "Enter Barcode Manually" is visible; on Android, auto-open
-      if (Platform.OS !== 'ios') {
-        await openScanner();
-      }
+      await openScanner();
     }
   };
 
@@ -298,6 +295,7 @@ export default function FillCylinderScreen() {
       logger.log('⚠️ Duplicate scan (already processing), ignoring:', barcode);
       await feedbackService.provideFeedback('duplicate', { barcode });
       Vibration.vibrate([0, 100, 50, 100]);
+      setError(`Barcode ${barcode} already scanned`);
       return;
     }
     processingBarcodesRef.current.add(barcode);
@@ -310,21 +308,21 @@ export default function FillCylinderScreen() {
       processingBarcodesRef.current.delete(barcode);
       return;
     }
-    
-    // Prevent duplicate scans within 1.5 seconds
-    const now = Date.now();
-    if (barcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 1500) {
-      logger.log('⚠️ Duplicate scan (too soon), ignoring');
-      processingBarcodesRef.current.delete(barcode);
-      return;
-    }
 
-    // Check if already scanned in this session
+    // Session duplicate before time debounce — same code as Android path; avoids silent ignore within 1.5s of last scan
     if (scannedBottles.find(b => b.barcode_number === barcode)) {
       logger.log('⚠️ Duplicate - already in list');
       await feedbackService.provideFeedback('duplicate', { barcode });
       Vibration.vibrate([0, 100, 50, 100]);
       setError(`Barcode ${barcode} already scanned`);
+      processingBarcodesRef.current.delete(barcode);
+      return;
+    }
+
+    // Camera double-read debounce (same barcode, not yet in list — e.g. race before add completes)
+    const now = Date.now();
+    if (barcode === lastScannedBarcodeRef.current && now - lastScanTimeRef.current < 1500) {
+      logger.log('⚠️ Duplicate scan (too soon), ignoring');
       processingBarcodesRef.current.delete(barcode);
       return;
     }
@@ -399,31 +397,48 @@ export default function FillCylinderScreen() {
           logger.log('📷 Customer assignment:', hasCustomerAssignment, 'Active rental:', hasActiveRental);
 
           if (hasActiveRental) {
-            const customerName = bottleData.customer_name || 'Unknown';
-            logger.log('⚠️ WARNING: Bottle still at customer (active rental) - showing alert');
-            Alert.alert(
-              'Still assigned to a customer',
-              `This ${assetConfig?.assetDisplayName?.toLowerCase() || 'bottle'} is still assigned to the customer "${customerName}" in the system (it was not scanned as returned/empty yet).\n\nTo keep the usual flow: scan it as empty when it returns, then as full after refilling.\n\nIf the bottle is already back and refilled, tap "Add Anyway" to mark it full and update location.`,
-              [
-                { 
-                  text: 'Cancel', 
-                  style: 'cancel',
-                  onPress: () => {
-                    processingBarcodesRef.current.delete(barcode);
-                    setIsProcessing(false);
-                    setLastScannedBarcode('');
-                    lastScannedBarcodeRef.current = '';
-                  }
-                },
-                { 
-                  text: 'Add Anyway', 
-                  onPress: () => {
-                    addBottleToScannedList(bottleData);
-                  }
-                }
-              ]
-            );
-            return;
+            // Movement history may show RETURN/PICKUP while rentals.rental_end_date was never closed
+            // (data drift). If the bottle has ever been scanned as RETURN/PICKUP, skip this alert.
+            const { data: anyReturnScan } = await supabase
+              .from('bottle_scans')
+              .select('id, mode')
+              .eq('organization_id', profile?.organization_id ?? '')
+              .eq('bottle_barcode', bottleData.barcode_number || barcode)
+              .in('mode', ['RETURN', 'PICKUP'])
+              .limit(1)
+              .maybeSingle();
+            const hasReturnHistory = !!anyReturnScan;
+            if (hasReturnHistory) {
+              logger.log(
+                '⚠️ Active rental exists but bottle has RETURN/PICKUP history — skipping still-at-customer alert.'
+              );
+            } else {
+              const customerName = bottleData.customer_name || 'Unknown';
+              logger.log('⚠️ WARNING: Bottle still at customer (active rental) - showing alert');
+              Alert.alert(
+                'Still assigned to a customer',
+                `This ${assetConfig?.assetDisplayName?.toLowerCase() || 'bottle'} is still assigned to the customer "${customerName}" in the system (it was not scanned as returned/empty yet).\n\nTo keep the usual flow: scan it as empty when it returns, then as full after refilling.\n\nIf the bottle is already back and refilled, tap "Add Anyway" to mark it full and update location.`,
+                [
+                  {
+                    text: 'Cancel',
+                    style: 'cancel',
+                    onPress: () => {
+                      processingBarcodesRef.current.delete(barcode);
+                      setIsProcessing(false);
+                      setLastScannedBarcode('');
+                      lastScannedBarcodeRef.current = '';
+                    },
+                  },
+                  {
+                    text: 'Add Anyway',
+                    onPress: () => {
+                      addBottleToScannedList(bottleData);
+                    },
+                  },
+                ]
+              );
+              return;
+            }
           }
           // No active rental: return was already processed (history shows Return) but bottle row
           // may still have stale customer name — allow locate as full without warning.

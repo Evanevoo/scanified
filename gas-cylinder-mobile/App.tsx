@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, LogBox } from 'react-native';
+import { View, Text, StyleSheet, LogBox, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -68,6 +68,8 @@ import TestBatchScanScreen from './screens/TestBatchScanScreen';
 import TestConcurrentScanScreen from './screens/TestConcurrentScanScreen';
 import TestPerformanceScreen from './screens/TestPerformanceScreen';
 import ScannerSettingsScreen from './screens/ScannerSettingsScreen';
+import AiTestScannerScreen from './screens/AiTestScannerScreen';
+import { isAiBarcodeTestScannerEnabled } from './utils/isAiBarcodeTestScannerEnabled';
 
 const Stack = createNativeStackNavigator();
 
@@ -412,6 +414,13 @@ function AppContent() {
               component={ScannerSettingsScreen}
               options={{ title: 'Scanner Settings' }}
             />
+            {Platform.OS === 'ios' && isAiBarcodeTestScannerEnabled() ? (
+              <Stack.Screen
+                name="AiTestScanner"
+                component={AiTestScannerScreen}
+                options={{ title: 'AI test scanner', headerShown: false }}
+              />
+            ) : null}
           </>
         )}
       </Stack.Navigator>

@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
+const { getSiteUrl } = require('./utils/siteUrl');
 
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   // Handle CORS preflight requests
   if (event.httpMethod === 'OPTIONS') {
     return {
@@ -90,7 +91,7 @@ exports.handler = async (event, context) => {
       type: 'recovery',
       email: email,
       options: {
-        redirectTo: `${process.env.SITE_URL || 'https://scanified1.netlify.app'}/contact-confirmation`,
+        redirectTo: `${getSiteUrl()}/contact-confirmation`,
         data: {
           subject: 'Contact Form Submission Received',
           html: emailContent,

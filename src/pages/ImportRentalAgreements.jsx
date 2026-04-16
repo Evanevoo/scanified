@@ -46,7 +46,7 @@ const FIELD_DEFINITIONS = [
   { key: 'agreement_number', label: 'Agreement Number', aliases: ['agreement number', 'agreementnumber', 'agreement #', 'agreement no'] },
   { key: 'duration_months', label: 'Duration (Months)', aliases: ['duration (months)', 'duration', 'duration months', 'term', 'months'] },
   { key: 'assets_on_agreement', label: 'Assets on Agreement', aliases: ['assets on agreement', 'assets', 'asset type', 'asset type description'] },
-  { key: 'total_cost', label: 'Total Cost', aliases: ['total cost', 'totalcost', 'total', 'cost', 'amount'] },
+  { key: 'total_cost', label: 'Total Cost', aliases: ['total cost', 'totalcost', 'total', 'cost', 'amount', 'this agreement', 'agreement amount', 'this agreement amount'] },
   { key: 'rent_balance', label: 'Rent Balance', aliases: ['rent balance', 'rentbalance', 'rent balance (number covered by agreements)', 'assets covered'] },
 ];
 
@@ -122,6 +122,120 @@ function isHeaderRow(row) {
   return row.every((cell) => typeof cell === 'string' && cell.length > 0 && !/^\d+$/.test(cell));
 }
 
+function normalizeHeaderCell(cell) {
+  return String(cell ?? '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function mergeHeaderRowsIfNeeded(rows) {
+  if (!Array.isArray(rows) || rows.length < 2) return rows;
+  const first = rows[0] || [];
+  const second = rows[1] || [];
+  const secondHasText = second.some((cell) => String(cell ?? '').trim() !== '');
+  if (!isHeaderRow(first) || !secondHasText) return rows;
+
+  // If second row looks like header continuation (e.g. "Number", "(Months)", "on Agreement"), merge it.
+  const dataHintRow = rows[2] || [];
+  const dataHintLooksLikeData = dataHintRow.some((cell) => /\d{1,2}\/\d{1,2}\/\d{4}/.test(String(cell ?? '')) || /^L\d+/i.test(String(cell ?? '').trim()));
+  const continuationTokens = ['number', '(months)', 'months', 'on agreement', 'cost', 'balance', 'covered by agreements'];
+  const continuationScore = second.reduce((score, cell) => {
+    const s = String(cell ?? '').toLowerCase().trim();
+    if (!s) return score;
+    return score + (continuationTokens.some((t) => s.includes(t)) ? 1 : 0);
+  }, 0);
+
+  if (continuationScore < 1 && !dataHintLooksLikeData) return rows;
+
+  const maxLen = Math.max(first.length, second.length);
+  const merged = Array.from({ length: maxLen }, (_, i) => {
+    const a = normalizeHeaderCell(first[i]);
+    const b = normalizeHeaderCell(second[i]);
+    return normalizeHeaderCell([a, b].filter(Boolean).join(' ')) || `Column ${i + 1}`;
+  });
+  return [merged, ...rows.slice(2)];
+}
+
+function isLikelyHeaderLikeDataRow(row) {
+  const rowText = row.map((c) => String(c ?? '').toLowerCase().trim()).filter(Boolean);
+  if (rowText.length === 0) return true;
+  const headerTokens = ['end date', 'customer', 'agreement', 'agreement number', 'number', 'duration', 'assets', 'total cost', 'rent balance'];
+  const tokenHits = rowText.filter((cell) => headerTokens.some((t) => cell === t || cell.includes(t))).length;
+  const hasRealAgreementNumber = rowText.some((cell) => /^l\d+/i.test(cell));
+  const hasDateValue = rowText.some((cell) => /^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(cell) || /^\d{4}-\d{2}-\d{2}$/.test(cell));
+  if (hasRealAgreementNumber || hasDateValue) return false;
+  return tokenHits >= Math.max(1, Math.floor(rowText.length / 2));
+}
+
+function detectDelimiterFromText(text) {
+  const firstNonEmptyLine = (text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0) || '';
+  const commaCount = (firstNonEmptyLine.match(/,/g) || []).length;
+  const tabCount = (firstNonEmptyLine.match(/\t/g) || []).length;
+  return tabCount >= commaCount ? '\t' : ',';
+}
+
+function parseDelimitedText(text, delimiter) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = text[i + 1];
+
+    if (ch === '"') {
+      if (inQuotes && next === '"') {
+        cell += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (!inQuotes && ch === delimiter) {
+      row.push(cell.trim());
+      cell = '';
+      continue;
+    }
+
+    if (!inQuotes && (ch === '\n' || ch === '\r')) {
+      if (ch === '\r' && next === '\n') i += 1;
+      row.push(cell.trim());
+      if (row.some((c) => c !== '')) rows.push(row);
+      row = [];
+      cell = '';
+      continue;
+    }
+
+    cell += ch;
+  }
+
+  row.push(cell.trim());
+  if (row.some((c) => c !== '')) rows.push(row);
+  return rows;
+}
+
+function filterImportRows(previewRows) {
+  return previewRows.filter((row) => {
+    const keyFields = [
+      row.end_date,
+      row.customer,
+      row.agreement_number,
+      row.duration_months,
+      row.assets_on_agreement,
+      row.total_cost,
+      row.rent_balance,
+    ];
+    return keyFields.some((value) => String(value ?? '').trim() !== '');
+  });
+}
+
 export default function ImportRentalAgreements() {
   const navigate = useNavigate();
   const { organization, profile } = useAuth();
@@ -195,14 +309,16 @@ export default function ImportRentalAgreements() {
 
       const processRows = (rows) => {
         if (!rows.length) return;
+        const normalizedRows = mergeHeaderRowsIfNeeded(rows);
         let detectedColumns = [];
-        let dataRows = rows;
-        if (isHeaderRow(rows[0])) {
-          detectedColumns = rows[0].map((col, i) => (col && String(col).trim()) || `Column ${i + 1}`);
-          dataRows = rows.slice(1);
+        let dataRows = normalizedRows;
+        if (isHeaderRow(normalizedRows[0])) {
+          detectedColumns = normalizedRows[0].map((col, i) => normalizeHeaderCell(col) || `Column ${i + 1}`);
+          dataRows = normalizedRows.slice(1);
         } else {
-          detectedColumns = rows[0].map((_, i) => `Column ${i + 1}`);
+          detectedColumns = normalizedRows[0].map((_, i) => `Column ${i + 1}`);
         }
+        dataRows = dataRows.filter((row) => !isLikelyHeaderLikeDataRow(row));
         setRawRows(dataRows);
         setColumns(detectedColumns);
 
@@ -236,7 +352,8 @@ export default function ImportRentalAgreements() {
         });
         const finalMapping = saved || autoMap;
         setMapping(finalMapping);
-        setPreview(generatePreview(dataRows, detectedColumns, finalMapping));
+        const generatedPreview = generatePreview(dataRows, detectedColumns, finalMapping);
+        setPreview(filterImportRows(generatedPreview));
         if (detectedColumns.length) {
           localStorage.setItem(MAPPING_STORAGE_KEY, JSON.stringify({ columns: detectedColumns, mapping: finalMapping }));
         }
@@ -255,13 +372,22 @@ export default function ImportRentalAgreements() {
       } else {
         const reader = new FileReader();
         reader.onload = (evt) => {
-          const text = evt.target.result;
-          const firstLine = text.split('\n')[0] || '';
-          const delimiter = (firstLine.match(/\t/g) || []).length >= (firstLine.match(/,/g) || []).length ? '\t' : ',';
-          const rows = text
-            .split(/\r?\n/)
-            .map((line) => line.split(delimiter).map((cell) => (cell != null ? String(cell).trim() : '')))
-            .filter((row) => row.length > 1 && row.some((c) => c !== ''));
+          const text = String(evt.target.result || '');
+          let rows = [];
+          try {
+            // Use SheetJS parser for CSV/TXT too; it is more resilient to quoted fields/newlines.
+            const workbook = XLSX.read(text, { type: 'string' });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+          } catch (parseErr) {
+            logger.warn('SheetJS text parse failed, falling back to manual parser', parseErr);
+          }
+
+          if (!rows.length || rows.length === 1) {
+            const delimiter = detectDelimiterFromText(text);
+            rows = parseDelimitedText(text, delimiter);
+          }
+
           processRows(rows);
         };
         reader.readAsText(uploadedFile);
@@ -337,7 +463,8 @@ export default function ImportRentalAgreements() {
     const newMapping = { ...mapping, [fieldKey]: colName || undefined };
     if (!colName) delete newMapping[fieldKey];
     setMapping(newMapping);
-    setPreview(generatePreview(rawRows, columns, newMapping));
+    const generatedPreview = generatePreview(rawRows, columns, newMapping);
+    setPreview(filterImportRows(generatedPreview));
     setAssignments({});
     setCustomerMatchMap({});
     if (columns.length) {
@@ -365,20 +492,29 @@ export default function ImportRentalAgreements() {
   };
 
   const unmatchedCount = preview.filter((_, idx) => !assignments[idx]).length;
-  const canImport = preview.length > 0 && unmatchedCount === 0 && preview.every((row) => row.agreement_number && row.end_date_parsed);
+  const rowsMissingRequiredFields = preview.filter((row) => !row.agreement_number || !row.end_date_parsed).length;
+  const importableRows = preview.filter((row, idx) => {
+    return Boolean(assignments[idx] && row.agreement_number && row.end_date_parsed);
+  });
+  const skippedRowsCount = preview.length - importableRows.length;
+  const canImport = importableRows.length > 0;
 
   const handleImport = useCallback(async () => {
     if (!canImport || !organization?.id || !profile?.id) return;
     setImporting(true);
     setError(null);
     setImportProgress(0);
-    const total = preview.length;
+    const rowsToImport = preview
+      .map((row, idx) => ({ row, idx }))
+      .filter(({ row, idx }) => Boolean(assignments[idx] && row.agreement_number && row.end_date_parsed));
+    const total = rowsToImport.length;
     let done = 0;
+    let failed = 0;
     try {
-      for (let i = 0; i < preview.length; i++) {
-        const row = preview[i];
-        const assigned = assignments[i];
-        if (!assigned) continue;
+      for (const entry of rowsToImport) {
+        const row = entry.row;
+        const rowIndex = entry.idx;
+        const assigned = assignments[rowIndex];
         const endDate = row.end_date_parsed || row.end_date;
         const startDate = row.start_date_parsed || deriveStartDate(endDate, row.duration_months);
         const annualAmount = row.total_cost_parsed != null ? row.total_cost_parsed : 0;
@@ -402,14 +538,25 @@ export default function ImportRentalAgreements() {
         };
         const { error: insertErr } = await supabase.from('lease_agreements').insert(insertRow);
         if (insertErr) {
-          logger.error('Insert error for row', i, insertErr);
-          toast.error(`Row ${i + 1}: ${insertErr.message}`);
+          failed += 1;
+          logger.error('Insert error for row', rowIndex, insertErr);
+          toast.error(`Row ${rowIndex + 1}: ${insertErr.message}`);
+        } else {
+          done += 1;
         }
-        done += 1;
         setImportProgress(Math.round((done / total) * 100));
       }
-      toast.success(`Imported ${done} rental agreement(s).`);
-      navigate('/lease-agreements');
+      const skipped = preview.length - total;
+      if (done > 0 && failed === 0 && skipped === 0) {
+        toast.success(`Imported ${done} rental agreement(s).`);
+      } else if (done > 0) {
+        toast.success(`Imported ${done} agreement(s). Skipped ${skipped + failed} row(s).`);
+      } else {
+        toast.error('No agreements were imported. Please fix row errors and try again.');
+      }
+      if (done > 0) {
+        navigate('/lease-agreements');
+      }
     } catch (err) {
       logger.error('Import error:', err);
       setError(err.message || 'Import failed');
@@ -535,18 +682,34 @@ export default function ImportRentalAgreements() {
                 size="small"
               />
             )}
-            {canImport && (
-              <Button
-                variant="contained"
-                onClick={handleImport}
-                disabled={importing}
-                startIcon={importing ? null : <CheckCircleIcon />}
-                sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
-              >
-                {importing ? `Importing… ${importProgress}%` : 'Import as lease agreements'}
-              </Button>
+            {rowsMissingRequiredFields > 0 && (
+              <Chip
+                icon={<ErrorIcon />}
+                label={`${rowsMissingRequiredFields} row(s) missing agreement # or end date`}
+                color="warning"
+                size="small"
+              />
             )}
+            <Button
+              variant="contained"
+              onClick={handleImport}
+              disabled={importing || !canImport}
+              startIcon={importing ? null : <CheckCircleIcon />}
+              sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}
+            >
+              {importing ? `Saving & importing… ${importProgress}%` : `Save & import ${importableRows.length} agreement${importableRows.length !== 1 ? 's' : ''}`}
+            </Button>
           </Box>
+          {!canImport && (
+            <Alert severity="warning" sx={{ mx: 2, mb: 1 }}>
+              No importable rows yet. Assign a customer and provide an agreement number + end date for at least one row.
+            </Alert>
+          )}
+          {canImport && skippedRowsCount > 0 && (
+            <Alert severity="info" sx={{ mx: 2, mb: 1 }}>
+              {skippedRowsCount} row(s) will be skipped because they are missing a customer assignment or required fields.
+            </Alert>
+          )}
           {importing && <LinearProgress variant="determinate" value={importProgress} sx={{ mx: 2 }} />}
           <TableContainer sx={{ maxHeight: 480, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
             <Table size="small" stickyHeader>

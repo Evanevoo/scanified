@@ -31,13 +31,12 @@ export const useTheme = () => {
   return context;
 };
 
-// Global styles for enhanced design
-const globalStyles = {
+// Shared global styles (mode-agnostic). Scrollbar/focus/selection follow active MUI theme.
+const globalStylesStatic = {
   '*': {
     boxSizing: 'border-box',
     transition: 'background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease',
   },
-  // Fix for Material-UI tab movement/vibration issues
   '.MuiTab-root': {
     transition: 'none !important',
     transform: 'none !important',
@@ -59,7 +58,7 @@ const globalStyles = {
     },
     '&::after': {
       display: 'none !important',
-    }
+    },
   },
   '.MuiTabs-indicator': {
     transition: 'none !important',
@@ -80,71 +79,26 @@ const globalStyles = {
     WebkitFontSmoothing: 'antialiased',
     MozOsxFontSmoothing: 'grayscale',
   },
-  // Custom scrollbar styles
-  '::-webkit-scrollbar': {
-    width: '8px',
-    height: '8px',
-  },
-  '::-webkit-scrollbar-track': {
-    background: 'rgba(0, 0, 0, 0.05)',
-    borderRadius: '4px',
-  },
-  '::-webkit-scrollbar-thumb': {
-    background: 'rgba(0, 0, 0, 0.2)',
-    borderRadius: '4px',
-    '&:hover': {
-      background: 'rgba(0, 0, 0, 0.3)',
-    },
-  },
-  // Enhanced focus styles
-  '*:focus-visible': {
-    outline: '2px solid #3b82f6',
-    outlineOffset: '2px',
-  },
-  // Enhanced selection styles
-  '::selection': {
-    backgroundColor: 'rgba(59, 130, 246, 0.2)',
-    color: 'inherit',
-  },
-  // Link styles
-  'a': {
+  a: {
     textDecoration: 'none',
     color: 'inherit',
     '&:hover': {
       textDecoration: 'underline',
     },
   },
-  // Loading animation keyframes
   '@keyframes pulse': {
-    '0%': {
-      opacity: 1,
-    },
-    '50%': {
-      opacity: 0.5,
-    },
-    '100%': {
-      opacity: 1,
-    },
+    '0%': { opacity: 1 },
+    '50%': { opacity: 0.5 },
+    '100%': { opacity: 1 },
   },
   '@keyframes slideIn': {
-    from: {
-      transform: 'translateY(-10px)',
-      opacity: 0,
-    },
-    to: {
-      transform: 'translateY(0)',
-      opacity: 1,
-    },
+    from: { transform: 'translateY(-10px)', opacity: 0 },
+    to: { transform: 'translateY(0)', opacity: 1 },
   },
   '@keyframes fadeIn': {
-    from: {
-      opacity: 0,
-    },
-    to: {
-      opacity: 1,
-    },
+    from: { opacity: 0 },
+    to: { opacity: 1 },
   },
-  // Utility classes for animations
   '.animate-pulse': {
     animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
   },
@@ -154,14 +108,12 @@ const globalStyles = {
   '.animate-fadeIn': {
     animation: 'fadeIn 0.3s ease-out',
   },
-  // Enhanced card hover effects
   '.card-hover': {
     transition: 'transform 0.2s ease, box-shadow 0.2s ease',
     '&:hover': {
       transform: 'translateY(-2px)',
     },
   },
-  // Gradient backgrounds for special elements
   '.gradient-bg': {
     background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
   },
@@ -174,6 +126,37 @@ const globalStyles = {
   '.gradient-bg-info': {
     background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
   },
+};
+
+const getGlobalStylesForTheme = (theme) => {
+  const isDark = theme.palette.mode === 'dark';
+  const primary = theme.palette.primary.main;
+  return {
+    ...globalStylesStatic,
+    '::-webkit-scrollbar': {
+      width: '8px',
+      height: '8px',
+    },
+    '::-webkit-scrollbar-track': {
+      background: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.05)',
+      borderRadius: '4px',
+    },
+    '::-webkit-scrollbar-thumb': {
+      background: isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)',
+      borderRadius: '4px',
+      '&:hover': {
+        background: isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.35)',
+      },
+    },
+    '*:focus-visible': {
+      outline: `2px solid ${primary}`,
+      outlineOffset: '2px',
+    },
+    '::selection': {
+      backgroundColor: isDark ? 'rgba(95, 205, 197, 0.35)' : 'rgba(64, 181, 173, 0.25)',
+      color: 'inherit',
+    },
+  };
 };
 
 export const ThemeProvider = ({ children }) => {
@@ -403,7 +386,7 @@ export const ThemeProvider = ({ children }) => {
       hexAccent = colorMap[hexAccent] || '#40B5AD'; // Scanified primary teal
     }
     
-    // Apply dark mode if enabled
+    // Apply dark mode — MUI-style layered surfaces (softer than pure black / pure white)
     if (isDarkMode) {
       return createTheme({
         ...baseTheme,
@@ -419,14 +402,22 @@ export const ThemeProvider = ({ children }) => {
             main: organizationColors.secondary,
           },
           background: {
-            default: '#0a0a0a',
-            paper: '#1a1a1a',
+            default: '#121212',
+            paper: '#1e1e1e',
           },
           text: {
-            primary: '#ffffff',
-            secondary: 'rgba(255, 255, 255, 0.7)',
+            primary: 'rgba(255, 255, 255, 0.87)',
+            secondary: 'rgba(255, 255, 255, 0.6)',
+            disabled: 'rgba(255, 255, 255, 0.38)',
           },
           divider: 'rgba(255, 255, 255, 0.12)',
+          action: {
+            active: 'rgba(255, 255, 255, 0.56)',
+            hover: 'rgba(255, 255, 255, 0.08)',
+            selected: 'rgba(255, 255, 255, 0.16)',
+            disabled: 'rgba(255, 255, 255, 0.3)',
+            disabledBackground: 'rgba(255, 255, 255, 0.12)',
+          },
         },
       });
     }
@@ -466,7 +457,7 @@ export const ThemeProvider = ({ children }) => {
     <ThemeContext.Provider value={contextValue}>
       <MuiThemeProvider theme={getTheme()}>
         <CssBaseline />
-        <GlobalStyles styles={globalStyles} />
+        <GlobalStyles styles={(theme) => getGlobalStylesForTheme(theme)} />
         {children}
       </MuiThemeProvider>
     </ThemeContext.Provider>

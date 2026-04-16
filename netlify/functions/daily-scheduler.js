@@ -6,7 +6,7 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 // Initialize Supabase client with service role key for admin operations
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   console.log('Daily scheduler function triggered at:', new Date().toISOString());
   
   // Verify this is being called by a scheduled function or authorized source
@@ -23,7 +23,7 @@ exports.handler = async (event, context) => {
 
   try {
     // Call the database function to run scheduled jobs
-    const { data, error } = await supabase.rpc('run_scheduled_jobs');
+    const { error } = await supabase.rpc('run_scheduled_jobs');
     
     if (error) {
       console.error('Error running scheduled jobs:', error);

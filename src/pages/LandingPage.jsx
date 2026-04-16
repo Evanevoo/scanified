@@ -17,6 +17,7 @@ import StatCard from '../components/design-system/StatCard';
 import ModernButton from '../components/design-system/ModernButton';
 import { Touch3D, Card3D, MobileButton, MobileTypography, MobileStack } from '../components/design-system';
 import { useMediaQuery, useTheme } from '@mui/material';
+import SEOHead from '../components/SEOHead';
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -81,6 +82,12 @@ export default function LandingPage() {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
+      <SEOHead
+        title="Scanified — Marketing preview"
+        description="Alternate marketing layout for Scanified. Use the main site for the primary experience."
+        keywords="scanified, asset tracking, gas cylinders"
+        robots="noindex, nofollow"
+      />
 
       {/* Hero Section - Upgraded */}
       <Box
@@ -819,7 +826,7 @@ export default function LandingPage() {
                   <Button 
                     color="inherit" 
                     sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'grey.400', p: 0 }}
-                    onClick={() => navigate('/support')}
+                    onClick={() => navigate('/help')}
                   >
                     Help Center
                   </Button>

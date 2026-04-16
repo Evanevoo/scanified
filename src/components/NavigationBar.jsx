@@ -23,6 +23,7 @@ import {
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../hooks/useAssetConfig';
+import { marketingTokens } from '../config/marketingTokens';
 
 const navigationItems = [
   {
@@ -47,7 +48,7 @@ const navigationItems = [
       { label: 'Documentation', path: '/documentation' },
       { label: 'FAQ', path: '/faq' },
       { label: 'Blog', path: '/blog' },
-      { label: 'Support', path: '/support' }
+      { label: 'Help center', path: '/help' }
     ]
   },
   {
@@ -74,7 +75,7 @@ function HideOnScroll({ children }) {
 export default function NavigationBar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile } = useAuth();
+  const { profile, organization } = useAuth();
   const { config } = useAssetConfig();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
@@ -106,9 +107,9 @@ export default function NavigationBar() {
     return location.pathname === path;
   };
 
-  // Don't show navigation on login page only
-  // Show navbar on landing pages and all other pages
-  if (location.pathname === '/login') {
+  // Marketing navbar should only appear for unauthenticated/public flows.
+  // Authenticated users get the in-app MainLayout navigation shell.
+  if (location.pathname === '/login' || (profile && organization)) {
     return null;
   }
 
@@ -122,7 +123,8 @@ export default function NavigationBar() {
           sx={{ 
             bgcolor: 'white',
             backdropFilter: 'blur(10px)',
-            borderBottom: '2px solid #000000'
+            borderBottom: `2px solid ${marketingTokens.brandTeal}`,
+            fontFamily: marketingTokens.fontStack
           }}
         >
           <Container maxWidth="lg">
@@ -287,7 +289,7 @@ export default function NavigationBar() {
               height: 2,
               bgcolor: 'transparent',
               '& .MuiLinearProgress-bar': {
-                bgcolor: '#000000'
+                bgcolor: marketingTokens.brandTeal
               }
             }}
           />

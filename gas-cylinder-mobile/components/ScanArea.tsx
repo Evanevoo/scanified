@@ -1,8 +1,9 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Pressable, Platform, useWindowDimensions, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { feedbackService } from '../services/feedbackService';
 
 let TextRecognition: any = null;
@@ -10,6 +11,16 @@ try {
   TextRecognition = require('@react-native-ml-kit/text-recognition').default;
 } catch {
   TextRecognition = null;
+}
+
+/** iOS: same ML Kit barcode engine family as Android expo-camera pipeline; still-image pass when live ZXing misses. */
+let BarcodeScanning: { scan: (imageUrl: string) => Promise<{ value?: string }[]> } | null = null;
+if (Platform.OS === 'ios') {
+  try {
+    BarcodeScanning = require('@react-native-ml-kit/barcode-scanning').default;
+  } catch {
+    BarcodeScanning = null;
+  }
 }
 
 interface ScanAreaProps {
@@ -29,7 +40,15 @@ interface ScanAreaProps {
   hideScanningLine?: boolean;
   /** When true, hides the "Last scanned" success indicator (for screens that show their own scanned item UI) */
   hideLastScannedIndicator?: boolean;
+  /**
+   * Reserve space at the bottom of the camera viewport (e.g. absolute RETURN/SHIP controls).
+   * Shortens the preview with marginBottom so the optical center matches where users aim on small iPhones.
+   */
+  reserveViewportBottom?: number;
 }
+
+type ScannerSdkMode = 'expo-native' | 'zbar-profile';
+const SCANNER_SETTINGS_STORAGE_KEY = '@scanner_settings';
 
 
 const extractPossibleNames = (text: string): string[] => {
@@ -61,35 +80,62 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   onClose,
   hideScanningLine = false,
   hideLastScannedIndicator = false,
+  reserveViewportBottom = 0,
 }) => {
-  const [permission, requestPermission] = useCameraPermissions();
-  const [cameraReady, setCameraReady] = useState(false); // Defer mount to prevent crash on open
-  const [nativeCameraReady, setNativeCameraReady] = useState(false); // iOS: only enable barcode scan after native preview is ready
-  const overlayOpacity = useRef(new Animated.Value(1)).current;
-  const [scanned, setScanned] = useState(false);
-  const [lastScanned, setLastScanned] = useState('');
-  const [error, setError] = useState('');
-  const [pendingBarcode, setPendingBarcode] = useState<string | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
-  const [focusTrigger, setFocusTrigger] = useState(0);
-  const [cameraZoom, setCameraZoom] = useState(0); // 0-1 (percentage of max zoom)
-  const [flashEnabled, setFlashEnabled] = useState(false);
-  const [isClosing, setIsClosing] = useState(false); // Graceful shutdown for iOS (avoids AVCaptureSession crash)
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   // iOS compact phones (13 mini, 12 mini ≈812pt) need small-screen handling; use lower threshold on iOS
   const isSmallScreen = Platform.OS === 'ios' ? screenHeight < 850 : screenHeight < 700;
   const isVerySmallScreen = Platform.OS === 'ios' ? screenHeight < 700 : screenHeight < 600;
+  /** Narrow width (mini, SE) — same layout pressure as short screens for aiming the barcode */
+  const isCompactWidth = screenWidth <= 380;
+  const compactPhone =
+    isVerySmallScreen || (Platform.OS === 'ios' && isSmallScreen) || isCompactWidth;
+
+  const [permission, requestPermission] = useCameraPermissions();
+  const [cameraReady, setCameraReady] = useState(false); // Defer mount to prevent crash on open
+  const [nativeCameraReady, setNativeCameraReady] = useState(false); // iOS: only enable barcode scan after native preview is ready
+  const overlayOpacity = useRef(new Animated.Value(1)).current;
+  const [lastScanned, setLastScanned] = useState('');
+  const [error, setError] = useState('');
+  const [pendingBarcode, setPendingBarcode] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+  const [sdkMode, setSdkMode] = useState<ScannerSdkMode>('expo-native');
+  /**
+   * iOS: expo-camera maps `autofocus="on"` to focus-once-then-lock; that hurts handheld scanning.
+   * Default to `off` ("focus when needed" / continuous). Tap briefly sets `on` then back to `off` to force a refocus.
+   * @see https://docs.expo.dev/versions/latest/sdk/camera/#focusmode
+   */
+  const [iosAutofocusMode, setIosAutofocusMode] = useState<'on' | 'off'>('off');
+  const iosRefocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Only mini / SE need default digital zoom; using height alone also matched 6.1in phones and hurt them vs Pro Max. */
+  const [cameraZoom, setCameraZoom] = useState(() => {
+    if (Platform.OS !== 'ios') return 0;
+    if (isVerySmallScreen) return 0.18;
+    if (isCompactWidth) return 0.14;
+    return 0;
+  });
+  const [flashEnabled, setFlashEnabled] = useState(false);
+  const [isClosing, setIsClosing] = useState(false); // Graceful shutdown for iOS (avoids AVCaptureSession crash)
   const holdTimeout = useRef<NodeJS.Timeout | null>(null);
   const scanCooldown = useRef<NodeJS.Timeout | null>(null);
+  const pendingBarcodeRef = useRef<string | null>(null);
   const cameraRef = useRef<any>(null);
   const lastBarcodeScanTimeRef = useRef<number>(0);
   const lastOcrCustomerRef = useRef<string>('');
-  const idleCheckRef = useRef({ isOcrProcessing, isProcessing, scanned, permissionGranted: permission?.granted });
+  /** Suppress duplicate reads of the same value right after a successful emit (does not block other barcodes). */
+  const lastEmitSuppressRef = useRef<{ code: string; until: number } | null>(null);
+  /** iOS ML Kit still-frame pass must not overlap itself or fight the live scanner. */
+  const iosMlStillBusyRef = useRef(false);
+  const handleBarcodeScannedRef = useRef<(event: any) => void>(() => {});
+  const validateBarcodeRef = useRef<(barcode: string) => { isValid: boolean; errorMessage?: string }>(() => ({
+    isValid: false,
+  }));
+  const idleCheckRef = useRef({ isOcrProcessing, isProcessing, permissionGranted: permission?.granted });
   const searchCustomerByNameRef = useRef(searchCustomerByName);
   const onCustomerFoundRef = useRef(onCustomerFound);
-  idleCheckRef.current = { isOcrProcessing, isProcessing, scanned, permissionGranted: permission?.granted };
+  idleCheckRef.current = { isOcrProcessing, isProcessing, permissionGranted: permission?.granted };
   searchCustomerByNameRef.current = searchCustomerByName;
   onCustomerFoundRef.current = onCustomerFound;
 
@@ -98,10 +144,36 @@ const ScanArea: React.FC<ScanAreaProps> = ({
     feedbackService.initialize();
   }, []);
 
+  // iOS-only test mode: apply scanner profile globally across ScanArea usage.
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSdkMode = async () => {
+      if (Platform.OS !== 'ios') return;
+      try {
+        const raw = await AsyncStorage.getItem(SCANNER_SETTINGS_STORAGE_KEY);
+        if (!raw || cancelled) return;
+        const parsed = JSON.parse(raw);
+        if (parsed?.sdk === 'zbar-profile' || parsed?.sdk === 'expo-native') {
+          setSdkMode(parsed.sdk);
+        }
+      } catch {
+        // Keep default mode on read/parse failures.
+      }
+    };
+
+    loadSdkMode();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const effectiveHoldTimeoutMs = Platform.OS === 'ios' && sdkMode === 'zbar-profile' ? 300 : holdTimeoutMs;
+  /** Same cooldown as `scanDelay` on both platforms (was longer on iOS zbar-profile, which hid duplicate feedback). */
+  const effectiveScanDelay = scanDelay;
+
   // Defer CameraView mount so layout is ready (prevents crash on open). Shorter delay; overlay hides init glitch.
-  const cameraMountDelay = Platform.OS === 'ios'
-    ? (isVerySmallScreen ? 400 : 300)
-    : 200;
+  const cameraMountDelay = Platform.OS === 'ios' ? (compactPhone ? 400 : 300) : 200;
   useEffect(() => {
     if (!permission?.granted) {
       setCameraReady(false);
@@ -181,65 +253,130 @@ const ScanArea: React.FC<ScanAreaProps> = ({
     return { isValid: true };
   };
 
-  const handleBarcodeScanned = (event: any) => {
-    if (isProcessing || scanned) return;
+  validateBarcodeRef.current = validateBarcode;
 
+  const handleBarcodeScanned = (event: any) => {
     const barcode = event.data?.trim();
     if (!barcode) return;
 
-    // Prevent duplicate scans of the same barcode
-    if (pendingBarcode === barcode) {
+    const now = Date.now();
+    const suppress = lastEmitSuppressRef.current;
+    if (suppress && now < suppress.until && suppress.code === barcode) {
       return;
     }
 
-    // Clear any existing timeouts
+    // During the hold window, accept new events and keep the longest valid candidate (reduces partial 1D reads on iOS).
+    if (isProcessing) {
+      const validation = validateBarcode(barcode);
+      if (!validation.isValid) return;
+
+      const current = pendingBarcodeRef.current;
+      if (!current || barcode.length > current.length) {
+        pendingBarcodeRef.current = barcode;
+        setPendingBarcode(barcode);
+      }
+      return;
+    }
+
+    if (pendingBarcodeRef.current === barcode) {
+      return;
+    }
+
     if (holdTimeout.current) clearTimeout(holdTimeout.current);
     if (scanCooldown.current) clearTimeout(scanCooldown.current);
 
-    setIsProcessing(true);
-    setPendingBarcode(barcode);
-
-    // Validate barcode
     const validation = validateBarcode(barcode);
-    
+
     if (!validation.isValid) {
       const errorMsg = validation.errorMessage || 'Invalid barcode';
       setError(errorMsg);
-      setScanned(true);
       feedbackService.scanError(errorMsg).catch((e) => logger.log('Feedback error:', e));
 
-      // Clear error after delay
       setTimeout(() => {
-        setScanned(false);
         setError('');
-        setIsProcessing(false);
         setPendingBarcode(null);
-      }, 2000);
+        pendingBarcodeRef.current = null;
+      }, 1500);
       return;
     }
 
-    // Require the barcode to be stable for a short time to prevent misreads
-    holdTimeout.current = setTimeout(() => {
-      setScanned(true);
-      setLastScanned(barcode);
-      setError('');
-      feedbackService.scanSuccess(barcode).catch((e) => logger.log('Feedback error:', e));
-      onScanned(barcode);
-      lastBarcodeScanTimeRef.current = Date.now();
+    setIsProcessing(true);
+    pendingBarcodeRef.current = barcode;
+    setPendingBarcode(barcode);
 
-      // Set cooldown period to prevent rapid re-scanning
+    holdTimeout.current = setTimeout(() => {
+      const finalBarcode = pendingBarcodeRef.current || barcode;
+      const emittedAt = Date.now();
+      lastEmitSuppressRef.current = { code: finalBarcode, until: emittedAt + effectiveScanDelay };
+      setLastScanned(finalBarcode);
+      setError('');
+      feedbackService.scanSuccess(finalBarcode).catch((e) => logger.log('Feedback error:', e));
+      onScanned(finalBarcode);
+      lastBarcodeScanTimeRef.current = emittedAt;
+
       scanCooldown.current = setTimeout(() => {
-        setScanned(false);
         setIsProcessing(false);
         setPendingBarcode(null);
-      }, scanDelay);
-    }, holdTimeoutMs);
+        pendingBarcodeRef.current = null;
+      }, effectiveScanDelay);
+    }, effectiveHoldTimeoutMs);
   };
+
+  handleBarcodeScannedRef.current = handleBarcodeScanned;
+
+  /** iOS: periodic still → ML Kit decode (Google), parallel to expo-camera live (ZXingObjC). No cloud cost. */
+  const runIosMlKitStillPass = useCallback(async () => {
+    if (!BarcodeScanning || Platform.OS !== 'ios') return;
+    if (!cameraRef.current || isClosing || !nativeCameraReady || !permission?.granted) return;
+    if (iosMlStillBusyRef.current) return;
+    if (idleCheckRef.current.isProcessing || idleCheckRef.current.isOcrProcessing) return;
+    if (Date.now() - lastBarcodeScanTimeRef.current < 2000) return;
+
+    iosMlStillBusyRef.current = true;
+    try {
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.52,
+        shutterSound: false,
+      });
+      const uri = photo?.uri;
+      if (!uri) return;
+
+      const rows = await BarcodeScanning.scan(uri);
+      if (!Array.isArray(rows) || rows.length === 0) return;
+
+      const check = validateBarcodeRef.current;
+      for (const row of rows) {
+        const candidate = String(row?.value ?? '').trim();
+        if (!candidate) continue;
+        const validation = check(candidate);
+        if (!validation.isValid) continue;
+        handleBarcodeScannedRef.current({ data: candidate });
+        break;
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.log('iOS ML Kit still barcode:', msg);
+    } finally {
+      iosMlStillBusyRef.current = false;
+    }
+  }, [isClosing, nativeCameraReady, permission?.granted]);
+
+  useEffect(() => {
+    if (!BarcodeScanning || Platform.OS !== 'ios') return;
+    if (!cameraReady || !permission?.granted || isClosing || !nativeCameraReady) return;
+
+    const IOS_ML_STILL_INTERVAL_MS = 3200;
+    const id = setInterval(() => {
+      void runIosMlKitStillPass();
+    }, IOS_ML_STILL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [cameraReady, permission?.granted, isClosing, nativeCameraReady, runIosMlKitStillPass]);
 
   useEffect(() => {
     return () => {
       if (holdTimeout.current) clearTimeout(holdTimeout.current);
       if (scanCooldown.current) clearTimeout(scanCooldown.current);
+      if (iosRefocusTimerRef.current) clearTimeout(iosRefocusTimerRef.current);
     };
   }, []);
 
@@ -247,8 +384,8 @@ const ScanArea: React.FC<ScanAreaProps> = ({
     const searchFn = searchCustomerByNameRef.current;
     const onFoundFn = onCustomerFoundRef.current;
     if (!searchFn || !onFoundFn || !TextRecognition || !cameraRef.current) return;
-    const { isOcrProcessing: ocr, isProcessing: proc, scanned: scan, permissionGranted } = idleCheckRef.current;
-    if (ocr || proc || scan || !permissionGranted) return;
+    const { isOcrProcessing: ocr, isProcessing: proc, permissionGranted } = idleCheckRef.current;
+    if (ocr || proc || !permissionGranted) return;
     if (Date.now() - lastBarcodeScanTimeRef.current < 2000) return;
 
     setIsOcrProcessing(true);
@@ -286,30 +423,43 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- refs hold latest callbacks
   }, []);
 
-  // Calculate region of interest - frame slightly higher on iOS; on small phones keep ROI in safe area
-  const safeTop = insets.top / screenHeight;
+  // Calculate region of interest — Android only (iOS ROI can block 1D callbacks on some builds).
+  /** Height used for guide math when bottom UI reserves space (modal overlays). */
+  const layoutHeight = Math.max(260, screenHeight - reserveViewportBottom);
+  const safeTop = insets.top / layoutHeight;
+  /** iOS: barcode detection is center-weighted; older layout put the guide too high (~22%) vs the real sweet spot. */
+  const frameWidth = Math.min(compactPhone ? 300 : 320, screenWidth * (isCompactWidth ? 0.94 : 0.9));
+  const frameHeight = Math.min(
+    compactPhone ? 140 : 150,
+    Math.max(115, layoutHeight * (compactPhone ? 0.24 : 0.22))
+  );
+  const frameCenterPercentIos = compactPhone ? 43 : 44;
   const frameTopPercent = Platform.OS === 'ios'
-    ? (isVerySmallScreen ? Math.max(20, safeTop * 100 + 8) : isSmallScreen ? 22 : 24)
+    ? Math.max(
+        safeTop * 100 + 10,
+        frameCenterPercentIos - (frameHeight / layoutHeight) * 50
+      )
     : 30;
   const roiYOffset = Platform.OS === 'ios' ? 0.02 : 0;
-  const roiHeight = isVerySmallScreen ? 0.38 : isSmallScreen ? 0.35 : 0.32;
-  // Android: use ROI to focus scan area. iOS: omit ROI - Apple detects 1D barcodes only near center,
-  // and ROI can cause onBarcodeScanned to never fire on some iOS builds.
+  const roiHeight = compactPhone ? 0.38 : isSmallScreen ? 0.35 : 0.32;
+  // Android: use ROI to focus scan area (wider than the overlay so curved bottle labels still decode).
+  // iOS: omit ROI - Apple detects 1D barcodes only near center, and ROI can prevent callbacks on some builds.
   const regionOfInterest = enableRegionOfInterest && Platform.OS !== 'ios' ? {
-    x: 0.08,
-    y: (frameTopPercent / 100) + roiYOffset,
-    width: 0.84,
-    height: roiHeight,
+    x: 0.04,
+    y: Math.max(0.12, (frameTopPercent / 100) + roiYOffset - 0.06),
+    width: 0.92,
+    height: Math.min(0.58, roiHeight + 0.18),
   } : undefined;
-
-  // Responsive scan layout - smaller frame on small phones so it fits and aligns with ROI
-  const frameWidth = Math.min(isVerySmallScreen ? 280 : 320, screenWidth * 0.9);
-  const frameHeight = Math.min(isVerySmallScreen ? 130 : 150, Math.max(110, screenHeight * 0.22));
 
   return (
     <View style={[styles.wrapper, style]}>
       <View style={styles.scanAreaWrapper}>
-        <View style={styles.scanAreaBox}> 
+        <View
+          style={[
+            styles.scanAreaBox,
+            reserveViewportBottom > 0 && { marginBottom: reserveViewportBottom },
+          ]}
+        >
           {!permission ? (
             <View style={styles.centerContent}>
               <ActivityIndicator size="large" color="#fff" />
@@ -331,14 +481,14 @@ const ScanArea: React.FC<ScanAreaProps> = ({
             <>
               <Pressable
                 style={styles.camera}
-                onPress={(event) => {
-                  // Trigger autofocus on tap by toggling autofocus prop
-                  setFocusTrigger(prev => {
-                    const newValue = prev + 1;
-                    // Toggle autofocus to trigger refocus
-                    setTimeout(() => setFocusTrigger(newValue + 1), 50);
-                    return newValue;
-                  });
+                onPress={() => {
+                  if (Platform.OS !== 'ios') return;
+                  if (iosRefocusTimerRef.current) clearTimeout(iosRefocusTimerRef.current);
+                  setIosAutofocusMode('on');
+                  iosRefocusTimerRef.current = setTimeout(() => {
+                    setIosAutofocusMode('off');
+                    iosRefocusTimerRef.current = null;
+                  }, 220);
                 }}
               >
                 <CameraView
@@ -348,16 +498,18 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                   active={!isClosing}
                   zoom={cameraZoom}
                   enableTorch={flashEnabled}
-                  autofocus="on"
+                  autofocus={Platform.OS === 'ios' ? iosAutofocusMode : 'on'}
                   animateShutter={false}
-                  mode={Platform.OS === 'ios' ? 'video' : 'picture'}
+                  mode="video"
                   onCameraReady={() => {
                   setNativeCameraReady(true);
                   Animated.timing(overlayOpacity, { toValue: 0, duration: 250, useNativeDriver: true }).start();
                 }}
                   onBarcodeScanned={
-                    (scanned || isClosing) ? undefined
-                      : (Platform.OS === 'ios' && !nativeCameraReady) ? undefined
+                    isClosing
+                      ? undefined
+                      : (Platform.OS === 'ios' && !nativeCameraReady)
+                        ? undefined
                         : handleBarcodeScanned
                   }
                   barcodeScannerEnabled={
@@ -365,8 +517,12 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                     (Platform.OS !== 'ios' || nativeCameraReady)
                   }
                   barcodeScannerSettings={{
-                    // Lowercase required on iOS. 1D types for gas cylinder barcodes.
-                    barcodeTypes: ['code128', 'code39', 'codabar', 'ean13', 'ean8', 'upc_a', 'upc_e', 'code93', 'itf14'],
+                    // Lowercase required on iOS. Full set supported by expo-camera (SDK 54+); was missing 2D types used on some asset labels.
+                    barcodeTypes: [
+                      'code128', 'code39', 'codabar', 'code93', 'itf14',
+                      'ean13', 'ean8', 'upc_a', 'upc_e',
+                      'qr', 'pdf417', 'datamatrix', 'aztec',
+                    ],
                     ...(regionOfInterest && { regionOfInterest })
                   }}
                 />
@@ -417,7 +573,10 @@ const ScanArea: React.FC<ScanAreaProps> = ({
               {/* Enhanced scanning overlay - responsive, aligned with barcode scan region */}
               {enableRegionOfInterest && (
                 <>
-                  <View style={[
+                  {/* pointerEvents none: frame is visual only; otherwise iOS captures taps in the scan box and breaks tap-to-refocus */}
+                  <View
+                    pointerEvents="none"
+                    style={[
                     styles.scanningFrame,
                     {
                       top: `${frameTopPercent}%`,
@@ -430,10 +589,12 @@ const ScanArea: React.FC<ScanAreaProps> = ({
                   
                   {/* Scanning animation */}
                   {isProcessing && !hideScanningLine && (
-                    <View style={[
+                    <View
+                      pointerEvents="none"
+                      style={[
                       styles.scanningLine,
                       {
-                        top: `${frameTopPercent + (frameHeight / screenHeight) * 50}%`,
+                        top: `${frameTopPercent + (frameHeight / layoutHeight) * 50}%`,
                         left: '50%',
                         width: frameWidth,
                         transform: [{ translateX: -frameWidth / 2 }],
@@ -445,7 +606,10 @@ const ScanArea: React.FC<ScanAreaProps> = ({
 
               {/* Status overlay (below safe area) */}
               {(error || isProcessing) && (
-                <View style={[styles.statusOverlay, { top: Math.max(20, insets.top + 8) }]}>
+                <View
+                  pointerEvents="box-none"
+                  style={[styles.statusOverlay, { top: Math.max(20, insets.top + 8) }]}
+                >
                   <View style={[
                     styles.statusBadge, 
                     error ? styles.errorBadge : styles.processingBadge
@@ -461,7 +625,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
               )}
 
               {barcodePreview && (
-                <View style={styles.barcodePreviewBox}>
+                <View pointerEvents="none" style={styles.barcodePreviewBox}>
                   <Text style={styles.barcodePreviewText}>{barcodePreview}</Text>
                 </View>
               )}

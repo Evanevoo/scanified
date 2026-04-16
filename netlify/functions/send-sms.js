@@ -1,6 +1,6 @@
 const twilio = require('twilio');
 
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   // Only allow POST requests
   if (event.httpMethod !== 'POST') {
     return {

@@ -6,6 +6,8 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// SEO: marketing routes are a client-rendered SPA. Crawlers get sitemap/robots in /public;
+// for richer previews consider Netlify prerender (see netlify.toml) or a prerender service.
 export default defineConfig({
   plugins: [react()],
   resolve: {

@@ -52,6 +52,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import AssetTypeDemo from '../components/AssetTypeDemo';
+import SEOHead, { SEOConfigs } from '../components/SEOHead';
 
 // Demo data
 const demoAssets = [
@@ -122,6 +123,7 @@ export default function Demo() {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#FFFFFF' }}>
+      <SEOHead {...SEOConfigs.demo} robots="noindex, nofollow" />
       {/* Header */}
       <Box sx={{ bgcolor: 'white', borderBottom: '2px solid #000000' }}>
         <Container maxWidth="lg">

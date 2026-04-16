@@ -7,7 +7,7 @@ import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
   Card, CardContent, Grid, Chip, IconButton, TextField, FormControl, InputLabel, Select, MenuItem,
   Alert, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions, Tabs, Tab,
-  Tooltip, Badge, Collapse, FormControlLabel, Checkbox, Menu, ListItemIcon, ListItemText
+  Tooltip, Badge, Collapse, FormControlLabel, Checkbox, Switch, Menu, ListItemIcon, ListItemText
 } from '@mui/material';
 import {
   Person as PersonIcon,
@@ -28,6 +28,8 @@ import InvoiceGenerator from '../components/InvoiceGenerator';
 import BulkInvoiceEmailDialog from '../components/BulkInvoiceEmailDialog';
 import { getNextInvoiceNumbers, getNextAgreementNumbers, toCsv, downloadFile } from '../utils/invoiceUtils';
 import { formatLocationDisplay } from '../utils/locationDisplay';
+import { fetchBillingWorkspaceData } from '../services/billingWorkspaceService';
+import { processBillingWorkspaceToFilteredRentals } from '../services/rentalWorkspaceMerge';
 
 // Business logic functions to determine asset status
 const getAssetStatus = (assignedCustomer, customerType) => {
@@ -55,6 +57,19 @@ const isRNB = (r) => r?.is_dns === true && (r?.dns_description || '').includes('
 // RNS = Return not scanned – reduces customer total, not billable
 const isRNS = (r) => r?.is_dns === true && (r?.dns_description || '').includes('Return not scanned');
 
+const isMonthlyRental = (r) => (r.rental_type || 'monthly') === 'monthly';
+const isYearlyRental = (r) => r.rental_type === 'yearly';
+
+const partitionRentalsByBillingType = (rentals) => {
+  const monthly = [];
+  const yearly = [];
+  for (const r of rentals) {
+    if (isYearlyRental(r)) yearly.push(r);
+    else monthly.push(r);
+  }
+  return { monthly, yearly };
+};
+
 // Enhanced status mapping with colors and descriptions
 const ASSET_STATUS = {
   'IN-HOUSE': { 
@@ -81,7 +96,35 @@ const RentalsTableBody = memo(function RentalsTableBody({
   setEditDialog,
   isRNB,
   isRNS,
+  rentalListMode,
 }) {
+  const renderAssetChips = (rentalList) =>
+    rentalList.map((rental, idx) => {
+      const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || rental.bottle_barcode;
+      const displayLabel = barcode || (rental.is_dns ? `${rental.dns_product_code || 'DNS'} - ${rental.dns_description || 'Not Scanned'}` : `Asset ${idx + 1}`);
+      const bottleId = rental.bottles?.id || rental.bottle_id;
+      return (
+        <Chip
+          key={rental.id || `${displayLabel}-${idx}`}
+          label={displayLabel}
+          size="small"
+          variant="outlined"
+          onClick={() => {
+            if (bottleId) navigate(`/bottle/${bottleId}`);
+          }}
+          sx={{
+            fontSize: 11,
+            cursor: 'pointer',
+            '&:hover': {
+              bgcolor: 'primary.light',
+              color: 'primary.contrastText',
+              borderColor: 'primary.main'
+            }
+          }}
+        />
+      );
+    });
+
   return (
     <>
       {currentCustomers.length === 0 ? (
@@ -234,39 +277,51 @@ const RentalsTableBody = memo(function RentalsTableBody({
                       <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
                     )}
                     <Typography variant="caption" color="text.secondary" fontWeight="medium">
-                      Individual Assets ({rentals.length})
+                      {(() => {
+                        const { monthly, yearly } = partitionRentalsByBillingType(rentals);
+                        if (rentalListMode === 'all' && monthly.length > 0 && yearly.length > 0) {
+                          return `Individual assets — ${monthly.length} monthly · ${yearly.length} yearly`;
+                        }
+                        return `Individual Assets (${rentals.length})`;
+                      })()}
                     </Typography>
                   </Box>
                   <Collapse in={expandedCustomers.has(customer.CustomerListID)}>
                     {expandedCustomers.has(customer.CustomerListID) ? (
                       <Box sx={{ p: 1.5, bgcolor: '#fafafa' }}>
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-                          {rentals.map((rental, idx) => {
-                            const barcode = rental.bottles?.barcode_number || rental.bottles?.barcode || rental.bottle_barcode;
-                            const displayLabel = barcode || (rental.is_dns ? `${rental.dns_product_code || 'DNS'} - ${rental.dns_description || 'Not Scanned'}` : `Asset ${idx + 1}`);
-                            const bottleId = rental.bottles?.id || rental.bottle_id;
+                        {rentalListMode === 'all' ? (
+                          (() => {
+                            const { monthly, yearly } = partitionRentalsByBillingType(rentals);
                             return (
-                              <Chip
-                                key={rental.id || idx}
-                                label={displayLabel}
-                                size="small"
-                                variant="outlined"
-                                onClick={() => {
-                                  if (bottleId) navigate(`/bottle/${bottleId}`);
-                                }}
-                                sx={{
-                                  fontSize: 11,
-                                  cursor: 'pointer',
-                                  '&:hover': {
-                                    bgcolor: 'primary.light',
-                                    color: 'primary.contrastText',
-                                    borderColor: 'primary.main'
-                                  }
-                                }}
-                              />
+                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                {monthly.length > 0 && (
+                                  <Box>
+                                    <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ display: 'block', mb: 1, letterSpacing: '0.02em' }}>
+                                      Monthly ({monthly.length})
+                                    </Typography>
+                                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+                                      {renderAssetChips(monthly)}
+                                    </Box>
+                                  </Box>
+                                )}
+                                {yearly.length > 0 && (
+                                  <Box>
+                                    <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ display: 'block', mb: 1, letterSpacing: '0.02em' }}>
+                                      Yearly / lease ({yearly.length})
+                                    </Typography>
+                                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+                                      {renderAssetChips(yearly)}
+                                    </Box>
+                                  </Box>
+                                )}
+                              </Box>
                             );
-                          })}
-                        </Box>
+                          })()
+                        ) : (
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+                            {renderAssetChips(rentals)}
+                          </Box>
+                        )}
                       </Box>
                     ) : null}
                   </Collapse>
@@ -291,6 +346,7 @@ function RentalsImproved() {
   const [customers, setCustomers] = useState([]);
   const [activeTab, setActiveTab] = useState(0);
   const [editDialog, setEditDialog] = useState({ open: false, customer: null, rentals: [] });
+  const [showBottleDetailsInEdit, setShowBottleDetailsInEdit] = useState(true);
   const [invoiceDialog, setInvoiceDialog] = useState({ open: false, customer: null, rentals: [] });
   const [bulkEmailDialogOpen, setBulkEmailDialogOpen] = useState(false);
   const [updatingRentals, setUpdatingRentals] = useState(false);
@@ -310,7 +366,6 @@ function RentalsImproved() {
   const [stats, setStats] = useState({
     inHouse: 0,
     withVendors: 0,
-    rented: 0
   });
 
   const fetchRentals = useCallback(async () => {
@@ -323,422 +378,21 @@ function RentalsImproved() {
         return;
       }
 
-      // Parallel fetch: rentals, bottles, locations, pricing, leases, customers (all for org)
-      const [
-        { data: rentalsData, error: rentalsError },
-        { data: assignedBottles, error: bottlesError },
-        { data: allBottles, error: allBottlesError },
-        { data: locationsData },
-        { data: customerPricing },
-        { data: leaseAgreements, error: leaseError },
-        { data: customersData }
-      ] = await Promise.all([
-        supabase.from('rentals').select('*').is('rental_end_date', null).eq('organization_id', organization.id),
-        supabase.from('bottles').select('*, customers:assigned_customer(customer_type)').eq('organization_id', organization.id).not('assigned_customer', 'is', null),
-        supabase.from('bottles').select('*').eq('organization_id', organization.id),
-        supabase.from('locations').select('id, name, province, total_tax_rate').eq('organization_id', organization.id),
-        supabase.from('customer_pricing').select('*').eq('organization_id', organization.id),
-        supabase.from('lease_agreements').select('*').eq('organization_id', organization.id).eq('status', 'active'),
-        supabase.from('customers').select('*').eq('organization_id', organization.id).order('name'),
-      ]);
-
-      if (rentalsError) throw rentalsError;
-      if (bottlesError) throw bottlesError;
-      if (allBottlesError) throw allBottlesError;
-
-      // Create a map of bottles for quick lookup by barcode AND by bottle_id
-      const bottlesMap = (allBottles || []).reduce((map, bottle) => {
-        const barcode = bottle.barcode_number || bottle.barcode;
-        if (barcode) {
-          map[barcode] = bottle;
-        }
-        // Also map by bottle_id for rentals that reference bottles by ID
-        if (bottle.id) {
-          map[`id:${bottle.id}`] = bottle;
-        }
-        return map;
-      }, {});
-
-      const totalBottles = allBottles?.length || 0;
-      const assignedBottlesCount = assignedBottles?.length || 0;
-      const unassignedBottles = totalBottles - assignedBottlesCount;
-      
-      const allRentalData = [];
-      const locationTaxMap = (locationsData || []).reduce((map, location) => {
-        map[location.name.toUpperCase()] = location.total_tax_rate / 100; // Convert percentage to decimal
-        return map;
-      }, {});
-
-      // Add rentals that have matching bottles in this organization
-      // Also include DNS rentals (is_dns = true) even if they don't have matching bottles
-      let rentalsIncluded = 0;
-      let rentalsExcluded = 0;
-      
-      for (const rental of rentalsData || []) {
-        // Try to find bottle by barcode first
-        let bottle = bottlesMap[rental.bottle_barcode];
-        
-        // If not found by barcode, try by bottle_id (for rentals with placeholder barcodes)
-        if (!bottle && rental.bottle_id) {
-          bottle = bottlesMap[`id:${rental.bottle_id}`];
-        }
-        
-        const isDNS = rental.is_dns === true;
-        
-        // Include rental if:
-        // 1. It has a matching bottle (by barcode OR by bottle_id), OR
-        // 2. It's a DNS rental, OR
-        // 3. It has a bottle_id (bottle exists but barcode might be placeholder)
-        if (bottle || isDNS || rental.bottle_id) {
-          rentalsIncluded++;
-          // For DNS rentals, use rental location or default
-          const rentalLocation = bottle 
-            ? (rental.location || bottle.location || 'SASKATOON').toUpperCase()
-            : (rental.location || 'SASKATOON').toUpperCase();
-          const locationTaxRate = locationTaxMap[rentalLocation] || rental.tax_rate || 0.11;
-          
-          allRentalData.push({
-            ...rental,
-            source: 'rental',
-            bottles: bottle || null, // null for DNS rentals without bottles
-            tax_rate: locationTaxRate,
-            location: rentalLocation,
-            is_dns: isDNS
-          });
-        } else {
-          rentalsExcluded++;
-        }
-      }
-
-      // Helper to detect placeholder barcodes (used in multiple places)
-      const isPlaceholderBarcode = (barcode) => {
-        if (!barcode || typeof barcode !== 'string') return false;
-        const normalized = barcode.trim().toLowerCase();
-        return normalized === 'delivered not-scanned' || 
-               normalized === 'delivered not scanned' ||
-               normalized === 'returned not-scanned' ||
-               normalized === 'returned not scanned' ||
-               normalized === 'not scanned' ||
-               normalized === 'dns';
-      };
-      
-      const rentalsByBottleId = (rentalsData || []).filter(r => r.bottle_id);
-      if (rentalsByBottleId.length > 0) {
-        let rentalsByBottleIdAdded = 0;
-        // Add rentals that weren't already included (by bottle_id lookup)
-        for (const rental of rentalsByBottleId) {
-          const bottle = bottlesMap[`id:${rental.bottle_id}`] || bottlesMap[rental.bottle_barcode];
-          const isDNS = rental.is_dns === true;
-          
-          // Check if this rental is already in allRentalData
-          const alreadyIncluded = allRentalData.some(r => r.id === rental.id);
-          
-          // Include rental if:
-          // 1. It has a matching bottle, OR
-          // 2. It's a DNS rental, OR
-          // 3. It has a bottle_id (even if bottle not found in bottlesMap - bottle might exist in assignedBottles)
-          // We should include ALL rentals with bottle_id because those bottles exist (they're in assignedBottles)
-          if (!alreadyIncluded && (bottle || isDNS || rental.bottle_id)) {
-            const rentalLocation = bottle 
-              ? (rental.location || bottle.location || 'SASKATOON').toUpperCase()
-              : (rental.location || 'SASKATOON').toUpperCase();
-            const locationTaxRate = locationTaxMap[rentalLocation] || rental.tax_rate || 0.11;
-            
-            allRentalData.push({
-              ...rental,
-              source: 'rental',
-              bottles: bottle || null,
-              tax_rate: locationTaxRate,
-              location: rentalLocation,
-              is_dns: isDNS
-            });
-            rentalsByBottleIdAdded++;
-          }
-        }
-      }
-
-      // Add bottles that are assigned but don't have rental records
-      // Track both barcodes AND bottle_ids to catch all cases
-      const existingBottleBarcodes = new Set();
-      const existingBottleIds = new Set();
-      
-      allRentalData.forEach(r => {
-        // Only track real barcodes (not placeholders) to avoid false matches
-        if (r.bottle_barcode && !isPlaceholderBarcode(r.bottle_barcode)) {
-          existingBottleBarcodes.add(r.bottle_barcode);
-        }
-        if (r.bottle_id) existingBottleIds.add(r.bottle_id);
-        if (r.bottles?.id) existingBottleIds.add(r.bottles.id);
-      });
-      
-      const pricingMap = (customerPricing || []).reduce((map, pricing) => {
-        map[pricing.customer_id] = pricing;
-        return map;
-      }, {});
-      
-      let bottlesAdded = 0;
-      let bottlesSkipped = 0;
-      
-      for (const bottle of assignedBottles || []) {
-        const barcode = bottle.barcode_number || bottle.barcode;
-        const bottleId = bottle.id;
-        const isPlaceholder = isPlaceholderBarcode(barcode);
-        
-        // Check if this bottle is already in rentals
-        // For placeholder barcodes, only check by bottle_id (not barcode)
-        // For real barcodes, check by both barcode AND bottle_id
-        const alreadyInRentals = isPlaceholder
-          ? (bottleId && existingBottleIds.has(bottleId))
-          : ((barcode && existingBottleBarcodes.has(barcode)) || 
-             (bottleId && existingBottleIds.has(bottleId)));
-        
-        if (!alreadyInRentals) {
-          // New/extra bottle: default to monthly until admin switches to yearly (one lease per bottle)
-          const customerPricing = pricingMap[bottle.assigned_customer];
-          let rentalAmount = 10; // Default rate
-          const rentalType = 'monthly';
-          
-          if (customerPricing) {
-            if (customerPricing.fixed_rate_override) {
-              rentalAmount = customerPricing.fixed_rate_override;
-            } else if (customerPricing.discount_percent > 0) {
-              // Apply discount to base rate (default $10/month)
-              rentalAmount = 10 * (1 - customerPricing.discount_percent / 100);
-            }
-          }
-          
-          // Get location-specific tax rate
-          const bottleLocation = (bottle.location || 'SASKATOON').toUpperCase();
-          const locationTaxRate = locationTaxMap[bottleLocation] || 0.11; // Default to 11% if location not found
-          
-          allRentalData.push({
-            id: `bottle_${bottle.id}`,
-            source: 'bottle_assignment',
-            customer_id: bottle.assigned_customer,
-            bottle_barcode: barcode || null, // Can be null for bottles without barcodes
-            bottle_id: bottle.id,
-            bottles: bottle,
-            rental_start_date: bottle.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
-            rental_end_date: null,
-            rental_amount: rentalAmount,
-            rental_type: rentalType,
-            tax_code: 'GST+PST',
-            tax_rate: locationTaxRate,
-            location: bottleLocation
-          });
-          
-          // Track this bottle so we don't add it again
-          // Only track real barcodes (not placeholders) in the barcode set to avoid false matches
-          if (barcode && !isPlaceholder) {
-            existingBottleBarcodes.add(barcode);
-          }
-          if (bottleId) {
-            existingBottleIds.add(bottleId);
-          }
-          bottlesAdded++;
-        } else {
-          bottlesSkipped++;
-        }
-      }
-
-      // Remove duplicates based on bottle_barcode OR bottle_id (keep rental records over bottle assignments)
-      // For placeholder barcodes, use bottle_id as the unique identifier
-      const deduplicatedData = [];
-      const seenBarcodes = new Set();
-      const seenBottleIds = new Set(); // Track bottle_ids for bottles without barcodes or with placeholder barcodes
-      const duplicateBarcodes = new Map(); // Track which barcodes have duplicates
-      
-      // First pass: Add all rental records (priority over bottle assignments)
-      let dnsRentalsIncluded = 0;
-      for (const item of allRentalData) {
-        if (item.source === 'rental') {
-          const barcode = item.bottle_barcode;
-          const bottleId = item.bottle_id || item.bottles?.id;
-          const isDNS = item.is_dns === true;
-          const isPlaceholder = isPlaceholderBarcode(barcode);
-          
-          // For placeholder barcodes or DNS, use bottle_id as unique identifier
-          if (isDNS || isPlaceholder || !barcode || (typeof barcode === 'string' && barcode.trim() === '')) {
-            // DNS rentals, placeholder barcodes, or rentals without barcode - use bottle_id
-            if (bottleId && seenBottleIds.has(bottleId)) {
-              // Duplicate bottle_id found
-              duplicateBarcodes.set(barcode || 'no_barcode', (duplicateBarcodes.get(barcode || 'no_barcode') || 1) + 1);
-          } else {
-              deduplicatedData.push(item);
-              if (isDNS) dnsRentalsIncluded++;
-              if (bottleId) seenBottleIds.add(bottleId);
-            }
-          } else if (!seenBarcodes.has(barcode)) {
-            // Real barcode - use barcode as unique identifier
-            deduplicatedData.push(item);
-            seenBarcodes.add(barcode);
-            if (bottleId) seenBottleIds.add(bottleId);
-          } else {
-            duplicateBarcodes.set(barcode, (duplicateBarcodes.get(barcode) || 1) + 1);
-          }
-        }
-      }
-      
-      // Second pass: Add bottle assignments only if no rental record exists
-      let bottlesWithoutBarcode = 0;
-      let placeholderBottlesAdded = 0;
-      let placeholderBottlesSkipped = 0;
-      
-      for (const item of allRentalData) {
-        if (item.source === 'bottle_assignment') {
-          const barcode = item.bottle_barcode;
-          const bottleId = item.bottle_id || item.bottles?.id;
-          const isPlaceholder = isPlaceholderBarcode(barcode);
-          
-          // For placeholder barcodes, check by bottle_id only (barcode is not unique)
-          // For real barcodes, check by both barcode AND bottle_id
-          const alreadyIncluded = isPlaceholder
-            ? (bottleId && seenBottleIds.has(bottleId))
-            : ((barcode && seenBarcodes.has(barcode)) || (bottleId && seenBottleIds.has(bottleId)));
-          
-          if (alreadyIncluded) {
-            // This is expected - rental record already exists for this barcode/bottle_id
-            if (barcode && !isPlaceholder) {
-              duplicateBarcodes.set(barcode, (duplicateBarcodes.get(barcode) || 1) + 1);
-            }
-            if (isPlaceholder) {
-              placeholderBottlesSkipped++;
-            }
-          } else {
-            // Include this bottle assignment
-            deduplicatedData.push(item);
-            // Only track real barcodes (not placeholders) in seenBarcodes
-            // Always track bottle_id for both placeholders and real barcodes
-            if (barcode && !isPlaceholder) {
-              seenBarcodes.add(barcode);
-            }
-            if (bottleId) {
-              seenBottleIds.add(bottleId);
-            }
-            if (isPlaceholder) {
-              placeholderBottlesAdded++;
-            }
-            if (!barcode || (typeof barcode === 'string' && barcode.trim() === '')) {
-              bottlesWithoutBarcode++;
-            }
-          }
-        }
-      }
-      
-      // Per-bottle lease map: bottle_id -> agreement (one lease per bottle)
-      const leaseByBottleId = (leaseAgreements || [])
-        .filter(a => a.bottle_id)
-        .reduce((map, a) => { map[a.bottle_id] = a; return map; }, {});
-
-      // Use customers from initial batch (no extra round trips)
-      const allCustomers = customersData || [];
-      setCustomers(allCustomers);
-      setLocations(locationsData || []);
-
-      const customersMap = allCustomers.reduce((map, c) => {
-        map[c.CustomerListID] = c;
-        return map;
-      }, {});
-
-      const customerTypesMap = allCustomers.reduce((map, c) => {
-        map[c.CustomerListID] = c.customer_type || 'CUSTOMER';
-        return map;
-      }, {});
-
-      // Apply per-bottle lease: only mark a rental as yearly if it has lease_agreement_id or its bottle has a lease (one lease per bottle)
-      for (const rental of deduplicatedData) {
-        const bottleId = rental.bottle_id || rental.bottles?.id;
-        const agreementFromBottle = bottleId ? leaseByBottleId[bottleId] : null;
-        const agreementFromRental = rental.lease_agreement_id && (leaseAgreements || []).find(a => a.id === rental.lease_agreement_id);
-        const agreement = agreementFromBottle || agreementFromRental;
-        if (agreement) {
-          const billingFreq = (agreement.billing_frequency || '').toLowerCase();
-          const isYearly = billingFreq === 'annual' || billingFreq === 'yearly' || billingFreq === 'annually' || billingFreq === 'semi-annual';
-          if (isYearly) {
-            rental.rental_type = 'yearly';
-            rental.lease_agreement_id = agreement.id;
-            rental.lease_agreement = agreement;
-            if ((agreement.annual_amount || 0) > 0) {
-              rental.rental_amount = agreement.annual_amount / 12;
-            }
-          }
-        }
-        // If rental came from DB without lease_agreement_id and bottle has no per-bottle lease, keep rental_type as-is (default monthly for new bottles)
-      }
-
-      // 7. Attach customer info to each rental
-      const rentalsWithCustomer = deduplicatedData.map(r => ({
-        ...r,
-        customer: customersMap[r.customer_id] || null
-      }));
-
-      // Include all rentals with customer_id (vendors included - filter applied in UI)
-      const filteredRentals = rentalsWithCustomer.filter(r => {
-        if (!r.customer_id) return false;
-        return true;
-      });
+      const workspaceData = await fetchBillingWorkspaceData(organization.id);
+      const {
+        filteredRentals,
+        allCustomers,
+        locationsData: locData,
+        bottlesWithVendors,
+        inHouseTotal,
+      } = processBillingWorkspaceToFilteredRentals(workspaceData);
 
       setAssets(filteredRentals);
-
-      // Calculate statistics based on bottle status and customer assignment
-      // IMPORTANT: Bottles at locations WITHOUT customers should be "in-house" (available), not "rented"
-      
-      // Count bottles by status and customer type (customerTypesMap from initial batch)
-      // Bottles assigned to vendors are "with vendors" (in-house, no charge)
-      const bottlesWithVendors = (assignedBottles || []).filter(bottle => {
-        const customerType = customerTypesMap[bottle.assigned_customer] || 'CUSTOMER';
-        return customerType === 'VENDOR';
-      }).length;
-      
-      // Count rented bottles: ONLY bottles assigned to CUSTOMERS (not vendors) with status "rented" (excluding customer-owned)
-      // Bottles at locations without customers are NOT rented - they're in-house
-      const rentedBottles = (assignedBottles || []).filter(bottle => {
-        const customerType = customerTypesMap[bottle.assigned_customer] || 'CUSTOMER';
-        const ownershipValue = String(bottle.ownership || '').trim().toLowerCase();
-        const isCustomerOwned = ownershipValue.includes('customer') || 
-                               ownershipValue.includes('owned') || 
-                               ownershipValue === 'customer owned';
-        
-        // Only count as rented if:
-        // 1. Assigned to a customer (not vendor, not null)
-        // 2. Customer type is CUSTOMER (not VENDOR) 
-        // 3. Status is "rented"
-        // 4. Not customer-owned (customer-owned bottles should be "available")
-        // Note: Bottles at locations without customers are NOT in assignedBottles, so they're already in-house
-        return bottle.assigned_customer && 
-               customerType === 'CUSTOMER' && 
-               (bottle.status === 'rented' || bottle.status === 'RENTED') &&
-               !isCustomerOwned;
-      }).length;
-      
-      // Available/In-House = unassigned bottles + vendor bottles + assigned bottles with status "available" OR customer-owned bottles
-      // Also includes bottles at locations without customer assignment (they're in-house)
-      const assignedBottlesAvailable = (assignedBottles || []).filter(bottle => {
-        const customerType = customerTypesMap[bottle.assigned_customer] || 'CUSTOMER';
-        const ownershipValue = String(bottle.ownership || '').trim().toLowerCase();
-        const isCustomerOwned = ownershipValue.includes('customer') || 
-                               ownershipValue.includes('owned') || 
-                               ownershipValue === 'customer owned';
-        
-        // Count as available if:
-        // 1. Status is "available", OR
-        // 2. Customer-owned (even if status is "rented", customer-owned should show as available)
-        // 3. Assigned to vendor (vendors are in-house, no charge)
-        return (bottle.status === 'available' || bottle.status === 'AVAILABLE') ||
-               (isCustomerOwned && customerType !== 'VENDOR') ||
-               customerType === 'VENDOR';
-      }).length;
-      
-      // In-house total includes:
-      // - Unassigned bottles (no customer, may have location)
-      // - Vendor bottles (assigned to vendors)
-      // - Assigned bottles with status "available" or customer-owned
-      const inHouseTotal = unassignedBottles + bottlesWithVendors + assignedBottlesAvailable;
-      
-      setStats({ 
-        inHouse: inHouseTotal,  // Unassigned + vendor bottles + assigned with status "available"
-        withVendors: bottlesWithVendors,  // Bottles assigned to vendors
-        rented: rentedBottles   // Bottles assigned to customers with status "rented"
+      setCustomers(allCustomers);
+      setLocations(locData || []);
+      setStats({
+        inHouse: inHouseTotal,
+        withVendors: bottlesWithVendors,
       });
 
     } catch (err) {
@@ -811,11 +465,27 @@ function RentalsImproved() {
       });
   }, [customersWithRentals, filters.customer_type, filters.status, debouncedSearch]);
 
-  const tabs = useMemo(() => [
-    { label: 'All Customers', value: 'all', count: filteredCustomers.length },
-    { label: 'Monthly Rentals', value: 'monthly', count: filteredCustomers.reduce((c, x) => c + x.rentals.filter(r => r.rental_type === 'monthly').length, 0) },
-    { label: 'Yearly Rentals', value: 'yearly', count: filteredCustomers.reduce((c, x) => c + x.rentals.filter(r => r.rental_type === 'yearly').length, 0) },
-  ], [filteredCustomers]);
+  // Same rows as the table/tabs: monthly = non-yearly (matches partitionRentalsByBillingType), yearly = yearly
+  const workspaceRentedLineCount = useMemo(
+    () => filteredCustomers.reduce((c, x) => c + x.rentals.length, 0),
+    [filteredCustomers]
+  );
+
+  const tabs = useMemo(() => {
+    const monthly = filteredCustomers.reduce(
+      (c, x) => c + x.rentals.filter((r) => !isYearlyRental(r)).length,
+      0
+    );
+    const yearly = filteredCustomers.reduce(
+      (c, x) => c + x.rentals.filter((r) => isYearlyRental(r)).length,
+      0
+    );
+    return [
+      { label: 'All Customers', value: 'all', count: filteredCustomers.length },
+      { label: 'Monthly Rentals', value: 'monthly', count: monthly },
+      { label: 'Yearly Rentals', value: 'yearly', count: yearly },
+    ];
+  }, [filteredCustomers]);
 
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
@@ -977,10 +647,20 @@ function RentalsImproved() {
 
   const currentCustomers = useMemo(() => {
     if (activeTab === 0) return filteredCustomers;
-    if (activeTab === 1) return filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'monthly'));
-    if (activeTab === 2) return filteredCustomers.filter(c => c.rentals.some(r => r.rental_type === 'yearly'));
+    if (activeTab === 1) {
+      return filteredCustomers
+        .map((c) => ({ ...c, rentals: c.rentals.filter((r) => isMonthlyRental(r)) }))
+        .filter((c) => c.rentals.length > 0);
+    }
+    if (activeTab === 2) {
+      return filteredCustomers
+        .map((c) => ({ ...c, rentals: c.rentals.filter((r) => isYearlyRental(r)) }))
+        .filter((c) => c.rentals.length > 0);
+    }
     return filteredCustomers;
   }, [filteredCustomers, activeTab]);
+
+  const rentalListMode = activeTab === 0 ? 'all' : activeTab === 1 ? 'monthly' : 'yearly';
 
   // Open edit dialog when navigated from CustomerDetail "Edit rental rates (per asset)"
   useEffect(() => {
@@ -1135,13 +815,15 @@ function RentalsImproved() {
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
                   <Typography variant="h4" fontWeight="bold" color="success.main">
-                    {stats.rented}
+                    {workspaceRentedLineCount}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Rented Assets
-                  </Typography>
+                  <Tooltip title="Rental rows in the workspace below (same list as Monthly + Yearly). Updates when you search. Not the same as bottle status in inventory.">
+                    <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                      Rented assets
+                    </Typography>
+                  </Tooltip>
                   <Typography variant="caption" color="success.main">
-                    (Billable)
+                    Monthly + yearly lines
                   </Typography>
                 </Box>
                 <PersonIcon sx={{ fontSize: 40, color: '#4caf50' }} />
@@ -1244,6 +926,7 @@ function RentalsImproved() {
               setEditDialog={setEditDialog}
               isRNB={isRNB}
               isRNS={isRNS}
+              rentalListMode={rentalListMode}
             />
           </TableBody>
         </Table>
@@ -1266,6 +949,17 @@ function RentalsImproved() {
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Set rental type and rate per asset. You can use different amounts per bottle (e.g. $10 for one, $9 for another).
               </Typography>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={showBottleDetailsInEdit}
+                    onChange={(e) => setShowBottleDetailsInEdit(e.target.checked)}
+                    color="primary"
+                  />
+                }
+                label="Show bottle details"
+                sx={{ mt: 1, mb: 0.5 }}
+              />
 
               <Grid container spacing={2} sx={{ mt: 1 }}>
                 {editDialog.rentals?.map((rental) => {
@@ -1273,12 +967,36 @@ function RentalsImproved() {
                   const displayLabel = barcode || (rental.is_dns ? `${rental.dns_product_code || 'DNS'} – ${rental.dns_description || 'Not Scanned'}` : 'Bottle');
                   const rentalType = rental.rental_type || 'monthly';
                   const amountStr = rental.rental_amount != null && rental.rental_amount !== '' ? String(rental.rental_amount) : '10';
+                  const b = rental.bottles;
+                  const detailParts = showBottleDetailsInEdit
+                    ? b
+                      ? [
+                          b.gas_type && `Gas: ${b.gas_type}`,
+                          b.product_code && `Product: ${b.product_code}`,
+                          b.size && `Size: ${b.size}`,
+                          b.serial_number && `Serial: ${b.serial_number}`,
+                          (b.description || b.type) && `Description: ${b.description || b.type}`,
+                        ].filter(Boolean)
+                      : rental.is_dns
+                        ? [
+                            rental.dns_product_code && `Product: ${rental.dns_product_code}`,
+                            rental.dns_description && `${rental.dns_description}`,
+                          ].filter(Boolean)
+                        : []
+                    : [];
                   return (
                     <Grid item xs={12} key={rental.id}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                        <Typography variant="body2" sx={{ minWidth: 100 }}>
-                          {displayLabel}
-                        </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap' }}>
+                        <Box sx={{ minWidth: 100, flex: '1 1 160px' }}>
+                          <Typography variant="body2" fontWeight={600}>
+                            {displayLabel}
+                          </Typography>
+                          {detailParts.length > 0 && (
+                            <Typography variant="caption" color="text.secondary" component="div" sx={{ display: 'block', mt: 0.5, lineHeight: 1.5 }}>
+                              {detailParts.join(' · ')}
+                            </Typography>
+                          )}
+                        </Box>
                         <TextField
                           size="small"
                           label="Rate ($)"
@@ -1307,6 +1025,17 @@ function RentalsImproved() {
                         </FormControl>
                         {rentalType === 'yearly' && rental.lease_agreement_id && (
                           <Chip size="small" label="Lease linked" color="success" />
+                        )}
+                        {rental.rental_rate_meta?.shortLabel && (
+                          <Tooltip title={rental.rental_rate_meta.label || ''}>
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              color="secondary"
+                              label={rental.rental_rate_meta.shortLabel}
+                              sx={{ fontWeight: 600 }}
+                            />
+                          </Tooltip>
                         )}
                       </Box>
                     </Grid>

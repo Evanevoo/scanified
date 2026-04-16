@@ -1,0 +1,26 @@
+# Keep deploy uploads small — Vercel runs `npm install` + `npm run build` remotely.
+node_modules
+.git
+.vercel
+dist
+coverage
+.netlify
+.cursor
+**/.cursor
+
+# Mobile app (not part of Vite web build)
+gas-cylinder-mobile
+
+# Local backups and large archives
+backups
+*.apk
+*.aab
+*.ipa
+*.tgz
+*.tar.gz
+
+# Logs and caches
+*.log
+.npm
+.eslintcache
+.cache

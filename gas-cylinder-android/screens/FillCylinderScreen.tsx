@@ -422,30 +422,44 @@ export default function FillCylinderScreen() {
             .maybeSingle();
           const hasActiveRental = !!activeRental;
 
-          if (hasActiveRental && isMountedRef.current) {
-            const customerName = bottleData.customer_name || 'Unknown';
-            setIsProcessing(false);
-            Alert.alert(
-              'Still assigned to a customer',
-              `This ${assetConfig?.assetDisplayName?.toLowerCase() || 'bottle'} is still assigned to the customer "${customerName}" in the system (it was not scanned as returned/empty yet).\n\nTo keep the usual flow: scan it as empty when it returns, then as full after refilling.\n\nIf the bottle is already back and refilled, tap "Add Anyway" to mark it full and update location.`,
-              [
-                { 
-                  text: 'Cancel', 
-                  style: 'cancel',
-                  onPress: () => {
-                    processingBarcodesRef.current.delete(barcode);
-                    if (isMountedRef.current) setIsProcessing(false);
+          if (hasActiveRental) {
+            // If the bottle has ever been scanned as RETURN/PICKUP, skip the warning even when
+            // rental_end_date is still open (stale rentals row/data drift).
+            const { data: anyReturnScan } = await supabase
+              .from('bottle_scans')
+              .select('id, mode')
+              .eq('organization_id', profile?.organization_id ?? '')
+              .eq('bottle_barcode', bottleData.barcode_number || barcode)
+              .in('mode', ['RETURN', 'PICKUP'])
+              .limit(1)
+              .maybeSingle();
+            const hasReturnHistory = !!anyReturnScan;
+
+            if (!hasReturnHistory && isMountedRef.current) {
+              const customerName = bottleData.customer_name || 'Unknown';
+              setIsProcessing(false);
+              Alert.alert(
+                'Still assigned to a customer',
+                `This ${assetConfig?.assetDisplayName?.toLowerCase() || 'bottle'} is still assigned to the customer "${customerName}" in the system (it was not scanned as returned/empty yet).\n\nTo keep the usual flow: scan it as empty when it returns, then as full after refilling.\n\nIf the bottle is already back and refilled, tap "Add Anyway" to mark it full and update location.`,
+                [
+                  {
+                    text: 'Cancel',
+                    style: 'cancel',
+                    onPress: () => {
+                      processingBarcodesRef.current.delete(barcode);
+                      if (isMountedRef.current) setIsProcessing(false);
+                    }
+                  },
+                  {
+                    text: 'Add Anyway',
+                    onPress: () => {
+                      addBottleToScannedList(bottleData);
+                    }
                   }
-                },
-                { 
-                  text: 'Add Anyway', 
-                  onPress: () => {
-                    addBottleToScannedList(bottleData);
-                  }
-                }
-              ]
-            );
-            return;
+                ]
+              );
+              return;
+            }
           }
         }
       }

@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useDebounce } from '../utils/performance';
 import { toCsv, downloadFile, getNextAgreementNumbers } from '../utils/invoiceUtils';
@@ -35,7 +35,8 @@ import {
   Alert,
   Snackbar,
   Tooltip,
-  InputAdornment
+  InputAdornment,
+  Autocomplete
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -55,6 +56,7 @@ import {
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
+import { fetchBillingWorkspaceData, computeLeaseAgreementStats } from '../services/billingWorkspaceService';
 import { StatsSkeleton, TableSkeleton } from '../components/SmoothLoading';
 
 export default function LeaseAgreements() {
@@ -72,6 +74,8 @@ export default function LeaseAgreements() {
   const [dialogMode, setDialogMode] = useState('view'); // 'view', 'add', 'edit'
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [customers, setCustomers] = useState([]);
+  /** Current assigned-bottle counts by customer id (from workspace inventory). */
+  const [bottleCountByCustomerId, setBottleCountByCustomerId] = useState({});
   const [customerBottles, setCustomerBottles] = useState([]); // bottles assigned to selected customer (for assign-to-bottle)
   const [billingHistory, setBillingHistory] = useState([]);
   const [retroactiveBilling, setRetroactiveBilling] = useState({ isRetroactive: false, proRatedAmount: 0, message: '' });
@@ -106,61 +110,38 @@ export default function LeaseAgreements() {
     applyToAllBottles: false
   });
 
-  const fetchAgreements = async () => {
-    const { data, error } = await supabase
-      .from('lease_agreements')
-      .select('*, bottles:bottle_id(barcode_number)')
-      .eq('organization_id', profile.organization_id)
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    setAgreements(data || []);
-  };
-
-  const fetchCustomers = async () => {
-    const { data, error } = await supabase
-      .from('customers')
-      .select('CustomerListID, name, payment_terms, location')
-      .eq('organization_id', profile.organization_id)
-      .order('name');
-    if (error) throw error;
-    setCustomers(data || []);
-  };
-
-  const fetchStats = async () => {
-    const { data, error } = await supabase
-      .from('lease_agreements')
-      .select('*')
-      .eq('organization_id', profile.organization_id);
-    if (error) throw error;
-    const list = data || [];
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    setStats({
-      totalAgreements: list.length,
-      activeAgreements: list.filter((a) => a.status === 'active').length,
-      totalAnnualValue: list.reduce((sum, a) => sum + (parseFloat(a.annual_amount) || 0), 0),
-      expiringThisMonth: list.filter(
-        (a) =>
-          a.status === 'active' &&
-          a.end_date &&
-          new Date(a.end_date) >= startOfMonth &&
-          new Date(a.end_date) <= endOfMonth
-      ).length,
-    });
-  };
+  const loadWorkspace = useCallback(
+    async ({ fullPage = true } = {}) => {
+      if (!profile?.organization_id) return;
+      if (fullPage) setLoading(true);
+      try {
+        const data = await fetchBillingWorkspaceData(profile.organization_id);
+        setAgreements((data.leaseAgreements || []).filter(Boolean));
+        setCustomers(data.customersData);
+        setStats(computeLeaseAgreementStats(data.leaseAgreements));
+        const counts = {};
+        for (const b of data.allBottles || []) {
+          const cid = b.assigned_customer;
+          if (cid == null || cid === '') continue;
+          const key = String(cid);
+          counts[key] = (counts[key] || 0) + 1;
+        }
+        setBottleCountByCustomerId(counts);
+      } catch (error) {
+        logger.error('Error loading billing workspace:', error);
+        setSnackbar({ open: true, message: 'Error loading agreements', severity: 'error' });
+      } finally {
+        if (fullPage) setLoading(false);
+      }
+    },
+    [profile?.organization_id]
+  );
 
   useEffect(() => {
     if (profile?.organization_id) {
-      setLoading(true);
-      Promise.all([fetchAgreements(), fetchCustomers(), fetchStats()])
-        .catch((error) => {
-          logger.error('Error loading:', error);
-          setSnackbar({ open: true, message: 'Error loading agreements', severity: 'error' });
-        })
-        .finally(() => setLoading(false));
+      loadWorkspace({ fullPage: true });
     }
-  }, [profile?.organization_id]);
+  }, [profile?.organization_id, loadWorkspace]);
 
   // Calculate retroactive billing when form dates/amounts change
   useEffect(() => {
@@ -332,8 +313,7 @@ export default function LeaseAgreements() {
       }
 
       setDialogOpen(false);
-      fetchAgreements();
-      fetchStats();
+      await loadWorkspace({ fullPage: false });
     } catch (error) {
       logger.error('Error saving agreement:', error);
       setSnackbar({ open: true, message: 'Error saving agreement', severity: 'error' });
@@ -351,8 +331,7 @@ export default function LeaseAgreements() {
 
       if (error) throw error;
       setSnackbar({ open: true, message: 'Agreement deleted successfully', severity: 'success' });
-      fetchAgreements();
-      fetchStats();
+      await loadWorkspace({ fullPage: false });
     } catch (error) {
       logger.error('Error deleting agreement:', error);
       setSnackbar({ open: true, message: 'Error deleting agreement', severity: 'error' });
@@ -424,8 +403,7 @@ export default function LeaseAgreements() {
         .eq('id', agreement.id);
 
       setSnackbar({ open: true, message: 'Agreement renewed successfully', severity: 'success' });
-      fetchAgreements();
-      fetchStats();
+      await loadWorkspace({ fullPage: false });
     } catch (error) {
       logger.error('Error renewing agreement:', error);
       setSnackbar({ open: true, message: 'Error renewing agreement', severity: 'error' });
@@ -518,6 +496,7 @@ export default function LeaseAgreements() {
     const byTab = activeTab === 0 ? null : activeTab === 1 ? 'active' : activeTab === 2 ? 'expired' : activeTab === 3 ? 'renewed' : null;
     const status = byTab || statusFilter;
     return agreements.filter((agreement) => {
+      if (!agreement) return false;
       const bottleBarcode = agreement.bottle_id
         ? (Array.isArray(agreement.bottles) ? agreement.bottles[0]?.barcode_number : agreement.bottles?.barcode_number) ?? ''
         : '';
@@ -543,18 +522,27 @@ export default function LeaseAgreements() {
   };
 
   const getBottleDisplay = (agreement) => {
-    if (!agreement.bottle_id) return '—';
+    if (!agreement || !agreement.bottle_id) return '—';
     const barcode = Array.isArray(agreement.bottles) ? agreement.bottles[0]?.barcode_number : agreement.bottles?.barcode_number;
     return barcode ?? agreement.bottle_id;
   };
 
+  const getLeaseBottleCount = (agreement) => {
+    if (!agreement) return 0;
+    if (agreement.bottle_id) return 1;
+    const key = agreement.customer_id != null ? String(agreement.customer_id) : '';
+    const n = key ? bottleCountByCustomerId[key] : 0;
+    return typeof n === 'number' ? n : 0;
+  };
+
   const exportToCSV = () => {
-    const cols = ['Agreement #', 'Customer', 'Customer ID', 'Bottle', 'Start Date', 'End Date', 'Annual Amount', 'Billing Frequency', 'Status'];
-    const rows = filteredAgreements.map((a) => ({
+    const cols = ['Agreement #', 'Customer', 'Customer ID', 'Bottle', '# Bottles', 'Start Date', 'End Date', 'Annual Amount', 'Billing Frequency', 'Status'];
+    const rows = filteredAgreements.filter(Boolean).map((a) => ({
       'Agreement #': a.agreement_number,
       Customer: a.customer_name,
       'Customer ID': a.customer_id,
       Bottle: getBottleDisplay(a),
+      '# Bottles': getLeaseBottleCount(a),
       'Start Date': a.start_date,
       'End Date': a.end_date,
       'Annual Amount': a.annual_amount,
@@ -582,7 +570,7 @@ export default function LeaseAgreements() {
           </Button>
         </Box>
         <StatsSkeleton count={4} />
-        <Box mt={4}><TableSkeleton rows={8} columns={8} /></Box>
+        <Box mt={4}><TableSkeleton rows={8} columns={10} /></Box>
       </Box>
     );
   }
@@ -745,6 +733,7 @@ export default function LeaseAgreements() {
               <TableCell>Agreement #</TableCell>
               <TableCell>Customer</TableCell>
               <TableCell>Bottle</TableCell>
+              <TableCell align="right"># Bottles</TableCell>
               <TableCell>Start Date</TableCell>
               <TableCell>End Date</TableCell>
               <TableCell>Annual Amount</TableCell>
@@ -756,7 +745,7 @@ export default function LeaseAgreements() {
           <TableBody>
             {filteredAgreements.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
+                <TableCell colSpan={10} align="center" sx={{ py: 6 }}>
                   <Typography color="text.secondary">
                     {agreements.length === 0
                       ? 'No lease agreements yet. Click "New Agreement" to create one.'
@@ -789,6 +778,19 @@ export default function LeaseAgreements() {
                   ) : (
                     '—'
                   )}
+                </TableCell>
+                <TableCell align="right">
+                  <Tooltip
+                    title={
+                      agreement.bottle_id
+                        ? 'Per-bottle lease (this agreement is for one asset).'
+                        : 'Customer-level lease: count of bottles currently assigned to this customer in your inventory.'
+                    }
+                  >
+                    <Typography component="span" fontWeight={600}>
+                      {getLeaseBottleCount(agreement)}
+                    </Typography>
+                  </Tooltip>
                 </TableCell>
                 <TableCell>{formatDate(agreement.start_date)}</TableCell>
                 <TableCell>{formatDate(agreement.end_date)}</TableCell>
@@ -866,12 +868,17 @@ export default function LeaseAgreements() {
                 <Tab label="Details" />
                 <Tab label="Billing History" />
               </Tabs>
-              {tabValue === 0 && (
+              {tabValue === 0 && !selectedAgreement && (
+                <Box pt={2}>
+                  <Typography color="text.secondary">No agreement selected.</Typography>
+                </Box>
+              )}
+              {tabValue === 0 && selectedAgreement && (
                 <Box pt={2}>
                   <Grid container spacing={2}>
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2">Agreement Number</Typography>
-                      <Typography variant="body1" mb={2}>{selectedAgreement?.agreement_number}</Typography>
+                      <Typography variant="body1" mb={2}>{selectedAgreement.agreement_number}</Typography>
                     </Grid>
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2">Customer</Typography>
@@ -879,12 +886,21 @@ export default function LeaseAgreements() {
                         variant="body1"
                         mb={2}
                         sx={{ cursor: 'pointer', color: 'primary.main', '&:hover': { textDecoration: 'underline' } }}
-                        onClick={() => selectedAgreement?.customer_id && (setDialogOpen(false), navigate(`/customer/${selectedAgreement.customer_id}`))}
+                        onClick={() => selectedAgreement.customer_id && (setDialogOpen(false), navigate(`/customer/${selectedAgreement.customer_id}`))}
                       >
-                        {selectedAgreement?.customer_name}
+                        {selectedAgreement.customer_name}
                       </Typography>
                     </Grid>
-                    {selectedAgreement?.bottle_id && (
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2">Bottles covered</Typography>
+                      <Typography variant="body1" mb={2} fontWeight={600}>
+                        {getLeaseBottleCount(selectedAgreement)}
+                        {selectedAgreement.bottle_id
+                          ? ' (per-bottle lease)'
+                          : ' (all bottles currently assigned to this customer)'}
+                      </Typography>
+                    </Grid>
+                    {selectedAgreement.bottle_id && (
                       <Grid item xs={12} md={6}>
                         <Typography variant="subtitle2">Bottle (per-bottle lease)</Typography>
                         <Typography
@@ -899,23 +915,23 @@ export default function LeaseAgreements() {
                     )}
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2">Start Date</Typography>
-                      <Typography variant="body1" mb={2}>{formatDate(selectedAgreement?.start_date)}</Typography>
+                      <Typography variant="body1" mb={2}>{formatDate(selectedAgreement.start_date)}</Typography>
                     </Grid>
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2">End Date</Typography>
-                      <Typography variant="body1" mb={2}>{formatDate(selectedAgreement?.end_date)}</Typography>
+                      <Typography variant="body1" mb={2}>{formatDate(selectedAgreement.end_date)}</Typography>
                     </Grid>
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2">Annual Amount</Typography>
-                      <Typography variant="body1" mb={2}>{formatCurrency(selectedAgreement?.annual_amount)}</Typography>
+                      <Typography variant="body1" mb={2}>{formatCurrency(selectedAgreement.annual_amount)}</Typography>
                     </Grid>
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2">Billing Frequency</Typography>
-                      <Typography variant="body1" mb={2}>{selectedAgreement?.billing_frequency}</Typography>
+                      <Typography variant="body1" mb={2}>{selectedAgreement.billing_frequency}</Typography>
                     </Grid>
                     <Grid item xs={12}>
                       <Typography variant="subtitle2">Terms & Conditions</Typography>
-                      <Typography variant="body1" mb={2}>{selectedAgreement?.terms_and_conditions || 'None specified'}</Typography>
+                      <Typography variant="body1" mb={2}>{selectedAgreement.terms_and_conditions || 'None specified'}</Typography>
                     </Grid>
                   </Grid>
                 </Box>
@@ -973,32 +989,46 @@ export default function LeaseAgreements() {
               )}
               <Grid container spacing={2}>
                 <Grid item xs={12} md={6}>
-                  <FormControl fullWidth>
-                    <InputLabel>Customer</InputLabel>
-                    <Select
-                      value={formData.customer_id}
-                      onChange={(e) => {
-                        const customer = customers.find(c => c.CustomerListID === e.target.value);
-                        const newCustomerId = e.target.value;
-                        setFormData({
-                          ...formData,
-                          customer_id: newCustomerId,
-                          customer_name: customer?.name || '',
-                          payment_terms: customer?.payment_terms || formData.payment_terms || 'Net 30',
-                          bottle_id: null,
-                          applyToAllBottles: false
-                        });
-                        fetchCustomerBottles(newCustomerId);
-                      }}
-                      label="Customer"
-                    >
-                      {customers.map((customer) => (
-                        <MenuItem key={customer.CustomerListID} value={customer.CustomerListID}>
-                          {customer.name}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
+                  <Autocomplete
+                    fullWidth
+                    disablePortal
+                    options={customers}
+                    value={customers.find((c) => c.CustomerListID === formData.customer_id) || null}
+                    isOptionEqualToValue={(option, value) => option.CustomerListID === value.CustomerListID}
+                    getOptionLabel={(option) => {
+                      const label = option?.name ?? option?.Name ?? option?.customer_name ?? '';
+                      return typeof label === 'string' ? label : String(label ?? '');
+                    }}
+                    filterOptions={(opts, { inputValue }) => {
+                      const term = inputValue.trim().toLowerCase();
+                      if (!term) return opts;
+                      return opts.filter((o) => {
+                        const label = (o?.name ?? o?.Name ?? o?.customer_name ?? '');
+                        return String(label).toLowerCase().includes(term);
+                      });
+                    }}
+                    PopperProps={{ sx: { zIndex: 2000 } }}
+                    onChange={(_, customer) => {
+                      const newCustomerId = customer?.CustomerListID || '';
+                      setFormData({
+                        ...formData,
+                        customer_id: newCustomerId,
+                        customer_name: customer?.name || '',
+                        payment_terms: customer?.payment_terms || formData.payment_terms || 'Net 30',
+                        bottle_id: null,
+                        applyToAllBottles: false
+                      });
+                      fetchCustomerBottles(newCustomerId);
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Customer"
+                        placeholder="Type to search customer..."
+                      />
+                    )}
+                    noOptionsText="No matching customers"
+                  />
                 </Grid>
                 {formData.customer_id && (
                   <>

@@ -127,7 +127,60 @@ If you weren't expecting this invitation, you can safely ignore this email.
 
 © ${new Date().getFullYear()} GasBoss. All rights reserved.
     `
-  })
+  }),
+
+  'password-recovery': ({ resetLink, organizationName, recipientName }) => ({
+    subject: `Reset your Scanified password`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: linear-gradient(135deg, #2563EB 0%, #1d4ed8 100%); color: white; padding: 24px; text-align: center; border-radius: 8px 8px 0 0; }
+          .content { background: #f9fafb; padding: 28px; border-radius: 0 0 8px 8px; }
+          .button { display: inline-block; background: #2563EB; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 20px 0; }
+          .footer { text-align: center; margin-top: 24px; color: #6b7280; font-size: 13px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1 style="margin: 0; font-size: 22px;">Password reset</h1>
+          </div>
+          <div class="content">
+            <p>Hello ${recipientName || 'there'},</p>
+            <p>Someone at <strong>${organizationName || 'your organization'}</strong> requested a password reset for your Scanified account.</p>
+            <p>Click the button below to choose a new password:</p>
+            <div style="text-align: center;">
+              <a href="${resetLink}" class="button">Reset password</a>
+            </div>
+            <p style="font-size: 14px; color: #64748b;">If the button does not work, copy this link into your browser:</p>
+            <p style="word-break: break-all; background: white; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 12px;">${resetLink}</p>
+            <p style="font-size: 14px;">If you did not request this, you can ignore this email.</p>
+          </div>
+          <div class="footer">
+            <p>&copy; ${new Date().getFullYear()} Scanified</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `,
+    text: `
+Hello ${recipientName || 'there'},
+
+Someone at ${organizationName || 'your organization'} requested a password reset for your Scanified account.
+
+Open this link to choose a new password:
+${resetLink}
+
+If you did not request this, you can ignore this email.
+
+© ${new Date().getFullYear()} Scanified
+    `,
+  }),
 };
 
 module.exports = { templates };

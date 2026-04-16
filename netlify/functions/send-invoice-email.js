@@ -1,11 +1,11 @@
 const nodemailer = require('nodemailer');
 
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   // Log function invocation
   console.log('=== send-invoice-email function invoked ===');
   console.log('HTTP Method:', event.httpMethod);
   console.log('Event body length:', event.body?.length || 0);
-  console.log('Context:', { requestId: context?.requestId, functionName: context?.functionName });
+  console.log('Context:', { requestId: _context?.requestId, functionName: _context?.functionName });
   
   // Wrap everything in try-catch to ensure we always return a response
   try {

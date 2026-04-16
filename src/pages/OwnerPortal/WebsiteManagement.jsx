@@ -161,7 +161,7 @@ export default function WebsiteManagement() {
               highlighted: false,
               visible: true,
               ctaText: 'Start Free Trial',
-              ctaLink: '/register?plan=basic'
+              ctaLink: '/create-organization?plan=basic'
             },
             {
               id: 'pro',
@@ -182,7 +182,7 @@ export default function WebsiteManagement() {
               highlighted: true,
               visible: true,
               ctaText: 'Start Free Trial',
-              ctaLink: '/register?plan=pro'
+              ctaLink: '/create-organization?plan=pro'
             },
             {
               id: 'enterprise',
@@ -436,7 +436,7 @@ export default function WebsiteManagement() {
               highlighted: false,
               visible: true,
               ctaText: 'Start Free Trial',
-              ctaLink: '/register?plan=basic'
+              ctaLink: '/create-organization?plan=basic'
             },
             {
               id: 'pro',
@@ -455,7 +455,7 @@ export default function WebsiteManagement() {
               highlighted: true,
               visible: true,
               ctaText: 'Start Free Trial',
-              ctaLink: '/register?plan=pro'
+              ctaLink: '/create-organization?plan=pro'
             },
             {
               id: 'enterprise',

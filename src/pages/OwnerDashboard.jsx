@@ -37,7 +37,7 @@ export default function OwnerDashboard() {
     {
       title: 'Customer Portal',
       description: 'Customer self-service portal demo',
-      icon: <BusinessIcon sx={{ fontSize: 40 }} />, color: '#4caf50', path: '/customer-portal'
+      icon: <BusinessIcon sx={{ fontSize: 40 }} />, color: '#4caf50', path: '/portal'
     }
   ];
   return (

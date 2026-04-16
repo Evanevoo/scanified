@@ -37,7 +37,7 @@ textarea,
 select {
   font-size: 16px !important; /* Prevents zoom on iOS */
   -webkit-appearance: none;
-  border-radius: 0;
+  border-radius: inherit;
 }
 
 /* Improve mobile form inputs */

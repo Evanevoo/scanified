@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
@@ -7,37 +7,55 @@ import { usePermissions } from '../context/PermissionsContext';
 import { useTheme } from '../context/ThemeContext';
 import { ListItem, ListItemButton, ListItemIcon, ListItemText, TextField, InputAdornment } from '@mui/material';
 import {
-  List, Divider, Box, Typography, Collapse, Chip, IconButton, Tooltip, Avatar
+  List, Divider, Box, Typography, Collapse, IconButton, Tooltip, Avatar, Button,
 } from '@mui/material';
 import {
   Dashboard, People, Inventory, LocalShipping, Schedule, Receipt, 
   AdminPanelSettings, Analytics, Payment, Settings, Assessment,
   TrendingUp,   Build as BuildIcon, Business as BusinessIcon,
-  LocalGasStation as TruckIcon, AutoFixHigh as AutomationIcon,
-  Navigation as RouteOptimizationIcon, People as CustomerServiceIcon,
+  AutoFixHigh as AutomationIcon, People as CustomerServiceIcon,
   SwapHoriz as SwapIcon, 
   ExpandLess, ExpandMore, Work as WorkIcon, Person as PersonIcon,
   Palette as PaletteIcon, Store as StoreIcon, Upload, History, CheckCircle,
-  Home as HomeIcon, LocationOn as LocationIcon, Search as SearchIcon,
+  Home as HomeIcon, LocationOn as LocationIcon, Place as PlaceIcon, Search as SearchIcon,
   Assignment as OrdersIcon, IntegrationInstructions as IntegrationIcon,
   Report as ReportIcon, Inventory2 as InventoryIcon, Support,
   Security as ShieldIcon, Build as WrenchIcon, Description as FileTextIcon,
   Inventory as PackageIcon, Calculate as CalculatorIcon, Psychology as BrainIcon,
   ChevronLeft, ChevronRight, Menu as MenuIcon, QrCode as QrCodeIcon, Notifications as NotificationsIcon,
-  Assignment as AssignmentIcon
+  Assignment as AssignmentIcon,
+  Category as RentalCategoryIcon,
+  Link as ProductMapIcon,
+  PriceChange as PriceChangeIcon
 } from '@mui/icons-material';
+import { getPrimaryPathsForRole, getDefaultFullMenuExpanded } from '../nav/appNavConfig';
 
 const drawerWidth = 280;
 const collapsedWidth = 72;
+
+/** First-visit defaults: admins/managers see more sections open; standard users get a shorter menu. */
+function getDefaultSectionsForRole(role) {
+  const r = (role || '').toLowerCase();
+  const collapsed = {
+    dashboard: true,
+    operations: true,
+    customers: true,
+    inventory: true,
+    billing: false,
+    reports: false,
+    admin: false,
+  };
+  if (r === 'admin' || r === 'orgowner' || r === 'manager') {
+    return { ...collapsed, billing: true, reports: true, admin: true };
+  }
+  return collapsed;
+}
 
 const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   const { profile, organization } = useAuth();
   const { organizationColors } = useTheme();
   const primaryColor = organizationColors?.primary || '#40B5AD';
-  
-  // CRITICAL: Check profile BEFORE calling any other hooks to avoid hook inconsistency
-  if (!profile) return null;
-  
+
   const { can, isOrgAdmin } = usePermissions();
   
   const [actualRole, setActualRole] = useState(null);
@@ -54,6 +72,9 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
     reports: false,
     admin: false
   });
+  const [sectionsHydrated, setSectionsHydrated] = useState(false);
+  const [fullMenuExpanded, setFullMenuExpanded] = useState(false);
+  const [fullMenuHydrated, setFullMenuHydrated] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -109,6 +130,68 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
     fetchRoleName();
   }, [profile?.role]); // Only depend on the role field, not the entire profile object
 
+  useEffect(() => {
+    setSectionsHydrated(false);
+  }, [organization?.id]);
+
+  useEffect(() => {
+    setFullMenuHydrated(false);
+  }, [organization?.id]);
+
+  useEffect(() => {
+    if (!organization?.id || !profile?.id || roleLoading) return;
+    const key = `sidebar-full-menu-v1:${organization.id}:${profile.id}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw !== null && raw !== '') {
+        setFullMenuExpanded(JSON.parse(raw));
+      } else {
+        setFullMenuExpanded(getDefaultFullMenuExpanded(actualRole));
+      }
+    } catch {
+      setFullMenuExpanded(getDefaultFullMenuExpanded(actualRole));
+    }
+    setFullMenuHydrated(true);
+  }, [organization?.id, profile?.id, roleLoading, actualRole]);
+
+  useEffect(() => {
+    if (!fullMenuHydrated || !organization?.id || !profile?.id) return;
+    const key = `sidebar-full-menu-v1:${organization.id}:${profile.id}`;
+    try {
+      localStorage.setItem(key, JSON.stringify(fullMenuExpanded));
+    } catch {
+      /* ignore */
+    }
+  }, [fullMenuExpanded, fullMenuHydrated, organization?.id, profile?.id]);
+
+  // Restore sidebar section open/closed state per org + user; first visit uses role-based defaults.
+  useEffect(() => {
+    if (!organization?.id || !profile?.id || roleLoading) return;
+    const key = `sidebar-sections-v1:${organization.id}:${profile.id}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setSections((prev) => ({ ...prev, ...parsed }));
+      } else {
+        setSections(getDefaultSectionsForRole(actualRole));
+      }
+    } catch {
+      setSections(getDefaultSectionsForRole(actualRole));
+    }
+    setSectionsHydrated(true);
+  }, [organization?.id, profile?.id, roleLoading, actualRole]);
+
+  useEffect(() => {
+    if (!sectionsHydrated || !organization?.id || !profile?.id) return;
+    const key = `sidebar-sections-v1:${organization.id}:${profile.id}`;
+    try {
+      localStorage.setItem(key, JSON.stringify(sections));
+    } catch {
+      /* ignore quota */
+    }
+  }, [sections, sectionsHydrated, organization?.id, profile?.id]);
+
   const toggleSection = (section) => {
     setSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
@@ -141,186 +224,78 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
     return allowedRoles.some(role => normalizeRole(role) === userRole);
   };
 
-  // Show loading while fetching role
-  if (roleLoading) {
-    return (
-      <Box sx={{ overflow: 'auto', mt: 8, display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
-        <Typography variant="body2" color="text.secondary">Loading menu...</Typography>
-      </Box>
-    );
-  }
-
-  // Platform owner (Scanified) gets special navigation - role 'owner' with no org
-  if (normalizeRole(actualRole) === 'owner' && !organization) {
-    const ownerMenuItems = [
-      {
-        title: 'Owner Portal',
-        path: '/owner-portal',
-        icon: <BusinessIcon />, 
-        roles: ['owner']
-      }
-    ];
-
-    return (
-      <Box sx={{ overflow: 'auto', mt: 8 }}>
-          {/* Organization Info */}
-          {organization && (
-            <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 2 }}>
-              {organization.logo_url ? (
-                <img 
-                  key={organization.logo_url}
-                  src={organization.logo_url} 
-                  alt="Org Logo" 
-                  style={{ height: 40, width: 40, objectFit: 'contain', borderRadius: 6, background: '#fff', border: '1px solid #eee' }}
-                  onError={(e) => {
-                    logger.error('Failed to load logo:', organization.logo_url);
-                    e.target.style.display = 'none';
-                  }}
-                  onLoad={() => {
-                    logger.log('Logo loaded successfully:', organization.logo_url);
-                  }}
-                />
-              ) : (
-                <Box 
-                  sx={{ 
-                    height: 40, 
-                    width: 40, 
-                    borderRadius: 6, 
-                    background: `linear-gradient(135deg, ${organizationColors?.primary || '#40B5AD'} 0%, ${organizationColors?.secondary || '#48C9B0'} 100%)`,
-                    border: '1px solid',
-borderColor: 'divider',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#fff',
-                    fontSize: '12px',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  {organization.name?.charAt(0)?.toUpperCase() || '?'}
-                </Box>
-              )}
-              <Box>
-                <Typography variant="h6" color="primary">
-                  {organization.name}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Platform Owner • {profile?.full_name}
-                </Typography>
-              </Box>
-            </Box>
-          )}
-
-          {/* Main Menu */}
-          <List>
-            {ownerMenuItems.map((item) => {
-              const active = isActive(item.path);
-              return (
-                <ListItem key={item.path} disablePadding sx={{ px: 2, py: 0.25 }}>
-                  <ListItemButton
-                    selected={active}
-                    onClick={() => handleNavigation(item.path)}
-                    sx={{
-                      py: 1.1,
-                      px: 1.5,
-                      borderRadius: 2,
-                      backgroundColor: active ? `${primaryColor}14` : 'transparent',
-                      color: active ? primaryColor : '#374151',
-                      borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
-                      '&.Mui-selected': {
-                        backgroundColor: `${primaryColor}14`,
-                        color: primaryColor,
-                        '&:hover': { backgroundColor: `${primaryColor}1e` },
-                      },
-                      '&:hover': { backgroundColor: active ? `${primaryColor}1e` : 'rgba(0,0,0,0.04)' },
-                    }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>
-                      {item.icon}
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary={item.title}
-                      primaryTypographyProps={{ fontWeight: active ? 600 : 500, fontSize: '0.875rem' }}
-                    />
-                  </ListItemButton>
-                </ListItem>
-              );
-            })}
-          </List>
-      </Box>
-    );
-  }
-
   // Organized menu structure
   const menuSections = {
     dashboard: {
       title: 'Dashboard',
       icon: <HomeIcon />,
       items: [
-        { title: 'Overview', path: '/home', icon: <Dashboard />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Industry Analytics', path: '/industry-analytics', icon: <Analytics />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Favorites', path: '/favorites', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] }
+        { title: 'Overview', subtitle: 'Home dashboard', path: '/home', icon: <Dashboard />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Industry Analytics', subtitle: 'Benchmarks and trends', path: '/industry-analytics', icon: <Analytics />, roles: ['admin', 'user', 'manager'] }
       ]
     },
     operations: {
       title: 'Operations',
       icon: <LocalShipping />,
       items: [
-        { title: 'Import Data', path: '/import', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Bottles for Day', path: '/bottles-for-day', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Scanned Orders', path: '/scanned-orders', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Order Verification', path: '/import-approvals', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Truck Reconciliation', path: '/truck-reconciliation', icon: <TruckIcon />, roles: ['admin', 'manager'] },
-        { title: 'Workflow Automation', path: '/workflow-automation', icon: <AutomationIcon />, roles: ['admin', 'manager'] },
-        { title: 'Route Optimization', path: '/route-optimization', icon: <RouteOptimizationIcon />, roles: ['admin', 'manager'] },
+        { title: 'Import Data', subtitle: 'Bring data into the app', path: '/import', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Bottles for Day', subtitle: "Today's route planning", path: '/bottles-for-day', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Scanned Orders', subtitle: 'Orders from scanning', path: '/scanned-orders', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Order Verification', subtitle: 'Approve pending imports', path: '/import-approvals', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Verified Orders', subtitle: 'Completed verifications', path: '/verified-orders', icon: <AssignmentIcon />, roles: ['admin', 'user', 'manager'] },
       ]
     },
     customers: {
       title: 'Customers',
       icon: <People />,
       items: [
-        { title: 'Customer List', path: '/customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Locations', path: '/locations', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Rentals', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Lease Agreements', path: '/lease-agreements', icon: <WorkIcon />, roles: ['admin', 'manager'] },
-        { title: 'Join Codes', path: '/organization-join-codes', icon: <QrCodeIcon />, roles: ['admin', 'manager'] }
+        { title: 'Customer List', subtitle: 'Search accounts', path: '/customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Locations', subtitle: 'Branches / sites list', path: '/locations', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Rentals', subtitle: 'Active rentals', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Lease Agreements', subtitle: 'Lease contracts', path: '/lease-agreements', icon: <WorkIcon />, roles: ['admin', 'manager'] },
+        { title: 'Join Codes', subtitle: 'Invite users to the org', path: '/organization-join-codes', icon: <QrCodeIcon />, roles: ['admin', 'manager'] }
       ]
     },
     inventory: {
       title: 'Inventory',
       icon: <Inventory />,
       items: [
-        { title: 'Bottle Management', path: '/bottle-management', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Ownership Management', path: '/ownership-management', icon: <BusinessIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Assets', path: '/assets', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Asset History Lookup', path: '/asset-history-lookup', icon: <SearchIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Recently Added Cylinders', path: '/recent-cylinders', icon: <Inventory />, roles: ['admin', 'user', 'manager'] }
+        { title: 'Bottle Management', subtitle: 'Bottles and assignments', path: '/bottle-management', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Ownership Management', subtitle: 'Who owns which assets', path: '/ownership-management', icon: <BusinessIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Assets', subtitle: 'Full list and filters', path: '/assets', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Where bottles are', subtitle: 'By warehouse or customer', path: '/bottle-locations', icon: <PlaceIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Asset History Lookup', subtitle: 'Trace a cylinder', path: '/asset-history-lookup', icon: <SearchIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Recently Added Cylinders', subtitle: 'New inventory', path: '/recent-cylinders', icon: <Inventory />, roles: ['admin', 'user', 'manager'] }
       ]
     },
     billing: {
       title: 'Billing',
       icon: <Payment />,
       items: [
-        { title: 'Billing Workspace', path: '/billing', icon: <Payment />, roles: ['admin', 'user', 'manager'] }
+        { title: 'Billing Workspace', subtitle: 'Invoices and workspace', path: '/billing', icon: <Payment />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Standard rate table', subtitle: 'Org default rental rates by class', path: '/rental/classes', icon: <RentalCategoryIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Map products to classes', subtitle: 'Match inventory to rental classes', path: '/rental/assign-asset-types', icon: <ProductMapIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Rental tax regions', subtitle: 'Location tax rates for billing', path: '/rental/tax-regions', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Bulk rental pricing', subtitle: 'Customer rates in bulk', path: '/bulk-rental-pricing', icon: <PriceChangeIcon />, roles: ['admin', 'user', 'manager'] }
       ]
     },
     reports: {
       title: 'Reports',
       icon: <ReportIcon />,
       items: [
-        { title: 'Custom Reports', path: '/custom-reports', icon: <ReportIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Report Library', path: '/reports', icon: <Assessment />, roles: ['admin', 'user', 'manager'] }
+        { title: 'Custom Reports', subtitle: 'Build your own', path: '/custom-reports', icon: <ReportIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Report Library', subtitle: 'Standard reports', path: '/reports', icon: <Assessment />, roles: ['admin', 'user', 'manager'] }
       ]
     },
     admin: {
       title: 'Admin',
       icon: <AdminPanelSettings />,
       items: [
-        { title: 'Team', path: '/settings?tab=team', icon: <AdminPanelSettings />, roles: ['admin', 'manager'] },
-        { title: 'Organization Tools', path: '/organization-tools', icon: <BuildIcon />, roles: ['admin', 'manager'] },
-        { title: 'Roles & Permissions', path: '/role-management', icon: <ShieldIcon />, roles: ['admin'] },
-        { title: 'Settings', path: '/settings', icon: <Settings />, roles: ['admin'] },
-        { title: 'Support Center', path: '/support', icon: <Support />, roles: ['admin', 'user', 'manager'] }
+        { title: 'Team', subtitle: 'Users and invites', path: '/settings?tab=team', icon: <AdminPanelSettings />, roles: ['admin', 'manager'] },
+        { title: 'Organization Tools', subtitle: 'Org utilities', path: '/organization-tools', icon: <BuildIcon />, roles: ['admin', 'manager'] },
+        { title: 'Roles & Permissions', subtitle: 'Access control', path: '/role-management', icon: <ShieldIcon />, roles: ['admin'] },
+        { title: 'Settings', subtitle: 'Company preferences', path: '/settings', icon: <Settings />, roles: ['admin'] },
+        { title: 'Support Center', subtitle: 'Help and tickets', path: '/support', icon: <Support />, roles: ['admin', 'user', 'manager'] }
       ]
     }
   };
@@ -332,9 +307,11 @@ borderColor: 'divider',
     const filteredItems = section.items.filter(item => {
       const hasRole = item.roles.some(role => normalizeRole(role) === normalizeRole(actualRole))
         || (isOrgOwnerRole && item.roles.some(role => ['admin', 'owner'].includes(normalizeRole(role))));
-      const matchesSearch = !searchTerm || 
-        item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.path.toLowerCase().includes(searchTerm.toLowerCase());
+      const st = searchTerm.toLowerCase();
+      const matchesSearch = !searchTerm ||
+        item.title.toLowerCase().includes(st) ||
+        item.path.toLowerCase().includes(st) ||
+        (item.subtitle && item.subtitle.toLowerCase().includes(st));
       return hasRole && matchesSearch;
     });
 
@@ -343,6 +320,41 @@ borderColor: 'divider',
     }
     return acc;
   }, {});
+
+  const pathBase = (p) => {
+    if (!p) return '';
+    const i = p.indexOf('?');
+    return i >= 0 ? p.slice(0, i) : p;
+  };
+
+  const flatMenuItems = useMemo(() => {
+    const isOrgOwnerRole = normalizeRole(actualRole) === 'orgowner';
+    const out = [];
+    Object.values(menuSections).forEach((section) => {
+      section.items.forEach((item) => {
+        const hasRole = item.roles.some((role) => normalizeRole(role) === normalizeRole(actualRole))
+          || (isOrgOwnerRole && item.roles.some((role) => ['admin', 'owner'].includes(normalizeRole(role))));
+        if (hasRole) out.push(item);
+      });
+    });
+    return out;
+  }, [actualRole]);
+
+  const primaryItems = useMemo(() => {
+    const paths = getPrimaryPathsForRole(actualRole);
+    const seen = new Set();
+    const items = [];
+    for (const p of paths) {
+      const found = flatMenuItems.find((it) => pathBase(it.path) === pathBase(p) || it.path === p);
+      if (found && !seen.has(found.path)) {
+        seen.add(found.path);
+        items.push(found);
+      }
+    }
+    return items.slice(0, 5);
+  }, [actualRole, flatMenuItems]);
+
+  const showCompactMenu = !isCollapsed && !searchTerm.trim() && !fullMenuExpanded && primaryItems.length > 0;
 
   // Get user's role display name
   const getRoleDisplayName = (role) => {
@@ -357,14 +369,134 @@ borderColor: 'divider',
     }
   };
 
+  if (!profile) {
+    return null;
+  }
+
+  if (roleLoading) {
+    return (
+      <Box sx={{ overflow: 'auto', mt: 8, display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
+        <Typography variant="body2" color="text.secondary">Loading menu...</Typography>
+      </Box>
+    );
+  }
+
+  if (normalizeRole(actualRole) === 'owner' && !organization) {
+    const ownerMenuItems = [
+      {
+        title: 'Owner Portal',
+        path: '/owner-portal',
+        icon: <BusinessIcon />,
+        roles: ['owner'],
+      },
+    ];
+
+    return (
+      <Box sx={{ overflow: 'auto', mt: 8 }}>
+        {organization && (
+          <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 2 }}>
+            {organization.logo_url ? (
+              <Box
+                component="img"
+                key={organization.logo_url}
+                src={organization.logo_url}
+                alt="Org Logo"
+                sx={{
+                  height: 40,
+                  width: 40,
+                  objectFit: 'contain',
+                  borderRadius: 1.5,
+                  bgcolor: 'background.paper',
+                  border: 1,
+                  borderColor: 'divider',
+                }}
+                onError={(e) => {
+                  logger.error('Failed to load logo:', organization.logo_url);
+                  e.target.style.display = 'none';
+                }}
+                onLoad={() => {
+                  logger.log('Logo loaded successfully:', organization.logo_url);
+                }}
+              />
+            ) : (
+              <Box
+                sx={{
+                  height: 40,
+                  width: 40,
+                  borderRadius: 6,
+                  background: `linear-gradient(135deg, ${organizationColors?.primary || '#40B5AD'} 0%, ${organizationColors?.secondary || '#48C9B0'} 100%)`,
+                  border: 1,
+                  borderColor: 'divider',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#fff',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                }}
+              >
+                {organization.name?.charAt(0)?.toUpperCase() || '?'}
+              </Box>
+            )}
+            <Box>
+              <Typography variant="h6" color="primary">
+                {organization.name}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Platform Owner • {profile?.full_name}
+              </Typography>
+            </Box>
+          </Box>
+        )}
+
+        <List>
+          {ownerMenuItems.map((item) => {
+            const active = isActive(item.path);
+            return (
+              <ListItem key={item.path} disablePadding sx={{ px: 2, py: 0.25 }}>
+                <ListItemButton
+                  selected={active}
+                  onClick={() => handleNavigation(item.path)}
+                  sx={{
+                    py: 1.1,
+                    px: 1.5,
+                    borderRadius: 2,
+                    backgroundColor: active ? `${primaryColor}14` : 'transparent',
+                    color: active ? primaryColor : 'text.primary',
+                    borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
+                    '&.Mui-selected': {
+                      backgroundColor: `${primaryColor}14`,
+                      color: primaryColor,
+                      '&:hover': { backgroundColor: `${primaryColor}1e` },
+                    },
+                    '&:hover': { backgroundColor: active ? `${primaryColor}1e` : 'action.hover' },
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>
+                    {item.icon}
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={item.title}
+                    primaryTypographyProps={{ fontWeight: active ? 600 : 500, fontSize: '0.875rem' }}
+                  />
+                </ListItemButton>
+              </ListItem>
+            );
+          })}
+        </List>
+      </Box>
+    );
+  }
+
   return (
     <Box sx={{ 
       overflow: 'auto', 
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      backgroundColor: '#fff',
-      borderRight: '1px solid rgba(0,0,0,0.06)',
+      bgcolor: 'background.paper',
+      borderRight: 1,
+      borderColor: 'divider',
     }}>
         {/* Sidebar collapse toggle */}
         {onToggleCollapse && (
@@ -373,58 +505,11 @@ borderColor: 'divider',
               <IconButton
                 size="small"
                 onClick={onToggleCollapse}
-                sx={{ color: '#6b7280', borderRadius: 1.5, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' } }}
+                sx={{ color: 'text.secondary', borderRadius: 1.5, '&:hover': { bgcolor: 'action.hover' } }}
               >
                 {isCollapsed ? <ChevronRight /> : <ChevronLeft />}
               </IconButton>
             </Tooltip>
-          </Box>
-        )}
-
-        {!isCollapsed && (
-          <Box sx={{ px: 2, pb: 2 }}>
-            <Box
-              sx={{
-                px: 1.5,
-                py: 1.5,
-                borderRadius: 3,
-                border: '1px solid rgba(15, 23, 42, 0.08)',
-                background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
-              }}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
-                <Avatar
-                  src={organization?.logo_url || undefined}
-                  sx={{
-                    width: 38,
-                    height: 38,
-                    bgcolor: `${primaryColor}20`,
-                    color: primaryColor,
-                    fontWeight: 700,
-                  }}
-                >
-                  {organization?.name?.charAt(0)?.toUpperCase() || 'O'}
-                </Avatar>
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography variant="body2" sx={{ fontWeight: 700, color: '#111827' }} noWrap>
-                    {organization?.name || 'Organization'}
-                  </Typography>
-                  <Typography variant="caption" sx={{ color: '#64748b' }} noWrap>
-                    Signed-in workspace
-                  </Typography>
-                </Box>
-              </Box>
-              <Chip
-                size="small"
-                label={getRoleDisplayName(actualRole)}
-                sx={{
-                  borderRadius: 999,
-                  backgroundColor: `${primaryColor}14`,
-                  color: primaryColor,
-                  fontWeight: 600,
-                }}
-              />
-            </Box>
           </Box>
         )}
 
@@ -441,16 +526,18 @@ borderColor: 'divider',
               sx={{
                 '& .MuiOutlinedInput-root': {
                   borderRadius: 2,
-                  backgroundColor: '#f6f5f3',
+                  bgcolor: (theme) =>
+                    theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.06)' : '#f6f5f3',
                   fontSize: '0.875rem',
                   '& fieldset': {
                     borderColor: 'transparent',
                   },
                   '&:hover': {
-                    backgroundColor: '#eeedeb',
+                    bgcolor: (theme) =>
+                      theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.09)' : '#eeedeb',
                   },
                   '&.Mui-focused': {
-                    backgroundColor: '#fff',
+                    bgcolor: 'background.paper',
                     boxShadow: `0 0 0 2px ${primaryColor}20`,
                     '& fieldset': { borderColor: primaryColor },
                   },
@@ -459,16 +546,102 @@ borderColor: 'divider',
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <SearchIcon fontSize="small" sx={{ color: '#6b7280' }} />
+                    <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
                   </InputAdornment>
                 ),
               }}
             />
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, px: 0.5 }}>
+              Tip: press Ctrl+K (⌘K on Mac) to search pages, customers, and barcodes
+            </Typography>
+          </Box>
+        )}
+
+        {!isCollapsed && showCompactMenu && (
+          <Box sx={{ px: 2, pb: 1.5 }}>
+            <Typography
+              variant="caption"
+              sx={{
+                color: 'text.secondary',
+                fontSize: '0.7rem',
+                fontWeight: 600,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                px: 0.5,
+                mb: 0.75,
+                display: 'block',
+              }}
+            >
+              Shortcuts
+            </Typography>
+            <List component="nav" disablePadding>
+              {primaryItems.map((item) => {
+                const active = isActive(item.path);
+                const btn = (
+                  <ListItemButton
+                    selected={active}
+                    onClick={() => handleNavigation(item.path)}
+                    sx={{
+                      py: 1,
+                      px: 1.5,
+                      borderRadius: 2,
+                      backgroundColor: active ? `${primaryColor}14` : 'transparent',
+                      color: active ? primaryColor : 'text.primary',
+                      borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
+                    }}
+                  >
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      <Box sx={{ color: 'inherit', fontSize: '20px', display: 'flex', alignItems: 'center' }}>{item.icon}</Box>
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={item.title}
+                      secondary={item.subtitle}
+                      primaryTypographyProps={{ variant: 'body2', fontWeight: active ? 600 : 500, fontSize: '0.875rem' }}
+                      secondaryTypographyProps={{
+                        variant: 'caption',
+                        sx: {
+                          color: 'text.secondary',
+                          fontSize: '0.7rem',
+                          lineHeight: 1.25,
+                          mt: 0.125,
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                        },
+                      }}
+                    />
+                  </ListItemButton>
+                );
+                return (
+                  <ListItem key={item.path} disablePadding sx={{ py: 0.25 }}>
+                    {btn}
+                  </ListItem>
+                );
+              })}
+            </List>
+            <Button
+              fullWidth
+              size="small"
+              variant="outlined"
+              onClick={() => setFullMenuExpanded(true)}
+              sx={{ mt: 1, textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
+            >
+              All pages
+            </Button>
+          </Box>
+        )}
+
+        {!isCollapsed && fullMenuExpanded && primaryItems.length > 0 && !showCompactMenu && (
+          <Box sx={{ px: 2, pb: 0.5 }}>
+            <Button size="small" onClick={() => setFullMenuExpanded(false)} sx={{ textTransform: 'none', fontWeight: 600 }}>
+              Show fewer links
+            </Button>
           </Box>
         )}
 
         {/* Menu Sections */}
-        <Box sx={{ flex: 1, overflow: 'auto' }}>
+        <Box sx={{ flex: 1, overflow: 'auto', display: showCompactMenu ? 'none' : 'block' }}>
             {Object.entries(filteredSections).map(([sectionKey, section], sectionIndex) => {
               const isSectionOpen = sections[sectionKey] !== false;
               return (
@@ -483,13 +656,13 @@ borderColor: 'divider',
                         py: 1,
                         minHeight: 32,
                         borderRadius: 1.5,
-                        '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' },
+                        '&:hover': { bgcolor: 'action.hover' },
                       }}
                     >
                       <Typography 
                         variant="caption" 
                         sx={{ 
-                          color: '#6b7280',
+                          color: 'text.secondary',
                           fontSize: '0.7rem',
                           fontWeight: 600,
                           letterSpacing: '0.06em',
@@ -499,13 +672,13 @@ borderColor: 'divider',
                       >
                         {section.title}
                       </Typography>
-                      {isSectionOpen ? <ExpandLess sx={{ fontSize: 18, color: '#9ca3af' }} /> : <ExpandMore sx={{ fontSize: 18, color: '#9ca3af' }} />}
+                      {isSectionOpen ? <ExpandLess sx={{ fontSize: 18, color: 'text.disabled' }} /> : <ExpandMore sx={{ fontSize: 18, color: 'text.disabled' }} />}
                     </ListItemButton>
                   </ListItem>
                 ) : (
                   <ListItem disablePadding>
                     <Box sx={{ px: 2, py: 0.75, width: '100%' }}>
-                      <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                      <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                         {section.title}
                       </Typography>
                     </Box>
@@ -517,53 +690,77 @@ borderColor: 'divider',
                 <List component="div" disablePadding sx={{ pb: 0.5 }}>
                   {section.items.map((item) => {
                     const active = isActive(item.path);
+                    const tooltipTitle = item.subtitle ? `${item.title} — ${item.subtitle}` : item.title;
+                    const listItemButton = (
+                      <ListItemButton
+                        selected={active}
+                        onClick={() => handleNavigation(item.path)}
+                        sx={{
+                          py: 1.1,
+                          px: 1.5,
+                          borderRadius: 2,
+                          backgroundColor: active ? `${primaryColor}14` : 'transparent',
+                          color: active ? primaryColor : 'text.primary',
+                          borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
+                          transition: 'background-color 0.15s, color 0.15s',
+                          '&:hover': {
+                            backgroundColor: active ? `${primaryColor}1e` : 'action.hover',
+                          },
+                          '&.Mui-selected': {
+                            backgroundColor: `${primaryColor}14`,
+                            color: primaryColor,
+                            '&:hover': {
+                              backgroundColor: `${primaryColor}1e`,
+                            },
+                          },
+                        }}
+                      >
+                        <ListItemIcon sx={{ minWidth: 36 }}>
+                          <Box sx={{
+                            color: 'inherit',
+                            fontSize: '20px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            {item.icon}
+                          </Box>
+                        </ListItemIcon>
+                        {!isCollapsed && (
+                          <ListItemText
+                            primary={item.title}
+                            secondary={item.subtitle}
+                            primaryTypographyProps={{
+                              variant: 'body2',
+                              fontWeight: active ? 600 : 500,
+                              fontSize: '0.875rem',
+                            }}
+                            secondaryTypographyProps={{
+                              variant: 'caption',
+                              sx: {
+                                color: 'text.secondary',
+                                fontSize: '0.7rem',
+                                lineHeight: 1.25,
+                                mt: 0.125,
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                              },
+                            }}
+                          />
+                        )}
+                      </ListItemButton>
+                    );
                     return (
                       <ListItem key={item.path} disablePadding sx={{ px: 2, py: 0.25 }}>
-                        <ListItemButton
-                          selected={active}
-                          onClick={() => handleNavigation(item.path)}
-                          sx={{
-                            py: 1.1,
-                            px: 1.5,
-                            borderRadius: 2,
-                            backgroundColor: active ? `${primaryColor}14` : 'transparent',
-                            color: active ? primaryColor : '#374151',
-                            borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
-                            transition: 'background-color 0.15s, color 0.15s',
-                            '&:hover': {
-                              backgroundColor: active ? `${primaryColor}1e` : 'rgba(0,0,0,0.04)',
-                            },
-                            '&.Mui-selected': {
-                              backgroundColor: `${primaryColor}14`,
-                              color: primaryColor,
-                              '&:hover': {
-                                backgroundColor: `${primaryColor}1e`,
-                              },
-                            },
-                          }}
-                        >
-                          <ListItemIcon sx={{ minWidth: 36 }}>
-                            <Box sx={{ 
-                              color: 'inherit',
-                              fontSize: '20px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center'
-                            }}>
-                              {item.icon}
-                            </Box>
-                          </ListItemIcon>
-                          {!isCollapsed && (
-                            <ListItemText 
-                              primary={item.title}
-                              primaryTypographyProps={{
-                                variant: 'body2',
-                                fontWeight: active ? 600 : 500,
-                                fontSize: '0.875rem',
-                              }}
-                            />
-                          )}
-                        </ListItemButton>
+                        {isCollapsed ? (
+                          <Tooltip title={tooltipTitle} placement="right">
+                            <Box sx={{ width: '100%' }}>{listItemButton}</Box>
+                          </Tooltip>
+                        ) : (
+                          listItemButton
+                        )}
                       </ListItem>
                     );
                   })}
@@ -578,8 +775,10 @@ borderColor: 'divider',
         {!isCollapsed && profile && (
           <Box sx={{ 
             p: 2,
-            borderTop: '1px solid rgba(0,0,0,0.06)',
-            backgroundColor: '#fafaf9',
+            borderTop: 1,
+            borderColor: 'divider',
+            bgcolor: (theme) =>
+              theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : '#fafaf9',
             mt: 'auto'
           }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -596,10 +795,10 @@ borderColor: 'divider',
                 {profile?.full_name?.charAt(0)?.toUpperCase() || 'U'}
               </Avatar>
               <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: '#1a1a1a', fontSize: '0.875rem' }}>
+                <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary', fontSize: '0.875rem' }}>
                   {profile?.full_name || 'User'}
                 </Typography>
-                <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.75rem' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
                   {getRoleDisplayName(actualRole)}
                 </Typography>
               </Box>
@@ -610,9 +809,9 @@ borderColor: 'divider',
                   navigate('/login');
                 }}
                 sx={{ 
-                  color: '#6b7280',
+                  color: 'text.secondary',
                   borderRadius: 1.5,
-                  '&:hover': { backgroundColor: 'rgba(0,0,0,0.06)' }
+                  '&:hover': { bgcolor: 'action.hover' }
                 }}
               >
                 <Box component="svg" width="16" height="16" viewBox="0 0 16 16" fill="none">

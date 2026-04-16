@@ -2,19 +2,22 @@ import React from 'react';
 import { Box } from '@mui/material';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import RentalSidebar from '../components/RentalSidebar';
-import RentalClassGroups from './RentalClassGroups';
 import RentalClasses from './RentalClasses';
-import RentalBillFormats from './RentalBillFormats';
-import FlatFees from './FlatFees';
-import ExpiringAssetAgreements from './ExpiringAssetAgreements';
-import RentalBillConfiguration from './RentalBillConfiguration';
-import ShowRentalBillingPeriods from './ShowRentalBillingPeriods';
-import RentalLegacyCodeMappings from './RentalLegacyCodeMappings';
-import RentalTaxRegions from './RentalTaxRegions';
-import RentalTaxCategories from './RentalTaxCategories';
 import RentalInvoiceSearch from './RentalInvoiceSearch';
-import AccountingAssetAgreementProducts from './AccountingAssetAgreementProducts';
 import AssignAssetTypesToRentalClasses from './AssignAssetTypesToRentalClasses';
+import RentalTaxRegions from './RentalTaxRegions';
+
+/** Removed placeholder pages redirect here so bookmarks still work. */
+const REDIRECTS = [
+  ['bill-formats', '/settings'],
+  ['flat-fees', '/rentals'],
+  ['expiring-asset-agreements', '/lease-agreements'],
+  ['bill-configuration', '/rentals'],
+  ['billing-periods', '/rentals'],
+  ['legacy-code-mappings', '/rental/classes'],
+  ['tax-categories', '/locations'],
+  ['accounting-products', '/rentals'],
+];
 
 export default function Rental() {
   return (
@@ -22,22 +25,16 @@ export default function Rental() {
       <RentalSidebar />
       <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
         <Routes>
-          <Route path="/class-groups" element={<RentalClassGroups />} />
           <Route path="/classes" element={<RentalClasses />} />
-          <Route path="/bill-formats" element={<RentalBillFormats />} />
-          <Route path="/flat-fees" element={<FlatFees />} />
-          <Route path="/expiring-asset-agreements" element={<ExpiringAssetAgreements />} />
-          <Route path="/bill-configuration" element={<RentalBillConfiguration />} />
-          <Route path="/billing-periods" element={<ShowRentalBillingPeriods />} />
-          <Route path="/legacy-code-mappings" element={<RentalLegacyCodeMappings />} />
-          <Route path="/tax-regions" element={<RentalTaxRegions />} />
-          <Route path="/tax-categories" element={<RentalTaxCategories />} />
           <Route path="/invoice-search" element={<RentalInvoiceSearch />} />
-          <Route path="/accounting-products" element={<AccountingAssetAgreementProducts />} />
           <Route path="/assign-asset-types" element={<AssignAssetTypesToRentalClasses />} />
-          <Route path="*" element={<Navigate to="/rental/class-groups" />} />
+          <Route path="/tax-regions" element={<RentalTaxRegions />} />
+          {REDIRECTS.map(([from, to]) => (
+            <Route key={from} path={from} element={<Navigate to={to} replace />} />
+          ))}
+          <Route path="*" element={<Navigate to="/rental/classes" replace />} />
         </Routes>
       </Box>
     </Box>
   );
-} 
+}

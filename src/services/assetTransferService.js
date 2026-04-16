@@ -1,7 +1,67 @@
 import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
+import { fetchOrgRentalPricingContext, monthlyRateForNewRental } from './rentalPricingContext';
 
 export class AssetTransferService {
+
+  /**
+   * Move an active per-bottle lease to the new customer when the bottle is transferred.
+   * Customer-level leases (bottle_id is null) are not moved — they remain on the original account.
+   * @returns {Promise<string|null>} lease id to attach to the new rental row, or null
+   */
+  static async reassignPerBottleLeaseForTransfer({
+    organizationId,
+    bottleId,
+    preferredLeaseId,
+    fromCustomerId,
+    toCustomerId,
+    toCustomerName,
+  }) {
+    const updateLeaseCustomer = async (leaseId) => {
+      const { error } = await supabase
+        .from('lease_agreements')
+        .update({
+          customer_id: toCustomerId,
+          customer_name: toCustomerName,
+        })
+        .eq('id', leaseId)
+        .eq('organization_id', organizationId)
+        .eq('bottle_id', bottleId)
+        .eq('status', 'active');
+      if (error) {
+        logger.error('Lease reassignment on bottle transfer failed:', error);
+        return null;
+      }
+      return leaseId;
+    };
+
+    if (preferredLeaseId) {
+      const { data: lease } = await supabase
+        .from('lease_agreements')
+        .select('id, bottle_id, status')
+        .eq('id', preferredLeaseId)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+      if (lease?.bottle_id === bottleId && lease.status === 'active') {
+        const id = await updateLeaseCustomer(lease.id);
+        if (id) return id;
+      }
+    }
+
+    const { data: candidates } = await supabase
+      .from('lease_agreements')
+      .select('id, customer_id, status')
+      .eq('organization_id', organizationId)
+      .eq('bottle_id', bottleId)
+      .eq('status', 'active');
+
+    const match = (candidates || []).find((l) => l.customer_id === fromCustomerId);
+    if (match) {
+      return updateLeaseCustomer(match.id);
+    }
+
+    return null;
+  }
 
   /**
    * Transfer assets from one customer to another
@@ -77,6 +137,138 @@ export class AssetTransferService {
 
       if (updateError) throw updateError;
 
+      // Keep `rentals` in sync: close open rows for the source customer and open rows for the target.
+      // Otherwise the old customer's "Rental History" still shows transferred bottles (stale customer_id).
+      const today = new Date().toISOString().split('T')[0];
+      let rentalsClosed = 0;
+      let rentalsOpened = 0;
+      let leasesReassigned = 0;
+
+      const pricingCtx = await fetchOrgRentalPricingContext(supabase, organizationId);
+
+      const collectOpenRentalsForAsset = async (asset) => {
+        const barcode = asset.barcode_number || asset.barcode || null;
+        const lists = [];
+
+        const { data: byBottleId } = await supabase
+          .from('rentals')
+          .select('*')
+          .eq('organization_id', organizationId)
+          .eq('customer_id', fromCustomerId)
+          .is('rental_end_date', null)
+          .eq('bottle_id', asset.id);
+        if (byBottleId?.length) lists.push(byBottleId);
+
+        if (barcode) {
+          const { data: byBarcode } = await supabase
+            .from('rentals')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .eq('customer_id', fromCustomerId)
+            .is('rental_end_date', null)
+            .eq('bottle_barcode', barcode);
+          if (byBarcode?.length) lists.push(byBarcode);
+
+          const { data: byNameAndBarcode } = await supabase
+            .from('rentals')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .eq('customer_name', fromCustomer.name)
+            .is('rental_end_date', null)
+            .eq('bottle_barcode', barcode);
+          if (byNameAndBarcode?.length) lists.push(byNameAndBarcode);
+        }
+
+        const { data: byNameAndBottleId } = await supabase
+          .from('rentals')
+          .select('*')
+          .eq('organization_id', organizationId)
+          .eq('customer_name', fromCustomer.name)
+          .is('rental_end_date', null)
+          .eq('bottle_id', asset.id);
+        if (byNameAndBottleId?.length) lists.push(byNameAndBottleId);
+
+        const seen = new Set();
+        const merged = [];
+        for (const list of lists) {
+          for (const r of list) {
+            if (seen.has(r.id)) continue;
+            seen.add(r.id);
+            merged.push(r);
+          }
+        }
+        return { openRentals: merged, barcode };
+      };
+
+      for (const asset of updatedAssets || []) {
+        const { openRentals, barcode } = await collectOpenRentalsForAsset(asset);
+        const template =
+          openRentals.find((r) => r.lease_agreement_id && !r.is_dns) ||
+          openRentals.find((r) => !r.is_dns) ||
+          openRentals[0];
+
+        const leaseIdForNewRental = await this.reassignPerBottleLeaseForTransfer({
+          organizationId,
+          bottleId: asset.id,
+          preferredLeaseId: template?.lease_agreement_id || null,
+          fromCustomerId,
+          toCustomerId,
+          toCustomerName: toCustomer.name,
+        });
+        if (leaseIdForNewRental) leasesReassigned += 1;
+
+        for (const rental of openRentals) {
+          const { error: closeErr } = await supabase
+            .from('rentals')
+            .update({ rental_end_date: today })
+            .eq('id', rental.id)
+            .eq('organization_id', organizationId);
+          if (!closeErr) rentalsClosed += 1;
+          else logger.error('Failed to close rental on transfer:', closeErr);
+        }
+
+        const { data: existingOpenRows } = await supabase
+          .from('rentals')
+          .select('id')
+          .eq('organization_id', organizationId)
+          .eq('customer_id', toCustomerId)
+          .eq('bottle_id', asset.id)
+          .is('rental_end_date', null)
+          .limit(1);
+
+        if (existingOpenRows?.length) continue;
+
+        const useTemplate = template && !template.is_dns;
+        const fromTemplate = useTemplate ? parseFloat(String(template.rental_amount)) : NaN;
+        const computedForTarget = monthlyRateForNewRental(toCustomerId, asset, pricingCtx);
+        const rentalAmount =
+          Number.isFinite(fromTemplate) && fromTemplate > 0 ? fromTemplate : computedForTarget;
+
+        const insertRow = {
+          organization_id: organizationId,
+          customer_id: toCustomerId,
+          customer_name: toCustomer.name,
+          bottle_id: asset.id,
+          bottle_barcode: barcode || template?.bottle_barcode || null,
+          rental_start_date: today,
+          rental_end_date: null,
+          rental_amount: rentalAmount,
+          rental_type: useTemplate ? (template.rental_type || 'monthly') : 'monthly',
+          tax_code: template?.tax_code || 'GST+PST',
+          tax_rate: template?.tax_rate != null ? template.tax_rate : 0.11,
+          location: String(
+            (asset.location || template?.location || 'SASKATOON')
+          ).toUpperCase(),
+          status: 'active',
+          is_dns: false,
+          lease_agreement_id: leaseIdForNewRental,
+        };
+
+        const { error: insErr } = await supabase.from('rentals').insert(insertRow);
+        if (!insErr) rentalsOpened += 1;
+        else logger.error('Failed to open rental after transfer:', insErr);
+      }
+
       // Log the transfer in audit table (if exists) or create transfer record
       await this.logTransfer({
         assetIds,
@@ -96,7 +288,10 @@ export class AssetTransferService {
         fromCustomer,
         toCustomer,
         count: updatedAssets.length,
-        message: `Successfully transferred ${updatedAssets.length} asset(s) from ${fromCustomer.name} to ${toCustomer.name}`
+        rentalsClosed,
+        rentalsOpened,
+        leasesReassigned,
+        message: `Successfully transferred ${updatedAssets.length} asset(s) from ${fromCustomer.name} to ${toCustomer.name}. Closed ${rentalsClosed} rental(s), opened ${rentalsOpened} for the new customer.${leasesReassigned > 0 ? ` Reassigned ${leasesReassigned} per-bottle lease agreement(s).` : ''}`
       };
 
     } catch (error) {

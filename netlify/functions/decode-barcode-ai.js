@@ -42,7 +42,11 @@ exports.handler = async (event) => {
     return {
       statusCode: 503,
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ok: false, error: 'OPENAI_API_KEY is not configured' }),
+      body: JSON.stringify({
+        ok: false,
+        error:
+          'OPENAI_API_KEY is not configured. In Netlify: Site → Environment variables → add OPENAI_API_KEY (your OpenAI secret key) for this site, save, then trigger a new deploy so functions pick it up.',
+      }),
     };
   }
 

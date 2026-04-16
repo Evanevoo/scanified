@@ -51,13 +51,26 @@ import ReceiptIcon from '@mui/icons-material/Receipt';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import SettingsIcon from '@mui/icons-material/Settings';
 import EditIcon from '@mui/icons-material/Edit';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
 import { TableSkeleton, CardSkeleton } from '../components/SmoothLoading';
 import { AssetTransferService } from '../services/assetTransferService';
+import {
+  fetchOrgRentalPricingContext,
+  monthlyRateForNewRental,
+  invalidateOrgRentalPricingCache,
+} from '../services/rentalPricingContext';
 import { useAuth } from '../hooks/useAuth';
 import DNSConversionDialog from '../components/DNSConversionDialog';
 import BarcodeDisplay from '../components/BarcodeDisplay';
 import { formatLocationDisplay, normalizeLocationKey } from '../utils/locationDisplay';
 import { summarizeBottlesByType, getBottleSummaryGroupKey } from '../utils/bottleInventoryGrouping';
+import {
+  getUnifiedClasses,
+  formatUnifiedClassLabel,
+  computeEffectiveMonthlyRate,
+  pickCustomerProductRateEntry,
+} from '../utils/organizationRentalClassUtils';
+import { getResolvedClassRates } from '../utils/rentalClassRates';
 
 // Helper to check if a string looks like an address
 function looksLikeAddress(str) {
@@ -74,6 +87,7 @@ export default function CustomerDetail() {
   const [customerAssets, setCustomerAssets] = useState([]);
   const [locationAssets, setLocationAssets] = useState([]);
   const [bottleSummary, setBottleSummary] = useState({});
+  const [customerDataVersion, setCustomerDataVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -115,9 +129,19 @@ export default function CustomerDetail() {
     tax_status: 'default'
   });
   const [rentalSettingsSaving, setRentalSettingsSaving] = useState(false);
+  const [rentalClassRatesDialogOpen, setRentalClassRatesDialogOpen] = useState(false);
+  const [classRatesDraft, setClassRatesDraft] = useState({});
+  const [savingClassRates, setSavingClassRates] = useState(false);
+  const [productSkuRatesDialogOpen, setProductSkuRatesDialogOpen] = useState(false);
+  const [productSkuRatesDraft, setProductSkuRatesDraft] = useState({});
+  const [productSkuExtraCode, setProductSkuExtraCode] = useState('');
+  const [productSkuExtraMonthly, setProductSkuExtraMonthly] = useState('');
+  const [savingProductSkuRates, setSavingProductSkuRates] = useState(false);
+  const [negotiatedForm, setNegotiatedForm] = useState({ fixed_rate: '', discount_percent: '' });
+  const [savingNegotiated, setSavingNegotiated] = useState(false);
+  const [orgRentalClasses, setOrgRentalClasses] = useState([]);
   const [resolvingRnbId, setResolvingRnbId] = useState(null); // rental id being resolved (RNB close)
   const [resolvingRnsId, setResolvingRnsId] = useState(null); // rental id being resolved (RNS close)
-  const [markingRnsRentalId, setMarkingRnsRentalId] = useState(null); // rental id for "Mark return not scanned"
 
   // Combine physical bottles with DNS (Delivered Not Scanned), RNB (Return not on balance), and RNS (Return not scanned)
   const dnsRentals = useMemo(() => (locationAssets || []).filter(r => r.is_dns), [locationAssets]);
@@ -246,67 +270,6 @@ export default function CustomerDetail() {
     }
   };
 
-  const handleMarkReturnNotScanned = async (rental) => {
-    const bottle = !rental.is_dns && (customerAssets || []).find(
-      (b) => b.id === rental.bottle_id || (b.barcode_number || b.barcode) === rental.bottle_barcode
-    );
-    if (!bottle?.id || !customer?.organization_id) {
-      setTransferMessage({ open: true, message: 'Bottle not found for this rental.', severity: 'error' });
-      return;
-    }
-    setMarkingRnsRentalId(rental.id);
-    try {
-      const orgId = organization?.id || customer?.organization_id;
-      const { data: { user } } = await supabase.auth.getUser();
-      const { data: result, error: rpcError } = await supabase.rpc('return_bottles_to_warehouse', {
-        p_bottle_ids: [bottle.id],
-        p_organization_id: orgId,
-        p_user_id: user?.id || null,
-      });
-      if (rpcError) throw rpcError;
-      await supabase.from('bottle_scans').insert({
-        organization_id: orgId,
-        bottle_barcode: bottle.barcode_number || bottle.barcode,
-        mode: 'RETURN',
-        order_number: 'RNS',
-        customer_id: customer?.CustomerListID || null,
-        customer_name: customer?.name || null,
-        timestamp: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-      });
-      const { data: customerAssetsData } = await supabase
-        .from('bottles')
-        .select('*')
-        .eq('assigned_customer', id)
-        .eq('organization_id', orgId);
-      setCustomerAssets(customerAssetsData || []);
-      setBottleSummary(summarizeBottlesByType(customerAssetsData || []));
-      const { data: rentalById } = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_id', id)
-        .eq('organization_id', orgId)
-        .is('rental_end_date', null);
-      const { data: rentalByName } = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_name', customer.name)
-        .eq('organization_id', orgId)
-        .is('rental_end_date', null)
-        .eq('is_dns', true);
-      const seen = new Set((rentalById || []).map((r) => r.id));
-      const merged = [...(rentalById || [])];
-      (rentalByName || []).forEach((r) => { if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); } });
-      setLocationAssets(merged);
-      setTransferMessage({ open: true, message: 'Bottle marked as returned (not scanned). It will no longer show at this customer.', severity: 'success' });
-    } catch (e) {
-      logger.error('Mark return not scanned error:', e);
-      setTransferMessage({ open: true, message: e?.message || 'Failed to mark return not scanned', severity: 'error' });
-    } finally {
-      setMarkingRnsRentalId(null);
-    }
-  };
-
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -393,8 +356,10 @@ export default function CustomerDetail() {
           return !hasById && !hasByBarcode;
         });
         if (bottlesWithoutRental.length > 0) {
+          const pricingCtx = await fetchOrgRentalPricingContext(supabase, customerData.organization_id);
           for (const bottle of bottlesWithoutRental) {
             const barcode = bottle.barcode_number || bottle.barcode;
+            const rental_amount = monthlyRateForNewRental(id, bottle, pricingCtx);
             await supabase.from('rentals').insert({
               organization_id: customerData.organization_id,
               customer_id: id,
@@ -403,7 +368,7 @@ export default function CustomerDetail() {
               bottle_barcode: barcode,
               rental_start_date: bottle.rental_start_date || new Date().toISOString().split('T')[0],
               rental_end_date: null,
-              rental_amount: 10,
+              rental_amount,
               rental_type: 'monthly',
               tax_rate: 0.11,
               location: bottle.location || 'SASKATOON',
@@ -434,7 +399,7 @@ export default function CustomerDetail() {
       setLoading(false);
     };
     fetchData();
-  }, [id]);
+  }, [id, customerDataVersion]);
 
   // Load parent customer options when entering edit (for "Under parent" selector)
   useEffect(() => {
@@ -462,6 +427,78 @@ export default function CustomerDetail() {
     })();
     return () => { cancelled = true; };
   }, [customer?.CustomerListID, organization?.id]);
+
+  useEffect(() => {
+    if (!customerPricing) {
+      setNegotiatedForm({ fixed_rate: '', discount_percent: '' });
+      return;
+    }
+    const fr = customerPricing.fixed_rate_override;
+    const dp = customerPricing.discount_percent;
+    setNegotiatedForm({
+      fixed_rate: fr != null && fr !== '' ? String(fr) : '',
+      discount_percent:
+        dp != null && dp !== '' && Number.parseFloat(String(dp)) > 0 ? String(dp) : '',
+    });
+  }, [customerPricing]);
+
+  useEffect(() => {
+    if (!organization?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('organization_rental_classes')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .order('sort_order', { ascending: true });
+      if (!cancelled) {
+        if (!error) setOrgRentalClasses(data || []);
+        else setOrgRentalClasses([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [organization?.id]);
+
+  const unifiedRentalClasses = useMemo(() => getUnifiedClasses(orgRentalClasses), [orgRentalClasses]);
+
+  /** Match Rentals workspace: show class/customer pricing, not stale DB rental_amount. */
+  const rentalHistoryDisplayRows = useMemo(() => {
+    const orgRows = orgRentalClasses || [];
+    const assets = customerAssets || [];
+    return (locationAssets || []).map((rental) => {
+      const isDNS = rental.is_dns === true;
+      const isYearly = (rental.rental_type || 'monthly').toLowerCase() === 'yearly';
+      if (isYearly) {
+        const raw = parseFloat(String(rental.rental_amount ?? ''));
+        return {
+          rental,
+          displayAmount: Number.isFinite(raw) ? raw : 0,
+        };
+      }
+      let bottle = null;
+      if (isDNS) {
+        bottle = {
+          product_code: rental.dns_product_code || '',
+          category: '',
+        };
+      } else {
+        bottle = assets.find(
+          (b) =>
+            (rental.bottle_id && b.id === rental.bottle_id) ||
+            (rental.bottle_barcode &&
+              (b.barcode_number || b.barcode) === rental.bottle_barcode)
+        );
+      }
+      if (!bottle) {
+        const raw = parseFloat(String(rental.rental_amount ?? ''));
+        return { rental, displayAmount: Number.isFinite(raw) ? raw : 0 };
+      }
+      const amt = computeEffectiveMonthlyRate(customerPricing, bottle, orgRows);
+      return { rental, displayAmount: Number.isFinite(amt) ? amt : 0 };
+    });
+  }, [locationAssets, customerAssets, customerPricing, orgRentalClasses]);
 
   // Enhanced transfer functionality functions
   const handleSelectAsset = (assetId) => {
@@ -748,21 +785,7 @@ export default function CustomerDetail() {
           message: result.message,
           severity: 'success'
         });
-        
-        // Refresh data and reset state
-        // SECURITY: Only fetch bottles from user's organization
-        const { data: customerAssetsData, error: customerAssetsError} = await supabase
-          .from('bottles')
-          .select('*')
-          .eq('assigned_customer', id)
-          .eq('organization_id', organization?.id || customer?.organization_id);
-        
-        if (!customerAssetsError) {
-          setCustomerAssets(customerAssetsData || []);
-          
-          setBottleSummary(summarizeBottlesByType(customerAssetsData || []));
-        }
-        
+        setCustomerDataVersion((v) => v + 1);
         setSelectedAssets([]);
         handleCloseTransferDialog();
       } else {
@@ -823,6 +846,283 @@ export default function CustomerDetail() {
       setTransferMessage({ open: true, message: e?.message || 'Failed to save rental settings', severity: 'error' });
     } finally {
       setRentalSettingsSaving(false);
+    }
+  };
+
+  const openRentalClassRatesDialog = () => {
+    const stored = customerPricing?.rental_class_rates;
+    const initial = {};
+    unifiedRentalClasses.forEach((c) => {
+      const ex = stored && typeof stored === 'object' ? stored[c.id] : null;
+      initial[c.id] = {
+        daily: ex?.daily != null && ex.daily !== '' ? String(ex.daily) : '',
+        weekly: ex?.weekly != null && ex.weekly !== '' ? String(ex.weekly) : '',
+        monthly: ex?.monthly != null && ex.monthly !== '' ? String(ex.monthly) : '',
+      };
+    });
+    setClassRatesDraft(initial);
+    setRentalClassRatesDialogOpen(true);
+  };
+
+  const formatMethodLabel = (m) => {
+    if (m === 'starting_balance') return 'Starting balance';
+    if (m === 'equipment') return 'Equipment';
+    if (m === 'no_rent') return 'No rent';
+    if (m === 'daily') return 'Daily';
+    return m ? m.charAt(0).toUpperCase() + m.slice(1) : '—';
+  };
+
+  const handleSaveRentalClassRates = async () => {
+    if (!organization?.id || !customer?.CustomerListID) return;
+    setSavingClassRates(true);
+    try {
+      const rental_class_rates = {};
+      unifiedRentalClasses.forEach((c) => {
+        const d = classRatesDraft[c.id] || {};
+        const entry = {};
+        ['daily', 'weekly', 'monthly'].forEach((k) => {
+          const raw = d[k];
+          if (raw === '' || raw == null) return;
+          const n = parseFloat(String(raw));
+          if (Number.isFinite(n)) entry[k] = n;
+        });
+        if (Object.keys(entry).length > 0) rental_class_rates[c.id] = entry;
+      });
+
+      const { data: existing, error: selErr } = await supabase
+        .from('customer_pricing')
+        .select('id')
+        .eq('organization_id', organization.id)
+        .eq('customer_id', customer.CustomerListID)
+        .maybeSingle();
+      if (selErr) throw selErr;
+
+      if (existing?.id) {
+        const { error } = await supabase
+          .from('customer_pricing')
+          .update({ rental_class_rates })
+          .eq('id', existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('customer_pricing').insert({
+          organization_id: organization.id,
+          customer_id: customer.CustomerListID,
+          discount_percent: 0,
+          markup_percent: 0,
+          rental_period: 'monthly',
+          is_active: true,
+          effective_date: new Date().toISOString().split('T')[0],
+          rental_class_rates,
+          rental_rates_by_product_code: {},
+        });
+        if (error) throw error;
+      }
+
+      const { data: refreshed, error: refErr } = await supabase
+        .from('customer_pricing')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .eq('customer_id', customer.CustomerListID)
+        .maybeSingle();
+      if (!refErr && refreshed) setCustomerPricing(refreshed);
+      else setCustomerPricing((prev) => ({ ...(prev || {}), rental_class_rates }));
+
+      invalidateOrgRentalPricingCache(organization.id);
+      setRentalClassRatesDialogOpen(false);
+      setTransferMessage({ open: true, message: 'Rental class rates saved.', severity: 'success' });
+    } catch (e) {
+      logger.error('Save rental class rates error:', e);
+      const msg = e?.message || 'Failed to save rental class rates';
+      const hint =
+        /rental_class_rates|column/i.test(msg)
+          ? ' Run sql/add_rental_class_rates_to_customer_pricing.sql in Supabase, then try again.'
+          : '';
+      setTransferMessage({ open: true, message: msg + hint, severity: 'error' });
+    } finally {
+      setSavingClassRates(false);
+    }
+  };
+
+  const openProductSkuRatesDialog = () => {
+    const stored =
+      customerPricing?.rental_rates_by_product_code &&
+      typeof customerPricing.rental_rates_by_product_code === 'object'
+        ? customerPricing.rental_rates_by_product_code
+        : {};
+    const codeSet = new Set();
+    (customerAssets || []).forEach((b) => {
+      const c = (b.product_code || '').trim();
+      if (c) codeSet.add(c);
+    });
+    Object.keys(stored).forEach((k) => {
+      const c = (k || '').trim();
+      if (c) codeSet.add(c);
+    });
+    const sorted = [...codeSet].sort((a, b) => a.localeCompare(b));
+    const wrap = { rental_rates_by_product_code: stored };
+    const initial = {};
+    sorted.forEach((code) => {
+      const hit = pickCustomerProductRateEntry(wrap, code);
+      initial[code] = {
+        monthly:
+          hit?.monthly != null && Number.isFinite(Number(hit.monthly)) ? String(hit.monthly) : '',
+      };
+    });
+    setProductSkuRatesDraft(initial);
+    setProductSkuExtraCode('');
+    setProductSkuExtraMonthly('');
+    setProductSkuRatesDialogOpen(true);
+  };
+
+  const handleSaveProductSkuRates = async () => {
+    if (!organization?.id || !customer?.CustomerListID) return;
+    setSavingProductSkuRates(true);
+    try {
+      const prev =
+        customerPricing?.rental_rates_by_product_code &&
+        typeof customerPricing.rental_rates_by_product_code === 'object'
+          ? { ...customerPricing.rental_rates_by_product_code }
+          : {};
+      const next = { ...prev };
+      Object.entries(productSkuRatesDraft).forEach(([code, v]) => {
+        const c = code.trim();
+        if (!c) return;
+        const raw = v && String(v.monthly ?? '').trim();
+        if (raw === '') {
+          delete next[c];
+          return;
+        }
+        const n = Number.parseFloat(raw);
+        if (!Number.isFinite(n) || n < 0) return;
+        next[c] = { monthly: n };
+      });
+
+      const { data: existing, error: selErr } = await supabase
+        .from('customer_pricing')
+        .select('id')
+        .eq('organization_id', organization.id)
+        .eq('customer_id', customer.CustomerListID)
+        .maybeSingle();
+      if (selErr) throw selErr;
+
+      if (existing?.id) {
+        const { error } = await supabase
+          .from('customer_pricing')
+          .update({ rental_rates_by_product_code: next })
+          .eq('id', existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('customer_pricing').insert({
+          organization_id: organization.id,
+          customer_id: customer.CustomerListID,
+          rental_rates_by_product_code: next,
+          discount_percent: 0,
+          markup_percent: 0,
+          rental_period: 'monthly',
+          is_active: true,
+          effective_date: new Date().toISOString().split('T')[0],
+          rental_class_rates: {},
+        });
+        if (error) throw error;
+      }
+
+      const { data: refreshed, error: refErr } = await supabase
+        .from('customer_pricing')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .eq('customer_id', customer.CustomerListID)
+        .maybeSingle();
+      if (!refErr && refreshed) setCustomerPricing(refreshed);
+      else setCustomerPricing((prev) => ({ ...(prev || {}), rental_rates_by_product_code: next }));
+
+      invalidateOrgRentalPricingCache(organization.id);
+      setProductSkuRatesDialogOpen(false);
+      setTransferMessage({ open: true, message: 'Product code rates saved.', severity: 'success' });
+    } catch (e) {
+      logger.error('Save product SKU rates error:', e);
+      const msg = e?.message || 'Failed to save product code rates';
+      const hint =
+        /rental_rates_by_product_code|column/i.test(msg)
+          ? ' Run sql/add_rental_rates_by_product_code_to_customer_pricing.sql in Supabase, then try again.'
+          : '';
+      setTransferMessage({ open: true, message: msg + hint, severity: 'error' });
+    } finally {
+      setSavingProductSkuRates(false);
+    }
+  };
+
+  const handleSaveNegotiatedPricing = async () => {
+    if (!organization?.id || !customer?.CustomerListID) return;
+    const fixedRaw = negotiatedForm.fixed_rate.trim();
+    const discRaw = negotiatedForm.discount_percent.trim();
+    const fixedParsed = fixedRaw === '' ? null : Number.parseFloat(fixedRaw);
+    const discParsed = discRaw === '' ? 0 : Number.parseFloat(discRaw);
+    if (fixedParsed != null && (!Number.isFinite(fixedParsed) || fixedParsed < 0)) {
+      setTransferMessage({ open: true, message: 'Fixed rate must be empty or a non-negative number.', severity: 'error' });
+      return;
+    }
+    if (!Number.isFinite(discParsed) || discParsed < 0 || discParsed > 100) {
+      setTransferMessage({ open: true, message: 'Discount must be between 0 and 100%.', severity: 'error' });
+      return;
+    }
+    setSavingNegotiated(true);
+    try {
+      const { data: existing, error: selErr } = await supabase
+        .from('customer_pricing')
+        .select('id')
+        .eq('organization_id', organization.id)
+        .eq('customer_id', customer.CustomerListID)
+        .maybeSingle();
+      if (selErr) throw selErr;
+
+      const patch = {
+        fixed_rate_override: fixedParsed,
+        discount_percent: discParsed,
+      };
+
+      if (existing?.id) {
+        const { error } = await supabase.from('customer_pricing').update(patch).eq('id', existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('customer_pricing').insert({
+          organization_id: organization.id,
+          customer_id: customer.CustomerListID,
+          ...patch,
+          markup_percent: 0,
+          rental_period: 'monthly',
+          is_active: true,
+          effective_date: new Date().toISOString().split('T')[0],
+          rental_class_rates: {},
+          rental_rates_by_product_code: {},
+        });
+        if (error) throw error;
+      }
+
+      const { data: refreshed, error: refErr } = await supabase
+        .from('customer_pricing')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .eq('customer_id', customer.CustomerListID)
+        .maybeSingle();
+      if (!refErr && refreshed) setCustomerPricing(refreshed);
+      else
+        setCustomerPricing((prev) => ({
+          ...(prev || {}),
+          fixed_rate_override: fixedParsed,
+          discount_percent: discParsed,
+        }));
+
+      invalidateOrgRentalPricingCache(organization.id);
+      setTransferMessage({ open: true, message: 'Customer-wide pricing saved.', severity: 'success' });
+    } catch (e) {
+      logger.error('Save negotiated pricing error:', e);
+      setTransferMessage({
+        open: true,
+        message: e?.message || 'Failed to save customer-wide pricing',
+        severity: 'error',
+      });
+    } finally {
+      setSavingNegotiated(false);
     }
   };
 
@@ -1712,6 +2012,11 @@ export default function CustomerDetail() {
             </Button>
           )}
         </Box>
+        {locationAssets.length > 0 && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 900 }}>
+            Rental amount uses your <strong>standard rate table</strong>, product/category matching, and this customer&apos;s pricing (same rules as the Rentals page). Stored database amounts may differ until the next save.
+          </Typography>
+        )}
 
         {locationAssets.length === 0 ? (
           <Typography color="text.secondary">No rental history found for this customer.</Typography>
@@ -1731,7 +2036,7 @@ export default function CustomerDetail() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {locationAssets.map((rental) => {
+                {rentalHistoryDisplayRows.map(({ rental, displayAmount }) => {
                   const isDNS = rental.is_dns === true;
                   const isRNB = isDNS && (rental.dns_description || '').includes('Return not on balance');
                   const isRNS = isDNS && (rental.dns_description || '').includes('Return not scanned');
@@ -1784,7 +2089,7 @@ export default function CustomerDetail() {
                           variant="outlined"
                         />
                       </TableCell>
-                      <TableCell>${(rental.rental_amount != null && rental.rental_amount !== '') ? Number(rental.rental_amount).toFixed(2) : '0.00'}</TableCell>
+                      <TableCell>${displayAmount.toFixed(2)}</TableCell>
                       <TableCell>
                         <Chip 
                           label={rental.location ? formatLocationDisplay(rental.location) : 'Unknown'} 
@@ -1830,22 +2135,6 @@ export default function CustomerDetail() {
                                 startIcon={resolvingRnsId === rental.id ? <CircularProgress size={14} /> : null}
                               >
                                 {resolvingRnsId === rental.id ? 'Resolving…' : 'Resolve'}
-                              </Button>
-                            </span>
-                          </Tooltip>
-                        )}
-                        {!isDNS && !isRNS && bottle && (
-                          <Tooltip title="Bottle was returned but return was not scanned. Mark it returned so it no longer shows at this customer.">
-                            <span>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                color="inherit"
-                                disabled={markingRnsRentalId === rental.id}
-                                onClick={() => handleMarkReturnNotScanned(rental)}
-                                startIcon={markingRnsRentalId === rental.id ? <CircularProgress size={14} /> : null}
-                              >
-                                {markingRnsRentalId === rental.id ? 'Marking…' : 'Mark return not scanned'}
                               </Button>
                             </span>
                           </Tooltip>
@@ -2241,16 +2530,20 @@ export default function CustomerDetail() {
           <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mb: 2 }}>Rental rates</Typography>
           <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="body2">Rental rate bracket</Typography>
-              <Button component={Link} to="/rental/classes" size="small" variant="text" color="primary">Standard Rates — View</Button>
+              <Typography variant="body2">Organization standard rate table</Typography>
+              <Button component={Link} to="/rental/classes" size="small" variant="text" color="primary">Manage</Button>
             </Box>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="body2">Customer-specific rates</Typography>
-              {customerPricing ? (
-                <Button component={Link} to="/rentals" state={{ openEditForCustomerId: id }} size="small" variant="text" color="primary">View</Button>
-              ) : (
-                <Button component={Link} to="/rentals" state={{ openEditForCustomerId: id }} size="small" variant="text" color="primary">None set — Create new</Button>
-              )}
+              <Typography variant="body2">Per-class rates for this customer</Typography>
+              <Button size="small" variant="text" color="primary" onClick={openRentalClassRatesDialog}>
+                Edit (e.g. lower skid / industrial)
+              </Button>
+            </Box>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="body2">Rentals workspace</Typography>
+              <Button component={Link} to="/rentals" state={{ openEditForCustomerId: id }} size="small" variant="text" color="primary">
+                Open
+              </Button>
             </Box>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Daily calculation method</Typography>
@@ -2262,11 +2555,132 @@ export default function CustomerDetail() {
             </Box>
           </Box>
 
+          <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mt: 3, mb: 1 }}>
+            Customer-wide pricing
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 720 }}>
+            <strong>Fixed monthly rate</strong> applies the same dollar amount to <em>every</em> billable monthly line for this customer and overrides class-based pricing (use for a simple negotiated flat).{' '}
+            <strong>Discount %</strong> reduces the system default when no class rate applies. For different amounts by product group, use <strong>per-class rates</strong> below instead.
+          </Typography>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ sm: 'flex-start' }}>
+            <TextField
+              label="Fixed monthly rate (all cylinders)"
+              type="number"
+              size="small"
+              value={negotiatedForm.fixed_rate}
+              onChange={(e) => setNegotiatedForm((f) => ({ ...f, fixed_rate: e.target.value }))}
+              inputProps={{ min: 0, step: 0.01 }}
+              helperText="Leave empty to use class table + per-class overrides"
+              sx={{ flex: 1, maxWidth: 280 }}
+            />
+            <TextField
+              label="Discount % off default"
+              type="number"
+              size="small"
+              value={negotiatedForm.discount_percent}
+              onChange={(e) => setNegotiatedForm((f) => ({ ...f, discount_percent: e.target.value }))}
+              inputProps={{ min: 0, max: 100, step: 0.5 }}
+              helperText="0–100; used when class pricing does not apply"
+              sx={{ flex: 1, maxWidth: 220 }}
+            />
+            <Button
+              variant="contained"
+              onClick={handleSaveNegotiatedPricing}
+              disabled={savingNegotiated}
+              sx={{ mt: { xs: 0, sm: 0.5 }, borderRadius: 2, fontWeight: 700, alignSelf: { sm: 'center' } }}
+            >
+              {savingNegotiated ? <CircularProgress size={22} color="inherit" /> : 'Save'}
+            </Button>
+          </Stack>
+
+          <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mt: 3, mb: 1 }}>
+            Rates by product code (SKU)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 720 }}>
+            Price by <strong>inventory product code</strong>, not barcode. When this customer swaps to another cylinder with the same code, the monthly rate stays the same. Overrides class-based pricing for that SKU (does not apply if you set a customer-wide <strong>fixed monthly rate</strong> above).
+          </Typography>
+          <Box display="flex" flexWrap="wrap" gap={1} alignItems="center" sx={{ mb: 2 }}>
+            <Button
+              variant="outlined"
+              startIcon={<Inventory2Icon />}
+              onClick={openProductSkuRatesDialog}
+              sx={{ borderRadius: 2, fontWeight: 700 }}
+            >
+              Edit rates by product code
+            </Button>
+            {customerPricing?.rental_rates_by_product_code &&
+            typeof customerPricing.rental_rates_by_product_code === 'object' &&
+            Object.keys(customerPricing.rental_rates_by_product_code).length > 0 ? (
+              <Typography variant="caption" color="text.secondary">
+                {Object.keys(customerPricing.rental_rates_by_product_code).length} product code rate(s) on file
+              </Typography>
+            ) : (
+              <Typography variant="caption" color="text.secondary">
+                No SKU-specific rates — class table applies
+              </Typography>
+            )}
+          </Box>
+
+          <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mt: 2, mb: 1 }}>
+            Rental class rates
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 720 }}>
+            Organization defaults come from the standard rate table. Use <strong>Edit rental class rates</strong> to adjust by <em>rental class</em> (group). Prefer <strong>product code</strong> above when each SKU should have its own negotiated price.
+          </Typography>
+          <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1} sx={{ mb: 1 }}>
+            <Button variant="outlined" startIcon={<AttachMoneyIcon />} onClick={openRentalClassRatesDialog} sx={{ borderRadius: 2, fontWeight: 700 }}>
+              Edit rental class rates
+            </Button>
+            {!customerPricing?.rental_class_rates || Object.keys(customerPricing.rental_class_rates).length === 0 ? (
+              <Typography variant="caption" color="text.secondary">No customer overrides — org / built-in defaults apply</Typography>
+            ) : (
+              <Typography variant="caption" color="text.secondary">
+                {Object.keys(customerPricing.rental_class_rates).length} customer bracket override(s)
+              </Typography>
+            )}
+          </Box>
+          <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 280, borderRadius: 2 }}>
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow sx={{ bgcolor: 'action.hover' }}>
+                  <TableCell><strong>Rental class</strong></TableCell>
+                  <TableCell><strong>Method</strong></TableCell>
+                  <TableCell><strong>Scope</strong></TableCell>
+                  <TableCell align="right"><strong>Daily</strong></TableCell>
+                  <TableCell align="right"><strong>Weekly</strong></TableCell>
+                  <TableCell align="right"><strong>Monthly</strong></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {unifiedRentalClasses.map((c) => {
+                  const r = getResolvedClassRates(customerPricing?.rental_class_rates, c.id, orgRentalClasses);
+                  const ov = customerPricing?.rental_class_rates?.[c.id];
+                  const hasOverride = ov && typeof ov === 'object' && Object.keys(ov).length > 0;
+                  const inOrg = orgRentalClasses.some((row) => String(row.id) === String(c.id));
+                  const scope = hasOverride ? 'Customer' : inOrg ? 'Org default' : 'Built-in';
+                  const fmt = (v) => (v != null && Number.isFinite(v) ? v.toFixed(3) : '—');
+                  return (
+                    <TableRow key={c.id} hover>
+                      <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatUnifiedClassLabel(c)}</TableCell>
+                      <TableCell>{formatMethodLabel(c.method)}</TableCell>
+                      <TableCell>
+                        <Chip size="small" label={scope} variant="outlined" color={hasOverride ? 'primary' : 'default'} />
+                      </TableCell>
+                      <TableCell align="right">{fmt(r.daily)}</TableCell>
+                      <TableCell align="right">{fmt(r.weekly)}</TableCell>
+                      <TableCell align="right">{fmt(r.monthly)}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
           <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mt: 3, mb: 2 }}>Other billing methods</Typography>
           <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Flat fees</Typography>
-              <Button component={Link} to="/rental/flat-fees" size="small" variant="text" color="primary">Default — Edit</Button>
+              <Button component={Link} to="/rentals" size="small" variant="text" color="primary">Rentals workspace</Button>
             </Box>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Asset agreements</Typography>
@@ -2370,6 +2784,201 @@ export default function CustomerDetail() {
           <Button onClick={() => setRentalSettingsDialog(false)}>Cancel</Button>
           <Button variant="contained" onClick={handleSaveRentalSettings} disabled={rentalSettingsSaving}>
             {rentalSettingsSaving ? <CircularProgress size={20} /> : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={rentalClassRatesDialogOpen}
+        onClose={() => setRentalClassRatesDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 3 } }}
+      >
+        <DialogTitle sx={{ fontWeight: 700 }}>Edit rental class rates</DialogTitle>
+        <DialogContent sx={{ pt: 1 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Leave blank to keep the organization or built-in default for that class. These values are customer-specific overrides only.
+          </Typography>
+          <TableContainer sx={{ maxHeight: 420 }}>
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow sx={{ bgcolor: 'action.hover' }}>
+                  <TableCell><strong>Class</strong></TableCell>
+                  <TableCell><strong>Method</strong></TableCell>
+                  <TableCell align="right"><strong>Daily</strong></TableCell>
+                  <TableCell align="right"><strong>Weekly</strong></TableCell>
+                  <TableCell align="right"><strong>Monthly</strong></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {unifiedRentalClasses.map((c) => {
+                  const row = classRatesDraft[c.id] || { daily: '', weekly: '', monthly: '' };
+                  const setField = (field, val) => {
+                    setClassRatesDraft((prev) => ({
+                      ...prev,
+                      [c.id]: { ...(prev[c.id] || {}), [field]: val },
+                    }));
+                  };
+                  const methodNorm = ((c.method ?? 'monthly') + '').trim().toLowerCase() || 'monthly';
+                  const showDailyCol = methodNorm === 'equipment' || methodNorm === 'daily';
+                  const showWeeklyCol = methodNorm === 'equipment';
+                  // Monthly override always; equipment gets D/W/M; daily-method classes get daily + monthly (TrackAbout-style)
+                  return (
+                    <TableRow key={c.id}>
+                      <TableCell sx={{ maxWidth: 260, whiteSpace: 'normal', wordBreak: 'break-word' }}>{formatUnifiedClassLabel(c)}</TableCell>
+                      <TableCell>{formatMethodLabel(c.method)}</TableCell>
+                      <TableCell align="right">
+                        {showDailyCol ? (
+                          <TextField
+                            size="small"
+                            type="number"
+                            inputProps={{ min: 0, step: 0.001 }}
+                            value={row.daily}
+                            onChange={(e) => setField('daily', e.target.value)}
+                            sx={{ width: 100 }}
+                          />
+                        ) : (
+                          '—'
+                        )}
+                      </TableCell>
+                      <TableCell align="right">
+                        {showWeeklyCol ? (
+                          <TextField
+                            size="small"
+                            type="number"
+                            inputProps={{ min: 0, step: 0.001 }}
+                            value={row.weekly}
+                            onChange={(e) => setField('weekly', e.target.value)}
+                            sx={{ width: 100 }}
+                          />
+                        ) : (
+                          '—'
+                        )}
+                      </TableCell>
+                      <TableCell align="right">
+                        <TextField
+                          size="small"
+                          type="number"
+                          inputProps={{ min: 0, step: 0.001 }}
+                          value={row.monthly}
+                          onChange={(e) => setField('monthly', e.target.value)}
+                          sx={{ width: 100 }}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRentalClassRatesDialogOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleSaveRentalClassRates} disabled={savingClassRates}>
+            {savingClassRates ? <CircularProgress size={20} /> : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={productSkuRatesDialogOpen}
+        onClose={() => setProductSkuRatesDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 3 } }}
+      >
+        <DialogTitle sx={{ fontWeight: 700 }}>Rates by product code</DialogTitle>
+        <DialogContent sx={{ pt: 1 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Monthly rent per SKU on this customer. Clear a field to remove the override and fall back to class pricing. You can prefix-match longer codes (e.g. key <code>BOX300</code> applies to <code>BOX300-16PK</code>) using the same rules as the org rate table.
+          </Typography>
+          <TableContainer sx={{ maxHeight: 360 }}>
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow sx={{ bgcolor: 'action.hover' }}>
+                  <TableCell><strong>Product code</strong></TableCell>
+                  <TableCell align="right"><strong>On hand</strong></TableCell>
+                  <TableCell align="right"><strong>Monthly ($)</strong></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {Object.keys(productSkuRatesDraft)
+                  .sort((a, b) => a.localeCompare(b))
+                  .map((code) => {
+                    const row = productSkuRatesDraft[code] || { monthly: '' };
+                    const onHand = (customerAssets || []).filter(
+                      (b) => (b.product_code || '').trim() === code
+                    ).length;
+                    return (
+                      <TableRow key={code}>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{code}</TableCell>
+                        <TableCell align="right">{onHand || '—'}</TableCell>
+                        <TableCell align="right">
+                          <TextField
+                            size="small"
+                            type="number"
+                            inputProps={{ min: 0, step: 0.01 }}
+                            placeholder="—"
+                            value={row.monthly}
+                            onChange={(e) =>
+                              setProductSkuRatesDraft((prev) => ({
+                                ...prev,
+                                [code]: { ...prev[code], monthly: e.target.value },
+                              }))
+                            }
+                            sx={{ width: 120 }}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          {Object.keys(productSkuRatesDraft).length === 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
+              No product codes yet. Add a SKU below (e.g. before inventory arrives).
+            </Typography>
+          )}
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 2 }} alignItems={{ sm: 'flex-end' }}>
+            <TextField
+              size="small"
+              label="Add product code"
+              value={productSkuExtraCode}
+              onChange={(e) => setProductSkuExtraCode(e.target.value)}
+              sx={{ flex: 1 }}
+            />
+            <TextField
+              size="small"
+              label="Monthly ($)"
+              type="number"
+              inputProps={{ min: 0, step: 0.01 }}
+              value={productSkuExtraMonthly}
+              onChange={(e) => setProductSkuExtraMonthly(e.target.value)}
+              sx={{ width: 140 }}
+            />
+            <Button
+              variant="outlined"
+              onClick={() => {
+                const c = productSkuExtraCode.trim();
+                if (!c) return;
+                setProductSkuRatesDraft((prev) => ({
+                  ...prev,
+                  [c]: { monthly: productSkuExtraMonthly.trim() },
+                }));
+                setProductSkuExtraCode('');
+                setProductSkuExtraMonthly('');
+              }}
+            >
+              Add row
+            </Button>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setProductSkuRatesDialogOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleSaveProductSkuRates} disabled={savingProductSkuRates}>
+            {savingProductSkuRates ? <CircularProgress size={20} /> : 'Save'}
           </Button>
         </DialogActions>
       </Dialog>

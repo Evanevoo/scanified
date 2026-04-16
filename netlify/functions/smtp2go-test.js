@@ -1,6 +1,6 @@
 const nodemailer = require('nodemailer');
 
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,

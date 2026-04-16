@@ -7,12 +7,14 @@
     "dev": "vite",
     "dev:netlify": "netlify dev --offline",
     "build": "vite build",
-    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "lint": "eslint netlify --ext js --report-unused-disable-directives --max-warnings 0",
+    "lint:src": "eslint src --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "test:ci": "jest --ci --coverage --watchAll=false"
+    "test:ci": "jest --ci --coverage --watchAll=false",
+    "sync:quickbooks": "node scripts/quickbooks-sync/index.js"
   },
   "dependencies": {
     "@emotion/react": "^11.11.1",
@@ -40,6 +42,7 @@
     "lodash.throttle": "^4.1.1",
     "lucide-react": "^0.561.0",
     "nodemailer": "^6.9.7",
+    "odbc": "^2.4.9",
     "papaparse": "^5.5.3",
     "react": "^18.2.0",
     "react-beautiful-dnd": "^13.1.1",
@@ -54,7 +57,8 @@
     "three": "^0.162.0",
     "twilio": "^5.3.5",
     "xlsx": "^0.18.5",
-    "zustand": "^4.4.7"
+    "zustand": "^4.4.7",
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@babel/core": "^7.23.6",

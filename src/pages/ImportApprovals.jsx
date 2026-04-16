@@ -1,4 +1,5 @@
 import logger from '../utils/logger';
+import { parseDbTimestamp } from '../utils/parseDbTimestamp';
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { supabase } from '../supabase/client';
 import { resetDaysAtLocation } from '../utils/daysAtLocationUpdater';
@@ -65,6 +66,13 @@ import ImportApprovalDetail from './ImportApprovalDetail';
 import QuantityDiscrepancyDetector from '../components/QuantityDiscrepancyDetector';
 import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
+import { reconcileShippedBottleAssignments } from '../services/reconcileShippedBottleAssignments';
+import {
+  fetchOrgRentalPricingContext,
+  monthlyRateForNewRental,
+  monthlyRateForProductPlaceholder,
+} from '../services/rentalPricingContext';
+import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
 
 /** Normalize numeric SO strings so 071760 matches 71760; alphanumeric (e.g. S47852) stays trimmed only. */
 function normalizeOrderNumForApproval(num) {
@@ -334,15 +342,36 @@ function EditBottleDialog({ open, bottle, barcode, isNew, organizationId, onClos
   );
 }
 
-// formatDate with optional timezone (used at call site with component's userTimezone)
+/** Case-insensitive status checks — DB uses mixed case; returns use `empty`. */
+function bottleStatusLower(status) {
+  return (status == null ? '' : String(status)).trim().toLowerCase();
+}
+
+/** Chip color for View Bottles: at-customer vs in-yard / available. */
+function viewBottlesStatusChipColor(status) {
+  const s = bottleStatusLower(status);
+  if (s === 'rented' || s === 'delivered') return 'warning';
+  if (s === 'empty' || s === 'available' || s === 'in_stock') return 'success';
+  return 'default';
+}
+
+function isBottleAtCustomerByStatus(status) {
+  const s = bottleStatusLower(status);
+  return s === 'delivered' || s === 'rented';
+}
+
+// formatDate: DB timestamps are parsed as UTC when no offset (see parseDbTimestamp)
 function formatDate(dt, timeZone) {
   if (!dt) return '';
-  const d = new Date(dt);
-  if (Number.isNaN(d.getTime())) return '';
+  const d = parseDbTimestamp(dt);
+  if (!d || Number.isNaN(d.getTime())) return '';
+  const tz = timeZone || 'UTC';
   try {
-    const opts = { dateStyle: 'medium', timeStyle: 'short' };
-    if (timeZone) opts.timeZone = timeZone;
-    return d.toLocaleString(undefined, opts);
+    return d.toLocaleString(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: tz
+    });
   } catch {
     return d.toLocaleString();
   }
@@ -606,9 +635,9 @@ function determineVerificationStatus(record) {
 
 export default function ImportApprovals() {
   const { user, organization, profile } = useAuth();
-  // Prefer profile timezone (Settings). If unset, use browser timezone; if browser says UTC, leave unset so engine uses system local time
   const browserTz = typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone;
-  const userTimezone = profile?.preferences?.timezone || (browserTz && browserTz !== 'UTC' ? browserTz : undefined);
+  // Match Scanned Orders: profile first, then browser, then UTC for consistent display
+  const displayTimezone = profile?.preferences?.timezone || browserTz || 'UTC';
   const [pendingInvoices, setPendingInvoices] = useState([]);
   const [pendingReceipts, setPendingReceipts] = useState([]);
   const [ordersWithBottlesAtCustomers, setOrdersWithBottlesAtCustomers] = useState(new Set());
@@ -710,6 +739,7 @@ export default function ImportApprovals() {
   const scanTimeRef = useRef(null);
   const prevPathnameRef = useRef(location.pathname);
   const silentRefetchRef = useRef(false);
+  const liveSyncTimerRef = useRef(null);
 
   // Define handleSelectAll early to avoid initialization errors
   const handleSelectAll = () => {
@@ -798,6 +828,60 @@ export default function ImportApprovals() {
       setRefetchTrigger(prevTrigger => prevTrigger + 1);
     }
   }, [location.pathname]);
+
+  // Keep Order Verification connected to edits happening elsewhere (Bottle Details, scanners, imports)
+  useEffect(() => {
+    if (!organization?.id) return undefined;
+
+    const queueSilentRefetch = () => {
+      if (liveSyncTimerRef.current) {
+        clearTimeout(liveSyncTimerRef.current);
+      }
+      liveSyncTimerRef.current = setTimeout(() => {
+        silentRefetchRef.current = true;
+        setRefetchTrigger(prev => prev + 1);
+      }, 250);
+    };
+
+    const liveSyncChannel = supabase
+      .channel(`import-approvals-sync-${organization.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'bottles',
+        filter: `organization_id=eq.${organization.id}`
+      }, queueSilentRefetch)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'bottle_scans',
+        filter: `organization_id=eq.${organization.id}`
+      }, queueSilentRefetch)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'imported_invoices',
+        filter: `organization_id=eq.${organization.id}`
+      }, queueSilentRefetch)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'imported_sales_receipts',
+        filter: `organization_id=eq.${organization.id}`
+      }, queueSilentRefetch)
+      .subscribe();
+
+    const handleWindowFocus = () => queueSilentRefetch();
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus);
+      if (liveSyncTimerRef.current) {
+        clearTimeout(liveSyncTimerRef.current);
+      }
+      liveSyncChannel.unsubscribe();
+    };
+  }, [organization?.id]);
 
   useEffect(() => {
     document.title = 'Order Verification';
@@ -967,7 +1051,9 @@ export default function ImportApprovals() {
   // Sort by scan time (created_at = when record was created/scanned), newest first
   const getSortableScanTime = (record) => {
     const t = record?.created_at;
-    return t ? new Date(t).getTime() : 0;
+    if (!t) return 0;
+    const d = parseDbTimestamp(t);
+    return d ? d.getTime() : 0;
   };
   const sortedFilteredInvoices = useMemo(() => {
     return [...(filteredInvoices || [])].sort((a, b) => getSortableScanTime(b) - getSortableScanTime(a));
@@ -1979,7 +2065,7 @@ export default function ImportApprovals() {
       (bottles || []).forEach(bottle => {
         const bottleInfo = {
           description: bottle.description || (bottle.gas_type && bottle.size ? `${bottle.gas_type} BOTTLE - SIZE ${bottle.size}` : ''),
-          type: bottle.product_code || '',
+          type: bottle.type || bottle.product_code || '',
           size: bottle.size || '',
           group: bottle.gas_type || '',
           category: bottle.category || 'INDUSTRIAL CYLINDERS',
@@ -2758,6 +2844,7 @@ export default function ImportApprovals() {
       }
 
       const warnings = [];
+      const pricingCtx = await fetchOrgRentalPricingContext(supabase, organization.id);
       for (const scan of scannedData) {
         if (scan.cylinder_barcode) {
           // Check for existing open rental
@@ -2818,15 +2905,29 @@ export default function ImportApprovals() {
               logger.warn('Could not fetch tax rate for location:', rentalLocation);
             }
 
+            const { data: bottleRow } = await supabase
+              .from('bottles')
+              .select(
+                'id, barcode_number, product_code, category, rental_class_id, rental_class_key, description, type, location'
+              )
+              .eq('barcode_number', scan.cylinder_barcode)
+              .eq('organization_id', organization.id)
+              .maybeSingle();
+            const rental_amount = bottleRow
+              ? monthlyRateForNewRental(customer.CustomerListID, bottleRow, pricingCtx)
+              : monthlyRateForProductPlaceholder(customer.CustomerListID, '', pricingCtx);
+
             const { error: rentalError } = await supabase
               .from('rentals')
               .insert({
+                organization_id: organization.id,
+                bottle_id: bottleRow?.id ?? null,
                 bottle_barcode: scan.cylinder_barcode,
                 customer_id: customer.CustomerListID,
                 rental_start_date: new Date().toISOString().split('T')[0],
                 rental_end_date: null,
                 rental_type: 'monthly',
-                rental_amount: 0,
+                rental_amount,
                 location: rentalLocation,
                 tax_code: taxCode,
                 tax_rate: taxRate
@@ -2856,7 +2957,9 @@ export default function ImportApprovals() {
               .from('bottles')
               .update({ 
                 assigned_customer: null,
+                customer_name: null,
                 status: 'empty',
+                location: 'In House',
                 last_location_update: new Date().toISOString()
               })
               .eq('barcode_number', scan.cylinder_barcode)
@@ -3010,6 +3113,7 @@ export default function ImportApprovals() {
       }
 
       const warnings = [];
+      const pricingCtx = await fetchOrgRentalPricingContext(supabase, organization.id);
       for (const scan of scannedData) {
         if (scan.cylinder_barcode) {
           // Check for existing open rental
@@ -3070,15 +3174,29 @@ export default function ImportApprovals() {
               logger.warn('Could not fetch tax rate for location:', rentalLocation);
             }
 
+            const { data: bottleRow } = await supabase
+              .from('bottles')
+              .select(
+                'id, barcode_number, product_code, category, rental_class_id, rental_class_key, description, type, location'
+              )
+              .eq('barcode_number', scan.cylinder_barcode)
+              .eq('organization_id', organization.id)
+              .maybeSingle();
+            const rental_amount = bottleRow
+              ? monthlyRateForNewRental(customer.CustomerListID, bottleRow, pricingCtx)
+              : monthlyRateForProductPlaceholder(customer.CustomerListID, '', pricingCtx);
+
             const { error: rentalError } = await supabase
               .from('rentals')
               .insert({
+                organization_id: organization.id,
+                bottle_id: bottleRow?.id ?? null,
                 bottle_barcode: scan.cylinder_barcode,
                 customer_id: customer.CustomerListID,
                 rental_start_date: new Date().toISOString().split('T')[0],
                 rental_end_date: null,
                 rental_type: 'monthly',
-                rental_amount: 0,
+                rental_amount,
                 location: rentalLocation,
                 tax_code: taxCode,
                 tax_rate: taxRate
@@ -3108,7 +3226,9 @@ export default function ImportApprovals() {
               .from('bottles')
               .update({ 
                 assigned_customer: null,
+                customer_name: null,
                 status: 'empty',
+                location: 'In House',
                 last_location_update: new Date().toISOString()
               })
               .eq('barcode_number', scan.cylinder_barcode)
@@ -3297,14 +3417,14 @@ export default function ImportApprovals() {
         allScannedRows.forEach(row => {
           if (row.status === 'rejected') return;
           if (normOrder(row.order_number) !== ordTrim) return;
-          let pc = row.product_code;
-          if (!pc) {
-            const b = String(row.bottle_barcode || row.barcode_number || '').trim();
-            if (b) {
-              const nb = b.replace(/^0+/, '') || b;
-              const info = productCodeToAssetInfo[b] || productCodeToAssetInfo[nb];
-              pc = (info && info.product_code) ? info.product_code : b;
-            }
+          const b = String(row.bottle_barcode || row.barcode_number || '').trim();
+          const nb = b ? (b.replace(/^0+/, '') || b) : '';
+          const info = (b && (productCodeToAssetInfo[b] || productCodeToAssetInfo[nb])) || null;
+          // Prefer live bottle classification over scan-row product_code (which may be stale after reclassify).
+          // In this workflow invoice lines are often keyed by bottle "type", so treat type as primary tracked code.
+          let pc = (info && (info.type || info.product_code)) ? (info.type || info.product_code) : row.product_code;
+          if (!pc && b) {
+            pc = b;
           }
           if (pc) productCodesFromScans.add(String(pc).trim());
         });
@@ -3361,14 +3481,14 @@ export default function ImportApprovals() {
       allScannedRows.forEach(row => {
         if (row.status === 'rejected') return;
         if (normOrder(row.order_number) !== ordTrim) return;
-        let pc = row.product_code;
-        if (!pc) {
-          const b = String(row.bottle_barcode || row.barcode_number || '').trim();
-          if (b) {
-            const nb = b.replace(/^0+/, '') || b;
-            const info = productCodeToAssetInfo[b] || productCodeToAssetInfo[nb];
-            pc = (info && info.product_code) ? info.product_code : b;
-          }
+        const b = String(row.bottle_barcode || row.barcode_number || '').trim();
+        const nb = b ? (b.replace(/^0+/, '') || b) : '';
+        const info = (b && (productCodeToAssetInfo[b] || productCodeToAssetInfo[nb])) || null;
+        // Prefer live bottle classification over scan-row product_code (which may be stale after reclassify).
+        // In this workflow invoice lines are often keyed by bottle "type", so treat type as primary tracked code.
+        let pc = (info && (info.type || info.product_code)) ? (info.type || info.product_code) : row.product_code;
+        if (!pc && b) {
+          pc = b;
         }
         if (pc) productCodesFromScans.add(String(pc).trim());
       });
@@ -3735,6 +3855,7 @@ export default function ImportApprovals() {
           .from('bottles')
           .update({
             status: 'empty', // Mark as empty when returned
+            location: 'In House',
             last_location_update: new Date().toISOString()
             // NOTE: We intentionally do NOT unassign customer or update rental records
             // since the asset was not on balance
@@ -3756,6 +3877,7 @@ export default function ImportApprovals() {
         .from('bottles')
         .update({
           status: 'empty', // Mark as empty when returned
+          location: 'In House',
           assigned_customer: null,
           customer_id: null,
           rental_start_date: null,
@@ -4315,12 +4437,18 @@ export default function ImportApprovals() {
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Found {(bottleInfoDialog?.bottles || []).length} bottle(s) for order {bottleInfoDialog?.orderNumber}
               </Typography>
+              <Alert severity="info" sx={{ mt: 1, mb: 1 }} icon={<InfoOutlined />}>
+                <Typography variant="body2">
+                  <strong>Status</strong> is the bottle&apos;s current record in inventory. <strong>Scan action</strong> is the latest scan on this order.
+                  Ship / delivery scans should end up <strong>rented</strong> (or delivered) at the customer after you approve; return / pickup scans should end up <strong>empty</strong> at the yard. If you have not approved yet, status may still be empty or available until processing runs.
+                </Typography>
+              </Alert>
               
               {/* Warning if any bottles are already at customers */}
               {(() => {
                 const bottlesAtCustomers = (bottleInfoDialog?.bottles || []).filter(b => 
                   (b.scanAction === 'out' || b.scanAction === 'SHIP' || b.scanAction === 'delivery') && 
-                  (b.status === 'delivered' || b.status === 'RENTED') && 
+                  isBottleAtCustomerByStatus(b.status) && 
                   (b.customer_name || b.assigned_customer)
                 );
                 
@@ -4387,15 +4515,11 @@ export default function ImportApprovals() {
                             <Chip 
                               label={bottle.status || 'UNKNOWN'} 
                               size="small"
-                              color={
-                                bottle.status === 'RENTED' ? 'warning' :
-                                bottle.status === 'AVAILABLE' || bottle.status === 'IN_STOCK' ? 'success' :
-                                'default'
-                              }
+                              color={viewBottlesStatusChipColor(bottle.status)}
                             />
                             {/* Warning if bottle is being shipped but is already at a customer */}
                             {(bottle.scanAction === 'out' || bottle.scanAction === 'SHIP' || bottle.scanAction === 'delivery') && 
-                             (bottle.status === 'delivered' || bottle.status === 'RENTED') && 
+                             isBottleAtCustomerByStatus(bottle.status) && 
                              (bottle.customer_name || bottle.assigned_customer) && (
                               <Chip 
                                 icon={<WarningIcon />}
@@ -5606,7 +5730,7 @@ return (
                     icon={VERIFICATION_STATES[status].icon}
                   />
                   <Typography variant="caption" color="text.secondary" title="Scan time (local)">
-                    {formatDate(invoice.created_at, userTimezone)}
+                    {formatDate(invoice.created_at, displayTimezone)}
                   </Typography>
                 </Box>
                 <Typography variant="body2" color="text.secondary" gutterBottom>
@@ -5836,7 +5960,7 @@ return (
                     icon={VERIFICATION_STATES[status].icon}
                   />
                   <Typography variant="caption" color="text.secondary" title="Scan time (local)">
-                    {formatDate(receipt.created_at, userTimezone)}
+                    {formatDate(receipt.created_at, displayTimezone)}
                   </Typography>
                 </Box>
                 <Typography variant="body2" color="text.secondary" gutterBottom>
@@ -6295,12 +6419,17 @@ return (
       // Single source: bottle_scans
       let allBottleScans = [];
       
+      // Same as checkBottlesAtCustomers: only SHIP/DELIVERY — not RETURN/PICKUP.
+      // Otherwise return scans still tied to the customer on the bottle row falsely light the badge.
+      const shipDeliveryFilter = 'mode.eq.SHIP,mode.eq.DELIVERY,mode.eq.delivery';
+
       if (orderNumbersArray.length > 0) {
         const { data: bottleScansStr } = await supabase
           .from('bottle_scans')
           .select('bottle_barcode, order_number')
           .in('order_number', orderNumbersArray)
-          .eq('organization_id', organization?.id);
+          .eq('organization_id', organization?.id)
+          .or(shipDeliveryFilter);
         
         if (bottleScansStr) allBottleScans = bottleScansStr;
       }
@@ -6310,7 +6439,8 @@ return (
           .from('bottle_scans')
           .select('bottle_barcode, order_number')
           .in('order_number', orderNumbersNumeric)
-          .eq('organization_id', organization?.id);
+          .eq('organization_id', organization?.id)
+          .or(shipDeliveryFilter);
         
         if (bottleScansNum) {
           const existingOrderNums = new Set(allBottleScans.map(bs => String(bs.order_number).trim()));
@@ -6505,6 +6635,7 @@ return (
   async function collectBarcodesForOrder(orderNumber, recordRows = null) {
     const shippedBarcodes = new Set();
     const returnedBarcodes = new Set();
+    let bottleScanRows = [];
 
     const normalizeOrderNum = (num) => {
       if (num == null || num === '') return '';
@@ -6530,10 +6661,14 @@ return (
     const normalizeBarcode = (b) => (b == null || b === '') ? '' : String(b).trim().replace(/^0+/, '') || String(b).trim();
 
     if (orderVariants.length > 0) {
-      let bottleScansQuery = supabase.from('bottle_scans').select('bottle_barcode, mode, created_at, timestamp').in('order_number', orderVariants);
+      let bottleScansQuery = supabase
+        .from('bottle_scans')
+        .select('bottle_barcode, mode, created_at, timestamp, customer_id, customer_name')
+        .in('order_number', orderVariants);
       if (organization?.id) bottleScansQuery = bottleScansQuery.eq('organization_id', organization.id);
       const { data: bottleScans, error: bottleScansError } = await bottleScansQuery;
       if (bottleScansError) logger.error('Error fetching bottle_scans:', bottleScansError);
+      bottleScanRows = bottleScans || [];
       if (bottleScans && bottleScans.length > 0) {
         const bottleScanMap = new Map();
         bottleScans.forEach(scan => {
@@ -6585,7 +6720,7 @@ return (
       if (normalizedReturnSet.has(normalizeBarcode(bc))) shippedBarcodes.delete(bc);
     }
 
-    return { shippedBarcodes, returnedBarcodes };
+    return { shippedBarcodes, returnedBarcodes, bottleScanRows };
   }
 
   // Assign bottles to customers after approval using the transactional RPC
@@ -6595,7 +6730,7 @@ return (
 
       const data = parseDataField(record.data);
       const rows = data.rows || data.line_items || [];
-      const newCustomerName = getCustomerInfo(data);
+      let newCustomerName = getCustomerInfo(data);
 
       let orderNumber = data.order_number || data.reference_number || data.invoice_number;
       if (!orderNumber && typeof record.id === 'string' && record.id.startsWith('scanned_')) {
@@ -6619,11 +6754,47 @@ return (
         if (customer) newCustomerId = customer.CustomerListID;
       }
 
-      const { shippedBarcodes, returnedBarcodes } = await collectBarcodesForOrder(orderNumber, rows);
+      const { shippedBarcodes, returnedBarcodes, bottleScanRows = [] } = await collectBarcodesForOrder(orderNumber, rows);
       logger.debug(`Collected barcodes for order ${orderNumber}: ${shippedBarcodes.size} SHIP, ${returnedBarcodes.size} RETURN`);
 
       const shipArr = Array.from(shippedBarcodes);
       const retArr = Array.from(returnedBarcodes);
+      const normalizeBarcodeAssign = (b) =>
+        b == null || b === '' ? '' : String(b).trim().replace(/^0+/, '') || String(b).trim();
+
+      const scanCustomerUnanimous = await getUnanimousShipScanCustomer(
+        supabase,
+        organization?.id,
+        shipArr,
+        bottleScanRows,
+        normalizeBarcodeAssign
+      );
+      if (scanCustomerUnanimous === 'CONFLICT') {
+        setSnackbar(
+          'Cannot approve: delivery scans on this order list different customers. Fix scans or split the order.'
+        );
+        throw new Error('Scan customer conflict');
+      }
+      if (scanCustomerUnanimous && scanCustomerUnanimous.customerListId) {
+        const importIdStr = String(newCustomerId || '').trim();
+        const importNameStr = String(newCustomerName || '').trim();
+        const scanIdStr = String(scanCustomerUnanimous.customerListId || '').trim();
+        const scanNameStr = String(scanCustomerUnanimous.name || '').trim();
+        const sameCustomer =
+          (importIdStr && importIdStr === scanIdStr) ||
+          (importNameStr &&
+            scanNameStr &&
+            importNameStr.toLowerCase() === scanNameStr.toLowerCase());
+        if (!sameCustomer) {
+          logger.log('ImportApprovals: using unanimous bottle_scans customer instead of invoice', {
+            invoiceCustomer: newCustomerName,
+            scanCustomer: scanCustomerUnanimous.name,
+            scanListId: scanIdStr,
+          });
+          newCustomerId = scanCustomerUnanimous.customerListId;
+          newCustomerName = scanCustomerUnanimous.name || newCustomerName;
+        }
+      }
       let returnsNotOnBalance = [];
 
       if (retArr.length > 0 && organization?.id) {
@@ -6687,14 +6858,36 @@ return (
         logger.debug(`RPC assignment succeeded: ${d.shipped || 0} shipped, ${d.returned || 0} returned, ${d.skipped || 0} skipped, ${d.created || 0} created`);
         // Close any existing RNB for barcodes we just shipped (bottle back in circulation)
         if (shipArr.length > 0) await closeRNBRentalsForBarcodes(shipArr);
+        const reconcileWarnings = await reconcileShippedBottleAssignments(supabase, {
+          organizationId: organization?.id,
+          shipBarcodes: shipArr,
+          customerId: newCustomerId || newCustomerName,
+          customerName: newCustomerName,
+          orderNumber,
+        });
+        if (reconcileWarnings.length > 0) {
+          logger.warn('Post-verify reassignment (prior customer / missing return):', reconcileWarnings);
+        }
+        const reconcileSuffix =
+          reconcileWarnings.length > 0
+            ? ` ⚠️ ${reconcileWarnings.length} bottle(s) were still on a prior customer and were reassigned (e.g. return not scanned).`
+            : '';
         if (returnsNotOnBalance.length > 0) {
           for (const rnb of returnsNotOnBalance) {
             await createRNBRentalRecord(newCustomerName, newCustomerId, orderNumber, rnb.product_code || 'Unknown', rnb.barcode);
           }
-          setSnackbar(`Bottles assigned. ${returnsNotOnBalance.length} return(s) were not on customer balance (RNB – see customer page).`);
+          setSnackbar(
+            `Bottles assigned. ${returnsNotOnBalance.length} return(s) were not on customer balance (RNB – see customer page).${reconcileSuffix}`
+          );
         } else if (d.errors && d.errors.length > 0) {
           logger.warn('RPC assignment warnings:', d.errors);
-          setSnackbar(`Bottles assigned (${d.shipped || 0} shipped, ${d.returned || 0} returned). ${d.errors.length} warning(s) - see logs.`);
+          setSnackbar(
+            `Bottles assigned (${d.shipped || 0} shipped, ${d.returned || 0} returned). ${d.errors.length} warning(s) - see logs.${reconcileSuffix}`
+          );
+        } else {
+          setSnackbar(
+            `Bottles assigned (${d.shipped || 0} shipped, ${d.returned || 0} returned).${reconcileSuffix}`
+          );
         }
       } else {
         logger.warn('RPC assignment failed, falling back to inline logic:', rpcResult.error);
@@ -6755,7 +6948,7 @@ return (
 
       const balanceCheck = await validateReturnBalance(bottle, orderNumber, organization);
       if (!balanceCheck.isOnBalance) {
-        await supabase.from('bottles').update({ status: 'empty', last_location_update: new Date().toISOString() }).eq('id', bottle.id);
+        await supabase.from('bottles').update({ status: 'empty', location: 'In House', last_location_update: new Date().toISOString() }).eq('id', bottle.id);
         assignmentWarnings.push(`Bottle ${bottle.barcode_number} returned but was not on customer balance.`);
         continue;
       }
@@ -6768,6 +6961,7 @@ return (
           assigned_customer: null,
           customer_name: null,
           status: 'empty',
+          location: 'In House',
           days_at_location: 0,
           last_verified_order: orderNumber,
         })
@@ -6838,7 +7032,9 @@ return (
         }
         await createRentalRecord(bottle, newCustomerName, newCustomerId, null, orderNumber);
       } else {
-        assignmentWarnings.push(`Bottle ${bottle.barcode_number} already at another customer (${currentCustomer}); not reassigning.`);
+        logger.log(
+          `Bottle ${bottle.barcode_number} still on prior customer (${currentCustomer}); post-pass will reassign to ${newCustomerName}.`
+        );
       }
     }
 
@@ -6872,11 +7068,23 @@ return (
             fallbackShippedBarcodes.push(bottle.barcode_number);
             await createRentalRecord(bottle, newCustomerName, newCustomerId, row, orderNumber);
           } else {
-            assignmentWarnings.push(`Bottle ${bottle.barcode_number} already at another customer; not reassigning.`);
+            logger.log(
+              `Bottle ${bottle.barcode_number} still on prior customer; post-pass will reassign to ${newCustomerName}.`
+            );
           }
         }
       }
     }
+
+    const allShippedUnique = [...new Set([...Array.from(shippedBarcodes), ...fallbackShippedBarcodes])];
+    const reconcileInline = await reconcileShippedBottleAssignments(supabase, {
+      organizationId: organization?.id,
+      shipBarcodes: allShippedUnique,
+      customerId: newCustomerId || newCustomerName,
+      customerName: newCustomerName,
+      orderNumber,
+    });
+    assignmentWarnings.push(...reconcileInline);
 
     // Close any RNB for barcodes we just shipped (main loop + fallback)
     const allShippedBarcodes = [...Array.from(shippedBarcodes), ...fallbackShippedBarcodes];
@@ -6925,6 +7133,9 @@ return (
         return;
       }
 
+      const pricingCtx = await fetchOrgRentalPricingContext(supabase, organization?.id);
+      const rental_amount = monthlyRateForNewRental(customerId || customerName, bottle, pricingCtx);
+
       const insertPayload = {
         organization_id: organization?.id,
         bottle_id: bottle.id,
@@ -6933,7 +7144,7 @@ return (
         customer_name: customerName,
         rental_start_date: new Date().toISOString().split('T')[0],
         rental_end_date: null,
-        rental_amount: 10,
+        rental_amount,
         rental_type: 'monthly',
         tax_code: 'GST+PST',
         tax_rate: 0.11,
@@ -7471,7 +7682,7 @@ return (
         'Date': data.date || '',
         'Status': record.status || '',
         'Uploaded By': record.uploaded_by || '',
-        'Scan time': record.created_at ? new Date(record.created_at).toLocaleString() : ''
+        'Scan time': record.created_at ? formatDate(record.created_at, displayTimezone) : ''
       };
     });
 
@@ -7607,13 +7818,17 @@ return (
     const formatIfIso = (raw) => {
       if (raw == null || raw === '') return '';
       if (typeof raw === 'string' && raw.includes('T')) {
-        const d = new Date(raw);
-        if (!Number.isNaN(d.getTime())) {
+        const d = parseDbTimestamp(raw);
+        if (d && !Number.isNaN(d.getTime())) {
           try {
-            const opts = { dateStyle: 'medium', timeStyle: 'short' };
-            if (userTimezone) opts.timeZone = userTimezone;
-            return d.toLocaleString(undefined, opts);
-          } catch { return raw; }
+            return d.toLocaleString(undefined, {
+              dateStyle: 'medium',
+              timeStyle: 'short',
+              timeZone: displayTimezone
+            });
+          } catch {
+            return raw;
+          }
         }
       }
       return raw;
@@ -7772,12 +7987,10 @@ return (
       // bottle_scans has no status column
       if (!orderNumVariants.has(normalizeOrderNum(row.order_number))) return;
       const scannedBarcode = String(row.bottle_barcode || row.barcode_number || '').trim();
-      let productMatch = normalizeProductCode(row.product_code) === resolvedNorm || row.bottle_barcode === resolvedProductCode || row.barcode_number === resolvedProductCode;
-      if (!productMatch && scannedBarcode) {
-        const normBarcodeScan = String(scannedBarcode).trim().replace(/^0+/, '') || String(scannedBarcode).trim();
-        const bottleInfo = productCodeToAssetInfo[scannedBarcode] || productCodeToAssetInfo[normBarcodeScan];
-        if (bottleInfo && normalizeProductCode(bottleInfo.product_code) === resolvedNorm) productMatch = true;
-      }
+      const normBarcodeScan = scannedBarcode ? (String(scannedBarcode).trim().replace(/^0+/, '') || String(scannedBarcode).trim()) : '';
+      const bottleInfo = scannedBarcode ? (productCodeToAssetInfo[scannedBarcode] || productCodeToAssetInfo[normBarcodeScan]) : null;
+      const effectiveRowProductNorm = normalizeProductCode((bottleInfo && (bottleInfo.type || bottleInfo.product_code)) ? (bottleInfo.type || bottleInfo.product_code) : row.product_code);
+      let productMatch = effectiveRowProductNorm === resolvedNorm || row.bottle_barcode === resolvedProductCode || row.barcode_number === resolvedProductCode;
       if (!productMatch) return;
       const nb = normalizeBarcodeForWins(scannedBarcode);
       if (!nb) return;
@@ -7813,17 +8026,13 @@ return (
       
       // Go by what was scanned for type (SHIP vs RETURN). For product line: use scan's product_code if present;
       // bottle_scans often has no product_code, so use barcode→bottle product from DB to assign to the right line.
+      const normBarcodeScan = scannedBarcode ? (String(scannedBarcode).trim().replace(/^0+/, '') || String(scannedBarcode).trim()) : '';
+      const bottleInfo = scannedBarcode ? (productCodeToAssetInfo[scannedBarcode] || productCodeToAssetInfo[normBarcodeScan]) : null;
+      const effectiveRowProductNorm = normalizeProductCode((bottleInfo && (bottleInfo.type || bottleInfo.product_code)) ? (bottleInfo.type || bottleInfo.product_code) : row.product_code);
       let productMatch =
-        normalizeProductCode(row.product_code) === resolvedNorm ||
+        effectiveRowProductNorm === resolvedNorm ||
         row.bottle_barcode === resolvedProductCode ||
         row.barcode_number === resolvedProductCode;
-      if (!productMatch && scannedBarcode) {
-        const normBarcodeScan = String(scannedBarcode).trim().replace(/^0+/, '') || String(scannedBarcode).trim();
-        const bottleInfo = productCodeToAssetInfo[scannedBarcode] || productCodeToAssetInfo[normBarcodeScan];
-        if (bottleInfo && normalizeProductCode(bottleInfo.product_code) === resolvedNorm) {
-          productMatch = true;
-        }
-      }
       if (!productMatch) {
         return false;
       }

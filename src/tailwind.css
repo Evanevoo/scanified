@@ -100,8 +100,8 @@ input, textarea, select {
 }
 
 /* Smooth transitions for better mobile UX */
-* {
-  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
+button, a, .theme-button, .MuiButton-root, .MuiChip-root, .MuiIconButton-root {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
 }
 
 .sidebar, .nav, nav {
@@ -178,7 +178,7 @@ button:hover, .theme-button:hover {
   transform: translateY(-1px);
 }
 
-input, .search-bar {
+input:not(.MuiInputBase-input), .search-bar {
   background: #f3f4f6 !important;
   color: var(--text-main) !important;
   border: 1px solid #e5e7eb !important;

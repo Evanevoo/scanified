@@ -773,19 +773,38 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     // Check if this is a sales receipt barcode (starts with %) or packing slip (9 digits)
     let validationResult: { isValid: boolean; error?: string; scannedValue?: string };
     
-    if (data.trim().startsWith('%')) {
+    const trimmedData = data.trim();
+    if (trimmedData.startsWith('%')) {
       // Sales receipt format - use barcode format validation
       logger.log('📷 Detected sales receipt barcode format (starts with %)');
       const barcodeValidation = await validateBarcodeFormat(data);
       validationResult = {
         isValid: barcodeValidation.isValid,
         error: barcodeValidation.error,
-        scannedValue: data.trim()
+        scannedValue: trimmedData
       };
-    } else {
-      // Packing slip format - use cylinder serial validation (9 digits)
-      logger.log('📷 Detected packing slip barcode format (9 digits)');
+    } else if (/^[0-9]{9}$/.test(trimmedData)) {
+      // Packing slip / cylinder serial — exactly 9 digits
+      logger.log('📷 Detected packing slip / cylinder serial (9 digits)');
       validationResult = validateCylinderSerial(data);
+    } else {
+      // Gas bottle and other asset barcodes (Code128, alphanumeric, etc.)
+      const assetPattern = /^[\dA-Za-z\-%]+$/;
+      const looksLikeAsset =
+        assetPattern.test(trimmedData) &&
+        trimmedData.length >= 4 &&
+        trimmedData.length <= 50 &&
+        !trimmedData.includes(' ');
+      if (looksLikeAsset) {
+        logger.log('📷 Detected asset / bottle barcode (non-9-digit)');
+        validationResult = { isValid: true, scannedValue: trimmedData };
+      } else {
+        validationResult = {
+          isValid: false,
+          error: `Invalid barcode format.\nUse a bottle barcode, 9-digit serial, or sales receipt (starts with %).\nScanned: ${trimmedData}`,
+          scannedValue: trimmedData
+        };
+      }
     }
     
     if (!validationResult.isValid) {
@@ -1490,18 +1509,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         }
         break;
       case 'in':
-        // NOTE: Bottle unassignment should also happen during verification
-        // For now, we'll still mark as empty and update location, but not unassign customer
-        // The verification process will handle customer unassignment
-        updateData.status = 'empty';
-        if (location) {
-          updateData.location = location;
-        } else {
-          updateData.location = 'Warehouse';
-        }
-        // Don't unassign customer here - verification will handle that
-        logger.log('Return scan recorded - customer unassignment will happen during verification');
-        break;
+        // Return scans should stay in a "pending verification" state until Import Approvals
+        // confirms the return. Do not move bottle in-house at scan time.
+        logger.log('Return scan recorded - pending verification in Import Approvals; skipping immediate bottle update.');
+        return;
       case 'locate':
         // Don't change status for locate, just update location
         if (location) updateData.location = location;
@@ -2437,6 +2448,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
       <Modal visible={isScanning} animationType="slide" transparent={false}>
         <View style={{ flex: 1, backgroundColor: '#000' }}>
           <ScanArea
+            reserveViewportBottom={Math.round(30 + insets.bottom + 92 + 52)}
             searchCustomerByName={searchCustomerByName}
             onCustomerFound={handleCustomerFound}
             onScanned={(data: string) => {

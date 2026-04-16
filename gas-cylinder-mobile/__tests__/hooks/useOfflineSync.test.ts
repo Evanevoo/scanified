@@ -3,12 +3,54 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useOfflineSync } from '../../hooks/useOfflineSync';
 import { supabase } from '../../supabase';
 
-// Mock the supabase module
+// Mock the supabase module (SyncService uses auth + from for bottles/profiles/bottle_scans)
 jest.mock('../../supabase', () => ({
   supabase: {
     from: jest.fn(),
+    auth: {
+      getUser: jest.fn().mockResolvedValue({
+        data: { user: { id: 'user1' } },
+        error: null,
+      }),
+    },
   },
 }));
+
+/** Matches SyncService.checkConnectivity + syncOfflineData supabase usage */
+function mockSupabaseForOnlineSync(mockSupabase: jest.Mocked<typeof supabase>) {
+  mockSupabase.from.mockImplementation((table: string) => {
+    if (table === 'bottles') {
+      return {
+        select: jest.fn().mockReturnValue({
+          limit: jest.fn().mockResolvedValue({ data: [{ id: '1' }], error: null }),
+        }),
+        update: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({
+            eq: jest.fn().mockResolvedValue({ error: null }),
+          }),
+        }),
+      } as any;
+    }
+    if (table === 'profiles') {
+      return {
+        select: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({
+            single: jest.fn().mockResolvedValue({
+              data: { organization_id: 'org-1' },
+              error: null,
+            }),
+          }),
+        }),
+      } as any;
+    }
+    if (table === 'bottle_scans') {
+      return {
+        upsert: jest.fn().mockResolvedValue({ error: null }),
+      } as any;
+    }
+    return {} as any;
+  });
+}
 
 // Mock the useErrorHandler hook
 jest.mock('../../hooks/useErrorHandler', () => ({
@@ -194,18 +236,7 @@ describe('useOfflineSync', () => {
 
     it('should sync successfully when online', async () => {
       const mockSupabase = supabase as jest.Mocked<typeof supabase>;
-      
-      // Mock connectivity check
-      mockSupabase.from.mockReturnValueOnce({
-        select: jest.fn().mockReturnValue({
-          limit: jest.fn().mockResolvedValue({ error: null }),
-        }),
-      } as any);
-
-      // Mock scan insertion
-      mockSupabase.from.mockReturnValueOnce({
-        insert: jest.fn().mockResolvedValue({ error: null }),
-      } as any);
+      mockSupabaseForOnlineSync(mockSupabase);
 
       const scans = [
         {
@@ -239,20 +270,36 @@ describe('useOfflineSync', () => {
 
     it('should handle sync errors gracefully', async () => {
       const mockSupabase = supabase as jest.Mocked<typeof supabase>;
-      
-      // Mock connectivity check
-      mockSupabase.from.mockReturnValueOnce({
-        select: jest.fn().mockReturnValue({
-          limit: jest.fn().mockResolvedValue({ error: null }),
-        }),
-      } as any);
 
-      // Mock scan insertion with error
-      mockSupabase.from.mockReturnValueOnce({
-        insert: jest.fn().mockResolvedValue({ 
-          error: { message: 'Database error' } 
-        }),
-      } as any);
+      mockSupabase.from.mockImplementation((table: string) => {
+        if (table === 'bottles') {
+          return {
+            select: jest.fn().mockReturnValue({
+              limit: jest.fn().mockResolvedValue({ data: [], error: null }),
+            }),
+          } as any;
+        }
+        if (table === 'profiles') {
+          return {
+            select: jest.fn().mockReturnValue({
+              eq: jest.fn().mockReturnValue({
+                single: jest.fn().mockResolvedValue({
+                  data: { organization_id: 'org-1' },
+                  error: null,
+                }),
+              }),
+            }),
+          } as any;
+        }
+        if (table === 'bottle_scans') {
+          return {
+            upsert: jest.fn().mockResolvedValue({
+              error: { message: 'Database error' },
+            }),
+          } as any;
+        }
+        return {} as any;
+      });
 
       const scans = [
         {

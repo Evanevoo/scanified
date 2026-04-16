@@ -36,7 +36,7 @@ const CRITICAL_TABLES = [
   'verified_orders'
 ];
 
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   console.log('🔄 Daily backup function triggered at:', new Date().toISOString());
   
   // Verify this is being called by a scheduled function or authorized source
@@ -80,11 +80,11 @@ exports.handler = async (event, context) => {
     success: false
   };
 
+  let backupLogId = null;
   try {
     console.log('📦 Starting comprehensive daily backup...');
     
     // Create backup record in database (if table exists)
-    let backupLogId = null;
     try {
       const { data: backupRecord, error: backupRecordError } = await supabase
         .from('backup_logs')

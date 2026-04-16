@@ -1,8 +1,9 @@
 import logger from '../utils/logger';
 import React, { useEffect, useState, useMemo } from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { 
-  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, TextField, Alert, Button, Card, CardContent, Grid, Stack, Chip
+  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, Alert, Button, Card, CardContent, Grid, Stack, Chip
 } from '@mui/material';
 import { useAuth } from '../hooks/useAuth';
 
@@ -158,7 +159,6 @@ export default function Assets() {
   const [rnbCount, setRnbCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [search, setSearch] = useState('');
   const { profile, organization } = useAuth();
   const [organizationName, setOrganizationName] = useState('');
 
@@ -229,22 +229,8 @@ export default function Assets() {
     }
   };
 
-  // Filter bottles by search
-  const filteredBottles = bottles.filter(bottle => {
-    if (!search) return true;
-    const s = search.toLowerCase();
-    return (
-      (bottle.barcode_number && bottle.barcode_number.toLowerCase().includes(s)) ||
-      (bottle.serial_number && bottle.serial_number.toLowerCase().includes(s)) ||
-      (bottle.type && bottle.type.toLowerCase().includes(s)) ||
-      (bottle.gas_type && bottle.gas_type.toLowerCase().includes(s)) ||
-      (bottle.location && bottle.location.toLowerCase().includes(s)) ||
-      (bottle.organization_name && bottle.organization_name.toLowerCase().includes(s))
-    );
-  });
-
   // Get all unique gas types from the bottles table - these are the gas assets inside the bottles
-  // Group by product_code when present so the same code (e.g. BOX300-16PK) always stays in one row
+  // Group by product_code when set (one row per SKU); otherwise roll up by cleaned description
   const assetTypes = useMemo(() => {
     const assetMap = new Map();
 
@@ -270,10 +256,14 @@ export default function Assets() {
     }
 
     function normalizedGroupKey(bottle) {
-      // Prefer descriptive fields first so "BAR300" and "ARGON BOTTLE - SIZE 300"
-      // can resolve to the same gas/size grouping when they represent the same asset.
+      // When product_code is set, it is the SKU — never merge different codes (e.g. BNI300 vs BNI125).
+      const code = (bottle.product_code || '').toString().trim();
+      if (code) {
+        return code.toUpperCase();
+      }
+      // No code: fall back to cleaned description so similar free-text rows still roll up.
       const descriptive = cleanedLabel(bottle, { includeProductCodeFallback: false });
-      const base = descriptive || bottle.product_code || cleanedLabel(bottle);
+      const base = descriptive || cleanedLabel(bottle);
       return (base || 'Unknown Gas Type').toString().trim().toUpperCase();
     }
 
@@ -367,10 +357,14 @@ export default function Assets() {
       // Removed all_bottles to prevent storage quota issues
     };
   });
+  const physicalTotal = assetRows.reduce((sum, row) => sum + row.total, 0);
   const inventoryMetrics = {
     assetTypes: assetRows.length,
-    totalBottles: assetRows.reduce((sum, row) => sum + row.total, 0),
-    totalBottlesDisplay: `${assetRows.reduce((sum, row) => sum + row.total, 0)} (${assetRows.reduce((sum, row) => sum + row.total, 0)} physical, ${rnbCount} RNB not counted)`,
+    totalBottles: physicalTotal,
+    physicalBottlesHelper:
+      rnbCount > 0
+        ? `${rnbCount} open RNB (return not on balance) — billing exceptions only, not extra physical bottles`
+        : 'Cylinder rows in bottle inventory',
     full: assetRows.reduce((sum, row) => sum + row.full, 0),
     empty: assetRows.reduce((sum, row) => sum + row.empty, 0),
     available: assetRows.reduce((sum, row) => sum + row.available, 0),
@@ -418,8 +412,16 @@ export default function Assets() {
             </Box>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
               <Button
+                component={RouterLink}
+                to="/bottle-locations"
                 variant="outlined"
-                onClick={() => exportSummaryByType(filteredBottles)}
+                sx={{ borderRadius: 2.5, textTransform: 'none', fontWeight: 700 }}
+              >
+                Where bottles are
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={() => exportSummaryByType(bottles)}
                 sx={{ borderRadius: 2.5, textTransform: 'none', fontWeight: 700 }}
               >
                 Export summary
@@ -438,7 +440,11 @@ export default function Assets() {
         <Grid container spacing={2} sx={{ mb: 3 }}>
           {[
             { label: 'Asset types', value: inventoryMetrics.assetTypes, helper: 'Grouped inventory categories' },
-            { label: 'Total bottles', value: inventoryMetrics.totalBottlesDisplay, helper: 'Physical bottles + RNB context' },
+            {
+              label: 'Physical bottles',
+              value: inventoryMetrics.totalBottles.toLocaleString(),
+              helper: inventoryMetrics.physicalBottlesHelper,
+            },
             { label: 'Full', value: inventoryMetrics.full, helper: 'Bottles ready for delivery/use' },
             { label: 'Empty', value: inventoryMetrics.empty, helper: 'Bottles to refill or return' },
             { label: 'Available', value: inventoryMetrics.available, helper: 'Ready for allocation or movement' },
@@ -462,19 +468,6 @@ export default function Assets() {
             </Grid>
           ))}
         </Grid>
-
-        {/* Filters */}
-        <Paper elevation={0} sx={{ p: 2.5, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', backgroundColor: '#fff' }}>
-        <Box display="flex" gap={2} mb={0} flexWrap="wrap" alignItems="center">
-          <TextField
-            size="small"
-            label="Search bottles, barcode, gas type..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            sx={{ minWidth: 280 }}
-          />
-        </Box>
-        </Paper>
 
         {error && (
           <Alert severity="error" sx={{ mb: 3 }}>

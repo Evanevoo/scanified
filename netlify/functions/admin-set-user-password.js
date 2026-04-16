@@ -2,9 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { handlePreflight, createResponse, createErrorResponse } = require('./utils/cors');
 const { applyRateLimit } = require('./utils/rateLimit');
 const { verifyAuth } = require('./utils/auth');
-
-// Roles that can set another user's password in the same org (must align with manage:users permission)
-const ADMIN_ROLES = ['admin', 'owner', 'administrator', 'manager'];
+const { requesterMaySetPasswords } = require('./utils/userAdminAuth');
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -40,14 +38,11 @@ exports.handler = async (event) => {
       return createResponse(event, 400, { error: 'Password must be at least 6 characters' });
     }
 
-    const supabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
-    );
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
     const { data: requesterProfile, error: reqErr } = await supabase
       .from('profiles')
-      .select('organization_id, role')
+      .select('organization_id, role, role_id')
       .eq('id', user.id)
       .single();
 
@@ -55,9 +50,11 @@ exports.handler = async (event) => {
       return createResponse(event, 403, { error: 'Your profile could not be verified' });
     }
 
-    const role = (requesterProfile.role || '').toLowerCase();
-    if (!ADMIN_ROLES.includes(role)) {
-      return createResponse(event, 403, { error: 'Only admins can set user passwords' });
+    const allowed = await requesterMaySetPasswords(supabase, requesterProfile);
+    if (!allowed) {
+      return createResponse(event, 403, {
+        error: 'Only organization admins and owners can set user passwords',
+      });
     }
 
     const { data: targetProfile, error: targetErr } = await supabase
@@ -75,7 +72,7 @@ exports.handler = async (event) => {
     }
 
     const { error: updateErr } = await supabase.auth.admin.updateUserById(userId, {
-      password
+      password,
     });
 
     if (updateErr) {

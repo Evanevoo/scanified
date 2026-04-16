@@ -2,7 +2,7 @@ const Stripe = require('stripe');
 const { handlePreflight, createResponse, createErrorResponse } = require('./utils/cors');
 const { applyRateLimit } = require('./utils/rateLimit');
 
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
     return handlePreflight(event);
