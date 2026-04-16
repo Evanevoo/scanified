@@ -20,9 +20,6 @@ import {
   IconButton,
   Tooltip,
   InputAdornment,
-  FormControl,
-  InputLabel,
-  Select,
   MenuItem,
   Stack,
   CircularProgress,
@@ -197,22 +194,22 @@ export default function RentalInvoiceSearch() {
               onChange={(e) => setFilters((f) => ({ ...f, customerSearch: e.target.value }))}
               sx={{ minWidth: 200 }}
             />
-            <FormControl size="small" sx={{ minWidth: 140 }}>
-              <InputLabel>Status</InputLabel>
-              <Select
-                value={filters.status}
-                label="Status"
-                onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="draft">Draft</MenuItem>
-                <MenuItem value="sent">Sent</MenuItem>
-                <MenuItem value="paid">Paid</MenuItem>
-                <MenuItem value="overdue">Overdue</MenuItem>
-                <MenuItem value="pending">Pending</MenuItem>
-                <MenuItem value="cancelled">Cancelled</MenuItem>
-              </Select>
-            </FormControl>
+            <TextField
+              select
+              size="small"
+              value={filters.status}
+              onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
+              inputProps={{ 'aria-label': 'Invoice status filter' }}
+              sx={{ minWidth: 140 }}
+            >
+              <MenuItem value="">All</MenuItem>
+              <MenuItem value="draft">Draft</MenuItem>
+              <MenuItem value="sent">Sent</MenuItem>
+              <MenuItem value="paid">Paid</MenuItem>
+              <MenuItem value="overdue">Overdue</MenuItem>
+              <MenuItem value="pending">Pending</MenuItem>
+              <MenuItem value="cancelled">Cancelled</MenuItem>
+            </TextField>
             <Button
               variant="contained"
               startIcon={exporting ? <CircularProgress size={18} /> : <DownloadIcon />}

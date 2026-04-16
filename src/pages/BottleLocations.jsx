@@ -29,9 +29,6 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  FormControl,
-  InputLabel,
-  Select,
   MenuItem,
   Menu,
   Checkbox,
@@ -505,27 +502,27 @@ export default function BottleLocations() {
                 borderBottom: '1px solid rgba(15, 23, 42, 0.08)',
               }}
             >
-              <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ sm: 'flex-end' }} flexWrap="wrap" useFlexGap>
+              <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} flexWrap="wrap" useFlexGap>
                 <TextField
                   size="small"
-                  label="Filter by place or customer"
+                  placeholder="Filter by place or customer"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
+                  inputProps={{ 'aria-label': 'Filter by place or customer' }}
                   sx={{ minWidth: 220, flex: { md: '1 1 0' } }}
                 />
-                <FormControl size="small" sx={{ minWidth: 200 }}>
-                  <InputLabel id="bl-place-view">Saved view</InputLabel>
-                  <Select
-                    labelId="bl-place-view"
-                    label="Saved view"
-                    value={placeView}
-                    onChange={(e) => setPlaceView(e.target.value)}
-                  >
-                    <MenuItem value="all">All places</MenuItem>
-                    <MenuItem value="customers">Customer sites only</MenuItem>
-                    <MenuItem value="inhouse">In-house / warehouse only</MenuItem>
-                  </Select>
-                </FormControl>
+                <TextField
+                  select
+                  size="small"
+                  value={placeView}
+                  onChange={(e) => setPlaceView(e.target.value)}
+                  inputProps={{ 'aria-label': 'Saved view' }}
+                  sx={{ minWidth: 200 }}
+                >
+                  <MenuItem value="all">All places</MenuItem>
+                  <MenuItem value="customers">Customer sites only</MenuItem>
+                  <MenuItem value="inhouse">In-house / warehouse only</MenuItem>
+                </TextField>
                 <Button
                   size="small"
                   variant="outlined"

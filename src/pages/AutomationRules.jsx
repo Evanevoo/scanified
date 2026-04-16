@@ -7,9 +7,6 @@ import {
   Paper,
   Button,
   TextField,
-  FormControl,
-  InputLabel,
-  Select,
   MenuItem,
   Switch,
   FormControlLabel,
@@ -464,20 +461,21 @@ export default function AutomationRules() {
               sx={{ mb: 2 }}
             />
             
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Trigger Event</InputLabel>
-              <Select
-                value={ruleForm.trigger}
-                onChange={(e) => setRuleForm({ ...ruleForm, trigger: e.target.value })}
-                label="Trigger Event"
-              >
-                {triggers.map((trigger) => (
-                  <MenuItem key={trigger.id} value={trigger.id}>
-                    {trigger.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <TextField
+              select
+              fullWidth
+              size="small"
+              label="Trigger Event"
+              value={ruleForm.trigger}
+              onChange={(e) => setRuleForm({ ...ruleForm, trigger: e.target.value })}
+              sx={{ mb: 2 }}
+            >
+              {triggers.map((trigger) => (
+                <MenuItem key={trigger.id} value={trigger.id}>
+                  {trigger.name}
+                </MenuItem>
+              ))}
+            </TextField>
             
             <Accordion sx={{ mb: 2 }}>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -493,23 +491,23 @@ export default function AutomationRules() {
                       size="small"
                       sx={{ flex: 1 }}
                     />
-                    <FormControl size="small" sx={{ minWidth: 120 }}>
-                      <InputLabel>Operator</InputLabel>
-                      <Select
-                        value={condition.operator}
-                        onChange={(e) => updateCondition(index, 'operator', e.target.value)}
-                        label="Operator"
-                      >
-                        <MenuItem value="equals">Equals</MenuItem>
-                        <MenuItem value="not_equals">Not Equals</MenuItem>
-                        <MenuItem value="greater_than">Greater Than</MenuItem>
-                        <MenuItem value="less_than">Less Than</MenuItem>
-                        <MenuItem value="contains">Contains</MenuItem>
-                        <MenuItem value="not_contains">Not Contains</MenuItem>
-                        <MenuItem value="is_empty">Is Empty</MenuItem>
-                        <MenuItem value="is_not_empty">Is Not Empty</MenuItem>
-                      </Select>
-                    </FormControl>
+                    <TextField
+                      select
+                      size="small"
+                      label="Operator"
+                      value={condition.operator}
+                      onChange={(e) => updateCondition(index, 'operator', e.target.value)}
+                      sx={{ minWidth: 120 }}
+                    >
+                      <MenuItem value="equals">Equals</MenuItem>
+                      <MenuItem value="not_equals">Not Equals</MenuItem>
+                      <MenuItem value="greater_than">Greater Than</MenuItem>
+                      <MenuItem value="less_than">Less Than</MenuItem>
+                      <MenuItem value="contains">Contains</MenuItem>
+                      <MenuItem value="not_contains">Not Contains</MenuItem>
+                      <MenuItem value="is_empty">Is Empty</MenuItem>
+                      <MenuItem value="is_not_empty">Is Not Empty</MenuItem>
+                    </TextField>
                     <TextField
                       label="Value"
                       value={condition.value}
@@ -536,20 +534,20 @@ export default function AutomationRules() {
                 {ruleForm.actions.map((action, index) => (
                   <Box key={index} sx={{ mb: 2, p: 2, border: 1, borderColor: 'divider', borderRadius: 1 }}>
                     <Box sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
-                      <FormControl size="small" sx={{ minWidth: 150 }}>
-                        <InputLabel>Action Type</InputLabel>
-                        <Select
-                          value={action.type}
-                          onChange={(e) => updateAction(index, 'type', e.target.value)}
-                          label="Action Type"
-                        >
-                          {actions.map((actionType) => (
-                            <MenuItem key={actionType.id} value={actionType.id}>
-                              {actionType.name}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
+                      <TextField
+                        select
+                        size="small"
+                        label="Action Type"
+                        value={action.type}
+                        onChange={(e) => updateAction(index, 'type', e.target.value)}
+                        sx={{ minWidth: 150 }}
+                      >
+                        {actions.map((actionType) => (
+                          <MenuItem key={actionType.id} value={actionType.id}>
+                            {actionType.name}
+                          </MenuItem>
+                        ))}
+                      </TextField>
                       <IconButton onClick={() => removeAction(index)} size="small">
                         <DeleteIcon />
                       </IconButton>
@@ -619,20 +617,21 @@ export default function AutomationRules() {
               sx={{ mb: 2 }}
             />
             
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Trigger Event</InputLabel>
-              <Select
-                value={ruleForm.trigger}
-                onChange={(e) => setRuleForm({ ...ruleForm, trigger: e.target.value })}
-                label="Trigger Event"
-              >
-                {triggers.map((trigger) => (
-                  <MenuItem key={trigger.id} value={trigger.id}>
-                    {trigger.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <TextField
+              select
+              fullWidth
+              size="small"
+              label="Trigger Event"
+              value={ruleForm.trigger}
+              onChange={(e) => setRuleForm({ ...ruleForm, trigger: e.target.value })}
+              sx={{ mb: 2 }}
+            >
+              {triggers.map((trigger) => (
+                <MenuItem key={trigger.id} value={trigger.id}>
+                  {trigger.name}
+                </MenuItem>
+              ))}
+            </TextField>
             
             <Accordion sx={{ mb: 2 }}>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -648,23 +647,23 @@ export default function AutomationRules() {
                       size="small"
                       sx={{ flex: 1 }}
                     />
-                    <FormControl size="small" sx={{ minWidth: 120 }}>
-                      <InputLabel>Operator</InputLabel>
-                      <Select
-                        value={condition.operator}
-                        onChange={(e) => updateCondition(index, 'operator', e.target.value)}
-                        label="Operator"
-                      >
-                        <MenuItem value="equals">Equals</MenuItem>
-                        <MenuItem value="not_equals">Not Equals</MenuItem>
-                        <MenuItem value="greater_than">Greater Than</MenuItem>
-                        <MenuItem value="less_than">Less Than</MenuItem>
-                        <MenuItem value="contains">Contains</MenuItem>
-                        <MenuItem value="not_contains">Not Contains</MenuItem>
-                        <MenuItem value="is_empty">Is Empty</MenuItem>
-                        <MenuItem value="is_not_empty">Is Not Empty</MenuItem>
-                      </Select>
-                    </FormControl>
+                    <TextField
+                      select
+                      size="small"
+                      label="Operator"
+                      value={condition.operator}
+                      onChange={(e) => updateCondition(index, 'operator', e.target.value)}
+                      sx={{ minWidth: 120 }}
+                    >
+                      <MenuItem value="equals">Equals</MenuItem>
+                      <MenuItem value="not_equals">Not Equals</MenuItem>
+                      <MenuItem value="greater_than">Greater Than</MenuItem>
+                      <MenuItem value="less_than">Less Than</MenuItem>
+                      <MenuItem value="contains">Contains</MenuItem>
+                      <MenuItem value="not_contains">Not Contains</MenuItem>
+                      <MenuItem value="is_empty">Is Empty</MenuItem>
+                      <MenuItem value="is_not_empty">Is Not Empty</MenuItem>
+                    </TextField>
                     <TextField
                       label="Value"
                       value={condition.value}
@@ -691,20 +690,20 @@ export default function AutomationRules() {
                 {ruleForm.actions.map((action, index) => (
                   <Box key={index} sx={{ mb: 2, p: 2, border: 1, borderColor: 'divider', borderRadius: 1 }}>
                     <Box sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
-                      <FormControl size="small" sx={{ minWidth: 150 }}>
-                        <InputLabel>Action Type</InputLabel>
-                        <Select
-                          value={action.type}
-                          onChange={(e) => updateAction(index, 'type', e.target.value)}
-                          label="Action Type"
-                        >
-                          {actions.map((actionType) => (
-                            <MenuItem key={actionType.id} value={actionType.id}>
-                              {actionType.name}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
+                      <TextField
+                        select
+                        size="small"
+                        label="Action Type"
+                        value={action.type}
+                        onChange={(e) => updateAction(index, 'type', e.target.value)}
+                        sx={{ minWidth: 150 }}
+                      >
+                        {actions.map((actionType) => (
+                          <MenuItem key={actionType.id} value={actionType.id}>
+                            {actionType.name}
+                          </MenuItem>
+                        ))}
+                      </TextField>
                       <IconButton onClick={() => removeAction(index)} size="small">
                         <DeleteIcon />
                       </IconButton>

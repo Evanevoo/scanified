@@ -33,7 +33,7 @@ import {
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { useDynamicAssetTerms } from '../hooks/useDynamicAssetTerms';
-import { formatLocationDisplay, normalizeLocationKey } from '../utils/locationDisplay';
+import { bottleLocationValueForCustomer, formatLocationDisplay, normalizeLocationKey } from '../utils/locationDisplay';
 
 // Same derivation as Inventory (Assets) page - group by product_code when present so one row per code
 function deriveInventoryGasTypes(bottles) {
@@ -191,7 +191,7 @@ export default function AssetDetail() {
 
       const { data, error } = await supabase
         .from('customers')
-        .select('CustomerListID, name, customer_type')
+        .select('CustomerListID, name, customer_type, location, city')
         .eq('organization_id', profile.organization_id)
         .order('name');
 
@@ -525,6 +525,22 @@ export default function AssetDetail() {
         }
       }
       // If assignment did not change, finalStatus already is editData.status (user's choice)
+
+      const customerForSave = editData.assigned_customer
+        ? customers.find((c) => c.CustomerListID === editData.assigned_customer)
+        : null;
+      const shouldSyncBottleLocationFromCustomer = Boolean(
+        editData.assigned_customer &&
+          customerForSave &&
+          customerForSave.customer_type !== 'VENDOR'
+      );
+      const resolvedLocationFromCustomer = shouldSyncBottleLocationFromCustomer
+        ? bottleLocationValueForCustomer(customerForSave, locations)
+        : null;
+      const finalLocationForSave =
+        resolvedLocationFromCustomer != null && resolvedLocationFromCustomer !== ''
+          ? resolvedLocationFromCustomer
+          : editData.location || null;
       
       // Build update data object with only valid fields, ensuring no undefined or system fields
       const updateData = {};
@@ -546,7 +562,7 @@ export default function AssetDetail() {
         updateData.status = NORMAL_STATUSES.includes(finalStatus) ? finalStatus : normalizeStatus(finalStatus);
       }
       if (editData.location !== undefined) {
-        updateData.location = editData.location || null;
+        updateData.location = finalLocationForSave || null;
       }
       if (editData.assigned_customer !== undefined) {
         updateData.assigned_customer = editData.assigned_customer || null;
@@ -577,9 +593,8 @@ export default function AssetDetail() {
 
       // Create a scan record if assignment changed
       const assignmentChangedForScan = previousCustomer !== (editData.assigned_customer || null);
-      const locationChanged = previousLocation !== editData.location;
-      
-      if (assignmentChangedForScan || locationChanged) {
+      const locationChangedEffective = previousLocation !== finalLocationForSave;
+      if (assignmentChangedForScan || locationChangedEffective) {
         const scanMode = assignmentChanged 
           ? (editData.assigned_customer ? 'SHIP' : 'RETURN')
           : 'LOCATE';
@@ -592,7 +607,7 @@ export default function AssetDetail() {
           order_number: 'manual', // Placeholder so insert doesn't fail if column is NOT NULL
           customer_id: editData.assigned_customer || null,
           customer_name: editData.customer_name || null,
-          location: editData.location || null,
+          location: finalLocationForSave || null,
           organization_id: profile.organization_id,
           created_at: new Date().toISOString(),
           status: 'approved' // Manual assignments are automatically approved
@@ -1186,11 +1201,16 @@ export default function AssetDetail() {
                   onChange={(e) => {
                     const customerId = e.target.value;
                     const customer = customers.find(c => c.CustomerListID === customerId);
-                    setEditData({ 
-                      ...editData, 
+                    const next = {
+                      ...editData,
                       assigned_customer: customerId || null,
                       customer_name: customer?.name || null
-                    });
+                    };
+                    if (customerId && customer && customer.customer_type !== 'VENDOR') {
+                      const loc = bottleLocationValueForCustomer(customer, locations);
+                      if (loc) next.location = loc;
+                    }
+                    setEditData(next);
                   }}
                   label="Assign to Customer"
                   disabled={loadingCustomers}

@@ -503,40 +503,40 @@ export default function OwnershipManagement() {
               flexWrap: 'wrap',
             }}
           >
-            <FormControl size="small" sx={{ width: { xs: '100%', sm: 220 }, flexShrink: 0 }}>
-              <InputLabel>Filter by Ownership</InputLabel>
-              <Select
-                value={selectedOwnership}
-                label="Filter by Ownership"
-                onChange={(e) => setSelectedOwnership(e.target.value)}
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="Unassigned">Unassigned</MenuItem>
-                {ownershipValues.map((o) => (
-                  <MenuItem key={o.id || o.value} value={o.value}>
-                    {o.value} ({ownershipStats[o.value] || 0})
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ width: { xs: '100%', sm: 160 }, flexShrink: 0 }}>
-              <InputLabel>Fill</InputLabel>
-              <Select
-                value={fillFilter}
-                label="Fill"
-                onChange={(e) => setFillFilter(e.target.value)}
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="full">Full</MenuItem>
-                <MenuItem value="empty">Empty</MenuItem>
-              </Select>
-            </FormControl>
+            <TextField
+              select
+              size="small"
+              value={selectedOwnership}
+              onChange={(e) => setSelectedOwnership(e.target.value)}
+              inputProps={{ 'aria-label': 'Filter by ownership' }}
+              sx={{ width: { xs: '100%', sm: 220 }, flexShrink: 0 }}
+            >
+              <MenuItem value="">All</MenuItem>
+              <MenuItem value="Unassigned">Unassigned</MenuItem>
+              {ownershipValues.map((o) => (
+                <MenuItem key={o.id || o.value} value={o.value}>
+                  {o.value} ({ownershipStats[o.value] || 0})
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              size="small"
+              value={fillFilter}
+              onChange={(e) => setFillFilter(e.target.value)}
+              inputProps={{ 'aria-label': 'Fill filter' }}
+              sx={{ width: { xs: '100%', sm: 160 }, flexShrink: 0 }}
+            >
+              <MenuItem value="">All</MenuItem>
+              <MenuItem value="full">Full</MenuItem>
+              <MenuItem value="empty">Empty</MenuItem>
+            </TextField>
             <TextField
               size="small"
-              label="Search bottles"
-              placeholder="Barcode, serial, product code..."
+              placeholder="Search bottles — barcode, serial, product code…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              inputProps={{ 'aria-label': 'Search bottles' }}
               sx={{
                 flex: { lg: '1 1 220px' },
                 width: { xs: '100%', lg: 'auto' },

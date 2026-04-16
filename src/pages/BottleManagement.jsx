@@ -438,6 +438,9 @@ const BottleManagement = () => {
           // Map to track generated IDs for customers without CustomerListID
           const customerNameToGeneratedId = new Map();
 
+          /** Delivered-not-scanned rows → rentals (same pattern as ImportApprovals DNS), not bottle rows */
+          const dnsRentalsQueue = [];
+
           // Helper function to find column value case-insensitively and with trimmed keys
           const getColumnValue = (row, possibleNames) => {
             const rowKeys = Object.keys(row);
@@ -466,6 +469,32 @@ const BottleManagement = () => {
               }
             }
             return '';
+          };
+
+          const rowIndicatesDeliveredNotScanned = (row) => {
+            const status = getColumnValue(row, [
+              'Status',
+              'status',
+              'Action',
+              'action',
+              'Delivery Status',
+              'delivery_status',
+              'DeliveryStatus',
+              'Type',
+              'type'
+            ]);
+            const matches = (text) => {
+              if (!text) return false;
+              const s = String(text).toLowerCase();
+              if (/\bdns\b/.test(s)) return true;
+              return s.includes('delivered') && s.includes('not') && s.includes('scan');
+            };
+            if (matches(status)) return true;
+            for (const v of Object.values(row)) {
+              if (v == null || v === '') continue;
+              if (matches(v)) return true;
+            }
+            return false;
           };
 
           // Debug: Log available column names
@@ -632,6 +661,60 @@ const BottleManagement = () => {
             }
 
 
+
+            // Delivered Not Scanned (DNS): create rental placeholder rows — do not insert empty bottles
+            if (rowIndicatesDeliveredNotScanned(row)) {
+              if (!customerName?.trim() || !customerId) {
+                logger.warn(
+                  `Bottle upload row ${rowIndex + 1}: Delivered Not-Scanned skipped — need customer name and ID`
+                );
+              } else {
+                const productCode =
+                  getColumnValue(row, [
+                    'Item',
+                    'item',
+                    'Product Code',
+                    'product_code',
+                    'ProductCode',
+                    'Product',
+                    'product'
+                  ]) || 'DNS';
+                const descText = getColumnValue(row, [
+                  'Item Description',
+                  'item_description',
+                  'ItemDescription',
+                  'Description',
+                  'description',
+                  'Desc',
+                  'desc'
+                ]);
+                const category = getColumnValue(row, ['Category', 'category']);
+                const grp = getColumnValue(row, ['Group', 'group', 'Group Name']);
+                const typeVal = getColumnValue(row, ['Type', 'type']);
+                const dnsDescription =
+                  (descText && descText.trim()) ||
+                  [category, grp, typeVal, productCode].filter(Boolean).join(' · ') ||
+                  `${productCode} – Delivered Not Scanned`;
+                const qtyRaw = getColumnValue(row, ['Qty', 'Quantity', 'quantity', 'Count', 'count']);
+                let repeat = 1;
+                const qParsed = parseInt(qtyRaw, 10);
+                if (!Number.isNaN(qParsed) && qParsed > 0) repeat = Math.min(qParsed, 10000);
+                const rentalLocation = (location && String(location).trim()) || 'SASKATOON';
+                for (let q = 0; q < repeat; q++) {
+                  dnsRentalsQueue.push({
+                    customerId: customerId.toUpperCase(),
+                    customerName: customerName.trim(),
+                    productCode,
+                    dnsDescription,
+                    rentalLocation
+                  });
+                }
+                logger.log(
+                  `Row ${rowIndex + 1}: queued ${repeat} DNS rental(s) for ${productCode} / ${customerName.trim()}`
+                );
+              }
+              return;
+            }
 
             // Create bottle
             // Location is already determined above (from Location column or Branch if it's a location name)
@@ -888,7 +971,45 @@ const BottleManagement = () => {
 
           }
 
+          let dnsRentalsInserted = 0;
+          if (dnsRentalsQueue.length > 0) {
+            const dnsOrderNumber = `BOTTLE-MGMT-${Date.now()}`;
+            const nowIso = new Date().toISOString();
+            const rentalDate = nowIso.split('T')[0];
+            const rentalRows = dnsRentalsQueue.map((item) => ({
+              organization_id: organization.id,
+              customer_id: item.customerId,
+              customer_name: item.customerName,
+              is_dns: true,
+              dns_product_code: item.productCode,
+              dns_description: item.dnsDescription,
+              dns_order_number: dnsOrderNumber,
+              bottle_id: null,
+              bottle_barcode: null,
+              rental_start_date: rentalDate,
+              rental_end_date: null,
+              rental_amount: 10,
+              rental_type: 'monthly',
+              tax_code: 'GST+PST',
+              tax_rate: 0.11,
+              location: item.rentalLocation,
+              status: 'active',
+              created_at: nowIso,
+              updated_at: nowIso
+            }));
 
+            const dnsBatchSize = 200;
+            for (let i = 0; i < rentalRows.length; i += dnsBatchSize) {
+              const batch = rentalRows.slice(i, i + dnsBatchSize);
+              const { error: dnsErr } = await supabase.from('rentals').insert(batch);
+              if (dnsErr) {
+                logger.error('Error inserting DNS rentals from bottle upload:', dnsErr);
+                throw dnsErr;
+              }
+              dnsRentalsInserted += batch.length;
+            }
+            logger.log(`Inserted ${dnsRentalsInserted} DNS (Delivered Not Scanned) rental(s), order ref ${dnsOrderNumber}`);
+          }
 
           // Now update bottles with correct assigned_customer values and set status appropriately
           bottlesToInsert.forEach((bottle) => {
@@ -1162,6 +1283,9 @@ const BottleManagement = () => {
           let message = `${newBottles.length} bottles inserted`;
           if (updatedCount > 0) {
             message += `, ${updatedCount} existing bottles updated`;
+          }
+          if (dnsRentalsInserted > 0) {
+            message += `, ${dnsRentalsInserted} delivered-not-scanned (DNS) rental(s) added`;
           }
           if (duplicatesInFile.length > 0) {
             message += ` (${duplicatesInFile.length} duplicate file rows skipped)`;
@@ -2042,8 +2166,6 @@ const BottleManagement = () => {
 
           <TextField
 
-            label="Search bottles"
-
             placeholder="Search by barcode, serial, customer, or description"
 
             value={searchTerm}
@@ -2058,33 +2180,24 @@ const BottleManagement = () => {
 
             size="small"
 
+            inputProps={{ 'aria-label': 'Search bottles' }}
+
             sx={{ minWidth: 300 }}
 
           />
 
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-
-            <InputLabel>Status</InputLabel>
-
-            <Select
-
-              value={statusFilter}
-
-              label="Status"
-
-              onChange={(e) => setStatusFilter(e.target.value)}
-
-            >
-
-              <MenuItem value="all">All</MenuItem>
-
-              <MenuItem value="available">Available</MenuItem>
-
-              <MenuItem value="rented">Rented</MenuItem>
-
-            </Select>
-
-          </FormControl>
+          <TextField
+            select
+            size="small"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            inputProps={{ 'aria-label': 'Status filter' }}
+            sx={{ minWidth: 140 }}
+          >
+            <MenuItem value="all">All</MenuItem>
+            <MenuItem value="available">Available</MenuItem>
+            <MenuItem value="rented">Rented</MenuItem>
+          </TextField>
 
         </Stack>
 
