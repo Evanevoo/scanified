@@ -388,9 +388,10 @@ export default function ScannedOrders() {
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }}>
             <TextField
               size="small"
-              label="Search orders, customer, product code, asset..."
+              placeholder="Search orders, customer, product code, asset..."
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={(e) => setSearch(e.target.value)}
+              inputProps={{ 'aria-label': 'Search scanned orders' }}
               sx={{ minWidth: { xs: '100%', md: 320 } }}
             />
             <Chip

@@ -16,9 +16,6 @@ import {
   Checkbox,
   CircularProgress,
   Alert,
-  FormControl,
-  InputLabel,
-  Select,
   MenuItem,
   Dialog,
   DialogTitle,
@@ -327,29 +324,29 @@ export default function TransferFromCustomers() {
             {/* Filters */}
             <Box p={3} pb={0} display="flex" gap={2} alignItems="center">
               <TextField
-                label="Search Assets"
+                placeholder="Search assets"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 size="small"
+                inputProps={{ 'aria-label': 'Search assets' }}
                 InputProps={{
                   startAdornment: <SearchIcon color="action" sx={{ mr: 1 }} />
                 }}
                 sx={{ minWidth: 200 }}
               />
-              
-              <FormControl size="small" sx={{ minWidth: 120 }}>
-                <InputLabel>Status</InputLabel>
-                <Select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  label="Status"
-                >
-                  <MenuItem value="all">All Status</MenuItem>
-                  <MenuItem value="available">Available</MenuItem>
-                  <MenuItem value="rented">Rented</MenuItem>
-                  <MenuItem value="maintenance">Maintenance</MenuItem>
-                </Select>
-              </FormControl>
+              <TextField
+                select
+                size="small"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                inputProps={{ 'aria-label': 'Status filter' }}
+                sx={{ minWidth: 120 }}
+              >
+                <MenuItem value="all">All Status</MenuItem>
+                <MenuItem value="available">Available</MenuItem>
+                <MenuItem value="rented">Rented</MenuItem>
+                <MenuItem value="maintenance">Maintenance</MenuItem>
+              </TextField>
               
               {statusFilter !== 'all' && (
                 <Button

@@ -4107,34 +4107,36 @@ export default function ImportApprovals() {
             onClear={() => setSearch('')}
             className="min-w-[300px]"
           />
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel>Status</InputLabel>
-            <Select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              label="Status"
-            >
-              <MenuItem value="all">All</MenuItem>
-              <MenuItem value="pending">Pending</MenuItem>
-              <MenuItem value="verified">Verified</MenuItem>
-              <MenuItem value="exception">Exceptions</MenuItem>
-              <MenuItem value="investigation">Investigating</MenuItem>
-              <MenuItem value="in_progress">Processing</MenuItem>
-              <MenuItem value="scanned_only">Scanned Only</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel>Location</InputLabel>
-            <Select
-              value={locationFilter}
-              onChange={(e) => setLocationFilter(e.target.value)}
-              label="Location"
-            >
-              {getUniqueLocations().map(location => (
-                <MenuItem key={location} value={location}>{location}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <TextField
+            select
+            size="small"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            inputProps={{ 'aria-label': 'Verification status filter' }}
+            sx={{ minWidth: 120 }}
+          >
+            <MenuItem value="all">All</MenuItem>
+            <MenuItem value="pending">Pending</MenuItem>
+            <MenuItem value="verified">Verified</MenuItem>
+            <MenuItem value="exception">Exceptions</MenuItem>
+            <MenuItem value="investigation">Investigating</MenuItem>
+            <MenuItem value="in_progress">Processing</MenuItem>
+            <MenuItem value="scanned_only">Scanned Only</MenuItem>
+          </TextField>
+          <TextField
+            select
+            size="small"
+            value={locationFilter}
+            onChange={(e) => setLocationFilter(e.target.value)}
+            inputProps={{ 'aria-label': 'Location filter' }}
+            sx={{ minWidth: 120 }}
+          >
+            {getUniqueLocations().map((location) => (
+              <MenuItem key={location} value={location}>
+                {location}
+              </MenuItem>
+            ))}
+          </TextField>
           <ButtonGroup size="small">
             <Button
               variant={viewMode === 'list' ? 'contained' : 'outlined'}

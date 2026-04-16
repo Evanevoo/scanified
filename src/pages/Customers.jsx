@@ -762,22 +762,23 @@ function Customers({ profile }) {
                 className="w-full"
               />
             </Box>
-            <FormControl size="small" sx={{ minWidth: 150 }}>
-              <Select
-                value={locationFilter}
-                onChange={(e) => {
-                  setLocationFilter(e.target.value);
-                  setPage(1);
-                }}
-                displayEmpty
-              >
-                <MenuItem value="All">All Locations</MenuItem>
-                <MenuItem value="SASKATOON">SASKATOON</MenuItem>
-                <MenuItem value="REGINA">REGINA</MenuItem>
-                <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
-                <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
-              </Select>
-            </FormControl>
+            <TextField
+              select
+              size="small"
+              value={locationFilter}
+              onChange={(e) => {
+                setLocationFilter(e.target.value);
+                setPage(1);
+              }}
+              inputProps={{ 'aria-label': 'Location filter' }}
+              sx={{ minWidth: 150 }}
+            >
+              <MenuItem value="All">All Locations</MenuItem>
+              <MenuItem value="SASKATOON">SASKATOON</MenuItem>
+              <MenuItem value="REGINA">REGINA</MenuItem>
+              <MenuItem value="CHILLIWACK">CHILLIWACK</MenuItem>
+              <MenuItem value="PRINCE_GEORGE">PRINCE GEORGE</MenuItem>
+            </TextField>
             <FormControlLabel
               control={
                 <Checkbox
@@ -792,19 +793,23 @@ function Customers({ profile }) {
               label={<Typography variant="body2">With assigned assets only</Typography>}
               sx={{ ml: 0, mr: 0, whiteSpace: 'nowrap' }}
             />
-            <FormControl size="small" sx={{ minWidth: 120 }}>
-              <InputLabel>Rows per page</InputLabel>
-              <Select 
-                value={rowsPerPage} 
-                label="Rows per page" 
-                onChange={e => { 
-                  setRowsPerPage(Number(e.target.value)); 
-                  setPage(1); 
-                }}
-              >
-                {[10, 20, 50, 100].map(opt => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
-              </Select>
-            </FormControl>
+            <TextField
+              select
+              size="small"
+              value={rowsPerPage}
+              onChange={(e) => {
+                setRowsPerPage(Number(e.target.value));
+                setPage(1);
+              }}
+              inputProps={{ 'aria-label': 'Rows per page' }}
+              sx={{ minWidth: 120 }}
+            >
+              {[10, 20, 50, 100].map((opt) => (
+                <MenuItem key={opt} value={opt}>
+                  {opt}
+                </MenuItem>
+              ))}
+            </TextField>
           </Box>
           
           <Typography variant="body2" color="text.secondary" mb={2}>
