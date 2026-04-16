@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.REACT_APP_SUPABASE_ANON_KEY
 );
 
-exports.handler = async (event, context) => {
+exports.handler = async (_event, _context) => {
   console.log('Starting yearly invoice notification generation');
 
   try {
@@ -32,7 +32,7 @@ exports.handler = async (event, context) => {
 
     // Call the PostgreSQL function to generate yearly rental notifications
     console.log('Calling generate_yearly_rental_notifications function...');
-    const { data, error } = await supabase.rpc('generate_yearly_rental_notifications');
+    const { error } = await supabase.rpc('generate_yearly_rental_notifications');
 
     if (error) {
       console.error('Error calling generate_yearly_rental_notifications:', error);
@@ -138,12 +138,12 @@ Yearly rental invoice notifications have been generated and sent to organization
 
 // Test endpoint - can be called manually to test the function
 // GET /api/yearly-invoice-notifications?test=true
-exports.testHandler = async (event, context) => {
+exports.testHandler = async (event, _context) => {
   if (event.queryStringParameters?.test === 'true') {
     console.log('Test mode - generating notifications regardless of date');
     
     try {
-      const { data, error } = await supabase.rpc('generate_yearly_rental_notifications');
+      const { error } = await supabase.rpc('generate_yearly_rental_notifications');
       
       if (error) throw error;
       
@@ -165,5 +165,5 @@ exports.testHandler = async (event, context) => {
     }
   }
   
-  return exports.handler(event, context);
+  return exports.handler(event, _context);
 };

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
+import { parseDbTimestamp } from '../utils/parseDbTimestamp';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
 import {
@@ -52,28 +53,6 @@ export default function ScannedOrders() {
   // Prefer profile timezone (Settings). Else browser TZ. Else UTC so scan times are consistent.
   const displayTimezone = profile?.preferences?.timezone || browserTz || 'UTC';
 
-  // Parse DB timestamp as UTC. Supabase/Postgres often return ISO without Z (e.g. "2026-03-18T14:19:00");
-  // in JS that parses as LOCAL time and shows wrong. We always treat no-offset as UTC so display is correct.
-  const parseScanTime = (value) => {
-    if (value == null) return null;
-    if (typeof value === 'number' && Number.isFinite(value)) return new Date(value);
-    if (value instanceof Date) {
-      const t = value.getTime();
-      return Number.isNaN(t) ? null : new Date(t);
-    }
-    let s = typeof value === 'string' ? value.trim() : String(value);
-    if (!s) return null;
-    // Normalize Postgres "2026-03-18 14:19:00" to "2026-03-18T14:19:00"
-    if (/^\d{4}-\d{2}-\d{2}\s+\d/.test(s)) s = s.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d)/, '$1T$2');
-    // Supabase can return "+00" or "-00"; normalize to Z so we don't produce "...+00Z"
-    if (s.endsWith('+00') || s.endsWith('-00')) s = s.slice(0, -3) + 'Z';
-    const hasExplicitTz = s.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(s);
-    if (!hasExplicitTz) {
-      s = s.replace(/\.\d+$/, '') + 'Z';
-    }
-    const d = new Date(s);
-    return Number.isNaN(d.getTime()) ? null : d;
-  };
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -155,7 +134,7 @@ export default function ScannedOrders() {
 
   const handleEdit = (order) => {
     if (!canBypassScanEditWindow) {
-      const scanTime = parseScanTime(order.timestamp || order.created_at) || new Date(0);
+      const scanTime = parseDbTimestamp(order.timestamp || order.created_at) || new Date(0);
       const now = new Date();
       const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
       if (hoursDiff > 24) {
@@ -192,7 +171,7 @@ export default function ScannedOrders() {
 
   const handleEnhancedEdit = (order) => {
     if (!canBypassScanEditWindow) {
-      const scanTime = parseScanTime(order.timestamp || order.created_at) || new Date(0);
+      const scanTime = parseDbTimestamp(order.timestamp || order.created_at) || new Date(0);
       const now = new Date();
       const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
       if (hoursDiff > 24) {
@@ -313,7 +292,7 @@ export default function ScannedOrders() {
   });
 
   const editableOrdersCount = filteredOrders.filter(order => {
-    const scanTime = parseScanTime(order.timestamp || order.created_at) || new Date(0);
+    const scanTime = parseDbTimestamp(order.timestamp || order.created_at) || new Date(0);
     const now = new Date();
     const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
     return canBypassScanEditWindow || hoursDiff <= 24;
@@ -371,7 +350,8 @@ export default function ScannedOrders() {
               </Typography>
             </Box>
             <Typography variant="body2" sx={{ color: '#64748b', maxWidth: 320 }}>
-              Scan times are shown in your timezone ({profile?.preferences?.timezone ? 'Settings' : 'browser'} -> {displayTimezone}).
+              Scan times are shown in your timezone ({profile?.preferences?.timezone ? 'Settings' : 'browser'}
+              {' → '}{displayTimezone}).
             </Typography>
           </Stack>
         </Paper>
@@ -449,7 +429,7 @@ export default function ScannedOrders() {
                 {filteredOrders.map(order => {
                   // Use timestamp (actual scan time from device) when available; else created_at
                   const scanTimeRaw = order.timestamp || order.created_at;
-                  const scanTime = parseScanTime(scanTimeRaw) || new Date(0);
+                  const scanTime = parseDbTimestamp(scanTimeRaw) || new Date(0);
                   const now = new Date();
                   const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
                   const isEditable = canBypassScanEditWindow || hoursDiff <= 24;

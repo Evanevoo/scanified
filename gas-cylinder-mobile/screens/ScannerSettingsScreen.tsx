@@ -17,6 +17,7 @@ import {
   Switch,
   TouchableOpacity,
   Alert,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -26,6 +27,7 @@ const SETTINGS_STORAGE_KEY = '@scanner_settings';
 export interface ScannerSettings {
   // Scanning mode
   mode: 'single' | 'batch' | 'concurrent';
+  sdk: 'expo-native' | 'zbar-profile';
   
   // Image processing
   imageProcessing: {
@@ -53,6 +55,7 @@ export interface ScannerSettings {
 
 const defaultSettings: ScannerSettings = {
   mode: 'single',
+  sdk: 'expo-native',
   imageProcessing: {
     multiFrame: true,
     lowLight: true,
@@ -211,6 +214,42 @@ const ScannerSettingsScreen: React.FC<{ onClose?: () => void }> = ({ onClose }) 
             </View>
           </TouchableOpacity>
         </View>
+
+        {Platform.OS === 'ios' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Scanner SDK Test Mode</Text>
+
+            <TouchableOpacity
+              style={[styles.option, settings.sdk === 'expo-native' && styles.optionSelected]}
+              onPress={() => updateSettings({ sdk: 'expo-native' })}
+            >
+              <Ionicons
+                name="radio-button-on"
+                size={24}
+                color={settings.sdk === 'expo-native' ? '#007AFF' : '#CCC'}
+              />
+              <View style={styles.optionContent}>
+                <Text style={styles.optionTitle}>Expo Native (Current)</Text>
+                <Text style={styles.optionDescription}>Use current expo-camera pipeline</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.option, settings.sdk === 'zbar-profile' && styles.optionSelected]}
+              onPress={() => updateSettings({ sdk: 'zbar-profile' })}
+            >
+              <Ionicons
+                name="radio-button-on"
+                size={24}
+                color={settings.sdk === 'zbar-profile' ? '#007AFF' : '#CCC'}
+              />
+              <View style={styles.optionContent}>
+                <Text style={styles.optionTitle}>ZBar Profile (Simulation)</Text>
+                <Text style={styles.optionDescription}>Test a stricter 1D scan profile for comparison</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Image Processing */}
         <View style={styles.section}>

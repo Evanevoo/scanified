@@ -136,11 +136,18 @@ interface ParticleTextEffectProps {
   words?: string[]
   asBackground?: boolean
   className?: string
+  /** When true, skip canvas animation (e.g. prefers-reduced-motion). */
+  disabled?: boolean
 }
 
 const DEFAULT_WORDS = ["HELLO", "21st.dev", "ParticleTextEffect", "BY", "KAINXU"]
 
-export function ParticleTextEffect({ words = DEFAULT_WORDS, asBackground = false, className = "" }: ParticleTextEffectProps) {
+export function ParticleTextEffect({
+  words = DEFAULT_WORDS,
+  asBackground = false,
+  className = "",
+  disabled = false,
+}: ParticleTextEffectProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationRef = useRef<number>()
   const particlesRef = useRef<Particle[]>([])
@@ -319,6 +326,9 @@ export function ParticleTextEffect({ words = DEFAULT_WORDS, asBackground = false
   }
 
   useEffect(() => {
+    if (disabled) {
+      return () => {}
+    }
     const canvas = canvasRef.current
     if (!canvas) return
 
@@ -398,7 +408,18 @@ export function ParticleTextEffect({ words = DEFAULT_WORDS, asBackground = false
         window.removeEventListener('resize', updateCanvasSize)
       }
     }
-  }, [asBackground, words])
+  }, [asBackground, words, disabled])
+
+  if (disabled) {
+    if (asBackground) {
+      return null
+    }
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] bg-black p-6 text-center text-gray-400 text-sm">
+        Visual effect is off when reduced motion is preferred.
+      </div>
+    )
+  }
 
   if (asBackground) {
     return (

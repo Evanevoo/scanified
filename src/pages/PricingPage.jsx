@@ -88,7 +88,7 @@ function PricingPage() {
     if (plan.name.toLowerCase() === 'enterprise') {
       navigate('/contact');
     } else {
-      navigate(`/register?plan=${plan.id}`);
+      navigate(`/create-organization?plan=${plan.id}`);
     }
   };
   

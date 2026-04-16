@@ -15,6 +15,7 @@ import Typography from '@mui/material/Typography';
 import SettingsIcon from '@mui/icons-material/SettingsOutlined';
 import LogoutIcon from '@mui/icons-material/LogoutOutlined';
 import NotificationsIcon from '@mui/icons-material/Notifications';
+import { useTheme as useMuiTheme } from '@mui/material/styles';
 import { useTheme } from '../context/ThemeContext';
 import GlobalImportProgress from './GlobalImportProgress';
 import ImportNotification from './ImportNotification';
@@ -22,6 +23,7 @@ import { useOwnerAccess } from '../hooks/useOwnerAccess';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import Sidebar from './Sidebar';
+import CommandPalette from './CommandPalette';
 import Paper from '@mui/material/Paper';
 import { SearchInputWithIcon } from './ui/search-input-with-icon';
 
@@ -32,12 +34,14 @@ const collapsedWidth = 72;
 export default function MainLayout({ children }) {
   const { profile, organization } = useAuth();
   const { organizationColors } = useTheme();
+  const muiTheme = useMuiTheme();
   const primaryColor = organizationColors?.primary || '#40B5AD';
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const searchRef = useRef();
   const navigate = useNavigate();
   const location = useLocation();
@@ -57,6 +61,17 @@ export default function MainLayout({ children }) {
   useEffect(() => {
     setShowSuggestions(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setCommandPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     logger.log('Search term changed:', searchTerm);
@@ -229,7 +244,7 @@ export default function MainLayout({ children }) {
       height: '100vh',
       width: '100vw',
       position: 'relative',
-      backgroundColor: '#fff',
+      bgcolor: 'background.default',
       overflow: 'hidden',
       // Tablet-specific optimizations
       '@media (min-width: 768px) and (max-width: 1024px)': {
@@ -273,13 +288,14 @@ export default function MainLayout({ children }) {
         sx={{
           zIndex: (theme) => theme.zIndex.drawer + 1,
           bgcolor: 'background.paper',
-          color: '#111',
+          color: 'text.primary',
           boxShadow: 'none',
-          border: 'none',
+          borderBottom: 1,
+          borderColor: 'divider',
           minHeight: 64,
         }}
       >
-        <Toolbar sx={{ minHeight: 64, px: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', gap: 2 }}>
+        <Toolbar sx={{ minHeight: 64, px: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between', bgcolor: 'background.paper', gap: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
             <Box
               sx={{
@@ -317,7 +333,7 @@ export default function MainLayout({ children }) {
                 organization?.name?.charAt(0)?.toUpperCase() || 'W'
               )}
             </Box>
-            <Typography variant="h6" sx={{ fontWeight: 700, color: '#111', fontSize: '18px', display: { xs: 'none', sm: 'block' } }}>
+            <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', fontSize: '18px', display: { xs: 'none', sm: 'block' } }}>
               {organization?.name || 'WeldCor'}
             </Typography>
           </Box>
@@ -332,7 +348,7 @@ export default function MainLayout({ children }) {
                     key={link.label}
                     onClick={() => navigate(link.to)}
                     sx={{
-                      color: active ? primaryColor : '#111',
+                      color: active ? primaryColor : 'text.primary',
                       fontWeight: active ? 700 : 500,
                       fontFamily: 'Inter, sans-serif',
                       fontSize: '0.875rem',
@@ -345,7 +361,7 @@ export default function MainLayout({ children }) {
                       transition: 'all 0.2s',
                       '&:hover': {
                         color: primaryColor,
-                        backgroundColor: 'transparent',
+                        bgcolor: 'action.hover',
                       },
                     }}
                   >
@@ -358,7 +374,7 @@ export default function MainLayout({ children }) {
 
             <Box sx={{ width: '100%', maxWidth: 400, position: 'relative', minWidth: 0 }} ref={searchRef}>
               <SearchInputWithIcon
-                placeholder="Search customers, assets, orders..."
+                placeholder="Search customers & assets — or press Ctrl+K for pages"
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
@@ -382,9 +398,12 @@ export default function MainLayout({ children }) {
                     maxHeight: 400,
                     overflow: 'auto',
                     zIndex: 1300,
-                    boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
                     borderRadius: 2,
+                    border: 1,
+                    borderColor: 'divider',
+                    bgcolor: 'background.paper',
                   }}
+                  elevation={muiTheme.palette.mode === 'dark' ? 8 : 3}
                 >
                   <List dense>
                     {suggestions.map((suggestion, index) => (
@@ -393,18 +412,18 @@ export default function MainLayout({ children }) {
                           onClick={() => handleSelectSuggestion(suggestion)}
                           sx={{
                             '&:hover': {
-                              backgroundColor: '#F3F4F6',
+                              bgcolor: 'action.hover',
                             },
                           }}
                         >
                           <ListItemText
                             primary={
-                              <Typography sx={{ fontWeight: 600, color: '#111' }}>
+                              <Typography sx={{ fontWeight: 600, color: 'text.primary' }}>
                                 {suggestion.label}
                               </Typography>
                             }
                             secondary={
-                              <Typography sx={{ fontSize: '0.75rem', color: '#6B7280' }}>
+                              <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
                                 {suggestion.type === 'customer' ? 'Customer' : suggestion.type === 'organization' ? 'Organization' : 'Bottle'} • {suggestion.sub}
                               </Typography>
                             }
@@ -417,10 +436,10 @@ export default function MainLayout({ children }) {
               )}
             </Box>
 
-            <IconButton sx={{ color: '#111', width: 40, height: 40, flexShrink: 0, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' } }} aria-label="Notifications">
+            <IconButton sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, '&:hover': { bgcolor: 'action.hover' } }} aria-label="Notifications">
               <NotificationsIcon />
             </IconButton>
-            <IconButton sx={{ color: '#111', width: 40, height: 40, flexShrink: 0, '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
+            <IconButton sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, '&:hover': { bgcolor: 'action.hover' } }} onClick={() => navigate('/settings')} aria-label="Settings">
               <SettingsIcon />
             </IconButton>
             <Button
@@ -431,8 +450,8 @@ export default function MainLayout({ children }) {
                 textTransform: 'none',
                 display: { xs: 'none', sm: 'inline-flex' },
                 fontWeight: 600,
-                color: '#111',
-                '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' },
+                color: 'text.primary',
+                '&:hover': { bgcolor: 'action.hover' },
               }}
             >
               {logoutLoading ? 'Signing out...' : 'Sign out'}
@@ -465,7 +484,7 @@ export default function MainLayout({ children }) {
         <Box sx={{
           flex: 1,
           width: '100%',
-          bgcolor: '#fff',
+          bgcolor: 'background.paper',
           p: 0,
           borderRadius: 0,
           boxShadow: 'none',
@@ -476,6 +495,7 @@ export default function MainLayout({ children }) {
         </Box>
         <GlobalImportProgress />
         <ImportNotification />
+        <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
       </Box>
     </Box>
   );

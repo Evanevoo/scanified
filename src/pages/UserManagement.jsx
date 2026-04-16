@@ -9,6 +9,7 @@ import {
 import { Delete as DeleteIcon, Edit as EditIcon, Add as AddIcon, ContentCopy as CopyIcon, Email as EmailIcon, LockReset as LockResetIcon } from '@mui/icons-material';
 import { usePermissions } from '../context/PermissionsContext';
 import { validateInput } from '../utils/security';
+import { netlifyFunctionUrl } from '../utils/netlifyFunctions';
 
 // Helper function to get role display name
 const getRoleDisplayName = (user) => {
@@ -538,13 +539,28 @@ export default function UserManagement() {
     setResetSending(true);
     setError('');
     try {
-      const redirectUrl = `${window.location.origin}/reset-password`;
-      const { error } = await supabase.auth.resetPasswordForEmail(user.email, { redirectTo: redirectUrl });
-      if (error) throw error;
-      setSuccess(`Password reset email sent to ${user.email}`);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated');
+      }
+      const res = await fetch(netlifyFunctionUrl('admin-send-password-reset'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ userId: user.id }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          payload.error || payload.details || 'Failed to send recovery email'
+        );
+      }
+      setSuccess(payload.message || `Password reset email sent to ${user.email}`);
     } catch (err) {
       logger.error('Error sending password reset email:', err);
-      setError(err.message || 'Failed to send reset email');
+      setError(err.message || 'Error sending recovery email');
     } finally {
       setResetSending(false);
     }
@@ -577,7 +593,7 @@ export default function UserManagement() {
       if (!session?.access_token) {
         throw new Error('Not authenticated');
       }
-      const res = await fetch('/.netlify/functions/admin-set-user-password', {
+      const res = await fetch(netlifyFunctionUrl('admin-set-user-password'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

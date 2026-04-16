@@ -21,40 +21,57 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 
+/** live = shipped workflows in the product; on_request = professional services / custom; coming_soon = roadmap */
 const integrations = [
   {
     id: 1,
     name: 'SAP',
-    description: 'Sync asset data with SAP ERP systems',
-    status: 'available',
-    setupTime: '2-3 days',
+    description: 'ERP sync and custom data flows tailored to your SAP landscape',
+    status: 'on_request',
+    setupTime: 'Typically 2–5 days with services',
     popular: true
   },
   {
     id: 2,
     name: 'Salesforce',
-    description: 'Connect customer data and asset information',
-    status: 'available',
-    setupTime: '1-2 days',
+    description: 'Align customer records and field operations with Salesforce',
+    status: 'on_request',
+    setupTime: 'Typically 1–3 days with services',
     popular: true
   },
   {
     id: 3,
     name: 'Slack',
-    description: 'Get notifications in your Slack channels',
-    status: 'available',
-    setupTime: '< 1 hour',
+    description: 'Operational alerts and notifications in Slack',
+    status: 'on_request',
+    setupTime: 'Typically under 1 week with services',
     popular: true
   },
   {
     id: 4,
     name: 'QuickBooks',
-    description: 'Sync financial data with QuickBooks',
-    status: 'coming_soon',
-    setupTime: '1-2 days',
+    description: 'Invoice and rental exports (CSV / desktop-friendly workflows)',
+    status: 'live',
+    setupTime: 'Built-in export tools',
     popular: false
   }
 ];
+
+function integrationChip(status) {
+  if (status === 'live') return { label: 'In product', color: 'success' };
+  if (status === 'on_request') return { label: 'On request', color: 'info' };
+  return { label: 'Coming soon', color: 'warning' };
+}
+
+function integrationCta(status, navigate) {
+  if (status === 'live') {
+    return { label: 'How it works', disabled: false, onClick: () => navigate('/documentation') };
+  }
+  if (status === 'on_request') {
+    return { label: 'Contact us', disabled: false, onClick: () => navigate('/contact') };
+  }
+  return { label: 'Coming soon', disabled: true, onClick: () => {} };
+}
 
 export default function Integrations() {
   const navigate = useNavigate();
@@ -80,7 +97,7 @@ export default function Integrations() {
               Integrations
             </Typography>
             <Typography variant="h5" sx={{ mb: 4, opacity: 0.9, width: '100%' }}>
-              Connect Scanified with your existing tools and workflows
+              Connect Scanified with your stack — in-product exports, APIs, and tailored integrations
             </Typography>
           </Box>
         </Container>
@@ -107,7 +124,10 @@ export default function Integrations() {
 
         {/* Integrations Grid */}
         <Grid container spacing={4}>
-          {filteredIntegrations.map((integration) => (
+          {filteredIntegrations.map((integration) => {
+            const chip = integrationChip(integration.status);
+            const cta = integrationCta(integration.status, navigate);
+            return (
             <Grid item xs={12} sm={6} md={4} key={integration.id}>
               <Card sx={{ 
                 height: '100%', 
@@ -126,9 +146,9 @@ export default function Integrations() {
                         {integration.name}
                       </Typography>
                       <Chip 
-                        label={integration.status === 'available' ? 'Available' : 'Coming Soon'}
+                        label={chip.label}
                         size="small"
-                        color={integration.status === 'available' ? 'success' : 'warning'}
+                        color={chip.color}
                       />
                     </Box>
                   </Box>
@@ -136,19 +156,22 @@ export default function Integrations() {
                     {integration.description}
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Setup time: {integration.setupTime}
+                    {integration.status === 'live' ? 'Availability: ' : 'Typical timeline: '}
+                    {integration.setupTime}
                   </Typography>
                   <Button 
                     variant="outlined" 
                     fullWidth
-                    disabled={integration.status !== 'available'}
+                    disabled={cta.disabled}
+                    onClick={cta.onClick}
                   >
-                    {integration.status === 'available' ? 'Connect' : 'Coming Soon'}
+                    {cta.label}
                   </Button>
                 </CardContent>
               </Card>
             </Grid>
-          ))}
+            );
+          })}
         </Grid>
 
         {/* API Section */}
@@ -160,12 +183,12 @@ export default function Integrations() {
           <Typography variant="h6" color="text.secondary" sx={{ mb: 4, width: '100%' }}>
             Build custom integrations with our comprehensive REST API
           </Typography>
-          <Stack direction="row" spacing={2} justifyContent="center">
-            <Button variant="contained" size="large">
+          <Stack direction="row" spacing={2} justifyContent="center" flexWrap="wrap">
+            <Button variant="contained" size="large" onClick={() => navigate('/documentation')}>
               View API Docs
             </Button>
-            <Button variant="outlined" size="large">
-              Get API Key
+            <Button variant="outlined" size="large" onClick={() => navigate('/contact')}>
+              Request API access
             </Button>
           </Stack>
         </Box>

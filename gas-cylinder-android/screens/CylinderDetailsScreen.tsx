@@ -22,6 +22,11 @@ export default function CylinderDetailsScreen() {
   const [cylinder, setCylinder] = useState<any>(null);
   const [customer, setCustomer] = useState<any>(null);
   const [locationDisplayName, setLocationDisplayName] = useState<string | null>(null);
+  const [pendingReturnVerification, setPendingReturnVerification] = useState<{
+    isPending: boolean;
+    wasAt?: string;
+    scannedAt?: string;
+  }>({ isPending: false });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -107,6 +112,28 @@ export default function CylinderDetailsScreen() {
       } else if (isMounted) {
         setLocationDisplayName(null);
       }
+
+      // Pending return view: latest scan is RETURN while bottle still appears customer-assigned.
+      const { data: latestScan } = await supabase
+        .from('bottle_scans')
+        .select('mode, customer_name, created_at, timestamp')
+        .eq('organization_id', profile.organization_id)
+        .eq('bottle_barcode', barcode)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const latestMode = (latestScan?.mode || '').toString().toUpperCase();
+      const stillCustomerAssigned = !!(cyl.assigned_customer || cyl.customer_name || cyl.status === 'rented');
+      const isReturnPendingVerification = latestMode === 'RETURN' && stillCustomerAssigned;
+
+      if (isMounted) {
+        setPendingReturnVerification({
+          isPending: isReturnPendingVerification,
+          wasAt: latestScan?.customer_name || cyl.customer_name || undefined,
+          scannedAt: latestScan?.created_at || latestScan?.timestamp || undefined,
+        });
+      }
       
       if (isMounted) setLoading(false);
     };
@@ -122,8 +149,8 @@ export default function CylinderDetailsScreen() {
   const isFull = statusLower === 'filled' || statusLower === 'available' || statusLower === 'full';
   const isEmpty = statusLower === 'empty';
   const isRented = statusLower === 'rented';
-  const statusBadgeColor = isFull ? '#22C55E' : isEmpty ? '#F59E0B' : isRented ? '#3B82F6' : '#9CA3AF';
-  const statusLabel = isFull ? 'Full' : isEmpty ? 'Empty' : isRented ? 'Rented' : (cylinder?.status || 'Unknown');
+  const statusBadgeColor = pendingReturnVerification.isPending ? '#F59E0B' : (isFull ? '#22C55E' : isEmpty ? '#F59E0B' : isRented ? '#3B82F6' : '#9CA3AF');
+  const statusLabel = pendingReturnVerification.isPending ? 'Empty' : (isFull ? 'Full' : isEmpty ? 'Empty' : isRented ? 'Rented' : (cylinder?.status || 'Unknown'));
 
   if (loading) {
     return (
@@ -195,8 +222,29 @@ export default function CylinderDetailsScreen() {
             </View>
           </View>
         </View>
+
+        {pendingReturnVerification.isPending && (
+          <>
+            <View style={styles.infoRow}>
+              <Text style={[styles.label, { color: colors.text }]}>Was At:</Text>
+              <Text style={[styles.value, { color: colors.textSecondary, fontWeight: '600' }]}>
+                {pendingReturnVerification.wasAt || 'Customer'}
+              </Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={[styles.label, { color: colors.text }]}>Current:</Text>
+              <Text style={[styles.value, { color: colors.textSecondary }]}>In House</Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={[styles.label, { color: colors.text }]}>Return Scanned:</Text>
+              <Text style={[styles.value, { color: colors.textSecondary }]}>
+                {formatDateTime(pendingReturnVerification.scannedAt || '')}
+              </Text>
+            </View>
+          </>
+        )}
         
-        {customer && (
+        {!pendingReturnVerification.isPending && customer && (
           <View style={styles.infoRow}>
             <Text style={[styles.label, { color: colors.text }]}>
               {isRented ? 'Rented To:' : 'Assigned To:'}
@@ -206,7 +254,7 @@ export default function CylinderDetailsScreen() {
             </Text>
           </View>
         )}
-        {!customer && cylinder.customer_name && (
+        {!pendingReturnVerification.isPending && !customer && cylinder.customer_name && (
           <View style={styles.infoRow}>
             <Text style={[styles.label, { color: colors.text }]}>
               {isRented ? 'Rented To:' : 'Assigned To:'}
@@ -225,7 +273,9 @@ export default function CylinderDetailsScreen() {
         <View style={styles.infoRow}>
           <Text style={[styles.label, { color: colors.text }]}>Current Location:</Text>
           <Text style={[styles.value, { color: colors.textSecondary }]}>
-            {locationDisplayName ?? (cylinder.location ? cylinder.location.replace(/_/g, ' ') : null) ?? 'Not set'}
+            {pendingReturnVerification.isPending
+              ? 'In House'
+              : (locationDisplayName ?? (cylinder.location ? cylinder.location.replace(/_/g, ' ') : null) ?? 'Not set')}
           </Text>
         </View>
         
@@ -241,7 +291,7 @@ export default function CylinderDetailsScreen() {
       </View>
 
       {/* Customer Assignment */}
-      {customer && (
+      {!pendingReturnVerification.isPending && customer && (
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.primary }]}>
             {isRented ? 'Currently Rented To' : 'Assigned Customer'}

@@ -1,8 +1,8 @@
 const { createClient } = require('@supabase/supabase-js');
-const { getCorsHeaders, handlePreflight, createResponse, createErrorResponse } = require('./utils/cors');
+const { handlePreflight, createResponse, createErrorResponse } = require('./utils/cors');
 const { applyRateLimit } = require('./utils/rateLimit');
 
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
     return handlePreflight(event);
@@ -25,7 +25,7 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    const { userId, organizationId, requesterId } = JSON.parse(event.body || '{}');
+    const { userId, organizationId } = JSON.parse(event.body || '{}');
 
     if (!userId || !organizationId) {
       return createResponse(event, 400, { error: 'Missing userId or organizationId' });
@@ -49,14 +49,10 @@ exports.handler = async (event, context) => {
 
     if (checkError || !existingProfile) {
       console.error('User not found or does not belong to organization:', checkError);
-      return {
-        statusCode: 404,
-        headers: corsHeaders,
-        body: JSON.stringify({ 
-          error: 'User not found or does not belong to this organization',
-          details: checkError?.message 
-        })
-      };
+      return createResponse(event, 404, {
+        error: 'User not found or does not belong to this organization',
+        details: checkError?.message
+      });
     }
 
     console.log('User found, proceeding with deletion');

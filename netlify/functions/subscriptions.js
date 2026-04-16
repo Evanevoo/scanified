@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   // Enable CORS
   const headers = {
     'Access-Control-Allow-Origin': '*',

@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { getSiteUrl } = require('./utils/siteUrl');
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -32,13 +33,6 @@ const TENANT_TABLES = [
   'verified_orders',
   'sales_orders',
   'sales_order_items'
-];
-
-// Tables that are shared (no organization_id)
-const SHARED_TABLES = [
-  'subscription_plans',
-  'roles',
-  'permissions'
 ];
 
 /**
@@ -160,7 +154,7 @@ async function backupTenantData(organizationId, organizationName) {
  * Main handler for daily tenant backup
  * Can be called via HTTP (for external cron services) or manually
  */
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   console.log('🔄 Daily tenant backup function triggered at:', new Date().toISOString());
   
   // For free plans: Allow calls without auth OR with simple secret
@@ -198,7 +192,7 @@ exports.handler = async (event, context) => {
         methods: ['GET', 'POST'],
         note: 'For free plans: Use external cron service to call this endpoint daily.',
         setup: {
-          url: `${event.headers.host || 'scanified.netlify.app'}/.netlify/functions/daily-tenant-backup`,
+          url: `${getSiteUrl()}/.netlify/functions/daily-tenant-backup`,
           method: 'POST',
           auth: expectedToken ? 'Add ?secret=YOUR_SECRET or Authorization: Bearer YOUR_SECRET' : 'No auth required'
         }

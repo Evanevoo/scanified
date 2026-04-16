@@ -9,7 +9,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 /**
  * Restore tenant data from a backup
  */
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   console.log('🔄 Tenant restore function triggered at:', new Date().toISOString());
   
   // Verify authorization

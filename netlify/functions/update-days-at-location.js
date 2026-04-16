@@ -121,7 +121,7 @@ async function updateDaysAtLocation() {
 }
 
 // Netlify scheduled function handler
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   // Only allow scheduled events
   if (event.source !== 'aws.events') {
     return {

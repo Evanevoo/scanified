@@ -85,7 +85,7 @@ export default function AssignAssetTypesToRentalClasses() {
                   Current assignment workflow
                 </Typography>
                 <Typography variant="body1" sx={{ color: '#64748b', mt: 1.25 }}>
-                  Define groups in <Link to="/rental/class-groups" style={{ fontWeight: 600 }}>rental class groups</Link>. Set live per-asset and per-customer rates in the <Link to="/rentals" style={{ fontWeight: 600 }}>Rentals</Link> page while asset-type-to-class assignment is still evolving.
+                  Organization classes and rates live on <Link to="/rental/classes" style={{ fontWeight: 600 }}>Rental classes</Link>. Set live per-asset and per-customer rates in the <Link to="/rentals" style={{ fontWeight: 600 }}>Rentals</Link> workspace while assignments here are still evolving.
                 </Typography>
               </Box>
             </CardContent>
@@ -98,8 +98,8 @@ export default function AssignAssetTypesToRentalClasses() {
                 Open related controls
               </Typography>
               <Stack spacing={1.5}>
-                <Button component={Link} to="/rental/class-groups" variant="contained" startIcon={<CategoryIcon />} sx={{ borderRadius: 999, justifyContent: 'flex-start', textTransform: 'none' }}>
-                  Open rental class groups
+                <Button component={Link} to="/rental/classes" variant="contained" startIcon={<CategoryIcon />} sx={{ borderRadius: 999, justifyContent: 'flex-start', textTransform: 'none' }}>
+                  Open rental classes
                 </Button>
                 <Button component={Link} to="/rentals" variant="outlined" startIcon={<ViewKanbanIcon />} sx={{ borderRadius: 999, justifyContent: 'flex-start', textTransform: 'none' }}>
                   Open rentals workspace

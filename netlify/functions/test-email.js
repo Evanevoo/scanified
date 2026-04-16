@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
+const { getSiteUrl } = require('./utils/siteUrl');
 
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   // Only allow POST requests
   if (event.httpMethod !== 'POST') {
     return {
@@ -44,7 +45,7 @@ exports.handler = async (event, context) => {
       type: 'signup',
       email: to,
       options: {
-        redirectTo: `${process.env.SITE_URL || 'https://scanified1.netlify.app'}/confirm-signup`
+        redirectTo: `${getSiteUrl()}/confirm-signup`
       }
     });
 
@@ -56,7 +57,7 @@ exports.handler = async (event, context) => {
         type: 'magiclink',
         email: to,
         options: {
-          redirectTo: `${process.env.SITE_URL || 'https://scanified1.netlify.app'}/magic-link`
+          redirectTo: `${getSiteUrl()}/magic-link`
         }
       });
 

@@ -977,8 +977,8 @@ const BottleManagement = () => {
 
 
 
-          // Check for existing bottles to prevent duplicates (by barcode only)
-          // Also check for duplicates WITHIN the upload batch itself
+          // Check existing bottles by barcode so we can update customer assignment
+          // instead of skipping them as duplicates.
 
           const bottleBarcodes = bottlesToInsert.map(b => b.barcode_number != null ? String(b.barcode_number).trim() : '').filter(b => b !== '');
 
@@ -1010,14 +1010,13 @@ const BottleManagement = () => {
             }
           }
 
-          // Track barcodes we've seen in THIS upload batch to catch duplicates within the file
-          // Only check barcodes for duplicates, not serial numbers
+          // Track barcodes we've seen in THIS upload batch to catch duplicates within the file.
           const seenBarcodesInBatch = new Set();
           
-          // Filter out bottles that already exist (check by barcode only)
-          // Also filter out duplicates WITHIN the upload batch
+          // Split records into inserts vs updates for existing barcodes.
           const newBottles = [];
-          const duplicates = [];
+          const bottlesToUpdate = [];
+          const duplicatesInFile = [];
 
           // Helper function to check if a value is a valid identifier (not empty, not "Not Set", etc.)
           const isValidIdentifier = (value) => {
@@ -1052,7 +1051,7 @@ const BottleManagement = () => {
             const isDuplicateInBatch = seenBarcodesInBatch.has(barcode);
             
             if (isDuplicateInBatch) {
-              duplicates.push({
+              duplicatesInFile.push({
                 barcode: barcode || 'N/A',
                 serial: serial || 'N/A',
                 reason: 'barcode (duplicate in file)',
@@ -1061,31 +1060,36 @@ const BottleManagement = () => {
               logger.log(`Skipping duplicate bottle in upload file (row ${index + 1}): Barcode=${barcode}, Serial=${serial || 'N/A'} (barcode "${barcode}" already seen in this file)`);
               return; // Skip this bottle
             }
+
+            // Mark this barcode as processed so a second row in the same upload is skipped.
+            seenBarcodesInBatch.add(barcode);
             
             // Second check: Does this bottle already exist in the database? (by barcode only, normalized string)
-            const hasExistingBarcode = existingBottles.some(existing => {
+            const existingBottle = existingBottles.find(existing => {
               const existingBarcode = existing.barcode_number != null ? String(existing.barcode_number).trim() : '';
               return existingBarcode && isValidIdentifier(existingBarcode) && existingBarcode === barcode;
             });
             
-            if (hasExistingBarcode) {
-              duplicates.push({
-                barcode: barcode || 'N/A',
-                serial: serial || 'N/A',
-                reason: 'barcode (exists in database)',
-                row: index + 1
+            if (existingBottle) {
+              bottlesToUpdate.push({
+                id: existingBottle.id,
+                barcode_number: barcode,
+                assigned_customer: bottle.assigned_customer ?? null,
+                customer_name: bottle.customer_name ?? null,
+                status: bottle.status || 'available'
               });
-              logger.log(`Skipping duplicate bottle: Barcode=${barcode}, Serial=${serial || 'N/A'} (barcode "${barcode}" already exists in database)`);
+              logger.log(`Queued bottle update for existing barcode "${barcode}" (id: ${existingBottle.id})`);
             } else {
-              // This is a new bottle - add it and track its barcode (only valid barcodes)
+              // This is a new bottle - insert it.
               newBottles.push(bottle);
-              seenBarcodesInBatch.add(barcode);
             }
           });
 
           
 
-          logger.log(`Found ${duplicates.length} duplicates, inserting ${newBottles.length} new bottles`);
+          logger.log(
+            `Prepared upload actions: ${newBottles.length} inserts, ${bottlesToUpdate.length} updates, ${duplicatesInFile.length} duplicate rows skipped`
+          );
 
 
 
@@ -1119,17 +1123,50 @@ const BottleManagement = () => {
 
           }
 
+          // Update existing bottles that matched by barcode.
+          let updatedCount = 0;
+          if (bottlesToUpdate.length > 0) {
+            const updateBatchSize = 100;
+
+            for (let i = 0; i < bottlesToUpdate.length; i += updateBatchSize) {
+              const batch = bottlesToUpdate.slice(i, i + updateBatchSize);
+              for (const bottleUpdate of batch) {
+                const { error: updateError } = await supabase
+                  .from('bottles')
+                  .update({
+                    assigned_customer: bottleUpdate.assigned_customer,
+                    customer_name: bottleUpdate.customer_name,
+                    status: bottleUpdate.status,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', bottleUpdate.id)
+                  .eq('organization_id', organization.id);
+
+                if (updateError) {
+                  logger.error(
+                    `Failed to update bottle assignment for barcode "${bottleUpdate.barcode_number}" (id: ${bottleUpdate.id})`,
+                    updateError
+                  );
+                  throw updateError;
+                }
+
+                updatedCount += 1;
+              }
+            }
+          }
+
 
 
           // Show proper success message with duplicate info
 
-          let message = `${newBottles.length} bottles uploaded successfully!`;
-
-          if (duplicates.length > 0) {
-
-            message += ` (${duplicates.length} duplicates skipped)`;
-
+          let message = `${newBottles.length} bottles inserted`;
+          if (updatedCount > 0) {
+            message += `, ${updatedCount} existing bottles updated`;
           }
+          if (duplicatesInFile.length > 0) {
+            message += ` (${duplicatesInFile.length} duplicate file rows skipped)`;
+          }
+          message += '!';
 
           setSnackbar({ open: true, message, severity: 'success' });
 

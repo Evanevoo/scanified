@@ -44,7 +44,7 @@ A comprehensive web and mobile application for managing gas cylinder inventory, 
 - **Material-UI 5.14.20** - React component library
 - **React Router 6.20.1** - Client-side routing
 - **Zustand 4.4.7** - State management
-- **TypeScript 5.2.2** - Type safety and development experience
+- **JavaScript (JSX)** - Primary web app source; TypeScript used in some mobile and UI modules
 
 ### Mobile
 - **React Native** - Cross-platform mobile development

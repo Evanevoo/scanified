@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -412,8 +412,8 @@ export default function Settings() {
   const [invoiceEmailLoading, setInvoiceEmailLoading] = useState(false);
   const [invoiceEmailMsg, setInvoiceEmailMsg] = useState('');
 
-  // Tab configuration based on user role
-  const getTabsConfig = () => {
+  // Tab configuration based on user role (memoized so URL ?tab= sync re-runs when profile loads)
+  const tabsConfig = useMemo(() => {
     const baseTabs = [
       { label: 'Profile', icon: <AccountCircleIcon />, id: 'profile' },
       { label: 'Security', icon: <SecurityIcon />, id: 'security' },
@@ -433,9 +433,7 @@ export default function Settings() {
     }
 
     return [...baseTabs, ...adminTabs];
-  };
-
-  const tabsConfig = getTabsConfig();
+  }, [profile?.role]);
 
   // Initialize data
   useEffect(() => {
@@ -944,16 +942,16 @@ export default function Settings() {
     }
   };
 
-  // Sync URL tab param for all tabs (bookmarkable)
+  // Sync URL tab param for all tabs (bookmarkable). Re-run when tabsConfig updates so ?tab=barcodes
+  // works after profile loads (admin tabs are absent until profile.role is known).
   useEffect(() => {
     const tabParam = searchParams.get('tab');
-    if (tabParam) {
-      const idx = tabsConfig.findIndex(tab => tab.id === tabParam);
-      if (idx >= 0 && idx !== activeTab) {
-        setActiveTab(idx);
-      }
+    if (!tabParam) return;
+    const idx = tabsConfig.findIndex((tab) => tab.id === tabParam);
+    if (idx >= 0 && idx !== activeTab) {
+      setActiveTab(idx);
     }
-  }, [searchParams]);
+  }, [searchParams, tabsConfig, activeTab]);
 
   // Unsaved changes: warn on browser close/refresh (useBlocker requires data router, so we use beforeunload)
   const hasUnsavedChanges = profileChanged || securityChanged || assetConfigChanged || barcodeConfigChanged || preferencesChanged;
@@ -1741,15 +1739,17 @@ export default function Settings() {
                   <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>Organization Logo</Typography>
                   {logoUrl && (
                     <Box sx={{ mb: 2 }}>
-                      <img 
-                        src={logoUrl} 
-                        alt="Organization Logo" 
-                        style={{ 
-                          maxHeight: 64, 
-                          maxWidth: 128, 
-                          borderRadius: 8, 
-                          border: '1px solid #eee' 
-                        }} 
+                      <Box
+                        component="img"
+                        src={logoUrl}
+                        alt="Organization Logo"
+                        sx={{
+                          maxHeight: 64,
+                          maxWidth: 128,
+                          borderRadius: 2,
+                          border: 1,
+                          borderColor: 'divider',
+                        }}
                       />
                     </Box>
                   )}

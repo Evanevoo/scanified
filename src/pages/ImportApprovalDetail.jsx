@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
@@ -7,6 +7,10 @@ import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBod
 import { ExpandMore as ExpandMoreIcon, Person as PersonIcon, Receipt as ReceiptIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon } from '@mui/icons-material';
 import { CardSkeleton } from '../components/SmoothLoading';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
+import { reconcileShippedBottleAssignments } from '../services/reconcileShippedBottleAssignments';
+import { fetchOrgRentalPricingContext, monthlyRateForProductPlaceholder } from '../services/rentalPricingContext';
+import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
+import { parseDbTimestamp } from '../utils/parseDbTimestamp';
 
 // Enhanced data parsing with better error handling
 function parseDataField(data) {
@@ -23,6 +27,15 @@ function parseDataField(data) {
   return data;
 }
 
+/** Ownership (e.g. WeldCor) = who owns the asset; customer fields = who it is assigned/rented to. */
+function bottleAssignedCustomerLabel(bottle) {
+  if (!bottle) return '—';
+  const name = (bottle.customer_name || '').trim();
+  if (name) return name;
+  if (bottle.assigned_customer) return `Customer ID: ${bottle.assigned_customer}`;
+  return '—';
+}
+
 export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber }) {
   const params = useParams();
   const [searchParams] = useSearchParams();
@@ -30,7 +43,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const navigate = useNavigate();
   const { organization, profile } = useAuth();
   const browserTz = typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone;
-  const userTimezone = profile?.preferences?.timezone || (browserTz && browserTz !== 'UTC' ? browserTz : undefined);
+  const displayTimezone = profile?.preferences?.timezone || browserTz || 'UTC';
   const [importRecord, setImportRecord] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -68,6 +81,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const [reclassifyDialog, setReclassifyDialog] = useState({ open: false, newType: '', newGroup: '' });
   const [moveOrderDialog, setMoveOrderDialog] = useState({ open: false, newOrderNumber: '' });
   const [assetActionSaving, setAssetActionSaving] = useState(false);
+  const liveSyncTimerRef = useRef(null);
 
   // Get filter parameters from URL
   const filterInvoiceNumber = searchParams.get('order') || searchParams.get('invoiceNumber');
@@ -320,7 +334,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         const assetInfoEntry = (bottle) => ({
           category: bottle.category || '',
           group: bottle.group_name || '',
-          type: bottle.type || '',
+          type: bottle.type || bottle.gas_type || '',
           product_code: bottle.product_code || '',
           description: bottle.description || '',
           gas_type: bottle.gas_type || ''
@@ -373,7 +387,48 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     }
     
     fetchAssetInfo();
-  }, [importRecord, organization]);
+  }, [importRecord, organization, refreshScannedBottlesTrigger]);
+
+  // Keep detail view connected to live asset/scan updates made in other screens (e.g. Bottle Details)
+  useEffect(() => {
+    if (!organization?.id) return undefined;
+
+    const queueRefresh = () => {
+      if (liveSyncTimerRef.current) {
+        clearTimeout(liveSyncTimerRef.current);
+      }
+      liveSyncTimerRef.current = setTimeout(() => {
+        setRefreshScannedBottlesTrigger(prev => prev + 1);
+      }, 200);
+    };
+
+    const syncChannel = supabase
+      .channel(`import-approval-detail-sync-${organization.id}-${invoiceNumber || 'record'}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'bottles',
+        filter: `organization_id=eq.${organization.id}`
+      }, queueRefresh)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'bottle_scans',
+        filter: `organization_id=eq.${organization.id}`
+      }, queueRefresh)
+      .subscribe();
+
+    const handleWindowFocus = () => queueRefresh();
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus);
+      if (liveSyncTimerRef.current) {
+        clearTimeout(liveSyncTimerRef.current);
+      }
+      syncChannel.unsubscribe();
+    };
+  }, [organization?.id, invoiceNumber]);
 
   // Fetch scanned bottles for this order
   useEffect(() => {
@@ -602,7 +657,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         if (deliveredBarcodes.size > 0) {
           const { data: bottles, error: bottlesError } = await supabase
             .from('bottles')
-            .select('barcode_number, product_code, category, group_name, type, description, gas_type, ownership, serial_number')
+            .select('barcode_number, product_code, category, group_name, type, description, gas_type, ownership, serial_number, customer_name, assigned_customer')
             .in('barcode_number', Array.from(deliveredBarcodes))
             .eq('organization_id', organization.id);
           
@@ -619,7 +674,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         if (returnedBarcodes.size > 0) {
           const { data: bottles, error: bottlesError } = await supabase
             .from('bottles')
-            .select('barcode_number, product_code, category, group_name, type, description, gas_type, ownership, serial_number')
+            .select('barcode_number, product_code, category, group_name, type, description, gas_type, ownership, serial_number, customer_name, assigned_customer')
             .in('barcode_number', Array.from(returnedBarcodes))
             .eq('organization_id', organization.id);
           
@@ -650,9 +705,9 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     fetchScannedBottles();
   }, [importRecord, organization, filterInvoiceNumber, refreshScannedBottlesTrigger]);
 
-  // Fetch bottle types/groups/categories/product codes/ownership when Assign to type dialog opens (for dropdowns and auto-fill)
+  // Fetch bottle metadata for dialogs that need type/group dropdown options
   useEffect(() => {
-    if (!assignBottleDialog.open || !organization?.id) return;
+    if ((!assignBottleDialog.open && !reclassifyDialog.open) || !organization?.id) return;
     let cancelled = false;
     (async () => {
       try {
@@ -690,7 +745,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       }
     })();
     return () => { cancelled = true; };
-  }, [assignBottleDialog.open, organization?.id]);
+  }, [assignBottleDialog.open, reclassifyDialog.open, organization?.id]);
 
   // Fetch customers for the change customer modal
   useEffect(() => {
@@ -802,6 +857,27 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     
     return null;
   };
+
+  /** Delivered barcodes that still show a different customer on the bottle row (e.g. return not scanned). */
+  const deliveredPriorCustomerMismatches = useMemo(() => {
+    if (!scannedBottles?.length || !importRecord) return [];
+    const data = parseDataField(importRecord.data);
+    const targetId = String(getCustomerId(data) || '').trim();
+    const targetNameRaw = String(getCustomerInfo(data) || '').trim();
+    const targetName =
+      targetNameRaw && targetNameRaw.toLowerCase() !== 'unknown'
+        ? targetNameRaw.toLowerCase()
+        : '';
+    if (!targetId && !targetName) return [];
+    return scannedBottles.filter((b) => {
+      const ac = String(b.assigned_customer || '').trim();
+      const cn = String(b.customer_name || '').trim().toLowerCase();
+      if (!ac && !cn) return false;
+      if (targetId && ac === targetId) return false;
+      if (targetName && cn === targetName) return false;
+      return true;
+    });
+  }, [scannedBottles, importRecord]);
 
   // Assign bottles to customers after verification (similar to ImportApprovals.jsx)
   const assignBottlesToCustomer = async (record) => {
@@ -928,7 +1004,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           assigned_customer: null,
           customer_name: null,
           status: 'empty',
-          location: bottle.location || 'Warehouse',
+          location: 'In House',
           rental_start_date: null,
           rental_order_number: null,
           updated_at: new Date().toISOString()
@@ -1290,7 +1366,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           if (orderVariants.length > 0) {
             const resBs = await supabase
               .from('bottle_scans')
-              .select('bottle_barcode, mode, created_at, timestamp')
+              .select('bottle_barcode, mode, created_at, timestamp, customer_id, customer_name')
               .in('order_number', orderVariants)
               .eq('organization_id', organization.id);
             bottleScanRows = resBs.data || [];
@@ -1390,8 +1466,40 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           let shipBarcodesUnique = [...new Set(shipBarcodes)];
           const returnBarcodesUnique = [...new Set(returnBarcodes)];
 
-          const customerName = importData.customer_name || importData.customer || '';
-          const customerId = importData.customer_id || importData.CustomerListID || customerName;
+          const scanCustomerUnanimous = await getUnanimousShipScanCustomer(
+            supabase,
+            organization.id,
+            shipBarcodesUnique,
+            bottleScanRows,
+            normalizeBarcode
+          );
+          if (scanCustomerUnanimous === 'CONFLICT') {
+            setActionMessage(
+              'Cannot verify: delivery scans on this order list different customers. Fix scans or split the order.'
+            );
+            return;
+          }
+
+          let customerName = importData.customer_name || importData.customer || '';
+          let customerId = importData.customer_id || importData.CustomerListID || customerName;
+
+          if (scanCustomerUnanimous && scanCustomerUnanimous.customerListId) {
+            const importIdStr = String(customerId || '').trim();
+            const importNameStr = String(customerName || '').trim();
+            const scanIdStr = String(scanCustomerUnanimous.customerListId || '').trim();
+            const scanNameStr = String(scanCustomerUnanimous.name || '').trim();
+            const sameCustomer =
+              (importIdStr && importIdStr === scanIdStr) ||
+              (importNameStr && scanNameStr && importNameStr.toLowerCase() === scanNameStr.toLowerCase());
+            if (!sameCustomer) {
+              logger.log(
+                'Verify: using unanimous bottle_scans customer (handset) instead of invoice customer:',
+                { invoiceCustomer: customerName, scanCustomer: scanCustomerUnanimous.name, scanListId: scanIdStr }
+              );
+              customerId = scanCustomerUnanimous.customerListId;
+              customerName = scanCustomerUnanimous.name || customerName;
+            }
+          }
 
           // Net-balance guard + RNB: if a return bottle is NOT actually assigned to this customer,
           // count it as "Return not on balance" (like DNS) and remove one ship of same product so net stays correct.
@@ -1493,15 +1601,33 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               }
             }
 
+            const reconcileWarnings = await reconcileShippedBottleAssignments(supabase, {
+              organizationId: organization?.id,
+              shipBarcodes: shipBarcodesUnique,
+              customerId,
+              customerName,
+              orderNumber: orderNum || null,
+            });
+            if (reconcileWarnings.length > 0) {
+              logger.warn('ImportApprovalDetail post-verify reassignment:', reconcileWarnings);
+            }
+            const reconcileNote =
+              reconcileWarnings.length > 0
+                ? ` ⚠️ ${reconcileWarnings.length} bottle(s) were still on a prior customer and were reassigned (e.g. return not scanned).`
+                : '';
+
             if (errors.length > 0 && totalAssigned === 0) {
-              setActionMessage(`Warning: ${errors.join('; ')}`);
+              setActionMessage(`Warning: ${errors.join('; ')}${reconcileNote}`);
             } else {
               setActionMessage(
                 `Record verified successfully! ${totalAssigned} bottle(s) processed` +
                 (skipped > 0 ? `, ${skipped} skipped` : '') +
-                (errors.length > 0 ? ` (${errors.length} warnings)` : '')
+                (errors.length > 0 ? ` (${errors.length} warnings)` : '') +
+                reconcileNote
               );
             }
+
+            const pricingCtxVerify = await fetchOrgRentalPricingContext(supabase, organization?.id);
 
             // RNB (Return not on balance): return was scanned but bottle was not at this customer – create DNS-style record so it shows on customer page
             if (returnsNotOnBalance?.length > 0) {
@@ -1512,6 +1638,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               }
               if (!resolvedCustomerId) resolvedCustomerId = customerName;
               for (const rnb of returnsNotOnBalance) {
+                const rental_amount = monthlyRateForProductPlaceholder(
+                  resolvedCustomerId,
+                  rnb.product_code || 'Unknown',
+                  pricingCtxVerify
+                );
                 await supabase.from('rentals').insert({
                   organization_id: organization.id,
                   customer_id: resolvedCustomerId,
@@ -1524,7 +1655,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                   bottle_barcode: rnb.barcode || null,
                   rental_start_date: new Date().toISOString().split('T')[0],
                   rental_end_date: null,
-                  rental_amount: 10,
+                  rental_amount,
                   rental_type: 'monthly',
                   tax_code: 'GST+PST',
                   tax_rate: 0.11,
@@ -1553,6 +1684,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               );
               const rnsProductCode = (firstReturnRow?.product_code || firstReturnRow?.description || 'RNS').toString().trim() || 'RNS';
               for (let i = 0; i < rnsCount; i++) {
+                const rental_amount = monthlyRateForProductPlaceholder(
+                  resolvedCustomerIdForRns,
+                  rnsProductCode,
+                  pricingCtxVerify
+                );
                 await supabase.from('rentals').insert({
                   organization_id: organization.id,
                   customer_id: resolvedCustomerIdForRns,
@@ -1565,7 +1701,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                   bottle_barcode: null,
                   rental_start_date: new Date().toISOString().split('T')[0],
                   rental_end_date: null,
-                  rental_amount: 10,
+                  rental_amount,
                   rental_type: 'monthly',
                   tax_code: 'GST+PST',
                   tax_rate: 0.11,
@@ -1624,6 +1760,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               const dnsCount = Math.max(0, invShipped - scannedOut);
               const description = row.description || row.product_code || 'Delivered Not Scanned';
               for (let i = 0; i < dnsCount; i++) {
+                const rental_amount = monthlyRateForProductPlaceholder(resolvedCustomerId, productCode, pricingCtxVerify);
                 const { error: dnsErr } = await supabase.from('rentals').insert({
                   organization_id: organization.id,
                   customer_id: resolvedCustomerId,
@@ -1636,7 +1773,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                   bottle_barcode: null,
                   rental_start_date: new Date().toISOString().split('T')[0],
                   rental_end_date: null,
-                  rental_amount: 10,
+                  rental_amount,
                   rental_type: 'monthly',
                   tax_code: 'GST+PST',
                   tax_rate: 0.11,
@@ -2632,7 +2769,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   // Reclassify selected assets
   const handleReclassifyAssets = async () => {
     if (selectedAssets.size === 0 || !organization?.id) return;
-    if (!reclassifyDialog.newType?.trim()) {
+    const nextType = reclassifyDialog.newType?.trim();
+    if (!nextType) {
       setActionMessage('Please select a new type');
       setTimeout(() => setActionMessage(''), 3000);
       return;
@@ -2643,11 +2781,14 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     try {
       const barcodeArray = Array.from(selectedAssets);
       let successCount = 0;
+      const selectedTypeDefaults = bottleTypes.typeDefaults?.[nextType] || {};
       
       for (const barcode of barcodeArray) {
         // Update the bottle record
         const updateData = {
-          type: reclassifyDialog.newType.trim(),
+          type: nextType,
+          // Import Approval tracking groups scans by product_code, so keep it aligned when type changes.
+          product_code: (selectedTypeDefaults.product_code || nextType).trim(),
         };
         if (reclassifyDialog.newGroup?.trim()) {
           updateData.group_name = reclassifyDialog.newGroup.trim();
@@ -3011,12 +3152,14 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                       {(() => {
                         const raw = importRecord.uploaded_at ?? importRecord.created_at ?? importRecord?.data?.summary?.uploaded_at;
                         if (raw == null || raw === '') return '—';
-                        const d = new Date(raw);
-                        if (Number.isNaN(d.getTime())) return '—';
+                        const d = parseDbTimestamp(raw);
+                        if (!d || Number.isNaN(d.getTime())) return '—';
                         try {
-                          const opts = { dateStyle: 'medium', timeStyle: 'short' };
-                          if (userTimezone) opts.timeZone = userTimezone;
-                          return d.toLocaleString(undefined, opts);
+                          return d.toLocaleString(undefined, {
+                            dateStyle: 'medium',
+                            timeStyle: 'short',
+                            timeZone: displayTimezone
+                          });
                         } catch {
                           return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
                         }
@@ -3036,6 +3179,27 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                   color: 'var(--text-main)'
                 }}>
                   {importRecord.notes}
+                </Alert>
+              )}
+
+              {deliveredPriorCustomerMismatches.length > 0 && (
+                <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>
+                  <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                    Prior customer still on file for some delivered scans
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
+                    {deliveredPriorCustomerMismatches.length} barcode(s) still show another customer in the database (return may not have been recorded).
+                    When you verify this order, they will be reassigned to this order&apos;s customer and open rentals for those bottles will be closed.
+                  </Typography>
+                  <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+                    {deliveredPriorCustomerMismatches.slice(0, 12).map((b) => (
+                      <li key={b.barcode_number || b.id}>
+                        <Typography variant="body2">
+                          {b.barcode_number || '—'} — currently {b.customer_name || b.assigned_customer || '—'}
+                        </Typography>
+                      </li>
+                    ))}
+                  </Box>
                 </Alert>
               )}
 
@@ -3083,6 +3247,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Product Code</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Description</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Ownership</TableCell>
+                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Assigned customer</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Barcode</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Serial Number</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Actions</TableCell>
@@ -3091,7 +3256,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                   <TableBody>
                     {scannedBottles.length === 0 && unassignedDeliveredBarcodes.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={10} align="center" sx={{ 
+                        <TableCell colSpan={11} align="center" sx={{ 
                           py: 4, 
                           color: 'text.secondary',
                           border: '2px dashed #e0e6ed',
@@ -3121,7 +3286,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               </TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.category || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.group_name || ''}</TableCell>
-                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.type || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.type || bottle.gas_type || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
                                 <Chip label={bottle.product_code || ''} size="small" variant="outlined" sx={{ 
                                   border: '2px solid #333',
@@ -3132,6 +3297,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               </TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.description || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.ownership || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
+                                <Tooltip title="Ownership is who owns the cylinder; assigned customer is who it is rented to in the system.">
+                                  <span>{bottleAssignedCustomerLabel(bottle)}</span>
+                                </Tooltip>
+                              </TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.barcode_number || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.serial_number || ''}</TableCell>
                               <TableCell />
@@ -3155,6 +3325,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               <TableCell colSpan={3} sx={{ borderRight: '1px solid #e0e6ed', fontWeight: 600, color: '#92400E' }}>Unassigned asset</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} />
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} colSpan={2}>Scanned barcode not in system – assign type below</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed', color: 'text.secondary' }}>—</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{barcode}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} />
                               <TableCell>
@@ -3197,6 +3368,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Product Code</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Description</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Ownership</TableCell>
+                      <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Assigned customer</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Barcode</TableCell>
                       <TableCell sx={{ fontWeight: 600, borderRight: '1px solid #e0e6ed' }}>Serial Number</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Actions</TableCell>
@@ -3205,7 +3377,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                   <TableBody>
                     {returnedBottles.length === 0 && returned.length === 0 && unassignedReturnedBarcodes.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={10} align="center" sx={{ 
+                        <TableCell colSpan={11} align="center" sx={{ 
                           py: 4, 
                           color: 'text.secondary',
                           border: '2px dashed #e0e6ed',
@@ -3236,7 +3408,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               </TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.category || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.group_name || ''}</TableCell>
-                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.type || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.type || bottle.gas_type || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
                                 <Chip label={bottle.product_code || ''} size="small" variant="outlined" sx={{ 
                                   border: '2px solid #333',
@@ -3247,6 +3419,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               </TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.description || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.ownership || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
+                                <Tooltip title="Ownership is who owns the cylinder; assigned customer is who it is rented to in the system.">
+                                  <span>{bottleAssignedCustomerLabel(bottle)}</span>
+                                </Tooltip>
+                              </TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.barcode_number || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.serial_number || ''}</TableCell>
                               <TableCell />
@@ -3284,6 +3461,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               </TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{assetInfo.description || row.description || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.ownership || ''}</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
+                                {(row.customer_name || row.customerName || '').trim() ||
+                                  (row.customer_id || row.customerId
+                                    ? `Customer ID: ${row.customer_id || row.customerId}`
+                                    : '—')}
+                              </TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.barcode || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{row.serial_number || ''}</TableCell>
                               <TableCell />
@@ -3307,6 +3490,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               <TableCell colSpan={3} sx={{ borderRight: '1px solid #e0e6ed', fontWeight: 600, color: '#92400E' }}>Unassigned asset</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} />
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} colSpan={2}>Scanned barcode not in system – assign type below</TableCell>
+                              <TableCell sx={{ borderRight: '1px solid #e0e6ed', color: 'text.secondary' }}>—</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{barcode}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }} />
                               <TableCell>

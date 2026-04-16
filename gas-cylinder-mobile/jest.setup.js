@@ -5,6 +5,22 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
 );
 
+jest.mock('@react-native-community/netinfo', () => ({
+  __esModule: true,
+  default: {
+    fetch: jest.fn(() =>
+      Promise.resolve({
+        type: 'wifi',
+        isConnected: true,
+        isInternetReachable: true,
+        details: {},
+      })
+    ),
+    addEventListener: jest.fn(() => jest.fn()),
+    configure: jest.fn(),
+  },
+}));
+
 // Mock Expo modules
 jest.mock('expo-camera', () => ({
   CameraView: 'CameraView',
@@ -62,9 +78,13 @@ jest.mock('@react-navigation/native', () => ({
   }),
 }));
 
-// Mock Haptic Feedback
-jest.mock('react-native-haptic-feedback', () => ({
-  trigger: jest.fn(),
+// Mock haptics (app uses expo-haptics, not react-native-haptic-feedback)
+jest.mock('expo-haptics', () => ({
+  impactAsync: jest.fn(),
+  notificationAsync: jest.fn(),
+  selectionAsync: jest.fn(),
+  ImpactFeedbackStyle: { Light: 0, Medium: 1, Heavy: 2 },
+  NotificationFeedbackType: { Success: 0, Warning: 1, Error: 2 },
 }));
 
 // Global test setup

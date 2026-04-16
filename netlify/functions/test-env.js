@@ -1,5 +1,5 @@
 // Test function to check environment variables
-exports.handler = async (event, context) => {
+exports.handler = async (_event, _context) => {
   return {
     statusCode: 200,
     headers: {

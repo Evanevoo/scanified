@@ -4,35 +4,17 @@ import {
   Box, List, ListItemButton, ListItemIcon, ListItemText, Typography
 } from '@mui/material';
 import {
-  Category as CategoryIcon,
   Assignment as AssignmentIcon,
-  Receipt as ReceiptIcon,
-  AttachMoney as MoneyIcon,
-  EventBusy as ExpiringIcon,
-  Settings as SettingsIcon,
-  CalendarMonth as CalendarIcon,
-  Code as CodeIcon,
-  Map as MapIcon,
-  LocalOffer as TagIcon,
   Search as SearchIcon,
-  Inventory as InventoryIcon,
   Link as LinkIcon,
+  Map as MapIcon,
 } from '@mui/icons-material';
 
 const links = [
-  { to: '/rental/class-groups', label: 'Rental Class Groups', icon: <CategoryIcon /> },
-  { to: '/rental/classes', label: 'Rental Classes', icon: <AssignmentIcon /> },
-  { to: '/rental/bill-formats', label: 'Rental Bill Formats', icon: <ReceiptIcon /> },
-  { to: '/rental/flat-fees', label: 'Flat Fees', icon: <MoneyIcon /> },
-  { to: '/rental/expiring-asset-agreements', label: 'Expiring Asset Agreements', icon: <ExpiringIcon /> },
-  { to: '/rental/bill-configuration', label: 'Rental Bill Configuration', icon: <SettingsIcon /> },
-  { to: '/rental/billing-periods', label: 'Show Rental Billing Periods', icon: <CalendarIcon /> },
-  { to: '/rental/legacy-code-mappings', label: 'Rental Legacy Code Mappings', icon: <CodeIcon /> },
-  { to: '/rental/tax-regions', label: 'Rental Tax Regions', icon: <MapIcon /> },
-  { to: '/rental/tax-categories', label: 'Rental Tax Categories', icon: <TagIcon /> },
-  { to: '/rental/invoice-search', label: 'Rental Invoice Search', icon: <SearchIcon /> },
-  { to: '/rental/accounting-products', label: 'Accounting Asset Agreement Products', icon: <InventoryIcon /> },
-  { to: '/rental/assign-asset-types', label: 'Assign Asset Types To Rental Classes', icon: <LinkIcon /> },
+  { to: '/rental/classes', label: 'Standard rate table', icon: <AssignmentIcon /> },
+  { to: '/rental/assign-asset-types', label: 'Map products to classes', icon: <LinkIcon /> },
+  { to: '/rental/tax-regions', label: 'Rental tax regions', icon: <MapIcon /> },
+  { to: '/rental/invoice-search', label: 'Rental invoice search', icon: <SearchIcon /> },
 ];
 
 export default function RentalSidebar() {
@@ -40,7 +22,7 @@ export default function RentalSidebar() {
   const location = useLocation();
 
   const isActive = (path) => {
-    if (path === '/rental/class-groups') return location.pathname === path;
+    if (path === '/rental/classes') return location.pathname === path || location.pathname.startsWith(`${path}/`);
     return location.pathname.startsWith(path);
   };
 
@@ -59,7 +41,7 @@ export default function RentalSidebar() {
           Rental
         </Typography>
         <Typography variant="caption" color="text.secondary">
-          Configuration & settings
+          Rates, tax &amp; class mapping
         </Typography>
       </Box>
       <List disablePadding sx={{ py: 1 }}>
@@ -95,4 +77,4 @@ export default function RentalSidebar() {
       </List>
     </Box>
   );
-} 
+}

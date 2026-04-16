@@ -215,11 +215,12 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
                 logger.log('Found active yearly lease agreement for customer, storing in state', leaseAgreements);
                 // Store lease agreement in state so calculateInvoiceData can use it
                 setCustomerLeaseAgreement(leaseAgreements);
-                // Also attach to rentals if not already attached
+                // Attach only to non–monthly lines so mixed lease + monthly bottles invoice correctly
                 rentals.forEach(r => {
+                  if ((r.rental_type || '').toLowerCase() === 'monthly') return;
                   if (!r.lease_agreement) {
                     r.lease_agreement = leaseAgreements;
-                    r.rental_type = 'yearly';
+                    r.rental_type = r.rental_type || 'yearly';
                   }
                 });
               } else {
@@ -348,68 +349,46 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
       rentalMonths = (endYear - startYear) * 12 + (endMonth - startMonth) + 1;
     }
     
-    // Check if this is a yearly rental (check rental_type/billing_frequency first, then check if period is 12 months)
-    // Priority: rental_type or lease_agreement billing_frequency overrides period length
+    const isYearlyBillingFrequency = (ag) => {
+      if (!ag) return false;
+      const b = (ag.billing_frequency || '').toLowerCase();
+      return b === 'annual' || b === 'yearly' || b === 'annually' || b === 'semi-annual';
+    };
+
+    // Customer-level lease in state: attach only to lines not explicitly monthly (mixed billing)
+    if (customerLeaseAgreement && isYearlyBillingFrequency(customerLeaseAgreement)) {
+      rentals.forEach((r) => {
+        if ((r.rental_type || '').toLowerCase() === 'monthly') return;
+        if (!r.lease_agreement) {
+          r.lease_agreement = customerLeaseAgreement;
+          r.rental_type = r.rental_type || 'yearly';
+        }
+      });
+    }
+
+    const isYearlyRentalLine = (r) => {
+      if ((r.rental_type || '').toLowerCase() === 'monthly') return false;
+      if (r.rental_type === 'yearly') return true;
+      return isYearlyBillingFrequency(r.lease_agreement);
+    };
+
     logger.log('=== YEARLY RENTAL DETECTION ===');
     logger.log('Customer:', customer?.CustomerListID, customer?.name);
-    logger.log('Rentals:', rentals.map(r => ({ 
-      rental_type: r.rental_type, 
+    logger.log('Rentals:', rentals.map(r => ({
+      rental_type: r.rental_type,
       has_lease_agreement: !!r.lease_agreement,
       billing_frequency: r.lease_agreement?.billing_frequency,
       lease_agreement_id: r.lease_agreement_id
     })));
     logger.log('Customer lease agreement from state:', customerLeaseAgreement);
-    
-    let isYearlyRental = rentals.some(r => {
-      // Check if rental has yearly type
-      if (r.rental_type === 'yearly') {
-        logger.log('✓ Yearly rental detected: rental_type = yearly', r);
-        return true;
-      }
-      // Check if rental has lease agreement with yearly billing frequency
-      const billingFreq = r.lease_agreement?.billing_frequency?.toLowerCase();
-      if (billingFreq === 'annual' || billingFreq === 'yearly' || billingFreq === 'annually' || billingFreq === 'semi-annual') {
-        logger.log('✓ Yearly rental detected: lease_agreement billing_frequency =', billingFreq, r.lease_agreement);
-        return true;
-      }
-      return false;
-    });
-    
-    // If not detected from rentals, check the customerLeaseAgreement from state
-    if (!isYearlyRental && customerLeaseAgreement) {
-      const billingFreq = (customerLeaseAgreement.billing_frequency || '').toLowerCase();
-      logger.log('Checking customerLeaseAgreement from state. billing_frequency:', billingFreq);
-      if (billingFreq === 'annual' || billingFreq === 'yearly' || billingFreq === 'annually' || billingFreq === 'semi-annual') {
-        isYearlyRental = true;
-        logger.log('✓ Yearly rental detected: customerLeaseAgreement from state, billing_frequency =', billingFreq);
-        // Attach to rentals for use in calculation
-        rentals.forEach(r => {
-          if (!r.lease_agreement) {
-            r.lease_agreement = customerLeaseAgreement;
-            r.rental_type = 'yearly';
-          }
-        });
-      } else {
-        logger.log('✗ Lease agreement found but billing_frequency is not yearly:', billingFreq);
-      }
-    } else if (!isYearlyRental) {
-      logger.log('✗ No customerLeaseAgreement in state. Yearly rental not detected.');
-    }
-    
-    // Fallback: if period is exactly 12 months, treat as yearly
-    if (!isYearlyRental && rentalMonths === 12) {
-      isYearlyRental = true;
-      logger.log('✓ Yearly rental detected: billing period is 12 months');
-    }
-    
-    logger.log('=== RESULT: isYearlyRental =', isYearlyRental, '===');
-    
-    if (isYearlyRental) {
-      logger.log('Invoice is for yearly rental. Billing period months:', rentalMonths);
-    } else {
-      logger.log('Invoice is for monthly rental. Billing period months:', rentalMonths);
-    }
-    
+
+    const hasYearlyLine = rentals.some((r) => isYearlyRentalLine(r));
+    const isYearlyRental = hasYearlyLine;
+    const hasMonthlyLine = rentals.some((r) => !isYearlyRentalLine(r));
+    const isMixedBilling = hasYearlyLine && hasMonthlyLine;
+
+    logger.log('=== RESULT: isYearlyRental =', isYearlyRental, 'hasYearlyLine =', hasYearlyLine, 'isMixedBilling =', isMixedBilling, '===');
+
     // Use actual rental amounts when available (from lease or rental record); fallback to $10/bottle
     const numBottles = rentals.length;
     const defaultRate = 10;
@@ -418,23 +397,18 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
         ? rentals.reduce((sum, r) => sum + (parseFloat(r.rental_amount) || 0), 0) / numBottles
         : defaultRate;
 
-    // Calculate subtotal:
-    // - Monthly rentals: sum(rental_amount) × 1 month
-    // - Yearly rentals: sum(rental_amount) × months to charge (lease period or full year)
-    let subtotal;
-    if (isYearlyRental) {
-      // Get lease agreement dates - check rentals first, then state
-      const yearlyRental = rentals.find(r => r.lease_agreement || r.rental_type === 'yearly');
+    // Months to charge for lease lines (remaining term or full year)
+    let monthsToChargeYearly = 12;
+    if (hasYearlyLine) {
+      const yearlyRental = rentals.find((r) => isYearlyRentalLine(r));
       const leaseAgreement = yearlyRental?.lease_agreement || customerLeaseAgreement;
       const leaseStartDate = leaseAgreement?.start_date ? new Date(leaseAgreement.start_date) : null;
       const leaseEndDate = leaseAgreement?.end_date ? new Date(leaseAgreement.end_date) : null;
       const invoiceDate = new Date(formData.invoice_date);
 
-      let monthsToCharge = 12; // Default: full year
-
       if (leaseEndDate && invoiceDate) {
         if (invoiceDate > leaseEndDate) {
-          monthsToCharge = 12;
+          monthsToChargeYearly = 12;
           logger.log('Yearly rental - new year: charging for full 12 months');
         } else if (leaseStartDate && leaseEndDate) {
           const invoiceYear = invoiceDate.getFullYear();
@@ -447,44 +421,33 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
             startMonth = 0;
             startYear += 1;
           }
-          monthsToCharge = (leaseEndYear - startYear) * 12 + (leaseEndMonth - startMonth) + 1;
-          if (monthsToCharge > 12) monthsToCharge = 12;
-          if (monthsToCharge < 1) monthsToCharge = 1;
-          logger.log('Yearly rental - during lease: charging for', monthsToCharge, 'remaining months');
+          monthsToChargeYearly = (leaseEndYear - startYear) * 12 + (leaseEndMonth - startMonth) + 1;
+          if (monthsToChargeYearly > 12) monthsToChargeYearly = 12;
+          if (monthsToChargeYearly < 1) monthsToChargeYearly = 1;
+          logger.log('Yearly rental - during lease: charging for', monthsToChargeYearly, 'remaining months');
         }
       }
-
-      rentalMonths = monthsToCharge;
-      // Subtotal = sum of (each bottle's monthly rate × months to charge)
-      subtotal = rentals.reduce((sum, r) => {
-        const rate = parseFloat(r.rental_amount) > 0 ? parseFloat(r.rental_amount) : monthlyRate;
-        return sum + rate * monthsToCharge;
-      }, 0);
-      logger.log('Yearly rental subtotal:', subtotal, '(rate from lease/rental_amount,', monthsToCharge, 'months)');
-    } else {
-      // Monthly: sum of rental_amount × 1 month
-      subtotal = rentals.reduce((sum, r) => sum + (parseFloat(r.rental_amount) || monthlyRate) * 1, 0);
-      logger.log('Monthly rental subtotal:', subtotal);
-      
-      // Calculate billing period for display: upcoming month (month after invoice date)
-      const invoiceDate = new Date(formData.invoice_date);
-      let billingStartYear = invoiceDate.getFullYear();
-      let billingStartMonth = invoiceDate.getMonth() + 1; // Month after invoice date
-      
-      // If we go past December, move to next year
-      if (billingStartMonth > 11) {
-        billingStartMonth = 0; // January
-        billingStartYear += 1;
-      }
-      
-      // First day of upcoming month
-      const billingPeriodStart = new Date(billingStartYear, billingStartMonth, 1);
-      // Last day of upcoming month
-      const billingPeriodEnd = new Date(billingStartYear, billingStartMonth + 1, 0);
-      
-      // Store billing period dates for display
-      // These will be used instead of formData.period_start/period_end for monthly rentals
     }
+
+    // Per line: lease-style lines × monthsToChargeYearly; month-to-month × 1
+    const subtotal = rentals.reduce((sum, r) => {
+      const rate = parseFloat(r.rental_amount) > 0 ? parseFloat(r.rental_amount) : monthlyRate;
+      if (isYearlyRentalLine(r)) {
+        return sum + rate * monthsToChargeYearly;
+      }
+      return sum + rate * 1;
+    }, 0);
+    logger.log('Invoice subtotal (per-line yearly vs monthly):', subtotal);
+
+    const yearlyLeaseAssetCount = rentals.filter((r) => isYearlyRentalLine(r)).length;
+    const yearlyLeaseSubtotal = rentals.reduce((sum, r) => {
+      if (!isYearlyRentalLine(r)) return sum;
+      const rate = parseFloat(r.rental_amount) > 0 ? parseFloat(r.rental_amount) : monthlyRate;
+      return sum + rate * monthsToChargeYearly;
+    }, 0);
+
+    // Keep rentalMonths as months charged on lease lines (for lease summary / PDF)
+    rentalMonths = hasYearlyLine ? monthsToChargeYearly : rentalMonths;
     
     // Use tax rate from location (priority), then rental record, then template, then default to 11%
     const taxRate = locationTaxRate !== null 
@@ -495,14 +458,17 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
 
     // Calculate billing period for display
     let displayBillingPeriodStart, displayBillingPeriodEnd;
-    if (!isYearlyRental) {
-      // For monthly rentals, use the period the user selected (Period Start / Period End)
+    if (!hasYearlyLine) {
+      displayBillingPeriodStart = startDate;
+      displayBillingPeriodEnd = endDate;
+    } else if (isMixedBilling) {
+      // Lease + monthly on same invoice: use the form period so both make sense together
       displayBillingPeriodStart = startDate;
       displayBillingPeriodEnd = endDate;
     } else {
-      // For yearly rentals, calculate the actual billing period based on months being charged
+      // All lease lines: span from lease/invoice logic
       const invoiceDate = new Date(formData.invoice_date);
-      const yearlyRental = rentals.find(r => r.lease_agreement || r.rental_type === 'yearly');
+      const yearlyRental = rentals.find((r) => isYearlyRentalLine(r));
       const leaseAgreement = yearlyRental?.lease_agreement || customerLeaseAgreement;
       const leaseEndDate = leaseAgreement?.end_date ? new Date(leaseAgreement.end_date) : null;
       
@@ -551,36 +517,33 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
       taxRate,
       total,
       rentalDays, // Days in billing period
-      rentalMonths: isYearlyRental ? rentalMonths : 1, // Months being charged (remaining months for yearly, always 1 for monthly)
+      rentalMonths: hasYearlyLine ? monthsToChargeYearly : 1,
       monthlyRate,
       numBottles,
-      isYearlyRental, // Include this so PDF generation can use it
-      billingPeriodStart: displayBillingPeriodStart, // Billing period start for display
-      billingPeriodEnd: displayBillingPeriodEnd, // Billing period end for display
-      rentals: rentals.map(rental => {
-        // Calculate actual days they've had the bottle (from rental start to period end)
-        // This is for display purposes only (RENT DAYS column)
-        const rentalStartDate = rental.rental_start_date 
-          ? new Date(rental.rental_start_date) 
+      isYearlyRental,
+      hasYearlyLine,
+      isMixedBilling,
+      yearlyLeaseAssetCount,
+      yearlyLeaseSubtotal,
+      billingPeriodStart: displayBillingPeriodStart,
+      billingPeriodEnd: displayBillingPeriodEnd,
+      rentals: rentals.map((rental) => {
+        const rentalStartDate = rental.rental_start_date
+          ? new Date(rental.rental_start_date)
           : (rental.bottles?.delivery_date ? new Date(rental.bottles.delivery_date) : startDate);
-        // Calculate days from the earliest date (rental start or period start) to period end
         const actualStartDate = rentalStartDate < startDate ? rentalStartDate : startDate;
         const daysHeld = Math.ceil((endDate - actualStartDate) / (1000 * 60 * 60 * 24)) + 1;
-        
-        // Calculate line total based on rental type (use actual rental_amount when set)
+
         const rateForLine = parseFloat(rental.rental_amount) > 0 ? parseFloat(rental.rental_amount) : monthlyRate;
-        let lineTotal;
-        if (isYearlyRental) {
-          lineTotal = rateForLine * rentalMonths;
-        } else {
-          lineTotal = rateForLine * 1;
-        }
-        
+        const lineIsYearly = isYearlyRentalLine(rental);
+        const lineTotal = lineIsYearly ? rateForLine * monthsToChargeYearly : rateForLine * 1;
+
         return {
           ...rental,
-          monthlyRate: rateForLine, // Per-asset rate (rental_amount); used for line display and PDF
-          lineTotal: lineTotal,
-          daysHeld: daysHeld, // Actual days they've had the bottle (for RENT DAYS display)
+          monthlyRate: rateForLine,
+          lineTotal,
+          daysHeld,
+          isYearlyLeaseLine: lineIsYearly,
           product_code: rental.product_code || rental.bottles?.product_code || rental.bottle?.product_code || rental.product_type || rental.bottles?.product_type || rental.bottle?.product_type
         };
       })
@@ -751,7 +714,8 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
 
     y += 30;
 
-    // Use the isYearlyRental from invoiceData (already calculated correctly)
+    const hasYearlyLine = invoiceData.hasYearlyLine ?? invoiceData.isYearlyRental;
+    const isMixedBilling = !!invoiceData.isMixedBilling;
     const isYearlyRental = invoiceData.isYearlyRental;
 
     // Rental Period Table
@@ -769,7 +733,11 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
             : invoiceData.billingPeriodEnd)
         : formData.period_end;
       
-      const billingTypeLabel = isYearlyRental ? ' (Yearly lease)' : ' (Monthly rental)';
+      const billingTypeLabel = isMixedBilling
+        ? ' (Lease + monthly)'
+        : hasYearlyLine
+          ? ' (Yearly lease)'
+          : ' (Monthly rental)';
       const periodHeaders = ['RENTAL PERIOD', 'BILL TO ACCT #', 'SHIP TO ACCT #'];
       const periodValues = [
         `${formatDate(displayPeriodStart)} - ${formatDate(displayPeriodEnd)}${billingTypeLabel}`,
@@ -816,12 +784,15 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
     }
 
     // LEASE SUMMARY section for yearly rentals
-    if (isYearlyRental) {
-      const yearlyRental = rentals.find(r => r.lease_agreement || r.rental_type === 'yearly');
+    if (hasYearlyLine) {
+      const yearlyRental = rentals.find((r) => r.lease_agreement || r.rental_type === 'yearly');
       const leaseAgreement = yearlyRental?.lease_agreement || customerLeaseAgreement;
       const formattedLeaseNumber = leaseAgreement?.agreement_number || `L${invoiceNumber.replace(/[^0-9]/g, '').slice(-6).padStart(6, '0')}`;
       const monthsCharged = invoiceData.rentalMonths || 12;
-      const ratePerCylinderPerMonth = invoiceData.numBottles > 0 ? invoiceData.subtotal / invoiceData.numBottles / monthsCharged : 0;
+      const leaseAssetCount = invoiceData.yearlyLeaseAssetCount ?? invoiceData.numBottles;
+      const leaseSubtotal = invoiceData.yearlyLeaseSubtotal != null ? invoiceData.yearlyLeaseSubtotal : invoiceData.subtotal;
+      const ratePerCylinderPerMonth =
+        leaseAssetCount > 0 && monthsCharged > 0 ? leaseSubtotal / leaseAssetCount / monthsCharged : 0;
       
       // LEASE SUMMARY table - use proper table structure
       autoTable(doc, {
@@ -844,9 +815,9 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
           formattedLeaseNumber,
           formatDate(formData.invoice_date),
           `${monthsCharged} Months`,
-          `${invoiceData.numBottles} Industrial Cylinder${invoiceData.numBottles !== 1 ? 's' : ''}`,
+          `${leaseAssetCount} Industrial Cylinder${leaseAssetCount !== 1 ? 's' : ''}`,
           `$${ratePerCylinderPerMonth.toFixed(2)}`,
-          `$${invoiceData.subtotal.toFixed(2)}`
+          `$${leaseSubtotal.toFixed(2)}`
         ]],
         theme: 'plain',
         headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
@@ -856,8 +827,8 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
       y = doc.lastAutoTable.finalY + 10;
     }
 
-    // Rental Summary Table (only show if not yearly rental, or if template requires it)
-    if (invoiceTemplate.show_rental_summary && !isYearlyRental) {
+    // Rental Summary Table (monthly-only or mixed; pure lease invoices use LEASE SUMMARY above)
+    if (invoiceTemplate.show_rental_summary && (!hasYearlyLine || isMixedBilling)) {
       // Group rentals by product type/description
       const groupedRentals = {};
       invoiceData.rentals.forEach(rental => {
@@ -1011,7 +982,7 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
     }
 
     // TRANSACTIONS Table (for monthly rentals)
-    if (!isYearlyRental && invoiceTemplate.show_transactions) {
+    if ((!hasYearlyLine || isMixedBilling) && invoiceTemplate.show_transactions) {
       // Try to get transaction data from rentals (shipments/returns during period)
       // This would ideally come from bottle_scans or order data
       const transactions = [];
@@ -2018,7 +1989,11 @@ export default function InvoiceGenerator({ open, onClose, customer, rentals, exi
                     // Fallback: use entered period dates
                     return `${formatDate(formData.period_start)} - ${formatDate(formData.period_end)}`;
                   })()} ({invoiceData.rentalMonths || 0} month{(invoiceData.rentalMonths || 0) !== 1 ? 's' : ''})</Typography>
-                  <Typography variant="body2">Cylinders: {invoiceData.numBottles || 0} × ${(invoiceData.monthlyRate || 0).toFixed(2)}/month × {invoiceData.rentalMonths || 0} month{(invoiceData.rentalMonths || 0) !== 1 ? 's' : ''}</Typography>
+                  <Typography variant="body2">
+                    {invoiceData.isMixedBilling
+                      ? `Lease: ${invoiceData.yearlyLeaseAssetCount || 0} cyl × lease term; Monthly: ${(invoiceData.numBottles || 0) - (invoiceData.yearlyLeaseAssetCount || 0)} cyl × 1 mo (see line totals)`
+                      : `Cylinders: ${invoiceData.numBottles || 0} × $${(invoiceData.monthlyRate || 0).toFixed(2)}/month × ${invoiceData.rentalMonths || 0} month${(invoiceData.rentalMonths || 0) !== 1 ? 's' : ''}`}
+                  </Typography>
                   <Typography variant="body2">Subtotal: ${(invoiceData.subtotal || 0).toFixed(2)}</Typography>
                   <Typography variant="body2">Tax ({((invoiceData.taxRate || 0) * 100).toFixed(0)}%): ${(invoiceData.taxAmount || 0).toFixed(2)}</Typography>
                   <Typography variant="body1" fontWeight="bold">Amount Due: ${(invoiceData.total || 0).toFixed(2)}</Typography>

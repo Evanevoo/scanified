@@ -9,7 +9,8 @@ import {
   ScrollView, 
   Alert,
   ActivityIndicator,
-  SafeAreaView
+  SafeAreaView,
+  Platform
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../hooks/useAuth';
@@ -24,6 +25,7 @@ import { soundService } from '../services/soundService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { ModernCard } from '../components/design-system';
+import { isAiBarcodeTestScannerEnabled } from '../utils/isAiBarcodeTestScannerEnabled';
 
 export default function SettingsScreen() {
   const navigation = useNavigation();
@@ -400,6 +402,30 @@ export default function SettingsScreen() {
         {/* Testing */}
         <SectionHeader title="TESTING" />
         <ModernCard elevated={false} style={styles.section}>
+          {Platform.OS === 'ios' && isAiBarcodeTestScannerEnabled() && (
+            <SettingItem
+              title="AI test scanner"
+              subtitle="Optional: OpenAI-backed (you pay usage). Enable with EXPO_PUBLIC_ENABLE_AI_BARCODE_TEST=true at build."
+              onPress={() => navigation.navigate('AiTestScanner' as never)}
+              rightComponent={<Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />}
+            />
+          )}
+          {Platform.OS === 'ios' && (
+            <SettingItem
+              title="1D Scanner Quick Test"
+              subtitle="Validate iOS linear barcode performance"
+              onPress={() => navigation.navigate('TestSingleScan')}
+              rightComponent={<Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />}
+            />
+          )}
+          {Platform.OS === 'ios' && (
+            <SettingItem
+              title="Scanner Settings"
+              subtitle="Choose scanner SDK test mode and tuning"
+              onPress={() => navigation.navigate('TestScannerSettings')}
+              rightComponent={<Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />}
+            />
+          )}
           <SettingItem
             title="Enhanced Scanner Tests"
             subtitle="Test enterprise-grade scanner features"
@@ -437,7 +463,7 @@ export default function SettingsScreen() {
                   {
                     text: 'Live Chat',
                     onPress: () => {
-                      Alert.alert('Live Chat', 'Live chat is available on our website at scanified.com/support');
+                      Alert.alert('Help center', 'Browse help articles at https://www.scanified.com/help');
                     }
                   }
                 ]

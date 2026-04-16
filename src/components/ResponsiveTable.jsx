@@ -102,7 +102,11 @@ const ResponsiveTable = ({
               })}
               
               {renderActions && (
-                <Box sx={{ ml: 1 }}>
+                <Box
+                  sx={{ ml: 1 }}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
                   {renderActions(row)}
                 </Box>
               )}
@@ -209,7 +213,11 @@ const ResponsiveTable = ({
                       {column.render ? column.render(row[column.field], row) : row[column.field]}
                     </TableCell>
                   ))}
-                  <TableCell sx={{ py: 1.5 }}>
+                  <TableCell
+                    sx={{ py: 1.5 }}
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
                     {renderActions && renderActions(row)}
                   </TableCell>
                 </TableRow>
@@ -288,7 +296,11 @@ const ResponsiveTable = ({
                 </TableCell>
               ))}
               {renderActions && (
-                <TableCell sx={{ py: 1.5 }}>
+                <TableCell
+                  sx={{ py: 1.5 }}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
                   {renderActions(row)}
                 </TableCell>
               )}

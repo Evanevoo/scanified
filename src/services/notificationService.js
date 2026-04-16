@@ -1,11 +1,12 @@
 import logger from '../utils/logger';
+import { CANONICAL_SITE_ORIGIN } from '../config/site';
 /**
  * Notification Service for Support Tickets
  * Handles sending email notifications when support tickets are created
  */
 
-const SITE_URL = import.meta.env.MODE === 'production' 
-  ? 'https://www.scanified.com' 
+const SITE_URL = import.meta.env.MODE === 'production'
+  ? CANONICAL_SITE_ORIGIN
   : 'http://localhost:5174';
 
 /**

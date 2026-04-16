@@ -68,13 +68,11 @@ import VisualPageBuilder from './pages/OwnerPortal/VisualPageBuilder';
 import DisasterRecoveryDashboard from './components/admin/DisasterRecoveryDashboard';
 
 // NEW ADVANCED FEATURES
-import TruckReconciliation from './pages/TruckReconciliation';
 import BulkRentalPricingManager from './pages/BulkRentalPricingManager';
 import MainLayout from './components/MainLayout';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 import { supabase } from './supabase/client';
-import WorkflowAutomation from './pages/WorkflowAutomation';
 import CustomerSelfService from './pages/CustomerSelfService';
 import ThemeShowcase from './pages/ThemeShowcase';
 import FAQ from './pages/FAQ';
@@ -83,6 +81,7 @@ import CookieNotice from './components/CookieNotice';
 import NavigationBar from './components/NavigationBar';
 import SessionTimeoutWarning from './components/SessionTimeoutWarning';
 import NotificationLayer from './components/NotificationLayer';
+import RedirectIfInApp from './components/RedirectIfInApp';
 import Demo from './pages/Demo';
 import ParticleTextDemo from './pages/ParticleTextDemo';
 import Features from './pages/Features';
@@ -110,8 +109,8 @@ const Rentals = lazy(() => import('./pages/Rentals'));
 const LeaseAgreements = lazy(() => import('./pages/LeaseAgreements'));
 const IndustryAnalyticsDashboard = lazy(() => import('./pages/IndustryAnalyticsDashboard'));
 const WebScanning = lazy(() => import('./pages/WebScanning'));
-const Favorites = lazy(() => import('./pages/Favorites'));
 const RecentCylinders = lazy(() => import('./pages/RecentCylinders'));
+const BottleLocations = lazy(() => import('./pages/BottleLocations'));
 const CustomReports = lazy(() => import('./pages/CustomReports'));
 const AllAssetsReport = lazy(() => import('./pages/management-reports/AllAssetsReport'));
 const AssetTypeChangesReport = lazy(() => import('./pages/management-reports/AssetTypeChangesReport'));
@@ -152,7 +151,6 @@ const BottlesForDay = lazy(() => import('./pages/BottlesForDay'));
 const SupportCenter = lazy(() => import('./pages/SupportCenter'));
 const OrganizationTools = lazy(() => import('./pages/OrganizationTools'));
 const MaintenanceWorkflows = lazy(() => import('./pages/MaintenanceWorkflows'));
-const RouteOptimization = lazy(() => import('./pages/RouteOptimization'));
 const PalletManagement = lazy(() => import('./pages/PalletManagement'));
 const HazmatCompliance = lazy(() => import('./pages/HazmatCompliance'));
 const ChainOfCustody = lazy(() => import('./pages/ChainOfCustody'));
@@ -278,9 +276,9 @@ function AppContent() {
                   <Route path="/fix-organization-link" element={<FixOrganizationLink />} />
                   <Route path="/connect-organization" element={<OAuthOrganizationLink />} />
 
-                  <Route path="/test-landing" element={<LandingPage />} />
-                  <Route path="/demo" element={<Demo />} />
-                  <Route path="/particle-demo" element={<ParticleTextDemo />} />
+                  <Route path="/test-landing" element={<RedirectIfInApp><LandingPage /></RedirectIfInApp>} />
+                  <Route path="/demo" element={<RedirectIfInApp><Demo /></RedirectIfInApp>} />
+                  <Route path="/particle-demo" element={<RedirectIfInApp><ParticleTextDemo /></RedirectIfInApp>} />
                   <Route path="/features" element={<Features />} />
                   <Route path="/about" element={<About />} />
                   <Route path="/case-studies" element={<CaseStudiesPage />} />
@@ -303,6 +301,14 @@ function AppContent() {
                     <Route path="/customer/:id/transfer-to" element={<TransferFromCustomers />} />
                     <Route path="/locations" element={<Locations />} />
                     <Route path="/assets" element={<Assets />} />
+                    <Route
+                      path="/bottle-locations"
+                      element={
+                        <Suspense fallback={<LoadingSpinner />}>
+                          <BottleLocations />
+                        </Suspense>
+                      }
+                    />
                     <Route path="/inventory" element={<Assets />} />
                     <Route path="/bottles-for-day" element={
                       <Suspense fallback={<LoadingSpinner />}>
@@ -313,13 +319,11 @@ function AppContent() {
                     <Route path="/lease-agreements" element={<LeaseAgreements />} />
                     <Route path="/industry-analytics" element={<IndustryAnalyticsDashboard />} />
                     <Route path="/web-scanning" element={<WebScanning />} />
-                    <Route path="/favorites" element={<Favorites />} />
                     <Route path="/custom-reports" element={<CustomReports />} />
-                    <Route path="/truck-reconciliation" element={<TruckReconciliation />} />
-                    <Route path="/workflow-automation" element={<WorkflowAutomation />} />
-                    <Route path="/route-optimization" element={<RouteOptimization />} />
                     <Route path="/customer-self-service" element={<CustomerSelfService />} />
-                    <Route path="/theme-showcase" element={<ThemeShowcase />} />
+                    {import.meta.env.DEV && (
+                      <Route path="/theme-showcase" element={<ThemeShowcase />} />
+                    )}
                     <Route path="/reports/all-assets" element={<AllAssetsReport />} />
                     <Route path="/reports/asset-type-changes" element={<AssetTypeChangesReport />} />
                     <Route path="/reports/assets-by-customer" element={<AssetsByCustomerReport />} />
@@ -396,11 +400,6 @@ function AppContent() {
                         <MaintenanceWorkflows />
                       </RoleProtectedRoute>
                     } />
-                    <Route path="/route-optimization" element={
-                      <RoleProtectedRoute allowedRoles={['admin', 'owner', 'manager']}>
-                        <RouteOptimization />
-                      </RoleProtectedRoute>
-                    } />
                     <Route path="/pallet-management" element={
                       <RoleProtectedRoute allowedRoles={['admin', 'owner', 'manager']}>
                         <PalletManagement />
@@ -460,26 +459,6 @@ function AppContent() {
                   </Route>
                   
                   {/* NEW ADVANCED FEATURES ROUTES */}
-                  <Route path="/hazmat-compliance" element={
-                    <ProtectedRoute>
-                      <HazmatCompliance />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/maintenance-workflows" element={
-                    <ProtectedRoute>
-                      <MaintenanceWorkflows />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/truck-reconciliation" element={
-                    <ProtectedRoute>
-                      <TruckReconciliation />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/chain-of-custody" element={
-                    <ProtectedRoute>
-                      <ChainOfCustody />
-                    </ProtectedRoute>
-                  } />
                   <Route path="/palletization-system" element={
                     <ProtectedRoute>
                       <PalletManagement />

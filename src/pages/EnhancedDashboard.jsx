@@ -26,6 +26,7 @@ import {
   Settings as SettingsIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { Line, Doughnut, Bar } from 'react-chartjs-2';
 import {
@@ -56,6 +57,7 @@ ChartJS.register(
 
 export default function EnhancedDashboard() {
   const { user, organization } = useAuth();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState({});
   const [notifications, setNotifications] = useState([]);
@@ -222,7 +224,7 @@ export default function EnhancedDashboard() {
         description: 'Quick cylinder scanning',
         icon: <InventoryIcon />,
         color: '#10B981',
-        path: '/scan-cylinders',
+        path: '/web-scanning',
         count: dashboardData.availableBottles
       },
       {
@@ -231,7 +233,7 @@ export default function EnhancedDashboard() {
         description: 'Generate new invoice',
         icon: <RevenueIcon />,
         color: '#F59E0B',
-        path: '/automated-billing',
+        path: '/billing',
         count: null
       },
       {
@@ -240,7 +242,7 @@ export default function EnhancedDashboard() {
         description: 'Plan delivery routes',
         icon: <DeliveryIcon />,
         color: '#8B5CF6',
-        path: '/truck-reconciliation-dashboard',
+        path: '/custom-reports',
         count: null
       },
       {
@@ -676,6 +678,7 @@ export default function EnhancedDashboard() {
                             borderColor: action.color
                           }
                         }}
+                        onClick={() => navigate(action.path)}
                       >
                         <CardContent sx={{ textAlign: 'center', p: 2 }}>
                           <Avatar 

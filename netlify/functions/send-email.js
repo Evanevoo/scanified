@@ -33,7 +33,7 @@ function getCorsOrigin(event) {
   return 'https://www.scanified.com';
 }
 
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   const corsOrigin = getCorsOrigin(event);
   
   const corsHeaders = {

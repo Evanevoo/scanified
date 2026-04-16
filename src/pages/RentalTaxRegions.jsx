@@ -21,7 +21,7 @@ import {
   Alert,
   CircularProgress,
 } from '@mui/material';
-import { Map as MapIcon, Edit as EditIcon, ArrowBack as ArrowBackIcon } from '@mui/icons-material';
+import { Edit as EditIcon, ArrowBack as ArrowBackIcon } from '@mui/icons-material';
 
 export default function RentalTaxRegions() {
   const navigate = useNavigate();
@@ -52,7 +52,9 @@ export default function RentalTaxRegions() {
         setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [organization?.id]);
 
   const averageRate = regions.length
@@ -81,7 +83,8 @@ export default function RentalTaxRegions() {
               Rental tax regions
             </Typography>
             <Typography variant="body1" color="text.secondary" sx={{ mt: 1, maxWidth: 760 }}>
-              Tax regions define the location-based tax rates applied to rental billing. These map directly to your organization&apos;s live locations.
+              Each region is a <strong>location</strong> in your org. The <strong>total tax rate</strong> on that location is what rental billing uses.
+              Use <Link to="/locations">Locations</Link> to add or edit sites and set each region&apos;s tax rate.
             </Typography>
           </Box>
           <Button onClick={() => navigate(-1)} variant="outlined" startIcon={<ArrowBackIcon />} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
@@ -101,7 +104,7 @@ export default function RentalTaxRegions() {
                 {regions.length}
               </Typography>
               <Typography variant="body2" sx={{ mt: 0.75, color: '#64748b' }}>
-                Rental tax regions currently defined from locations
+                Locations used as rental tax regions
               </Typography>
             </CardContent>
           </Card>
@@ -116,7 +119,7 @@ export default function RentalTaxRegions() {
                 {averageRate}%
               </Typography>
               <Typography variant="body2" sx={{ mt: 0.75, color: '#64748b' }}>
-                Mean total tax rate across all configured regions
+                Mean total tax rate across configured regions
               </Typography>
             </CardContent>
           </Card>
@@ -131,19 +134,19 @@ export default function RentalTaxRegions() {
 
       <Card elevation={0} sx={{ border: '1px solid rgba(15, 23, 42, 0.08)', borderRadius: 3 }}>
         <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
             <Typography variant="subtitle1" fontWeight={600}>
               Tax rates by region
             </Typography>
             <Button
               component={Link}
               to="/locations"
-              variant="outlined"
+              variant="contained"
               size="small"
               startIcon={<EditIcon />}
               sx={{ borderRadius: 999, textTransform: 'none' }}
             >
-              Manage locations
+              Edit rates in Locations
             </Button>
           </Box>
           {loading ? (
@@ -152,8 +155,8 @@ export default function RentalTaxRegions() {
             </Box>
           ) : regions.length === 0 ? (
             <Typography color="text.secondary" sx={{ py: 3 }}>
-              No tax regions yet. Add locations in{' '}
-              <Link to="/locations" style={{ fontWeight: 500 }}>Locations</Link> to define regions and tax rates for rental billing.
+              No locations yet. Go to{' '}
+              <Link to="/locations" style={{ fontWeight: 600 }}>Locations</Link> to add branches/sites and set each one&apos;s total tax rate for rental billing.
             </Typography>
           ) : (
             <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>

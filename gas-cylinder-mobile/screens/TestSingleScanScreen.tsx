@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Alert, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import ScanArea from '../components/ScanArea';
 import { feedbackService } from '../services/feedbackService';
+import { loadScannerSettings, type ScannerSettings } from './ScannerSettingsScreen';
 
 export default function TestSingleScanScreen() {
   const navigation = useNavigation();
   const [scanning, setScanning] = useState(false);
   const [lastScan, setLastScan] = useState<string>('');
   const [scanCount, setScanCount] = useState(0);
+  const [activeSdk, setActiveSdk] = useState<ScannerSettings['sdk']>('expo-native');
 
   const handleScan = async (barcode: string, result?: { format: string; confidence: number }) => {
     setLastScan(barcode);
@@ -48,6 +50,11 @@ export default function TestSingleScanScreen() {
             <Text style={styles.description}>
               Test basic barcode scanning functionality. Scan one barcode at a time with full feedback.
             </Text>
+            {Platform.OS === 'ios' && (
+              <Text style={styles.sdkInfo}>
+                Active SDK Test Mode: {activeSdk === 'expo-native' ? 'Expo Native' : 'ZBar Profile (Simulation)'}
+              </Text>
+            )}
 
             {lastScan && (
               <View style={styles.lastScanCard}>
@@ -76,6 +83,10 @@ export default function TestSingleScanScreen() {
               style={styles.startButton}
               onPress={async () => {
                 await feedbackService.initialize();
+                if (Platform.OS === 'ios') {
+                  const scannerSettings = await loadScannerSettings();
+                  setActiveSdk(scannerSettings.sdk);
+                }
                 setScanning(true);
               }}
             >
@@ -90,6 +101,8 @@ export default function TestSingleScanScreen() {
           onClose={() => setScanning(false)}
           label="Single Scan Test - Scan a barcode"
           validationPattern={/^[\dA-Za-z\-%]+$/}
+          holdTimeoutMs={Platform.OS === 'ios' ? (activeSdk === 'zbar-profile' ? 300 : 175) : 175}
+          scanDelay={Platform.OS === 'ios' ? (activeSdk === 'zbar-profile' ? 650 : 400) : 400}
           style={{ flex: 1, backgroundColor: '#000' }}
         />
       )}
@@ -133,7 +146,14 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     lineHeight: 22,
+    marginBottom: 8,
+  },
+  sdkInfo: {
+    fontSize: 13,
+    color: '#007AFF',
     marginBottom: 24,
+    textAlign: 'center',
+    fontWeight: '600',
   },
   lastScanCard: {
     backgroundColor: '#E8F5E9',

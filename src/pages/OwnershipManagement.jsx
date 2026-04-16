@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Paper,
@@ -27,19 +27,42 @@ import {
   Checkbox,
   Grid,
   Card,
-  CardContent
+  CardContent,
+  TablePagination
 } from '@mui/material';
 import {
   Add as AddIcon,
   Delete as DeleteIcon,
   Edit as EditIcon,
-  Business as BusinessIcon,
-  FilterList as FilterListIcon,
   SwapHoriz as SwapIcon
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 import { formatLocationDisplay } from '../utils/locationDisplay';
+
+/** Aligns with Assets.jsx: legacy "available" / "filled" count as full for fill-level filtering. */
+function normalizeFillStatus(status) {
+  const value = (status || '').toString().trim().toLowerCase();
+  if (!value) return 'full';
+  if (value === 'empty') return 'empty';
+  if (['full', 'filled', 'available'].includes(value)) return 'full';
+  return 'other';
+}
+
+function bottleFillChipProps(status) {
+  const fill = normalizeFillStatus(status);
+  const raw = (status || '').toString().trim();
+  const label =
+    fill === 'full'
+      ? 'Full'
+      : fill === 'empty'
+        ? 'Empty'
+        : raw
+          ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase()
+          : '—';
+  const color = fill === 'full' ? 'success' : fill === 'empty' ? 'warning' : 'default';
+  return { label, color };
+}
 
 export default function OwnershipManagement() {
   const { organization } = useAuth();
@@ -51,6 +74,7 @@ export default function OwnershipManagement() {
   
   // Filters
   const [selectedOwnership, setSelectedOwnership] = useState('');
+  const [fillFilter, setFillFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   
   // Dialogs
@@ -66,12 +90,27 @@ export default function OwnershipManagement() {
   const [selectedBottles, setSelectedBottles] = useState(new Set());
   const [bulkChangeFrom, setBulkChangeFrom] = useState('');
   const [bulkChangeTo, setBulkChangeTo] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(100);
 
   useEffect(() => {
     if (organization) {
       loadData();
     }
   }, [organization]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm.trim().toLowerCase());
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [selectedOwnership, fillFilter, debouncedSearchTerm, rowsPerPage]);
 
   const loadData = async () => {
     try {
@@ -300,20 +339,27 @@ export default function OwnershipManagement() {
     setSnackbar({ open: true, message, severity });
   };
 
-  const filteredBottles = bottles.filter(bottle => {
-    const matchesOwnership = !selectedOwnership || bottle.ownership === selectedOwnership;
-    const matchesSearch = !searchTerm || 
-      bottle.barcode_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bottle.serial_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bottle.product_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bottle.gas_type?.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    return matchesOwnership && matchesSearch;
-  });
+  const filteredBottles = useMemo(() => {
+    return bottles.filter((bottle) => {
+      const ownershipValue = bottle.ownership || 'Unassigned';
+      const matchesOwnership = !selectedOwnership || ownershipValue === selectedOwnership;
 
-  const getOwnershipStats = () => {
+      const fill = normalizeFillStatus(bottle.status);
+      const matchesFill = !fillFilter || fill === fillFilter;
+
+      const matchesSearch = !debouncedSearchTerm ||
+        bottle.barcode_number?.toLowerCase().includes(debouncedSearchTerm) ||
+        bottle.serial_number?.toLowerCase().includes(debouncedSearchTerm) ||
+        bottle.product_code?.toLowerCase().includes(debouncedSearchTerm) ||
+        bottle.gas_type?.toLowerCase().includes(debouncedSearchTerm);
+
+      return matchesOwnership && matchesFill && matchesSearch;
+    });
+  }, [bottles, selectedOwnership, fillFilter, debouncedSearchTerm]);
+
+  const ownershipStats = useMemo(() => {
     const stats = {};
-    bottles.forEach(bottle => {
+    bottles.forEach((bottle) => {
       const ownership = bottle.ownership || 'Unassigned';
       if (!stats[ownership]) {
         stats[ownership] = 0;
@@ -321,9 +367,15 @@ export default function OwnershipManagement() {
       stats[ownership]++;
     });
     return stats;
-  };
+  }, [bottles]);
 
-  const ownershipStats = getOwnershipStats();
+  const paginatedBottles = useMemo(() => {
+    const start = page * rowsPerPage;
+    return filteredBottles.slice(start, start + rowsPerPage);
+  }, [filteredBottles, page, rowsPerPage]);
+
+  const allVisibleSelected = paginatedBottles.length > 0 && paginatedBottles.every((b) => selectedBottles.has(b.id));
+  const someVisibleSelected = paginatedBottles.some((b) => selectedBottles.has(b.id));
 
   if (loading) {
     return (
@@ -336,9 +388,9 @@ export default function OwnershipManagement() {
   return (
     <Box sx={{ p: { xs: 2, sm: 3 } }}>
         {/* Header */}
-        <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
-          <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} flexDirection={{ xs: 'column', md: 'row' }} gap={2}>
-            <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+        <Paper elevation={0} sx={{ p: { xs: 2, md: 2.25 }, mb: 2, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+          <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} flexDirection={{ xs: 'column', md: 'row' }} gap={1.5}>
+            <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
               Ownership Management
             </Typography>
             <Box display="flex" gap={2} flexWrap="wrap">
@@ -372,38 +424,38 @@ export default function OwnershipManagement() {
         )}
 
         {/* Stats Cards */}
-        <Grid container spacing={2} sx={{ mb: 3, width: '100%' }}>
+        <Grid container spacing={1.5} sx={{ mb: 2, width: '100%' }}>
           <Grid item xs={12} sm={6} md={4}>
-            <Card elevation={0} sx={{ height: '100%', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
-              <CardContent>
-                <Typography variant="h6" color="text.secondary" gutterBottom>
+            <Card elevation={0} sx={{ height: '100%', borderRadius: 2, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+              <CardContent sx={{ py: 1.25, px: 1.75, '&:last-child': { pb: 1.25 } }}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, letterSpacing: '0.02em', display: 'block', mb: 0.25 }}>
                   Total Bottles
                 </Typography>
-                <Typography variant="h3" fontWeight={700}>
+                <Typography variant="h5" fontWeight={700} sx={{ lineHeight: 1.2 }}>
                   {bottles.length}
                 </Typography>
               </CardContent>
             </Card>
           </Grid>
           <Grid item xs={12} sm={6} md={4}>
-            <Card elevation={0} sx={{ height: '100%', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
-              <CardContent>
-                <Typography variant="h6" color="text.secondary" gutterBottom>
+            <Card elevation={0} sx={{ height: '100%', borderRadius: 2, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+              <CardContent sx={{ py: 1.25, px: 1.75, '&:last-child': { pb: 1.25 } }}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, letterSpacing: '0.02em', display: 'block', mb: 0.25 }}>
                   Ownership Values
                 </Typography>
-                <Typography variant="h3" fontWeight={700}>
+                <Typography variant="h5" fontWeight={700} sx={{ lineHeight: 1.2 }}>
                   {ownershipValues.length}
                 </Typography>
               </CardContent>
             </Card>
           </Grid>
           <Grid item xs={12} sm={6} md={4}>
-            <Card elevation={0} sx={{ height: '100%', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
-              <CardContent>
-                <Typography variant="h6" color="text.secondary" gutterBottom>
+            <Card elevation={0} sx={{ height: '100%', borderRadius: 2, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+              <CardContent sx={{ py: 1.25, px: 1.75, '&:last-child': { pb: 1.25 } }}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, letterSpacing: '0.02em', display: 'block', mb: 0.25 }}>
                   Unassigned
                 </Typography>
-                <Typography variant="h3" fontWeight={700}>
+                <Typography variant="h5" fontWeight={700} sx={{ lineHeight: 1.2 }}>
                   {ownershipStats['Unassigned'] || 0}
                 </Typography>
               </CardContent>
@@ -412,8 +464,8 @@ export default function OwnershipManagement() {
         </Grid>
 
         {/* Ownership Values Section */}
-        <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, width: '100%', boxSizing: 'border-box', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
-          <Typography variant="h6" fontWeight={600} gutterBottom>
+        <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2 }, mb: 2, width: '100%', boxSizing: 'border-box', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+          <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
             Ownership Values
           </Typography>
           <Box display="flex" flexWrap="wrap" gap={2} mt={2}>
@@ -441,59 +493,92 @@ export default function OwnershipManagement() {
         </Paper>
 
         {/* Filters */}
-        <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, width: '100%', boxSizing: 'border-box', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
-          <Grid container spacing={2} alignItems="flex-end">
-            <Grid item xs={12} sm={6} md={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Filter by Ownership</InputLabel>
-                <Select
-                  value={selectedOwnership}
-                  label="Filter by Ownership"
-                  onChange={(e) => setSelectedOwnership(e.target.value)}
-                >
-                  <MenuItem value="">All</MenuItem>
-                  <MenuItem value="Unassigned">Unassigned</MenuItem>
-                  {ownershipValues.map((o) => (
-                    <MenuItem key={o.id || o.value} value={o.value}>
-                      {o.value} ({ownershipStats[o.value] || 0})
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={6} md={4}>
-              <TextField
-                fullWidth
-                size="small"
-                label="Search bottles"
-                placeholder="Barcode, serial, product code..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <Typography variant="body2" color="text.secondary" sx={{ pb: 0.5 }}>
-                Showing {filteredBottles.length} of {bottles.length} bottles
-              </Typography>
-            </Grid>
-          </Grid>
+        <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2 }, mb: 2, width: '100%', boxSizing: 'border-box', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: { xs: 'column', lg: 'row' },
+              alignItems: { xs: 'stretch', lg: 'center' },
+              gap: 2,
+              flexWrap: 'wrap',
+            }}
+          >
+            <FormControl size="small" sx={{ width: { xs: '100%', sm: 220 }, flexShrink: 0 }}>
+              <InputLabel>Filter by Ownership</InputLabel>
+              <Select
+                value={selectedOwnership}
+                label="Filter by Ownership"
+                onChange={(e) => setSelectedOwnership(e.target.value)}
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="Unassigned">Unassigned</MenuItem>
+                {ownershipValues.map((o) => (
+                  <MenuItem key={o.id || o.value} value={o.value}>
+                    {o.value} ({ownershipStats[o.value] || 0})
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ width: { xs: '100%', sm: 160 }, flexShrink: 0 }}>
+              <InputLabel>Fill</InputLabel>
+              <Select
+                value={fillFilter}
+                label="Fill"
+                onChange={(e) => setFillFilter(e.target.value)}
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="full">Full</MenuItem>
+                <MenuItem value="empty">Empty</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              size="small"
+              label="Search bottles"
+              placeholder="Barcode, serial, product code..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              sx={{
+                flex: { lg: '1 1 220px' },
+                width: { xs: '100%', lg: 'auto' },
+                minWidth: { lg: 200 },
+              }}
+            />
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{
+                width: { xs: '100%', lg: 'auto' },
+                ml: { lg: 'auto' },
+                flexShrink: 0,
+                alignSelf: { xs: 'flex-start', lg: 'center' },
+                lineHeight: { lg: '40px' },
+              }}
+            >
+              Showing {filteredBottles.length} of {bottles.length} bottles
+            </Typography>
+          </Box>
         </Paper>
 
         {/* Bottles Table */}
-        <TableContainer sx={{ maxHeight: 'calc(100vh - 500px)', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
+        <TableContainer sx={{ maxHeight: 'calc(100dvh - 220px)', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
             <Table stickyHeader size="small">
               <TableHead>
                 <TableRow sx={{ backgroundColor: '#f8fafc' }}>
                   <TableCell padding="checkbox" sx={{ width: 48, fontWeight: 600, px: 1 }}>
                     <Checkbox
-                      checked={selectedBottles.size === filteredBottles.length && filteredBottles.length > 0}
-                      indeterminate={selectedBottles.size > 0 && selectedBottles.size < filteredBottles.length}
+                      checked={allVisibleSelected}
+                      indeterminate={someVisibleSelected && !allVisibleSelected}
                       onChange={(e) => {
+                        const visibleIds = paginatedBottles.map((b) => b.id);
+                        const newSelected = new Set(selectedBottles);
+
                         if (e.target.checked) {
-                          setSelectedBottles(new Set(filteredBottles.map(b => b.id)));
+                          visibleIds.forEach((id) => newSelected.add(id));
                         } else {
-                          setSelectedBottles(new Set());
+                          visibleIds.forEach((id) => newSelected.delete(id));
                         }
+
+                        setSelectedBottles(newSelected);
                       }}
                       size="small"
                     />
@@ -503,12 +588,14 @@ export default function OwnershipManagement() {
                   <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap', px: 2 }}>Product Code</TableCell>
                   <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap', px: 2 }}>Gas Type</TableCell>
                   <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap', px: 2 }}>Ownership</TableCell>
-                  <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap', px: 2 }}>Status</TableCell>
+                  <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap', px: 2 }}>Fill</TableCell>
                   <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap', px: 2 }}>Location</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {filteredBottles.map((bottle) => (
+                {paginatedBottles.map((bottle) => {
+                  const fillChip = bottleFillChipProps(bottle.status);
+                  return (
                   <TableRow key={bottle.id} hover>
                     <TableCell padding="checkbox" sx={{ width: 48, px: 1 }}>
                       <Checkbox
@@ -537,15 +624,12 @@ export default function OwnershipManagement() {
                       />
                     </TableCell>
                     <TableCell sx={{ whiteSpace: 'nowrap', px: 2 }}>
-                      <Chip
-                        label={bottle.status || 'available'}
-                        size="small"
-                        color={bottle.status === 'available' ? 'success' : 'default'}
-                      />
+                      <Chip label={fillChip.label} color={fillChip.color} size="small" />
                     </TableCell>
                     <TableCell sx={{ whiteSpace: 'nowrap', px: 2 }}>{bottle.location ? formatLocationDisplay(bottle.location) : '-'}</TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
                 {filteredBottles.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
@@ -557,6 +641,18 @@ export default function OwnershipManagement() {
                 )}
               </TableBody>
             </Table>
+            <TablePagination
+              component="div"
+              count={filteredBottles.length}
+              page={page}
+              onPageChange={(_, newPage) => setPage(newPage)}
+              rowsPerPage={rowsPerPage}
+              onRowsPerPageChange={(event) => {
+                setRowsPerPage(parseInt(event.target.value, 10));
+                setPage(0);
+              }}
+              rowsPerPageOptions={[25, 50, 100, 250]}
+            />
         </TableContainer>
 
         {/* Add Ownership Dialog */}

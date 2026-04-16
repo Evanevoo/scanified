@@ -2,7 +2,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { handlePreflight, createResponse, createErrorResponse } = require('./utils/cors');
 const { verifyAuth } = require('./utils/auth');
 
-exports.handler = async (event, context) => {
+exports.handler = async (event, _context) => {
   if (event.httpMethod === 'OPTIONS') {
     return handlePreflight(event);
   }

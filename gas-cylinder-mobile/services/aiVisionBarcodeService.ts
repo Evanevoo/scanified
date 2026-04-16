@@ -103,7 +103,7 @@ export async function decodeBarcodeFromPhoto(params: {
       res.status === 401
         ? ' If Netlify has AI_SCANNER_SECRET, set EXPO_PUBLIC_AI_SCANNER_SECRET in EAS env to match.'
         : res.status === 503 && String(data?.error || '').includes('OPENAI_API_KEY')
-          ? ' Netlify must have OPENAI_API_KEY set for decode-barcode-ai.'
+          ? ' Add OPENAI_API_KEY in Netlify (Site → Environment variables), save, redeploy production.'
           : '';
     return { error: (data?.error || `AI scan failed (${res.status})`) + hint };
   }

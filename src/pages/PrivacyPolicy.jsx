@@ -107,7 +107,7 @@ function PrivacyPolicy() {
               You may request deletion of your data subject to legal requirements.
             </Typography>
 
-            <Typography variant="h6" gutterBottom>
+            <Typography variant="h6" gutterBottom id="data-rights" component="h2">
               6. Your Rights
             </Typography>
             <Typography variant="body2" paragraph>
@@ -121,7 +121,7 @@ function PrivacyPolicy() {
               <Typography component="li" variant="body2">Export your data in a portable format</Typography>
             </Box>
 
-            <Typography variant="h6" gutterBottom>
+            <Typography variant="h6" gutterBottom id="cookies" component="h2">
               7. Cookies and Tracking Technologies
             </Typography>
             <Typography variant="body2" paragraph>
