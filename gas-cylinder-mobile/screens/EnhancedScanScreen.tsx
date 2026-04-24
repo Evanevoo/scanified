@@ -1459,7 +1459,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
     // Fetch current bottle status and assignment (needed for fill: at-customer => keep rented)
     const { data: currentBottle, error: fetchError } = await supabase
       .from('bottles')
-      .select('status, assigned_customer')
+      .select('status, assigned_customer, customer_id, customer_name')
       .eq('barcode_number', barcode)
       .eq('organization_id', organization?.id)
       .single();
@@ -1509,10 +1509,15 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         }
         break;
       case 'in':
-        // Return scans should stay in a "pending verification" state until Import Approvals
-        // confirms the return. Do not move bottle in-house at scan time.
-        logger.log('Return scan recorded - pending verification in Import Approvals; skipping immediate bottle update.');
-        return;
+        // Move returned bottles in-house immediately so web inventory reflects
+        // the same state shown in mobile scan feedback.
+        updateData.status = 'empty';
+        updateData.assigned_customer = null;
+        updateData.customer_id = null;
+        updateData.customer_name = null;
+        updateData.location = (location || '').trim() || 'In House';
+        logger.log('Return scan recorded - bottle moved in-house immediately.');
+        break;
       case 'locate':
         // Don't change status for locate, just update location
         if (location) updateData.location = location;
@@ -2290,7 +2295,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           </Text>
           <TouchableOpacity 
             style={styles.customizationButton}
-            onPress={() => setShowCustomization(true)}
+            onPress={() => navigation.navigate('Customization' as never)}
           >
             <Text style={styles.customizationButtonText}>⚙️</Text>
           </TouchableOpacity>

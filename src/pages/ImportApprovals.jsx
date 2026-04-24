@@ -73,6 +73,7 @@ import {
   monthlyRateForProductPlaceholder,
 } from '../services/rentalPricingContext';
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
+import { resolveCustomerListId, clearResolveCustomerListIdMemo } from '../utils/resolveCustomerListId';
 
 /** Normalize numeric SO strings so 071760 matches 71760; alphanumeric (e.g. S47852) stays trimmed only. */
 function normalizeOrderNumForApproval(num) {
@@ -2466,15 +2467,18 @@ export default function ImportApprovals() {
   function handleViewBottles(orderNumber, record = null) {
     const isScannedOnly = record && (record.is_scanned_only || (typeof record.id === 'string' && record.id.startsWith('scanned_')));
     const data = record && parseDataField(record.data);
-    const customerName = isScannedOnly && data ? (data.customer_name || data.CustomerName || data.Customer || '') : '';
-    const customerId = isScannedOnly && data ? (data.customer_id || data.CustomerId || data.CustomerListID || '') : '';
+    const customerNameFromRecord = data ? getCustomerInfo(data) : '';
+    const customerName = customerNameFromRecord === 'Unknown' ? '' : customerNameFromRecord;
+    const customerId = data ? (getCustomerId(data) || '') : '';
     setBottleInfoDialog({
       open: true,
       orderNumber: orderNumber,
       bottles: [],
       scannedBarcodes: [],
       loading: true,
-      customerFilter: isScannedOnly ? { customerName: (customerName || '').toString().trim(), customerId: (customerId || '').toString().trim() } : null
+      customerFilter: isScannedOnly ? { customerName: (customerName || '').toString().trim(), customerId: (customerId || '').toString().trim() } : null,
+      targetCustomerName: (customerName || '').toString().trim(),
+      targetCustomerId: (customerId || '').toString().trim()
     });
     fetchCustomers();
     fetchBottleInfoForOrder(orderNumber, isScannedOnly ? { customerName, customerId } : null);
@@ -3786,12 +3790,22 @@ export default function ImportApprovals() {
         return;
       }
       
+      // Resolve to CustomerListID so Customer Detail / Asset Detail / Reports all line up.
+      let resolvedListId = customerId || null;
+      if (!resolvedListId || !/^[A-Za-z0-9-]+$/.test(resolvedListId)) {
+        const r =
+          (await resolveCustomerListId(supabase, organization?.id, customerId)) ||
+          (await resolveCustomerListId(supabase, organization?.id, customerName));
+        if (r?.customerListId) resolvedListId = r.customerListId;
+      }
+
       const { error: updateError } = await supabase
         .from('bottles')
         .update({
           status: 'rented',
-          assigned_customer: customerName,
-          customer_id: customerId,
+          assigned_customer: resolvedListId || customerName,
+          customer_id: resolvedListId || customerId,
+          customer_name: customerName,
           rental_start_date: new Date().toISOString().split('T')[0],
           rental_order_number: orderNumber
         })
@@ -4448,22 +4462,50 @@ export default function ImportApprovals() {
               
               {/* Warning if any bottles are already at customers */}
               {(() => {
+                const norm = (v) => (v != null && v !== '' ? String(v).trim().toLowerCase() : '');
+                const targetCustomerName = norm(bottleInfoDialog?.targetCustomerName);
+                const targetCustomerId = norm(bottleInfoDialog?.targetCustomerId);
+                const isBottleAtDifferentCustomer = (bottle) => {
+                  if (!isBottleAtCustomerByStatus(bottle.status)) return false;
+                  const bottleName = norm(bottle.customer_name);
+                  const bottleAssigned = norm(bottle.assigned_customer);
+                  if (!bottleName && !bottleAssigned) return false;
+                  const matchesTargetName = !!targetCustomerName && (bottleName === targetCustomerName || bottleAssigned === targetCustomerName);
+                  const matchesTargetId = !!targetCustomerId && (bottleAssigned === targetCustomerId || bottleName === targetCustomerId);
+                  return !(matchesTargetName || matchesTargetId);
+                };
+
                 const bottlesAtCustomers = (bottleInfoDialog?.bottles || []).filter(b => 
                   (b.scanAction === 'out' || b.scanAction === 'SHIP' || b.scanAction === 'delivery') && 
-                  isBottleAtCustomerByStatus(b.status) && 
-                  (b.customer_name || b.assigned_customer)
+                  isBottleAtDifferentCustomer(b)
                 );
                 
                 if (bottlesAtCustomers.length > 0) {
+                  const first = bottlesAtCustomers[0];
+                  const currentCust =
+                    first.customer_name ||
+                    (first.assigned_customer && customerIdToName[String(first.assigned_customer)]) ||
+                    first.assigned_customer ||
+                    '';
+                  const orderCustomerDisplay =
+                    (bottleInfoDialog?.targetCustomerName && String(bottleInfoDialog.targetCustomerName).trim()) ||
+                    (bottleInfoDialog?.targetCustomerId && customerIdToName[String(bottleInfoDialog.targetCustomerId)]) ||
+                    '';
                   return (
                     <Alert severity="warning" icon={<WarningIcon />} sx={{ mt: 1, mb: 1 }}>
-                      <strong>⚠️ Warning:</strong> {bottlesAtCustomers.length} bottle(s) are being shipped but appear to already be at a customer. 
-                      {bottlesAtCustomers.length === 1 && bottlesAtCustomers[0].customer_name && 
-                        ` Bottle is currently at: ${bottlesAtCustomers[0].customer_name}`
-                      }
-                      {bottlesAtCustomers.length > 1 && 
-                        ' Please verify if these bottles were returned before approving this shipment.'
-                      }
+                      <Typography variant="body2" component="span">
+                        <strong>⚠️ Warning:</strong> {bottlesAtCustomers.length} bottle(s) have a SHIP scan but inventory still shows them assigned to{' '}
+                        <strong>another</strong> customer—not this order.
+                        {bottlesAtCustomers.length === 1 && currentCust && (
+                          <> Currently: <strong>{currentCust}</strong>.</>
+                        )}{' '}
+                        {orderCustomerDisplay ? (
+                          <>This order is for <strong>{orderCustomerDisplay}</strong>. Approving will reassign those shipped bottle(s) to that customer.</>
+                        ) : (
+                          <>Approving will reassign those shipped bottle(s) to this order&apos;s customer.</>
+                        )}{' '}
+                        If the cylinder was physically returned before this delivery, add a return scan so inventory matches; otherwise this mismatch clears when you approve.
+                      </Typography>
                     </Alert>
                   );
                 }
@@ -4520,12 +4562,23 @@ export default function ImportApprovals() {
                               color={viewBottlesStatusChipColor(bottle.status)}
                             />
                             {/* Warning if bottle is being shipped but is already at a customer */}
-                            {(bottle.scanAction === 'out' || bottle.scanAction === 'SHIP' || bottle.scanAction === 'delivery') && 
-                             isBottleAtCustomerByStatus(bottle.status) && 
-                             (bottle.customer_name || bottle.assigned_customer) && (
+                            {(bottle.scanAction === 'out' || bottle.scanAction === 'SHIP' || bottle.scanAction === 'delivery') &&
+                             (() => {
+                               const norm = (v) => (v != null && v !== '' ? String(v).trim().toLowerCase() : '');
+                               const targetCustomerName = norm(bottleInfoDialog?.targetCustomerName);
+                               const targetCustomerId = norm(bottleInfoDialog?.targetCustomerId);
+                               if (!isBottleAtCustomerByStatus(bottle.status)) return false;
+                               const bottleName = norm(bottle.customer_name);
+                               const bottleAssigned = norm(bottle.assigned_customer);
+                               if (!bottleName && !bottleAssigned) return false;
+                               const matchesTargetName = !!targetCustomerName && (bottleName === targetCustomerName || bottleAssigned === targetCustomerName);
+                               const matchesTargetId = !!targetCustomerId && (bottleAssigned === targetCustomerId || bottleName === targetCustomerId);
+                               return !(matchesTargetName || matchesTargetId);
+                             })() && (
                               <Chip 
                                 icon={<WarningIcon />}
-                                label="Already at customer" 
+                                label="Other customer"
+                                title="Inventory shows this bottle on a different customer than this order"
                                 size="small"
                                 color="warning"
                                 variant="outlined"
@@ -6743,17 +6796,25 @@ return (
       }
       if (!orderNumber) throw new Error('No order number found in record');
 
-      // Use CustomerListID from record first so DNS and assignments match Customer Detail page (which queries by customer_id = CustomerListID)
+      // Resolve to a CustomerListID so downstream pages (Customer Detail, Asset Detail, Bottle Locations, Reports) all match.
+      clearResolveCustomerListIdMemo();
       let newCustomerId = getCustomerId(data) || null;
-      if (!newCustomerId && newCustomerName) {
-        const { data: customer } = await supabase
-          .from('customers')
-          .select('CustomerListID')
-          .eq('name', newCustomerName)
-          .eq('organization_id', organization?.id)
-          .limit(1)
-          .single();
-        if (customer) newCustomerId = customer.CustomerListID;
+      {
+        const resolved =
+          (await resolveCustomerListId(supabase, organization?.id, newCustomerId)) ||
+          (await resolveCustomerListId(supabase, organization?.id, newCustomerName));
+        if (resolved?.customerListId) {
+          newCustomerId = resolved.customerListId;
+          if (!newCustomerName || newCustomerName === 'Unknown') {
+            newCustomerName = resolved.name || newCustomerName;
+          }
+        } else {
+          logger.warn('assignBottlesToCustomer: could not resolve CustomerListID — writes may use display name', {
+            orderNumber,
+            customerHintId: getCustomerId(data),
+            customerName: newCustomerName,
+          });
+        }
       }
 
       const { shippedBarcodes, returnedBarcodes, bottleScanRows = [] } = await collectBarcodesForOrder(orderNumber, rows);
@@ -6844,6 +6905,18 @@ return (
       // Only pass returns that are on this customer's balance to the RPC. RNB returns must not be unassigned for this order (we only create RNB records).
       const rnbBarcodeSet = new Set((returnsNotOnBalance || []).map((r) => r.barcode));
       const returnBarcodesOnBalance = retArr.filter((bc) => !rnbBarcodeSet.has(bc));
+      const effectiveDeliveryDate = (() => {
+        const rowWithDate = (rows || []).find(
+          (row) => row?.date || row?.Date || row?.invoice_date || row?.InvoiceDate
+        );
+        return (
+          rowWithDate?.date ||
+          rowWithDate?.Date ||
+          rowWithDate?.invoice_date ||
+          rowWithDate?.InvoiceDate ||
+          null
+        );
+      })();
 
       // Try transactional RPC first (does not mark import record - confirmApprove handles that)
       const rpcResult = await bottleAssignmentService.assignBottles({
@@ -6866,6 +6939,7 @@ return (
           customerId: newCustomerId || newCustomerName,
           customerName: newCustomerName,
           orderNumber,
+          effectiveDate: effectiveDeliveryDate,
         });
         if (reconcileWarnings.length > 0) {
           logger.warn('Post-verify reassignment (prior customer / missing return):', reconcileWarnings);
@@ -6893,7 +6967,16 @@ return (
         }
       } else {
         logger.warn('RPC assignment failed, falling back to inline logic:', rpcResult.error);
-        await assignBottlesToCustomerInline(record, newCustomerName, newCustomerId, orderNumber, shippedBarcodes, returnBarcodesOnBalance, rows);
+        await assignBottlesToCustomerInline(
+          record,
+          newCustomerName,
+          newCustomerId,
+          orderNumber,
+          shippedBarcodes,
+          returnBarcodesOnBalance,
+          rows,
+          effectiveDeliveryDate
+        );
       }
 
       // RNS (Return Not Scanned): invoice has return qty but no return scan – create one RNS per missing return
@@ -6929,7 +7012,7 @@ return (
   }
 
   // Fallback inline bottle assignment when the RPC is unavailable
-  async function assignBottlesToCustomerInline(record, newCustomerName, newCustomerId, orderNumber, shippedBarcodes, returnedBarcodes, rows) {
+  async function assignBottlesToCustomerInline(record, newCustomerName, newCustomerId, orderNumber, shippedBarcodes, returnedBarcodes, rows, effectiveDate = null) {
     const assignmentWarnings = [];
     const assignmentSuccesses = [];
     const processedBarcodes = new Set();
@@ -7018,6 +7101,7 @@ return (
             previous_status: bottle.status,
             assigned_customer: newCustomerId || newCustomerName,
             customer_name: newCustomerName,
+            customer_id: newCustomerId || null,
             status: 'rented',
             rental_start_date: new Date().toISOString().split('T')[0],
             last_verified_order: orderNumber,
@@ -7085,6 +7169,7 @@ return (
       customerId: newCustomerId || newCustomerName,
       customerName: newCustomerName,
       orderNumber,
+      effectiveDate,
     });
     assignmentWarnings.push(...reconcileInline);
 
@@ -7136,13 +7221,21 @@ return (
       }
 
       const pricingCtx = await fetchOrgRentalPricingContext(supabase, organization?.id);
-      const rental_amount = monthlyRateForNewRental(customerId || customerName, bottle, pricingCtx);
+      // Prefer CustomerListID for customer_id so Customer Detail / reports can find this rental.
+      let resolvedCustomerId = customerId;
+      if (!resolvedCustomerId || !/^[A-Za-z0-9-]+$/.test(resolvedCustomerId)) {
+        const resolved =
+          (await resolveCustomerListId(supabase, organization?.id, customerId)) ||
+          (await resolveCustomerListId(supabase, organization?.id, customerName));
+        if (resolved?.customerListId) resolvedCustomerId = resolved.customerListId;
+      }
+      const rental_amount = monthlyRateForNewRental(resolvedCustomerId || customerName, bottle, pricingCtx);
 
       const insertPayload = {
         organization_id: organization?.id,
         bottle_id: bottle.id,
         bottle_barcode: bottle.barcode_number,
-        customer_id: customerId || customerName,
+        customer_id: resolvedCustomerId || customerName,
         customer_name: customerName,
         rental_start_date: new Date().toISOString().split('T')[0],
         rental_end_date: null,

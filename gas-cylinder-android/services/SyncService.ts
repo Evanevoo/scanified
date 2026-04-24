@@ -264,11 +264,17 @@ export class SyncService {
           scan.synced = true;
           syncedCount++;
 
-          // For RETURN scans, mark bottle as empty (with org_id filter)
+          // For RETURN scans, move bottle to in-house immediately (with org_id filter)
           if (mode === 'RETURN' && barcode) {
             const { error: updateError } = await supabase
               .from('bottles')
-              .update({ status: 'empty' })
+              .update({
+                status: 'empty',
+                assigned_customer: null,
+                customer_id: null,
+                customer_name: null,
+                location: scan.location || 'In House',
+              })
               .eq('barcode_number', barcode)
               .eq('organization_id', profile.organization_id);
 

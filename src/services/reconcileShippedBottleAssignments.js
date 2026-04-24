@@ -1,5 +1,29 @@
 import logger from '../utils/logger';
 import { fetchOrgRentalPricingContext, monthlyRateForNewRental } from './rentalPricingContext';
+import { resolveCustomerListId } from '../utils/resolveCustomerListId';
+
+function toIsoDate(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const usDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (usDate) {
+    const month = usDate[1].padStart(2, '0');
+    const day = usDate[2].padStart(2, '0');
+    return `${usDate[3]}-${month}-${day}`;
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().split('T')[0];
+}
+
+function daysBetweenIsoDates(startIsoDate, endIsoDate) {
+  const start = new Date(`${startIsoDate}T00:00:00Z`);
+  const end = new Date(`${endIsoDate}T00:00:00Z`);
+  const diffMs = end.getTime() - start.getTime();
+  return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+}
 
 function assignmentMatchesVerifyTarget(bottle, targetCustomerId, targetCustomerName) {
   const tid = String(targetCustomerId || '').trim();
@@ -23,15 +47,27 @@ export async function reconcileShippedBottleAssignments(supabase, params) {
     customerId,
     customerName,
     orderNumber = null,
+    effectiveDate = null,
   } = params;
 
   if (!organizationId || !shipBarcodes?.length) return [];
 
   const warnings = [];
   const today = new Date().toISOString().split('T')[0];
+  const shipmentDate = toIsoDate(effectiveDate) || today;
+  const daysAtLocation = daysBetweenIsoDates(shipmentDate, today);
   const pricingCtx = await fetchOrgRentalPricingContext(supabase, organizationId);
-  const assignId = customerId != null && String(customerId).trim() !== '' ? String(customerId).trim() : null;
-  const assignName = String(customerName || '').trim();
+  let assignId = customerId != null && String(customerId).trim() !== '' ? String(customerId).trim() : null;
+  let assignName = String(customerName || '').trim();
+  // Always try to resolve to a CustomerListID so bottles.assigned_customer and rentals.customer_id
+  // use the same identifier the rest of the app queries by.
+  const resolved =
+    (await resolveCustomerListId(supabase, organizationId, assignId)) ||
+    (await resolveCustomerListId(supabase, organizationId, assignName));
+  if (resolved?.customerListId) {
+    assignId = resolved.customerListId;
+    if (!assignName) assignName = resolved.name || '';
+  }
   const assignedCustomerValue = assignId || assignName;
 
   for (const rawBc of shipBarcodes) {
@@ -54,7 +90,21 @@ export async function reconcileShippedBottleAssignments(supabase, params) {
     const bottle = bottles?.[0];
     if (!bottle) continue;
 
-    if (assignmentMatchesVerifyTarget(bottle, assignId, assignName)) continue;
+    if (assignmentMatchesVerifyTarget(bottle, assignId, assignName)) {
+      const { error: syncErr } = await supabase
+        .from('bottles')
+        .update({
+          days_at_location: daysAtLocation,
+          last_location_update: today,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', bottle.id)
+        .eq('organization_id', organizationId);
+      if (syncErr) {
+        logger.warn('reconcileShippedBottleAssignments: sync location days', barcode, syncErr);
+      }
+      continue;
+    }
 
     const prev =
       (bottle.customer_name && String(bottle.customer_name).trim()) ||
@@ -84,6 +134,8 @@ export async function reconcileShippedBottleAssignments(supabase, params) {
         assigned_customer: assignedCustomerValue,
         customer_name: assignName || bottle.customer_name,
         status: 'rented',
+        days_at_location: daysAtLocation,
+        last_location_update: today,
         rental_order_number: orderNumber,
         last_verified_order: orderNumber,
         updated_at: new Date().toISOString(),
@@ -116,7 +168,7 @@ export async function reconcileShippedBottleAssignments(supabase, params) {
       bottle_barcode: bottle.barcode_number,
       customer_id: assignedCustomerValue,
       customer_name: assignName || 'Customer',
-      rental_start_date: today,
+      rental_start_date: shipmentDate,
       rental_end_date: null,
       rental_amount: rentalAmount,
       rental_type: 'monthly',

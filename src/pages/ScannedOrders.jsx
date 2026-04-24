@@ -4,7 +4,7 @@ import { parseDbTimestamp } from '../utils/parseDbTimestamp';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, CircularProgress, Alert, MenuItem, Select, InputLabel, FormControl, Chip, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Card, CardContent, Grid, Stack
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, CircularProgress, Alert, MenuItem, Select, InputLabel, FormControl, Chip, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Card, CardContent, Grid, Stack, Autocomplete
 } from '@mui/material';
 import { Add, Remove, Edit, Save, Cancel } from '@mui/icons-material';
 
@@ -65,6 +65,7 @@ export default function ScannedOrders() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [bottles, setBottles] = useState([]);
   const [barcodeToProductCode, setBarcodeToProductCode] = useState({});
+  const [customers, setCustomers] = useState([]);
 
   const selectedOrg = organization?.id ?? '';
 
@@ -81,6 +82,31 @@ export default function ScannedOrders() {
     }
     fetchUsers();
   }, []);
+
+  useEffect(() => {
+    async function fetchCustomers() {
+      if (!selectedOrg) {
+        setCustomers([]);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('customers')
+        .select('CustomerListID, name')
+        .eq('organization_id', selectedOrg)
+        .order('name', { ascending: true });
+      if (!error) {
+        setCustomers(
+          (data || [])
+            .filter((c) => c?.CustomerListID && c?.name)
+            .map((c) => ({
+              id: String(c.CustomerListID),
+              name: String(c.name),
+            }))
+        );
+      }
+    }
+    fetchCustomers();
+  }, [selectedOrg]);
 
   useEffect(() => {
     async function fetchOrders() {
@@ -571,12 +597,45 @@ export default function ScannedOrders() {
               onChange={handleEditChange}
               fullWidth
             />
-            <TextField
-              label="Customer Name"
-              name="customer_name"
-              value={editForm.customer_name}
-              onChange={handleEditChange}
-              fullWidth
+            <Autocomplete
+              options={customers}
+              value={(() => {
+                const matched = customers.find(
+                  (c) =>
+                    c.id === String(editForm.customer_id || '') ||
+                    c.name === String(editForm.customer_name || '')
+                );
+                if (matched) return matched;
+                if (editForm.customer_name || editForm.customer_id) {
+                  return {
+                    id: String(editForm.customer_id || ''),
+                    name: String(editForm.customer_name || ''),
+                  };
+                }
+                return null;
+              })()}
+              onChange={(_, selectedCustomer) => {
+                setEditForm((prev) => ({
+                  ...prev,
+                  customer_name: selectedCustomer?.name || '',
+                  customer_id: selectedCustomer?.id || '',
+                }));
+              }}
+              getOptionLabel={(option) => option?.name || ''}
+              isOptionEqualToValue={(option, value) => option.id === value.id}
+              renderOption={(props, option) => (
+                <li {...props} key={option.id}>
+                  {option.name} ({option.id})
+                </li>
+              )}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Customer"
+                  placeholder="Search and select customer"
+                  fullWidth
+                />
+              )}
             />
             <TextField
               label="Customer ID"
@@ -584,6 +643,7 @@ export default function ScannedOrders() {
               value={editForm.customer_id}
               onChange={handleEditChange}
               fullWidth
+              helperText="Auto-filled from selected customer; editable if needed."
             />
 
             {/* Bottles Management */}

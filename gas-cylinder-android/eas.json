@@ -9,28 +9,18 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
-      },
-      "ios": {
-        "simulator": true
       }
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
-      },
-      "ios": {
-        "simulator": true
       }
     },
     "production": {
       "autoIncrement": false,
       "android": {
         "buildType": "app-bundle"
-      },
-      "ios": {
-        "simulator": false,
-        "buildConfiguration": "Release"
       },
       "env": {
         "EXPO_NO_DOTENV": "1"

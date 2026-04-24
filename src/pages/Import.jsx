@@ -13,6 +13,8 @@ import { Box, Paper, Typography, Button, IconButton, Alert, LinearProgress, Card
 import { ArrowBack as ArrowBackIcon, Upload as UploadIcon, Search as SearchIcon, CheckCircle as CheckCircleIcon, CloudUpload as CloudUploadIcon } from '@mui/icons-material';
 import { findCustomer, normalizeCustomerName, batchFindCustomers } from '../utils/customerMatching';
 import { validateImportData, autoCorrectImportData, generateImportSummary } from '../utils/importValidation';
+import { bottleAssignmentService } from '../services/bottleAssignmentService';
+import { resolveCustomerListId } from '../utils/resolveCustomerListId';
 
 // Import type definitions
 const IMPORT_TYPES = {
@@ -304,10 +306,6 @@ export default function Import() {
       }
       setMapping(autoMap);
       setPreview(generatePreview(dataRows, detectedColumns, autoMap));
-      
-      setTimeout(() => {
-        checkPreviewStatuses();
-      }, 0);
     };
 
     if (ext === 'xls' || ext === 'xlsx') {
@@ -325,19 +323,17 @@ export default function Import() {
       const reader = new FileReader();
       reader.onload = evt => {
         const text = evt.target.result;
-        
-        // Detect delimiter (tab or comma)
+
         const firstLine = text.split('\n')[0];
         const tabCount = (firstLine.match(/\t/g) || []).length;
         const commaCount = (firstLine.match(/,/g) || []).length;
         const delimiter = tabCount >= commaCount ? '\t' : ',';
-        
-        const rows = text
-          .split(/\r?\n/) // Handle different line endings
-          .map(line => line.split(delimiter))
-          .filter(row => row.length > 1 && row.some(cell => cell.trim() !== ''))
-          .map(row => row.map(cell => cell.trim())); // Trim whitespace from cells
-        
+
+        const parsed = Papa.parse(text, { delimiter, header: false, skipEmptyLines: true });
+        const rows = (parsed.data || [])
+          .filter(row => row.length > 1 && row.some(cell => (cell || '').trim() !== ''))
+          .map(row => row.map(cell => (cell || '').trim()));
+
         processRows(rows);
       };
       reader.readAsText(file);
@@ -406,25 +402,26 @@ export default function Import() {
 
   function isValidDate(dateStr) {
     if (!dateStr) return false;
-    if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
-      const [d, m, y] = dateStr.split('/');
-      return d >= '01' && d <= '31' && m >= '01' && m <= '12' && y.length === 4;
+    // MM/DD/YYYY
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateStr)) {
+      const [m, d, y] = dateStr.split('/');
+      return +d >= 1 && +d <= 31 && +m >= 1 && +m <= 12 && y.length === 4;
     }
+    // YYYY-MM-DD
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
       const [y, m, d] = dateStr.split('-');
-      return d >= '01' && d <= '31' && m >= '01' && m <= '12' && y.length === 4;
+      return +d >= 1 && +d <= 31 && +m >= 1 && +m <= 12 && y.length === 4;
     }
     return false;
   }
 
   function convertDate(dateStr) {
     if (!dateStr) return null;
-    // Convert DD/MM/YYYY to YYYY-MM-DD
-    if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
-      const [d, m, y] = dateStr.split('/');
+    // MM/DD/YYYY → YYYY-MM-DD
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateStr)) {
+      const [m, d, y] = dateStr.split('/');
       return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
     }
-    // Already in YYYY-MM-DD format
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
       return dateStr;
     }
@@ -441,6 +438,15 @@ export default function Import() {
           errors.push({ row: idx, field: field.key, reason: 'Missing value' });
         }
       });
+      if (row.date && !isValidDate(row.date)) {
+        errors.push({ row: idx, field: 'date', reason: `Invalid date format: "${row.date}" (expected MM/DD/YYYY or YYYY-MM-DD)` });
+      }
+      if (row.qty_out && row.qty_out.toString().trim() !== '' && isNaN(Number(row.qty_out))) {
+        errors.push({ row: idx, field: 'qty_out', reason: `Qty Out is not a number: "${row.qty_out}"` });
+      }
+      if (row.qty_in && row.qty_in.toString().trim() !== '' && isNaN(Number(row.qty_in))) {
+        errors.push({ row: idx, field: 'qty_in', reason: `Qty In is not a number: "${row.qty_in}"` });
+      }
     });
     let missingCustomerCount = 0;
     if (organizationId && previewRows.some(r => r.customer_id || r.customer_name)) {
@@ -686,11 +692,123 @@ export default function Import() {
       }
     }
 
+    // "No issues" means there are no extra tracked product quantities
+    // for this order that do not exist in the imported invoice rows.
+    for (const [product, trackedQty] of trackedQtyByProduct.entries()) {
+      const invoiceQty = invoiceQtyByProduct.get(product);
+      if (!invoiceQty && (trackedQty.shipped > 0 || trackedQty.returned > 0)) {
+        return false;
+      }
+    }
+
     return true;
   }
 
-  async function autoApproveImportedRecords({ table, recordIds, organizationId }) {
-    const ids = [...new Set((recordIds || []).filter(Boolean))];
+  function getCustomerInfoFromImportData(data) {
+    if (!data) return { name: 'Unknown', id: null };
+    const name =
+      data.customer_name || data.CustomerName || data.Customer ||
+      (data.rows?.[0]?.customer_name) || (data.rows?.[0]?.CustomerName) ||
+      (data.line_items?.[0]?.customer_name) || (data.line_items?.[0]?.CustomerName) ||
+      data.summary?.customer_name || 'Unknown';
+    const id =
+      data.customer_id || data.CustomerID || data.CustomerId || data.CustomerListID ||
+      (data.rows?.[0]?.customer_id) || (data.rows?.[0]?.CustomerID) || (data.rows?.[0]?.CustomerListID) ||
+      (data.line_items?.[0]?.customer_id) || (data.line_items?.[0]?.CustomerListID) ||
+      null;
+    return { name, id };
+  }
+
+  async function assignBottlesForAutoApprovedRecord(recordId, table, organizationId) {
+    try {
+      const { data: record, error: recErr } = await supabase
+        .from(table)
+        .select('id, data')
+        .eq('id', recordId)
+        .single();
+      if (recErr || !record) return;
+
+      const data = typeof record.data === 'string' ? JSON.parse(record.data) : record.data;
+      if (!data) return;
+
+      const orderNumber = getOrderNumberFromImportData(data);
+      if (!orderNumber) return;
+
+      const { name: rawName, id: rawId } = getCustomerInfoFromImportData(data);
+      let customerName = rawName;
+      let customerId = rawId;
+
+      const resolved =
+        (await resolveCustomerListId(supabase, organizationId, customerId)) ||
+        (await resolveCustomerListId(supabase, organizationId, customerName));
+      if (resolved?.customerListId) {
+        customerId = resolved.customerListId;
+        if (!customerName || customerName === 'Unknown') customerName = resolved.name || customerName;
+      }
+
+      const orderVariants = getOrderVariants(orderNumber);
+      const { data: scans } = await supabase
+        .from('bottle_scans')
+        .select('bottle_barcode, mode, created_at, timestamp')
+        .in('order_number', orderVariants)
+        .eq('organization_id', organizationId);
+
+      const shipBarcodes = [];
+      const returnBarcodes = [];
+      const latestByBarcode = new Map();
+      (scans || []).forEach((scan) => {
+        const bc = (scan.bottle_barcode || '').toString().trim();
+        if (!bc) return;
+        const time = new Date(scan.created_at || scan.timestamp || 0).getTime();
+        const existing = latestByBarcode.get(bc);
+        if (!existing || time >= existing.time) latestByBarcode.set(bc, { scan, time });
+      });
+      latestByBarcode.forEach(({ scan }) => {
+        const bc = (scan.bottle_barcode || '').toString().trim();
+        const mode = (scan.mode || '').toUpperCase();
+        if (mode === 'RETURN' || mode === 'PICKUP') returnBarcodes.push(bc);
+        else shipBarcodes.push(bc);
+      });
+
+      if (shipBarcodes.length === 0 && returnBarcodes.length === 0) return;
+
+      await bottleAssignmentService.assignBottles({
+        organizationId,
+        customerId: customerId || customerName,
+        customerName,
+        shipBarcodes,
+        returnBarcodes,
+        importRecordId: recordId,
+        importTable: table,
+        orderNumber,
+      });
+      logger.log(`Auto-approve: bottles assigned for record ${recordId}, order ${orderNumber}`);
+    } catch (err) {
+      logger.error('Auto-approve bottle assignment failed for record', recordId, err);
+    }
+  }
+
+  async function autoApproveImportedRecords({ table, recordIds, organizationId, sweepPendingOrg = false, importedOrderNumbers = [] }) {
+    let ids = [...new Set((recordIds || []).filter(Boolean))];
+    if (sweepPendingOrg && importedOrderNumbers.length > 0) {
+      const { data: pendingRows } = await supabase
+        .from(table)
+        .select('id, data')
+        .eq('organization_id', organizationId)
+        .eq('status', 'pending');
+      const relevantNorms = new Set(importedOrderNumbers.map(n => normalizeOrderNum(n)));
+      (pendingRows || []).forEach(row => {
+        if (ids.includes(row.id)) return;
+        try {
+          const d = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+          const orderNum = getOrderNumberFromImportData(d);
+          if (orderNum && relevantNorms.has(normalizeOrderNum(orderNum))) {
+            ids.push(row.id);
+          }
+        } catch { /* skip malformed */ }
+      });
+      ids = [...new Set(ids)];
+    }
     if (!ids.length) return 0;
     let approvedCount = 0;
     for (const id of ids) {
@@ -702,7 +820,10 @@ export default function Import() {
         .eq('id', id)
         .eq('organization_id', organizationId)
         .eq('status', 'pending');
-      if (!error) approvedCount += 1;
+      if (!error) {
+        approvedCount += 1;
+        await assignBottlesForAutoApprovedRecord(id, table, organizationId);
+      }
     }
     return approvedCount;
   }
@@ -867,10 +988,13 @@ export default function Import() {
         else logger.warn('Failed to update existing invoice on re-import:', updateError);
       }
 
+      const importedOrderNumbers = groups.map(g => g.refNumber).filter(Boolean);
       const autoApproved = await autoApproveImportedRecords({
         table: 'imported_invoices',
         recordIds: [...insertedIds, ...updatedIds],
-        organizationId: userProfile.organization_id
+        organizationId: userProfile.organization_id,
+        sweepPendingOrg: true,
+        importedOrderNumbers
       });
 
       const message = (() => {
@@ -893,6 +1017,9 @@ export default function Import() {
     } catch (error) {
       logger.error('Invoice import error:', error);
       setError(error.message);
+      setLoading(false);
+      setImporting(false);
+      throw error;
     }
     setLoading(false);
     setImporting(false);
@@ -1021,10 +1148,13 @@ export default function Import() {
         else logger.warn('Failed to update existing receipt on re-import:', updateError);
       }
 
+      const importedOrderNumbers = groups.map(g => g.refNumber).filter(Boolean);
       const autoApproved = await autoApproveImportedRecords({
         table: 'imported_sales_receipts',
         recordIds: [...insertedIds, ...updatedIds],
-        organizationId: userProfile.organization_id
+        organizationId: userProfile.organization_id,
+        sweepPendingOrg: true,
+        importedOrderNumbers
       });
 
       const message = (() => {
@@ -1047,6 +1177,9 @@ export default function Import() {
     } catch (error) {
       logger.error('Sales receipt import error:', error);
       setError(error.message);
+      setLoading(false);
+      setImporting(false);
+      throw error;
     }
     setLoading(false);
     setImporting(false);

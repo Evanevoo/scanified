@@ -180,6 +180,16 @@ export default function BottleLocations() {
     return m;
   }, [customers]);
 
+  // Reverse map: display name -> CustomerListID, so bottles.assigned_customer stored as name
+  // (legacy import rows) still group under the correct customer and deep-link works.
+  const listIdByCustomerName = useMemo(() => {
+    const m = new Map();
+    (customers || []).forEach((c) => {
+      if (c?.name && c?.CustomerListID) m.set(c.name, c.CustomerListID);
+    });
+    return m;
+  }, [customers]);
+
   const { physicalTotal, placeRows, inHouseByLocation, withCustomerCount, inHouseCount } = useMemo(() => {
     const list = bottles || [];
     const physical = list.length;
@@ -187,11 +197,14 @@ export default function BottleLocations() {
     const byCustomer = new Map();
 
     list.forEach((b) => {
-      const cid = b.assigned_customer || b.customer_id;
-      if (!cid) {
+      const raw = b.assigned_customer || b.customer_id;
+      if (!raw) {
         inHouse.push(b);
         return;
       }
+      // If assigned_customer was stored as a display name (legacy), remap to the real CustomerListID
+      // so we don't show duplicate "Unknown (NAME)" rows and the deep link navigates correctly.
+      const cid = listIdByCustomerName.get(raw) || raw;
       if (!byCustomer.has(cid)) {
         byCustomer.set(cid, []);
       }
@@ -241,7 +254,7 @@ export default function BottleLocations() {
       withCustomerCount: list.filter((b) => b.assigned_customer || b.customer_id).length,
       inHouseCount: inHouse.length,
     };
-  }, [bottles, customerNameByListId]);
+  }, [bottles, customerNameByListId, listIdByCustomerName]);
 
   const filteredPlaceRows = useMemo(() => {
     const q = search.trim().toLowerCase();

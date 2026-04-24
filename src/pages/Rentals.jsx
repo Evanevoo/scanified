@@ -1165,6 +1165,7 @@ function RentalsImproved() {
                       rental_type: newType,
                       lease_agreement_id: leaseAgreementId,
                       rental_amount: rentalAmount,
+                      rental_amount_manual: true,
                       tax_code: sharedTaxCode,
                       location: sharedLocation,
                     })

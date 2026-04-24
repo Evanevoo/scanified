@@ -23,6 +23,45 @@ import {
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 
+const TRACKED_FIELDS = [
+  'barcode_number',
+  'serial_number',
+  'category',
+  'group_name',
+  'type',
+  'description',
+  'gas_type',
+  'dock_stock',
+  'status',
+  'use_state',
+  'location',
+  'assigned_customer',
+  'customer_name',
+  'ownership',
+];
+
+const normalizeValue = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed === '' ? null : trimmed;
+  }
+  return value;
+};
+
+const buildFieldChanges = (before, after) => {
+  const changes = {};
+  TRACKED_FIELDS.forEach((field) => {
+    if (!(field in after)) return;
+    const from = normalizeValue(before?.[field]);
+    const to = normalizeValue(after?.[field]);
+    if (JSON.stringify(from) !== JSON.stringify(to)) {
+      changes[field] = { from, to };
+    }
+  });
+  return changes;
+};
+
 export default function AssetHistory() {
   const { id } = useParams(); // id can be barcode or serial number
   const navigate = useNavigate();
@@ -72,9 +111,33 @@ export default function AssetHistory() {
   const handleAssetEditSave = async () => {
     setLoading(true);
     setError(null);
+    const fieldChanges = buildFieldChanges(asset, editForm);
     const { error: updateError } = await supabase.from('bottles').update(editForm).eq('id', asset.id);
-    if (updateError) setError(updateError.message);
-    else {
+    if (updateError) {
+      setError(updateError.message);
+    } else {
+      if (Object.keys(fieldChanges).length > 0) {
+        const baseAuditPayload = {
+          action: 'BOTTLE_UPDATE',
+          table_name: 'bottles',
+          record_id: asset.id,
+          details: {
+            event_type: 'bottle_update',
+            bottle_id: asset.id,
+            barcode_number: editForm.barcode_number || asset.barcode_number || null,
+            field_changes: fieldChanges,
+          },
+          created_at: new Date().toISOString(),
+        };
+        const { error: auditError } = await supabase.from('audit_logs').insert(baseAuditPayload);
+        if (auditError) {
+          await supabase.from('audit_logs').insert({
+            action: 'BOTTLE_UPDATE',
+            details: baseAuditPayload.details,
+            created_at: baseAuditPayload.created_at,
+          });
+        }
+      }
       setAsset(editForm);
       setEditMode(false);
     }

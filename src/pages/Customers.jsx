@@ -286,30 +286,46 @@ function Customers({ profile }) {
 
       setTotalCount(count || 0);
 
-      // Fetch asset counts for these customers
-      // Count bottles assigned to each customer (this is the source of truth for assets)
+      // Fetch asset counts for these customers.
+      // assigned_customer may be stored as CustomerListID (correct) or (legacy) the display name,
+      // so count both and key the results by CustomerListID so the UI rows always line up.
       if (data && data.length > 0) {
-        const customerIds = data.map(c => c.CustomerListID);
-        
-        // Count bottles assigned to each customer
-        const { data: bottlesData, error: bottlesError } = await supabase
-          .from('bottles')
-          .select('assigned_customer')
-          .in('assigned_customer', customerIds)
-          .eq('organization_id', organization.id);
+        const customerIds = data.map((c) => c.CustomerListID).filter(Boolean);
+        const customerNames = data.map((c) => c.name).filter(Boolean);
+        const nameToListId = new Map(
+          data.filter((c) => c.CustomerListID && c.name).map((c) => [c.name, c.CustomerListID])
+        );
 
-        if (bottlesError) {
-          logger.error('Error fetching bottle data:', bottlesError);
-        } else {
-          const counts = {};
-          bottlesData?.forEach(bottle => {
-            if (bottle.assigned_customer) {
-              counts[bottle.assigned_customer] = (counts[bottle.assigned_customer] || 0) + 1;
-            }
-          });
-          setAssetCounts(counts);
-          logger.log('Asset counts calculated:', counts);
-        }
+        const [byIdRes, byNameRes] = await Promise.all([
+          customerIds.length
+            ? supabase
+                .from('bottles')
+                .select('assigned_customer')
+                .in('assigned_customer', customerIds)
+                .eq('organization_id', organization.id)
+            : Promise.resolve({ data: [], error: null }),
+          customerNames.length
+            ? supabase
+                .from('bottles')
+                .select('assigned_customer')
+                .in('assigned_customer', customerNames)
+                .eq('organization_id', organization.id)
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+
+        if (byIdRes.error) logger.error('Error fetching bottle counts by ID:', byIdRes.error);
+        if (byNameRes.error) logger.error('Error fetching bottle counts by name:', byNameRes.error);
+
+        const counts = {};
+        (byIdRes.data || []).forEach((b) => {
+          const key = b.assigned_customer;
+          if (key) counts[key] = (counts[key] || 0) + 1;
+        });
+        (byNameRes.data || []).forEach((b) => {
+          const mapped = nameToListId.get(b.assigned_customer);
+          if (mapped) counts[mapped] = (counts[mapped] || 0) + 1;
+        });
+        setAssetCounts(counts);
       } else {
         setAssetCounts({});
       }

@@ -318,6 +318,9 @@ export function processBillingWorkspaceToFilteredRentals(data) {
   const pricingMapForPatch = pricingMap;
   const patchedDeduped = deduplicatedData.map((rental) => {
     if (rental.source !== 'rental' || rental.is_dns) return rental;
+    // Respect explicit per-rental overrides saved from the Rentals edit dialog.
+    // Without this, the computed class/pricing default would overwrite the user's saved rate.
+    if (rental.rental_amount_manual === true) return rental;
     const bottle = rental.bottles;
     if (!bottle) return rental;
     if ((rental.rental_type || 'monthly') === 'yearly') return rental;
