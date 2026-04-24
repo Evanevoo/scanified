@@ -31,8 +31,8 @@ const FIELD_DEFINITIONS = {
       { key: 'date', label: 'Date', aliases: ['invoicedate', 'invoice date', 'txndate', 'txn_date', 'transaction date', 'order date'] },
       { key: 'product_code', label: 'Product Code', aliases: ['productcode', 'product code', 'assettype', 'asset type', 'item', 'item code', 'product', 'sku'] },
       { key: 'invoice_number', label: 'Invoice Number', aliases: ['invoicenumber', 'invoice number', 'invoice no', 'invoiceno', 'sales order number', 'salesordernumber', 'order number', 'ordernumber', 'ref', 'reference'] },
-      { key: 'qty_out', label: 'Qty Out', aliases: ['qtyout', 'qty out', 'quantity shipped', 'quantityshipped', 'shipped', 'qty shipped'] },
-      { key: 'qty_in', label: 'Qty In', aliases: ['qtyin', 'qty in', 'quantity returned', 'quantityreturned', 'returned', 'qty returned'] },
+      { key: 'qty_out', label: 'Qty Out', aliases: ['qtyout', 'qty out', 'quantity shipped', 'quantityshipped', 'shipped', 'qty shipped', 'shp'] },
+      { key: 'qty_in', label: 'Qty In', aliases: ['qtyin', 'qty in', 'quantity returned', 'quantityreturned', 'returned', 'qty returned', 'rtn'] },
     ],
     OPTIONAL_FIELDS: [
       { key: 'description', label: 'Description', aliases: ['desc', 'itemdesc', 'linedesc', 'item description', 'product description'] },
@@ -48,8 +48,8 @@ const FIELD_DEFINITIONS = {
       { key: 'date', label: 'Date', aliases: ['receiptdate', 'receipt date', 'txndate', 'txn_date', 'transaction date', 'order date'] },
       { key: 'product_code', label: 'Product Code', aliases: ['productcode', 'product code', 'assettype', 'asset type', 'item', 'item code', 'product', 'sku'] },
       { key: 'sales_receipt_number', label: 'Sales Receipt Number', aliases: ['salesreceiptnumber', 'sales receipt number', 'receipt number', 'receiptnumber', 'refnumber', 'ref number', 'ref_no', 'ref no', 'sales order number', 'salesordernumber', 'order number', 'ordernumber'] },
-      { key: 'qty_out', label: 'Qty Out', aliases: ['qtyout', 'qty out', 'quantity shipped', 'quantityshipped', 'shipped', 'qty shipped'] },
-      { key: 'qty_in', label: 'Qty In', aliases: ['qtyin', 'qty in', 'quantity returned', 'quantityreturned', 'returned', 'qty returned'] },
+      { key: 'qty_out', label: 'Qty Out', aliases: ['qtyout', 'qty out', 'quantity shipped', 'quantityshipped', 'shipped', 'qty shipped', 'shp'] },
+      { key: 'qty_in', label: 'Qty In', aliases: ['qtyin', 'qty in', 'quantity returned', 'quantityreturned', 'returned', 'qty returned', 'rtn'] },
     ],
     OPTIONAL_FIELDS: [
       { key: 'description', label: 'Description', aliases: ['desc', 'itemdesc', 'linedesc', 'item description', 'product description'] },
@@ -126,8 +126,8 @@ export default function Import() {
     { key: 'date', label: 'Date', aliases: ['invoicedate', 'invoice date', 'receiptdate', 'receipt date', 'txndate', 'txn_date', 'transaction date', 'order date'] },
     { key: 'product_code', label: 'Product Code', aliases: ['productcode', 'product code', 'assettype', 'asset type', 'item', 'item code', 'product', 'sku'] },
     { key: 'reference_number', label: 'Reference Number', aliases: ['invoicenumber', 'invoice number', 'invoice no', 'invoiceno', 'salesreceiptnumber', 'sales receipt number', 'receipt number', 'receiptnumber', 'sales order number', 'salesordernumber', 'order number', 'ordernumber', 'ref', 'reference', 'refnumber', 'ref number', 'ref_no', 'ref no'] },
-    { key: 'qty_out', label: 'Qty Out', aliases: ['qtyout', 'qty out', 'quantity shipped', 'quantityshipped', 'shipped', 'qty shipped'] },
-    { key: 'qty_in', label: 'Qty In', aliases: ['qtyin', 'qty in', 'quantity returned', 'quantityreturned', 'returned', 'qty returned'] },
+    { key: 'qty_out', label: 'Qty Out', aliases: ['qtyout', 'qty out', 'quantity shipped', 'quantityshipped', 'shipped', 'qty shipped', 'shp'] },
+    { key: 'qty_in', label: 'Qty In', aliases: ['qtyin', 'qty in', 'quantity returned', 'quantityreturned', 'returned', 'qty returned', 'rtn'] },
   ];
 
   const OPTIONAL_FIELDS = [
@@ -167,6 +167,16 @@ export default function Import() {
     };
     if (invalidQtyColumn(next.qty_out)) delete next.qty_out;
     if (invalidQtyColumn(next.qty_in)) delete next.qty_in;
+    return next;
+  }
+
+  function sanitizeMappingForDetectedColumns(mappingObj, detectedColumns) {
+    if (!mappingObj) return mappingObj;
+    const allowed = new Set(detectedColumns || []);
+    const next = {};
+    Object.entries(mappingObj).forEach(([key, col]) => {
+      if (col && allowed.has(col)) next[key] = col;
+    });
     return next;
   }
 
@@ -218,12 +228,13 @@ export default function Import() {
       setColumns(detectedColumns);
       
       const savedMapping = loadSavedMapping(detectedColumns);
-      let autoMap = {};
-      if (savedMapping) {
-        autoMap = sanitizeQuantityMappings(savedMapping);
-      } else {
-        // Improved auto-mapping logic
-        ALL_FIELDS.forEach(field => {
+      let autoMap = savedMapping
+        ? sanitizeMappingForDetectedColumns(sanitizeQuantityMappings(savedMapping), detectedColumns)
+        : {};
+      // Improved auto-mapping logic
+      // Even with saved mapping, backfill any missing fields so new aliases (e.g. SHP/RTN) get picked up.
+      ALL_FIELDS.forEach(field => {
+          if (autoMap[field.key]) return;
           let found = null;
           
           // First, try exact matches (case-insensitive)
@@ -285,13 +296,13 @@ export default function Import() {
               const c = col.toLowerCase();
               const excluded = /(customer|invoice|reference|order|product|date)/.test(c);
               if (excluded) return false;
-              return /(qty[\s_]*out|quantity[\s_]*shipped|shipped|delivered)/.test(c);
+              return /(qty[\s_]*out|quantity[\s_]*shipped|shipped|delivered|\bshp\b)/.test(c);
             };
             const isQtyInColumn = (col) => {
               const c = col.toLowerCase();
               const excluded = /(customer|invoice|reference|order|product|date)/.test(c);
               if (excluded) return false;
-              return /(qty[\s_]*in|quantity[\s_]*returned|returned|return)/.test(c);
+              return /(qty[\s_]*in|quantity[\s_]*returned|returned|return|\brtn\b)/.test(c);
             };
             if (field.key === 'qty_out' && detectedColumns.some(isQtyOutColumn)) {
               found = detectedColumns.find(isQtyOutColumn);
@@ -303,7 +314,55 @@ export default function Import() {
           
           if (found) autoMap[field.key] = found;
         });
+
+      // Trackabout fallback: no header row, 7-column export format.
+      // Expected order:
+      // 1 customer_id, 2 customer_name, 3 date, 4 product_code, 5 reference_number, 6 qty_out(SHP), 7 qty_in(RTN)
+      const noHeaderColumns = detectedColumns.length > 0 && detectedColumns.every(c => /^Column \d+$/i.test(String(c)));
+      const hasSevenCols = detectedColumns.length >= 7;
+      if (noHeaderColumns && hasSevenCols) {
+        // Heuristic: in raw Trackabout rows, SHP/RTN are typically the last two numeric columns.
+        // This is safer than hardcoded positions when exports include an extra leading/trailing column.
+        const sampleRow = (dataRows || []).find(r => Array.isArray(r) && r.some(v => String(v ?? '').trim() !== ''));
+        const isNumericLike = (v) => {
+          const s = String(v ?? '').trim();
+          if (s === '') return false;
+          return !Number.isNaN(Number(s));
+        };
+        const numericColumnIndexes = sampleRow
+          ? sampleRow
+              .map((v, i) => ({ i, ok: isNumericLike(v) }))
+              .filter(x => x.ok)
+              .map(x => x.i)
+          : [];
+        const lastNumericIdx = numericColumnIndexes.length > 0 ? numericColumnIndexes[numericColumnIndexes.length - 1] : 6;
+        const secondLastNumericIdx = numericColumnIndexes.length > 1 ? numericColumnIndexes[numericColumnIndexes.length - 2] : 5;
+        const qtyOutCol = detectedColumns[secondLastNumericIdx] || 'Column 6';
+        const qtyInCol = detectedColumns[lastNumericIdx] || 'Column 7';
+
+        const fallbackByPosition = {
+          customer_id: 'Column 1',
+          customer_name: 'Column 2',
+          date: 'Column 3',
+          product_code: 'Column 4',
+          reference_number: 'Column 5',
+          qty_out: qtyOutCol,
+          qty_in: qtyInCol
+        };
+        // Force positional mapping for known Trackabout exports to avoid stale saved maps
+        // binding qty fields to wrong generic columns.
+        Object.entries(fallbackByPosition).forEach(([key, col]) => {
+          autoMap[key] = col;
+        });
       }
+
+      // Trackabout header override: if SHP/RTN columns exist, always bind qty_out/qty_in to them.
+      // This prevents stale saved mappings from forcing qty_out to an unrelated column.
+      const shpHeader = detectedColumns.find((col) => /\bshp\b/i.test(String(col)));
+      const rtnHeader = detectedColumns.find((col) => /\brtn\b/i.test(String(col)));
+      if (shpHeader) autoMap.qty_out = shpHeader;
+      if (rtnHeader) autoMap.qty_in = rtnHeader;
+
       setMapping(autoMap);
       setPreview(generatePreview(dataRows, detectedColumns, autoMap));
     };
@@ -402,10 +461,12 @@ export default function Import() {
 
   function isValidDate(dateStr) {
     if (!dateStr) return false;
-    // MM/DD/YYYY
+    // Slash dates: accept both MM/DD/YYYY and DD/MM/YYYY.
     if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateStr)) {
-      const [m, d, y] = dateStr.split('/');
-      return +d >= 1 && +d <= 31 && +m >= 1 && +m <= 12 && y.length === 4;
+      const [a, b, y] = dateStr.split('/');
+      const first = +a;
+      const second = +b;
+      return first >= 1 && first <= 31 && second >= 1 && second <= 31 && y.length === 4;
     }
     // YYYY-MM-DD
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
@@ -417,9 +478,22 @@ export default function Import() {
 
   function convertDate(dateStr) {
     if (!dateStr) return null;
-    // MM/DD/YYYY → YYYY-MM-DD
+    // Slash dates: support both MM/DD/YYYY and DD/MM/YYYY.
+    // When unambiguous, infer format:
+    // - first > 12  => DD/MM/YYYY
+    // - second > 12 => MM/DD/YYYY
+    // If ambiguous (both <= 12), default to MM/DD/YYYY to preserve existing behavior.
     if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateStr)) {
-      const [m, d, y] = dateStr.split('/');
+      const [a, b, y] = dateStr.split('/');
+      let m = a;
+      let d = b;
+      if (+a > 12) {
+        d = a;
+        m = b;
+      } else if (+b > 12) {
+        m = a;
+        d = b;
+      }
       return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
     }
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
@@ -560,7 +634,7 @@ export default function Import() {
     const byInvoiceNumber = {};
     for (const row of rows) {
       const invoiceNumber = String(
-        row.invoice_number ?? row.reference_number ?? row.sales_receipt_number ?? ''
+        row.invoice_number || row.reference_number || row.sales_receipt_number || ''
       ).trim() || 'UNKNOWN';
       if (!byInvoiceNumber[invoiceNumber]) byInvoiceNumber[invoiceNumber] = [];
       byInvoiceNumber[invoiceNumber].push(row);
@@ -814,13 +888,14 @@ export default function Import() {
     for (const id of ids) {
       const matches = await checkTrackedMatchesInvoiceForRecord({ recordId: id, table, organizationId });
       if (!matches) continue;
-      const { error } = await supabase
+      const { data: updatedRows, error } = await supabase
         .from(table)
         .update({ approved_at: new Date().toISOString(), status: 'approved', auto_approved: true })
         .eq('id', id)
         .eq('organization_id', organizationId)
-        .eq('status', 'pending');
-      if (!error) {
+        .eq('status', 'pending')
+        .select('id');
+      if (!error && updatedRows && updatedRows.length > 0) {
         approvedCount += 1;
         await assignBottlesForAutoApprovedRecord(id, table, organizationId);
       }
@@ -845,14 +920,26 @@ export default function Import() {
     for (const rec of records || []) {
       const data = typeof rec.data === 'string' ? JSON.parse(rec.data) : rec.data;
       if (!data) continue;
-      let orderNum = data.summary?.reference_number ?? data.reference_number ?? data.order_number ?? data.invoice_number;
-      if (orderNum == null && data.rows?.[0]) {
+      let orderNum = data.summary?.reference_number || data.reference_number || data.order_number || data.invoice_number || '';
+      if ((!orderNum || orderNum === 'UNKNOWN') && data.rows?.[0]) {
         const row = data.rows[0];
-        orderNum = row.order_number ?? row.invoice_number ?? row.reference_number ?? row.sales_receipt_number;
+        orderNum = row.order_number || row.invoice_number || row.reference_number || row.sales_receipt_number || '';
       }
       const norm = normalizeOrderNum(orderNum);
       const entry = { id: rec.id, status: rec.status || 'pending' };
-      if (norm) map.set(norm, entry);
+      if (norm && norm !== 'UNKNOWN') map.set(norm, entry);
+      // Also index by unique order numbers found inside the rows so re-uploads
+      // match even when summary.reference_number is stale/UNKNOWN.
+      if (data.rows && Array.isArray(data.rows)) {
+        const seenRowOrders = new Set();
+        data.rows.forEach(r => {
+          const ro = normalizeOrderNum(r.order_number || r.invoice_number || r.reference_number || r.sales_receipt_number);
+          if (ro && ro !== 'UNKNOWN' && !seenRowOrders.has(ro)) {
+            seenRowOrders.add(ro);
+            if (!map.has(ro)) map.set(ro, entry);
+          }
+        });
+      }
       // Also map verified_order_numbers so we can update by any of those refs
       const verifiedOrders = data.verified_order_numbers;
       if (Array.isArray(verifiedOrders)) {
@@ -883,28 +970,19 @@ export default function Import() {
       
       const groups = groupPreviewByReferenceNumber(preview);
       const existingRecords = await getExistingOrderRecordsForOrg('invoice', userProfile.organization_id);
-      const isVerifiedOrApproved = (entry) => (entry?.status === 'verified' || entry?.status === 'approved');
       const groupsToInsert = groups.filter(({ refNumber }) => {
         const entry = existingRecords.get(normalizeOrderNum(refNumber));
         return !entry;
       });
       const groupsToUpdate = groups.filter(({ refNumber }) => {
         const entry = existingRecords.get(normalizeOrderNum(refNumber));
-        return entry && !isVerifiedOrApproved(entry);
-      });
-      const groupsSkippedVerified = groups.filter(({ refNumber }) => {
-        const entry = existingRecords.get(normalizeOrderNum(refNumber));
-        return entry && isVerifiedOrApproved(entry);
+        return !!entry;
       });
       const updateCount = groupsToUpdate.length;
-      const skippedVerifiedCount = groupsSkippedVerified.length;
       if (updateCount > 0) {
-        logger.log(`Re-import: updating ${updateCount} already existing pending invoice(s) with new data`);
+        logger.log(`Re-import: updating ${updateCount} already existing invoice(s) with new data`);
       }
-      if (skippedVerifiedCount > 0) {
-        logger.log(`Skipping ${skippedVerifiedCount} invoice(s) already verified/approved (not shown in Import Approvals)`);
-      }
-      logger.log('Creating invoice import: one row per invoice', { groupCount: groupsToInsert.length, totalRows: preview.length, toUpdate: updateCount, skippedVerified: skippedVerifiedCount });
+      logger.log('Creating invoice import: one row per invoice', { groupCount: groupsToInsert.length, totalRows: preview.length, toUpdate: updateCount, skippedVerified: 0 });
 
       const insertPayloads = groupsToInsert.map(({ refNumber, rows: groupRows }) => ({
         data: {
@@ -965,15 +1043,19 @@ export default function Import() {
         if (!existing?.id) continue;
         const prev = existingById.get(existing.id);
         const prevData = prev?.data ? (typeof prev.data === 'string' ? JSON.parse(prev.data) : prev.data) : {};
+        const actualRef = refNumber !== 'UNKNOWN' ? refNumber : (prevData.order_number || prevData.reference_number || refNumber);
         const newData = {
           ...prevData,
           rows: groupRows,
+          order_number: actualRef,
+          reference_number: actualRef,
           mapping,
           summary: {
+            ...(prevData.summary || {}),
             total_rows: groupRows.length,
             uploaded_by: user.id,
             uploaded_at: new Date().toISOString(),
-            reference_number: refNumber
+            reference_number: actualRef
           }
         };
         const { error: updateError } = await supabase
@@ -988,7 +1070,38 @@ export default function Import() {
         else logger.warn('Failed to update existing invoice on re-import:', updateError);
       }
 
-      const importedOrderNumbers = groups.map(g => g.refNumber).filter(Boolean);
+      const importedOrderNumbers = groups.map(g => g.refNumber).filter(r => r && r !== 'UNKNOWN');
+
+      // Clean up stale duplicate records: if we updated a real record for an order number,
+      // delete any leftover "UNKNOWN"-keyed pending records whose rows contain the same order.
+      if (updatedIds.length > 0 && importedOrderNumbers.length > 0) {
+        try {
+          const { data: allPending } = await supabase
+            .from('imported_invoices')
+            .select('id, data')
+            .eq('organization_id', userProfile.organization_id)
+            .eq('status', 'pending')
+            .not('id', 'in', `(${[...insertedIds, ...updatedIds].join(',')})`);
+          const staleIds = [];
+          (allPending || []).forEach(rec => {
+            const d = typeof rec.data === 'string' ? JSON.parse(rec.data) : rec.data;
+            const summaryRef = d?.summary?.reference_number;
+            if (summaryRef && summaryRef !== 'UNKNOWN') return;
+            const rows = d?.rows || [];
+            const rowOrders = new Set(rows.map(r => normalizeOrderNum(r.order_number || r.invoice_number || r.reference_number || '')).filter(Boolean));
+            if (importedOrderNumbers.some(n => rowOrders.has(normalizeOrderNum(n)))) {
+              staleIds.push(rec.id);
+            }
+          });
+          if (staleIds.length > 0) {
+            await supabase.from('imported_invoices').delete().in('id', staleIds).eq('organization_id', userProfile.organization_id);
+            logger.log(`Cleaned up ${staleIds.length} stale duplicate record(s)`);
+          }
+        } catch (cleanupErr) {
+          logger.warn('Non-critical: failed to clean up stale records:', cleanupErr);
+        }
+      }
+
       const autoApproved = await autoApproveImportedRecords({
         table: 'imported_invoices',
         recordIds: [...insertedIds, ...updatedIds],
@@ -1000,9 +1113,8 @@ export default function Import() {
       const message = (() => {
         const parts = [];
         if (inserted > 0) parts.push(`${inserted} new invoice(s) added`);
-        if (updated > 0) parts.push(`${updated} existing pending order(s) updated`);
+        if (updated > 0) parts.push(`${updated} existing order(s) updated`);
         if (autoApproved > 0) parts.push(`${autoApproved} auto-approved (Inv matches Trk)`);
-        if (skippedVerifiedCount > 0) parts.push(`${skippedVerifiedCount} already verified (skipped)`);
         if (parts.length === 0) return 'No new imports. All orders already exist (updated or already verified).';
         return `Import submitted. ${parts.join('. ')}`;
       })();
@@ -1012,7 +1124,7 @@ export default function Import() {
         status: 'pending_approval',
         invoices_submitted: inserted,
         invoices_updated: updated,
-        invoices_skipped: skippedVerifiedCount
+        invoices_skipped: 0
       });
     } catch (error) {
       logger.error('Invoice import error:', error);
@@ -1043,28 +1155,19 @@ export default function Import() {
       
       const groups = groupPreviewByReferenceNumber(preview);
       const existingRecords = await getExistingOrderRecordsForOrg('receipt', userProfile.organization_id);
-      const isVerifiedOrApproved = (entry) => (entry?.status === 'verified' || entry?.status === 'approved');
       const groupsToInsert = groups.filter(({ refNumber }) => {
         const entry = existingRecords.get(normalizeOrderNum(refNumber));
         return !entry;
       });
       const groupsToUpdate = groups.filter(({ refNumber }) => {
         const entry = existingRecords.get(normalizeOrderNum(refNumber));
-        return entry && !isVerifiedOrApproved(entry);
-      });
-      const groupsSkippedVerified = groups.filter(({ refNumber }) => {
-        const entry = existingRecords.get(normalizeOrderNum(refNumber));
-        return entry && isVerifiedOrApproved(entry);
+        return !!entry;
       });
       const updateCount = groupsToUpdate.length;
-      const skippedVerifiedCount = groupsSkippedVerified.length;
       if (updateCount > 0) {
-        logger.log(`Re-import: updating ${updateCount} already existing pending receipt(s) with new data`);
+        logger.log(`Re-import: updating ${updateCount} already existing receipt(s) with new data`);
       }
-      if (skippedVerifiedCount > 0) {
-        logger.log(`Skipping ${skippedVerifiedCount} receipt(s) already verified/approved (not shown in Import Approvals)`);
-      }
-      logger.log('Creating sales receipt import: one row per receipt', { groupCount: groupsToInsert.length, totalRows: preview.length, toUpdate: updateCount, skippedVerified: skippedVerifiedCount });
+      logger.log('Creating sales receipt import: one row per receipt', { groupCount: groupsToInsert.length, totalRows: preview.length, toUpdate: updateCount, skippedVerified: 0 });
 
       const insertPayloads = groupsToInsert.map(({ refNumber, rows: groupRows }) => ({
         data: {
@@ -1125,15 +1228,19 @@ export default function Import() {
         if (!existing?.id) continue;
         const prev = existingReceiptById.get(existing.id);
         const prevData = prev?.data ? (typeof prev.data === 'string' ? JSON.parse(prev.data) : prev.data) : {};
+        const actualRef = refNumber !== 'UNKNOWN' ? refNumber : (prevData.order_number || prevData.reference_number || refNumber);
         const newData = {
           ...prevData,
           rows: groupRows,
+          order_number: actualRef,
+          reference_number: actualRef,
           mapping,
           summary: {
+            ...(prevData.summary || {}),
             total_rows: groupRows.length,
             uploaded_by: user.id,
             uploaded_at: new Date().toISOString(),
-            reference_number: refNumber
+            reference_number: actualRef
           }
         };
         const { error: updateError } = await supabase
@@ -1160,9 +1267,8 @@ export default function Import() {
       const message = (() => {
         const parts = [];
         if (inserted > 0) parts.push(`${inserted} new receipt(s) added`);
-        if (updated > 0) parts.push(`${updated} existing pending order(s) updated`);
+        if (updated > 0) parts.push(`${updated} existing order(s) updated`);
         if (autoApproved > 0) parts.push(`${autoApproved} auto-approved (Inv matches Trk)`);
-        if (skippedVerifiedCount > 0) parts.push(`${skippedVerifiedCount} already verified (skipped)`);
         if (parts.length === 0) return 'No new imports. All orders already exist (updated or already verified).';
         return `Import submitted. ${parts.join('. ')}`;
       })();
@@ -1172,7 +1278,7 @@ export default function Import() {
         status: 'pending_approval',
         receipts_submitted: inserted,
         receipts_updated: updated,
-        receipts_skipped: skippedVerifiedCount
+        receipts_skipped: 0
       });
     } catch (error) {
       logger.error('Sales receipt import error:', error);
