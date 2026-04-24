@@ -110,6 +110,35 @@ export default function LeaseAgreements() {
     applyToAllBottles: false
   });
 
+  const parsePositiveNumber = (value) => {
+    const n = parseFloat(value);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+
+  const parsePositiveInt = (value) => {
+    const n = parseInt(value, 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+
+  const recalculateAnnualAmountForBottleCount = (nextCountRaw, prevData) => {
+    const nextCount = parsePositiveInt(nextCountRaw);
+    if (nextCount <= 0) return prevData.annual_amount;
+
+    const previousCount = parsePositiveInt(prevData.max_asset_count);
+    const currentAnnual = parsePositiveNumber(prevData.annual_amount);
+    if (currentAnnual <= 0) return prevData.annual_amount;
+
+    // Keep a stable per-bottle rate as count changes.
+    const unitPrice = previousCount > 0 ? currentAnnual / previousCount : currentAnnual;
+    const nextAnnual = unitPrice * nextCount;
+    return nextAnnual.toFixed(2);
+  };
+
+  const currentCustomerBottleCount = useMemo(() => {
+    const key = formData.customer_id ? String(formData.customer_id) : '';
+    return key ? (bottleCountByCustomerId[key] || 0) : 0;
+  }, [formData.customer_id, bottleCountByCustomerId]);
+
   const loadWorkspace = useCallback(
     async ({ fullPage = true } = {}) => {
       if (!profile?.organization_id) return;
@@ -260,7 +289,18 @@ export default function LeaseAgreements() {
         return;
       }
       if (dialogMode === 'add' && !formData.applyToAllBottles && !formData.bottle_id) {
-        setSnackbar({ open: true, message: 'Please select a bottle or "Apply to all bottles"', severity: 'warning' });
+        const selectedBottleCount = parseInt(formData.max_asset_count, 10);
+        if (!selectedBottleCount || selectedBottleCount <= 0) {
+          setSnackbar({
+            open: true,
+            message: 'Please select a bottle, choose "Apply to all bottles", or enter number of bottles covered',
+            severity: 'warning'
+          });
+          return;
+        }
+      }
+      if (formData.max_asset_count && parseInt(formData.max_asset_count, 10) <= 0) {
+        setSnackbar({ open: true, message: 'Number of bottles must be greater than 0', severity: 'warning' });
         return;
       }
 
@@ -530,9 +570,22 @@ export default function LeaseAgreements() {
   const getLeaseBottleCount = (agreement) => {
     if (!agreement) return 0;
     if (agreement.bottle_id) return 1;
+    const configured = parseInt(agreement.max_asset_count, 10);
+    if (!Number.isNaN(configured) && configured > 0) return configured;
     const key = agreement.customer_id != null ? String(agreement.customer_id) : '';
     const n = key ? bottleCountByCustomerId[key] : 0;
     return typeof n === 'number' ? n : 0;
+  };
+
+  // Customer-level leases use annual_amount as per-bottle rate.
+  // Display total annual amount as rate * bottle count.
+  const getDisplayedAnnualAmount = (agreement) => {
+    if (!agreement) return 0;
+    const baseAnnual = parseFloat(agreement.annual_amount) || 0;
+    if (agreement.bottle_id) return baseAnnual;
+    const count = getLeaseBottleCount(agreement);
+    const effectiveCount = count > 0 ? count : 1;
+    return baseAnnual * effectiveCount;
   };
 
   const exportToCSV = () => {
@@ -545,7 +598,7 @@ export default function LeaseAgreements() {
       '# Bottles': getLeaseBottleCount(a),
       'Start Date': a.start_date,
       'End Date': a.end_date,
-      'Annual Amount': a.annual_amount,
+      'Annual Amount': getDisplayedAnnualAmount(a),
       'Billing Frequency': a.billing_frequency,
       Status: a.status,
     }));
@@ -794,7 +847,7 @@ export default function LeaseAgreements() {
                 </TableCell>
                 <TableCell>{formatDate(agreement.start_date)}</TableCell>
                 <TableCell>{formatDate(agreement.end_date)}</TableCell>
-                <TableCell>{formatCurrency(agreement.annual_amount)}</TableCell>
+                <TableCell>{formatCurrency(getDisplayedAnnualAmount(agreement))}</TableCell>
                 <TableCell>{agreement.billing_frequency}</TableCell>
                 <TableCell>
                   <Chip
@@ -923,7 +976,7 @@ export default function LeaseAgreements() {
                     </Grid>
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2">Annual Amount</Typography>
-                      <Typography variant="body1" mb={2}>{formatCurrency(selectedAgreement.annual_amount)}</Typography>
+                      <Typography variant="body1" mb={2}>{formatCurrency(getDisplayedAnnualAmount(selectedAgreement))}</Typography>
                     </Grid>
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2">Billing Frequency</Typography>
@@ -1010,13 +1063,19 @@ export default function LeaseAgreements() {
                     PopperProps={{ sx: { zIndex: 2000 } }}
                     onChange={(_, customer) => {
                       const newCustomerId = customer?.CustomerListID || '';
-                      setFormData({
-                        ...formData,
-                        customer_id: newCustomerId,
-                        customer_name: customer?.name || '',
-                        payment_terms: customer?.payment_terms || formData.payment_terms || 'Net 30',
-                        bottle_id: null,
-                        applyToAllBottles: false
+                      const assignedCount = newCustomerId ? (bottleCountByCustomerId[String(newCustomerId)] || 0) : 0;
+                      setFormData((prev) => {
+                        const nextCount = assignedCount > 0 ? String(assignedCount) : '';
+                        return {
+                          ...prev,
+                          customer_id: newCustomerId,
+                          customer_name: customer?.name || '',
+                          payment_terms: customer?.payment_terms || prev.payment_terms || 'Net 30',
+                          bottle_id: null,
+                          applyToAllBottles: false,
+                          max_asset_count: nextCount,
+                          annual_amount: recalculateAnnualAmountForBottleCount(nextCount, prev),
+                        };
                       });
                       fetchCustomerBottles(newCustomerId);
                     }}
@@ -1039,10 +1098,18 @@ export default function LeaseAgreements() {
                             <Checkbox
                               checked={formData.applyToAllBottles || false}
                               onChange={(e) =>
-                                setFormData({
-                                  ...formData,
-                                  applyToAllBottles: e.target.checked,
-                                  bottle_id: e.target.checked ? null : formData.bottle_id
+                                setFormData((prev) => {
+                                  const nextApplyAll = e.target.checked;
+                                  const nextCount = nextApplyAll
+                                    ? String(customerBottles.length || '')
+                                    : prev.max_asset_count;
+                                  return {
+                                    ...prev,
+                                    applyToAllBottles: nextApplyAll,
+                                    bottle_id: nextApplyAll ? null : prev.bottle_id,
+                                    max_asset_count: nextCount,
+                                    annual_amount: recalculateAnnualAmountForBottleCount(nextCount, prev),
+                                  };
                                 })
                               }
                             />
@@ -1075,6 +1142,32 @@ export default function LeaseAgreements() {
                             Optional: assign this lease to one bottle (per-bottle lease). Leave as None for a customer-level agreement.
                           </Typography>
                         </FormControl>
+                      </Grid>
+                    )}
+                    {!formData.bottle_id && (
+                      <Grid item xs={12} md={6}>
+                        <TextField
+                          fullWidth
+                          label="Number of bottles covered"
+                          type="number"
+                          value={formData.max_asset_count || ''}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              max_asset_count: e.target.value,
+                              annual_amount: recalculateAnnualAmountForBottleCount(e.target.value, prev),
+                            }))
+                          }
+                          inputProps={{
+                            min: 1,
+                            max: currentCustomerBottleCount > 0 ? currentCustomerBottleCount : undefined
+                          }}
+                          helperText={
+                            currentCustomerBottleCount > 0
+                              ? `Currently assigned to this customer: ${currentCustomerBottleCount}`
+                              : 'Enter how many bottles this agreement should cover'
+                          }
+                        />
                       </Grid>
                     )}
                   </>

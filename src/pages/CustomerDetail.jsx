@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import {
@@ -79,6 +79,44 @@ function looksLikeAddress(str) {
   return /\d/.test(str) && str.includes(',');
 }
 
+const CUSTOMER_PK_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Load one customer row from the URL segment. Handles:
+ * - CustomerListID exact match
+ * - CustomerListID case mismatch (Postgres eq is case-sensitive for text)
+ * - Deep links using customers.id (UUID) instead of CustomerListID
+ * Always scoped by organization when orgId is provided.
+ */
+async function fetchCustomerRowForRouteParam(supabaseClient, orgId, routeId) {
+  const raw = routeId == null ? '' : decodeURIComponent(String(routeId)).trim();
+  if (!raw) {
+    return { data: [], error: null };
+  }
+
+  const base = () =>
+    orgId
+      ? supabaseClient.from('customers').select('*').eq('organization_id', orgId)
+      : supabaseClient.from('customers').select('*');
+
+  const { data: byListExact, error: e1 } = await base().eq('CustomerListID', raw);
+  if (e1) return { data: null, error: e1 };
+  if (byListExact?.length) return { data: byListExact, error: null };
+
+  const { data: byListIlike, error: e2 } = await base().ilike('CustomerListID', raw);
+  if (e2) return { data: null, error: e2 };
+  if (byListIlike?.length) return { data: byListIlike, error: null };
+
+  if (CUSTOMER_PK_UUID_RE.test(raw)) {
+    const { data: byPk, error: e3 } = await base().eq('id', raw);
+    if (e3) return { data: null, error: e3 };
+    if (byPk?.length) return { data: byPk, error: null };
+  }
+
+  return { data: [], error: null };
+}
+
 export default function CustomerDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -143,6 +181,87 @@ export default function CustomerDetail() {
   const [resolvingRnbId, setResolvingRnbId] = useState(null); // rental id being resolved (RNB close)
   const [resolvingRnsId, setResolvingRnsId] = useState(null); // rental id being resolved (RNS close)
 
+  /**
+   * Bottles for this account. Legacy import paths could have saved:
+   *   - bottles.assigned_customer = CustomerListID (correct)
+   *   - bottles.assigned_customer = display name
+   *   - bottles.customer_id      = CustomerListID
+   *   - bottles.customer_id      = display name
+   *   - bottles.customer_name    = display name
+   * Merge every match so no assignments disappear.
+   */
+  const fetchMergedBottlesForCustomer = useCallback(async (orgId, customerName, customerListId) => {
+    const listId = (customerListId || id || '').toString().trim();
+    const runs = await Promise.all([
+      listId
+        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', listId)
+        : Promise.resolve({ data: [], error: null }),
+      customerName
+        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', customerName)
+        : Promise.resolve({ data: [], error: null }),
+      listId
+        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_id', listId)
+        : Promise.resolve({ data: [], error: null }),
+      customerName
+        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_id', customerName)
+        : Promise.resolve({ data: [], error: null }),
+      customerName
+        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_name', customerName)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    const map = new Map();
+    runs.forEach(({ data, error }) => {
+      if (error) return;
+      (data || []).forEach((b) => {
+        if (b?.id) map.set(b.id, b);
+      });
+    });
+    return Array.from(map.values());
+  }, [id]);
+
+  /** Open rentals: customer_id may be List ID or (incorrectly) name; customer_name also matches. */
+  const fetchMergedOpenRentalsForCustomer = useCallback(async (orgId, customerName, customerListId) => {
+    const listId = (customerListId || id || '').toString().trim();
+    let rentalById = [];
+    if (listId) {
+      const { data, error: rentalError } = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_id', listId)
+        .eq('organization_id', orgId)
+        .is('rental_end_date', null);
+      if (rentalError) throw rentalError;
+      rentalById = data || [];
+    }
+    const { data: rentalByName, error: rentalByNameError } = await supabase
+      .from('rentals')
+      .select('*')
+      .eq('customer_name', customerName)
+      .eq('organization_id', orgId)
+      .is('rental_end_date', null);
+    const { data: rentalByNameAsId, error: rentalByNameAsIdError } = await supabase
+      .from('rentals')
+      .select('*')
+      .eq('customer_id', customerName)
+      .eq('organization_id', orgId)
+      .is('rental_end_date', null);
+    const seen = new Set();
+    const merged = [];
+    const push = (rows) => {
+      (rows || []).forEach((r) => {
+        if (r?.id && !seen.has(r.id)) {
+          seen.add(r.id);
+          merged.push(r);
+        }
+      });
+    };
+    push(rentalById);
+    if (!rentalByNameError) push(rentalByName);
+    if (!rentalByNameAsIdError) push(rentalByNameAsId);
+    return merged;
+  }, [id]);
+
   // Combine physical bottles with DNS (Delivered Not Scanned), RNB (Return not on balance), and RNS (Return not scanned)
   const dnsRentals = useMemo(() => (locationAssets || []).filter(r => r.is_dns), [locationAssets]);
   const rnbRentals = useMemo(() => dnsRentals.filter(r => (r.dns_description || '').includes('Return not on balance')), [dnsRentals]);
@@ -206,22 +325,11 @@ export default function CustomerDetail() {
         })
         .eq('id', rental.id);
       if (error) throw error;
-      const { data: rentalById } = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_id', id)
-        .eq('organization_id', customer.organization_id)
-        .is('rental_end_date', null);
-      const { data: rentalByName } = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_name', customer.name)
-        .eq('organization_id', customer.organization_id)
-        .is('rental_end_date', null)
-        .eq('is_dns', true);
-      const seen = new Set((rentalById || []).map((r) => r.id));
-      const merged = [...(rentalById || [])];
-      (rentalByName || []).forEach((r) => { if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); } });
+      const merged = await fetchMergedOpenRentalsForCustomer(
+        customer.organization_id,
+        customer.name,
+        customer.CustomerListID
+      );
       setLocationAssets(merged);
       setTransferMessage({ open: true, message: 'RNB resolved. It will no longer show on this customer.', severity: 'success' });
     } catch (e) {
@@ -244,22 +352,11 @@ export default function CustomerDetail() {
         })
         .eq('id', rental.id);
       if (error) throw error;
-      const { data: rentalById } = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_id', id)
-        .eq('organization_id', customer.organization_id)
-        .is('rental_end_date', null);
-      const { data: rentalByName } = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_name', customer.name)
-        .eq('organization_id', customer.organization_id)
-        .is('rental_end_date', null)
-        .eq('is_dns', true);
-      const seen = new Set((rentalById || []).map((r) => r.id));
-      const merged = [...(rentalById || [])];
-      (rentalByName || []).forEach((r) => { if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); } });
+      const merged = await fetchMergedOpenRentalsForCustomer(
+        customer.organization_id,
+        customer.name,
+        customer.CustomerListID
+      );
       setLocationAssets(merged);
       setTransferMessage({ open: true, message: 'RNS resolved. It will no longer reduce this customer\'s total.', severity: 'success' });
     } catch (e) {
@@ -272,25 +369,30 @@ export default function CustomerDetail() {
 
   useEffect(() => {
     const fetchData = async () => {
+      if (!organization?.id) {
+        return;
+      }
       setLoading(true);
       setError(null);
       try {
-        // First, check if there are multiple customers with this ID
-        const { data: allCustomers, error: checkError } = await supabase
-          .from('customers')
-          .select('*')
-          .eq('CustomerListID', id);
-        
+        const { data: allCustomers, error: checkError } = await fetchCustomerRowForRouteParam(
+          supabase,
+          organization.id,
+          id
+        );
+
         if (checkError) throw checkError;
-        
+
         if (!allCustomers || allCustomers.length === 0) {
           setError(`Customer with ID "${id}" not found.`);
           setLoading(false);
           return;
         }
-        
+
         if (allCustomers.length > 1) {
-          setError(`Multiple customers found with ID "${id}". This indicates a data integrity issue. Please contact support.`);
+          setError(
+            `Multiple customers found with ID "${id}". This indicates a data integrity issue. Please contact support.`
+          );
           setLoading(false);
           return;
         }
@@ -315,37 +417,21 @@ export default function CustomerDetail() {
           setChildCustomers([]);
         }
         
-        // SECURITY: Only fetch bottles from user's organization
-        const { data: customerAssetsData, error: customerAssetsError } = await supabase
-          .from('bottles')
-          .select('*')
-          .eq('assigned_customer', id)
-          .eq('organization_id', customerData.organization_id);
-        if (customerAssetsError) throw customerAssetsError;
-        setCustomerAssets(customerAssetsData || []);
+        const orgId = customerData.organization_id;
+        const customerAssetsData = await fetchMergedBottlesForCustomer(
+          orgId,
+          customerData.name,
+          customerData.CustomerListID
+        );
+        setCustomerAssets(customerAssetsData);
         
         setBottleSummary(summarizeBottlesByType(customerAssetsData || []));
         
-        // Get all rentals (active only). Match by customer_id (CustomerListID) and by customer_name so we don't miss any.
-        const { data: rentalById, error: rentalError } = await supabase
-          .from('rentals')
-          .select('*')
-          .eq('customer_id', id)
-          .eq('organization_id', customerData.organization_id)
-          .is('rental_end_date', null);
-        if (rentalError) throw rentalError;
-        // Also fetch by customer_name (all active, not just DNS) in case rentals were stored with name instead of ID
-        const { data: rentalByName, error: rentalByNameError } = await supabase
-          .from('rentals')
-          .select('*')
-          .eq('customer_name', customerData.name)
-          .eq('organization_id', customerData.organization_id)
-          .is('rental_end_date', null);
-        const seen = new Set((rentalById || []).map(r => r.id));
-        const merged = [...(rentalById || [])];
-        if (!rentalByNameError && rentalByName?.length) {
-          rentalByName.forEach(r => { if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); } });
-        }
+        const merged = await fetchMergedOpenRentalsForCustomer(
+          orgId,
+          customerData.name,
+          customerData.CustomerListID
+        );
         // Backfill: assigned bottles with no rental record (e.g. assigned before rental creation was enforced)
         const bottleIdsWithRental = new Set(merged.map(r => r.bottle_id).filter(Boolean));
         const barcodesWithRental = new Set(merged.map(r => r.bottle_barcode).filter(Boolean));
@@ -359,10 +445,10 @@ export default function CustomerDetail() {
           const pricingCtx = await fetchOrgRentalPricingContext(supabase, customerData.organization_id);
           for (const bottle of bottlesWithoutRental) {
             const barcode = bottle.barcode_number || bottle.barcode;
-            const rental_amount = monthlyRateForNewRental(id, bottle, pricingCtx);
+            const rental_amount = monthlyRateForNewRental(customerData.CustomerListID, bottle, pricingCtx);
             await supabase.from('rentals').insert({
               organization_id: customerData.organization_id,
-              customer_id: id,
+              customer_id: customerData.CustomerListID,
               customer_name: customerData.name,
               bottle_id: bottle.id,
               bottle_barcode: barcode,
@@ -376,20 +462,12 @@ export default function CustomerDetail() {
               is_dns: false,
             });
           }
-          const { data: refetched } = await supabase
-            .from('rentals')
-            .select('*')
-            .eq('customer_id', id)
-            .eq('organization_id', customerData.organization_id)
-            .is('rental_end_date', null);
-          if (refetched?.length) {
-            const seen2 = new Set(refetched.map(r => r.id));
-            const merged2 = [...refetched];
-            (rentalByName || []).forEach(r => { if (!seen2.has(r.id)) { seen2.add(r.id); merged2.push(r); } });
-            setLocationAssets(merged2);
-          } else {
-            setLocationAssets(merged);
-          }
+          const mergedAfterBackfill = await fetchMergedOpenRentalsForCustomer(
+            orgId,
+            customerData.name,
+            customerData.CustomerListID
+          );
+          setLocationAssets(mergedAfterBackfill);
         } else {
           setLocationAssets(merged);
         }
@@ -399,7 +477,13 @@ export default function CustomerDetail() {
       setLoading(false);
     };
     fetchData();
-  }, [id, customerDataVersion]);
+  }, [
+    id,
+    customerDataVersion,
+    organization?.id,
+    fetchMergedBottlesForCustomer,
+    fetchMergedOpenRentalsForCustomer,
+  ]);
 
   // Load parent customer options when entering edit (for "Under parent" selector)
   useEffect(() => {
@@ -476,6 +560,11 @@ export default function CustomerDetail() {
           rental,
           displayAmount: Number.isFinite(raw) ? raw : 0,
         };
+      }
+      // Respect explicit per-rental overrides saved from the Rentals edit dialog.
+      if (rental.rental_amount_manual === true) {
+        const raw = parseFloat(String(rental.rental_amount ?? ''));
+        return { rental, displayAmount: Number.isFinite(raw) ? raw : 0 };
       }
       let bottle = null;
       if (isDNS) {
@@ -611,16 +700,16 @@ export default function CustomerDetail() {
         severity: 'success'
       });
 
-      const { data: customerAssetsData, error: customerAssetsError } = await supabase
-        .from('bottles')
-        .select('*')
-        .eq('assigned_customer', id)
-        .eq('organization_id', orgId);
-
-      if (!customerAssetsError) {
+      try {
+        const customerAssetsData = await fetchMergedBottlesForCustomer(
+          orgId,
+          customer?.name,
+          customer?.CustomerListID
+        );
         setCustomerAssets(customerAssetsData || []);
-
         setBottleSummary(summarizeBottlesByType(customerAssetsData || []));
+      } catch (e) {
+        logger.error('Refresh bottles after warehouse transfer:', e);
       }
 
       setSelectedAssets([]);

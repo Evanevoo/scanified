@@ -10,6 +10,7 @@ import { bottleAssignmentService } from '../services/bottleAssignmentService';
 import { reconcileShippedBottleAssignments } from '../services/reconcileShippedBottleAssignments';
 import { fetchOrgRentalPricingContext, monthlyRateForProductPlaceholder } from '../services/rentalPricingContext';
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
+import { resolveCustomerListId } from '../utils/resolveCustomerListId';
 import { parseDbTimestamp } from '../utils/parseDbTimestamp';
 
 // Enhanced data parsing with better error handling
@@ -905,28 +906,18 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         throw new Error('No order number found in record');
       }
       
-      // Get customer ID from customer name
+      // Resolve to CustomerListID (not customers.id UUID) so Customer Detail / AssetDetail /
+      // reports all find these assignments — they query by CustomerListID.
       let newCustomerId = null;
       if (newCustomerName) {
-        logger.log('🔍 Looking up customer:', newCustomerName, 'org:', organization?.id);
-        const { data: customer, error: customerError } = await supabase
-          .from('customers')
-          .select('id, CustomerListID')
-          .eq('name', newCustomerName)
-          .eq('organization_id', organization?.id)
-          .limit(1)
-          .single();
-        
-        if (customerError) {
-          logger.error('❌ Error looking up customer:', customerError);
-        } else if (customer) {
-          newCustomerId = customer.id || customer.CustomerListID;
-          logger.log('✅ Found customer ID:', newCustomerId);
+        const resolved = await resolveCustomerListId(supabase, organization?.id, newCustomerName);
+        if (resolved?.customerListId) {
+          newCustomerId = resolved.customerListId;
         } else {
-          logger.warn('⚠️ Customer not found:', newCustomerName);
+          logger.warn('Customer not found by name; assignment will fall back to name:', newCustomerName);
         }
       } else {
-        logger.warn('⚠️ No customer name found in record');
+        logger.warn('No customer name found in record');
       }
       
       // Get scanned barcodes split by SHIP (assign) vs RETURN (unassign)
@@ -1601,12 +1592,23 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               }
             }
 
+            const dateRowForReconcile = (importData?.rows || importData?.line_items || []).find(
+              (row) => row?.date || row?.Date || row?.invoice_date || row?.InvoiceDate
+            );
+            const effectiveDateForReconcile =
+              dateRowForReconcile?.date ||
+              dateRowForReconcile?.Date ||
+              dateRowForReconcile?.invoice_date ||
+              dateRowForReconcile?.InvoiceDate ||
+              null;
+
             const reconcileWarnings = await reconcileShippedBottleAssignments(supabase, {
               organizationId: organization?.id,
               shipBarcodes: shipBarcodesUnique,
               customerId,
               customerName,
               orderNumber: orderNum || null,
+              effectiveDate: effectiveDateForReconcile,
             });
             if (reconcileWarnings.length > 0) {
               logger.warn('ImportApprovalDetail post-verify reassignment:', reconcileWarnings);
@@ -2284,9 +2286,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         logger.warn('Sales order verify after save:', { verifyErr, savedOrder, expected: newOrder });
       }
 
-      // 3) Update any other pending imports with the same old order number
-      const invoiceIds = [];
-      const receiptIds = [];
+      // 3) Merge into existing destination record if one already has the new order number,
+      //    and update any other pending imports with the same OLD order number.
+      const invoiceIdsOld = [];
+      const receiptIdsOld = [];
+      let mergedIntoDestination = false;
       const { data: invList } = await supabase
         .from('imported_invoices')
         .select('id, data')
@@ -2297,7 +2301,31 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       for (const row of invList || []) {
         if (row.id === currentId) continue;
         const data = parseDataField(row.data);
-        if (trim(getOrderNumber(data)) === currentOrder) invoiceIds.push(row.id);
+        const rowOrder = trim(getOrderNumber(data));
+        if (rowOrder === newOrder && !mergedIntoDestination) {
+          // Destination record exists — merge source invoice rows into it
+          const destRows = data.rows || data.line_items || [];
+          const mergedRows = [...destRows, ...updatedRows];
+          const mergedPayload = {
+            data: {
+              ...data,
+              rows: mergedRows,
+              summary: {
+                ...(data.summary || {}),
+                total_rows: mergedRows.length,
+                merged_from_order: currentOrder,
+                merged_at: new Date().toISOString()
+              }
+            }
+          };
+          await supabase.from('imported_invoices').update(mergedPayload).eq('id', row.id);
+          // Remove the source record since its data is now merged
+          await supabase.from('imported_invoices').delete().eq('id', currentId);
+          mergedIntoDestination = true;
+          logger.log(`Merged invoice rows from order ${currentOrder} into existing order ${newOrder} (record ${row.id})`);
+        } else if (rowOrder === currentOrder) {
+          invoiceIdsOld.push(row.id);
+        }
       }
       const { data: recList } = await supabase
         .from('imported_sales_receipts')
@@ -2309,10 +2337,32 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       for (const row of recList || []) {
         if (row.id === currentId) continue;
         const data = parseDataField(row.data);
-        if (trim(getOrderNumber(data)) === currentOrder) receiptIds.push(row.id);
+        const rowOrder = trim(getOrderNumber(data));
+        if (rowOrder === newOrder && !mergedIntoDestination) {
+          const destRows = data.rows || data.line_items || [];
+          const mergedRows = [...destRows, ...updatedRows];
+          const mergedPayload = {
+            data: {
+              ...data,
+              rows: mergedRows,
+              summary: {
+                ...(data.summary || {}),
+                total_rows: mergedRows.length,
+                merged_from_order: currentOrder,
+                merged_at: new Date().toISOString()
+              }
+            }
+          };
+          await supabase.from('imported_sales_receipts').update(mergedPayload).eq('id', row.id);
+          await supabase.from('imported_sales_receipts').delete().eq('id', currentId);
+          mergedIntoDestination = true;
+          logger.log(`Merged receipt rows from order ${currentOrder} into existing order ${newOrder} (record ${row.id})`);
+        } else if (rowOrder === currentOrder) {
+          receiptIdsOld.push(row.id);
+        }
       }
-      if (invoiceIds.length > 0) await supabase.from('imported_invoices').update(payload).in('id', invoiceIds);
-      if (receiptIds.length > 0) await supabase.from('imported_sales_receipts').update(payload).in('id', receiptIds);
+      if (invoiceIdsOld.length > 0) await supabase.from('imported_invoices').update(payload).in('id', invoiceIdsOld);
+      if (receiptIdsOld.length > 0) await supabase.from('imported_sales_receipts').update(payload).in('id', receiptIdsOld);
 
       // 4) Move scans and bottle_scans from old order to new order (RPC runs in DB so RLS cannot block it)
       let scansMoved = false;
@@ -2340,7 +2390,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         }
       }
 
-      setActionMessage(scansMoved ? `Saved. Order ${currentOrder} → ${newOrder}; scans moved. Returning to list...` : `Saved. Order number is now ${newOrder}. Returning to list...`);
+      const mergeNote = mergedIntoDestination ? ` Invoice rows merged into existing order ${newOrder}.` : '';
+      setActionMessage(scansMoved ? `Saved. Order ${currentOrder} → ${newOrder}; scans moved.${mergeNote} Returning to list...` : `Saved. Order number is now ${newOrder}.${mergeNote} Returning to list...`);
       setTimeout(() => navigate('/import-approvals', { state: { refetch: true } }), 1500);
     } catch (error) {
       logger.error('Error updating sales order number:', error);

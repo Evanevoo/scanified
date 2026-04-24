@@ -74,6 +74,84 @@ const normalizeStatus = (s) => {
   return 'empty';
 };
 
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+const toStartOfDay = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+};
+
+const sameCustomer = (record, assignedCustomerId, customerName) => {
+  const recId = String(record?.customer_id || record?.assigned_customer || '').trim();
+  const recName = String(record?.customer_name || '').trim().toLowerCase();
+  const targetId = String(assignedCustomerId || '').trim();
+  const targetName = String(customerName || '').trim().toLowerCase();
+  if (targetId && recId && recId === targetId) return true;
+  if (targetName && recName && recName === targetName) return true;
+  return false;
+};
+
+const modeIndicatesDelivery = (record) => {
+  const mode = String(record?.mode || record?.action || '').trim().toUpperCase();
+  return mode === 'SHIP' || mode === 'DELIVERY' || mode === 'OUT';
+};
+
+const TRACKED_BOTTLE_FIELDS = [
+  'barcode_number',
+  'serial_number',
+  'product_code',
+  'gas_type',
+  'status',
+  'location',
+  'assigned_customer',
+  'customer_name',
+  'ownership',
+  'description',
+];
+
+const normalizeComparableValue = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed === '' ? null : trimmed;
+  }
+  return value;
+};
+
+const valuesDiffer = (a, b) => JSON.stringify(normalizeComparableValue(a)) !== JSON.stringify(normalizeComparableValue(b));
+
+const buildBottleFieldChanges = (previousBottle, updatedFields) => {
+  const changes = {};
+  TRACKED_BOTTLE_FIELDS.forEach((field) => {
+    if (!(field in updatedFields)) return;
+    const from = normalizeComparableValue(previousBottle?.[field]);
+    const to = normalizeComparableValue(updatedFields?.[field]);
+    if (!valuesDiffer(from, to)) return;
+    changes[field] = { from, to };
+  });
+  return changes;
+};
+
+const stringifyHistoryDetails = (details) => {
+  if (!details) return '';
+  if (typeof details === 'string') return details;
+  if (details.field_changes && typeof details.field_changes === 'object') {
+    const lines = Object.entries(details.field_changes).map(([field, change]) => {
+      const from = change?.from == null ? 'empty' : String(change.from);
+      const to = change?.to == null ? 'empty' : String(change.to);
+      return `${field}: ${from} -> ${to}`;
+    });
+    if (lines.length > 0) return lines.join(' | ');
+  }
+  try {
+    return JSON.stringify(details);
+  } catch {
+    return String(details);
+  }
+};
+
 export default function AssetDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -97,6 +175,48 @@ export default function AssetDetail() {
   const [customers, setCustomers] = useState([]);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [gasTypes, setGasTypes] = useState([]);
+
+  const logBottleAuditEvent = async ({ action, details, bottleId = null }) => {
+    if (!profile?.organization_id || !bottleId) return;
+    const basePayload = {
+      organization_id: profile.organization_id,
+      user_id: profile?.id || null,
+      action,
+      details,
+      created_at: new Date().toISOString(),
+    };
+    const tableAwarePayload = {
+      ...basePayload,
+      table_name: 'bottles',
+      record_id: bottleId,
+    };
+    const { error } = await supabase.from('audit_logs').insert(tableAwarePayload);
+    if (error) {
+      logger.warn('Primary bottle audit insert failed, retrying minimal payload:', error);
+      const { error: fallbackError } = await supabase.from('audit_logs').insert(basePayload);
+      if (fallbackError) {
+        logger.error('Failed to write bottle audit log:', fallbackError);
+      }
+    }
+  };
+
+  const derivedDaysAtLocation = React.useMemo(() => {
+    if (!asset?.assigned_customer || !movementHistory.length) {
+      return asset?.days_at_location || 0;
+    }
+
+    const latestCustomerDelivery = movementHistory
+      .filter((record) => modeIndicatesDelivery(record) && sameCustomer(record, asset.assigned_customer, asset.customer_name))
+      .map((record) => toStartOfDay(record.created_at))
+      .filter(Boolean)
+      .sort((a, b) => b.getTime() - a.getTime())[0];
+
+    if (!latestCustomerDelivery) return asset?.days_at_location || 0;
+
+    const today = toStartOfDay(new Date());
+    const diffDays = Math.floor((today.getTime() - latestCustomerDelivery.getTime()) / MS_PER_DAY);
+    return Math.max(0, diffDays);
+  }, [asset?.assigned_customer, asset?.customer_name, asset?.days_at_location, movementHistory]);
 
   useEffect(() => {
     fetchAssetDetail();
@@ -268,23 +388,37 @@ export default function AssetDetail() {
     }
   };
 
-  const fetchCustomerData = async (customerId) => {
+  const fetchCustomerData = async (customerHint) => {
     try {
-      if (!profile?.organization_id || !customerId) return;
+      if (!profile?.organization_id || !customerHint) return;
 
-      const { data, error } = await supabase
+      // assigned_customer may be a CustomerListID OR (from legacy import paths) a display name.
+      // Try ID first, then fall back to name lookup so the linked customer card still appears.
+      const byId = await supabase
         .from('customers')
         .select('CustomerListID, name, location, city')
-        .eq('CustomerListID', customerId)
+        .eq('CustomerListID', customerHint)
         .eq('organization_id', profile.organization_id)
-        .single();
+        .maybeSingle();
 
-      if (error) {
-        logger.error('Error fetching customer data:', error);
+      if (byId.data) {
+        setCustomerData(byId.data);
         return;
       }
 
-      setCustomerData(data);
+      const byName = await supabase
+        .from('customers')
+        .select('CustomerListID, name, location, city')
+        .eq('name', customerHint)
+        .eq('organization_id', profile.organization_id)
+        .maybeSingle();
+
+      if (byName.data) {
+        setCustomerData(byName.data);
+        return;
+      }
+
+      setCustomerData(null);
     } catch (error) {
       logger.error('Error fetching customer data:', error);
     }
@@ -343,6 +477,33 @@ export default function AssetDetail() {
       }
 
       let allHistory = [];
+      const nowIso = new Date().toISOString();
+      const isMissingSourceError = (err) => {
+        const msg = String(err?.message || '').toLowerCase();
+        return (
+          msg.includes('does not exist') ||
+          msg.includes('could not find the table') ||
+          msg.includes('relation') ||
+          msg.includes('schema cache')
+        );
+      };
+      const runOptionalQuery = async (queryFactory, sourceLabel) => {
+        try {
+          const { data, error } = await queryFactory();
+          if (error) {
+            if (!isMissingSourceError(error)) {
+              logger.warn(`Movement history optional source failed (${sourceLabel}):`, error);
+            }
+            return [];
+          }
+          return data || [];
+        } catch (err) {
+          if (!isMissingSourceError(err)) {
+            logger.warn(`Movement history optional source threw (${sourceLabel}):`, err);
+          }
+          return [];
+        }
+      };
 
       // Fetch from bottle_scans (single source for movement history)
       if (barcodeNumber) {
@@ -364,6 +525,36 @@ export default function AssetDetail() {
             });
           });
         }
+      }
+
+      // Include older/parallel scan stream if present
+      if (barcodeNumber) {
+        const cylinderScanRows = await runOptionalQuery(
+          () =>
+            supabase
+              .from('cylinder_scans')
+              .select('*')
+              .or(`barcode_number.eq.${barcodeNumber},cylinder_barcode.eq.${barcodeNumber},bottle_barcode.eq.${barcodeNumber}`)
+              .eq('organization_id', profile.organization_id)
+              .order('created_at', { ascending: false })
+              .limit(50),
+          'cylinder_scans'
+        );
+        cylinderScanRows.forEach((scan) => {
+          allHistory.push({
+            ...scan,
+            id: scan.id || `${scan.created_at || nowIso}_cylinder_scan`,
+            history_type: 'cylinder_scan',
+            barcode_number: scan.barcode_number || scan.cylinder_barcode || scan.bottle_barcode || barcodeNumber,
+            customer_id: scan.customer_id || null,
+            customer_name: scan.customer_name || null,
+            location: scan.location || null,
+            created_at: scan.created_at || scan.timestamp || nowIso,
+            action: scan.mode || scan.action || 'SCAN',
+            mode: scan.mode || scan.action || 'SCAN',
+            order_number: scan.order_number || scan.invoice_number || null
+          });
+        });
       }
 
       // 3. Fetch from rentals table (for shipment/return dates)
@@ -413,6 +604,114 @@ export default function AssetDetail() {
         }
       }
 
+      // Include exceptions as timeline events so users can see non-scan changes
+      if (asset.id && profile?.organization_id) {
+        const exceptionRows = await runOptionalQuery(
+          () =>
+            supabase
+              .from('asset_exceptions')
+              .select('*')
+              .eq('asset_id', asset.id)
+              .eq('organization_id', profile.organization_id)
+              .order('created_at', { ascending: false })
+              .limit(50),
+          'asset_exceptions'
+        );
+        exceptionRows.forEach((item) => {
+          allHistory.push({
+            ...item,
+            id: `exception_${item.id}`,
+            history_type: 'exception',
+            barcode_number: barcodeNumber,
+            customer_id: item.customer_id || null,
+            customer_name: item.customer_name || null,
+            location: item.location || asset.location || null,
+            created_at: item.created_at || nowIso,
+            action: item.exception_type ? `EXCEPTION: ${item.exception_type}` : 'EXCEPTION',
+            mode: item.resolution_status || 'EXCEPTION',
+            notes: item.resolution_note || item.notes || null,
+            order_number: item.order_number || null
+          });
+        });
+      }
+
+      // Optional transfer activity source
+      if (profile?.organization_id && (asset.id || barcodeNumber)) {
+        const transferRows = await runOptionalQuery(
+          () =>
+            supabase
+              .from('transfer_history')
+              .select('*')
+              .eq('organization_id', profile.organization_id)
+              .or(`bottle_id.eq.${asset.id},bottle_barcode.eq.${barcodeNumber}`)
+              .order('created_at', { ascending: false })
+              .limit(50),
+          'transfer_history'
+        );
+        transferRows.forEach((item) => {
+          allHistory.push({
+            ...item,
+            id: `transfer_${item.id}`,
+            history_type: 'transfer',
+            barcode_number: item.bottle_barcode || barcodeNumber,
+            customer_id: item.customer_id || null,
+            customer_name: item.customer_name || null,
+            location: item.to_location || item.location || item.from_location || null,
+            created_at: item.created_at || item.transfer_date || nowIso,
+            action: item.action || item.transfer_type || 'TRANSFER',
+            mode: 'TRANSFER',
+            notes: item.notes || null,
+            order_number: item.order_number || null
+          });
+        });
+      }
+
+      // Optional audit source for direct bottle edits
+      if (profile?.organization_id && asset.id) {
+        let auditRows = await runOptionalQuery(
+          () =>
+            supabase
+              .from('audit_logs')
+              .select('*')
+              .eq('organization_id', profile.organization_id)
+              .eq('table_name', 'bottles')
+              .eq('record_id', asset.id)
+              .order('created_at', { ascending: false })
+              .limit(50),
+          'audit_logs'
+        );
+        if (!auditRows.length) {
+          auditRows = await runOptionalQuery(
+            () =>
+              supabase
+                .from('audit_logs')
+                .select('*')
+                .eq('organization_id', profile.organization_id)
+                .eq('record_id', asset.id)
+                .order('created_at', { ascending: false })
+                .limit(50),
+            'audit_logs_fallback'
+          );
+        }
+        auditRows.forEach((item) => {
+          allHistory.push({
+            ...item,
+            id: `audit_${item.id}`,
+            history_type: 'audit',
+            barcode_number: barcodeNumber,
+            customer_id: null,
+            customer_name: null,
+            location: item.location || asset.location || null,
+            created_at: item.created_at || nowIso,
+            action: item.action ? `AUDIT: ${item.action}` : 'AUDIT UPDATE',
+            mode: item.action || 'AUDIT',
+            notes: stringifyHistoryDetails(item.details),
+            details: item.details || null,
+            order_number: item.order_number || null
+          });
+        });
+      }
+
       // 4. Fetch from cylinder_fills table (for fill history)
       if (barcodeNumber || asset.id) {
         const orClauses = [];
@@ -455,6 +754,17 @@ export default function AssetDetail() {
           created_at: asset.created_at,
           action: 'Add New Asset',
           mode: 'CREATE',
+          location: asset.location
+        });
+      }
+      if (asset.updated_at && asset.created_at && new Date(asset.updated_at).getTime() !== new Date(asset.created_at).getTime()) {
+        allHistory.push({
+          id: 'bottle_last_updated',
+          history_type: 'record_update',
+          barcode_number: barcodeNumber,
+          created_at: asset.updated_at,
+          action: 'Asset Record Updated',
+          mode: 'UPDATE',
           location: asset.location
         });
       }
@@ -591,6 +901,20 @@ export default function AssetDetail() {
 
       if (error) throw error;
 
+      const fieldChanges = buildBottleFieldChanges(asset, updateData);
+      if (Object.keys(fieldChanges).length > 0) {
+        await logBottleAuditEvent({
+          action: 'BOTTLE_UPDATE',
+          bottleId: id,
+          details: {
+            event_type: 'bottle_update',
+            bottle_id: id,
+            barcode_number: asset?.barcode_number || updateData?.barcode_number || null,
+            field_changes: fieldChanges,
+          },
+        });
+      }
+
       // Create a scan record if assignment changed
       const assignmentChangedForScan = previousCustomer !== (editData.assigned_customer || null);
       const locationChangedEffective = previousLocation !== finalLocationForSave;
@@ -655,6 +979,28 @@ export default function AssetDetail() {
       if (!profile?.organization_id) {
         throw new Error('Organization not found');
       }
+
+      await logBottleAuditEvent({
+        action: 'BOTTLE_DELETE',
+        bottleId: id,
+        details: {
+          event_type: 'bottle_delete',
+          bottle_id: id,
+          barcode_number: asset?.barcode_number || null,
+          snapshot: {
+            barcode_number: asset?.barcode_number || null,
+            serial_number: asset?.serial_number || null,
+            product_code: asset?.product_code || null,
+            gas_type: asset?.gas_type || null,
+            status: asset?.status || null,
+            location: asset?.location || null,
+            assigned_customer: asset?.assigned_customer || null,
+            customer_name: asset?.customer_name || null,
+            ownership: asset?.ownership || null,
+            description: asset?.description || null,
+          },
+        },
+      });
       
       const { error } = await supabase
         .from('bottles') // Keep using bottles table for now
@@ -891,7 +1237,7 @@ export default function AssetDetail() {
               Days at Location
             </Typography>
             <Typography variant="body1" fontWeight="bold">
-              {asset.days_at_location || 0} days
+              {derivedDaysAtLocation} days
             </Typography>
           </Grid>
           <Grid item xs={12} md={6}>
@@ -984,7 +1330,10 @@ export default function AssetDetail() {
                   const group = asset.gas_type || record.gas_type || record.group || '';
                   const type = asset.product_code || record.product_code || record.type || '';
                   const productCode = asset.product_code || record.product_code || '';
-                  const description = asset.description || record.description || '';
+                  const description =
+                    record.history_type === 'audit'
+                      ? (record.notes || record.description || asset.description || '')
+                      : (record.description || record.notes || asset.description || '');
                   const barcode = asset.barcode_number || record.barcode_number || record.bottle_barcode || '';
                   
                   // Format date; show date-only when value is date-only or midnight UTC to avoid

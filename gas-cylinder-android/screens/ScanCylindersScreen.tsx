@@ -426,8 +426,6 @@ export default function ScanCylindersScreen() {
   const [showCustomerPopup, setShowCustomerPopup] = useState(false);
   const [showCustomerScan, setShowCustomerScan] = useState(false);
   const [showOrderScan, setShowOrderScan] = useState(false);
-  const [showEnterBarcodeModal, setShowEnterBarcodeModal] = useState(false);
-  const [enterBarcodeInput, setEnterBarcodeInput] = useState('');
   const [showSimpleTest, setShowSimpleTest] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
   const [focusTrigger, setFocusTrigger] = useState(0); // Used to trigger autofocus on tap
@@ -1557,12 +1555,6 @@ export default function ScanCylindersScreen() {
               >
                 <Text style={styles.scanButtonText}>📷</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={{ paddingVertical: 8, paddingHorizontal: 12, justifyContent: 'center' }}
-                onPress={() => setShowEnterBarcodeModal(true)}
-              >
-                <Text style={[styles.rescanButtonText, { color: colors.primary, fontSize: 14 }]}>Enter barcode</Text>
-              </TouchableOpacity>
             </View>
             {customerBarcodeError ? (
               <Text style={[styles.errorText, { color: colors.error }]}>{customerBarcodeError}</Text>
@@ -1676,15 +1668,6 @@ export default function ScanCylindersScreen() {
       {/* Camera Scanner - Customer */}
       {showCustomerScan && (
         <View style={{ flex: 1, backgroundColor: '#000' }}>
-        <TouchableOpacity
-          style={{ position: 'absolute', bottom: 40, left: 20, right: 20, zIndex: 10, paddingVertical: 12, alignItems: 'center' }}
-          onPress={() => {
-            setShowCustomerScan(false);
-            setShowEnterBarcodeModal(true);
-          }}
-        >
-          <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16 }}>Can't scan? Enter barcode</Text>
-        </TouchableOpacity>
         <ScanArea
             searchCustomerByName={async (names) => {
               const c = await searchCustomerByName(names);
@@ -1750,48 +1733,6 @@ export default function ScanCylindersScreen() {
         </View>
       )}
 
-      {/* Manual barcode entry when camera won't read paper (e.g. iOS sales receipt) */}
-      <Modal
-        visible={showEnterBarcodeModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowEnterBarcodeModal(false)}
-      >
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 }} onPress={() => setShowEnterBarcodeModal(false)}>
-          <Pressable style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 20 }} onPress={(e) => e.stopPropagation()}>
-            <Text style={[styles.customerName, { color: colors.text, marginBottom: 8 }]}>Enter customer barcode</Text>
-            <Text style={[styles.customerId, { color: colors.textSecondary, marginBottom: 12, fontSize: 13 }]}>
-              Type or paste the barcode from the sales receipt (e.g. 80000A62-1711404132A or *%80000A62-1711404132A*)
-            </Text>
-            <TextInput
-              style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 12, fontSize: 16, color: colors.text, marginBottom: 16 }}
-              placeholder="80000A62-1711404132A"
-              placeholderTextColor={colors.textSecondary}
-              value={enterBarcodeInput}
-              onChangeText={setEnterBarcodeInput}
-              autoCapitalize="characters"
-              autoCorrect={false}
-            />
-            <View style={{ flexDirection: 'row', gap: 12, justifyContent: 'flex-end' }}>
-              <TouchableOpacity onPress={() => { setShowEnterBarcodeModal(false); setEnterBarcodeInput(''); }}>
-                <Text style={[styles.rescanButtonText, { color: colors.textSecondary }]}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={{ backgroundColor: colors.primary, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8 }}
-                onPress={() => {
-                  const barcode = enterBarcodeInput.trim();
-                  if (!barcode) return;
-                  setShowEnterBarcodeModal(false);
-                  setEnterBarcodeInput('');
-                  handleBarcodeScanned({ data: barcode, type: 'manual', target: 'customer' });
-                }}
-              >
-                <Text style={[styles.continueButtonText, { color: '#FFF' }]}>Find customer</Text>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
     </View>
   );
 }

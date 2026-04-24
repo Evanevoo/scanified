@@ -74,6 +74,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   barcodeTypesOverride,
   acceptForFeedback,
 }) => {
+  const DECODE_ROI_INSET = 0.04;
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraReady, setCameraReady] = useState(false); // Defer mount to prevent Android crash
   const [previewReady, setPreviewReady] = useState(false); // Hide "Starting camera..." overlay when native preview is ready
@@ -314,13 +315,20 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
   const frameWidthRatio = screenWidth > 0 ? clamp01(frameWidthPx / screenWidth) : 0.8;
   const frameHeightRatio = screenHeight > 0 ? clamp01(frameHeightPx / screenHeight) : 0.2;
+  const frameRectNormalized = {
+    x: clamp01(0.5 - frameWidthRatio / 2),
+    y: clamp01(frameTopPercent / 100),
+    width: frameWidthRatio,
+    height: frameHeightRatio,
+  };
+  const decodeRoiNormalized = {
+    x: clamp01(frameRectNormalized.x + frameRectNormalized.width * DECODE_ROI_INSET),
+    y: clamp01(frameRectNormalized.y + frameRectNormalized.height * DECODE_ROI_INSET),
+    width: clamp01(frameRectNormalized.width * (1 - DECODE_ROI_INSET * 2)),
+    height: clamp01(frameRectNormalized.height * (1 - DECODE_ROI_INSET * 2)),
+  };
   const scanningRegionOfInterest = enableRegionOfInterest
-    ? {
-        x: clamp01(0.5 - frameWidthRatio / 2),
-        y: clamp01(frameTopPercent / 100),
-        width: frameWidthRatio,
-        height: frameHeightRatio,
-      }
+    ? decodeRoiNormalized
     : undefined;
 
   return (

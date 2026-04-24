@@ -240,9 +240,9 @@ export class AssetTransferService {
 
         const useTemplate = template && !template.is_dns;
         const fromTemplate = useTemplate ? parseFloat(String(template.rental_amount)) : NaN;
+        const usedTemplateRate = Number.isFinite(fromTemplate) && fromTemplate > 0;
         const computedForTarget = monthlyRateForNewRental(toCustomerId, asset, pricingCtx);
-        const rentalAmount =
-          Number.isFinite(fromTemplate) && fromTemplate > 0 ? fromTemplate : computedForTarget;
+        const rentalAmount = usedTemplateRate ? fromTemplate : computedForTarget;
 
         const insertRow = {
           organization_id: organizationId,
@@ -253,6 +253,9 @@ export class AssetTransferService {
           rental_start_date: today,
           rental_end_date: null,
           rental_amount: rentalAmount,
+          // Preserve the manual-override flag when we carry the template's rate forward,
+          // so an edited rate survives a transfer. Auto-computed target rates stay unpinned.
+          rental_amount_manual: usedTemplateRate && template?.rental_amount_manual === true,
           rental_type: useTemplate ? (template.rental_type || 'monthly') : 'monthly',
           tax_code: template?.tax_code || 'GST+PST',
           tax_rate: template?.tax_rate != null ? template.tax_rate : 0.11,
