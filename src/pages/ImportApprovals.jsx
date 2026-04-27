@@ -1170,6 +1170,7 @@ export default function ImportApprovals() {
       const individualRecords = [];
       (data || []).forEach(importRecord => {
         const splitRecords = splitImportIntoIndividualRecords(importRecord);
+        splitRecords.forEach(r => { r._sourceTable = 'imported_invoices'; });
         individualRecords.push(...splitRecords);
       });
       
@@ -1814,7 +1815,6 @@ export default function ImportApprovals() {
         if (newTime >= existingTime) mergedByKey[k] = r;
       };
       (filteredBottleScans || []).forEach(mergeNewest);
-      (mobileScans || []).forEach(mergeNewest);
       const allScans = Object.values(mergedByKey);
       
       setAllScannedRows(allScans);
@@ -3298,14 +3298,77 @@ export default function ImportApprovals() {
     };
   }
 
+  function firstNumericValue(...values) {
+    for (const value of values) {
+      if (value == null) continue;
+      const str = String(value).trim();
+      if (str === '') continue;
+      const num = Number(str);
+      if (!Number.isNaN(num)) return num;
+    }
+    return 0;
+  }
+
   function getShippedQuantity(lineItem) {
-    // Prefer invoice-native fields first; qty_out is scan-derived and should be fallback only.
-    return parseInt(lineItem.shipped || lineItem.Shipped || lineItem.quantity || lineItem.qty_out || lineItem.QtyOut || 0, 10);
+    // Prefer qty_out/QtyOut first in this workflow.
+    // Some legacy rows carry stale shipped=0 while qty_out has the correct imported SHP value.
+    return firstNumericValue(
+      lineItem.qty_out,
+      lineItem.QtyOut,
+      lineItem.shipped,
+      lineItem.Shipped,
+      lineItem.quantity
+    );
   }
 
   function getReturnedQuantity(lineItem) {
-    // Prefer invoice-native fields first; qty_in is scan-derived and should be fallback only.
-    return parseInt(lineItem.returned || lineItem.Returned || lineItem.return_qty || lineItem.ReturnQty || lineItem.qty_in || lineItem.QtyIn || 0, 10);
+    // Prefer qty_in/QtyIn first for consistency with imported RTN values.
+    return firstNumericValue(
+      lineItem.qty_in,
+      lineItem.QtyIn,
+      lineItem.returned,
+      lineItem.Returned,
+      lineItem.return_qty,
+      lineItem.ReturnQty
+    );
+  }
+
+  function getInvoiceQuantitiesForProduct(data, productCode, orderNum = '', customerName = '', customerId = '') {
+    const rows = getLineItems(data);
+    const norm = (v) => String(v || '').trim().replace(/\s+/g, '').toUpperCase();
+    const targetProduct = norm(productCode);
+    const targetOrder = String(orderNum || '').trim();
+    const targetCustomerName = String(customerName || '').trim();
+    const targetCustomerId = String(customerId || '').trim();
+
+    let shipped = 0;
+    let returned = 0;
+
+    rows.forEach((row) => {
+      const rowOrder = String(
+        row.order_number || row.reference_number || row.invoice_number || row.sales_receipt_number || ''
+      ).trim();
+      if (targetOrder && rowOrder && rowOrder !== targetOrder) return;
+
+      const rowCustomerName = String(row.customer_name || row.customerName || '').trim();
+      const rowCustomerId = String(row.customer_id || row.customerId || row.CustomerListID || '').trim();
+      const customerMatch =
+        (!targetCustomerName && !targetCustomerId) ||
+        (targetCustomerName && rowCustomerName === targetCustomerName) ||
+        (targetCustomerId && rowCustomerId === targetCustomerId);
+      if (!customerMatch) return;
+
+      const rowInfo = getProductInfo(row);
+      const rowProduct = norm(
+        rowInfo.productCode || row.product_code || row.ProductCode || row.productCode || row.barcode || row.bottle_barcode
+      );
+      if (!targetProduct || !rowProduct || rowProduct !== targetProduct) return;
+
+      shipped += getShippedQuantity(row);
+      returned += getReturnedQuantity(row);
+    });
+
+    return { shipped, returned };
   }
 
   function getHighlightInfo(lineItem, productInfo) {
@@ -5278,8 +5341,17 @@ export default function ImportApprovals() {
                       logger.debug(`📊 Scanned-only record display: orderNum=${orderNum}, productCode=${item.productInfo.productCode}, scannedOut=${scannedOut}, scannedIn=${scannedIn}`);
                     }
                     
-                    const shipped = isScannedOnlyRecord ? 0 : (item.shipped || 0);
-                    const returned = isScannedOnlyRecord ? 0 : (item.returned || 0);
+                    const invoiceQty = isScannedOnlyRecord
+                      ? { shipped: 0, returned: 0 }
+                      : getInvoiceQuantitiesForProduct(
+                          data,
+                          item.productInfo.productCode,
+                          orderNum,
+                          customerInfo,
+                          customerId
+                        );
+                    const shipped = invoiceQty.shipped;
+                    const returned = invoiceQty.returned;
                     const shippedMismatch = shipped !== scannedOut;
                     const returnedMismatch = returned !== scannedIn;
                     // DNS = Delivered Not Scanned: only when user has verified/approved the order without scanned bottles (inv > 0, trk = 0). Do NOT show for "invoice imported before scanning" – that is pending scan, not DNS.
@@ -5547,8 +5619,17 @@ return (
                       const invoiceForCount = invoice;
                       const scannedOut = getScannedQty(orderNum, item.productInfo.productCode, 'out', invoiceForCount);
                       const scannedIn = getScannedQty(orderNum, item.productInfo.productCode, 'in', invoiceForCount);
-                      const shipped = isScannedOnlyRecord ? 0 : (item.shipped || 0);
-                      const returned = isScannedOnlyRecord ? 0 : (item.returned || 0);
+                      const invoiceQty = isScannedOnlyRecord
+                        ? { shipped: 0, returned: 0 }
+                        : getInvoiceQuantitiesForProduct(
+                            data,
+                            item.productInfo.productCode,
+                            orderNum,
+                            customerInfo,
+                            customerId
+                          );
+                      const shipped = invoiceQty.shipped;
+                      const returned = invoiceQty.returned;
                       
                       return (
                         <Box key={index} sx={{ mb: 1, p: 1, bgcolor: 'grey.50', borderRadius: 1 }}>
@@ -6659,9 +6740,13 @@ return (
       // Quantities match AND all bottles are at home - safe to auto-approve
       logger.debug(`✅ Auto-approving record ${record.id} - quantities match and all bottles are at home`);
       
-      // Update record status to approved
-      const tableName = record.is_scanned_only ? 'imported_invoices' : 'imported_invoices';
-      const { error } = await supabase
+      // Update record status to approved — use the correct source table
+      const tableName = record._sourceTable || (record.is_scanned_only ? null : 'imported_invoices');
+      if (!tableName) {
+        logger.debug(`Skipping auto-approve for scanned-only record ${record.id} (no DB row)`);
+        return false;
+      }
+      const { data: updatedRows, error } = await supabase
         .from(tableName)
         .update({ 
           status: 'approved', 
@@ -6669,10 +6754,12 @@ return (
           auto_approved: true,
           auto_approval_reason: 'Quantities match between invoice and scanned data, and all bottles are at home'
         })
-        .eq('id', record.id);
+        .eq('id', record.id)
+        .select('id');
       
-      if (error) {
-        logger.error('Error auto-approving record:', error);
+      if (error || !updatedRows || updatedRows.length === 0) {
+        if (error) logger.error('Error auto-approving record:', error);
+        else logger.debug(`Auto-approve update matched 0 rows for record ${record.id}`);
         return false;
       }
       

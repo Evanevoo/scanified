@@ -76,12 +76,13 @@ export default function VerifiedOrders() {
       setLoading(true);
       logger.log('🔍 Fetching verified orders for organization:', organization.id);
 
-      // Fetch verified imported invoices (order by approved_at first, then verified_at for latest first)
+      // Fetch verified imported invoices (auto_approved column exists on this table)
       const { data: invoices, error: invoiceError } = await supabase
         .from('imported_invoices')
         .select('*')
         .eq('organization_id', organization.id)
         .in('status', ['verified', 'approved'])
+        .neq('auto_approved', true)
         .order('approved_at', { ascending: false })
         .order('verified_at', { ascending: false });
 
@@ -90,7 +91,7 @@ export default function VerifiedOrders() {
         throw invoiceError;
       }
 
-      // Fetch verified imported receipts
+      // Fetch verified imported receipts (some DBs do not have auto_approved on this table)
       const { data: receipts, error: receiptError } = await supabase
         .from('imported_sales_receipts')
         .select('*')
