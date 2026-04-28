@@ -14,7 +14,7 @@ import { ArrowBack as ArrowBackIcon, Upload as UploadIcon, Search as SearchIcon,
 import { findCustomer, normalizeCustomerName, batchFindCustomers } from '../utils/customerMatching';
 import { validateImportData, autoCorrectImportData, generateImportSummary } from '../utils/importValidation';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
-import { resolveCustomerListId } from '../utils/resolveCustomerListId';
+import { resolveCustomerListId, isTemporaryCustomerIdentity } from '../utils/resolveCustomerListId';
 
 // Import type definitions
 const IMPORT_TYPES = {
@@ -819,6 +819,10 @@ export default function Import() {
         customerId = resolved.customerListId;
         if (!customerName || customerName === 'Unknown') customerName = resolved.name || customerName;
       }
+      if (isTemporaryCustomerIdentity(customerId) || isTemporaryCustomerIdentity(customerName)) {
+        logger.warn(`Auto-approve skipped bottle assignment for temp customer on order ${orderNumber}`);
+        return;
+      }
 
       const orderVariants = getOrderVariants(orderNumber);
       const { data: scans } = await supabase
@@ -846,7 +850,7 @@ export default function Import() {
 
       if (shipBarcodes.length === 0 && returnBarcodes.length === 0) return;
 
-      await bottleAssignmentService.assignBottles({
+      const assignmentResult = await bottleAssignmentService.assignBottles({
         organizationId,
         customerId: customerId || customerName,
         customerName,
@@ -856,6 +860,10 @@ export default function Import() {
         importTable: table,
         orderNumber,
       });
+      if (!assignmentResult?.success) {
+        logger.warn(`Auto-approve assignment skipped/failed for record ${recordId}: ${assignmentResult?.error || 'Unknown error'}`);
+        return;
+      }
       logger.log(`Auto-approve: bottles assigned for record ${recordId}, order ${orderNumber}`);
     } catch (err) {
       logger.error('Auto-approve bottle assignment failed for record', recordId, err);
@@ -903,7 +911,7 @@ export default function Import() {
     return approvedCount;
   }
 
-  // Return a Map of normalized order number -> { id, status } for existing records.
+  // Return a Map of normalized order number -> { id, status, ids } for existing records.
   // Used to skip insert for new imports, skip already-verified, and UPDATE only pending on re-import.
   async function getExistingOrderRecordsForOrg(type, organizationId) {
     const table = type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts';
@@ -916,7 +924,21 @@ export default function Import() {
       logger.warn('Could not fetch records for skip/update check:', error);
       return new Map();
     }
-    const map = new Map(); // normOrderNum -> { id, status }
+    const map = new Map(); // normOrderNum -> { id, status, ids: [] }
+    const addEntry = (normOrder, rec) => {
+      if (!normOrder || normOrder === 'UNKNOWN') return;
+      const existing = map.get(normOrder);
+      if (existing) {
+        if (!existing.ids.includes(rec.id)) existing.ids.push(rec.id);
+        // Prefer pending as primary target for updates.
+        if (existing.status !== 'pending' && rec.status === 'pending') {
+          existing.id = rec.id;
+          existing.status = rec.status || 'pending';
+        }
+      } else {
+        map.set(normOrder, { id: rec.id, status: rec.status || 'pending', ids: [rec.id] });
+      }
+    };
     for (const rec of records || []) {
       const data = typeof rec.data === 'string' ? JSON.parse(rec.data) : rec.data;
       if (!data) continue;
@@ -926,8 +948,7 @@ export default function Import() {
         orderNum = row.order_number || row.invoice_number || row.reference_number || row.sales_receipt_number || '';
       }
       const norm = normalizeOrderNum(orderNum);
-      const entry = { id: rec.id, status: rec.status || 'pending' };
-      if (norm && norm !== 'UNKNOWN') map.set(norm, entry);
+      addEntry(norm, rec);
       // Also index by unique order numbers found inside the rows so re-uploads
       // match even when summary.reference_number is stale/UNKNOWN.
       if (data.rows && Array.isArray(data.rows)) {
@@ -936,7 +957,7 @@ export default function Import() {
           const ro = normalizeOrderNum(r.order_number || r.invoice_number || r.reference_number || r.sales_receipt_number);
           if (ro && ro !== 'UNKNOWN' && !seenRowOrders.has(ro)) {
             seenRowOrders.add(ro);
-            if (!map.has(ro)) map.set(ro, entry);
+            addEntry(ro, rec);
           }
         });
       }
@@ -945,7 +966,7 @@ export default function Import() {
       if (Array.isArray(verifiedOrders)) {
         verifiedOrders.forEach(n => {
           const nNorm = normalizeOrderNum(n);
-          if (nNorm && !map.has(nNorm)) map.set(nNorm, entry);
+          addEntry(nNorm, rec);
         });
       }
     }
@@ -1031,43 +1052,47 @@ export default function Import() {
       // Re-import: update existing records with new rows so RTN Inv / SHP Inv etc. reflect the new file
       let updated = 0;
       const updatedIds = [];
+      const updateIds = [...new Set(groupsToUpdate.flatMap(({ refNumber }) => existingRecords.get(normalizeOrderNum(refNumber))?.ids || []))];
       const { data: existingRows } = await supabase
         .from('imported_invoices')
         .select('id, data')
         .eq('organization_id', userProfile.organization_id)
-        .in('id', groupsToUpdate.map(({ refNumber }) => existingRecords.get(normalizeOrderNum(refNumber))?.id).filter(Boolean));
+        .in('id', updateIds);
       const existingById = new Map((existingRows || []).map(r => [r.id, r]));
       for (const { refNumber, rows: groupRows } of groupsToUpdate) {
         const norm = normalizeOrderNum(refNumber);
         const existing = existingRecords.get(norm);
-        if (!existing?.id) continue;
-        const prev = existingById.get(existing.id);
-        const prevData = prev?.data ? (typeof prev.data === 'string' ? JSON.parse(prev.data) : prev.data) : {};
-        const actualRef = refNumber !== 'UNKNOWN' ? refNumber : (prevData.order_number || prevData.reference_number || refNumber);
-        const newData = {
-          ...prevData,
-          rows: groupRows,
-          order_number: actualRef,
-          reference_number: actualRef,
-          mapping,
-          summary: {
-            ...(prevData.summary || {}),
-            total_rows: groupRows.length,
-            uploaded_by: user.id,
-            uploaded_at: new Date().toISOString(),
-            reference_number: actualRef
+        const targetIds = existing?.ids || (existing?.id ? [existing.id] : []);
+        for (const targetId of targetIds) {
+          const prev = existingById.get(targetId);
+          const prevData = prev?.data ? (typeof prev.data === 'string' ? JSON.parse(prev.data) : prev.data) : {};
+          const actualRef = refNumber !== 'UNKNOWN' ? refNumber : (prevData.order_number || prevData.reference_number || refNumber);
+          const newData = {
+            ...prevData,
+            rows: groupRows,
+            order_number: actualRef,
+            reference_number: actualRef,
+            mapping,
+            summary: {
+              ...(prevData.summary || {}),
+              total_rows: groupRows.length,
+              uploaded_by: user.id,
+              uploaded_at: new Date().toISOString(),
+              reference_number: actualRef
+            }
+          };
+          const { error: updateError } = await supabase
+            .from('imported_invoices')
+            .update({ data: newData })
+            .eq('id', targetId)
+            .eq('organization_id', userProfile.organization_id);
+          if (!updateError) {
+            updated++;
+            updatedIds.push(targetId);
+          } else {
+            logger.warn('Failed to update existing invoice on re-import:', updateError);
           }
-        };
-        const { error: updateError } = await supabase
-          .from('imported_invoices')
-          .update({ data: newData })
-          .eq('id', existing.id)
-          .eq('organization_id', userProfile.organization_id);
-        if (!updateError) {
-          updated++;
-          updatedIds.push(existing.id);
         }
-        else logger.warn('Failed to update existing invoice on re-import:', updateError);
       }
 
       const importedOrderNumbers = groups.map(g => g.refNumber).filter(r => r && r !== 'UNKNOWN');
@@ -1216,43 +1241,47 @@ export default function Import() {
       // Re-import: update existing records with new rows (preserve verified_order_numbers etc.)
       let updated = 0;
       const updatedIds = [];
+      const updateReceiptIds = [...new Set(groupsToUpdate.flatMap(({ refNumber }) => existingRecords.get(normalizeOrderNum(refNumber))?.ids || []))];
       const { data: existingReceiptRows } = await supabase
         .from('imported_sales_receipts')
         .select('id, data')
         .eq('organization_id', userProfile.organization_id)
-        .in('id', groupsToUpdate.map(({ refNumber }) => existingRecords.get(normalizeOrderNum(refNumber))?.id).filter(Boolean));
+        .in('id', updateReceiptIds);
       const existingReceiptById = new Map((existingReceiptRows || []).map(r => [r.id, r]));
       for (const { refNumber, rows: groupRows } of groupsToUpdate) {
         const norm = normalizeOrderNum(refNumber);
         const existing = existingRecords.get(norm);
-        if (!existing?.id) continue;
-        const prev = existingReceiptById.get(existing.id);
-        const prevData = prev?.data ? (typeof prev.data === 'string' ? JSON.parse(prev.data) : prev.data) : {};
-        const actualRef = refNumber !== 'UNKNOWN' ? refNumber : (prevData.order_number || prevData.reference_number || refNumber);
-        const newData = {
-          ...prevData,
-          rows: groupRows,
-          order_number: actualRef,
-          reference_number: actualRef,
-          mapping,
-          summary: {
-            ...(prevData.summary || {}),
-            total_rows: groupRows.length,
-            uploaded_by: user.id,
-            uploaded_at: new Date().toISOString(),
-            reference_number: actualRef
+        const targetIds = existing?.ids || (existing?.id ? [existing.id] : []);
+        for (const targetId of targetIds) {
+          const prev = existingReceiptById.get(targetId);
+          const prevData = prev?.data ? (typeof prev.data === 'string' ? JSON.parse(prev.data) : prev.data) : {};
+          const actualRef = refNumber !== 'UNKNOWN' ? refNumber : (prevData.order_number || prevData.reference_number || refNumber);
+          const newData = {
+            ...prevData,
+            rows: groupRows,
+            order_number: actualRef,
+            reference_number: actualRef,
+            mapping,
+            summary: {
+              ...(prevData.summary || {}),
+              total_rows: groupRows.length,
+              uploaded_by: user.id,
+              uploaded_at: new Date().toISOString(),
+              reference_number: actualRef
+            }
+          };
+          const { error: updateError } = await supabase
+            .from('imported_sales_receipts')
+            .update({ data: newData })
+            .eq('id', targetId)
+            .eq('organization_id', userProfile.organization_id);
+          if (!updateError) {
+            updated++;
+            updatedIds.push(targetId);
+          } else {
+            logger.warn('Failed to update existing receipt on re-import:', updateError);
           }
-        };
-        const { error: updateError } = await supabase
-          .from('imported_sales_receipts')
-          .update({ data: newData })
-          .eq('id', existing.id)
-          .eq('organization_id', userProfile.organization_id);
-        if (!updateError) {
-          updated++;
-          updatedIds.push(existing.id);
         }
-        else logger.warn('Failed to update existing receipt on re-import:', updateError);
       }
 
       const importedOrderNumbers = groups.map(g => g.refNumber).filter(Boolean);

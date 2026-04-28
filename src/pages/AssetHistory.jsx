@@ -90,13 +90,82 @@ export default function AssetHistory() {
         if (assetError || !assetData) throw new Error('Asset not found.');
         setAsset(assetData);
         setEditForm(assetData);
-        // Fetch asset history/records (simulate with a table 'asset_records' or use mock data)
-        const { data: recordsData, error: recordsError } = await supabase
-          .from('asset_records')
-          .select('*')
-          .eq('asset_id', assetData.id)
-          .order('created_at', { ascending: false });
-        setRecords(recordsData || []);
+        // Fetch asset history/records.
+        // Primary source: bottle_scans (actual movement events).
+        // Fallback sources: asset_records and audit_logs for legacy/custom events.
+        const barcode = String(assetData.barcode_number || '').trim();
+        const barcodeNoLeadingZeros = barcode.replace(/^0+/, '') || barcode;
+        const barcodeOr = [
+          `barcode_number.eq.${barcode}`,
+          `bottle_barcode.eq.${barcode}`,
+          `cylinder_barcode.eq.${barcode}`,
+          `barcode_number.eq.${barcodeNoLeadingZeros}`,
+          `bottle_barcode.eq.${barcodeNoLeadingZeros}`,
+          `cylinder_barcode.eq.${barcodeNoLeadingZeros}`
+        ].join(',');
+
+        const [scanRes, recordsRes, auditRes] = await Promise.all([
+          supabase
+            .from('bottle_scans')
+            .select('*')
+            .or(barcodeOr)
+            .eq('organization_id', assetData.organization_id)
+            .order('created_at', { ascending: false })
+            .limit(200),
+          supabase
+            .from('asset_records')
+            .select('*')
+            .eq('asset_id', assetData.id)
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('audit_logs')
+            .select('*')
+            .eq('record_id', assetData.id)
+            .order('created_at', { ascending: false })
+            .limit(100)
+        ]);
+
+        const scanRows = (scanRes.data || []).map((row) => ({
+          id: `scan_${row.id}`,
+          type: row.mode || row.scan_type || row.action || 'SCAN',
+          created_at: row.created_at || row.timestamp || '',
+          submitted_at: row.created_at || row.timestamp || '',
+          user: row.scanned_by || row.user_name || row.user || '-',
+          device: row.device || row.device_id || '-',
+          location: row.location || row.resulting_location || '-',
+          data: [
+            row.order_number ? `Order: ${row.order_number}` : null,
+            row.product_code ? `Product: ${row.product_code}` : null,
+            row.barcode_number || row.bottle_barcode || row.cylinder_barcode ? `Barcode: ${row.barcode_number || row.bottle_barcode || row.cylinder_barcode}` : null
+          ].filter(Boolean).join(' | '),
+          associated_assets: row.bottle_id || row.asset_id || '-',
+          notes: row.notes || row.map || ''
+        }));
+
+        const legacyRows = (recordsRes.data || []).map((row) => ({
+          ...row,
+          id: row.id || `asset_record_${Math.random()}`
+        }));
+
+        const auditRows = (auditRes.data || []).map((row) => ({
+          id: `audit_${row.id}`,
+          type: row.action || 'AUDIT',
+          created_at: row.created_at || '',
+          submitted_at: row.created_at || '',
+          user: row.user_id || '-',
+          device: '-',
+          location: row.location || '-',
+          data: row.table_name || 'bottles',
+          associated_assets: row.record_id || '-',
+          notes: typeof row.details === 'string' ? row.details : JSON.stringify(row.details || {})
+        }));
+
+        const merged = [...scanRows, ...legacyRows, ...auditRows].sort((a, b) => {
+          const at = new Date(a.created_at || 0).getTime();
+          const bt = new Date(b.created_at || 0).getTime();
+          return bt - at;
+        });
+        setRecords(merged);
       } catch (err) {
         setError(err.message);
       }

@@ -259,7 +259,41 @@ export default function CustomerDetail() {
     push(rentalById);
     if (!rentalByNameError) push(rentalByName);
     if (!rentalByNameAsIdError) push(rentalByNameAsId);
-    return merged;
+
+    // Final safety dedupe by business key so one active row is shown per bottle/DNS key.
+    // Keep the most recent row when duplicates exist.
+    const byKey = new Map();
+    const dedupeKey = (r) => {
+      if (r?.is_dns === true) {
+        return `dns:${r?.dns_product_code || r?.product_code || ''}:${r?.bottle_barcode || ''}:${r?.customer_id || ''}`;
+      }
+      if (r?.bottle_id) return `bottle_id:${r.bottle_id}`;
+      if (r?.bottle_barcode) return `barcode:${String(r.bottle_barcode).trim().toUpperCase()}`;
+      return `row:${r?.id || Math.random().toString(36).slice(2)}`;
+    };
+    const rank = (r) => {
+      const start = Date.parse(r?.rental_start_date || '') || 0;
+      const updated = Date.parse(r?.updated_at || '') || 0;
+      const created = Date.parse(r?.created_at || '') || 0;
+      return [start, updated, created];
+    };
+    const isNewer = (next, cur) => {
+      const [ns, nu, nc] = rank(next);
+      const [cs, cu, cc] = rank(cur);
+      if (ns !== cs) return ns > cs;
+      if (nu !== cu) return nu > cu;
+      return nc >= cc;
+    };
+
+    merged.forEach((row) => {
+      const key = dedupeKey(row);
+      const existing = byKey.get(key);
+      if (!existing || isNewer(row, existing)) {
+        byKey.set(key, row);
+      }
+    });
+
+    return Array.from(byKey.values());
   }, [id]);
 
   // Combine physical bottles with DNS (Delivered Not Scanned), RNB (Return not on balance), and RNS (Return not scanned)
@@ -2234,24 +2268,13 @@ export default function CustomerDetail() {
                             customerId={customer?.CustomerListID}
                             customerName={customer?.name}
                             onConverted={() => {
-                              // Reload rentals (same as initial load: by customer_id and by customer_name for DNS)
+                              // Reload rentals with the same merge+dedupe logic used by initial load.
                               const loadRentals = async () => {
-                                const { data: rentalById } = await supabase
-                                  .from('rentals')
-                                  .select('*')
-                                  .eq('customer_id', id)
-                                  .eq('organization_id', customer?.organization_id)
-                                  .is('rental_end_date', null);
-                                const { data: rentalByName } = await supabase
-                                  .from('rentals')
-                                  .select('*')
-                                  .eq('customer_name', customer?.name)
-                                  .eq('organization_id', customer?.organization_id)
-                                  .is('rental_end_date', null)
-                                  .eq('is_dns', true);
-                                const seen = new Set((rentalById || []).map(r => r.id));
-                                const merged = [...(rentalById || [])];
-                                (rentalByName || []).forEach(r => { if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); } });
+                                const merged = await fetchMergedOpenRentalsForCustomer(
+                                  customer?.organization_id,
+                                  customer?.name,
+                                  customer?.CustomerListID || id
+                                );
                                 setLocationAssets(merged);
                               };
                               loadRentals();

@@ -348,11 +348,21 @@ function bottleStatusLower(status) {
   return (status == null ? '' : String(status)).trim().toLowerCase();
 }
 
+/** Normalize status labels for display only (do not mutate DB values). */
+function bottleStatusDisplayLabel(status) {
+  const s = bottleStatusLower(status);
+  if (s === 'available' || s === 'in_stock' || s === 'full' || s === 'filled') return 'filled';
+  if (s === 'empty') return 'empty';
+  if (s === 'rented' || s === 'delivered') return 'rented';
+  if (s === 'lost') return 'lost';
+  return s || 'unknown';
+}
+
 /** Chip color for View Bottles: at-customer vs in-yard / available. */
 function viewBottlesStatusChipColor(status) {
   const s = bottleStatusLower(status);
   if (s === 'rented' || s === 'delivered') return 'warning';
-  if (s === 'empty' || s === 'available' || s === 'in_stock') return 'success';
+  if (s === 'empty' || s === 'available' || s === 'in_stock' || s === 'filled' || s === 'full') return 'success';
   return 'default';
 }
 
@@ -460,10 +470,49 @@ function mergeScannedWithImported(importedInvoices, scannedRecords) {
 const validateReturnBalance = async (bottle, orderNumber, organization) => {
   const currentCustomerId = bottle.assigned_customer || bottle.customer_id;
   const currentCustomerName = bottle.assigned_customer || bottle.customer_name;
+  const normalizedBottleBarcode =
+    bottle?.barcode_number == null || bottle?.barcode_number === ''
+      ? ''
+      : String(bottle.barcode_number).trim().replace(/^0+/, '') || String(bottle.barcode_number).trim();
 
   if (!currentCustomerId) {
     // No customer assigned, so it's not a balance issue
     return { isOnBalance: true, exceptionCreated: false };
+  }
+
+  // Date-aware/event-aware override:
+  // if the latest scan for this order+barcode is RETURN/PICKUP,
+  // treat as physically back in-house even if current assignment lags.
+  if (organization?.id && orderNumber && normalizedBottleBarcode) {
+    const orderVariants = [];
+    const orderStr = String(orderNumber).trim();
+    if (orderStr) {
+      orderVariants.push(orderStr);
+      const numericOnly = orderStr.replace(/^(\d+).*$/i, '$1').trim();
+      if (numericOnly && numericOnly !== orderStr) orderVariants.push(numericOnly);
+    }
+    if (orderVariants.length > 0) {
+      const { data: scanRows } = await supabase
+        .from('bottle_scans')
+        .select('bottle_barcode, mode, created_at, timestamp')
+        .eq('organization_id', organization.id)
+        .in('order_number', [...new Set(orderVariants)]);
+
+      let latestScan = null;
+      (scanRows || []).forEach((scan) => {
+        const raw = scan?.bottle_barcode;
+        const norm = raw == null || raw === '' ? '' : String(raw).trim().replace(/^0+/, '') || String(raw).trim();
+        if (!norm || norm !== normalizedBottleBarcode) return;
+        const time = new Date(scan?.timestamp || scan?.created_at || 0).getTime();
+        if (!latestScan || time >= latestScan.time) {
+          latestScan = { mode: String(scan?.mode || '').toUpperCase(), time };
+        }
+      });
+
+      if (latestScan && (latestScan.mode === 'RETURN' || latestScan.mode === 'PICKUP')) {
+        return { isOnBalance: true, exceptionCreated: false };
+      }
+    }
   }
 
   // Check for active rental record
@@ -628,7 +677,13 @@ function determineVerificationStatus(record) {
   if (orderNumber && Array.isArray(verifiedOrders) && verifiedOrders.some(n => normOrder(n) === normOrder(orderNumber))) return 'VERIFIED';
   
   // Check verification state - check status field
-  if (record.status === 'approved' || record.status === 'verified') return 'VERIFIED';
+  if (
+    record.status === 'approved' ||
+    record.status === 'verified' ||
+    record.auto_approved === true ||
+    !!record.approved_at ||
+    !!record.verified_at
+  ) return 'VERIFIED';
   if (record.processing) return 'IN_PROGRESS';
   
   return 'PENDING';
@@ -1049,12 +1104,69 @@ export default function ImportApprovals() {
   const filteredInvoices = deduplicateRecords(filterRecords(pendingInvoices));
   const filteredReceipts = deduplicateRecords(filterRecords(pendingReceipts));
 
-  // Sort by scan time (created_at = when record was created/scanned), newest first
+  // Sort by best available date/time, newest first.
+  // Prefer scan/upload timestamps, then import/receipt dates.
   const getSortableScanTime = (record) => {
-    const t = record?.created_at;
-    if (!t) return 0;
-    const d = parseDbTimestamp(t);
-    return d ? d.getTime() : 0;
+    const parseToEpoch = (raw) => {
+      if (raw == null || raw === '') return 0;
+      if (typeof raw === 'string') {
+        const s = raw.trim();
+        // Support day-first dates from imports (DD/MM/YYYY or DD-MM-YYYY), optional time.
+        const dayFirst = s.match(
+          /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+        );
+        if (dayFirst) {
+          const day = parseInt(dayFirst[1], 10);
+          const month = parseInt(dayFirst[2], 10);
+          const year = parseInt(dayFirst[3], 10);
+          const hour = dayFirst[4] ? parseInt(dayFirst[4], 10) : 0;
+          const minute = dayFirst[5] ? parseInt(dayFirst[5], 10) : 0;
+          const second = dayFirst[6] ? parseInt(dayFirst[6], 10) : 0;
+          if (
+            year >= 1900 &&
+            month >= 1 && month <= 12 &&
+            day >= 1 && day <= 31 &&
+            hour >= 0 && hour <= 23 &&
+            minute >= 0 && minute <= 59 &&
+            second >= 0 && second <= 59
+          ) {
+            const parsed = new Date(year, month - 1, day, hour, minute, second);
+            if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+          }
+        }
+      }
+      const d = parseDbTimestamp(raw);
+      if (d && !Number.isNaN(d.getTime())) return d.getTime();
+      const native = new Date(raw);
+      return Number.isNaN(native.getTime()) ? 0 : native.getTime();
+    };
+
+    const data = parseDataField(record?.data);
+    const firstRow = Array.isArray(data?.rows) && data.rows.length > 0 ? data.rows[0] : null;
+    const summary = data?.summary || null;
+
+    const candidates = [
+      data?.date,
+      data?.invoice_date,
+      data?.receipt_date,
+      firstRow?.date,
+      firstRow?.invoice_date,
+      firstRow?.receipt_date,
+      data?.scan_date,
+      firstRow?.scan_date,
+      record?.created_at,
+      record?.updated_at,
+      record?.uploaded_at,
+      data?.created_at,
+      data?.uploaded_at,
+      summary?.uploaded_at
+    ];
+
+    for (const c of candidates) {
+      const ts = parseToEpoch(c);
+      if (ts > 0) return ts;
+    }
+    return 0;
   };
   const sortedFilteredInvoices = useMemo(() => {
     return [...(filteredInvoices || [])].sort((a, b) => getSortableScanTime(b) - getSortableScanTime(a));
@@ -1370,14 +1482,14 @@ export default function ImportApprovals() {
       const [approvedInvoicesResult, approvedReceiptsResult] = await Promise.all([
         supabase
           .from('imported_invoices')
-          .select('data, approved_at, verified_at')
+          .select('data, approved_at, verified_at, auto_approved')
           .eq('organization_id', organization.id)
-          .in('status', ['approved', 'verified']),
+          .or('status.in.(approved,verified),auto_approved.eq.true'),
         supabase
           .from('imported_sales_receipts')
-          .select('data, approved_at, verified_at')
+          .select('data, approved_at, verified_at, auto_approved')
           .eq('organization_id', organization.id)
-          .in('status', ['approved', 'verified'])
+          .or('status.in.(approved,verified),auto_approved.eq.true')
       ]);
       
       const approvedImports = [...(approvedInvoicesResult.data || []), ...(approvedReceiptsResult.data || [])];
@@ -1445,12 +1557,7 @@ export default function ImportApprovals() {
             const orderNumber = groupKey.split('\t')[0];
             const normOrder = normalizeOrderNumForApproval(orderNumber);
             if (approvedOrderNumbers.has(normOrder)) return false;
-            
-            if (approvedImportOrderNumbers.has(normOrder)) {
-              const mostRecentScanTime = Math.max(...scans.map(s => new Date(s.created_at || s.scan_date || 0).getTime()));
-              const approvalTime = approvedImportTimestamps.get(normOrder) || 0;
-              if (approvalTime > mostRecentScanTime) return false;
-            }
+            if (approvedImportOrderNumbers.has(normOrder)) return false;
             
             return true;
           })
@@ -1590,7 +1697,14 @@ export default function ImportApprovals() {
       // order number is already fully approved (catches duplicates from re-imports).
       const cleanedRecords = allRecords.filter(record => {
         const status = (record.status || '').toLowerCase();
-        if (status === 'approved' || status === 'rejected' || status === 'verified') {
+        if (
+          status === 'approved' ||
+          status === 'rejected' ||
+          status === 'verified' ||
+          record.auto_approved === true ||
+          !!record.approved_at ||
+          !!record.verified_at
+        ) {
           return false;
         }
         const data = parseDataField(record.data);
@@ -2410,19 +2524,94 @@ export default function ImportApprovals() {
             }
           });
 
+          // Build latest global movement per barcode so "current status/customer" reflects reality
+          // even when bottles table fields are stale.
+          const normalizeBarcode = (v) => (v == null || v === '') ? '' : (String(v).trim().replace(/^0+/, '') || String(v).trim());
+          const normalizeOrderNum = (num) => {
+            if (num == null || num === '') return '';
+            const s = String(num).trim();
+            if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
+            return s;
+          };
+
+          const { data: globalScanRows } = await supabase
+            .from('bottle_scans')
+            .select('bottle_barcode, barcode_number, cylinder_barcode, mode, action, scan_type, created_at, timestamp, customer_name, customer_id, location, order_number, organization_id')
+            .eq('organization_id', organization.id)
+            .in('bottle_barcode', barcodeArray);
+
+          const { data: fillRows } = await supabase
+            .from('cylinder_fills')
+            .select('barcode_number, fill_date, created_at, organization_id')
+            .eq('organization_id', organization.id)
+            .in('barcode_number', barcodeArray);
+
+          const latestGlobalByBarcode = new Map();
+          const upsertLatest = (rawBarcode, payload) => {
+            const norm = normalizeBarcode(rawBarcode);
+            if (!norm) return;
+            const existing = latestGlobalByBarcode.get(norm);
+            if (!existing || payload.time >= existing.time) {
+              latestGlobalByBarcode.set(norm, payload);
+            }
+          };
+
+          (globalScanRows || []).forEach((s) => {
+            const raw = s.bottle_barcode || s.barcode_number || s.cylinder_barcode;
+            const mode = (s.mode || '').toString().toUpperCase();
+            const action = (s.action || '').toString().toLowerCase();
+            const scanType = (s.scan_type || '').toString().toLowerCase();
+            const isReturn = mode === 'RETURN' || mode === 'PICKUP' || scanType === 'pickup' || (action === 'in' && mode !== 'SHIP' && mode !== 'DELIVERY');
+            const time = new Date(s.created_at || s.timestamp || 0).getTime();
+            upsertLatest(raw, {
+              time,
+              source: 'scan',
+              status: isReturn ? 'empty' : 'rented',
+              customer_name: isReturn ? null : (s.customer_name || null),
+              assigned_customer: isReturn ? null : (s.customer_id || null),
+              location: isReturn ? (s.location || 'In House') : (s.location || null),
+              event_order_norm: normalizeOrderNum(s.order_number)
+            });
+          });
+
+          (fillRows || []).forEach((f) => {
+            const time = new Date(f.fill_date || f.created_at || 0).getTime();
+            upsertLatest(f.barcode_number, {
+              time,
+              source: 'fill',
+              status: 'filled',
+              customer_name: null,
+              assigned_customer: null,
+              location: 'In House',
+              event_order_norm: ''
+            });
+          });
+
+          const orderNorm = normalizeOrderNum(orderNumber);
+
           // Match bottles with scan information (most recent wins so View Bottles matches card Trk)
           bottleData.forEach(bottle => {
             const b = bottle.barcode_number?.toString().trim();
             const best = b ? barcodeToBestScan.get(b) : null;
             const scanAction = best ? (best.action || best.mode) : 'unknown';
             const scanDate = best?.created_at ?? null;
-            const customer_name = bottle.customer_name || best?.customer_name || null;
+            const movementNow = latestGlobalByBarcode.get(normalizeBarcode(b));
+            const hasMovementNow = !!movementNow;
+            const customer_name = hasMovementNow ? movementNow.customer_name : (bottle.customer_name ?? best?.customer_name ?? null);
+            const assigned_customer = hasMovementNow ? movementNow.assigned_customer : (bottle.assigned_customer ?? null);
+            const status = movementNow?.status || bottle.status;
+            const location = movementNow?.location || bottle.location;
+            const latestGlobalOnThisOrder = movementNow?.event_order_norm && movementNow.event_order_norm === orderNorm;
             
             bottles.push({
               ...bottle,
               customer_name,
+              assigned_customer,
+              status,
+              location,
               scanAction,
-              scanDate
+              scanDate,
+              latestGlobalOnThisOrder
             });
           });
           
@@ -4590,7 +4779,17 @@ export default function ImportApprovals() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {bottleInfoDialog.bottles.map((bottle, index) => (
+                    {bottleInfoDialog.bottles.map((bottle, index) => {
+                      const scanActionUpper = String(bottle.scanAction || '').trim().toUpperCase();
+                      const isShipScan = scanActionUpper === 'OUT' || scanActionUpper === 'SHIP' || scanActionUpper === 'DELIVERY';
+                      const isReturnScan = scanActionUpper === 'IN' || scanActionUpper === 'RETURN' || scanActionUpper === 'PICKUP';
+                      const expectedStatusAfterApprove = isShipScan ? 'rented' : isReturnScan ? 'empty' : (bottle.status || 'unknown');
+                      const expectedCustomerAfterApprove = isShipScan
+                        ? (bottleInfoDialog?.targetCustomerName || bottleInfoDialog?.targetCustomerId || 'Order customer')
+                        : isReturnScan
+                          ? 'In-House'
+                          : (bottle.customer_name || bottle.assigned_customer || 'Available');
+                      return (
                       <TableRow key={bottle.id || index} hover>
                         <TableCell>
                           {bottle.barcode_number ? (
@@ -4620,10 +4819,15 @@ export default function ImportApprovals() {
                         <TableCell>
                           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                             <Chip 
-                              label={bottle.status || 'UNKNOWN'} 
+                              label={bottleStatusDisplayLabel(bottle.status)} 
                               size="small"
                               color={viewBottlesStatusChipColor(bottle.status)}
                             />
+                            {(isShipScan || isReturnScan) && (
+                              <Typography variant="caption" color="text.secondary">
+                                After approve: {expectedStatusAfterApprove}
+                              </Typography>
+                            )}
                             {/* Warning if bottle is being shipped but is already at a customer */}
                             {(bottle.scanAction === 'out' || bottle.scanAction === 'SHIP' || bottle.scanAction === 'delivery') &&
                              (() => {
@@ -4655,6 +4859,11 @@ export default function ImportApprovals() {
                             <Typography variant="body2">
                               {bottle.customer_name || (bottle.assigned_customer && customerIdToName[String(bottle.assigned_customer)]) || (bottle.assigned_customer ? 'Assigned' : 'Available')}
                             </Typography>
+                            {(isShipScan || isReturnScan) && (
+                              <Typography variant="caption" color="text.secondary">
+                                After approve: {expectedCustomerAfterApprove}
+                              </Typography>
+                            )}
                             {/* Show location if bottle is at a customer */}
                             {(bottle.customer_name || bottle.assigned_customer) && bottle.location && (
                               <Typography variant="caption" color="text.secondary">
@@ -4706,7 +4915,7 @@ export default function ImportApprovals() {
                           </IconButton>
                         </TableCell>
                       </TableRow>
-                    ))}
+                    );})}
                   </TableBody>
                 </Table>
               </Box>
@@ -5352,6 +5561,9 @@ export default function ImportApprovals() {
                         );
                     const shipped = invoiceQty.shipped;
                     const returned = invoiceQty.returned;
+                    if (orderNum === 'S48310') {
+                      console.error(`[DEBUG S48310] product=${item.productInfo.productCode}, shipped=${shipped}, returned=${returned}, isScannedOnly=${isScannedOnlyRecord}, rowCount=${getLineItems(data).length}, rows=`, JSON.stringify(getLineItems(data).map(r => ({ pc: r.product_code, qo: r.qty_out, qi: r.qty_in, sh: r.shipped, ret: r.returned, ref: r.reference_number, on: r.order_number }))));
+                    }
                     const shippedMismatch = shipped !== scannedOut;
                     const returnedMismatch = returned !== scannedIn;
                     // DNS = Delivered Not Scanned: only when user has verified/approved the order without scanned bottles (inv > 0, trk = 0). Do NOT show for "invoice imported before scanning" – that is pending scan, not DNS.
@@ -6335,12 +6547,12 @@ return (
       await assignBottlesToCustomer(row);
       
       setSnackbar('Record approved successfully and bottles assigned to customers');
-      await fetchData();
+      await fetchData(true);
     } catch (error) {
       logger.error('❌ Failed to approve record:', error);
       setError('Failed to approve record: ' + error.message);
       setSnackbar('Failed to approve record: ' + error.message);
-      await fetchData();
+      await fetchData(true);
     }
   }
 
@@ -6611,24 +6823,75 @@ return (
       // Only flag orders where bottles being shipped are already at customers (warning condition)
       if (allBarcodes.size > 0) {
         const barcodesArray = Array.from(allBarcodes);
+        const normalizeBarcode = (v) => (v == null || v === '') ? '' : (String(v).trim().replace(/^0+/, '') || String(v).trim());
         const { data: allBottles } = await supabase
           .from('bottles')
           .select('barcode_number, customer_name, assigned_customer, status')
           .in('barcode_number', barcodesArray)
           .eq('organization_id', organization?.id);
+
+        // Use latest movement to avoid stale bottle rows falsely lighting the red dot.
+        const { data: globalScanRows } = await supabase
+          .from('bottle_scans')
+          .select('bottle_barcode, barcode_number, cylinder_barcode, mode, action, scan_type, created_at, timestamp, customer_name, customer_id, organization_id')
+          .eq('organization_id', organization?.id)
+          .in('bottle_barcode', barcodesArray);
+        const { data: fillRows } = await supabase
+          .from('cylinder_fills')
+          .select('barcode_number, fill_date, created_at, organization_id')
+          .eq('organization_id', organization?.id)
+          .in('barcode_number', barcodesArray);
+
+        const latestGlobalByBarcode = new Map();
+        const upsertLatest = (rawBarcode, payload) => {
+          const norm = normalizeBarcode(rawBarcode);
+          if (!norm) return;
+          const existing = latestGlobalByBarcode.get(norm);
+          if (!existing || payload.time >= existing.time) {
+            latestGlobalByBarcode.set(norm, payload);
+          }
+        };
+        (globalScanRows || []).forEach((s) => {
+          const raw = s.bottle_barcode || s.barcode_number || s.cylinder_barcode;
+          const mode = (s.mode || '').toString().toUpperCase();
+          const action = (s.action || '').toString().toLowerCase();
+          const scanType = (s.scan_type || '').toString().toLowerCase();
+          const isReturn = mode === 'RETURN' || mode === 'PICKUP' || scanType === 'pickup' || (action === 'in' && mode !== 'SHIP' && mode !== 'DELIVERY');
+          const time = new Date(s.created_at || s.timestamp || 0).getTime();
+          upsertLatest(raw, {
+            time,
+            status: isReturn ? 'empty' : 'rented',
+            customer_name: isReturn ? null : (s.customer_name || null),
+            assigned_customer: isReturn ? null : (s.customer_id || null)
+          });
+        });
+        (fillRows || []).forEach((f) => {
+          const time = new Date(f.fill_date || f.created_at || 0).getTime();
+          upsertLatest(f.barcode_number, {
+            time,
+            status: 'filled',
+            customer_name: null,
+            assigned_customer: null
+          });
+        });
         
-        // Create a map of barcodes to customer status
-        // Only flag if bottle has a customer assigned (warning: being shipped but already at customer)
+        // Create a map of barcodes to customer status.
+        // Only flag if bottle is truly "at customer" by BOTH status and assignment.
+        // This avoids false red dots when legacy assignment text is stale but current status is in-house.
         const bottleCustomerMap = new Map();
         (allBottles || []).forEach(bottle => {
-          const customerName = bottle.customer_name || bottle.assigned_customer;
-          // Only consider it "at customer" if there's actually a customer name assigned
-          // Empty strings, null, or undefined mean the bottle is at home/available
-          const isAtCustomer = customerName && 
-                               customerName !== '' && 
-                               customerName !== null && 
-                               customerName !== undefined &&
-                               String(customerName).trim() !== '';
+          const movementNow = latestGlobalByBarcode.get(normalizeBarcode(bottle.barcode_number));
+          const effectiveStatus = movementNow?.status || bottle.status;
+          const customerName = movementNow
+            ? (movementNow.customer_name || movementNow.assigned_customer)
+            : (bottle.customer_name || bottle.assigned_customer);
+          const hasCustomerAssigned = customerName &&
+            customerName !== '' &&
+            customerName !== null &&
+            customerName !== undefined &&
+            String(customerName).trim() !== '';
+          const statusIndicatesAtCustomer = isBottleAtCustomerByStatus(effectiveStatus);
+          const isAtCustomer = !!hasCustomerAssigned && statusIndicatesAtCustomer;
           bottleCustomerMap.set(bottle.barcode_number, isAtCustomer);
         });
         
@@ -6682,7 +6945,9 @@ return (
       
       const bottlesAtCustomers = [];
       
-      // Check each scanned barcode to see if it's at a customer
+      // Check each scanned barcode to see if it's at a customer.
+      // Auto-approve should be blocked only when status shows at-customer (rented/delivered),
+      // not merely because a legacy customer assignment string exists.
       for (const barcode of scannedBarcodes) {
         const { data: bottles } = await supabase
           .from('bottles')
@@ -6693,10 +6958,8 @@ return (
         
         if (bottles && bottles.length > 0) {
           const bottle = bottles[0];
-          const currentCustomerName = bottle.customer_name || bottle.assigned_customer;
-          
-          // Check if bottle is at a customer (not home)
-          const isAtCustomer = currentCustomerName && currentCustomerName !== '' && currentCustomerName !== null;
+          const currentCustomerName = bottle.customer_name || bottle.assigned_customer || null;
+          const isAtCustomer = isBottleAtCustomerByStatus(bottle.status);
           
           if (isAtCustomer) {
             bottlesAtCustomers.push({
@@ -6719,7 +6982,8 @@ return (
     }
   }
 
-  // Auto-approve record if quantities match AND all bottles are at home
+  // Auto-approve record when quantities match and shipped bottles are at home.
+  // Operational rule: Trk == Inv + no shipped bottle currently rented/delivered at customer.
   async function autoApproveIfQuantitiesMatch(record) {
     try {
       const quantitiesMatch = await checkQuantityMatch(record);
@@ -6728,17 +6992,16 @@ return (
         logger.debug(`❌ Not auto-approving record ${record.id} - quantities don't match`);
         return false;
       }
-      
-      // Check if any bottles are currently at customers (not home)
+
+      // Block auto-approve when shipped bottles are currently at customers.
+      // Allowed home statuses include empty / available / filled.
       const { hasBottlesAtCustomers, bottlesAtCustomers } = await checkBottlesAtCustomers(record);
-      
       if (hasBottlesAtCustomers) {
-        logger.debug(`⚠️ Not auto-approving record ${record.id} - bottles are at customers:`, bottlesAtCustomers);
-        return false; // Require manual verification when bottles are at customers
+        logger.debug(`⚠️ Not auto-approving record ${record.id} - shipped bottles currently at customers:`, bottlesAtCustomers);
+        return false;
       }
-      
-      // Quantities match AND all bottles are at home - safe to auto-approve
-      logger.debug(`✅ Auto-approving record ${record.id} - quantities match and all bottles are at home`);
+
+      logger.debug(`✅ Auto-approving record ${record.id} - quantities match and bottles are at home`);
       
       // Update record status to approved — use the correct source table
       const tableName = record._sourceTable || (record.is_scanned_only ? null : 'imported_invoices');
@@ -6752,7 +7015,7 @@ return (
           status: 'approved', 
           approved_at: new Date().toISOString(),
           auto_approved: true,
-          auto_approval_reason: 'Quantities match between invoice and scanned data, and all bottles are at home'
+          auto_approval_reason: 'Quantities match between invoice and scanned data, and shipped bottles are at home'
         })
         .eq('id', record.id)
         .select('id');
@@ -6763,7 +7026,7 @@ return (
         return false;
       }
       
-      // Assign bottles to customers
+      // Trk matches Inv and record is approved — now assign bottles
       await assignBottlesToCustomer(record);
       
       return true;
@@ -6949,6 +7212,20 @@ return (
 
       if (retArr.length > 0 && organization?.id) {
         const normalizeBarcode = (b) => (b == null || b === '') ? '' : String(b).trim().replace(/^0+/, '') || String(b).trim();
+        // Date/event-aware guard: if this order's latest scan for a barcode is RETURN/PICKUP,
+        // treat it as physically back in warehouse and do not flag it as RNB.
+        const latestOrderScanModeByBarcode = new Map();
+        (bottleScanRows || []).forEach((scan) => {
+          const rawBarcode = scan?.bottle_barcode;
+          const norm = normalizeBarcode(rawBarcode);
+          if (!norm) return;
+          const mode = String(scan?.mode || '').toUpperCase();
+          const time = new Date(scan?.timestamp || scan?.created_at || 0).getTime();
+          const existing = latestOrderScanModeByBarcode.get(norm);
+          if (!existing || time >= existing.time) {
+            latestOrderScanModeByBarcode.set(norm, { mode, time });
+          }
+        });
         const allBc = [...new Set([...shipArr, ...retArr])];
         const { data: bottleRows } = await supabase
           .from('bottles')
@@ -6977,6 +7254,11 @@ return (
         const custId = String(newCustomerId || '').trim();
         const custName = String(newCustomerName || '').trim();
         for (const retBc of retArr) {
+          const retNorm = normalizeBarcode(retBc);
+          const latestScan = latestOrderScanModeByBarcode.get(retNorm);
+          if (latestScan && (latestScan.mode === 'RETURN' || latestScan.mode === 'PICKUP')) {
+            continue;
+          }
           const bottle = bottleMap.get(retBc);
           if (!bottle) continue;
           const ac = String(bottle.assigned_customer || '').trim();
