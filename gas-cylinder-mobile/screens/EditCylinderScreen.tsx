@@ -5,7 +5,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
 import { Ionicons } from '@expo/vector-icons';
 import ScanArea from '../components/ScanArea';
-import { Picker } from '@react-native-picker/picker';
 import { useAssetConfig } from '../context/AssetContext';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -34,7 +33,63 @@ interface Cylinder {
   assigned_customer?: string;
   location?: string;
   ownership?: string;
+  gas_type?: string;
+  group_name?: string;
+  category?: string;
+  product_code?: string;
+  description?: string;
 }
+
+interface GasType {
+  id: number;
+  category: string;
+  group_name: string;
+  type: string;
+  product_code: string;
+  description: string;
+}
+
+const TRACKED_BOTTLE_FIELDS = [
+  'barcode_number',
+  'serial_number',
+  'product_code',
+  'gas_type',
+  'status',
+  'location',
+  'assigned_customer',
+  'customer_name',
+  'ownership',
+  'description',
+  'category',
+  'group_name',
+];
+
+const normalizeComparableValue = (value: unknown) => {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed === '' ? null : trimmed;
+  }
+  return value;
+};
+
+const valuesDiffer = (a: unknown, b: unknown) =>
+  JSON.stringify(normalizeComparableValue(a)) !== JSON.stringify(normalizeComparableValue(b));
+
+const buildBottleFieldChanges = (
+  previousBottle: Record<string, unknown> | null | undefined,
+  updatedFields: Record<string, unknown>
+) => {
+  const changes: Record<string, { from: unknown; to: unknown }> = {};
+  TRACKED_BOTTLE_FIELDS.forEach((field) => {
+    if (!(field in updatedFields)) return;
+    const from = normalizeComparableValue(previousBottle?.[field]);
+    const to = normalizeComparableValue(updatedFields[field]);
+    if (!valuesDiffer(from, to)) return;
+    changes[field] = { from, to };
+  });
+  return changes;
+};
 
 export default function EditCylinderScreen() {
   const { config: assetConfig } = useAssetConfig();
@@ -71,6 +126,11 @@ export default function EditCylinderScreen() {
   const [ownershipValuesLoading, setOwnershipValuesLoading] = useState(false);
   const [selectedOwnership, setSelectedOwnership] = useState('');
   const [ownershipPickerVisible, setOwnershipPickerVisible] = useState(false);
+  const [gasTypes, setGasTypes] = useState<GasType[]>([]);
+  const [gasTypesLoading, setGasTypesLoading] = useState(false);
+  const [gasTypesError, setGasTypesError] = useState('');
+  const [selectedGasTypeId, setSelectedGasTypeId] = useState('');
+  const [gasTypePickerVisible, setGasTypePickerVisible] = useState(false);
   const [bottles, setBottles] = useState<{ barcode_number: string }[]>([]);
   const [barcodeSuggestions, setBarcodeSuggestions] = useState<{ barcode_number: string }[]>([]);
   const [showBarcodeSuggestions, setShowBarcodeSuggestions] = useState(false);
@@ -169,6 +229,24 @@ export default function EditCylinderScreen() {
           }
           setOwnershipValuesLoading(false);
         });
+
+      setGasTypesLoading(true);
+      supabase
+        .from('gas_types')
+        .select('*')
+        .order('category', { ascending: true })
+        .order('group_name', { ascending: true })
+        .order('type', { ascending: true })
+        .then(({ data, error }) => {
+          if (error) {
+            logger.log('❌ Error loading gas types:', error);
+            setGasTypesError('Failed to load gas types');
+          } else {
+            setGasTypes(data || []);
+            setGasTypesError('');
+          }
+          setGasTypesLoading(false);
+        });
     }
   }, [step, profile]);
 
@@ -231,8 +309,10 @@ export default function EditCylinderScreen() {
       setSelectedLocation(cylinder?.location || '');
       setSelectedLocationName(cylinder?.location || '');
       setSelectedOwnership(cylinder?.ownership || '');
+      const matchedGasType = gasTypes.find((gt) => gt.type === cylinder?.gas_type);
+      setSelectedGasTypeId(matchedGasType ? matchedGasType.id.toString() : '');
     }
-  }, [cylinder]);
+  }, [cylinder, gasTypes]);
 
   const scanDelay = 1500; // ms
 
@@ -307,6 +387,16 @@ export default function EditCylinderScreen() {
       serial_number: serial,
       location: selectedLocationName || selectedLocation || null
     };
+    if (selectedGasTypeId) {
+      const selectedGasType = gasTypes.find((gt) => gt.id.toString() === selectedGasTypeId);
+      if (selectedGasType) {
+        updateFields.gas_type = selectedGasType.type;
+        updateFields.group_name = selectedGasType.group_name || null;
+        updateFields.category = selectedGasType.category || null;
+        updateFields.product_code = selectedGasType.product_code || null;
+        updateFields.description = selectedGasType.description || null;
+      }
+    }
     if (ownerType === 'organization') {
       updateFields.owner_type = 'organization';
       updateFields.owner_id = null;
@@ -334,6 +424,57 @@ export default function EditCylinderScreen() {
       setError(updateError.message || `Failed to update ${assetConfig?.assetDisplayName?.toLowerCase() || 'asset'}.`);
       logger.log('❌ EditCylinder update error:', updateError);
     } else {
+      const fieldChanges = buildBottleFieldChanges(cylinder as unknown as Record<string, unknown>, updateFields);
+      if (Object.keys(fieldChanges).length > 0 && profile?.organization_id && cylinder?.id) {
+        const baseAuditPayload = {
+          organization_id: profile.organization_id,
+          user_id: profile?.id || null,
+          action: 'BOTTLE_UPDATE',
+          details: {
+            event_type: 'bottle_update',
+            bottle_id: cylinder.id,
+            barcode_number: (updateFields.barcode_number as string) || cylinder.barcode_number || null,
+            field_changes: fieldChanges,
+          },
+          created_at: new Date().toISOString(),
+        };
+        const tableAwarePayload = {
+          ...baseAuditPayload,
+          table_name: 'bottles',
+          record_id: cylinder.id,
+        };
+        const { error: auditError } = await supabase.from('audit_logs').insert(tableAwarePayload);
+        if (auditError) {
+          await supabase.from('audit_logs').insert(baseAuditPayload);
+        }
+        const typeChangeFields = ['category', 'group_name', 'type', 'gas_type', 'product_code', 'description'];
+        const hasTypeChange = typeChangeFields.some((field) => field in fieldChanges);
+        if (hasTypeChange) {
+          const typeChangeSummary = typeChangeFields
+            .filter((field) => field in fieldChanges)
+            .map((field) => {
+              const from = fieldChanges[field]?.from == null ? 'empty' : String(fieldChanges[field].from);
+              const to = fieldChanges[field]?.to == null ? 'empty' : String(fieldChanges[field].to);
+              return `${field}: ${from} -> ${to}`;
+            })
+            .join(' | ');
+          const { error: typeChangeScanError } = await supabase.from('bottle_scans').insert({
+            organization_id: profile.organization_id,
+            bottle_barcode: (updateFields.barcode_number as string) || cylinder.barcode_number,
+            mode: 'LOCATE',
+            order_number: 'manual',
+            customer_id: updateFields.assigned_customer || cylinder.assigned_customer || null,
+            customer_name: updateFields.customer_name || cylinder.customer_name || null,
+            location: updateFields.location || cylinder.location || null,
+            notes: `[TYPE_CHANGE] ${typeChangeSummary}`,
+            timestamp: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+          });
+          if (typeChangeScanError) {
+            logger.warn('Failed to create mobile TYPE_CHANGE scan record:', typeChangeScanError);
+          }
+        }
+      }
       Alert.alert('Success', `${assetConfig?.assetDisplayName || 'Asset'} updated successfully!`);
       setStep(1);
       setBarcode('');
@@ -446,6 +587,34 @@ export default function EditCylinderScreen() {
                 onChangeText={setSerial}
                 autoCapitalize="none"
               />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Gas Type</Text>
+              {gasTypesLoading ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={[styles.loadingText, { color: colors.text }]}>Loading gas types...</Text>
+                </View>
+              ) : gasTypesError ? (
+                <Text style={[styles.error, { color: colors.error }]}>{gasTypesError}</Text>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  onPress={() => setGasTypePickerVisible(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.pickerButtonText, { color: selectedGasTypeId ? colors.text : colors.textSecondary }]}>
+                    {selectedGasTypeId
+                      ? (() => {
+                          const gasType = gasTypes.find((gt) => gt.id.toString() === selectedGasTypeId);
+                          return gasType ? `${gasType.category} - ${gasType.type}` : 'Select gas type...';
+                        })()
+                      : (cylinder.gas_type || 'Select gas type...')}
+                  </Text>
+                  <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
@@ -760,6 +929,47 @@ export default function EditCylinderScreen() {
                 >
                   <Text style={[styles.pickerModalItemText, { color: colors.text }]}>{item.value}</Text>
                   {selectedOwnership === item.value && <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Gas Type Picker Modal */}
+      <Modal
+        visible={gasTypePickerVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setGasTypePickerVisible(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setGasTypePickerVisible(false)}
+        >
+          <View style={[styles.pickerModal, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
+            <View style={[styles.pickerModalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Gas Type</Text>
+              <TouchableOpacity onPress={() => setGasTypePickerVisible(false)}>
+                <Text style={[styles.pickerModalClose, { color: colors.primary }]}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.pickerModalScroll}>
+              {gasTypes.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.pickerModalItem, { borderBottomColor: colors.border }]}
+                  onPress={() => {
+                    setSelectedGasTypeId(item.id.toString());
+                    setGasTypePickerVisible(false);
+                  }}
+                >
+                  <Text style={[styles.pickerModalItemText, { color: colors.text }]}>
+                    {item.category} - {item.type}
+                  </Text>
+                  {selectedGasTypeId === item.id.toString() && (
+                    <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>
+                  )}
                 </TouchableOpacity>
               ))}
             </ScrollView>

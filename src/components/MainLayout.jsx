@@ -137,12 +137,25 @@ export default function MainLayout({ children }) {
         // SECURITY CHECK: Double-verify all bottles belong to current organization
         const verifiedBottles = (bottles || []).filter(b => b.organization_id === organization.id);
         
-        const customerResults = (customers || []).map(c => ({
-          type: 'customer',
-          id: c.CustomerListID,
-          label: c.name,
-          sub: c.CustomerListID,
-        }));
+        const seenCustomerSuggestionKeys = new Set();
+        const customerResults = (customers || []).reduce((acc, c) => {
+          const customerName = (c.name || '').trim();
+          const customerListId = (c.CustomerListID || '').trim();
+          const dedupeKey = `${customerName.toLowerCase()}::${customerListId.toLowerCase()}`;
+
+          if (seenCustomerSuggestionKeys.has(dedupeKey)) {
+            return acc;
+          }
+
+          seenCustomerSuggestionKeys.add(dedupeKey);
+          acc.push({
+            type: 'customer',
+            id: c.CustomerListID,
+            label: c.name,
+            sub: c.CustomerListID,
+          });
+          return acc;
+        }, []);
         const bottleResults = verifiedBottles.map(b => ({
           type: 'bottle',
           id: b.id,

@@ -1496,6 +1496,20 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           // count it as "Return not on balance" (like DNS) and remove one ship of same product so net stays correct.
           let returnsNotOnBalance = [];
           if (returnBarcodesUnique.length > 0) {
+            // Date/event-aware guard: if this order's latest scan for a barcode is RETURN/PICKUP,
+            // treat it as physically back in warehouse and do not flag it as RNB.
+            const latestOrderScanModeByBarcode = new Map();
+            (bottleScanRows || []).forEach((scan) => {
+              const rawBarcode = scan?.bottle_barcode;
+              const norm = normalizeBarcode(rawBarcode);
+              if (!norm) return;
+              const mode = String(scan?.mode || '').toUpperCase();
+              const time = new Date(scan?.timestamp || scan?.created_at || 0).getTime();
+              const existing = latestOrderScanModeByBarcode.get(norm);
+              if (!existing || time >= existing.time) {
+                latestOrderScanModeByBarcode.set(norm, { mode, time });
+              }
+            });
             const allBarcodes = [...new Set([...shipBarcodesUnique, ...returnBarcodesUnique])];
             const { data: bottleRows } = await supabase
               .from('bottles')
@@ -1526,6 +1540,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             const custNameStr = String(customerName || '').trim();
 
             for (const retBc of returnBarcodesUnique) {
+              const retNorm = normalizeBarcode(retBc);
+              const latestScan = latestOrderScanModeByBarcode.get(retNorm);
+              if (latestScan && (latestScan.mode === 'RETURN' || latestScan.mode === 'PICKUP')) {
+                continue;
+              }
               const bottle = bottleMap.get(retBc);
               if (!bottle) continue;
               const assignedTo = String(bottle.assigned_customer || '').trim();

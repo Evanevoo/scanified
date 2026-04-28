@@ -6,6 +6,7 @@
  */
 import { supabase } from '../supabase/client';
 import logger from '../utils/logger';
+import { isTemporaryCustomerIdentity } from '../utils/resolveCustomerListId';
 
 export const bottleAssignmentService = {
   /**
@@ -37,6 +38,13 @@ export const bottleAssignmentService = {
     orderNumber = null,
   }) {
     try {
+      if (isTemporaryCustomerIdentity(customerId) || isTemporaryCustomerIdentity(customerName)) {
+        return {
+          success: false,
+          error: 'Cannot assign bottles to temporary customer. Please select a real customer profile.',
+        };
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
 
       const { data, error } = await supabase.rpc('assign_bottles_to_customer', {

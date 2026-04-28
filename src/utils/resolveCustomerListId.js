@@ -8,6 +8,20 @@ const memo = new Map();
 const memoKey = (orgId, hint) =>
   `${orgId || ''}\t${(hint || '').toString().trim().toLowerCase()}`;
 
+export function isTemporaryCustomerIdentity(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return false;
+  const lower = raw.toLowerCase();
+  // Legacy/import placeholders used for walk-ins; never assign bottles to these.
+  return (
+    raw.toUpperCase() === '999C' ||
+    lower === 'temp' ||
+    lower === 'temp customer' ||
+    lower.includes('temporary') ||
+    lower.includes('walk in')
+  );
+}
+
 export function clearResolveCustomerListIdMemo() {
   memo.clear();
 }

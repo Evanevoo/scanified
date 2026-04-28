@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -35,33 +35,6 @@ import { useAuth } from '../hooks/useAuth';
 import { useDynamicAssetTerms } from '../hooks/useDynamicAssetTerms';
 import { bottleLocationValueForCustomer, formatLocationDisplay, normalizeLocationKey } from '../utils/locationDisplay';
 
-// Same derivation as Inventory (Assets) page - group by product_code when present so one row per code
-function deriveInventoryGasTypes(bottles) {
-  const assetMap = new Map();
-  function cleanedLabel(bottle) {
-    let gasType = bottle.description || bottle.product_code || bottle.gas_type || bottle.type;
-    if (gasType) {
-      gasType = gasType
-        .replace(/^AVIATOR\s+/i, '')
-        .replace(/\s+BOTTLE.*$/i, '')
-        .replace(/\s+ASSET.*$/i, '')
-        .replace(/\s+SIZE\s+\d+.*$/i, '')
-        .replace(/\s+-\s+SIZE\s+\d+.*$/i, '')
-        .replace(/\s+ASSETS.*$/i, '')
-        .trim();
-      if (gasType.length < 3) gasType = bottle.description || bottle.product_code || bottle.gas_type || bottle.type;
-    }
-    return gasType || 'Unknown Gas Type';
-  }
-  bottles.forEach((bottle) => {
-    const normalizedCode = bottle.product_code && bottle.product_code.trim() ? bottle.product_code.trim() : null;
-    const groupingKey = normalizedCode || cleanedLabel(bottle);
-    if (!assetMap.has(groupingKey)) assetMap.set(groupingKey, []);
-    assetMap.get(groupingKey).push(bottle);
-  });
-  return Array.from(assetMap.keys()).filter(Boolean).sort((a, b) => (a || '').localeCompare(b || ''));
-}
-
 // Only 4 statuses: Full, Empty, Rented, Lost (stored as filled, empty, rented, lost)
 const NORMAL_STATUSES = ['filled', 'empty', 'rented', 'lost'];
 const normalizeStatus = (s) => {
@@ -96,6 +69,26 @@ const sameCustomer = (record, assignedCustomerId, customerName) => {
 const modeIndicatesDelivery = (record) => {
   const mode = String(record?.mode || record?.action || '').trim().toUpperCase();
   return mode === 'SHIP' || mode === 'DELIVERY' || mode === 'OUT';
+};
+
+const modeIndicatesReturn = (record) => {
+  const mode = String(record?.mode || record?.action || '').trim().toUpperCase();
+  return (
+    mode === 'RETURN' ||
+    mode === 'PICKUP' ||
+    mode === 'IN' ||
+    record?.history_type === 'rental_end'
+  );
+};
+
+const modeIndicatesFill = (record) => {
+  const mode = String(record?.mode || record?.action || '').trim().toUpperCase();
+  return mode === 'FILL' || record?.history_type === 'fill';
+};
+
+const modeIndicatesDeliveryForStatus = (record) => {
+  const mode = String(record?.mode || record?.action || '').trim().toUpperCase();
+  return mode === 'SHIP' || mode === 'DELIVERY' || mode === 'OUT' || record?.history_type === 'rental_start';
 };
 
 const TRACKED_BOTTLE_FIELDS = [
@@ -152,6 +145,31 @@ const stringifyHistoryDetails = (details) => {
   }
 };
 
+const normalizeAuditDetails = (details) => {
+  if (!details) return {};
+  if (typeof details === 'string') {
+    try {
+      const parsed = JSON.parse(details);
+      return normalizeAuditDetails(parsed);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof details === 'object') {
+    if (details.field_changes && typeof details.field_changes === 'object') return details;
+    if (details.details) return normalizeAuditDetails(details.details);
+  }
+  return {};
+};
+
+const getAuditFieldChangeDisplay = (auditDetails, fieldName, fallbackValue) => {
+  const change = auditDetails?.field_changes?.[fieldName];
+  if (!change) return fallbackValue;
+  const from = change?.from == null || change?.from === '' ? 'empty' : String(change.from);
+  const to = change?.to == null || change?.to === '' ? 'empty' : String(change.to);
+  return `${from} -> ${to}`;
+};
+
 export default function AssetDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -175,6 +193,19 @@ export default function AssetDetail() {
   const [customers, setCustomers] = useState([]);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [gasTypes, setGasTypes] = useState([]);
+  const assignmentRepairKeyRef = useRef(null);
+  const gasTypeOptions = React.useMemo(
+    () =>
+      [...new Set((gasTypes || []).map((item) => (item?.type || '').trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b)),
+    [gasTypes]
+  );
+  const productCodeOptions = React.useMemo(
+    () =>
+      [...new Set((gasTypes || []).map((item) => (item?.product_code || '').trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b)),
+    [gasTypes]
+  );
 
   const logBottleAuditEvent = async ({ action, details, bottleId = null }) => {
     if (!profile?.organization_id || !bottleId) return;
@@ -200,13 +231,105 @@ export default function AssetDetail() {
     }
   };
 
+  const effectiveCustomerAssignment = React.useMemo(() => {
+    const fallback = {
+      assignedCustomerId: asset?.assigned_customer || '',
+      customerName: asset?.customer_name || '',
+      sourceAction: 'fallback'
+    };
+    if (!movementHistory.length) return fallback;
+
+    // Movement history is sorted newest-first; first decisive movement wins.
+    for (const record of movementHistory) {
+      if (modeIndicatesReturn(record) || modeIndicatesFill(record)) {
+        return { assignedCustomerId: '', customerName: '', sourceAction: 'cleared_by_return_or_fill' };
+      }
+      if (modeIndicatesDelivery(record)) {
+        const customerId = String(record?.customer_id || record?.assigned_customer || '').trim();
+        const customerName = String(record?.customer_name || '').trim();
+        if (customerId || customerName) {
+          return { assignedCustomerId: customerId, customerName, sourceAction: 'set_by_delivery' };
+        }
+      }
+    }
+    return fallback;
+  }, [movementHistory, asset?.assigned_customer, asset?.customer_name]);
+
+  const effectiveAssignedCustomerId = effectiveCustomerAssignment.assignedCustomerId;
+  const effectiveAssignedCustomerName = effectiveCustomerAssignment.customerName;
+  const effectiveStatus = React.useMemo(() => {
+    const fallback = normalizeStatus(asset?.status);
+    if (!movementHistory.length) return fallback;
+    for (const record of movementHistory) {
+      if (modeIndicatesFill(record)) return 'filled';
+      if (modeIndicatesReturn(record)) return 'empty';
+      if (modeIndicatesDeliveryForStatus(record)) return 'rented';
+    }
+    return fallback;
+  }, [movementHistory, asset?.status]);
+
+  useEffect(() => {
+    const syncAssignmentFromHistory = async () => {
+      if (!asset?.id || !profile?.organization_id || movementHistory.length === 0) return;
+      if (effectiveCustomerAssignment.sourceAction === 'fallback') return;
+
+      const currentId = String(asset.assigned_customer || '').trim();
+      const currentName = String(asset.customer_name || '').trim();
+      const nextId = String(effectiveAssignedCustomerId || '').trim();
+      const nextName = String(effectiveAssignedCustomerName || '').trim();
+      const currentStatus = normalizeStatus(asset?.status);
+      const needsRepair = currentId !== nextId || currentName !== nextName || currentStatus !== effectiveStatus;
+      if (!needsRepair) return;
+
+      const repairKey = `${asset.id}|${currentId}|${currentName}|${nextId}|${nextName}|${currentStatus}|${effectiveStatus}|${effectiveCustomerAssignment.sourceAction}`;
+      if (assignmentRepairKeyRef.current === repairKey) return;
+      assignmentRepairKeyRef.current = repairKey;
+
+      const updateData = {
+        assigned_customer: nextId || null,
+        customer_name: nextName || null,
+        customer_id: nextId || null,
+        status: effectiveStatus,
+      };
+      if (!nextId) {
+        // Returned/filled bottles should not carry previous customer aging.
+        updateData.days_at_location = 0;
+      }
+
+      const { error: repairError } = await supabase
+        .from('bottles')
+        .update(updateData)
+        .eq('id', asset.id)
+        .eq('organization_id', profile.organization_id);
+
+      if (repairError) {
+        logger.warn('Assignment repair from movement history failed:', repairError);
+        return;
+      }
+
+      setAsset((prev) => prev ? { ...prev, ...updateData } : prev);
+    };
+
+    syncAssignmentFromHistory();
+  }, [
+    asset?.id,
+    asset?.assigned_customer,
+    asset?.customer_name,
+    profile?.organization_id,
+    movementHistory,
+    effectiveAssignedCustomerId,
+    effectiveAssignedCustomerName,
+    effectiveStatus,
+    effectiveCustomerAssignment.sourceAction
+  ]);
+
   const derivedDaysAtLocation = React.useMemo(() => {
-    if (!asset?.assigned_customer || !movementHistory.length) {
+    if (!effectiveAssignedCustomerId || !movementHistory.length) {
       return asset?.days_at_location || 0;
     }
 
     const latestCustomerDelivery = movementHistory
-      .filter((record) => modeIndicatesDelivery(record) && sameCustomer(record, asset.assigned_customer, asset.customer_name))
+      .filter((record) => modeIndicatesDelivery(record) && sameCustomer(record, effectiveAssignedCustomerId, effectiveAssignedCustomerName))
       .map((record) => toStartOfDay(record.created_at))
       .filter(Boolean)
       .sort((a, b) => b.getTime() - a.getTime())[0];
@@ -216,7 +339,7 @@ export default function AssetDetail() {
     const today = toStartOfDay(new Date());
     const diffDays = Math.floor((today.getTime() - latestCustomerDelivery.getTime()) / MS_PER_DAY);
     return Math.max(0, diffDays);
-  }, [asset?.assigned_customer, asset?.customer_name, asset?.days_at_location, movementHistory]);
+  }, [effectiveAssignedCustomerId, effectiveAssignedCustomerName, asset?.days_at_location, movementHistory]);
 
   useEffect(() => {
     fetchAssetDetail();
@@ -240,12 +363,12 @@ export default function AssetDetail() {
 
   // Fetch customer data when assigned_customer changes
   useEffect(() => {
-    if (asset?.assigned_customer) {
-      fetchCustomerData(asset.assigned_customer);
+    if (effectiveAssignedCustomerId) {
+      fetchCustomerData(effectiveAssignedCustomerId);
     } else {
       setCustomerData(null);
     }
-  }, [asset?.assigned_customer, profile?.organization_id]);
+  }, [effectiveAssignedCustomerId, profile?.organization_id]);
 
   const fetchAssetDetail = async () => {
     try {
@@ -324,20 +447,21 @@ export default function AssetDetail() {
     }
   };
 
-  // Build the same Gas Type list as Inventory (/inventory) from this org's bottles
+  // Load gas type catalog so gas type can drive product code automatically.
   const fetchGasTypes = async () => {
     try {
       if (!profile?.organization_id) return;
-      const { data: bottles, error } = await supabase
-        .from('bottles')
-        .select('product_code, description, gas_type, type')
-        .eq('organization_id', profile.organization_id);
+      const { data, error } = await supabase
+        .from('gas_types')
+        .select('id, category, group_name, type, product_code, description')
+        .order('category', { ascending: true })
+        .order('group_name', { ascending: true })
+        .order('type', { ascending: true });
 
       if (error) throw error;
-      const list = deriveInventoryGasTypes(bottles || []);
-      setGasTypes(list);
+      setGasTypes(data || []);
     } catch (err) {
-      logger.error('Error fetching gas types from inventory:', err);
+      logger.error('Error fetching gas type catalog:', err);
     }
   };
 
@@ -506,11 +630,26 @@ export default function AssetDetail() {
       };
 
       // Fetch from bottle_scans (single source for movement history)
+      // Include barcode variants so leading-zero differences do not hide scans.
+      const barcodeVariants = (() => {
+        const raw = String(barcodeNumber || '').trim();
+        if (!raw) return [];
+        const stripped = raw.replace(/^0+/, '') || raw;
+        return [...new Set([raw, stripped])];
+      })();
+      const barcodeOrClause = barcodeVariants
+        .flatMap((b) => [
+          `barcode_number.eq.${b}`,
+          `bottle_barcode.eq.${b}`,
+          `cylinder_barcode.eq.${b}`
+        ])
+        .join(',');
+
       if (barcodeNumber) {
         const { data: bsData, error: bsError } = await supabase
           .from('bottle_scans')
           .select('*')
-          .or(`barcode_number.eq.${barcodeNumber},bottle_barcode.eq.${barcodeNumber},cylinder_barcode.eq.${barcodeNumber}`)
+          .or(barcodeOrClause)
           .eq('organization_id', profile.organization_id)
           .order('created_at', { ascending: false })
           .limit(50);
@@ -534,7 +673,7 @@ export default function AssetDetail() {
             supabase
               .from('cylinder_scans')
               .select('*')
-              .or(`barcode_number.eq.${barcodeNumber},cylinder_barcode.eq.${barcodeNumber},bottle_barcode.eq.${barcodeNumber}`)
+              .or(barcodeOrClause)
               .eq('organization_id', profile.organization_id)
               .order('created_at', { ascending: false })
               .limit(50),
@@ -693,7 +832,26 @@ export default function AssetDetail() {
             'audit_logs_fallback'
           );
         }
+        if (!auditRows.length) {
+          const barcodeForAudit = String(barcodeNumber || '').trim();
+          if (barcodeForAudit) {
+            const auditByDetails = await runOptionalQuery(
+              () =>
+                supabase
+                  .from('audit_logs')
+                  .select('*')
+                  .eq('organization_id', profile.organization_id)
+                  .eq('action', 'BOTTLE_UPDATE')
+                  .or(`details->>bottle_id.eq.${asset.id},details->>barcode_number.eq.${barcodeForAudit}`)
+                  .order('created_at', { ascending: false })
+                  .limit(50),
+              'audit_logs_details_fallback'
+            );
+            auditRows = auditByDetails;
+          }
+        }
         auditRows.forEach((item) => {
+          const parsedDetails = normalizeAuditDetails(item.details);
           allHistory.push({
             ...item,
             id: `audit_${item.id}`,
@@ -705,8 +863,8 @@ export default function AssetDetail() {
             created_at: item.created_at || nowIso,
             action: item.action ? `AUDIT: ${item.action}` : 'AUDIT UPDATE',
             mode: item.action || 'AUDIT',
-            notes: stringifyHistoryDetails(item.details),
-            details: item.details || null,
+            notes: stringifyHistoryDetails(parsedDetails),
+            details: parsedDetails,
             order_number: item.order_number || null
           });
         });
@@ -913,6 +1071,35 @@ export default function AssetDetail() {
             field_changes: fieldChanges,
           },
         });
+      }
+      const typeChangeFields = ['category', 'group_name', 'type', 'gas_type', 'product_code', 'description'];
+      const hasTypeChange = typeChangeFields.some((field) => field in fieldChanges);
+      if (hasTypeChange) {
+        const typeChangeSummary = typeChangeFields
+          .filter((field) => field in fieldChanges)
+          .map((field) => {
+            const from = fieldChanges[field]?.from == null ? 'empty' : String(fieldChanges[field].from);
+            const to = fieldChanges[field]?.to == null ? 'empty' : String(fieldChanges[field].to);
+            return `${field}: ${from} -> ${to}`;
+          })
+          .join(' | ');
+        const { error: typeChangeScanError } = await supabase
+          .from('bottle_scans')
+          .insert({
+            organization_id: profile.organization_id,
+            bottle_barcode: updateData.barcode_number || asset.barcode_number,
+            mode: 'LOCATE',
+            order_number: 'manual',
+            customer_id: updateData.assigned_customer || asset.assigned_customer || null,
+            customer_name: updateData.customer_name || asset.customer_name || null,
+            location: updateData.location || asset.location || null,
+            notes: `[TYPE_CHANGE] ${typeChangeSummary}`,
+            timestamp: new Date().toISOString(),
+            created_at: new Date().toISOString()
+          });
+        if (typeChangeScanError) {
+          logger.warn('Failed to create TYPE_CHANGE scan record:', typeChangeScanError);
+        }
       }
 
       // Create a scan record if assignment changed
@@ -1150,17 +1337,17 @@ export default function AssetDetail() {
             </Typography>
             <Chip 
               label={
-                asset.status === 'filled' || asset.status === 'full' ? 'Full' :
-                asset.status === 'empty' ? 'Empty' :
-                asset.status === 'rented' ? 'Rented' :
-                asset.status === 'lost' ? 'Lost' :
-                asset.status || 'Unknown'
+                effectiveStatus === 'filled' || effectiveStatus === 'full' ? 'Full' :
+                effectiveStatus === 'empty' ? 'Empty' :
+                effectiveStatus === 'rented' ? 'Rented' :
+                effectiveStatus === 'lost' ? 'Lost' :
+                effectiveStatus || 'Unknown'
               }
               color={
-                asset.status === 'filled' || asset.status === 'full' ? 'success' :
-                asset.status === 'empty' ? 'warning' :
-                asset.status === 'rented' ? 'info' :
-                asset.status === 'lost' ? 'error' : 'default'
+                effectiveStatus === 'filled' || effectiveStatus === 'full' ? 'success' :
+                effectiveStatus === 'empty' ? 'warning' :
+                effectiveStatus === 'rented' ? 'info' :
+                effectiveStatus === 'lost' ? 'error' : 'default'
               }
               size="small"
             />
@@ -1198,7 +1385,7 @@ export default function AssetDetail() {
       </Paper>
 
       {/* Customer Assignment */}
-      {asset.assigned_customer && (
+      {effectiveAssignedCustomerId && (
         <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Typography variant="h6" gutterBottom>
             Customer Assignment
@@ -1209,7 +1396,7 @@ export default function AssetDetail() {
                 Customer ID
               </Typography>
               <Typography variant="body1" fontWeight="bold">
-                {asset.assigned_customer}
+                {effectiveAssignedCustomerId}
               </Typography>
             </Grid>
             <Grid item xs={12} md={6}>
@@ -1217,7 +1404,7 @@ export default function AssetDetail() {
                 Customer Name
               </Typography>
               <Typography variant="body1" fontWeight="bold">
-                {asset.customer_name || '-'}
+                {effectiveAssignedCustomerName || '-'}
               </Typography>
             </Grid>
           <Grid item xs={12} md={6}>
@@ -1293,10 +1480,22 @@ export default function AssetDetail() {
               </thead>
               <tbody>
                 {movementHistory.slice(0, 10).map((record, index) => {
+                  const auditDetails = normalizeAuditDetails(record.details);
+                  const typeChangeFields = ['category', 'group_name', 'type', 'gas_type', 'product_code', 'description'];
+                  const isTypeChangeAudit =
+                    record.history_type === 'audit' &&
+                    typeChangeFields.some((field) => auditDetails?.field_changes?.[field]);
+
                   // Determine action type based on mode/action
                   let action = '';
                   const recordMode = record.mode;
-                  if (recordMode === 'RNB' || record.action === 'RNB' || record.history_type === 'rental_rnb') {
+                  const isTypeChangeScan =
+                    recordMode === 'LOCATE' &&
+                    typeof record.notes === 'string' &&
+                    record.notes.includes('[TYPE_CHANGE]');
+                  if (isTypeChangeAudit || isTypeChangeScan) {
+                    action = 'Bottle Type Changed';
+                  } else if (recordMode === 'RNB' || record.action === 'RNB' || record.history_type === 'rental_rnb') {
                     action = 'RNB (Return not on balance)';
                   } else if (recordMode === 'SHIP' || record.action === 'SHIP' || record.history_type === 'rental_start') {
                     action = 'Delivery';
@@ -1326,14 +1525,25 @@ export default function AssetDetail() {
                   }
                   
                   // Get asset details (use asset data or record data)
-                  const category = asset.category || record.category || 'INDUSTRIAL CYLINDERS';
-                  const group = asset.gas_type || record.gas_type || record.group || '';
-                  const type = asset.product_code || record.product_code || record.type || '';
-                  const productCode = asset.product_code || record.product_code || '';
-                  const description =
-                    record.history_type === 'audit'
-                      ? (record.notes || record.description || asset.description || '')
-                      : (record.description || record.notes || asset.description || '');
+                  const category = isTypeChangeAudit
+                    ? getAuditFieldChangeDisplay(auditDetails, 'category', asset.category || record.category || 'INDUSTRIAL CYLINDERS')
+                    : (asset.category || record.category || 'INDUSTRIAL CYLINDERS');
+                  const group = isTypeChangeAudit
+                    ? getAuditFieldChangeDisplay(auditDetails, 'group_name', asset.gas_type || record.gas_type || record.group || '')
+                    : (asset.gas_type || record.gas_type || record.group || '');
+                  const type = isTypeChangeAudit
+                    ? getAuditFieldChangeDisplay(auditDetails, 'gas_type', asset.gas_type || record.gas_type || record.type || '')
+                    : (asset.gas_type || record.gas_type || record.type || '');
+                  const productCode = isTypeChangeAudit
+                    ? getAuditFieldChangeDisplay(auditDetails, 'product_code', asset.product_code || record.product_code || '')
+                    : (asset.product_code || record.product_code || '');
+                  const description = isTypeChangeAudit
+                    ? getAuditFieldChangeDisplay(auditDetails, 'description', asset.description || record.description || '')
+                    : (
+                        record.history_type === 'audit'
+                          ? (record.notes || record.description || asset.description || '')
+                          : (record.description || record.notes || asset.description || '')
+                      );
                   const barcode = asset.barcode_number || record.barcode_number || record.bottle_barcode || '';
                   
                   // Format date; show date-only when value is date-only or midnight UTC to avoid
@@ -1476,31 +1686,64 @@ export default function AssetDetail() {
               />
             </Grid>
             <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Product Code"
-                value={editData.product_code || ''}
-                onChange={(e) => setEditData({ ...editData, product_code: e.target.value })}
-              />
+              <FormControl fullWidth>
+                <InputLabel>Product Code</InputLabel>
+                <Select
+                  value={editData.product_code || ''}
+                  onChange={(e) => {
+                    const selectedProductCode = e.target.value;
+                    const matchedGasType = gasTypes.find((item) => item.product_code === selectedProductCode);
+                    setEditData({
+                      ...editData,
+                      product_code: selectedProductCode,
+                      gas_type: matchedGasType?.type || editData.gas_type || '',
+                      description: matchedGasType?.description || editData.description || ''
+                    });
+                  }}
+                  label="Product Code"
+                >
+                  <MenuItem value="">
+                    <em>None</em>
+                  </MenuItem>
+                  {productCodeOptions.map((code) => (
+                    <MenuItem key={code} value={code}>
+                      {code}
+                    </MenuItem>
+                  ))}
+                  {editData.product_code && !productCodeOptions.includes((editData.product_code || '').trim()) && (
+                    <MenuItem value={editData.product_code}>
+                      {editData.product_code} (current)
+                    </MenuItem>
+                  )}
+                </Select>
+              </FormControl>
             </Grid>
             <Grid item xs={12} md={6}>
               <FormControl fullWidth>
                 <InputLabel>Gas Type</InputLabel>
                 <Select
                   value={editData.gas_type || ''}
-                  onChange={(e) => setEditData({ ...editData, gas_type: e.target.value })}
+                  onChange={(e) => {
+                    const selectedGasType = e.target.value;
+                    const matchedGasType = gasTypes.find((item) => item.type === selectedGasType);
+                    setEditData({
+                      ...editData,
+                      gas_type: selectedGasType,
+                      product_code: matchedGasType?.product_code || editData.product_code || '',
+                      description: matchedGasType?.description || editData.description || ''
+                    });
+                  }}
                   label="Gas Type"
                 >
                   <MenuItem value="">
                     <em>None</em>
                   </MenuItem>
-                  {gasTypes.map((label) => (
-                    <MenuItem key={label} value={label}>
-                      {label}
+                  {gasTypeOptions.map((type) => (
+                    <MenuItem key={type} value={type}>
+                      {type}
                     </MenuItem>
                   ))}
-                  {/* If current value is not in inventory list (e.g. new type), keep it selectable */}
-                  {editData.gas_type && !gasTypes.includes((editData.gas_type || '').trim()) && (
+                  {editData.gas_type && !gasTypeOptions.includes((editData.gas_type || '').trim()) && (
                     <MenuItem value={editData.gas_type}>
                       {editData.gas_type} (current)
                     </MenuItem>
