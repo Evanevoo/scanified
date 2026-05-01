@@ -38,6 +38,8 @@ interface ScanAreaProps {
   barcodeTypesOverride?: string[];
   /** When provided, only barcodes for which this returns true get success feedback and onScanned. Others are silently ignored (no beep, no error). Use so order number doesn't trigger a "reaction" when scanning for customer barcode. */
   acceptForFeedback?: (barcode: string) => boolean;
+  /** Enables idle OCR customer detection while camera is open. */
+  enableOcr?: boolean;
 }
 
 // Extract potential customer names from OCR text (exclude barcodes, numbers, short words)
@@ -73,6 +75,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
   disablePeriodicFocus = false,
   barcodeTypesOverride,
   acceptForFeedback,
+  enableOcr = true,
 }) => {
   const DECODE_ROI_INSET = 0.04;
   const [permission, requestPermission] = useCameraPermissions();
@@ -261,6 +264,7 @@ const ScanArea: React.FC<ScanAreaProps> = ({
 
   // Automatic OCR when idle - only reports customers that exist in the system
   const runOcrIfIdle = async () => {
+    if (!enableOcr) return;
     const searchFn = searchCustomerByNameRef.current;
     const onFoundFn = onCustomerFoundRef.current;
     if (!searchFn || !onFoundFn || !TextRecognition || !cameraRef.current) return;
@@ -298,11 +302,11 @@ const ScanArea: React.FC<ScanAreaProps> = ({
 
   // Run OCR periodically when idle - use refs so interval isn't reset on parent re-renders
   useEffect(() => {
-    if (!searchCustomerByName || !onCustomerFound || !TextRecognition) return;
+    if (!enableOcr || !searchCustomerByName || !onCustomerFound || !TextRecognition) return;
     const interval = setInterval(runOcrIfIdle, 2500);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- refs hold latest callbacks
-  }, []);
+  }, [enableOcr]);
 
   // Calculate region of interest for better scanning
   // IMPORTANT:

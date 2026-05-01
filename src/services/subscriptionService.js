@@ -1,275 +1,277 @@
-import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
+import {
+  generateInvoiceNumber,
+  getNextBillingDate,
+  getPeriodEnd,
+  calculateProration,
+  getEndOfMonth,
+} from '../utils/subscriptionUtils';
 
-// Cache for subscription plans to avoid repeated database calls
-let cachedPlans = null;
-let cacheTimestamp = null;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+export async function createSubscription(organizationId, customerId, planId, billingPeriod, items = []) {
+  const startDate = new Date().toISOString().split('T')[0];
+  const periodEnd = getPeriodEnd(startDate, billingPeriod).toISOString().split('T')[0];
+  const nextBilling = getNextBillingDate(startDate, billingPeriod).toISOString().split('T')[0];
 
-const fetchSubscriptionPlans = async () => {
-  // Check if cache is valid
-  if (cachedPlans && cacheTimestamp && (Date.now() - cacheTimestamp < CACHE_DURATION)) {
-    return cachedPlans;
+  const { data: sub, error } = await supabase
+    .from('subscriptions')
+    .insert({
+      organization_id: organizationId,
+      customer_id: customerId,
+      plan_id: planId || null,
+      status: 'active',
+      billing_period: billingPeriod,
+      start_date: startDate,
+      current_period_start: startDate,
+      current_period_end: periodEnd,
+      next_billing_date: nextBilling,
+      auto_renew: true,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  if (items.length > 0) {
+    const rows = items.map((it) => ({
+      subscription_id: sub.id,
+      organization_id: organizationId,
+      product_code: it.product_code,
+      category: it.category || null,
+      description: it.description || null,
+      quantity: it.quantity || 1,
+      unit_price: it.unit_price || 0,
+      status: 'active',
+    }));
+    const { error: itemErr } = await supabase.from('subscription_items').insert(rows);
+    if (itemErr) throw itemErr;
   }
 
-  try {
-    const { data, error } = await supabase
-      .from('subscription_plans')
-      .select('*')
-      .eq('is_active', true)
-      .order('price', { ascending: true });
+  return sub;
+}
 
+export async function modifySubscription(subscriptionId, addItems = [], removeItemIds = [], prorate = false) {
+  if (removeItemIds.length > 0) {
+    const { error } = await supabase
+      .from('subscription_items')
+      .update({ status: 'removed', removed_at: new Date().toISOString() })
+      .in('id', removeItemIds);
     if (error) throw error;
-
-    // Convert to legacy format for compatibility
-    const plansObject = {};
-    (data || []).forEach(plan => {
-      const key = plan.name.toLowerCase().replace(/\s+/g, '');
-      plansObject[key] = {
-        id: plan.id,
-        name: plan.name,
-        price: plan.price,
-        users: plan.max_users || 999999,
-        customers: plan.max_customers || 999999,
-        bottles: plan.max_cylinders || 999999,
-        features: Array.isArray(plan.features) ? plan.features : []
-      };
-    });
-
-    // Update cache
-    cachedPlans = plansObject;
-    cacheTimestamp = Date.now();
-    
-    return plansObject;
-  } catch (error) {
-    logger.error('Error fetching subscription plans:', error);
-    // Return fallback plans if database fetch fails
-    return {
-      basic: {
-        name: 'Basic',
-        price: 29,
-        users: 5,
-        customers: 100,
-        bottles: 1000,
-        features: ['Basic reporting', 'Email support', 'Mobile app access']
-      },
-      pro: {
-        name: 'Pro',
-        price: 99,
-        users: 15,
-        customers: 500,
-        bottles: 5000,
-        features: ['Advanced reporting', 'Priority support', 'API access', 'Custom branding']
-      },
-      enterprise: {
-        name: 'Enterprise',
-        price: 299,
-        users: 999999,
-        customers: 999999,
-        bottles: 999999,
-        features: ['All Pro features', 'Dedicated support', 'Custom integrations', 'SLA guarantee']
-      }
-    };
   }
-};
 
-// Function to clear cache when plans are updated
-export const clearPlansCache = () => {
-  cachedPlans = null;
-  cacheTimestamp = null;
-};
+  if (addItems.length > 0) {
+    const { data: sub } = await supabase
+      .from('subscriptions')
+      .select('organization_id')
+      .eq('id', subscriptionId)
+      .single();
 
-// Helper function to check if a limit is effectively unlimited
-const isUnlimited = (limit) => limit === -1 || limit >= 999999;
+    const rows = addItems.map((it) => ({
+      subscription_id: subscriptionId,
+      organization_id: sub?.organization_id,
+      product_code: it.product_code,
+      category: it.category || null,
+      description: it.description || null,
+      quantity: it.quantity || 1,
+      unit_price: it.unit_price || 0,
+      status: 'active',
+    }));
+    const { error } = await supabase.from('subscription_items').insert(rows);
+    if (error) throw error;
+  }
+
+  return { success: true };
+}
+
+export async function cancelSubscription(subscriptionId, policy = 'end_of_term') {
+  const update = {
+    cancelled_at: new Date().toISOString(),
+    cancellation_policy: policy,
+  };
+  if (policy === 'immediate') {
+    update.status = 'cancelled';
+  }
+  const { error } = await supabase
+    .from('subscriptions')
+    .update(update)
+    .eq('id', subscriptionId);
+  if (error) throw error;
+  return { success: true };
+}
+
+export async function renewSubscription(subscriptionId) {
+  const { data: sub, error: fetchErr } = await supabase
+    .from('subscriptions')
+    .select('*')
+    .eq('id', subscriptionId)
+    .single();
+  if (fetchErr) throw fetchErr;
+
+  const newStart = sub.current_period_end;
+  const newEnd = getPeriodEnd(newStart, sub.billing_period).toISOString().split('T')[0];
+  const nextBilling = getNextBillingDate(newStart, sub.billing_period).toISOString().split('T')[0];
+
+  const { error } = await supabase
+    .from('subscriptions')
+    .update({
+      status: 'active',
+      current_period_start: newStart,
+      current_period_end: newEnd,
+      next_billing_date: nextBilling,
+      cancelled_at: null,
+    })
+    .eq('id', subscriptionId);
+  if (error) throw error;
+  return { success: true };
+}
+
+export async function generateInvoice(organizationId, subscriptionId) {
+  const { data: sub, error: subErr } = await supabase
+    .from('subscriptions')
+    .select('*, subscription_items(*)')
+    .eq('id', subscriptionId)
+    .single();
+  if (subErr) throw subErr;
+
+  const activeItems = (sub.subscription_items || []).filter((i) => i.status === 'active');
+  const subtotal = activeItems.reduce((s, i) => s + (parseFloat(i.unit_price) || 0) * (i.quantity || 1), 0);
+  const taxRate = 0.11;
+  const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
+  const totalAmount = Math.round((subtotal + taxAmount) * 100) / 100;
+
+  const periodStart = sub.current_period_start;
+  const periodEnd = sub.current_period_end;
+  const dueDate = getEndOfMonth(periodEnd || new Date()).toISOString().split('T')[0];
+
+  const { data: invoice, error: invErr } = await supabase
+    .from('subscription_invoices')
+    .insert({
+      organization_id: organizationId,
+      subscription_id: subscriptionId,
+      customer_id: sub.customer_id,
+      invoice_number: generateInvoiceNumber(),
+      status: 'draft',
+      period_start: periodStart,
+      period_end: periodEnd,
+      subtotal,
+      tax_amount: taxAmount,
+      total_amount: totalAmount,
+      due_date: dueDate,
+    })
+    .select()
+    .single();
+  if (invErr) throw invErr;
+
+  const lineItems = activeItems.map((item) => ({
+    invoice_id: invoice.id,
+    subscription_item_id: item.id,
+    product_code: item.product_code,
+    description: item.description,
+    quantity: item.quantity,
+    unit_price: parseFloat(item.unit_price) || 0,
+    amount: (parseFloat(item.unit_price) || 0) * (item.quantity || 1),
+  }));
+
+  if (lineItems.length > 0) {
+    const { error: liErr } = await supabase.from('invoice_line_items').insert(lineItems);
+    if (liErr) throw liErr;
+  }
+
+  return invoice;
+}
+
+export async function recordPayment(invoiceId, organizationId, amount, method, reference, notes) {
+  const { data: payment, error: payErr } = await supabase
+    .from('payments')
+    .insert({
+      invoice_id: invoiceId,
+      organization_id: organizationId,
+      amount,
+      payment_method: method || null,
+      payment_date: new Date().toISOString().split('T')[0],
+      reference_number: reference || null,
+      notes: notes || null,
+    })
+    .select()
+    .single();
+  if (payErr) throw payErr;
+
+  const { data: inv } = await supabase
+    .from('subscription_invoices')
+    .select('total_amount')
+    .eq('id', invoiceId)
+    .single();
+
+  const { data: allPayments } = await supabase
+    .from('payments')
+    .select('amount')
+    .eq('invoice_id', invoiceId);
+
+  const totalPaid = (allPayments || []).reduce((s, p) => s + parseFloat(p.amount), 0);
+  if (totalPaid >= parseFloat(inv?.total_amount || 0)) {
+    await supabase
+      .from('subscription_invoices')
+      .update({ status: 'paid', paid_at: new Date().toISOString() })
+      .eq('id', invoiceId);
+  }
+
+  return payment;
+}
+
+export async function getEffectivePrice(organizationId, customerId, productCode, billingPeriod) {
+  const { data: override } = await supabase
+    .from('customer_pricing_overrides')
+    .select('*')
+    .eq('organization_id', organizationId)
+    .eq('customer_id', customerId)
+    .eq('product_code', productCode)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (override) {
+    if (override.fixed_rate_override != null) return parseFloat(override.fixed_rate_override);
+    const baseField = billingPeriod === 'yearly' ? 'custom_yearly_price' : 'custom_monthly_price';
+    if (override[baseField] != null) return parseFloat(override[baseField]);
+  }
+
+  const { data: assetPrice } = await supabase
+    .from('asset_type_pricing')
+    .select('*')
+    .eq('organization_id', organizationId)
+    .eq('product_code', productCode)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (assetPrice) {
+    const price = billingPeriod === 'yearly'
+      ? parseFloat(assetPrice.yearly_price)
+      : parseFloat(assetPrice.monthly_price);
+
+    if (override?.discount_percent > 0) {
+      return Math.round(price * (1 - override.discount_percent / 100) * 100) / 100;
+    }
+    return price;
+  }
+
+  return 0;
+}
+
+// Compatibility shim for existing pages that rely on the legacy service shape.
+export function clearPlansCache() {
+  // No-op in the subscription rebuild; plans are fetched live.
+}
 
 export const subscriptionService = {
-  async createSubscription(organizationId, plan, paymentMethodId) {
-    // Call your backend API to create Stripe subscription
-    const response = await fetch('/api/subscriptions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        organizationId,
-        plan,
-        paymentMethodId
-      })
-    });
-    
-    return response.json();
-  },
-
-  async getSubscription(organizationId) {
-    const { data, error } = await supabase
-      .from('organizations')
-      .select('subscription_plan, subscription_status, subscription_end_date')
-      .eq('id', organizationId)
-      .single();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  async updateSubscription(organizationId, plan) {
-    // Get organization details
-    const { data: organization, error: orgError } = await supabase
-      .from('organizations')
-      .select('*')
-      .eq('id', organizationId)
-      .single();
-    
-    if (orgError) throw orgError;
-
-    // Get plan details from database
-    const plans = await fetchSubscriptionPlans();
-    const planDetails = plans[plan];
-    if (!planDetails) throw new Error('Invalid plan');
-
-    // Check if payment is required
-    if (planDetails.price > 0) {
-      // Check if organization has payment method
-      if (!organization.stripe_customer_id) {
-        throw new Error('Please add a payment method before upgrading your plan.');
-      }
-
-      // Create payment intent for the plan upgrade
-      const response = await fetch('/.netlify/functions/create-payment-intent', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          amount: planDetails.price * 100, // Convert to cents
-          currency: 'usd',
-          customerId: organization.stripe_customer_id,
-          metadata: {
-            organization_id: organizationId,
-            plan: plan,
-            plan_name: planDetails.name,
-            type: 'plan_upgrade'
-          }
-        }),
-      });
-
-      const { clientSecret, error } = await response.json();
-      
-      if (error) {
-        throw new Error(error);
-      }
-
-      // Initialize Stripe
-      const { loadStripe } = await import('@stripe/stripe-js');
-      const stripe = await loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
-
-      if (!stripe) {
-        throw new Error('Stripe failed to load');
-      }
-
-      // Confirm payment
-      const { error: paymentError, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
-        payment_method: {
-          card: null, // Will use default payment method
-          billing_details: {
-            name: organization.name,
-            email: organization.email
-          }
-        }
-      });
-
-      if (paymentError) {
-        throw new Error(paymentError.message);
-      }
-
-      if (paymentIntent.status !== 'succeeded') {
-        throw new Error('Payment was not successful');
-      }
-    }
-
-    // Payment successful (or free plan), now update the database
-    const { error } = await supabase
-      .from('organizations')
-      .update({ 
-        subscription_plan: plan,
-        subscription_status: 'active',
-        subscription_start_date: new Date().toISOString(),
-        max_users: planDetails.users,
-        max_customers: planDetails.customers,
-        max_bottles: planDetails.bottles,
-        ...(planDetails.price > 0 && {
-          last_payment_date: new Date().toISOString(),
-          last_payment_amount: planDetails.price
-        })
-      })
-      .eq('id', organizationId);
-    
-    if (error) throw error;
-  },
-
   async getOrganizationUsage(organizationId) {
-    const { data, error } = await supabase
-      .from('organization_usage')
-      .select('*')
-      .eq('id', organizationId)
-      .single();
-    
-    if (error) throw error;
-    return data;
-  },
+    const [{ count: usersCount }, { count: customersCount }, { count: bottlesCount }] = await Promise.all([
+      supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('organization_id', organizationId),
+      supabase.from('customers').select('*', { count: 'exact', head: true }).eq('organization_id', organizationId),
+      supabase.from('bottles').select('*', { count: 'exact', head: true }).eq('organization_id', organizationId),
+    ]);
 
-  async checkOrganizationLimits(organizationId, resourceType) {
-    const usage = await this.getOrganizationUsage(organizationId);
-    
-    switch (resourceType) {
-      case 'users':
-        return {
-          current: usage.current_users,
-          max: isUnlimited(usage.max_users) ? 'Unlimited' : usage.max_users,
-          percentage: usage.user_usage_percent,
-          canAdd: isUnlimited(usage.max_users) || usage.current_users < usage.max_users
-        };
-      case 'customers':
-        return {
-          current: usage.current_customers,
-          max: isUnlimited(usage.max_customers) ? 'Unlimited' : usage.max_customers,
-          percentage: usage.customer_usage_percent,
-          canAdd: isUnlimited(usage.max_customers) || usage.current_customers < usage.max_customers
-        };
-      case 'bottles':
-        return {
-          current: usage.current_bottles,
-          max: isUnlimited(usage.max_bottles) ? 'Unlimited' : usage.max_bottles,
-          percentage: usage.bottle_usage_percent,
-          canAdd: isUnlimited(usage.max_bottles) || usage.current_bottles < usage.max_bottles
-        };
-      default:
-        throw new Error('Invalid resource type');
-    }
+    return {
+      users: { current: usersCount || 0 },
+      customers: { current: customersCount || 0 },
+      assets: { current: bottlesCount || 0 },
+    };
   },
-
-  async getSubscriptionPlans() {
-    return await fetchSubscriptionPlans();
-  },
-
-  async cancelSubscription(organizationId) {
-    const { error } = await supabase
-      .from('organizations')
-      .update({ 
-        subscription_status: 'cancelled',
-        subscription_end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() // 30 days from now
-      })
-      .eq('id', organizationId);
-    
-    if (error) throw error;
-  },
-
-  async reactivateSubscription(organizationId) {
-    const { error } = await supabase
-      .from('organizations')
-      .update({ 
-        subscription_status: 'active',
-        subscription_end_date: null
-      })
-      .eq('id', organizationId);
-    
-    if (error) throw error;
-  }
-}; 
+};

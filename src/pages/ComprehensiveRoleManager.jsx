@@ -52,7 +52,7 @@ export default function ComprehensiveRoleManager() {
         { id: 'user_management', title: 'User Management', path: '/settings?tab=team' },
         { id: 'join_codes', title: 'Join Codes', path: '/organization-join-codes' },
         { id: 'role_management', title: 'Role Management', path: '/comprehensive-role-manager' },
-        { id: 'billing', title: 'Billing', path: '/billing' },
+        { id: 'billing', title: 'Invoices', path: '/invoices' },
         { id: 'settings', title: 'Settings', path: '/settings' }
       ]
     },
@@ -66,7 +66,7 @@ export default function ComprehensiveRoleManager() {
         { id: 'locations', title: 'Locations', path: '/locations' },
         { id: 'assets', title: 'Assets', path: '/assets' },
         { id: 'inventory', title: 'Inventory Management', path: '/inventory-management' },
-        { id: 'rentals', title: 'Rentals', path: '/rentals' },
+        { id: 'rentals', title: 'Subscriptions', path: '/subscriptions' },
         { id: 'orders', title: 'Orders', path: '/orders' }
       ]
     },

@@ -1,10 +1,10 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect } from 'react';
-import { fetchWorkspaceFilteredRentals } from '../services/rentalWorkspaceMerge';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabase/client';
+import { useSubscriptions } from '../context/SubscriptionContext';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Grid, Card, CardContent, Typography, Button,
@@ -26,65 +26,66 @@ export default function Home() {
   const primaryColor = organizationColors?.primary || '#40B5AD';
   const navigate = useNavigate();
   
+  const subCtx = useSubscriptions();
+
   const [stats, setStats] = useState({
     customers: 0,
-    cylinders: 0,
     activeRentals: 0,
-    pendingDeliveries: 0,
     totalUsers: 0,
   });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (profile && organization) {
-      fetchDashboardData();
-    }
-  }, [profile, organization]);
-
-  const fetchDashboardData = async () => {
-    try {
+    let active = true;
+    const loadStats = async () => {
+      if (!organization?.id) return;
       setLoading(true);
-      
-      // Core statistics - available to all users
-      const [customersRes, cylindersRes] = await Promise.all([
-        supabase.from('customers').select('id', { count: 'exact' }).eq('organization_id', organization.id),
-        supabase.from('bottles').select('id', { count: 'exact' }).eq('organization_id', organization.id)
+
+      const [customersRes, bottlesRes, rentalsRes, activeSubsRes, usersRes] = await Promise.allSettled([
+        supabase.from('customers').select('id', { count: 'exact', head: true }).eq('organization_id', organization.id),
+        supabase.from('bottles').select('assigned_customer, customer_id:customer_uuid, customer_name').eq('organization_id', organization.id),
+        supabase
+          .from('rentals')
+          .select('customer_id, customer_name')
+          .eq('organization_id', organization.id)
+          .is('rental_end_date', null),
+        Promise.resolve({ count: (subCtx.activeSubscriptions || []).length }),
+        isAdmin()
+          ? supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('organization_id', organization.id)
+          : Promise.resolve({ count: 0 }),
       ]);
 
-      // Same merged rental rows as /rentals (monthly + yearly lines, ghost rows dropped) — not bottle status alone
-      let activeRentalsCount = 0;
-      try {
-        const { filteredRentals } = await fetchWorkspaceFilteredRentals(organization.id);
-        activeRentalsCount = filteredRentals.length;
-        logger.log('Dashboard active rentals (workspace lines, matches Rentals):', { activeRentalsCount });
-      } catch (error) {
-        logger.error('Error calculating active rentals:', error);
-        activeRentalsCount = 0;
-      }
+      if (!active) return;
 
-      const newStats = {
-        customers: customersRes.count || 0,
-        cylinders: cylindersRes.count || 0,
-        activeRentals: activeRentalsCount,
-        totalUsers: 0,
-      };
+      const ctxBottleCustomerIds = new Set(
+        (subCtx.bottles || []).map((b) => b.assigned_customer || b.customer_id || b.customer_name).filter(Boolean)
+      );
+      const bottleCustomerIds = new Set(
+        (bottlesRes.status === 'fulfilled' ? (bottlesRes.value.data || []) : [])
+          .map((b) => b.assigned_customer || b.customer_id || b.customer_name)
+          .filter(Boolean)
+      );
+      const rentalCustomerIds = new Set(
+        (rentalsRes.status === 'fulfilled' ? (rentalsRes.value.data || []) : [])
+          .map((r) => r.customer_id || r.customer_name)
+          .filter(Boolean)
+      );
 
-      // Admin-only statistics
-      if (isAdmin()) {
-        const usersRes = await supabase
-          .from('profiles')
-          .select('id', { count: 'exact' })
-          .eq('organization_id', organization.id);
-        newStats.totalUsers = usersRes.count || 0;
-      }
+      const customersCountFromDb = customersRes.status === 'fulfilled' ? (customersRes.value.count || 0) : 0;
+      const activeSubsCountFromDb = activeSubsRes.status === 'fulfilled' ? (activeSubsRes.value.count || 0) : 0;
+      const totalUsers = usersRes.status === 'fulfilled' ? (usersRes.value.count || 0) : 0;
 
-      setStats(newStats);
-    } catch (error) {
-      logger.error('Error fetching dashboard data:', error);
-    } finally {
+      setStats({
+        customers: Math.max(customersCountFromDb, bottleCustomerIds.size, rentalCustomerIds.size, (subCtx.customers || []).length, ctxBottleCustomerIds.size),
+        activeRentals: Math.max(activeSubsCountFromDb, bottleCustomerIds.size, rentalCustomerIds.size, (subCtx.activeSubscriptions || []).length),
+        totalUsers,
+      });
       setLoading(false);
-    }
-  };
+    };
+
+    loadStats();
+    return () => { active = false; };
+  }, [organization?.id, subCtx.customers.length, subCtx.activeSubscriptions.length, subCtx.bottles.length]);
 
   const getQuickActions = () => {
     if (isAdmin()) {
@@ -93,7 +94,7 @@ export default function Home() {
         { title: 'User Management', path: '/settings?tab=team', icon: <AdminPanelSettings />, color: 'secondary' },
         { title: 'View Analytics', path: '/analytics', icon: <Analytics />, color: 'info' },
         { title: 'Organization Settings', path: '/settings', icon: <Settings />, color: 'warning' },
-        { title: 'Billing Management', path: '/billing', icon: <Receipt />, color: 'success' },
+        { title: 'Invoices', path: '/invoices', icon: <Receipt />, color: 'success' },
         { title: 'Organization Tools', path: '/organization-tools', icon: <SecurityIcon />, color: 'error' }
       ];
     } else if (isManager()) {
@@ -106,8 +107,8 @@ export default function Home() {
       return [
         { title: 'View Customers', path: '/customers', icon: <People />, color: 'primary' },
         { title: 'Check Inventory', path: '/inventory', icon: <Inventory />, color: 'secondary' },
-        { title: 'View Rentals', path: '/rentals', icon: <Schedule />, color: 'success' },
-        { title: 'View Invoices', path: '/billing', icon: <Receipt />, color: 'warning' },
+        { title: 'Rentals', path: '/subscriptions', icon: <Schedule />, color: 'success' },
+        { title: 'View Invoices', path: '/invoices', icon: <Receipt />, color: 'warning' },
         { title: 'Customer Portal', path: '/portal', icon: <DashboardIcon />, color: 'error' }
       ];
     }
@@ -142,30 +143,14 @@ export default function Home() {
         value: stats.customers, 
         icon: <People />, 
         color: primaryColor,
-        onClick: () => {
-          logger.log('🔄 Navigating to /customers');
-          navigate('/customers');
-        }
-      },
-      { 
-        title: 'Cylinders', 
-        value: stats.cylinders, 
-        icon: <Inventory />, 
-        color: primaryColor,
-        onClick: () => {
-          logger.log('🔄 Navigating to /inventory');
-          navigate('/inventory');
-        }
+        onClick: () => navigate('/customers'),
       },
       { 
         title: 'Active Rentals', 
         value: stats.activeRentals, 
         icon: <Schedule />, 
         color: primaryColor,
-        onClick: () => {
-          logger.log('🔄 Navigating to /rentals');
-          navigate('/rentals');
-        }
+        onClick: () => navigate('/subscriptions'),
       },
     ];
 
@@ -228,7 +213,7 @@ export default function Home() {
           <Stack direction="row" spacing={1.25} alignItems="center">
             <Tooltip title="Refresh dashboard">
               <IconButton
-                onClick={fetchDashboardData}
+                onClick={() => subCtx.refresh()}
                 sx={{
                   borderRadius: 2,
                   width: 44,

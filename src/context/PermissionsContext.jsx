@@ -40,9 +40,6 @@ export function PermissionsProvider({ children }) {
     const resolveRoleAndPermissions = async () => {
       setLoading(true);
       let roleName = profile.role;
-      // #region agent log
-      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'website-permissions-pre-fix',hypothesisId:'W1',location:'src/context/PermissionsContext.jsx:40',message:'Resolving website role and permissions',data:{profileRole:profile?.role || null,isUuidLike:!!(profile?.role && profile.role.includes('-'))},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
 
       // If role is a UUID (contains hyphens), fetch the role name
       if (profile.role && profile.role.includes('-')) {
@@ -55,9 +52,6 @@ export function PermissionsProvider({ children }) {
           
           if (error) {
             logger.error('Error fetching role from UUID:', error);
-            // #region agent log
-            fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'website-permissions-pre-fix',hypothesisId:'W1',location:'src/context/PermissionsContext.jsx:53',message:'Role lookup failed and admin fallback is about to apply',data:{profileRole:profile?.role || null,errorCode:error?.code || null,errorMessage:error?.message || null},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
             // Fallback to default admin permissions if we can't resolve the role
             setActualRole('admin');
             setPermissions(['*']);
@@ -78,9 +72,6 @@ export function PermissionsProvider({ children }) {
           }
         } catch (err) {
           logger.error('Error in role resolution:', err);
-          // #region agent log
-          fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'website-permissions-pre-fix',hypothesisId:'W1',location:'src/context/PermissionsContext.jsx:73',message:'Role resolution threw and admin fallback is about to apply',data:{profileRole:profile?.role || null,errorMessage:err?.message || String(err)},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           // Fallback to admin
           setActualRole('admin');
           setPermissions(['*']);

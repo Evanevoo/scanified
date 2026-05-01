@@ -5,6 +5,7 @@ import { AuthProvider } from './hooks/useAuth';
 import { PermissionsProvider } from './context/PermissionsContext';
 import { ImportProgressProvider } from './components/ImportProgressContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { SubscriptionProvider } from './context/SubscriptionContext';
 import { Toaster } from 'react-hot-toast';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ThemeProvider as MuiThemeProvider } from '@mui/material/styles';
@@ -19,7 +20,12 @@ import { initializeDisasterRecovery } from './utils/disasterRecovery';
 import { initGlobalErrorHandler } from './utils/globalErrorHandler';
 import './styles/responsive.css';
 import './styles/accessibility.css';
-import Billing from './pages/Billing';
+import Subscriptions from './pages/Subscriptions';
+import SubscriptionDetail from './pages/SubscriptionDetail';
+import AssetTypePricing from './pages/AssetTypePricing';
+import CustomerPricingOverrides from './pages/CustomerPricingOverrides';
+import QuickBooksExport from './pages/QuickBooksExport';
+import TaxRegionsPage from './pages/TaxRegions';
 import OwnerDashboard from './pages/OwnerDashboard';
 import CustomerPortal from './pages/CustomerPortal';
 import BarcodeGenerator from './pages/BarcodeGenerator';
@@ -28,12 +34,10 @@ import ModernLandingPage from './pages/ModernLandingPage';
 import FixOrganizationLink from './pages/FixOrganizationLink';
 import OAuthOrganizationLink from './pages/OAuthOrganizationLink';
 
-import CustomerBillingPortal from './pages/CustomerBillingPortal';
 import ResetPassword from './pages/ResetPassword';
 import ContactUs from './pages/ContactUs';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
-import PricingPage from './pages/PricingPage';
 import Documentation from './pages/Documentation';
 import CustomPageViewer from './pages/CustomPageViewer';
 import ImportApprovals from './pages/ImportApprovals';
@@ -44,7 +48,6 @@ import DataUtilities from './pages/OwnerPortal/DataUtilities';
 import OwnerPortalLanding from './pages/OwnerPortalLanding';
 import Analytics from './pages/OwnerPortal/Analytics';
 import SupportTickets from './pages/OwnerPortal/SupportTickets';
-import BillingManagement from './pages/OwnerPortal/BillingManagement';
 import SystemHealth from './pages/OwnerPortal/SystemHealth';
 import SecurityEvents from './pages/OwnerPortal/SecurityEvents';
 import UserManagementAllOrgs from './pages/OwnerPortal/UserManagementAllOrgs';
@@ -67,8 +70,6 @@ import WebsiteManagement from './pages/OwnerPortal/WebsiteManagement';
 import VisualPageBuilder from './pages/OwnerPortal/VisualPageBuilder';
 import DisasterRecoveryDashboard from './components/admin/DisasterRecoveryDashboard';
 
-// NEW ADVANCED FEATURES
-import BulkRentalPricingManager from './pages/BulkRentalPricingManager';
 import MainLayout from './components/MainLayout';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
@@ -105,8 +106,6 @@ const UserInvites = lazy(() => import('./pages/UserInvites'));
 // Debug routes - only available in development
 const DebugSession = lazy(() => import('./pages/DebugSession'));
 const Customers = lazy(() => import('./pages/Customers.jsx'));
-const Rentals = lazy(() => import('./pages/Rentals'));
-const LeaseAgreements = lazy(() => import('./pages/LeaseAgreements'));
 const IndustryAnalyticsDashboard = lazy(() => import('./pages/IndustryAnalyticsDashboard'));
 const WebScanning = lazy(() => import('./pages/WebScanning'));
 const RecentCylinders = lazy(() => import('./pages/RecentCylinders'));
@@ -130,10 +129,10 @@ const PrintDaysRecordsReport = lazy(() => import('./pages/management-reports/Pri
 const QuickMapReport = lazy(() => import('./pages/management-reports/QuickMapReport'));
 const QuickAdd = lazy(() => import('./pages/QuickAdd'));
 const LotReports = lazy(() => import('./pages/LotReports'));
-const Rental = lazy(() => import('./pages/Rental'));
 const CustomerDetail = lazy(() => import('./pages/CustomerDetail'));
 const AssetHistory = lazy(() => import('./pages/AssetHistory'));
 const AssetHistoryLookup = lazy(() => import('./pages/AssetHistoryLookup'));
+const BottleActivity = lazy(() => import('./pages/BottleActivity'));
 const Import = lazy(() => import('./pages/Import'));
 const Settings = lazy(() => import('./pages/Settings'));
 const ImportCustomerInfo = lazy(() => import('./pages/ImportCustomerInfo'));
@@ -141,8 +140,6 @@ const ScannedOrders = lazy(() => import('./pages/ScannedOrders'));
 const SupabaseOrders = lazy(() => import('./pages/management-reports/SupabaseOrders'));
 const UserManagement = lazy(() => import('./pages/UserManagement'));
 const ImportAssetBalance = lazy(() => import('./pages/ImportAssetBalance'));
-const ImportRentalAgreements = lazy(() => import('./pages/ImportRentalAgreements'));
-const SendYearlyLeaseEmails = lazy(() => import('./pages/SendYearlyLeaseEmails'));
 const IntegrationsPage = lazy(() => import('./pages/Integrations'));
 const BottleManagement = lazy(() => import('./pages/BottleManagement'));
 const AssetDetail = lazy(() => import('./pages/AssetDetail'));
@@ -154,13 +151,11 @@ const MaintenanceWorkflows = lazy(() => import('./pages/MaintenanceWorkflows'));
 const PalletManagement = lazy(() => import('./pages/PalletManagement'));
 const HazmatCompliance = lazy(() => import('./pages/HazmatCompliance'));
 const ChainOfCustody = lazy(() => import('./pages/ChainOfCustody'));
-const AdvancedRentals = lazy(() => import('./pages/AdvancedRentals'));
 const IntegrationSettings = lazy(() => import('./pages/IntegrationSettings'));
 const AutomationRules = lazy(() => import('./pages/AutomationRules'));
 const Locations = lazy(() => import('./pages/Locations'));
 const TransferFromCustomers = lazy(() => import('./pages/TransferFromCustomers.jsx'));
 const DailyUpdateAdmin = lazy(() => import('./pages/DailyUpdateAdmin'));
-const InvoiceDetail = lazy(() => import('./pages/InvoiceDetail'));
 
 // Analytics tracking component
 function AnalyticsTracker() {
@@ -206,6 +201,7 @@ function AppContent() {
     <ErrorBoundary>
       <ImportProgressProvider>
         <PermissionsProvider>
+          <SubscriptionProvider>
           <ThemeProvider>
             <Router
               future={{
@@ -267,7 +263,7 @@ function AppContent() {
                   <Route path="/reviews" element={<Reviews />} />
                   <Route path="/privacy-policy" element={<PrivacyPolicy />} />
                   <Route path="/terms-of-service" element={<TermsOfService />} />
-                  <Route path="/pricing" element={<PricingPage />} />
+                  <Route path="/pricing" element={<Navigate to="/" replace />} />
                   <Route path="/documentation" element={<Documentation />} />
                   <Route path="/p/:slug" element={<CustomPageViewer />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
@@ -315,8 +311,16 @@ function AppContent() {
                         <BottlesForDay />
                       </Suspense>
                     } />
-                    <Route path="/rentals" element={<Rentals />} />
-                    <Route path="/lease-agreements" element={<LeaseAgreements />} />
+                    <Route path="/subscriptions" element={<Subscriptions />} />
+                    <Route path="/subscriptions/:id" element={<SubscriptionDetail />} />
+                    <Route path="/pricing/asset-types" element={<AssetTypePricing />} />
+                    <Route path="/pricing/customers" element={<CustomerPricingOverrides />} />
+                    <Route path="/pricing/tax-regions" element={<TaxRegionsPage />} />
+                    <Route path="/invoices" element={<Navigate to="/subscriptions" replace />} />
+                    <Route path="/invoices/export" element={<QuickBooksExport />} />
+                    {/* Legacy redirects */}
+                    <Route path="/rentals" element={<Navigate to="/subscriptions" replace />} />
+                    <Route path="/lease-agreements" element={<Navigate to="/subscriptions" replace />} />
                     <Route path="/industry-analytics" element={<IndustryAnalyticsDashboard />} />
                     <Route path="/web-scanning" element={<WebScanning />} />
                     <Route path="/custom-reports" element={<CustomReports />} />
@@ -341,13 +345,13 @@ function AppContent() {
                     <Route path="/reports/print-days" element={<PrintDaysRecordsReport />} />
                     <Route path="/reports/quick-map" element={<QuickMapReport />} />
                     <Route path="/reports/supabase-orders" element={<SupabaseOrders />} />
-                    <Route path="/reports" element={<CustomReports />} />
                     <Route path="/quick-add" element={<QuickAdd />} />
                     <Route path="/lot-reports" element={<LotReports />} />
-                    <Route path="/rental/*" element={<Rental />} />
+                    <Route path="/rental/*" element={<Navigate to="/subscriptions" replace />} />
                     <Route path="/customer/:id" element={<CustomerDetail />} />
                     <Route path="/asset-history" element={<AssetHistory />} />
                     <Route path="/asset-history-lookup" element={<AssetHistoryLookup />} />
+                    <Route path="/bottle-activity" element={<BottleActivity />} />
                     <Route path="/assets/:id/history" element={<AssetHistory />} />
                     <Route path="/import" element={<Import />} />
                     <Route path="/settings" element={<Settings />} />
@@ -362,8 +366,8 @@ function AppContent() {
                     <Route path="/role-permission-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/unified-role-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/import-asset-balance" element={<ImportAssetBalance />} />
-                    <Route path="/import-rental-agreements" element={<ImportRentalAgreements />} />
-                    <Route path="/send-yearly-lease-emails" element={<SendYearlyLeaseEmails />} />
+                    <Route path="/import-rental-agreements" element={<Navigate to="/import" replace />} />
+                    <Route path="/send-yearly-lease-emails" element={<Navigate to="/subscriptions" replace />} />
                     <Route path="/import-approvals" element={<ImportApprovals />} />
                     <Route path="/import-approval/:id/detail" element={<ImportApprovalDetail />} />
                     <Route path="/verified-orders" element={<VerifiedOrders />} />
@@ -378,16 +382,8 @@ function AppContent() {
                     <Route path="/assets/:id" element={<AssetDetail />} />
                     <Route path="/asset/:id" element={<AssetDetail />} />
                     <Route path="/orders" element={<ScannedOrders />} />
-                    <Route path="/billing" element={
-                      <RoleProtectedRoute allowedRoles={['admin', 'manager', 'user']}>
-                        <Billing />
-                      </RoleProtectedRoute>
-                    } />
-                    <Route path="/invoice/:id" element={
-                      <Suspense fallback={<LoadingSpinner />}>
-                        <InvoiceDetail />
-                      </Suspense>
-                    } />
+                    <Route path="/billing" element={<Navigate to="/subscriptions" replace />} />
+                    <Route path="/invoice/:id" element={<Navigate to="/subscriptions" replace />} />
                     <Route path="/support" element={<SupportCenter />} />
                     <Route path="/recent-cylinders" element={<RecentCylinders />} />
                     <Route path="/organization-tools" element={
@@ -415,11 +411,7 @@ function AppContent() {
                         <ChainOfCustody />
                       </RoleProtectedRoute>
                     } />
-                    <Route path="/advanced-rentals" element={
-                      <RoleProtectedRoute allowedRoles={['admin', 'owner', 'manager']}>
-                        <AdvancedRentals />
-                      </RoleProtectedRoute>
-                    } />
+                    <Route path="/advanced-rentals" element={<Navigate to="/subscriptions" replace />} />
                     <Route path="/data-utilities" element={<DataUtilities />} />
                     
                     {/* Owner-only routes */}
@@ -434,7 +426,7 @@ function AppContent() {
                       <Route path="/owner-portal/tools" element={<DataUtilities />} />
                       <Route path="/owner-portal/support" element={<SupportTickets />} />
                       <Route path="/owner-portal/customer-management" element={<OwnerCustomers />} />
-                      <Route path="/owner-portal/billing" element={<BillingManagement />} />
+                      <Route path="/owner-portal/billing" element={<Navigate to="/subscriptions" replace />} />
                       <Route path="/owner-portal/system-health" element={<SystemHealth />} />
                       <Route path="/owner-portal/disaster-recovery" element={<DisasterRecoveryDashboard />} />
                       <Route path="/owner-portal/security" element={<SecurityEvents />} />
@@ -464,11 +456,7 @@ function AppContent() {
                       <PalletManagement />
                     </ProtectedRoute>
                   } />
-                  <Route path="/advanced-rental-calculations" element={
-                    <ProtectedRoute>
-                      <AdvancedRentals />
-                    </ProtectedRoute>
-                  } />
+                  <Route path="/advanced-rental-calculations" element={<Navigate to="/subscriptions" replace />} />
                   <Route path="/integration-settings" element={
                     <RoleProtectedRoute allowedRoles={['admin', 'owner']}>
                       <IntegrationSettings />
@@ -479,11 +467,7 @@ function AppContent() {
                       <AutomationRules />
                     </RoleProtectedRoute>
                   } />
-                  <Route path="/bulk-rental-pricing" element={
-                    <ProtectedRoute>
-                      <BulkRentalPricingManager />
-                    </ProtectedRoute>
-                  } />
+                  <Route path="/bulk-rental-pricing" element={<Navigate to="/pricing/customers" replace />} />
 
                   {/* Catch-all for any other unmatched routes */}
                   <Route path="*" element={
@@ -552,6 +536,7 @@ profile && organization ? <Navigate to="/home" replace /> :
               </NotificationLayer>
             </Router>
           </ThemeProvider>
+          </SubscriptionProvider>
         </PermissionsProvider>
       </ImportProgressProvider>
     </ErrorBoundary>

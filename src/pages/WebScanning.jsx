@@ -126,6 +126,9 @@ export default function WebScanning() {
 
   const scannerRef = useRef(null);
   const scanTimeRef = useRef(null);
+  const isProcessingScanRef = useRef(false);
+  const lastProcessedBarcodeRef = useRef('');
+  const lastProcessedAtRef = useRef(0);
   const debouncedSearch = useDebounce(searchTerm, 300);
 
   // Initialize scanner
@@ -222,61 +225,86 @@ export default function WebScanning() {
   }, [getQrboxDimensions]);
 
   const handleScanSuccess = useCallback(async (scannedText) => {
-    const startTime = Date.now();
-    scanTimeRef.current = startTime;
+    const normalizedText = (scannedText || '').trim();
+    if (!normalizedText) return;
 
-    // Validate barcode
-    if (scanValidation.enabled && !scanValidation.pattern.test(scannedText)) {
-      addScanResult({
-        barcode: scannedText,
-        status: 'error',
-        error: scanValidation.errorMessage,
-        timestamp: new Date(),
-        scanTime: 0
-      });
+    // iOS browsers can emit rapid duplicate callbacks while a code remains in frame.
+    // Guard async processing to keep scanner responsive across consecutive bottle scans.
+    const now = Date.now();
+    if (isProcessingScanRef.current) return;
+    if (
+      normalizedText === lastProcessedBarcodeRef.current &&
+      now - lastProcessedAtRef.current < 1500
+    ) {
       return;
     }
 
-    // Get GPS location
-    const location = await getCurrentLocation();
+    isProcessingScanRef.current = true;
+    lastProcessedBarcodeRef.current = normalizedText;
+    lastProcessedAtRef.current = now;
 
-    // Process scan based on mode
+    const startTime = Date.now();
+    scanTimeRef.current = startTime;
+
     try {
-      const scanResult = await processScan(scannedText, activeMode, location);
-      const scanTime = Date.now() - startTime;
-
-      addScanResult({
-        ...scanResult,
-        scanTime,
-        timestamp: new Date(),
-        gpsLocation: location
-      });
-
-      // Update stats
-      setScanStats(prev => ({
-        totalScans: prev.totalScans + 1,
-        successfulScans: scanResult.status === 'success' ? prev.successfulScans + 1 : prev.successfulScans,
-        errorScans: scanResult.status === 'error' ? prev.errorScans + 1 : prev.errorScans,
-        avgScanTime: ((prev.avgScanTime * prev.totalScans) + scanTime) / (prev.totalScans + 1)
-      }));
-
-      // Play success sound/vibration
-      if (scanResult.status === 'success') {
-        playSuccessSound();
-      } else {
-        playErrorSound();
+      // Validate barcode
+      if (scanValidation.enabled && !scanValidation.pattern.test(normalizedText)) {
+        addScanResult({
+          barcode: normalizedText,
+          status: 'error',
+          error: scanValidation.errorMessage,
+          timestamp: new Date(),
+          scanTime: 0
+        });
+        return;
       }
 
-    } catch (error) {
-      const scanTime = Date.now() - startTime;
-      addScanResult({
-        barcode: scannedText,
-        status: 'error',
-        error: error.message,
-        timestamp: new Date(),
-        scanTime,
-        gpsLocation: location
-      });
+      // Get GPS location
+      const location = await getCurrentLocation();
+
+      // Process scan based on mode
+      try {
+        const scanResult = await processScan(normalizedText, activeMode, location);
+        const scanTime = Date.now() - startTime;
+
+        addScanResult({
+          ...scanResult,
+          scanTime,
+          timestamp: new Date(),
+          gpsLocation: location
+        });
+
+        // Update stats
+        setScanStats(prev => ({
+          totalScans: prev.totalScans + 1,
+          successfulScans: scanResult.status === 'success' ? prev.successfulScans + 1 : prev.successfulScans,
+          errorScans: scanResult.status === 'error' ? prev.errorScans + 1 : prev.errorScans,
+          avgScanTime: ((prev.avgScanTime * prev.totalScans) + scanTime) / (prev.totalScans + 1)
+        }));
+
+        // Play success sound/vibration
+        if (scanResult.status === 'success') {
+          playSuccessSound();
+        } else {
+          playErrorSound();
+        }
+
+      } catch (error) {
+        const scanTime = Date.now() - startTime;
+        addScanResult({
+          barcode: normalizedText,
+          status: 'error',
+          error: error.message,
+          timestamp: new Date(),
+          scanTime,
+          gpsLocation: location
+        });
+      }
+    } finally {
+      // Small cooldown helps Safari avoid rapid callback storms.
+      window.setTimeout(() => {
+        isProcessingScanRef.current = false;
+      }, 300);
     }
   }, [activeMode, scanValidation]);
 

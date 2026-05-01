@@ -40,13 +40,15 @@ function getDefaultSectionsForRole(role) {
     dashboard: true,
     operations: true,
     customers: true,
+    subscriptions: true,
     inventory: true,
+    pricing: false,
     billing: false,
     reports: false,
     admin: false,
   };
   if (r === 'admin' || r === 'orgowner' || r === 'manager') {
-    return { ...collapsed, billing: true, reports: true, admin: true };
+    return { ...collapsed, pricing: true, billing: true, reports: true, admin: true };
   }
   return collapsed;
 }
@@ -67,7 +69,9 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
     dashboard: true,
     operations: true,
     customers: true,
+    subscriptions: true,
     inventory: true,
+    pricing: false,
     billing: false,
     reports: false,
     admin: false
@@ -250,10 +254,16 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       icon: <People />,
       items: [
         { title: 'Customer List', subtitle: 'Search accounts', path: '/customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Import Customer Info', subtitle: 'Upload customer updates', path: '/import-customer-info', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
         { title: 'Locations', subtitle: 'Branches / sites list', path: '/locations', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Rentals', subtitle: 'Active rentals', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Lease Agreements', subtitle: 'Lease contracts', path: '/lease-agreements', icon: <WorkIcon />, roles: ['admin', 'manager'] },
         { title: 'Join Codes', subtitle: 'Invite users to the org', path: '/organization-join-codes', icon: <QrCodeIcon />, roles: ['admin', 'manager'] }
+      ]
+    },
+    subscriptions: {
+      title: 'Rentals',
+      icon: <Schedule />,
+      items: [
+        { title: 'Rentals', subtitle: 'Active rentals & billing', path: '/subscriptions', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
       ]
     },
     inventory: {
@@ -265,18 +275,24 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         { title: 'Assets', subtitle: 'Full list and filters', path: '/assets', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
         { title: 'Where bottles are', subtitle: 'By warehouse or customer', path: '/bottle-locations', icon: <PlaceIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Asset History Lookup', subtitle: 'Trace a cylinder', path: '/asset-history-lookup', icon: <SearchIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Bottle Activity', subtitle: 'All bottle edit events', path: '/bottle-activity', icon: <History />, roles: ['admin', 'user', 'manager'] },
         { title: 'Recently Added Cylinders', subtitle: 'New inventory', path: '/recent-cylinders', icon: <Inventory />, roles: ['admin', 'user', 'manager'] }
+      ]
+    },
+    pricing: {
+      title: 'Pricing',
+      icon: <PriceChangeIcon />,
+      items: [
+        { title: 'Asset Type Pricing', subtitle: 'Default rates per product', path: '/pricing/asset-types', icon: <RentalCategoryIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Customer Pricing', subtitle: 'Overrides & discounts', path: '/pricing/customers', icon: <PriceChangeIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Tax Regions', subtitle: 'Location tax rates', path: '/pricing/tax-regions', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] },
       ]
     },
     billing: {
       title: 'Billing',
       icon: <Payment />,
       items: [
-        { title: 'Billing Workspace', subtitle: 'Invoices and workspace', path: '/billing', icon: <Payment />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Standard rate table', subtitle: 'Org default rental rates by class', path: '/rental/classes', icon: <RentalCategoryIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Map products to classes', subtitle: 'Match inventory to rental classes', path: '/rental/assign-asset-types', icon: <ProductMapIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Rental tax regions', subtitle: 'Location tax rates for billing', path: '/rental/tax-regions', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Bulk rental pricing', subtitle: 'Customer rates in bulk', path: '/bulk-rental-pricing', icon: <PriceChangeIcon />, roles: ['admin', 'user', 'manager'] }
+        { title: 'QuickBooks Export', subtitle: 'Export CSV for QB', path: '/invoices/export', icon: <Receipt />, roles: ['admin', 'user', 'manager'] },
       ]
     },
     reports: {
@@ -284,7 +300,6 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       icon: <ReportIcon />,
       items: [
         { title: 'Custom Reports', subtitle: 'Build your own', path: '/custom-reports', icon: <ReportIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Report Library', subtitle: 'Standard reports', path: '/reports', icon: <Assessment />, roles: ['admin', 'user', 'manager'] }
       ]
     },
     admin: {
