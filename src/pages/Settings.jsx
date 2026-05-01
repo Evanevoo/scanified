@@ -63,7 +63,18 @@ import DownloadIcon from '@mui/icons-material/Download';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ArticleIcon from '@mui/icons-material/Article';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import InvoiceTemplateManager from '../components/InvoiceTemplateManager';
+const InvoiceTemplateManager = ({ open, onClose }) => open ? (
+  <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div style={{ background: 'white', borderRadius: 12, padding: 24, maxWidth: 400 }}>
+      <h3 style={{ margin: 0 }}>Invoice template editor unavailable</h3>
+      <p>
+        Your saved template is still kept in this browser and is now applied from Rentals.
+        Use <a href="/subscriptions">Rentals</a> to generate invoice PDFs with your current template.
+      </p>
+      <button onClick={onClose}>Close</button>
+    </div>
+  </div>
+) : null;
 import UserManagement from './UserManagement';
 import { usePermissions } from '../context/PermissionsContext';
 

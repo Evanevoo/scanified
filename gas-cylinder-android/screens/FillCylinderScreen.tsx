@@ -1206,6 +1206,8 @@ export default function FillCylinderScreen() {
                 style={{ flex: 1 }}
                 hideLastScannedIndicator={true}
                 disablePeriodicFocus
+                enableOcr={false}
+                scanDelay={Platform.OS === 'ios' ? 1200 : 400}
               />
               {/* Details card + quantity badge (quantity under the details box) */}
               <View style={styles.scannerOverlayContainer} pointerEvents="none">
@@ -1632,7 +1634,7 @@ const styles = StyleSheet.create({
   // Scanner overlay: details card + quantity badge (badge under the card)
   scannerOverlayContainer: {
     position: 'absolute',
-    top: '55%',
+    bottom: Platform.OS === 'ios' ? 96 : 80,
     left: 20,
     right: 20,
     alignItems: 'center',

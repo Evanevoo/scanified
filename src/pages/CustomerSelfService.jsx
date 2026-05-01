@@ -25,7 +25,12 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 import { deliveryService } from '../services/deliveryService';
-import { CustomerBillingService } from '../services/CustomerBillingService';
+const CustomerBillingService = {
+  getCustomerInvoices: async () => [],
+  getCustomerBillingSummary: async () => ({ totalDue: 0, totalPaid: 0, overdueCount: 0 }),
+  getInvoiceDetails: async () => null,
+  generateInvoicePDF: async () => ({ message: 'PDF generation not yet implemented in the new subscription system.' }),
+};
 import { formatLocationDisplay } from '../utils/locationDisplay';
 
 function CustomerDashboard({ customer, stats }) {

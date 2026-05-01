@@ -54,23 +54,134 @@ import EditIcon from '@mui/icons-material/Edit';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import { TableSkeleton, CardSkeleton } from '../components/SmoothLoading';
 import { AssetTransferService } from '../services/assetTransferService';
-import {
-  fetchOrgRentalPricingContext,
-  monthlyRateForNewRental,
-  invalidateOrgRentalPricingCache,
-} from '../services/rentalPricingContext';
 import { useAuth } from '../hooks/useAuth';
 import DNSConversionDialog from '../components/DNSConversionDialog';
 import BarcodeDisplay from '../components/BarcodeDisplay';
 import { formatLocationDisplay, normalizeLocationKey } from '../utils/locationDisplay';
 import { summarizeBottlesByType, getBottleSummaryGroupKey } from '../utils/bottleInventoryGrouping';
-import {
-  getUnifiedClasses,
-  formatUnifiedClassLabel,
-  computeEffectiveMonthlyRate,
-  pickCustomerProductRateEntry,
-} from '../utils/organizationRentalClassUtils';
-import { getResolvedClassRates } from '../utils/rentalClassRates';
+import { getEffectivePrice } from '../services/subscriptionService';
+
+const rentalPricingCtxCache = new Map();
+
+const normCode = (v) => String(v || '').trim().toUpperCase();
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const toNumberOrNull = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const fetchOrgRentalPricingContext = async (supabaseClient, organizationId) => {
+  if (!organizationId) return { customerPricingByCustomerId: new Map() };
+  const cached = rentalPricingCtxCache.get(organizationId);
+  if (cached) return cached;
+
+  const ctx = { customerPricingByCustomerId: new Map() };
+  try {
+    const { data } = await supabaseClient
+      .from('customer_pricing')
+      .select('*')
+      .eq('organization_id', organizationId);
+    for (const row of data || []) {
+      const id = row.customer_id || row.CustomerListID || row.customer_number;
+      if (!id) continue;
+      ctx.customerPricingByCustomerId.set(String(id), row);
+    }
+  } catch {
+    // Keep empty context fallback.
+  }
+  rentalPricingCtxCache.set(organizationId, ctx);
+  return ctx;
+};
+
+const invalidateOrgRentalPricingCache = (organizationId) => {
+  if (!organizationId) return;
+  rentalPricingCtxCache.delete(organizationId);
+};
+
+const pickCustomerProductRateEntry = (customerPricingRow, productCode) => {
+  const rates = customerPricingRow?.rental_rates_by_product_code;
+  if (!rates || typeof rates !== 'object') return null;
+  const target = normCode(productCode);
+  if (!target) return null;
+
+  // Exact key match first.
+  for (const [key, value] of Object.entries(rates)) {
+    if (normCode(key) === target) {
+      return typeof value === 'object' && value !== null ? value : { monthly: value };
+    }
+  }
+
+  // Prefix match: key BOX300 applies to BOX300-16PK.
+  let best = null;
+  let bestLen = -1;
+  for (const [key, value] of Object.entries(rates)) {
+    const k = normCode(key);
+    if (!k) continue;
+    if (target.startsWith(k) && k.length > bestLen) {
+      bestLen = k.length;
+      best = typeof value === 'object' && value !== null ? value : { monthly: value };
+    }
+  }
+  return best;
+};
+
+const computeEffectiveMonthlyRate = (customerPricingRow, bottle) => {
+  const fixed = toNumberOrNull(customerPricingRow?.fixed_rate_override);
+  if (fixed != null) return fixed;
+
+  const productRate = pickCustomerProductRateEntry(customerPricingRow, bottle?.product_code);
+  const productMonthly = toNumberOrNull(productRate?.monthly ?? productRate?.rate);
+  if (productMonthly != null) return productMonthly;
+
+  // Last fallback when no pricing rule applies.
+  return 0;
+};
+
+const getLocalSkuRatesKey = (organizationId, customerId) =>
+  `customer_sku_rates:${organizationId || ''}:${customerId || ''}`;
+const getLocalClassRatesKey = (organizationId, customerId) =>
+  `customer_class_rates:${organizationId || ''}:${customerId || ''}`;
+
+const monthlyRateForNewRental = (customerId, bottle, pricingCtx) => {
+  const customerPricingRow =
+    pricingCtx?.customerPricingByCustomerId?.get?.(String(customerId)) || null;
+  return computeEffectiveMonthlyRate(customerPricingRow, bottle);
+};
+
+const getUnifiedClasses = (orgRows) => orgRows || [];
+const formatUnifiedClassLabel = (c) => {
+  const readable = [
+    c?.label,
+    c?.name,
+    c?.class_name,
+    c?.rental_class_name,
+    c?.title,
+    c?.class_code,
+    c?.code,
+    c?.product_code,
+    c?.productCode,
+    c?.group_name,
+    c?.category,
+  ].find((v) => String(v || '').trim());
+  if (readable) return String(readable).trim();
+
+  const rawId = String(c?.id || c?.class_id || '').trim();
+  if (rawId && !UUID_RE.test(rawId)) return rawId;
+
+  const order = Number(c?.sort_order);
+  if (Number.isFinite(order)) return `Class ${order + 1}`;
+  return 'Unnamed class';
+};
+const getResolvedClassRates = (customerClassRates, classId, orgRows) => {
+  const orgBase = (orgRows || []).find((r) => String(r.id) === String(classId)) || {};
+  const ov = customerClassRates?.[classId] || {};
+  return {
+    daily: ov.daily != null && ov.daily !== '' ? Number(ov.daily) : Number(orgBase.daily),
+    weekly: ov.weekly != null && ov.weekly !== '' ? Number(ov.weekly) : Number(orgBase.weekly),
+    monthly: ov.monthly != null && ov.monthly !== '' ? Number(ov.monthly) : Number(orgBase.monthly),
+  };
+};
 
 // Helper to check if a string looks like an address
 function looksLikeAddress(str) {
@@ -973,7 +1084,18 @@ export default function CustomerDetail() {
   };
 
   const openRentalClassRatesDialog = () => {
-    const stored = customerPricing?.rental_class_rates;
+    let stored = customerPricing?.rental_class_rates;
+    try {
+      if (organization?.id && customer?.CustomerListID) {
+        const localRaw = localStorage.getItem(getLocalClassRatesKey(organization.id, customer.CustomerListID));
+        const localRates = localRaw ? JSON.parse(localRaw) : null;
+        if (localRates && typeof localRates === 'object') {
+          stored = localRates;
+        }
+      }
+    } catch {
+      // Ignore local storage parse failures and fall back to DB values.
+    }
     const initial = {};
     unifiedRentalClasses.forEach((c) => {
       const ex = stored && typeof stored === 'object' ? stored[c.id] : null;
@@ -1012,33 +1134,50 @@ export default function CustomerDetail() {
         if (Object.keys(entry).length > 0) rental_class_rates[c.id] = entry;
       });
 
-      const { data: existing, error: selErr } = await supabase
-        .from('customer_pricing')
-        .select('id')
-        .eq('organization_id', organization.id)
-        .eq('customer_id', customer.CustomerListID)
-        .maybeSingle();
-      if (selErr) throw selErr;
-
-      if (existing?.id) {
-        const { error } = await supabase
+      let savedViaLocalFallback = false;
+      try {
+        const { data: existing, error: selErr } = await supabase
           .from('customer_pricing')
-          .update({ rental_class_rates })
-          .eq('id', existing.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('customer_pricing').insert({
-          organization_id: organization.id,
-          customer_id: customer.CustomerListID,
-          discount_percent: 0,
-          markup_percent: 0,
-          rental_period: 'monthly',
-          is_active: true,
-          effective_date: new Date().toISOString().split('T')[0],
-          rental_class_rates,
-          rental_rates_by_product_code: {},
-        });
-        if (error) throw error;
+          .select('id')
+          .eq('organization_id', organization.id)
+          .eq('customer_id', customer.CustomerListID)
+          .maybeSingle();
+        if (selErr) throw selErr;
+
+        if (existing?.id) {
+          const { error } = await supabase
+            .from('customer_pricing')
+            .update({ rental_class_rates })
+            .eq('id', existing.id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('customer_pricing').insert({
+            organization_id: organization.id,
+            customer_id: customer.CustomerListID,
+            discount_percent: 0,
+            markup_percent: 0,
+            rental_period: 'monthly',
+            is_active: true,
+            effective_date: new Date().toISOString().split('T')[0],
+            rental_class_rates,
+            rental_rates_by_product_code: {},
+          });
+          if (error) throw error;
+        }
+      } catch (writeErr) {
+        const writeMsg = writeErr?.message || '';
+        const missingClassColumn = /rental_class_rates|column|schema cache/i.test(writeMsg);
+        if (!missingClassColumn) throw writeErr;
+        try {
+          localStorage.setItem(
+            getLocalClassRatesKey(organization.id, customer.CustomerListID),
+            JSON.stringify(rental_class_rates)
+          );
+          window.dispatchEvent(new Event('rental-pricing-local-updated'));
+          savedViaLocalFallback = true;
+        } catch {
+          throw writeErr;
+        }
       }
 
       const { data: refreshed, error: refErr } = await supabase
@@ -1052,7 +1191,13 @@ export default function CustomerDetail() {
 
       invalidateOrgRentalPricingCache(organization.id);
       setRentalClassRatesDialogOpen(false);
-      setTransferMessage({ open: true, message: 'Rental class rates saved.', severity: 'success' });
+      setTransferMessage({
+        open: true,
+        message: savedViaLocalFallback
+          ? 'Rental class rates saved (local compatibility mode).'
+          : 'Rental class rates saved.',
+        severity: 'success',
+      });
     } catch (e) {
       logger.error('Save rental class rates error:', e);
       const msg = e?.message || 'Failed to save rental class rates';
@@ -1066,12 +1211,47 @@ export default function CustomerDetail() {
     }
   };
 
-  const openProductSkuRatesDialog = () => {
-    const stored =
+  const openProductSkuRatesDialog = async () => {
+    let stored =
       customerPricing?.rental_rates_by_product_code &&
       typeof customerPricing.rental_rates_by_product_code === 'object'
-        ? customerPricing.rental_rates_by_product_code
+        ? { ...customerPricing.rental_rates_by_product_code }
         : {};
+    try {
+      if (organization?.id && customer?.CustomerListID) {
+        const { data: skuOverrides } = await supabase
+          .from('customer_pricing_overrides')
+          .select('product_code, custom_monthly_price')
+          .eq('organization_id', organization.id)
+          .eq('customer_id', customer.CustomerListID)
+          .not('product_code', 'is', null)
+          .eq('is_active', true);
+        for (const row of skuOverrides || []) {
+          const code = String(row?.product_code || '').trim();
+          const monthly = Number(row?.custom_monthly_price);
+          if (!code || !Number.isFinite(monthly)) continue;
+          stored[code] = { monthly };
+        }
+      }
+    } catch {
+      // Keep using local customer_pricing data when overrides lookup fails.
+    }
+    try {
+      if (organization?.id && customer?.CustomerListID) {
+        const localRaw = localStorage.getItem(getLocalSkuRatesKey(organization.id, customer.CustomerListID));
+        const localRates = localRaw ? JSON.parse(localRaw) : {};
+        if (localRates && typeof localRates === 'object') {
+          Object.entries(localRates).forEach(([code, value]) => {
+            const c = String(code || '').trim();
+            const monthly = Number(value?.monthly);
+            if (!c || !Number.isFinite(monthly)) return;
+            stored[c] = { monthly };
+          });
+        }
+      }
+    } catch {
+      // Ignore local storage parsing issues.
+    }
     const codeSet = new Set();
     (customerAssets || []).forEach((b) => {
       const c = (b.product_code || '').trim();
@@ -1120,33 +1300,117 @@ export default function CustomerDetail() {
         next[c] = { monthly: n };
       });
 
-      const { data: existing, error: selErr } = await supabase
-        .from('customer_pricing')
-        .select('id')
-        .eq('organization_id', organization.id)
-        .eq('customer_id', customer.CustomerListID)
-        .maybeSingle();
-      if (selErr) throw selErr;
-
-      if (existing?.id) {
-        const { error } = await supabase
+      let savedViaLegacyTable = false;
+      let savedViaLocalFallback = false;
+      try {
+        const { data: existing, error: selErr } = await supabase
           .from('customer_pricing')
-          .update({ rental_rates_by_product_code: next })
-          .eq('id', existing.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('customer_pricing').insert({
-          organization_id: organization.id,
-          customer_id: customer.CustomerListID,
-          rental_rates_by_product_code: next,
-          discount_percent: 0,
-          markup_percent: 0,
-          rental_period: 'monthly',
-          is_active: true,
-          effective_date: new Date().toISOString().split('T')[0],
-          rental_class_rates: {},
-        });
-        if (error) throw error;
+          .select('id')
+          .eq('organization_id', organization.id)
+          .eq('customer_id', customer.CustomerListID)
+          .maybeSingle();
+        if (selErr) throw selErr;
+
+        if (existing?.id) {
+          const { error } = await supabase
+            .from('customer_pricing')
+            .update({ rental_rates_by_product_code: next })
+            .eq('id', existing.id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('customer_pricing').insert({
+            organization_id: organization.id,
+            customer_id: customer.CustomerListID,
+            rental_rates_by_product_code: next,
+            discount_percent: 0,
+            markup_percent: 0,
+            rental_period: 'monthly',
+            is_active: true,
+            effective_date: new Date().toISOString().split('T')[0],
+            rental_class_rates: {},
+          });
+          if (error) throw error;
+        }
+      } catch (writeErr) {
+        const writeMsg = writeErr?.message || '';
+        const isMissingJsonbColumn = /rental_rates_by_product_code|column|schema cache/i.test(writeMsg);
+        if (!isMissingJsonbColumn) throw writeErr;
+
+        // Compatibility fallback for orgs without rental_rates_by_product_code column:
+        // persist SKU monthly rates as product-specific rows in customer_pricing_overrides.
+        const { data: existingRows, error: existingRowsErr } = await supabase
+          .from('customer_pricing_overrides')
+          .select('id, product_code')
+          .eq('organization_id', organization.id)
+          .eq('customer_id', customer.CustomerListID)
+          .not('product_code', 'is', null);
+        if (existingRowsErr) {
+          const missingOverridesTable = existingRowsErr.code === '42P01'
+            || /relation .*customer_pricing_overrides.* does not exist/i.test(existingRowsErr.message || '');
+          if (!missingOverridesTable) throw existingRowsErr;
+          try {
+            localStorage.setItem(
+              getLocalSkuRatesKey(organization.id, customer.CustomerListID),
+              JSON.stringify(next)
+            );
+            window.dispatchEvent(new Event('rental-pricing-local-updated'));
+            savedViaLocalFallback = true;
+          } catch {
+            throw existingRowsErr;
+          }
+        } else {
+          const byCode = new Map(
+            (existingRows || []).map((row) => [String(row.product_code || '').trim().toUpperCase(), row])
+          );
+          const desired = Object.entries(next)
+            .map(([code, value]) => {
+              const monthly = Number(value?.monthly);
+              return { code: String(code || '').trim(), monthly };
+            })
+            .filter((row) => row.code && Number.isFinite(row.monthly) && row.monthly >= 0);
+
+          for (const row of desired) {
+            const key = row.code.toUpperCase();
+            const existingRow = byCode.get(key);
+            if (existingRow?.id) {
+              const { error: upErr } = await supabase
+                .from('customer_pricing_overrides')
+                .update({
+                  custom_monthly_price: row.monthly,
+                  custom_yearly_price: null,
+                  is_active: true,
+                })
+                .eq('id', existingRow.id);
+              if (upErr) throw upErr;
+            } else {
+              const { error: insErr } = await supabase
+                .from('customer_pricing_overrides')
+                .insert({
+                  organization_id: organization.id,
+                  customer_id: customer.CustomerListID,
+                  product_code: row.code,
+                  custom_monthly_price: row.monthly,
+                  custom_yearly_price: null,
+                  discount_percent: 0,
+                  fixed_rate_override: null,
+                  is_active: true,
+                });
+              if (insErr) throw insErr;
+            }
+          }
+
+          const desiredCodeKeys = new Set(desired.map((r) => r.code.toUpperCase()));
+          for (const row of existingRows || []) {
+            const key = String(row.product_code || '').trim().toUpperCase();
+            if (!key || desiredCodeKeys.has(key)) continue;
+            const { error: delErr } = await supabase
+              .from('customer_pricing_overrides')
+              .delete()
+              .eq('id', row.id);
+            if (delErr) throw delErr;
+          }
+          savedViaLegacyTable = true;
+        }
       }
 
       const { data: refreshed, error: refErr } = await supabase
@@ -1160,7 +1424,15 @@ export default function CustomerDetail() {
 
       invalidateOrgRentalPricingCache(organization.id);
       setProductSkuRatesDialogOpen(false);
-      setTransferMessage({ open: true, message: 'Product code rates saved.', severity: 'success' });
+      setTransferMessage({
+        open: true,
+        message: savedViaLegacyTable
+          ? 'Product code rates saved (compatibility mode).'
+          : savedViaLocalFallback
+            ? 'Product code rates saved (local compatibility mode).'
+          : 'Product code rates saved.',
+        severity: 'success',
+      });
     } catch (e) {
       logger.error('Save product SKU rates error:', e);
       const msg = e?.message || 'Failed to save product code rates';
@@ -2126,7 +2398,7 @@ export default function CustomerDetail() {
           {locationAssets.length > 0 && (
             <Button
               component={Link}
-              to="/rentals"
+              to="/subscriptions"
               state={id ? { openEditForCustomerId: id } : undefined}
               variant="outlined"
               size="small"
@@ -2643,7 +2915,7 @@ export default function CustomerDetail() {
           <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Organization standard rate table</Typography>
-              <Button component={Link} to="/rental/classes" size="small" variant="text" color="primary">Manage</Button>
+              <Button component={Link} to="/pricing/asset-types" size="small" variant="text" color="primary">Manage</Button>
             </Box>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Per-class rates for this customer</Typography>
@@ -2653,7 +2925,7 @@ export default function CustomerDetail() {
             </Box>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Rentals workspace</Typography>
-              <Button component={Link} to="/rentals" state={{ openEditForCustomerId: id }} size="small" variant="text" color="primary">
+              <Button component={Link} to="/subscriptions" state={{ openEditForCustomerId: id }} size="small" variant="text" color="primary">
                 Open
               </Button>
             </Box>
@@ -2792,7 +3064,7 @@ export default function CustomerDetail() {
           <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Flat fees</Typography>
-              <Button component={Link} to="/rentals" size="small" variant="text" color="primary">Rentals workspace</Button>
+              <Button component={Link} to="/subscriptions" size="small" variant="text" color="primary">Rentals workspace</Button>
             </Box>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Asset agreements</Typography>

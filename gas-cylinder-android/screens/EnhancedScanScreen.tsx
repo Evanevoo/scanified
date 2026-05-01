@@ -2412,7 +2412,12 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
               style={{ flex: 1 }}
               hideLastScannedIndicator
               enableRegionOfInterest={Platform.OS === 'android'}
-              disablePeriodicFocus={Platform.OS === 'android'}
+              // On iOS, periodic autofocus toggles can interrupt continuous reads.
+              // Android benefits from these focus nudges for back-to-back bottle scans.
+              disablePeriodicFocus={Platform.OS === 'ios'}
+              // OCR is useful for customer lookup, but in Locate mode it can interfere
+              // with rapid consecutive iOS scans by competing for camera processing.
+              enableOcr={selectedAction !== 'locate'}
             />
 
           {/* Scanned Bottle Details - Centered in Middle */}

@@ -76,6 +76,22 @@ function formatDate(val) {
   return isNaN(d) ? null : d.toISOString();
 }
 
+function toSafeText(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+  if (value instanceof Date) return value.toISOString();
+  try {
+    return String(value);
+  } catch {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return Object.prototype.toString.call(value);
+    }
+  }
+}
+
 const TXT_COLUMNS = [
   "Customer ID",
   "Customer Name",
@@ -208,8 +224,10 @@ const ImportCustomerInfo = () => {
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
           // Only use saved mapping if all mapped columns exist in the current file
-          const valid = Object.values(parsed).every(col => !col || columns.includes(col));
+          const mappedColumns = Object.values(parsed || {});
+          const valid = mappedColumns.every(col => !col || columns.includes(col));
           if (valid) setMapping(parsed);
         } catch {}
       }
@@ -221,10 +239,17 @@ const ImportCustomerInfo = () => {
     setColumns([]);
     setMapping({});
     setShowMapping(false);
+    setPreview([]);
+    setError('');
+    setSuccess('');
     setLoading(true);
-    if (!e.target.files[0]) return;
-    const file = e.target.files[0];
-    const ext = file.name.split('.').pop().toLowerCase();
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile) {
+      setLoading(false);
+      return;
+    }
+    setFile(selectedFile);
+    const ext = selectedFile.name.split('.').pop().toLowerCase();
     const reader = new FileReader();
     reader.onload = (evt) => {
       let rows;
@@ -234,23 +259,69 @@ const ImportCustomerInfo = () => {
       if (ext === 'xls' || ext === 'xlsx') {
         const bstr = rawContent;
         const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        // Prefer first non-empty sheet so exports with intro/blank first sheets still work.
+        rows = [];
+        for (const wsname of wb.SheetNames || []) {
+          const ws = wb.Sheets[wsname];
+          const sheetRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+          const hasContent = (sheetRows || []).some((row) =>
+            Array.isArray(row) && row.some((cell) => String(cell ?? '').trim() !== '')
+          );
+          if (hasContent) {
+            rows = sheetRows;
+            break;
+          }
+        }
       } else {
-        // Remove blank lines and trim
-        const lines = rawContent.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-        rows = lines.map(line => line.split('\t'));
+        // Let Papa auto-detect CSV/tab delimiters and handle quoted values.
+        const parsed = Papa.parse(rawContent, {
+          delimiter: '',
+          skipEmptyLines: true,
+        });
+        rows = parsed.data || [];
+        // Fallback: explicit delimiter attempts if auto-detect fails.
+        if (!rows.length) {
+          const delimiters = ['\t', ',', ';', '|'];
+          for (const delimiter of delimiters) {
+            const fallbackParsed = Papa.parse(rawContent, {
+              delimiter,
+              skipEmptyLines: true,
+            });
+            if ((fallbackParsed.data || []).length > 0) {
+              rows = fallbackParsed.data;
+              break;
+            }
+          }
+        }
       }
-      if (!rows.length) { setLoading(false); return; }
-      // Remove empty rows
-      rows = rows.filter(row => Array.isArray(row) ? row.some(cell => cell && cell.trim() !== '') : true);
+      if (!rows.length) {
+        setError('Could not detect rows in this file. Try saving as CSV (UTF-8) and re-uploading.');
+        setLoading(false);
+        return;
+      }
+      // Normalize row shape to arrays and remove fully empty rows.
+      rows = rows
+        .map((row) => {
+          if (Array.isArray(row)) return row;
+          if (row && typeof row === 'object') return Object.values(row);
+          return [row];
+        })
+        .filter((row) => row.some((cell) => toSafeText(cell).trim() !== ''));
+      if (!rows.length) {
+        setError('No usable rows were found in this file.');
+        setLoading(false);
+        return;
+      }
       let detectedColumns = [];
       let dataRows = rows;
       // Detect if first row is header
-      const isHeader = rows[0].every(cell => typeof cell === 'string' && cell.length > 0 && !/^[0-9]+$/.test(cell));
+      const firstRow = Array.isArray(rows[0]) ? rows[0] : [];
+      const isHeader = firstRow.length > 0 && firstRow.every((cell) => {
+        const value = toSafeText(cell).trim();
+        return value.length > 0 && !/^[0-9]+$/.test(value);
+      });
       if (isHeader) {
-        detectedColumns = rows[0].map((col, i) => col.trim() || `Column ${i+1}`);
+        detectedColumns = firstRow.map((col, i) => toSafeText(col).trim() || `Column ${i + 1}`);
         dataRows = rows.slice(1);
       } else {
         detectedColumns = ALLOWED_FIELDS.map(f => f.label);
@@ -308,10 +379,14 @@ const ImportCustomerInfo = () => {
       }
       processBatch();
     };
+    reader.onerror = () => {
+      setError('Failed to read file. Please try again.');
+      setLoading(false);
+    };
     if (ext === 'xls' || ext === 'xlsx') {
-      reader.readAsBinaryString(file);
+      reader.readAsBinaryString(selectedFile);
     } else {
-      reader.readAsText(file);
+      reader.readAsText(selectedFile);
     }
   };
 
@@ -434,13 +509,12 @@ const ImportCustomerInfo = () => {
           continue;
         }
         
-        // Check for duplicates within the import data itself using normalized IDs
+        // Check for duplicates within the import data itself by normalized name only.
         const normalizedName = customerName.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-        const normalizedId = normalizeId(customerId);
-        const duplicateKey = `${normalizedName}_${normalizedId}`;
+        const duplicateKey = normalizedName;
         
         if (seenCustomers.has(duplicateKey)) {
-          duplicateCustomers.push(`${customerName} (${customerId}) - duplicate within import file`);
+          duplicateCustomers.push(`${customerName} - duplicate name within import file`);
           continue;
         }
         
@@ -458,16 +532,27 @@ const ImportCustomerInfo = () => {
         validCustomers.push(customer);
       }
       
-      // Batch lookup all existing customers (single database query)
-      logger.log(`Checking ${validCustomers.length} customers against database...`);
-      const existingCustomerMap = await batchFindCustomers(validCustomers, profile.organization_id);
+      // Name-only matching: build a lookup of existing customers by normalized name.
+      logger.log(`Checking ${validCustomers.length} customers against database by name...`);
+      const { data: existingCustomersByOrg, error: existingCustomersError } = await supabase
+        .from('customers')
+        .select('CustomerListID, name')
+        .eq('organization_id', profile.organization_id);
+      if (existingCustomersError) throw existingCustomersError;
+
+      const existingCustomerMap = new Map();
+      for (const existing of existingCustomersByOrg || []) {
+        const key = normalizeName(existing?.name);
+        if (key && !existingCustomerMap.has(key)) {
+          existingCustomerMap.set(key, existing);
+        }
+      }
       
       // Process each customer using the batch lookup results
       for (const customer of validCustomers) {
         const customerName = customer.name || '';
         const customerId = customer.CustomerListID || '';
-        const key = `${customerId}_${customerName}`;
-        const existingCustomer = existingCustomerMap[key];
+        const existingCustomer = existingCustomerMap.get(normalizeName(customerName));
         
         if (existingCustomer) {
           // Always update existing customer with new info from import file
@@ -536,8 +621,8 @@ const ImportCustomerInfo = () => {
             hasUpdates = true;
           }
           
-          // Always add to update list if customer exists (even if no field changes detected)
-          // This ensures we still update the customer record timestamp
+          // Always update existing record by existing CustomerListID.
+          // Never change CustomerListID from import rows.
           const nameValue = getMappedValue(customer, 'name');
           customersToUpdate.push({
             CustomerListID: existingCustomer.CustomerListID,

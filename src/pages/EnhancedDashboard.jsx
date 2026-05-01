@@ -28,6 +28,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
+import { useSubscriptions } from '../context/SubscriptionContext';
 import { Line, Doughnut, Bar } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -58,6 +59,7 @@ ChartJS.register(
 export default function EnhancedDashboard() {
   const { user, organization } = useAuth();
   const navigate = useNavigate();
+  const billing = useSubscriptions();
   const [loading, setLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState({});
   const [notifications, setNotifications] = useState([]);
@@ -67,7 +69,6 @@ export default function EnhancedDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMetric, setSelectedMetric] = useState(null);
 
-  // Load dashboard data
   useEffect(() => {
     if (organization?.id) {
       loadDashboardData();
@@ -76,66 +77,39 @@ export default function EnhancedDashboard() {
       loadPerformanceMetrics();
       loadChartData();
     }
-  }, [organization?.id]);
+  }, [organization?.id, billing.loading]);
 
   const loadDashboardData = async () => {
     try {
       setLoading(true);
 
-      // Parallel data loading for better performance
+      const customers = billing.customers || [];
+      const activeSubs = billing.activeSubscriptions || [];
+
       const [
-        bottlesResult,
-        customersResult,
-        rentalsResult,
         recentScansResult,
         reconciliationsResult,
-        invoicesResult
+        bottlesResult,
       ] = await Promise.allSettled([
-        supabase.from('bottles').select('id, status, product_type, assigned_customer, ownership').eq('organization_id', organization.id),
-        supabase.from('customers').select('id, name, created_at, CustomerListID, customer_type').eq('organization_id', organization.id),
-        supabase.from('rentals').select('id, rental_amount, status, rental_type, rental_end_date').eq('organization_id', organization.id),
         supabase.from('bottle_scans').select('id, created_at').eq('organization_id', organization.id).order('created_at', { ascending: false }).limit(100),
         supabase.from('truck_reconciliations').select('id, status, discrepancy_cost').eq('organization_id', organization.id),
-        supabase.from('invoices').select('id, total_amount, status, created_at').eq('organization_id', organization.id)
+        supabase.from('bottles').select('id, status').eq('organization_id', organization.id),
       ]);
 
-      // Process results
-      const bottles = bottlesResult.status === 'fulfilled' ? bottlesResult.value.data || [] : [];
-      const customers = customersResult.status === 'fulfilled' ? customersResult.value.data || [] : [];
-      const rentals = rentalsResult.status === 'fulfilled' ? rentalsResult.value.data || [] : [];
       const recentScans = recentScansResult.status === 'fulfilled' ? recentScansResult.value.data || [] : [];
       const reconciliations = reconciliationsResult.status === 'fulfilled' ? reconciliationsResult.value.data || [] : [];
-      const invoices = invoicesResult.status === 'fulfilled' ? invoicesResult.value.data || [] : [];
+      const bottles = bottlesResult.status === 'fulfilled' ? bottlesResult.value.data || [] : [];
 
-      // Calculate metrics
-      const totalRevenue = rentals.reduce((sum, rental) => sum + (parseFloat(rental.rental_amount) || 0), 0);
-      const monthlyRevenue = invoices
-        .filter(inv => new Date(inv.created_at) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
-        .reduce((sum, inv) => sum + (parseFloat(inv.total_amount) || 0), 0);
+      const totalRevenue = billing.mrr * 12;
+      const monthlyRevenue = billing.mrr;
 
-      // Active Rentals = Rented Assets (Billable) - same as Rentals page: bottles assigned to CUSTOMER
-      // with status "rented", excluding vendors and customer-owned
-      const customerTypesMap = (customers || []).reduce((map, c) => {
-        map[c.CustomerListID] = c.customer_type || 'CUSTOMER';
-        return map;
-      }, {});
-      const activeRentals = bottles.filter(b => {
-        if (!b.assigned_customer) return false;
-        const customerType = customerTypesMap[b.assigned_customer] || 'CUSTOMER';
-        if (customerType !== 'CUSTOMER') return false;
-        const ownershipValue = String(b.ownership || '').trim().toLowerCase();
-        const isCustomerOwned = ownershipValue.includes('customer') || ownershipValue.includes('owned') || ownershipValue === 'customer owned';
-        if (isCustomerOwned) return false;
-        return b.status === 'rented' || b.status === 'RENTED';
-      }).length;
+      const activeRentals = activeSubs.length;
       const availableBottles = bottles.filter(b => b.status === 'available').length;
       const rentedBottles = bottles.filter(b => b.status === 'rented' || b.status === 'RENTED').length;
 
-      // Recent activity (last 7 days)
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       const recentActivity = recentScans.filter(scan => new Date(scan.created_at) > weekAgo).length;
 
-      // Growth calculations
       const lastMonthCustomers = customers.filter(c => 
         new Date(c.created_at) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
       ).length;
@@ -233,7 +207,7 @@ export default function EnhancedDashboard() {
         description: 'Generate new invoice',
         icon: <RevenueIcon />,
         color: '#F59E0B',
-        path: '/billing',
+        path: '/invoices',
         count: null
       },
       {

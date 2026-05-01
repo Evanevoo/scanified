@@ -24,6 +24,11 @@ export default function CylinderDetailsScreen() {
     wasAt?: string;
     scannedAt?: string;
   }>({ isPending: false });
+  const [pendingShipVerification, setPendingShipVerification] = useState<{
+    isPending: boolean;
+    scannedTo?: string;
+    scannedAt?: string;
+  }>({ isPending: false });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -114,7 +119,7 @@ export default function CylinderDetailsScreen() {
       // still appears customer-assigned (verification/import approval not completed yet).
       const { data: latestScan } = await supabase
         .from('bottle_scans')
-        .select('mode, customer_name, created_at, timestamp')
+        .select('mode, customer_name, customer_id, created_at, timestamp')
         .eq('organization_id', profile.organization_id)
         .eq('bottle_barcode', barcode)
         .order('created_at', { ascending: false })
@@ -129,6 +134,25 @@ export default function CylinderDetailsScreen() {
         setPendingReturnVerification({
           isPending: isReturnPendingVerification,
           wasAt: latestScan?.customer_name || cyl.customer_name || undefined,
+          scannedAt: latestScan?.created_at || latestScan?.timestamp || undefined,
+        });
+      }
+
+      const assignedCustomerId = (cyl.customer_id || cyl.assigned_customer || '').toString().trim().toLowerCase();
+      const assignedCustomerName = (cyl.customer_name || '').toString().trim().toLowerCase();
+      const scannedCustomerId = (latestScan?.customer_id || '').toString().trim().toLowerCase();
+      const scannedCustomerName = (latestScan?.customer_name || '').toString().trim().toLowerCase();
+      const hasScannedTarget = Boolean(scannedCustomerId || scannedCustomerName);
+      const alreadyAssignedToScannedCustomer =
+        (scannedCustomerId && assignedCustomerId && scannedCustomerId === assignedCustomerId) ||
+        (scannedCustomerName && assignedCustomerName && scannedCustomerName === assignedCustomerName);
+      const isShipPendingVerification =
+        latestMode === 'SHIP' && hasScannedTarget && !alreadyAssignedToScannedCustomer;
+
+      if (isMounted) {
+        setPendingShipVerification({
+          isPending: isShipPendingVerification,
+          scannedTo: latestScan?.customer_name || undefined,
           scannedAt: latestScan?.created_at || latestScan?.timestamp || undefined,
         });
       }
@@ -263,7 +287,7 @@ export default function CylinderDetailsScreen() {
           </>
         )}
         
-        {!pendingReturnVerification.isPending && customer && (
+        {!pendingReturnVerification.isPending && !pendingShipVerification.isPending && customer && (
           <View style={styles.infoRow}>
             <Text style={[styles.label, { color: colors.text }]}>
               {cylinder.status === 'rented' ? 'Rented To:' : 'Assigned To:'}
@@ -273,7 +297,7 @@ export default function CylinderDetailsScreen() {
             </Text>
           </View>
         )}
-        {!pendingReturnVerification.isPending && !customer && cylinder.customer_name && (
+        {!pendingReturnVerification.isPending && !pendingShipVerification.isPending && !customer && cylinder.customer_name && (
           <View style={styles.infoRow}>
             <Text style={[styles.label, { color: colors.text }]}>
               {cylinder.status === 'rented' ? 'Rented To:' : 'Assigned To:'}
@@ -282,6 +306,23 @@ export default function CylinderDetailsScreen() {
               {cylinder.customer_name}
             </Text>
           </View>
+        )}
+
+        {!pendingReturnVerification.isPending && pendingShipVerification.isPending && (
+          <>
+            <View style={styles.infoRow}>
+              <Text style={[styles.label, { color: colors.text }]}>Scanned To:</Text>
+              <Text style={[styles.value, { color: colors.textSecondary, fontWeight: '600' }]}>
+                {pendingShipVerification.scannedTo || 'Customer'}
+              </Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={[styles.label, { color: colors.text }]}>Ship Scanned:</Text>
+              <Text style={[styles.value, { color: colors.textSecondary }]}>
+                {formatDateTime(pendingShipVerification.scannedAt || '')}
+              </Text>
+            </View>
+          </>
         )}
       </View>
 
@@ -310,7 +351,7 @@ export default function CylinderDetailsScreen() {
       </View>
 
       {/* Customer Assignment */}
-      {!pendingReturnVerification.isPending && customer && (
+      {!pendingReturnVerification.isPending && !pendingShipVerification.isPending && customer && (
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.primary }]}>
             {cylinder.status === 'rented' ? 'Currently Rented To' : 'Assigned Customer'}

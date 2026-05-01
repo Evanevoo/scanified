@@ -41,7 +41,13 @@ import { supabase } from '../supabase/client';
 import { formatLocationDisplay } from '../utils/locationDisplay';
 
 /** Aligns with Assets.jsx: legacy "available" / "filled" count as full for fill-level filtering. */
-function normalizeFillStatus(status) {
+function isCustomerOwned(ownership) {
+  const value = (ownership || '').toString().trim().toLowerCase();
+  return value.includes('customer') && value.includes('own');
+}
+
+function normalizeFillStatus(status, ownership) {
+  if (isCustomerOwned(ownership)) return 'na';
   const value = (status || '').toString().trim().toLowerCase();
   if (!value) return 'full';
   if (value === 'empty') return 'empty';
@@ -49,11 +55,13 @@ function normalizeFillStatus(status) {
   return 'other';
 }
 
-function bottleFillChipProps(status) {
-  const fill = normalizeFillStatus(status);
+function bottleFillChipProps(status, ownership) {
+  const fill = normalizeFillStatus(status, ownership);
   const raw = (status || '').toString().trim();
   const label =
-    fill === 'full'
+    fill === 'na'
+      ? 'N/A'
+      : fill === 'full'
       ? 'Full'
       : fill === 'empty'
         ? 'Empty'
@@ -344,14 +352,15 @@ export default function OwnershipManagement() {
       const ownershipValue = bottle.ownership || 'Unassigned';
       const matchesOwnership = !selectedOwnership || ownershipValue === selectedOwnership;
 
-      const fill = normalizeFillStatus(bottle.status);
+      const fill = normalizeFillStatus(bottle.status, bottle.ownership);
       const matchesFill = !fillFilter || fill === fillFilter;
 
       const matchesSearch = !debouncedSearchTerm ||
         bottle.barcode_number?.toLowerCase().includes(debouncedSearchTerm) ||
         bottle.serial_number?.toLowerCase().includes(debouncedSearchTerm) ||
         bottle.product_code?.toLowerCase().includes(debouncedSearchTerm) ||
-        bottle.gas_type?.toLowerCase().includes(debouncedSearchTerm);
+        bottle.gas_type?.toLowerCase().includes(debouncedSearchTerm) ||
+        (fill === 'na' && 'n/a'.includes(debouncedSearchTerm));
 
       return matchesOwnership && matchesFill && matchesSearch;
     });
@@ -530,6 +539,7 @@ export default function OwnershipManagement() {
               <MenuItem value="">All</MenuItem>
               <MenuItem value="full">Full</MenuItem>
               <MenuItem value="empty">Empty</MenuItem>
+              <MenuItem value="na">N/A (Customer Owned)</MenuItem>
             </TextField>
             <TextField
               size="small"
@@ -594,7 +604,7 @@ export default function OwnershipManagement() {
               </TableHead>
               <TableBody>
                 {paginatedBottles.map((bottle) => {
-                  const fillChip = bottleFillChipProps(bottle.status);
+                  const fillChip = bottleFillChipProps(bottle.status, bottle.ownership);
                   return (
                   <TableRow key={bottle.id} hover>
                     <TableCell padding="checkbox" sx={{ width: 48, px: 1 }}>

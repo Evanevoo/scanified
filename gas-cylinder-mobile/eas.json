@@ -18,7 +18,7 @@
       }
     },
     "production": {
-      "autoIncrement": false,
+      "autoIncrement": true,
       "ios": {
         "simulator": false,
         "buildConfiguration": "Release"

@@ -67,11 +67,7 @@ import QuantityDiscrepancyDetector from '../components/QuantityDiscrepancyDetect
 import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
 import { reconcileShippedBottleAssignments } from '../services/reconcileShippedBottleAssignments';
-import {
-  fetchOrgRentalPricingContext,
-  monthlyRateForNewRental,
-  monthlyRateForProductPlaceholder,
-} from '../services/rentalPricingContext';
+import { fetchOrgRentalPricingContext, monthlyRateForNewRental, monthlyRateForProductPlaceholder } from '../utils/rentalPricing';
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
 import { resolveCustomerListId, clearResolveCustomerListIdMemo } from '../utils/resolveCustomerListId';
 

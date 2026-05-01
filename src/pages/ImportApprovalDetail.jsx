@@ -8,7 +8,7 @@ import { ExpandMore as ExpandMoreIcon, Person as PersonIcon, Receipt as ReceiptI
 import { CardSkeleton } from '../components/SmoothLoading';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
 import { reconcileShippedBottleAssignments } from '../services/reconcileShippedBottleAssignments';
-import { fetchOrgRentalPricingContext, monthlyRateForProductPlaceholder } from '../services/rentalPricingContext';
+import { fetchOrgRentalPricingContext, monthlyRateForProductPlaceholder } from '../utils/rentalPricing';
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
 import { resolveCustomerListId } from '../utils/resolveCustomerListId';
 import { parseDbTimestamp } from '../utils/parseDbTimestamp';

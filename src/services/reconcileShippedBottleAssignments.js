@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import { fetchOrgRentalPricingContext, monthlyRateForNewRental } from './rentalPricingContext';
+import { fetchOrgRentalPricingContext, monthlyRateForNewRental } from '../utils/rentalPricing';
 import { resolveCustomerListId } from '../utils/resolveCustomerListId';
 
 function toIsoDate(value) {

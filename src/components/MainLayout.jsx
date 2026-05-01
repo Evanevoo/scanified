@@ -55,7 +55,7 @@ export default function MainLayout({ children }) {
         { label: 'Home', to: '/home' },
         { label: 'Inventory', to: '/inventory' },
         { label: 'Orders', to: '/import-approvals' },
-        { label: 'Rentals', to: '/rentals' },
+        { label: 'Rentals', to: '/subscriptions' },
       ];
 
   useEffect(() => {
@@ -210,7 +210,7 @@ export default function MainLayout({ children }) {
     if (to === '/home') return path === '/home';
     if (to === '/inventory') return path.startsWith('/inventory') || path.startsWith('/assets');
     if (to === '/import-approvals') return path.startsWith('/import-approval');
-    if (to === '/rentals') return path.startsWith('/rentals') || path.startsWith('/lease-agreements');
+    if (to === '/subscriptions') return path.startsWith('/subscriptions');
     return path === to || path.startsWith(`${to}/`);
   };
 

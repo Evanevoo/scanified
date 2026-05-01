@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
-import { fetchOrgRentalPricingContext, monthlyRateForNewRental } from './rentalPricingContext';
+import { fetchOrgRentalPricingContext, monthlyRateForNewRental } from '../utils/rentalPricing';
 
 export class AssetTransferService {
 
