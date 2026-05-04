@@ -107,7 +107,7 @@ export default function Home() {
       return [
         { title: 'View Customers', path: '/customers', icon: <People />, color: 'primary' },
         { title: 'Check Inventory', path: '/inventory', icon: <Inventory />, color: 'secondary' },
-        { title: 'Rentals', path: '/subscriptions', icon: <Schedule />, color: 'success' },
+        { title: 'Rentals', path: '/rentals', icon: <Schedule />, color: 'success' },
         { title: 'View Invoices', path: '/invoices', icon: <Receipt />, color: 'warning' },
         { title: 'Customer Portal', path: '/portal', icon: <DashboardIcon />, color: 'error' }
       ];
@@ -150,7 +150,7 @@ export default function Home() {
         value: stats.activeRentals, 
         icon: <Schedule />, 
         color: primaryColor,
-        onClick: () => navigate('/subscriptions'),
+        onClick: () => navigate('/rentals'),
       },
     ];
 

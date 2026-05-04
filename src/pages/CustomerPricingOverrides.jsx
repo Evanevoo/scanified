@@ -17,7 +17,7 @@ import {
   Refresh as RefreshIcon, Search as SearchIcon,
 } from '@mui/icons-material';
 
-/** Writes Custom Yearly (all products) onto active lease_agreements for the same customer. */
+/** Writes Custom Yearly (all products) onto active lease_agreements AND lease_contract_items for the same customer. */
 async function syncLeaseAgreementsAnnualFromYearlyOverride(supabaseClient, organizationId, customerId, yearlyAmount) {
   if (!organizationId || customerId == null || customerId === '') return;
   const cid = String(customerId).trim();
@@ -58,6 +58,48 @@ async function syncLeaseAgreementsAnnualFromYearlyOverride(supabaseClient, organ
     .in('customer_id', ids);
 
   if (error) throw error;
+
+  // Also sync to lease_contracts / lease_contract_items (used by billing engine).
+  try {
+    const { data: contracts } = await supabaseClient
+      .from('lease_contracts')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('status', 'active')
+      .in('customer_id', ids);
+    if (contracts && contracts.length > 0) {
+      const contractIds = contracts.map((c) => c.id);
+      await supabaseClient
+        .from('lease_contract_items')
+        .update({ yearly_price: amount })
+        .in('contract_id', contractIds);
+    }
+  } catch {
+    // lease_contracts / lease_contract_items may not exist for all orgs; ignore gracefully.
+  }
+}
+
+/** Prefer QuickBooks / subscription List ID so overrides match `subscriptions.customer_id`. */
+function canonicalCustomerListId(c) {
+  if (!c) return '';
+  return String(c.CustomerListID || c.id || '').trim();
+}
+
+function keySetForCustomerId(raw, customerOptions) {
+  const s = new Set();
+  const add = (v) => {
+    const t = String(v || '').trim().toLowerCase();
+    if (t) s.add(t);
+  };
+  add(raw);
+  const opt = customerOptions.find(
+    (c) => String(c.id || '') === String(raw || '') || String(c.CustomerListID || '') === String(raw || '')
+  );
+  if (opt) {
+    add(opt.id);
+    add(opt.CustomerListID);
+  }
+  return s;
 }
 
 function shouldUpdateExistingOverride(editItem) {
@@ -210,12 +252,13 @@ export default function CustomerPricingOverrides() {
               Object.entries(ratesByCode).forEach(([productCode, value]) => {
                 if (!productCode) return;
                 const monthly = typeof value === 'object' && value !== null ? (value.monthly ?? value.rate ?? null) : value;
+                const yearly = typeof value === 'object' && value !== null ? (value.yearly ?? null) : null;
                 mapped.push({
                   id: `legacy-${row.id || customerId}-${productCode}`,
                   source: 'legacy',
                   product_code: productCode,
                   custom_monthly_price: monthly != null && monthly !== '' ? Number(monthly) : null,
-                  custom_yearly_price: null,
+                  custom_yearly_price: yearly != null && yearly !== '' ? Number(yearly) : null,
                   ...common,
                 });
               });
@@ -256,13 +299,21 @@ export default function CustomerPricingOverrides() {
   }, [ctx.assetTypePricing, fallbackProductCodes]);
 
   const allCustomerIds = useMemo(
-    () => customerOptions.map((c) => c.id || c.CustomerListID).filter(Boolean),
+    () => [...new Set(customerOptions.map((c) => canonicalCustomerListId(c)).filter(Boolean))],
     [customerOptions]
   );
   const handleSelectAllCustomers = () => setBulkCustomers(allCustomerIds);
   const handleClearAllCustomers = () => setBulkCustomers([]);
   const selectedBulkCustomerOptions = useMemo(
-    () => customerOptions.filter((c) => bulkCustomers.includes(c.id || c.CustomerListID)),
+    () =>
+      customerOptions.filter((c) => {
+        const can = canonicalCustomerListId(c);
+        return (
+          bulkCustomers.includes(can) ||
+          (c.id && bulkCustomers.includes(c.id)) ||
+          (c.CustomerListID && bulkCustomers.includes(c.CustomerListID))
+        );
+      }),
     [customerOptions, bulkCustomers]
   );
 
@@ -462,33 +513,51 @@ export default function CustomerPricingOverrides() {
     setSaving(true);
     setError(null);
     try {
-      for (const custId of bulkCustomers) {
-        const existing = ctx.customerPricingOverrides.find(
-          (o) => o.customer_id === custId && (o.product_code == null || o.product_code === '')
+      for (const selectedId of bulkCustomers) {
+        const custRow = customerOptions.find(
+          (c) =>
+            canonicalCustomerListId(c) === selectedId ||
+            c.id === selectedId ||
+            c.CustomerListID === selectedId
         );
-        const payload = {
-          organization_id: organization.id,
-          customer_id: custId,
-          product_code: null,
-          discount_percent: bulkValues.discount_percent ? parseFloat(bulkValues.discount_percent) : 0,
-          fixed_rate_override: bulkValues.fixed_rate_override ? parseFloat(bulkValues.fixed_rate_override) : null,
-          is_active: true,
-        };
-        if (hasYearly) {
-          payload.custom_yearly_price = parseFloat(yearlyRaw);
-        }
+        const custId = canonicalCustomerListId(custRow) || String(selectedId).trim();
+        if (!custId) continue;
+
+        const targetKeys = keySetForCustomerId(custId, customerOptions);
+        const existing = ctx.customerPricingOverrides.find((o) => {
+          if (o.product_code != null && o.product_code !== '') return false;
+          const rowKeys = keySetForCustomerId(o.customer_id, customerOptions);
+          for (const k of rowKeys) {
+            if (targetKeys.has(k)) return true;
+          }
+          return false;
+        });
+
         if (existing) {
-          const updatePayload = { ...payload };
-          if (!hasYearly) delete updatePayload.custom_yearly_price;
-          if (!hasDiscount) delete updatePayload.discount_percent;
-          if (!hasFixed) delete updatePayload.fixed_rate_override;
-          const { error: upErr } = await supabase.from('customer_pricing_overrides').update(updatePayload).eq('id', existing.id);
+          const updatePayload = {
+            organization_id: organization.id,
+            customer_id: custId,
+            product_code: null,
+            is_active: true,
+          };
+          if (hasYearly) updatePayload.custom_yearly_price = parseFloat(yearlyRaw);
+          if (hasDiscount) updatePayload.discount_percent = parseFloat(bulkValues.discount_percent);
+          if (hasFixed) updatePayload.fixed_rate_override = parseFloat(bulkValues.fixed_rate_override);
+          const { error: upErr } = await supabase
+            .from('customer_pricing_overrides')
+            .update(updatePayload)
+            .eq('id', existing.id);
           if (upErr) throw upErr;
         } else {
           const { error: insErr } = await supabase.from('customer_pricing_overrides').insert({
-            ...payload,
+            organization_id: organization.id,
+            customer_id: custId,
+            product_code: null,
+            is_active: true,
             custom_monthly_price: null,
             custom_yearly_price: hasYearly ? parseFloat(yearlyRaw) : null,
+            discount_percent: hasDiscount ? parseFloat(bulkValues.discount_percent) : 0,
+            fixed_rate_override: hasFixed ? parseFloat(bulkValues.fixed_rate_override) : null,
           });
           if (insErr) throw insErr;
         }
@@ -660,7 +729,9 @@ export default function CustomerPricingOverrides() {
               disableCloseOnSelect
               options={customerOptions}
               value={selectedBulkCustomerOptions}
-              onChange={(_, values) => setBulkCustomers(values.map((v) => v.id || v.CustomerListID))}
+              onChange={(_, values) =>
+                setBulkCustomers(values.map((v) => canonicalCustomerListId(v)).filter(Boolean))
+              }
               getOptionLabel={(option) => option.name || option.Name || option.id || option.CustomerListID || ''}
               isOptionEqualToValue={(option, value) => (option.id || option.CustomerListID) === (value.id || value.CustomerListID)}
               renderOption={(props, option, { selected }) => (

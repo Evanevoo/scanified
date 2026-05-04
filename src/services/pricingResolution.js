@@ -45,12 +45,16 @@ export function flattenCustomerPricingRowsToLegacyOverrides(customerPricingRows)
           typeof value === 'object' && value !== null
             ? (value.monthly ?? value.rate ?? null)
             : value;
+        const yearly =
+          typeof value === 'object' && value !== null
+            ? (value.yearly ?? null)
+            : null;
         mapped.push({
           customer_id: customerId,
           product_code: productCode,
           fixed_rate_override: null,
           custom_monthly_price: monthly,
-          custom_yearly_price: null,
+          custom_yearly_price: yearly,
           discount_percent: row.discount_percent ?? 0,
           is_active: row.is_active !== false,
         });
@@ -60,27 +64,69 @@ export function flattenCustomerPricingRowsToLegacyOverrides(customerPricingRows)
   return mapped;
 }
 
+/**
+ * Map one stored customer_id to every lookup alias (UUID ↔ CustomerListID) so overrides
+ * match subscriptions.rental rows regardless of which identifier bulk-edit saved.
+ */
+function expandCustomerKeysForOverrides(customerIdRaw, customers) {
+  const keys = new Set();
+  const add = (v) => {
+    const k = normalizePricingKey(v);
+    if (k) keys.add(k);
+  };
+  add(customerIdRaw);
+  const raw = String(customerIdRaw ?? '').trim();
+  if (!raw) return keys;
+  for (const c of customers || []) {
+    const id = c?.id != null ? String(c.id).trim() : '';
+    const list = c?.CustomerListID != null ? String(c.CustomerListID).trim() : '';
+    if (!id && !list) continue;
+    if (
+      raw === id ||
+      raw === list ||
+      normalizePricingKey(raw) === normalizePricingKey(id) ||
+      normalizePricingKey(raw) === normalizePricingKey(list)
+    ) {
+      add(id);
+      add(list);
+      break;
+    }
+  }
+  return keys;
+}
+
 export function buildCustomerOverrideMap({
   legacyPricingOverrides,
   customerPricingOverrides,
   organizationId,
+  /** When provided, each override is registered under UUID and CustomerListID keys. */
+  customers,
 }) {
   const byCustomer = new Map();
   const normalize = normalizePricingKey;
+
+  const registerOverride = (o, productKey) => {
+    const aliasKeys = expandCustomerKeysForOverrides(o.customer_id, customers);
+    const keyList = aliasKeys.size > 0 ? [...aliasKeys] : [normalize(o.customer_id)].filter(Boolean);
+    for (const customerKey of keyList) {
+      if (!customerKey) continue;
+      byCustomer.set(`${customerKey}::${productKey}`, o);
+    }
+  };
 
   for (const o of legacyPricingOverrides || []) {
     if (o?.is_active === false) continue;
     const customerKey = normalize(o.customer_id);
     if (!customerKey) continue;
     const productKey = normalize(o.product_code) || '__all__';
-    byCustomer.set(`${customerKey}::${productKey}`, o);
+    registerOverride(o, productKey);
   }
   for (const o of customerPricingOverrides || []) {
     if (o?.is_active === false) continue;
     const customerKey = normalize(o.customer_id);
     if (!customerKey) continue;
     const productKey = normalize(o.product_code) || '__all__';
-    byCustomer.set(`${customerKey}::${productKey}`, o);
+    registerOverride(o, productKey);
   }
 
   if (organizationId) {
@@ -90,21 +136,27 @@ export function buildCustomerOverrideMap({
         const storageKey = localStorage.key(i);
         if (!storageKey || !storageKey.startsWith(prefix)) continue;
         const customerIdRaw = storageKey.slice(prefix.length);
-        const customerKey = normalize(customerIdRaw);
-        if (!customerKey) continue;
         const parsed = JSON.parse(localStorage.getItem(storageKey) || '{}');
         if (!parsed || typeof parsed !== 'object') continue;
         Object.entries(parsed).forEach(([code, value]) => {
           const productKey = normalize(code);
           const monthly = Number(value?.monthly);
-          if (!productKey || !Number.isFinite(monthly)) return;
-          byCustomer.set(`${customerKey}::${productKey}`, {
+          const yearly = value?.yearly != null ? Number(value.yearly) : null;
+          if (!productKey || (!Number.isFinite(monthly) && !(yearly != null && Number.isFinite(yearly)))) return;
+          const stub = {
             customer_id: customerIdRaw,
             product_code: code,
-            custom_monthly_price: monthly,
+            custom_monthly_price: Number.isFinite(monthly) ? monthly : null,
+            custom_yearly_price: yearly != null && Number.isFinite(yearly) ? yearly : null,
             is_active: true,
             source: 'local_compatibility',
-          });
+          };
+          const aliasKeys = expandCustomerKeysForOverrides(customerIdRaw, customers);
+          const keyList = aliasKeys.size > 0 ? [...aliasKeys] : [normalize(customerIdRaw)].filter(Boolean);
+          for (const customerKey of keyList) {
+            if (!customerKey) continue;
+            byCustomer.set(`${customerKey}::${productKey}`, stub);
+          }
         });
       }
     } catch {
@@ -221,6 +273,9 @@ export function resolveEffectiveUnitPrice({
   if (period === 'yearly' && override?.custom_yearly_price != null) {
     return parseFloat(override.custom_yearly_price) || 0;
   }
+  if (period === 'yearly' && specificOverride && specificOverride.custom_yearly_price == null && allProductsOverride?.custom_yearly_price != null) {
+    return parseFloat(allProductsOverride.custom_yearly_price) || 0;
+  }
   if (period === 'monthly' && override?.custom_monthly_price != null) {
     return parseFloat(override.custom_monthly_price) || 0;
   }
@@ -308,7 +363,8 @@ export function computeSubscriptionBillingCycleTotal(sub, customerRecord, ctx, b
   const groups = groupAssignedBottleCountsByProductCode(
     billingData.bottles || [],
     sub.customer_id,
-    cust
+    cust,
+    { allCustomers: billingData.customers }
   );
   let sum = 0;
   for (const { productCode, count } of groups) {
@@ -337,7 +393,7 @@ export function computeSubscriptionCycleTotal(sub, activeItems, customerRecord, 
 }
 
 /**
- * @param {object} billingData — { bottles, leaseContracts, leaseContractItems }
+ * @param {object} billingData — { bottles, leaseContracts, leaseContractItems, customers? }
  */
 export function computeMRRWithResolution(subscriptions, customers, ctx, billingData = {}) {
   const customerForSub = (sub) =>

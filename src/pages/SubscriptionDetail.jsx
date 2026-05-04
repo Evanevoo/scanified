@@ -126,15 +126,15 @@ export default function SubscriptionDetail() {
     return (
       <Box sx={{ p: 4, textAlign: 'center' }}>
         <Typography variant="h6" color="text.secondary">Subscription not found</Typography>
-        <Button onClick={() => navigate('/subscriptions')} sx={{ mt: 2 }}>Back to Subscriptions</Button>
+        <Button onClick={() => navigate('/rentals')} sx={{ mt: 2 }}>Back to Rentals</Button>
       </Box>
     );
   }
 
   return (
     <Box sx={{ p: { xs: 2, sm: 3 }, minHeight: '100%' }}>
-      <Button startIcon={<ArrowBack />} onClick={() => navigate('/subscriptions')} sx={{ mb: 2, textTransform: 'none' }}>
-        Back to Subscriptions
+      <Button startIcon={<ArrowBack />} onClick={() => navigate('/rentals')} sx={{ mb: 2, textTransform: 'none' }}>
+        Back to Rentals
       </Button>
 
       {error && <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 2 }}>{error}</Alert>}

@@ -69,7 +69,7 @@ const InvoiceTemplateManager = ({ open, onClose }) => open ? (
       <h3 style={{ margin: 0 }}>Invoice template editor unavailable</h3>
       <p>
         Your saved template is still kept in this browser and is now applied from Rentals.
-        Use <a href="/subscriptions">Rentals</a> to generate invoice PDFs with your current template.
+        Use <a href="/rentals">Rentals</a> to generate invoice PDFs with your current template.
       </p>
       <button onClick={onClose}>Close</button>
     </div>

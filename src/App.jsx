@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useEffect, useMemo } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import { AuthProvider } from './hooks/useAuth';
 import { PermissionsProvider } from './context/PermissionsContext';
@@ -170,6 +170,12 @@ function AnalyticsTracker() {
   return null;
 }
 
+/** Old bookmarks used `/subscriptions/:id`; canonical URL is `/rentals/:id`. */
+function SubscriptionsIdLegacyRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/rentals/${id}`} replace />;
+}
+
 function AppContent() {
   const { profile, organization, loading } = useAuth();
   
@@ -313,15 +319,16 @@ function AppContent() {
                         <BottlesForDay />
                       </Suspense>
                     } />
-                    <Route path="/subscriptions" element={<Subscriptions />} />
-                    <Route path="/subscriptions/:id" element={<SubscriptionDetail />} />
+                    <Route path="/rentals" element={<Subscriptions />} />
+                    <Route path="/rentals/:id" element={<SubscriptionDetail />} />
+                    <Route path="/subscriptions" element={<Navigate to="/rentals" replace />} />
+                    <Route path="/subscriptions/:id" element={<SubscriptionsIdLegacyRedirect />} />
                     <Route path="/pricing/asset-types" element={<AssetTypePricing />} />
                     <Route path="/pricing/customers" element={<CustomerPricingOverrides />} />
                     <Route path="/pricing/tax-regions" element={<TaxRegionsPage />} />
-                    <Route path="/invoices" element={<Navigate to="/subscriptions" replace />} />
+                    <Route path="/invoices" element={<Navigate to="/rentals" replace />} />
                     <Route path="/invoices/export" element={<QuickBooksExport />} />
                     {/* Legacy redirects */}
-                    <Route path="/rentals" element={<Navigate to="/subscriptions" replace />} />
                     <Route path="/lease-agreements" element={<LeaseAgreements />} />
                     <Route path="/industry-analytics" element={<IndustryAnalyticsDashboard />} />
                     <Route path="/web-scanning" element={<WebScanning />} />
@@ -349,7 +356,7 @@ function AppContent() {
                     <Route path="/reports/supabase-orders" element={<SupabaseOrders />} />
                     <Route path="/quick-add" element={<QuickAdd />} />
                     <Route path="/lot-reports" element={<LotReports />} />
-                    <Route path="/rental/*" element={<Navigate to="/subscriptions" replace />} />
+                    <Route path="/rental/*" element={<Navigate to="/rentals" replace />} />
                     <Route path="/customer/:id" element={<CustomerDetail />} />
                     <Route path="/asset-history" element={<AssetHistory />} />
                     <Route path="/asset-history-lookup" element={<AssetHistoryLookup />} />
@@ -369,7 +376,7 @@ function AppContent() {
                     <Route path="/unified-role-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/import-asset-balance" element={<ImportAssetBalance />} />
                     <Route path="/import-rental-agreements" element={<ImportRentalAgreements />} />
-                    <Route path="/send-yearly-lease-emails" element={<Navigate to="/subscriptions" replace />} />
+                    <Route path="/send-yearly-lease-emails" element={<Navigate to="/rentals" replace />} />
                     <Route path="/import-approvals" element={<ImportApprovals />} />
                     <Route path="/import-approval/:id/detail" element={<ImportApprovalDetail />} />
                     <Route path="/verified-orders" element={<VerifiedOrders />} />
@@ -384,8 +391,8 @@ function AppContent() {
                     <Route path="/assets/:id" element={<AssetDetail />} />
                     <Route path="/asset/:id" element={<AssetDetail />} />
                     <Route path="/orders" element={<ScannedOrders />} />
-                    <Route path="/billing" element={<Navigate to="/subscriptions" replace />} />
-                    <Route path="/invoice/:id" element={<Navigate to="/subscriptions" replace />} />
+                    <Route path="/billing" element={<Navigate to="/rentals" replace />} />
+                    <Route path="/invoice/:id" element={<Navigate to="/rentals" replace />} />
                     <Route path="/support" element={<SupportCenter />} />
                     <Route path="/recent-cylinders" element={<RecentCylinders />} />
                     <Route path="/organization-tools" element={
@@ -413,7 +420,7 @@ function AppContent() {
                         <ChainOfCustody />
                       </RoleProtectedRoute>
                     } />
-                    <Route path="/advanced-rentals" element={<Navigate to="/subscriptions" replace />} />
+                    <Route path="/advanced-rentals" element={<Navigate to="/rentals" replace />} />
                     <Route path="/data-utilities" element={<DataUtilities />} />
                     
                     {/* Owner-only routes */}
@@ -428,7 +435,7 @@ function AppContent() {
                       <Route path="/owner-portal/tools" element={<DataUtilities />} />
                       <Route path="/owner-portal/support" element={<SupportTickets />} />
                       <Route path="/owner-portal/customer-management" element={<OwnerCustomers />} />
-                      <Route path="/owner-portal/billing" element={<Navigate to="/subscriptions" replace />} />
+                      <Route path="/owner-portal/billing" element={<Navigate to="/rentals" replace />} />
                       <Route path="/owner-portal/system-health" element={<SystemHealth />} />
                       <Route path="/owner-portal/disaster-recovery" element={<DisasterRecoveryDashboard />} />
                       <Route path="/owner-portal/security" element={<SecurityEvents />} />
@@ -458,7 +465,7 @@ function AppContent() {
                       <PalletManagement />
                     </ProtectedRoute>
                   } />
-                  <Route path="/advanced-rental-calculations" element={<Navigate to="/subscriptions" replace />} />
+                  <Route path="/advanced-rental-calculations" element={<Navigate to="/rentals" replace />} />
                   <Route path="/integration-settings" element={
                     <RoleProtectedRoute allowedRoles={['admin', 'owner']}>
                       <IntegrationSettings />
