@@ -221,8 +221,9 @@ export function SubscriptionProvider({ children }) {
         legacyPricingOverrides,
         customerPricingOverrides,
         organizationId: orgId,
+        customers,
       }),
-    [legacyPricingOverrides, customerPricingOverrides, orgId]
+    [legacyPricingOverrides, customerPricingOverrides, orgId, customers]
   );
 
   const defaultRates = useMemo(
@@ -245,6 +246,7 @@ export function SubscriptionProvider({ children }) {
           bottles,
           leaseContracts,
           leaseContractItems,
+          customers,
         }
       ),
     [subscriptions, customers, customerOverrideMap, assetPricingMap, defaultRates, bottles, leaseContracts, leaseContractItems]

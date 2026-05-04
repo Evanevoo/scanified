@@ -717,10 +717,12 @@ export default function CustomerDetail() {
         legacyPricingOverrides: subscriptionCtx.legacyPricingOverrides,
         customerPricingOverrides: subscriptionCtx.customerPricingOverrides,
         organizationId: organization?.id,
+        customers: subscriptionCtx.customers,
       }),
     [
       subscriptionCtx.legacyPricingOverrides,
       subscriptionCtx.customerPricingOverrides,
+      subscriptionCtx.customers,
       organization?.id,
       rentalHistoryLocalRatesVersion,
     ]
@@ -731,7 +733,7 @@ export default function CustomerDetail() {
     [subscriptionCtx.assetTypePricing]
   );
 
-  /** Match Rentals (/subscriptions): overrides + rate table + local SKU rates, not stale DB rental_amount. */
+  /** Match Rentals page: overrides + rate table + local SKU rates, not stale DB rental_amount. */
   const rentalHistoryDisplayRows = useMemo(() => {
     const assets = customerAssets || [];
     const customerKey = customer?.CustomerListID;
@@ -2752,7 +2754,7 @@ export default function CustomerDetail() {
           {locationAssets.length > 0 && (
             <Button
               component={Link}
-              to="/subscriptions"
+              to="/rentals"
               state={id ? { openEditForCustomerId: id } : undefined}
               variant="outlined"
               size="small"
@@ -3279,7 +3281,7 @@ export default function CustomerDetail() {
             </Box>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Rentals workspace</Typography>
-              <Button component={Link} to="/subscriptions" state={{ openEditForCustomerId: id }} size="small" variant="text" color="primary">
+              <Button component={Link} to="/rentals" state={{ openEditForCustomerId: id }} size="small" variant="text" color="primary">
                 Open
               </Button>
             </Box>
@@ -3418,7 +3420,7 @@ export default function CustomerDetail() {
           <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Flat fees</Typography>
-              <Button component={Link} to="/subscriptions" size="small" variant="text" color="primary">Rentals workspace</Button>
+              <Button component={Link} to="/rentals" size="small" variant="text" color="primary">Rentals workspace</Button>
             </Box>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Asset agreements</Typography>

@@ -915,7 +915,7 @@ export default function ImportRentalAgreements() {
         toast('Imported to lease agreements. Rentals sync was skipped because subscriptions tables are missing. Run subscription_system_migration.sql for this org database.');
       }
       if (done > 0) {
-        navigate('/subscriptions');
+        navigate('/rentals');
       }
     } catch (err) {
       logger.error('Import error:', err);
@@ -941,7 +941,7 @@ export default function ImportRentalAgreements() {
     <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 1600, mx: 'auto' }}>
       <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Button startIcon={<ArrowBackIcon />} component={Link} to="/subscriptions" sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
+          <Button startIcon={<ArrowBackIcon />} component={Link} to="/rentals" sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
             Back
           </Button>
           <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>

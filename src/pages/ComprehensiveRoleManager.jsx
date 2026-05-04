@@ -66,7 +66,7 @@ export default function ComprehensiveRoleManager() {
         { id: 'locations', title: 'Locations', path: '/locations' },
         { id: 'assets', title: 'Assets', path: '/assets' },
         { id: 'inventory', title: 'Inventory Management', path: '/inventory-management' },
-        { id: 'rentals', title: 'Subscriptions', path: '/subscriptions' },
+        { id: 'rentals', title: 'Rentals', path: '/rentals' },
         { id: 'orders', title: 'Orders', path: '/orders' }
       ]
     },

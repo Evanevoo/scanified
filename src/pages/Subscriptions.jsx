@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscriptions } from '../context/SubscriptionContext';
@@ -112,6 +112,16 @@ export default function Subscriptions() {
     return customerResolvers.byId.get(idKey) || customerResolvers.byName.get(nameKey) || null;
   };
 
+  const matchCustomerRecordBySubscriptionId = useCallback((customerId) => {
+    if (!customerId || !(ctx.customers || []).length) return null;
+    const key = normalize(customerId);
+    for (const c of ctx.customers) {
+      const ids = [c.id, c.CustomerListID].map(normalize).filter(Boolean);
+      if (ids.includes(key)) return c;
+    }
+    return null;
+  }, [ctx.customers]);
+
   useEffect(() => {
     let active = true;
     const loadFallbackResolverCustomers = async () => {
@@ -176,8 +186,9 @@ export default function Subscriptions() {
         legacyPricingOverrides: ctx.legacyPricingOverrides,
         customerPricingOverrides: ctx.customerPricingOverrides,
         organizationId: organization?.id,
+        customers: ctx.customers,
       }),
-    [ctx.customerPricingOverrides, ctx.legacyPricingOverrides, organization?.id, localRatesVersion]
+    [ctx.customerPricingOverrides, ctx.legacyPricingOverrides, organization?.id, ctx.customers, localRatesVersion]
   );
 
   const resolveDisplayUnitPrice = (pricingRow, item) =>
@@ -195,6 +206,7 @@ export default function Subscriptions() {
       bottles: ctx.bottles || [],
       leaseContracts: ctx.leaseContracts || [],
       leaseContractItems: ctx.leaseContractItems || [],
+      customers: ctx.customers || [],
     };
     const pricingCtx = {
       customerOverrideMap,
@@ -204,7 +216,17 @@ export default function Subscriptions() {
     };
     return ctx.subscriptions.map((sub) => {
       const items = ctx.subscriptionItems.filter((i) => i.subscription_id === sub.id && i.status === 'active');
-      const customer = resolveCustomer(sub.customer_id) || resolveCustomer(sub.customer_name || '');
+      const customer =
+        resolveCustomer(sub.customer_id) ||
+        resolveCustomer(sub.customer_name || '') ||
+        matchCustomerRecordBySubscriptionId(sub.customer_id) ||
+        {
+          CustomerListID: sub.customer_id,
+          id: sub.customer_id,
+          name: sub.customer_name || sub.customer_id,
+          Name: sub.customer_name,
+          billing_mode: 'rental',
+        };
       const totalPerCycle = computeSubscriptionBillingCycleTotal(sub, customer, pricingCtx, billingData);
       let itemCount = 0;
       if (customer?.billing_mode === 'lease') {
@@ -218,10 +240,13 @@ export default function Subscriptions() {
           : [];
         itemCount = leaseLines.reduce((s, i) => s + (parseInt(i.contracted_quantity, 10) || 0), 0);
       } else {
-        const groups = groupAssignedBottleCountsByProductCode(ctx.bottles || [], sub.customer_id, customer);
+        const groups = groupAssignedBottleCountsByProductCode(ctx.bottles || [], sub.customer_id, customer, {
+          allCustomers: ctx.customers || [],
+        });
         itemCount = groups.reduce((s, g) => s + g.count, 0);
       }
-      return { ...sub, items, customer, totalPerCycle, itemCount };
+      const billingPeriod = customer?.billing_mode === 'lease' ? 'yearly' : sub.billing_period;
+      return { ...sub, items, customer, totalPerCycle, itemCount, billing_period: billingPeriod };
     });
   }, [
     ctx.subscriptions,
@@ -229,7 +254,9 @@ export default function Subscriptions() {
     ctx.bottles,
     ctx.leaseContracts,
     ctx.leaseContractItems,
+    ctx.customers,
     customerResolvers,
+    matchCustomerRecordBySubscriptionId,
     customerOverrideMap,
     assetPricingMap,
     defaultUnitRateByPeriod,
@@ -325,7 +352,7 @@ export default function Subscriptions() {
           id: `virtual-${groupKey}`,
           customer: customer || { name: displayName, Name: displayName },
           customer_id: customerIdValue,
-          billing_period: 'monthly',
+          billing_period: customer?.billing_mode === 'lease' ? 'yearly' : 'monthly',
           itemCount: group.bottleCount,
           productCounts: group.productCounts || {},
           totalPerCycle: 0,
@@ -342,6 +369,7 @@ export default function Subscriptions() {
     let active = true;
     const loadLegacyActiveRentals = async () => {
       if (!organization?.id) return;
+      let rows = [];
       try {
         const { data, error } = await supabase
           .from('rentals')
@@ -351,18 +379,32 @@ export default function Subscriptions() {
         if (error) throw error;
         if (!active) return;
 
+        // Same spirit as pre-consolidation Rentals.jsx + billingWorkspace: keep rows even when
+        // customer directory lookup misses (QuickBooks ID drift, timing). Fall back to rental row IDs/names.
         const grouped = (data || [])
           .filter((r) => !r.is_dns)
           .reduce((acc, row) => {
             const key = String(row.customer_id || row.customer_name || 'unassigned').trim();
             if (!key) return acc;
             const resolvedCustomer = resolveCustomer(row.customer_id || row.customer_name, row.customer_name);
-            if (!resolvedCustomer) return acc; // hide orphaned rentals for deleted customers
+            const fallbackId = String(row.customer_id || row.customer_name || key).trim();
+            const fallbackName =
+              row.customer_name ||
+              row.customer_id ||
+              'Unknown customer';
+            const displayCustomer =
+              resolvedCustomer ||
+              {
+                id: fallbackId,
+                CustomerListID: fallbackId,
+                name: fallbackName,
+                Name: fallbackName,
+              };
             const cur = acc.get(key) || {
               key,
-              customer_id: resolvedCustomer?.CustomerListID || resolvedCustomer?.id || row.customer_id || '',
-              customer_name: resolvedCustomer?.name || resolvedCustomer?.Name || row.customer_name || row.customer_id || 'Assigned customer',
-              customer: resolvedCustomer || null,
+              customer_id: resolvedCustomer?.CustomerListID || resolvedCustomer?.id || fallbackId,
+              customer_name: resolvedCustomer?.name || resolvedCustomer?.Name || fallbackName,
+              customer: displayCustomer,
               itemCount: 0,
               billing_period: row.rental_type === 'yearly' ? 'yearly' : 'monthly',
               totalPerCycle: 0,
@@ -389,7 +431,7 @@ export default function Subscriptions() {
             return acc;
           }, new Map());
 
-        const rows = Array.from(grouped.values()).map((g) => ({
+        rows = Array.from(grouped.values()).map((g) => ({
           id: `legacy-${g.key}`,
           customer: g.customer || { name: g.customer_name, Name: g.customer_name },
           customer_id: g.customer_id || g.customer_name,
@@ -402,58 +444,13 @@ export default function Subscriptions() {
           next_billing_date: null,
           status: 'active',
           isVirtual: true,
+          legacySource: 'rentals_table',
         }));
-
-        // Also surface active lease_agreements as fallback virtual rows so imported
-        // agreements are visible even before full subscriptions backfill completes.
-        let leaseRows = [];
-        try {
-          const { data: leaseData, error: leaseErr } = await supabase
-            .from('lease_agreements')
-            .select('id, customer_id, customer_name, agreement_number, assets_on_agreement, max_asset_count, annual_amount, next_billing_date, end_date, status')
-            .eq('organization_id', organization.id)
-            .eq('status', 'active');
-          if (leaseErr) throw leaseErr;
-
-          leaseRows = (leaseData || []).map((a) => {
-            const resolvedCustomer = resolveCustomer(a.customer_id || a.customer_name, a.customer_name);
-            const displayName =
-              resolvedCustomer?.name ||
-              resolvedCustomer?.Name ||
-              a.customer_name ||
-              a.customer_id ||
-              'Assigned customer';
-            const itemCount = Number.parseInt(String(a.max_asset_count ?? ''), 10);
-            const agreementCode = String(a.agreement_number || '').trim();
-            const productCode = String(a.assets_on_agreement || '').trim();
-            const productCounts = {};
-            if (productCode) productCounts[productCode] = Number.isFinite(itemCount) && itemCount > 0 ? itemCount : 1;
-
-            return {
-              id: `lease-${a.id}`,
-              customer: resolvedCustomer || { name: displayName, Name: displayName },
-              customer_id: resolvedCustomer?.CustomerListID || resolvedCustomer?.id || a.customer_id || a.customer_name,
-              billing_period: 'yearly',
-              itemCount: Number.isFinite(itemCount) && itemCount > 0 ? itemCount : 1,
-              totalPerCycle: parseFloat(a.annual_amount) || 0,
-              bottleIdentifiers: [],
-              bottleIds: [],
-              productCounts,
-              next_billing_date: a.next_billing_date || a.end_date || null,
-              status: 'active',
-              isVirtual: true,
-              legacySource: 'lease_agreements',
-              notes: agreementCode ? `Agreement ${agreementCode}` : undefined,
-            };
-          });
-        } catch {
-          leaseRows = [];
-        }
-
-        setLegacyRows([...rows, ...leaseRows]);
       } catch {
-        if (active) setLegacyRows([]);
+        rows = [];
       }
+
+      if (active) setLegacyRows(rows);
     };
     loadLegacyActiveRentals();
     return () => { active = false; };
@@ -475,45 +472,37 @@ export default function Subscriptions() {
         .filter(Boolean)
     );
 
+    const subscriptionIds = new Set((ctx.subscriptions || []).map((s) => s.id).filter(Boolean));
     const merged = [...enriched, ...customersWithBottlesNoSubscription];
     const existingKeys = new Set(
       merged.map((r) => String(r.customer_id || r.customer?.name || '').trim().toLowerCase()).filter(Boolean)
     );
     // Legacy rentals table: only add when this customer is not already in subscriptions/bottle rows.
     const extraLegacy = (legacyRows || []).filter((r) => {
-      if (r.legacySource === 'lease_agreements') return false;
       const k = String(r.customer_id || r.customer?.name || '').trim().toLowerCase();
       return k && !existingKeys.has(k);
     });
-    // Imported lease_agreements must always appear (yearly), even if the same customer already has
-    // a monthly subscription or bottle-only row — otherwise the Yearly tab stays empty.
-    const leaseAgreementRows = (legacyRows || []).filter((r) => r.legacySource === 'lease_agreements');
-    const combined = [...merged, ...extraLegacy, ...leaseAgreementRows].filter((row) => {
+    const combined = [...merged, ...extraLegacy].filter((row) => {
       const itemCount = parseFloat(row.itemCount) || 0;
       const rawTotal = parseFloat(row.totalPerCycle) || 0;
-      // Drop only rows with no quantity signal AND no cycle total (avoids empty shells).
-      if (itemCount <= 0 && rawTotal <= 0) return false;
+      const fromLegacyRentals = row.legacySource === 'rentals_table';
+      const isPersistedSubscriptionRow = row.id != null && subscriptionIds.has(row.id);
+
+      // Drop rows with no quantity and no cycle total, unless they're from the
+      // legacy rentals table or are real subscription records.
+      if (!fromLegacyRentals && !isPersistedSubscriptionRow && itemCount <= 0 && rawTotal <= 0) return false;
 
       const idKey = normalize(row.customer_id);
       const nameKey = normalizeName(row.customer?.name || row.customer?.Name || '');
       const inCustomerDirectory =
         activeCustomerIdKeys.has(idKey) || activeCustomerNameKeys.has(nameKey);
 
-      // Lease agreements from import often reference CustomerListID; keep them visible even when
-      // the ID string does not exactly match `customers` yet, as long as we have a customer key.
-      const leaseImported =
-        row.legacySource === 'lease_agreements' &&
-        (Boolean(String(row.customer_id || '').trim()) || Boolean(nameKey));
-
-      // Live subscription rows with a priced cycle still show if customer directory matching fails
-      // (timing, ID format drift) — avoids an empty Rentals table when subscriptions exist.
       const pricedLiveSubscription =
         rawTotal > 0 &&
         !row.isVirtual &&
         Boolean(String(row.customer_id || '').trim());
 
-      // Only render rows linked to active customers in directory — except imported leases / priced subs.
-      if (!inCustomerDirectory && !leaseImported && !pricedLiveSubscription) return false;
+      if (!inCustomerDirectory && !fromLegacyRentals && !pricedLiveSubscription && !isPersistedSubscriptionRow) return false;
 
       return true;
     });
@@ -663,7 +652,19 @@ export default function Subscriptions() {
 
       return { ...row, totalPerCycle: total };
     });
-  }, [enriched, customersWithBottlesNoSubscription, legacyRows, customerOverrideMap, ctx.customers, ctx.bottles, assetPricingMap, defaultUnitRateByPeriod]);
+  }, [
+    enriched,
+    customersWithBottlesNoSubscription,
+    legacyRows,
+    customerOverrideMap,
+    ctx.customers,
+    ctx.subscriptions,
+    ctx.bottles,
+    assetPricingMap,
+    defaultUnitRateByPeriod,
+    organization?.id,
+    customerResolvers,
+  ]);
 
   const derivedMrr = useMemo(() => {
     return allRows
@@ -715,15 +716,25 @@ export default function Subscriptions() {
   const filtered = useMemo(() => {
     let list = allRows;
     const filter = tabFilters[tab];
-    if (filter === 'monthly') list = list.filter((s) => String(s.billing_period || '').toLowerCase() === 'monthly' && s.status === 'active');
-    else if (filter === 'yearly') list = list.filter((s) => String(s.billing_period || '').toLowerCase() === 'yearly' && s.status === 'active');
-    else if (filter === 'cancelled') list = list.filter((s) => s.status === 'cancelled');
+    const isNotTerminal = (s) => {
+      const st = String(s.status || '').toLowerCase();
+      return st !== 'cancelled' && st !== 'expired';
+    };
+    if (filter === 'monthly') {
+      list = list.filter(
+        (s) => String(s.billing_period || '').toLowerCase() === 'monthly' && isNotTerminal(s)
+      );
+    } else if (filter === 'yearly') {
+      list = list.filter(
+        (s) => String(s.billing_period || '').toLowerCase() === 'yearly' && isNotTerminal(s)
+      );
+    } else if (filter === 'cancelled') list = list.filter((s) => s.status === 'cancelled');
 
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((s) => {
         const name = s.customer?.name || s.customer?.Name || s.customer_id || '';
-        return name.toLowerCase().includes(q) || String(s.billing_period || '').includes(q);
+        return name.toLowerCase().includes(q) || String(s.billing_period || '').toLowerCase().includes(q);
       });
     }
     return list;
@@ -763,7 +774,7 @@ export default function Subscriptions() {
         (activeSubs || []).map((s) => String(s.customer_id || '').trim()).filter(Boolean)
       );
 
-      // Legacy `invoices` rows for virtual rentals / lease_agreements (not subscription_invoices).
+      // Legacy `invoices` rows for virtual rentals (not subscription_invoices).
       const invoiceableVirtualRows = (allRows || []).filter((row) => (
         row.status === 'active' &&
         row.isVirtual &&
@@ -854,7 +865,7 @@ export default function Subscriptions() {
         parts.push(`Generated ${subscriptionCreated} subscription invoice${subscriptionCreated === 1 ? '' : 's'}`);
       }
       if (legacyCreated > 0) {
-        parts.push(`created ${legacyCreated} invoice${legacyCreated === 1 ? '' : 's'} from rentals and lease agreements`);
+        parts.push(`created ${legacyCreated} invoice${legacyCreated === 1 ? '' : 's'} from rentals`);
       }
       if (exported > 0) {
         parts.push(`downloaded ${exported} CSV row${exported === 1 ? '' : 's'}`);
@@ -1677,7 +1688,7 @@ export default function Subscriptions() {
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary' }}>Rentals</Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-            Manage customer rentals, lease agreements, and billing
+            Manage customer rentals and billing
           </Typography>
         </Box>
         <Stack
@@ -1813,7 +1824,7 @@ export default function Subscriptions() {
                     key={sub.id}
                     hover
                     sx={{ cursor: sub.isVirtual ? 'default' : 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
-                    onClick={() => { if (!sub.isVirtual) navigate(`/subscriptions/${sub.id}`); }}
+                    onClick={() => { if (!sub.isVirtual) navigate(`/rentals/${sub.id}`); }}
                   >
                     <TableCell>
                       <Typography variant="body2" sx={{ fontWeight: 600 }}>{sub.customer?.name || sub.customer?.Name || sub.customer_id}</Typography>
@@ -1935,7 +1946,7 @@ export default function Subscriptions() {
                               Edit Rates
                             </Button>
                             <Tooltip title="View details">
-                              <IconButton size="small" onClick={() => navigate(`/subscriptions/${sub.id}`)}>
+                              <IconButton size="small" onClick={() => navigate(`/rentals/${sub.id}`)}>
                                 <ViewIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>

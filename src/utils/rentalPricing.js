@@ -33,7 +33,7 @@ export const fetchOrgRentalPricingContext = async (supabaseClient, organizationI
     };
   }
 
-  const [legacyRes, overridesRes, assetPricingRes] = await Promise.all([
+  const [legacyRes, overridesRes, assetPricingRes, customersRes] = await Promise.all([
     safeSelect(
       supabaseClient
         .from('customer_pricing')
@@ -54,6 +54,12 @@ export const fetchOrgRentalPricingContext = async (supabaseClient, organizationI
         .eq('organization_id', organizationId)
         .eq('is_active', true)
     ),
+    safeSelect(
+      supabaseClient
+        .from('customers')
+        .select('id, CustomerListID')
+        .eq('organization_id', organizationId)
+    ),
   ]);
 
   if (legacyRes.error) throw legacyRes.error;
@@ -65,6 +71,7 @@ export const fetchOrgRentalPricingContext = async (supabaseClient, organizationI
     legacyPricingOverrides: legacyFlat,
     customerPricingOverrides: overridesRes.data || [],
     organizationId,
+    customers: customersRes.data || [],
   });
   const assetPricingMap = buildAssetPricingMap(assetPricingRes.data || []);
   const defaults = defaultUnitRatesFromAssetPricingTable(assetPricingRes.data || []);

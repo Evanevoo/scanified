@@ -39,7 +39,12 @@ async function loadCustomerRowForSubscription(sub, organizationId) {
 }
 
 async function loadPricingMaps(organizationId) {
-  const [{ data: assetRows, error: aErr }, { data: overrideRows, error: oErr }, { data: legacyRows, error: lErr }] =
+  const [
+    { data: assetRows, error: aErr },
+    { data: overrideRows, error: oErr },
+    { data: legacyRows, error: lErr },
+    { data: customerRows, error: cErr },
+  ] =
     await Promise.all([
       supabase
         .from('asset_type_pricing')
@@ -52,15 +57,18 @@ async function loadPricingMaps(organizationId) {
         .eq('organization_id', organizationId)
         .eq('is_active', true),
       supabase.from('customer_pricing').select('*').eq('organization_id', organizationId),
+      supabase.from('customers').select('id, CustomerListID').eq('organization_id', organizationId),
     ]);
   if (aErr) throw aErr;
   if (oErr) throw oErr;
   if (lErr) throw lErr;
+  if (cErr) throw cErr;
   const legacyFlat = flattenCustomerPricingRowsToLegacyOverrides(legacyRows || []);
   const customerOverrideMap = buildCustomerOverrideMap({
     legacyPricingOverrides: legacyFlat,
     customerPricingOverrides: overrideRows || [],
     organizationId,
+    customers: customerRows || [],
   });
   const assetPricingMap = buildAssetPricingMap(assetRows || []);
   const { monthly: defaultMonthly, yearly: defaultYearly } = defaultUnitRatesFromAssetPricingTable(
@@ -211,6 +219,12 @@ export async function generateInvoice(organizationId, subscriptionId) {
     assetTypePricingRows,
   } = await loadPricingMaps(organizationId);
 
+  const { data: orgCustomers, error: custErr } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('organization_id', organizationId);
+  if (custErr) throw custErr;
+
   const rowForPricing = { ...sub, customer: customerRow };
   const assetById = new Map((assetTypePricingRows || []).map((p) => [p.id, p]));
 
@@ -260,7 +274,8 @@ export async function generateInvoice(organizationId, subscriptionId) {
     const groups = groupAssignedBottleCountsByProductCode(
       bottleRows || [],
       sub.customer_id,
-      customerRow
+      customerRow,
+      { allCustomers: orgCustomers || [] }
     );
     for (const { productCode, count } of groups) {
       if (count <= 0) continue;

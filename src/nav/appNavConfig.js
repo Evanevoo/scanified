@@ -5,10 +5,10 @@
 
 /** Role → up to 5 primary paths shown when “All pages” is collapsed. */
 export const PRIMARY_SHORTCUTS_BY_ROLE = {
-  user: ['/home', '/customers', '/assets', '/subscriptions', '/scanned-orders'],
-  manager: ['/home', '/customers', '/assets', '/subscriptions', '/import-approvals'],
-  admin: ['/home', '/customers', '/assets', '/subscriptions', '/settings'],
-  orgowner: ['/home', '/customers', '/assets', '/subscriptions', '/settings'],
+  user: ['/home', '/customers', '/assets', '/rentals', '/scanned-orders'],
+  manager: ['/home', '/customers', '/assets', '/rentals', '/import-approvals'],
+  admin: ['/home', '/customers', '/assets', '/rentals', '/settings'],
+  orgowner: ['/home', '/customers', '/assets', '/rentals', '/settings'],
 };
 
 /** First visit: show full sectioned menu expanded by default only for these roles. */
@@ -45,10 +45,10 @@ export const APP_NAV_ROUTE_ENTRIES = [
   { path: '/import-customer-info', title: 'Import Customer Info', subtitle: 'Upload customer updates', keywords: ['customer', 'import', 'upload', 'xlsx', 'csv'] },
   { path: '/locations', title: 'Locations', subtitle: 'Branches / sites list', keywords: ['branches', 'sites'] },
   {
-    path: '/subscriptions',
+    path: '/rentals',
     title: 'Rentals',
-    subtitle: 'Active rentals, lease agreements & billing',
-    keywords: ['rental', 'lease', 'lease agreement', 'agreement', 'agreements', 'plan', 'subscription', 'billing'],
+    subtitle: 'Active rentals & billing',
+    keywords: ['rental', 'plan', 'subscription', 'billing'],
   },
   { path: '/organization-join-codes', title: 'Join Codes', subtitle: 'Invite users to the org', keywords: ['qr', 'invite'] },
   { path: '/bottle-management', title: 'Bottle Management', subtitle: 'Bottles and assignments', keywords: [] },
