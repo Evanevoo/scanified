@@ -13,6 +13,7 @@ import {
   TableHead,
   TableRow,
   Button,
+  IconButton,
   Chip,
   Divider,
   TextField,
@@ -52,6 +53,7 @@ import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import SettingsIcon from '@mui/icons-material/Settings';
 import EditIcon from '@mui/icons-material/Edit';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { TableSkeleton, CardSkeleton } from '../components/SmoothLoading';
 import { AssetTransferService } from '../services/assetTransferService';
 import { useAuth } from '../hooks/useAuth';
@@ -59,95 +61,28 @@ import DNSConversionDialog from '../components/DNSConversionDialog';
 import BarcodeDisplay from '../components/BarcodeDisplay';
 import { formatLocationDisplay, normalizeLocationKey } from '../utils/locationDisplay';
 import { summarizeBottlesByType, getBottleSummaryGroupKey } from '../utils/bottleInventoryGrouping';
-import { getEffectivePrice } from '../services/subscriptionService';
+import { useSubscriptions } from '../context/SubscriptionContext';
+import {
+  buildAssetPricingMap,
+  buildCustomerOverrideMap,
+  resolveMonthlyDisplayUnit,
+  pickMonthlyFromLegacyRentalRatesJson,
+  defaultUnitRatesFromAssetPricingTable,
+} from '../utils/rentalDisplayPricing';
+import {
+  fetchOrgRentalPricingContext,
+  monthlyRateForNewRental,
+  invalidateOrgRentalPricingCache,
+} from '../utils/rentalPricing';
+import { findActiveLeaseContract } from '../services/leaseBilling';
 
-const rentalPricingCtxCache = new Map();
-
-const normCode = (v) => String(v || '').trim().toUpperCase();
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const toNumberOrNull = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
-
-const fetchOrgRentalPricingContext = async (supabaseClient, organizationId) => {
-  if (!organizationId) return { customerPricingByCustomerId: new Map() };
-  const cached = rentalPricingCtxCache.get(organizationId);
-  if (cached) return cached;
-
-  const ctx = { customerPricingByCustomerId: new Map() };
-  try {
-    const { data } = await supabaseClient
-      .from('customer_pricing')
-      .select('*')
-      .eq('organization_id', organizationId);
-    for (const row of data || []) {
-      const id = row.customer_id || row.CustomerListID || row.customer_number;
-      if (!id) continue;
-      ctx.customerPricingByCustomerId.set(String(id), row);
-    }
-  } catch {
-    // Keep empty context fallback.
-  }
-  rentalPricingCtxCache.set(organizationId, ctx);
-  return ctx;
-};
-
-const invalidateOrgRentalPricingCache = (organizationId) => {
-  if (!organizationId) return;
-  rentalPricingCtxCache.delete(organizationId);
-};
-
-const pickCustomerProductRateEntry = (customerPricingRow, productCode) => {
-  const rates = customerPricingRow?.rental_rates_by_product_code;
-  if (!rates || typeof rates !== 'object') return null;
-  const target = normCode(productCode);
-  if (!target) return null;
-
-  // Exact key match first.
-  for (const [key, value] of Object.entries(rates)) {
-    if (normCode(key) === target) {
-      return typeof value === 'object' && value !== null ? value : { monthly: value };
-    }
-  }
-
-  // Prefix match: key BOX300 applies to BOX300-16PK.
-  let best = null;
-  let bestLen = -1;
-  for (const [key, value] of Object.entries(rates)) {
-    const k = normCode(key);
-    if (!k) continue;
-    if (target.startsWith(k) && k.length > bestLen) {
-      bestLen = k.length;
-      best = typeof value === 'object' && value !== null ? value : { monthly: value };
-    }
-  }
-  return best;
-};
-
-const computeEffectiveMonthlyRate = (customerPricingRow, bottle) => {
-  const fixed = toNumberOrNull(customerPricingRow?.fixed_rate_override);
-  if (fixed != null) return fixed;
-
-  const productRate = pickCustomerProductRateEntry(customerPricingRow, bottle?.product_code);
-  const productMonthly = toNumberOrNull(productRate?.monthly ?? productRate?.rate);
-  if (productMonthly != null) return productMonthly;
-
-  // Last fallback when no pricing rule applies.
-  return 0;
-};
 
 const getLocalSkuRatesKey = (organizationId, customerId) =>
   `customer_sku_rates:${organizationId || ''}:${customerId || ''}`;
 const getLocalClassRatesKey = (organizationId, customerId) =>
   `customer_class_rates:${organizationId || ''}:${customerId || ''}`;
-
-const monthlyRateForNewRental = (customerId, bottle, pricingCtx) => {
-  const customerPricingRow =
-    pricingCtx?.customerPricingByCustomerId?.get?.(String(customerId)) || null;
-  return computeEffectiveMonthlyRate(customerPricingRow, bottle);
-};
 
 const getUnifiedClasses = (orgRows) => orgRows || [];
 const formatUnifiedClassLabel = (c) => {
@@ -232,6 +167,7 @@ export default function CustomerDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { organization } = useAuth();
+  const subscriptionCtx = useSubscriptions();
   const [customer, setCustomer] = useState(null);
   const [customerAssets, setCustomerAssets] = useState([]);
   const [locationAssets, setLocationAssets] = useState([]);
@@ -291,6 +227,18 @@ export default function CustomerDetail() {
   const [orgRentalClasses, setOrgRentalClasses] = useState([]);
   const [resolvingRnbId, setResolvingRnbId] = useState(null); // rental id being resolved (RNB close)
   const [resolvingRnsId, setResolvingRnsId] = useState(null); // rental id being resolved (RNS close)
+
+  const [leaseContractRow, setLeaseContractRow] = useState(null);
+  const [leaseItemsRows, setLeaseItemsRows] = useState([]);
+  const [leaseStartDate, setLeaseStartDate] = useState('');
+  const [leaseEndDate, setLeaseEndDate] = useState('');
+  const [newLeaseLine, setNewLeaseLine] = useState({
+    asset_type_id: '',
+    contracted_quantity: '1',
+    unit_price: '',
+    yearly_price: '',
+  });
+  const [leaseBusy, setLeaseBusy] = useState(false);
 
   /**
    * Bottles for this account. Legacy import paths could have saved:
@@ -545,7 +493,7 @@ export default function CustomerDetail() {
         // We have exactly one customer
         const customerData = allCustomers[0];
         setCustomer(customerData);
-        setEditForm(customerData);
+        setEditForm({ ...customerData, billing_mode: customerData.billing_mode || 'rental' });
 
         // Parent: customer under another (e.g. Stevenson Industrial Regina under Stevenson Industrial)
         if (customerData.parent_customer_id) {
@@ -630,6 +578,57 @@ export default function CustomerDetail() {
     fetchMergedOpenRentalsForCustomer,
   ]);
 
+  useEffect(() => {
+    const billingIsLease =
+      (customer?.billing_mode || 'rental') === 'lease' ||
+      (editing && (editForm.billing_mode || 'rental') === 'lease');
+    if (!customer?.organization_id || !customer?.CustomerListID || !billingIsLease) {
+      setLeaseContractRow(null);
+      setLeaseItemsRows([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data: contracts, error } = await supabase
+        .from('lease_contracts')
+        .select('*')
+        .eq('organization_id', customer.organization_id)
+        .eq('customer_id', customer.CustomerListID)
+        .order('start_date', { ascending: false });
+      if (error || cancelled) return;
+      const active = findActiveLeaseContract(
+        contracts || [],
+        customer.CustomerListID,
+        customer.organization_id
+      );
+      const c = active || (contracts && contracts[0]) || null;
+      if (cancelled) return;
+      setLeaseContractRow(c);
+      if (c) {
+        setLeaseStartDate(c.start_date || '');
+        setLeaseEndDate(c.end_date || '');
+        const { data: items } = await supabase
+          .from('lease_contract_items')
+          .select('*')
+          .eq('contract_id', c.id);
+        if (!cancelled) setLeaseItemsRows(items || []);
+      } else {
+        setLeaseStartDate((prev) => prev || new Date().toISOString().split('T')[0]);
+        setLeaseEndDate('');
+        setLeaseItemsRows([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    customer?.organization_id,
+    customer?.CustomerListID,
+    customer?.billing_mode,
+    editing,
+    editForm.billing_mode,
+  ]);
+
   // Load parent customer options when entering edit (for "Under parent" selector)
   useEffect(() => {
     if (!editing || !organization?.id || !customer?.id) return;
@@ -692,10 +691,50 @@ export default function CustomerDetail() {
 
   const unifiedRentalClasses = useMemo(() => getUnifiedClasses(orgRentalClasses), [orgRentalClasses]);
 
-  /** Match Rentals workspace: show class/customer pricing, not stale DB rental_amount. */
+  const [rentalHistoryLocalRatesVersion, setRentalHistoryLocalRatesVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setRentalHistoryLocalRatesVersion((v) => v + 1);
+    const onStorage = (e) => {
+      if (!e?.key) return;
+      if (e.key.startsWith(`customer_sku_rates:${organization?.id || ''}:`)) bump();
+    };
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('rental-pricing-local-updated', bump);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('rental-pricing-local-updated', bump);
+    };
+  }, [organization?.id]);
+
+  const rentalHistoryAssetPricingMap = useMemo(
+    () => buildAssetPricingMap(subscriptionCtx.assetTypePricing),
+    [subscriptionCtx.assetTypePricing]
+  );
+
+  const rentalHistoryCustomerOverrideMap = useMemo(
+    () =>
+      buildCustomerOverrideMap({
+        legacyPricingOverrides: subscriptionCtx.legacyPricingOverrides,
+        customerPricingOverrides: subscriptionCtx.customerPricingOverrides,
+        organizationId: organization?.id,
+      }),
+    [
+      subscriptionCtx.legacyPricingOverrides,
+      subscriptionCtx.customerPricingOverrides,
+      organization?.id,
+      rentalHistoryLocalRatesVersion,
+    ]
+  );
+
+  const rentalHistoryDefaultMonthly = useMemo(
+    () => defaultUnitRatesFromAssetPricingTable(subscriptionCtx.assetTypePricing).monthly,
+    [subscriptionCtx.assetTypePricing]
+  );
+
+  /** Match Rentals (/subscriptions): overrides + rate table + local SKU rates, not stale DB rental_amount. */
   const rentalHistoryDisplayRows = useMemo(() => {
-    const orgRows = orgRentalClasses || [];
     const assets = customerAssets || [];
+    const customerKey = customer?.CustomerListID;
     return (locationAssets || []).map((rental) => {
       const isDNS = rental.is_dns === true;
       const isYearly = (rental.rental_type || 'monthly').toLowerCase() === 'yearly';
@@ -706,7 +745,6 @@ export default function CustomerDetail() {
           displayAmount: Number.isFinite(raw) ? raw : 0,
         };
       }
-      // Respect explicit per-rental overrides saved from the Rentals edit dialog.
       if (rental.rental_amount_manual === true) {
         const raw = parseFloat(String(rental.rental_amount ?? ''));
         return { rental, displayAmount: Number.isFinite(raw) ? raw : 0 };
@@ -729,10 +767,27 @@ export default function CustomerDetail() {
         const raw = parseFloat(String(rental.rental_amount ?? ''));
         return { rental, displayAmount: Number.isFinite(raw) ? raw : 0 };
       }
-      const amt = computeEffectiveMonthlyRate(customerPricing, bottle, orgRows);
+      const productCodeRaw = isDNS
+        ? (rental.dns_product_code || bottle.product_code || '')
+        : getBottleSummaryGroupKey(bottle);
+      const amt = resolveMonthlyDisplayUnit({
+        customerKeyRaw: customerKey,
+        productCodeRaw,
+        customerOverrideMap: rentalHistoryCustomerOverrideMap,
+        assetPricingMap: rentalHistoryAssetPricingMap,
+        defaultMonthly: rentalHistoryDefaultMonthly,
+        customer,
+      });
       return { rental, displayAmount: Number.isFinite(amt) ? amt : 0 };
     });
-  }, [locationAssets, customerAssets, customerPricing, orgRentalClasses]);
+  }, [
+    locationAssets,
+    customerAssets,
+    customer,
+    rentalHistoryCustomerOverrideMap,
+    rentalHistoryAssetPricingMap,
+    rentalHistoryDefaultMonthly,
+  ]);
 
   // Enhanced transfer functionality functions
   const handleSelectAsset = (assetId) => {
@@ -1194,7 +1249,7 @@ export default function CustomerDetail() {
       setTransferMessage({
         open: true,
         message: savedViaLocalFallback
-          ? 'Rental class rates saved (local compatibility mode).'
+          ? 'Rental class rates saved on this device only (database update failed — often missing customer_pricing.rental_class_rates). Run sql/add_rental_class_rates_to_customer_pricing.sql in Supabase, then save again to sync for all users.'
           : 'Rental class rates saved.',
         severity: 'success',
       });
@@ -1262,13 +1317,12 @@ export default function CustomerDetail() {
       if (c) codeSet.add(c);
     });
     const sorted = [...codeSet].sort((a, b) => a.localeCompare(b));
-    const wrap = { rental_rates_by_product_code: stored };
     const initial = {};
     sorted.forEach((code) => {
-      const hit = pickCustomerProductRateEntry(wrap, code);
+      const hitMonthly = pickMonthlyFromLegacyRentalRatesJson(stored, code);
       initial[code] = {
         monthly:
-          hit?.monthly != null && Number.isFinite(Number(hit.monthly)) ? String(hit.monthly) : '',
+          hitMonthly != null && Number.isFinite(hitMonthly) ? String(hitMonthly) : '',
       };
     });
     setProductSkuRatesDraft(initial);
@@ -1427,9 +1481,9 @@ export default function CustomerDetail() {
       setTransferMessage({
         open: true,
         message: savedViaLegacyTable
-          ? 'Product code rates saved (compatibility mode).'
+          ? 'Product code rates saved via customer_pricing_overrides (JSON column on customer_pricing not available).'
           : savedViaLocalFallback
-            ? 'Product code rates saved (local compatibility mode).'
+            ? 'Product code rates saved on this device only. Fix Supabase schema (see error hint / sql scripts), then save again for server-wide pricing.'
           : 'Product code rates saved.',
         severity: 'success',
       });
@@ -1521,6 +1575,114 @@ export default function CustomerDetail() {
     }
   };
 
+  const handleCreateLeaseContract = async () => {
+    if (!customer?.organization_id || !customer?.CustomerListID) return;
+    setLeaseBusy(true);
+    try {
+      const { data, error } = await supabase
+        .from('lease_contracts')
+        .insert({
+          organization_id: customer.organization_id,
+          customer_id: customer.CustomerListID,
+          billing_cycle: 'yearly',
+          start_date: leaseStartDate || new Date().toISOString().split('T')[0],
+          end_date: leaseEndDate || null,
+          status: 'active',
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      setLeaseContractRow(data);
+      setLeaseItemsRows([]);
+      subscriptionCtx.refresh?.();
+      setTransferMessage({ open: true, message: 'Lease contract created.', severity: 'success' });
+    } catch (e) {
+      setTransferMessage({ open: true, message: e?.message || 'Failed to create lease', severity: 'error' });
+    } finally {
+      setLeaseBusy(false);
+    }
+  };
+
+  const handleSaveLeaseDates = async () => {
+    if (!leaseContractRow?.id) return;
+    setLeaseBusy(true);
+    try {
+      const { error } = await supabase
+        .from('lease_contracts')
+        .update({
+          start_date: leaseStartDate,
+          end_date: leaseEndDate || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', leaseContractRow.id);
+      if (error) throw error;
+      subscriptionCtx.refresh?.();
+      setTransferMessage({ open: true, message: 'Lease dates saved.', severity: 'success' });
+    } catch (e) {
+      setTransferMessage({ open: true, message: e?.message || 'Failed to save lease', severity: 'error' });
+    } finally {
+      setLeaseBusy(false);
+    }
+  };
+
+  const handleAddLeaseLine = async () => {
+    if (!leaseContractRow?.id || !customer?.organization_id) return;
+    const atp = subscriptionCtx.assetTypePricing?.find((p) => p.id === newLeaseLine.asset_type_id);
+    const up = newLeaseLine.unit_price === '' ? null : parseFloat(newLeaseLine.unit_price);
+    const yp = newLeaseLine.yearly_price === '' ? null : parseFloat(newLeaseLine.yearly_price);
+    if ((up == null || !Number.isFinite(up)) && (yp == null || !Number.isFinite(yp))) {
+      setTransferMessage({
+        open: true,
+        message: 'Enter a unit price and/or yearly price for the lease line.',
+        severity: 'error',
+      });
+      return;
+    }
+    if (!atp?.id) {
+      setTransferMessage({ open: true, message: 'Select an asset type.', severity: 'error' });
+      return;
+    }
+    setLeaseBusy(true);
+    try {
+      const { error } = await supabase.from('lease_contract_items').insert({
+        organization_id: customer.organization_id,
+        contract_id: leaseContractRow.id,
+        asset_type_id: atp.id,
+        product_code: atp.product_code || null,
+        contracted_quantity: Math.max(0, parseInt(newLeaseLine.contracted_quantity, 10) || 0),
+        unit_price: Number.isFinite(up) ? up : null,
+        yearly_price: Number.isFinite(yp) ? yp : null,
+      });
+      if (error) throw error;
+      const { data: items } = await supabase
+        .from('lease_contract_items')
+        .select('*')
+        .eq('contract_id', leaseContractRow.id);
+      setLeaseItemsRows(items || []);
+      setNewLeaseLine({ asset_type_id: '', contracted_quantity: '1', unit_price: '', yearly_price: '' });
+      subscriptionCtx.refresh?.();
+    } catch (e) {
+      setTransferMessage({ open: true, message: e?.message || 'Failed to add line', severity: 'error' });
+    } finally {
+      setLeaseBusy(false);
+    }
+  };
+
+  const handleDeleteLeaseLine = async (lineId) => {
+    if (!lineId) return;
+    setLeaseBusy(true);
+    try {
+      const { error } = await supabase.from('lease_contract_items').delete().eq('id', lineId);
+      if (error) throw error;
+      setLeaseItemsRows((rows) => rows.filter((r) => r.id !== lineId));
+      subscriptionCtx.refresh?.();
+    } catch (e) {
+      setTransferMessage({ open: true, message: e?.message || 'Failed to delete line', severity: 'error' });
+    } finally {
+      setLeaseBusy(false);
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setSaveError(null);
@@ -1552,7 +1714,8 @@ export default function CustomerDetail() {
       department: (editForm.department || '').trim() || null,
       parent_customer_id: editForm.parent_customer_id || null,
       // Include barcode if provided (empty string allowed to clear)
-      barcode: normalizedBarcode || null
+      barcode: normalizedBarcode || null,
+      billing_mode: editForm.billing_mode === 'lease' ? 'lease' : 'rental',
     };
     const customerIdChanged = newCustomerListID !== id;
     if (customerIdChanged) {
@@ -1574,6 +1737,7 @@ export default function CustomerDetail() {
       navigate(`/customer/${newCustomerListID}`, { replace: true });
     }
     setCustomer({ ...customer, ...updateFields });
+    subscriptionCtx.refresh?.();
     if (updateFields.parent_customer_id) {
       const { data: p } = await supabase.from('customers').select('id, name, CustomerListID').eq('id', updateFields.parent_customer_id).single();
       setParentCustomer(p || null);
@@ -1826,7 +1990,6 @@ export default function CustomerDetail() {
                 value={editForm.email || ''} 
                 onChange={handleEditChange} 
                 size="small" 
-                label="Email" 
                 type="email"
                 sx={{ mb: 2, minWidth: 200 }} 
                 placeholder="customer@example.com"
@@ -1844,7 +2007,7 @@ export default function CustomerDetail() {
             )}
             <Typography variant="body2" color="text.secondary">Phone</Typography>
             {editing ? (
-              <TextField name="phone" value={editForm.phone || ''} onChange={handleEditChange} size="small" label="Phone" sx={{ mb: 2, minWidth: 180 }} />
+              <TextField name="phone" value={editForm.phone || ''} onChange={handleEditChange} size="small" sx={{ mb: 2, minWidth: 180 }} />
             ) : (
               <Typography variant="body1" sx={{ mb: 2 }}>{customer.phone || 'Not provided'}</Typography>
             )}
@@ -1852,12 +2015,10 @@ export default function CustomerDetail() {
             <Typography variant="body2" color="text.secondary">Customer Type</Typography>
             {editing ? (
               <FormControl size="small" sx={{ mb: 2, minWidth: 180 }}>
-                <InputLabel>Customer Type</InputLabel>
                 <Select
                   name="customer_type"
                   value={editForm.customer_type || 'CUSTOMER'}
                   onChange={handleEditChange}
-                  label="Customer Type"
                 >
                   <MenuItem value="CUSTOMER">Customer</MenuItem>
                   <MenuItem value="VENDOR">Vendor</MenuItem>
@@ -1874,6 +2035,33 @@ export default function CustomerDetail() {
                   } 
                   size="small"
                   variant="outlined"
+                />
+              </Typography>
+            )}
+
+            <Typography variant="body2" color="text.secondary">Billing mode</Typography>
+            {editing ? (
+              <FormControl size="small" sx={{ mb: 2, minWidth: 260 }}>
+                <Select
+                  name="billing_mode"
+                  value={editForm.billing_mode || 'rental'}
+                  onChange={(e) => setEditForm({ ...editForm, billing_mode: e.target.value })}
+                >
+                  <MenuItem value="rental">Rental — bill from assigned bottles (live)</MenuItem>
+                  <MenuItem value="lease">Lease — bill from yearly contract lines</MenuItem>
+                </Select>
+              </FormControl>
+            ) : (
+              <Typography component="div" variant="body1" sx={{ mb: 2 }}>
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color={(customer.billing_mode || 'rental') === 'lease' ? 'secondary' : 'primary'}
+                  label={
+                    (customer.billing_mode || 'rental') === 'lease'
+                      ? 'Lease (contract pricing)'
+                      : 'Rental (assigned assets)'
+                  }
                 />
               </Typography>
             )}
@@ -1910,7 +2098,6 @@ export default function CustomerDetail() {
                 value={editForm.department || ''}
                 onChange={handleEditChange}
                 size="small"
-                label="Department (optional)"
                 placeholder="e.g. Warehouse, Lab, Shipping"
                 sx={{ mb: 2, minWidth: 180 }}
               />
@@ -1921,7 +2108,7 @@ export default function CustomerDetail() {
             )}
             <Typography variant="body2" color="text.secondary">Contact</Typography>
             {editing ? (
-              <TextField name="contact_details" value={editForm.contact_details || ''} onChange={handleEditChange} size="small" label="Contact" sx={{ minWidth: 180 }} />
+              <TextField name="contact_details" value={editForm.contact_details || ''} onChange={handleEditChange} size="small" sx={{ minWidth: 180 }} />
             ) : (
               <Typography variant="body1">
                 {([
@@ -1977,6 +2164,165 @@ export default function CustomerDetail() {
             )}
           </Box>
         </Box>
+
+        {((editing && (editForm.billing_mode || 'rental') === 'lease') ||
+          (!editing && (customer.billing_mode || 'rental') === 'lease')) && (
+          <Paper variant="outlined" sx={{ mt: 3, p: 2, borderRadius: 2 }}>
+            <Typography variant="h6" fontWeight={700} gutterBottom>
+              Lease contract
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Invoice amounts for lease customers come only from these lines (not org pricing rules). Use yearly price and/or unit price × quantity.
+            </Typography>
+            {!leaseContractRow && (
+              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
+                <TextField
+                  label="Start date"
+                  type="date"
+                  size="small"
+                  value={leaseStartDate || new Date().toISOString().split('T')[0]}
+                  onChange={(e) => setLeaseStartDate(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+                <TextField
+                  label="End (optional)"
+                  type="date"
+                  size="small"
+                  value={leaseEndDate}
+                  onChange={(e) => setLeaseEndDate(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+                <Button
+                  variant="contained"
+                  onClick={handleCreateLeaseContract}
+                  disabled={leaseBusy || !customer?.CustomerListID}
+                >
+                  Create lease contract
+                </Button>
+              </Stack>
+            )}
+            {leaseContractRow && (
+              <>
+                <Stack direction="row" spacing={2} sx={{ mb: 2 }} flexWrap="wrap" useFlexGap alignItems="center">
+                  <TextField
+                    label="Start date"
+                    type="date"
+                    size="small"
+                    value={leaseStartDate}
+                    onChange={(e) => setLeaseStartDate(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                  <TextField
+                    label="End date (optional)"
+                    type="date"
+                    size="small"
+                    value={leaseEndDate}
+                    onChange={(e) => setLeaseEndDate(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                  <Button variant="outlined" onClick={handleSaveLeaseDates} disabled={leaseBusy}>
+                    Save dates
+                  </Button>
+                </Stack>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>SKU</TableCell>
+                        <TableCell align="right">Qty</TableCell>
+                        <TableCell align="right">Unit $</TableCell>
+                        <TableCell align="right">Yearly $</TableCell>
+                        <TableCell align="right" width={48} />
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {leaseItemsRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} align="center" sx={{ py: 2, color: 'text.secondary' }}>
+                            No lines yet. Add an asset type below.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        leaseItemsRows.map((row) => (
+                          <TableRow key={row.id}>
+                            <TableCell sx={{ fontFamily: 'monospace' }}>{row.product_code || '—'}</TableCell>
+                            <TableCell align="right">{row.contracted_quantity}</TableCell>
+                            <TableCell align="right">
+                              {row.unit_price != null ? row.unit_price : '—'}
+                            </TableCell>
+                            <TableCell align="right">
+                              {row.yearly_price != null ? row.yearly_price : '—'}
+                            </TableCell>
+                            <TableCell align="right">
+                              <IconButton
+                                size="small"
+                                onClick={() => handleDeleteLeaseLine(row.id)}
+                                disabled={leaseBusy}
+                                aria-label="Delete line"
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+                <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
+                  Add line
+                </Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+                  <FormControl size="small" sx={{ minWidth: 200 }}>
+                    <InputLabel>Asset type</InputLabel>
+                    <Select
+                      value={newLeaseLine.asset_type_id}
+                      label="Asset type"
+                      onChange={(e) => setNewLeaseLine((p) => ({ ...p, asset_type_id: e.target.value }))}
+                    >
+                      {(subscriptionCtx.assetTypePricing || []).map((p) => (
+                        <MenuItem key={p.id} value={p.id}>
+                          {p.product_code}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <TextField
+                    size="small"
+                    label="Qty"
+                    value={newLeaseLine.contracted_quantity}
+                    onChange={(e) =>
+                      setNewLeaseLine((p) => ({ ...p, contracted_quantity: e.target.value }))
+                    }
+                    sx={{ width: 88 }}
+                  />
+                  <TextField
+                    size="small"
+                    label="Unit price"
+                    value={newLeaseLine.unit_price}
+                    onChange={(e) => setNewLeaseLine((p) => ({ ...p, unit_price: e.target.value }))}
+                    sx={{ width: 110 }}
+                  />
+                  <TextField
+                    size="small"
+                    label="Yearly price"
+                    value={newLeaseLine.yearly_price}
+                    onChange={(e) => setNewLeaseLine((p) => ({ ...p, yearly_price: e.target.value }))}
+                    sx={{ width: 110 }}
+                  />
+                  <Button
+                    variant="contained"
+                    onClick={handleAddLeaseLine}
+                    disabled={leaseBusy || !newLeaseLine.asset_type_id}
+                  >
+                    Add
+                  </Button>
+                </Stack>
+              </>
+            )}
+          </Paper>
+        )}
+
         {childCustomers.length > 0 && (
           <Box sx={{ mt: 3 }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Locations / departments under this customer</Typography>
@@ -2008,7 +2354,15 @@ export default function CustomerDetail() {
               <Button variant="contained" color="primary" onClick={handleSave} disabled={saving}>
                 {saving ? <CircularProgress size={20} /> : 'Save Changes'}
               </Button>
-              <Button variant="outlined" color="secondary" onClick={() => { setEditing(false); setEditForm(customer); }} disabled={saving}>
+              <Button
+                variant="outlined"
+                color="secondary"
+                onClick={() => {
+                  setEditing(false);
+                  setEditForm({ ...customer, billing_mode: customer.billing_mode || 'rental' });
+                }}
+                disabled={saving}
+              >
                 Cancel
               </Button>
             </Box>
@@ -2409,7 +2763,7 @@ export default function CustomerDetail() {
         </Box>
         {locationAssets.length > 0 && (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 900 }}>
-            Rental amount uses your <strong>standard rate table</strong>, product/category matching, and this customer&apos;s pricing (same rules as the Rentals page). Stored database amounts may differ until the next save.
+            Rental amount uses your <strong>standard rate table</strong>, product/category matching, and this customer&apos;s pricing — the same live rules as the Rentals page (including saved overrides and local rate edits).
           </Typography>
         )}
 

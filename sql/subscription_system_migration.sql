@@ -214,13 +214,29 @@ declare
     'asset_type_pricing',
     'customer_pricing_overrides',
     'subscription_invoices',
-    'invoice_line_items',
     'payments',
     'tax_regions'
   ];
 begin
   foreach t in array tables loop
+    -- Some orgs may already have drifted table shapes from earlier experiments.
+    -- Only apply generic org-scoped policies when organization_id is present.
+    if not exists (
+      select 1
+      from information_schema.columns c
+      where c.table_schema = 'public'
+        and c.table_name = t
+        and c.column_name = 'organization_id'
+    ) then
+      raise notice 'Skipping generic org RLS for %.organization_id (column missing)', t;
+      continue;
+    end if;
+
     execute format('alter table public.%I enable row level security', t);
+    execute format('drop policy if exists "%1$s_select_org" on public.%1$I', t);
+    execute format('drop policy if exists "%1$s_insert_org" on public.%1$I', t);
+    execute format('drop policy if exists "%1$s_update_org" on public.%1$I', t);
+    execute format('drop policy if exists "%1$s_delete_org" on public.%1$I', t);
 
     execute format($p$
       create policy "%1$s_select_org" on public.%1$I

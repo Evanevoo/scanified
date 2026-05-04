@@ -17,6 +17,54 @@ import {
   Refresh as RefreshIcon, Search as SearchIcon,
 } from '@mui/icons-material';
 
+/** Writes Custom Yearly (all products) onto active lease_agreements for the same customer. */
+async function syncLeaseAgreementsAnnualFromYearlyOverride(supabaseClient, organizationId, customerId, yearlyAmount) {
+  if (!organizationId || customerId == null || customerId === '') return;
+  const cid = String(customerId).trim();
+  if (!cid) return;
+  const amount = yearlyAmount != null ? Number(yearlyAmount) : null;
+  if (amount != null && (!Number.isFinite(amount) || amount < 0)) return;
+
+  const idKeys = new Set([cid]);
+  const { data: byListId } = await supabaseClient
+    .from('customers')
+    .select('id, CustomerListID')
+    .eq('organization_id', organizationId)
+    .eq('CustomerListID', cid)
+    .maybeSingle();
+  if (byListId?.id != null) idKeys.add(String(byListId.id));
+  if (byListId?.CustomerListID != null && String(byListId.CustomerListID).trim() !== '') {
+    idKeys.add(String(byListId.CustomerListID).trim());
+  }
+  const { data: byPk } = await supabaseClient
+    .from('customers')
+    .select('id, CustomerListID')
+    .eq('organization_id', organizationId)
+    .eq('id', cid)
+    .maybeSingle();
+  if (byPk?.id != null) idKeys.add(String(byPk.id));
+  if (byPk?.CustomerListID != null && String(byPk.CustomerListID).trim() !== '') {
+    idKeys.add(String(byPk.CustomerListID).trim());
+  }
+
+  const ids = [...idKeys].filter(Boolean);
+  if (ids.length === 0) return;
+
+  const { error } = await supabaseClient
+    .from('lease_agreements')
+    .update({ annual_amount: amount })
+    .eq('organization_id', organizationId)
+    .eq('status', 'active')
+    .in('customer_id', ids);
+
+  if (error) throw error;
+}
+
+function shouldUpdateExistingOverride(editItem) {
+  if (!editItem?.id) return false;
+  return !String(editItem.id).startsWith('lease-suggest-');
+}
+
 export default function CustomerPricingOverrides() {
   const { organization } = useAuth();
   const location = useLocation();
@@ -32,11 +80,17 @@ export default function CustomerPricingOverrides() {
 
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkCustomers, setBulkCustomers] = useState([]);
-  const [bulkValues, setBulkValues] = useState({ discount_percent: '', fixed_rate_override: '' });
+  const [bulkValues, setBulkValues] = useState({
+    discount_percent: '',
+    fixed_rate_override: '',
+    custom_yearly_price: '',
+  });
   const [fallbackCustomers, setFallbackCustomers] = useState([]);
   const [fallbackProductCodes, setFallbackProductCodes] = useState([]);
   const [fallbackBottleCustomers, setFallbackBottleCustomers] = useState([]);
   const [fallbackRentalCustomers, setFallbackRentalCustomers] = useState([]);
+  /** Active lease agreements — lease-only customers appear in pickers, bulk, and suggested table rows. */
+  const [fallbackLeaseCustomers, setFallbackLeaseCustomers] = useState([]);
   const [legacyOverrides, setLegacyOverrides] = useState([]);
 
   useEffect(() => {
@@ -44,7 +98,7 @@ export default function CustomerPricingOverrides() {
     const loadFallbacks = async () => {
       if (!organization?.id) return;
       try {
-        const [custRes, bottleRes, bottleCustomerRes, rentalsRes] = await Promise.all([
+        const [custRes, bottleRes, bottleCustomerRes, rentalsRes, leaseRes] = await Promise.all([
           supabase
             .from('customers')
             .select('id, CustomerListID, name, Name')
@@ -64,6 +118,11 @@ export default function CustomerPricingOverrides() {
             .select('customer_id, customer_name')
             .eq('organization_id', organization.id)
             .is('rental_end_date', null),
+          supabase
+            .from('lease_agreements')
+            .select('customer_id, customer_name')
+            .eq('organization_id', organization.id)
+            .eq('status', 'active'),
         ]);
         if (!active) return;
         if (!custRes.error) setFallbackCustomers(custRes.data || []);
@@ -102,6 +161,22 @@ export default function CustomerPricingOverrides() {
             }
           }
           setFallbackRentalCustomers([...byId.values()]);
+        }
+        if (!leaseRes.error) {
+          const byId = new Map();
+          for (const row of leaseRes.data || []) {
+            const id = row.customer_id || row.customer_name;
+            if (!id) continue;
+            if (!byId.has(id)) {
+              byId.set(id, {
+                id,
+                CustomerListID: id,
+                name: row.customer_name || row.customer_id || id,
+                Name: row.customer_name || row.customer_id || id,
+              });
+            }
+          }
+          setFallbackLeaseCustomers([...byId.values()]);
         }
         const { data: legacyPricingRows, error: legacyPricingErr } = await supabase
           .from('customer_pricing')
@@ -157,7 +232,13 @@ export default function CustomerPricingOverrides() {
   }, [organization?.id]);
 
   const customerOptions = useMemo(() => {
-    const combined = [...(ctx.customers || []), ...fallbackCustomers, ...fallbackBottleCustomers, ...fallbackRentalCustomers];
+    const combined = [
+      ...(ctx.customers || []),
+      ...fallbackCustomers,
+      ...fallbackBottleCustomers,
+      ...fallbackRentalCustomers,
+      ...fallbackLeaseCustomers,
+    ];
     const byId = new Map();
     for (const c of combined) {
       const id = c?.id || c?.CustomerListID;
@@ -165,7 +246,7 @@ export default function CustomerPricingOverrides() {
       if (!byId.has(id)) byId.set(id, c);
     }
     return [...byId.values()];
-  }, [ctx.customers, fallbackCustomers, fallbackBottleCustomers, fallbackRentalCustomers]);
+  }, [ctx.customers, fallbackCustomers, fallbackBottleCustomers, fallbackRentalCustomers, fallbackLeaseCustomers]);
 
   const productCodeOptions = useMemo(() => {
     if (ctx.assetTypePricing && ctx.assetTypePricing.length > 0) {
@@ -196,11 +277,37 @@ export default function CustomerPricingOverrides() {
       merged.set(keyFor(current), current);
     }
 
+    const idsWithAllProductsRow = new Set(
+      [...merged.values()]
+        .filter((o) => o.product_code == null || o.product_code === '')
+        .map((o) => String(o.customer_id || '').trim())
+        .filter(Boolean)
+    );
+
+    for (const fc of fallbackLeaseCustomers || []) {
+      const cid = String(fc.id || fc.CustomerListID || '').trim();
+      if (!cid || idsWithAllProductsRow.has(cid)) continue;
+      const row = {
+        id: `lease-suggest-${cid}`,
+        source: 'lease_suggestion',
+        customer_id: cid,
+        product_code: null,
+        custom_monthly_price: null,
+        custom_yearly_price: null,
+        discount_percent: 0,
+        fixed_rate_override: null,
+        is_active: true,
+        effective_date: null,
+        expiry_date: null,
+      };
+      merged.set(keyFor(row), row);
+    }
+
     return [...merged.values()].map((o) => {
       const cust = customerOptions.find((c) => c.id === o.customer_id || c.CustomerListID === o.customer_id);
       return { ...o, customerName: cust?.name || cust?.Name || o.customer_id };
     });
-  }, [ctx.customerPricingOverrides, legacyOverrides, customerOptions]);
+  }, [ctx.customerPricingOverrides, legacyOverrides, customerOptions, fallbackLeaseCustomers]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return enriched;
@@ -270,7 +377,22 @@ export default function CustomerPricingOverrides() {
   }, [location?.state?.prefillCustomerId, location?.state?.prefillCustomerName, enriched]);
 
   const openEdit = (item) => {
-    setEditItem({ ...item });
+    if (item.source === 'lease_suggestion') {
+      setEditItem({
+        __lockCustomer: true,
+        customer_id: item.customer_id,
+        product_code: item.product_code || '',
+        custom_monthly_price: '',
+        custom_yearly_price: '',
+        discount_percent: '',
+        fixed_rate_override: '',
+        effective_date: '',
+        expiry_date: '',
+        is_active: true,
+      });
+    } else {
+      setEditItem({ ...item });
+    }
     setEditOpen(true);
   };
 
@@ -291,12 +413,20 @@ export default function CustomerPricingOverrides() {
         expiry_date: editItem.expiry_date || null,
         is_active: editItem.is_active !== false,
       };
-      if (editItem.id) {
+      if (shouldUpdateExistingOverride(editItem)) {
         const { error: err } = await supabase.from('customer_pricing_overrides').update(payload).eq('id', editItem.id);
         if (err) throw err;
       } else {
         const { error: err } = await supabase.from('customer_pricing_overrides').insert(payload);
         if (err) throw err;
+      }
+      if (!editItem.product_code && payload.custom_yearly_price != null) {
+        await syncLeaseAgreementsAnnualFromYearlyOverride(
+          supabase,
+          organization.id,
+          editItem.customer_id,
+          payload.custom_yearly_price
+        );
       }
       setEditOpen(false);
       ctx.refresh();
@@ -308,6 +438,7 @@ export default function CustomerPricingOverrides() {
   };
 
   const handleDelete = async (id) => {
+    if (id != null && String(id).startsWith('lease-suggest-')) return;
     if (!confirm('Remove this override?')) return;
     try {
       const { error: err } = await supabase.from('customer_pricing_overrides').delete().eq('id', id);
@@ -320,27 +451,59 @@ export default function CustomerPricingOverrides() {
 
   const handleBulkApply = async () => {
     if (bulkCustomers.length === 0) return;
+    const yearlyRaw = String(bulkValues.custom_yearly_price ?? '').trim();
+    const hasYearly = yearlyRaw !== '' && Number.isFinite(Number.parseFloat(yearlyRaw));
+    const hasDiscount = String(bulkValues.discount_percent ?? '').trim() !== '';
+    const hasFixed = String(bulkValues.fixed_rate_override ?? '').trim() !== '';
+    if (!hasYearly && !hasDiscount && !hasFixed) {
+      setError('Enter a custom yearly amount, discount %, or fixed rate to apply.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       for (const custId of bulkCustomers) {
-        const existing = ctx.customerPricingOverrides.find((o) => o.customer_id === custId && !o.product_code);
+        const existing = ctx.customerPricingOverrides.find(
+          (o) => o.customer_id === custId && (o.product_code == null || o.product_code === '')
+        );
         const payload = {
           organization_id: organization.id,
           customer_id: custId,
+          product_code: null,
           discount_percent: bulkValues.discount_percent ? parseFloat(bulkValues.discount_percent) : 0,
           fixed_rate_override: bulkValues.fixed_rate_override ? parseFloat(bulkValues.fixed_rate_override) : null,
           is_active: true,
         };
+        if (hasYearly) {
+          payload.custom_yearly_price = parseFloat(yearlyRaw);
+        }
         if (existing) {
-          await supabase.from('customer_pricing_overrides').update(payload).eq('id', existing.id);
+          const updatePayload = { ...payload };
+          if (!hasYearly) delete updatePayload.custom_yearly_price;
+          if (!hasDiscount) delete updatePayload.discount_percent;
+          if (!hasFixed) delete updatePayload.fixed_rate_override;
+          const { error: upErr } = await supabase.from('customer_pricing_overrides').update(updatePayload).eq('id', existing.id);
+          if (upErr) throw upErr;
         } else {
-          await supabase.from('customer_pricing_overrides').insert(payload);
+          const { error: insErr } = await supabase.from('customer_pricing_overrides').insert({
+            ...payload,
+            custom_monthly_price: null,
+            custom_yearly_price: hasYearly ? parseFloat(yearlyRaw) : null,
+          });
+          if (insErr) throw insErr;
+        }
+        if (hasYearly) {
+          await syncLeaseAgreementsAnnualFromYearlyOverride(
+            supabase,
+            organization.id,
+            custId,
+            parseFloat(yearlyRaw)
+          );
         }
       }
       setBulkOpen(false);
       setBulkCustomers([]);
-      setBulkValues({ discount_percent: '', fixed_rate_override: '' });
+      setBulkValues({ discount_percent: '', fixed_rate_override: '', custom_yearly_price: '' });
       ctx.refresh();
     } catch (err) {
       setError(err.message);
@@ -407,7 +570,9 @@ export default function CustomerPricingOverrides() {
                     <TableCell>{item.is_active ? <Chip label="Active" size="small" color="success" /> : <Chip label="Inactive" size="small" />}</TableCell>
                     <TableCell align="right">
                       <Tooltip title="Edit"><IconButton size="small" onClick={() => openEdit(item)}><EditIcon fontSize="small" /></IconButton></Tooltip>
-                      <Tooltip title="Delete"><IconButton size="small" color="error" onClick={() => handleDelete(item.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
+                      {!(item.source === 'lease_suggestion' || String(item.id || '').startsWith('lease-suggest-')) && (
+                        <Tooltip title="Delete"><IconButton size="small" color="error" onClick={() => handleDelete(item.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))
@@ -419,7 +584,9 @@ export default function CustomerPricingOverrides() {
 
       {/* Edit Dialog */}
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>{editItem?.id ? 'Edit Override' : 'Add Override'}</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          {editItem && shouldUpdateExistingOverride(editItem) ? 'Edit Override' : 'Add Override'}
+        </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <FormControl fullWidth size="small">
@@ -428,7 +595,7 @@ export default function CustomerPricingOverrides() {
                 value={editItem?.customer_id || ''}
                 label="Customer"
                 onChange={(e) => setEditItem((p) => ({ ...p, customer_id: e.target.value }))}
-                disabled={!!editItem?.id || !!editItem?.__lockCustomer}
+                disabled={shouldUpdateExistingOverride(editItem) || !!editItem?.__lockCustomer}
               >
                 {customerOptions.map((c) => <MenuItem key={c.id || c.CustomerListID} value={c.id || c.CustomerListID}>{c.name || c.Name}</MenuItem>)}
               </Select>
@@ -465,7 +632,9 @@ export default function CustomerPricingOverrides() {
         <DialogTitle sx={{ fontWeight: 700 }}>Bulk Apply Pricing</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
-            <Typography variant="body2" color="text.secondary">Select customers and set a discount or fixed rate override for all selected.</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Select customers and set pricing for the all-products row. Leave a field blank to leave existing values unchanged on update.
+            </Typography>
             <Stack direction="row" spacing={1}>
               <Button
                 size="small"
@@ -501,6 +670,15 @@ export default function CustomerPricingOverrides() {
                 </li>
               )}
               renderInput={(params) => <TextField {...params} size="small" label="Select Customers" placeholder="Choose customers..." />}
+            />
+            <TextField
+              size="small"
+              label="Custom Yearly (all products)"
+              type="number"
+              value={bulkValues.custom_yearly_price}
+              onChange={(e) => setBulkValues((p) => ({ ...p, custom_yearly_price: e.target.value }))}
+              inputProps={{ min: 0, step: 0.01 }}
+              helperText="Applied as custom yearly rate per customer. Use with Select All to set one yearly amount for everyone."
             />
             <TextField size="small" label="Discount %" type="number" value={bulkValues.discount_percent} onChange={(e) => setBulkValues((p) => ({ ...p, discount_percent: e.target.value }))} inputProps={{ min: 0, max: 100, step: 0.5 }} />
             <TextField size="small" label="Fixed Rate Override" type="number" value={bulkValues.fixed_rate_override} onChange={(e) => setBulkValues((p) => ({ ...p, fixed_rate_override: e.target.value }))} inputProps={{ min: 0, step: 0.01 }} />

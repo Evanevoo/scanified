@@ -6,7 +6,19 @@ import { useTheme } from '../context/ThemeContext';
 import { createSubscription, generateInvoice } from '../services/subscriptionService';
 import { supabase } from '../supabase/client';
 import jsPDF from 'jspdf';
-import { formatCurrency, formatDate, computeSubscriptionTotal, STATUS_COLORS } from '../utils/subscriptionUtils';
+import { formatCurrency, formatDate, STATUS_COLORS } from '../utils/subscriptionUtils';
+import {
+  buildAssetPricingMap,
+  buildCustomerOverrideMap,
+  collectNormalizedCustomerKeysForPricingRow,
+  findAllProductsOverrideMultiKey,
+  findBestSpecificOverrideMultiKey,
+  resolveDisplayUnitFromMaps,
+  defaultUnitRatesFromAssetPricingTable,
+  computeSubscriptionBillingCycleTotal,
+} from '../utils/rentalDisplayPricing';
+import { groupAssignedBottleCountsByProductCode } from '../services/billingFromAssets';
+import { findActiveLeaseContract } from '../services/leaseBilling';
 import {
   Box, Typography, Card, CardContent, Grid, Tabs, Tab, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Paper, Chip, IconButton,
@@ -36,7 +48,6 @@ export default function Subscriptions() {
   const [actionSuccess, setActionSuccess] = useState(null);
   const [legacyRows, setLegacyRows] = useState([]);
   const [fallbackResolverCustomers, setFallbackResolverCustomers] = useState([]);
-  const [legacyPricingOverrides, setLegacyPricingOverrides] = useState([]);
   const [invoiceTemplate, setInvoiceTemplate] = useState(null);
   const [localRatesVersion, setLocalRatesVersion] = useState(0);
   const [emailOpen, setEmailOpen] = useState(false);
@@ -109,7 +120,7 @@ export default function Subscriptions() {
         // Broad fallback query so customer names still resolve when org-scoped rows are incomplete.
         const { data } = await supabase
           .from('customers')
-          .select('id, CustomerListID, name, Name, deleted_at, is_deleted, is_active, archived')
+          .select('id, CustomerListID, name, Name, email, deleted_at, is_deleted, is_active, archived')
           .eq('organization_id', organization.id)
           .order('name');
         if (!active) return;
@@ -149,136 +160,81 @@ export default function Subscriptions() {
     };
   }, [organization?.id]);
 
-  const assetPricingMap = useMemo(() => {
-    const map = new Map();
-    for (const p of (ctx.assetTypePricing || [])) {
-      if (!p?.product_code) continue;
-      map.set(String(p.product_code).trim().toLowerCase(), p);
-    }
-    return map;
-  }, [ctx.assetTypePricing]);
+  const assetPricingMap = useMemo(
+    () => buildAssetPricingMap(ctx.assetTypePricing),
+    [ctx.assetTypePricing]
+  );
 
-  const defaultUnitRateByPeriod = useMemo(() => {
-    const rows = (ctx.assetTypePricing || []).filter(Boolean);
-    const monthlyCandidates = rows
-      .map((p) => parseFloat(p?.monthly_price))
-      .filter((n) => Number.isFinite(n) && n > 0);
-    const yearlyCandidates = rows
-      .map((p) => parseFloat(p?.yearly_price))
-      .filter((n) => Number.isFinite(n) && n > 0);
-    const monthly = monthlyCandidates.length > 0 ? monthlyCandidates[0] : 12;
-    const yearly = yearlyCandidates.length > 0 ? yearlyCandidates[0] : (monthly * 12);
-    return { monthly, yearly };
-  }, [ctx.assetTypePricing]);
+  const defaultUnitRateByPeriod = useMemo(
+    () => defaultUnitRatesFromAssetPricingTable(ctx.assetTypePricing),
+    [ctx.assetTypePricing]
+  );
 
-  const customerOverrideMap = useMemo(() => {
-    const byCustomer = new Map();
-    for (const o of (legacyPricingOverrides || [])) {
-      if (o?.is_active === false) continue;
-      const customerKey = normalize(o.customer_id);
-      if (!customerKey) continue;
-      const productKey = normalize(o.product_code) || '__all__';
-      const key = `${customerKey}::${productKey}`;
-      byCustomer.set(key, o);
-    }
-    for (const o of (ctx.customerPricingOverrides || [])) {
-      if (o?.is_active === false) continue;
-      const customerKey = normalize(o.customer_id);
-      if (!customerKey) continue;
-      const productKey = normalize(o.product_code) || '__all__';
-      const key = `${customerKey}::${productKey}`;
-      byCustomer.set(key, o);
-    }
-    try {
-      if (organization?.id) {
-        const prefix = `customer_sku_rates:${organization.id}:`;
-        for (let i = 0; i < localStorage.length; i += 1) {
-          const storageKey = localStorage.key(i);
-          if (!storageKey || !storageKey.startsWith(prefix)) continue;
-          const customerIdRaw = storageKey.slice(prefix.length);
-          const customerKey = normalize(customerIdRaw);
-          if (!customerKey) continue;
-          const parsed = JSON.parse(localStorage.getItem(storageKey) || '{}');
-          if (!parsed || typeof parsed !== 'object') continue;
-          Object.entries(parsed).forEach(([code, value]) => {
-            const productKey = normalize(code);
-            const monthly = Number(value?.monthly);
-            if (!productKey || !Number.isFinite(monthly)) return;
-            byCustomer.set(`${customerKey}::${productKey}`, {
-              customer_id: customerIdRaw,
-              product_code: code,
-              custom_monthly_price: monthly,
-              is_active: true,
-              source: 'local_compatibility',
-            });
-          });
-        }
-      }
-    } catch {
-      // Ignore localStorage read errors.
-    }
-    return byCustomer;
-  }, [ctx.customerPricingOverrides, legacyPricingOverrides, organization?.id, localRatesVersion]);
+  const customerOverrideMap = useMemo(
+    () =>
+      buildCustomerOverrideMap({
+        legacyPricingOverrides: ctx.legacyPricingOverrides,
+        customerPricingOverrides: ctx.customerPricingOverrides,
+        organizationId: organization?.id,
+      }),
+    [ctx.customerPricingOverrides, ctx.legacyPricingOverrides, organization?.id, localRatesVersion]
+  );
 
-  const findBestOverride = (customerKeyRaw, productCodeRaw) => {
-    const customerKey = normalize(customerKeyRaw);
-    const productCode = normalize(productCodeRaw);
-    if (!customerKey || !productCode) return null;
-
-    const exact = customerOverrideMap.get(`${customerKey}::${productCode}`);
-    if (exact) return exact;
-
-    let best = null;
-    let bestLen = -1;
-    for (const [key, value] of customerOverrideMap.entries()) {
-      const [cKey, pKey] = key.split('::');
-      if (cKey !== customerKey) continue;
-      if (!pKey || pKey === '__all__') continue;
-      if (productCode.startsWith(pKey) && pKey.length > bestLen) {
-        best = value;
-        bestLen = pKey.length;
-      }
-    }
-    return best;
-  };
-
-  const resolveDisplayUnitPrice = (sub, item) => {
-    const productCode = normalize(item?.product_code);
-    const customerKey = normalize(sub?.customer_id);
-    const specificOverride = findBestOverride(customerKey, productCode);
-    const allProductsOverride = customerOverrideMap.get(`${customerKey}::__all__`);
-    const override = specificOverride || allProductsOverride || null;
-
-    const basePricing = assetPricingMap.get(productCode);
-    const basePrice = sub.billing_period === 'yearly'
-      ? parseFloat(basePricing?.yearly_price)
-      : parseFloat(basePricing?.monthly_price);
-
-    if (override?.fixed_rate_override != null) return parseFloat(override.fixed_rate_override) || 0;
-    if (sub.billing_period === 'yearly' && override?.custom_yearly_price != null) return parseFloat(override.custom_yearly_price) || 0;
-    if (sub.billing_period === 'monthly' && override?.custom_monthly_price != null) return parseFloat(override.custom_monthly_price) || 0;
-
-    if (basePricing) {
-      const discount = parseFloat(override?.discount_percent) || 0;
-      if (discount > 0) return Math.max(0, Math.round(basePrice * (1 - discount / 100) * 100) / 100);
-      return basePrice || 0;
-    }
-
-    return parseFloat(item?.unit_price) || 0;
-  };
+  const resolveDisplayUnitPrice = (pricingRow, item) =>
+    resolveDisplayUnitFromMaps({
+      row: pricingRow,
+      item,
+      customerOverrideMap,
+      assetPricingMap,
+      defaultMonthly: defaultUnitRateByPeriod.monthly,
+      defaultYearly: defaultUnitRateByPeriod.yearly,
+    });
 
   const enriched = useMemo(() => {
+    const billingData = {
+      bottles: ctx.bottles || [],
+      leaseContracts: ctx.leaseContracts || [],
+      leaseContractItems: ctx.leaseContractItems || [],
+    };
+    const pricingCtx = {
+      customerOverrideMap,
+      assetPricingMap,
+      defaultMonthly: defaultUnitRateByPeriod.monthly,
+      defaultYearly: defaultUnitRateByPeriod.yearly,
+    };
     return ctx.subscriptions.map((sub) => {
       const items = ctx.subscriptionItems.filter((i) => i.subscription_id === sub.id && i.status === 'active');
       const customer = resolveCustomer(sub.customer_id) || resolveCustomer(sub.customer_name || '');
-      const total = items.reduce((sum, item) => {
-        const qty = parseFloat(item.quantity) || 1;
-        return sum + resolveDisplayUnitPrice(sub, item) * qty;
-      }, 0);
-      const itemCount = items.reduce((sum, item) => sum + (parseFloat(item.quantity) || 1), 0);
-      return { ...sub, items, customer, totalPerCycle: total, itemCount };
+      const totalPerCycle = computeSubscriptionBillingCycleTotal(sub, customer, pricingCtx, billingData);
+      let itemCount = 0;
+      if (customer?.billing_mode === 'lease') {
+        const contract = findActiveLeaseContract(
+          ctx.leaseContracts || [],
+          sub.customer_id,
+          organization?.id
+        );
+        const leaseLines = contract
+          ? (ctx.leaseContractItems || []).filter((i) => i.contract_id === contract.id)
+          : [];
+        itemCount = leaseLines.reduce((s, i) => s + (parseInt(i.contracted_quantity, 10) || 0), 0);
+      } else {
+        const groups = groupAssignedBottleCountsByProductCode(ctx.bottles || [], sub.customer_id, customer);
+        itemCount = groups.reduce((s, g) => s + g.count, 0);
+      }
+      return { ...sub, items, customer, totalPerCycle, itemCount };
     });
-  }, [ctx.subscriptions, ctx.subscriptionItems, customerResolvers, customerOverrideMap, assetPricingMap]);
+  }, [
+    ctx.subscriptions,
+    ctx.subscriptionItems,
+    ctx.bottles,
+    ctx.leaseContracts,
+    ctx.leaseContractItems,
+    customerResolvers,
+    customerOverrideMap,
+    assetPricingMap,
+    defaultUnitRateByPeriod,
+    organization?.id,
+  ]);
 
   const customersWithBottlesNoSubscription = useMemo(() => {
     const norm = (v) => String(v || '').trim().toLowerCase();
@@ -447,57 +403,56 @@ export default function Subscriptions() {
           status: 'active',
           isVirtual: true,
         }));
-        setLegacyRows(rows);
+
+        // Also surface active lease_agreements as fallback virtual rows so imported
+        // agreements are visible even before full subscriptions backfill completes.
+        let leaseRows = [];
+        try {
+          const { data: leaseData, error: leaseErr } = await supabase
+            .from('lease_agreements')
+            .select('id, customer_id, customer_name, agreement_number, assets_on_agreement, max_asset_count, annual_amount, next_billing_date, end_date, status')
+            .eq('organization_id', organization.id)
+            .eq('status', 'active');
+          if (leaseErr) throw leaseErr;
+
+          leaseRows = (leaseData || []).map((a) => {
+            const resolvedCustomer = resolveCustomer(a.customer_id || a.customer_name, a.customer_name);
+            const displayName =
+              resolvedCustomer?.name ||
+              resolvedCustomer?.Name ||
+              a.customer_name ||
+              a.customer_id ||
+              'Assigned customer';
+            const itemCount = Number.parseInt(String(a.max_asset_count ?? ''), 10);
+            const agreementCode = String(a.agreement_number || '').trim();
+            const productCode = String(a.assets_on_agreement || '').trim();
+            const productCounts = {};
+            if (productCode) productCounts[productCode] = Number.isFinite(itemCount) && itemCount > 0 ? itemCount : 1;
+
+            return {
+              id: `lease-${a.id}`,
+              customer: resolvedCustomer || { name: displayName, Name: displayName },
+              customer_id: resolvedCustomer?.CustomerListID || resolvedCustomer?.id || a.customer_id || a.customer_name,
+              billing_period: 'yearly',
+              itemCount: Number.isFinite(itemCount) && itemCount > 0 ? itemCount : 1,
+              totalPerCycle: parseFloat(a.annual_amount) || 0,
+              bottleIdentifiers: [],
+              bottleIds: [],
+              productCounts,
+              next_billing_date: a.next_billing_date || a.end_date || null,
+              status: 'active',
+              isVirtual: true,
+              legacySource: 'lease_agreements',
+              notes: agreementCode ? `Agreement ${agreementCode}` : undefined,
+            };
+          });
+        } catch {
+          leaseRows = [];
+        }
+
+        setLegacyRows([...rows, ...leaseRows]);
       } catch {
         if (active) setLegacyRows([]);
-      }
-
-      try {
-        const { data, error } = await supabase
-          .from('customer_pricing')
-          .select('*')
-          .eq('organization_id', organization.id);
-        if (error) throw error;
-        if (!active) return;
-
-        const mapped = [];
-        for (const row of data || []) {
-          const customerId = row.customer_id || row.CustomerListID || row.customer_number;
-          if (!customerId) continue;
-          const base = {
-            customer_id: customerId,
-            product_code: null,
-            fixed_rate_override: row.fixed_rate_override ?? null,
-            custom_monthly_price: row.custom_monthly_price ?? row.monthly ?? null,
-            custom_yearly_price: row.custom_yearly_price ?? row.yearly ?? null,
-            discount_percent: row.discount_percent ?? 0,
-            is_active: row.is_active !== false,
-          };
-          mapped.push(base);
-
-          const byProduct = row.rental_rates_by_product_code;
-          if (byProduct && typeof byProduct === 'object') {
-            Object.entries(byProduct).forEach(([productCode, value]) => {
-              if (!productCode) return;
-              const monthly =
-                typeof value === 'object' && value !== null
-                  ? (value.monthly ?? value.rate ?? null)
-                  : value;
-              mapped.push({
-                customer_id: customerId,
-                product_code: productCode,
-                fixed_rate_override: null,
-                custom_monthly_price: monthly,
-                custom_yearly_price: null,
-                discount_percent: row.discount_percent ?? 0,
-                is_active: row.is_active !== false,
-              });
-            });
-          }
-        }
-        setLegacyPricingOverrides(mapped);
-      } catch {
-        if (active) setLegacyPricingOverrides([]);
       }
     };
     loadLegacyActiveRentals();
@@ -524,24 +479,50 @@ export default function Subscriptions() {
     const existingKeys = new Set(
       merged.map((r) => String(r.customer_id || r.customer?.name || '').trim().toLowerCase()).filter(Boolean)
     );
+    // Legacy rentals table: only add when this customer is not already in subscriptions/bottle rows.
     const extraLegacy = (legacyRows || []).filter((r) => {
+      if (r.legacySource === 'lease_agreements') return false;
       const k = String(r.customer_id || r.customer?.name || '').trim().toLowerCase();
       return k && !existingKeys.has(k);
     });
-    const combined = [...merged, ...extraLegacy].filter((row) => {
+    // Imported lease_agreements must always appear (yearly), even if the same customer already has
+    // a monthly subscription or bottle-only row — otherwise the Yearly tab stays empty.
+    const leaseAgreementRows = (legacyRows || []).filter((r) => r.legacySource === 'lease_agreements');
+    const combined = [...merged, ...extraLegacy, ...leaseAgreementRows].filter((row) => {
       const itemCount = parseFloat(row.itemCount) || 0;
-      if (itemCount <= 0) return false; // Never show customers with zero bottles/items.
+      const rawTotal = parseFloat(row.totalPerCycle) || 0;
+      // Drop only rows with no quantity signal AND no cycle total (avoids empty shells).
+      if (itemCount <= 0 && rawTotal <= 0) return false;
+
       const idKey = normalize(row.customer_id);
       const nameKey = normalizeName(row.customer?.name || row.customer?.Name || '');
-      // Only render rows linked to currently active customers.
-      return activeCustomerIdKeys.has(idKey) || activeCustomerNameKeys.has(nameKey);
+      const inCustomerDirectory =
+        activeCustomerIdKeys.has(idKey) || activeCustomerNameKeys.has(nameKey);
+
+      // Lease agreements from import often reference CustomerListID; keep them visible even when
+      // the ID string does not exactly match `customers` yet, as long as we have a customer key.
+      const leaseImported =
+        row.legacySource === 'lease_agreements' &&
+        (Boolean(String(row.customer_id || '').trim()) || Boolean(nameKey));
+
+      // Live subscription rows with a priced cycle still show if customer directory matching fails
+      // (timing, ID format drift) — avoids an empty Rentals table when subscriptions exist.
+      const pricedLiveSubscription =
+        rawTotal > 0 &&
+        !row.isVirtual &&
+        Boolean(String(row.customer_id || '').trim());
+
+      // Only render rows linked to active customers in directory — except imported leases / priced subs.
+      if (!inCustomerDirectory && !leaseImported && !pricedLiveSubscription) return false;
+
+      return true;
     });
     const legacyTotalsByCustomer = new Map(
       (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), parseFloat(r.totalPerCycle) || 0])
     );
     return combined.map((row) => {
       const customerKey = normalize(row.customer_id);
-      const allProductsOverride = customerOverrideMap.get(`${customerKey}::__all__`);
+      const allProductsOverride = findAllProductsOverrideMultiKey(customerOverrideMap, row);
       const period = String(row.billing_period || 'monthly').toLowerCase();
       let total = parseFloat(row.totalPerCycle) || 0;
       let effectiveProductCounts = row.productCounts && typeof row.productCounts === 'object'
@@ -611,38 +592,25 @@ export default function Subscriptions() {
       // For bottle-derived rows, compute total from product mix + customer/base pricing.
       let usedSpecificProductOverride = false;
       if (row.isVirtual && effectiveProductCounts && typeof effectiveProductCounts === 'object') {
+        const rowForPricing = { ...row, billing_period: period };
         const recalculated = Object.entries(effectiveProductCounts).reduce((sum, [productCode, qtyRaw]) => {
           const qty = parseFloat(qtyRaw) || 0;
           if (qty <= 0) return sum;
-          const productKey = normalize(productCode);
-          const specificOverride = findBestOverride(customerKey, productKey);
-          const override = specificOverride || allProductsOverride || null;
-          const basePricing = assetPricingMap.get(productKey);
-          const baseUnit = period === 'yearly'
-            ? parseFloat(basePricing?.yearly_price)
-            : parseFloat(basePricing?.monthly_price);
-
-          let unit = 0;
-          if (override?.fixed_rate_override != null) {
-            unit = parseFloat(override.fixed_rate_override) || 0;
-            if (specificOverride) usedSpecificProductOverride = true;
-          } else if (period === 'yearly' && override?.custom_yearly_price != null) {
-            unit = parseFloat(override.custom_yearly_price) || 0;
-            if (specificOverride) usedSpecificProductOverride = true;
-          } else if (period === 'monthly' && override?.custom_monthly_price != null) {
-            unit = parseFloat(override.custom_monthly_price) || 0;
-            if (specificOverride) usedSpecificProductOverride = true;
-          }
-          else {
-            const discount = parseFloat(override?.discount_percent) || 0;
-            if (Number.isFinite(baseUnit)) {
-              unit = discount > 0
-                ? Math.max(0, Math.round(baseUnit * (1 - discount / 100) * 100) / 100)
-                : baseUnit;
-              if (specificOverride && discount > 0) usedSpecificProductOverride = true;
-            }
-          }
-          return sum + (unit * qty);
+          const specificOverride = findBestSpecificOverrideMultiKey(
+            customerOverrideMap,
+            rowForPricing,
+            productCode
+          );
+          if (specificOverride) usedSpecificProductOverride = true;
+          const unit = resolveDisplayUnitFromMaps({
+            row: rowForPricing,
+            item: { product_code: productCode },
+            customerOverrideMap,
+            assetPricingMap,
+            defaultMonthly: defaultUnitRateByPeriod.monthly,
+            defaultYearly: defaultUnitRateByPeriod.yearly,
+          });
+          return sum + unit * qty;
         }, 0);
         if (recalculated > 0) total = recalculated;
       }
@@ -669,7 +637,16 @@ export default function Subscriptions() {
       // Final fallback: when bottle-based math cannot price a customer,
       // use grouped legacy rentals total if available.
       if ((parseFloat(total) || 0) <= 0) {
-        const legacyTotal = legacyTotalsByCustomer.get(customerKey) || 0;
+        const legacyKeys = [
+          customerKey,
+          ...collectNormalizedCustomerKeysForPricingRow(row),
+          normalize(row.customer?.name || row.customer?.Name || ''),
+        ].filter(Boolean);
+        let legacyTotal = 0;
+        for (const k of [...new Set(legacyKeys)]) {
+          const v = legacyTotalsByCustomer.get(k) || 0;
+          if (v > legacyTotal) legacyTotal = v;
+        }
         if (legacyTotal > 0) total = legacyTotal;
       }
 
@@ -776,83 +753,113 @@ export default function Subscriptions() {
     setActionSuccess(null);
     try {
       const activeSubs = ctx.activeSubscriptions || [];
-      if (activeSubs.length > 0) {
-        let created = 0;
-        for (const sub of activeSubs) {
-          await generateInvoice(organization.id, sub.id);
-          created += 1;
+      let subscriptionCreated = 0;
+      for (const sub of activeSubs) {
+        await generateInvoice(organization.id, sub.id);
+        subscriptionCreated += 1;
+      }
+
+      const subscriptionCustomerIds = new Set(
+        (activeSubs || []).map((s) => String(s.customer_id || '').trim()).filter(Boolean)
+      );
+
+      // Legacy `invoices` rows for virtual rentals / lease_agreements (not subscription_invoices).
+      const invoiceableVirtualRows = (allRows || []).filter((row) => (
+        row.status === 'active' &&
+        row.isVirtual &&
+        (parseFloat(row.totalPerCycle) || 0) > 0 &&
+        String(row.customer_id || '').trim()
+      ));
+
+      const legacyCandidates = invoiceableVirtualRows.filter((row) => {
+        const cid = String(row.customer_id || '').trim();
+        return !subscriptionCustomerIds.has(cid);
+      });
+
+      const bestByCustomer = new Map();
+      for (const row of legacyCandidates) {
+        const cid = String(row.customer_id || '').trim();
+        const prev = bestByCustomer.get(cid);
+        const total = parseFloat(row.totalPerCycle) || 0;
+        if (!prev || total > (parseFloat(prev.totalPerCycle) || 0)) {
+          bestByCustomer.set(cid, row);
         }
-        const exported = downloadInvoiceCsv((allRows || []).filter((r) => r.status === 'active' && (parseFloat(r.itemCount) || 0) > 0));
-        setActionSuccess(`Generated ${created} invoice${created === 1 ? '' : 's'}${exported > 0 ? ` and downloaded ${exported} CSV row${exported === 1 ? '' : 's'}` : ''}.`);
+      }
+      const dedupedInvoiceableRows = [...bestByCustomer.values()];
+
+      let legacyCreated = 0;
+      if (dedupedInvoiceableRows.length > 0) {
+        const { data: existingInvs } = await supabase
+          .from('invoices')
+          .select('invoice_number')
+          .eq('organization_id', organization.id);
+        let maxNum = 0;
+        for (const inv of existingInvs || []) {
+          const n = String(inv.invoice_number || '').match(/(\d+)/)?.[1];
+          if (!n) continue;
+          maxNum = Math.max(maxNum, parseInt(n, 10) || 0);
+        }
+
+        const today = new Date();
+        const invoiceDate = today.toISOString().split('T')[0];
+        const dueDate = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+        const periodStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+        const periodEnd = dueDate;
+
+        const customerIds = [...new Set(dedupedInvoiceableRows.map((r) => String(r.customer_id || '').trim()).filter(Boolean))];
+        const { data: existingSamePeriod } = await supabase
+          .from('invoices')
+          .select('customer_id')
+          .eq('organization_id', organization.id)
+          .eq('period_start', periodStart)
+          .eq('period_end', periodEnd)
+          .in('customer_id', customerIds);
+        const alreadyInvoicedIds = new Set((existingSamePeriod || []).map((r) => String(r.customer_id || '').trim()));
+        const filteredInvoiceableRows = dedupedInvoiceableRows.filter(
+          (row) => !alreadyInvoicedIds.has(String(row.customer_id || '').trim())
+        );
+
+        if (filteredInvoiceableRows.length > 0) {
+          const rowsToInsert = filteredInvoiceableRows.map((row, idx) => ({
+            organization_id: organization.id,
+            invoice_number: formatLegacyInvoiceNumber(maxNum + idx + 1),
+            customer_id: row.customer_id,
+            customer_name: row.customer?.name || row.customer?.Name || row.customer_id,
+            period_start: periodStart,
+            period_end: periodEnd,
+            invoice_date: invoiceDate,
+            due_date: dueDate,
+            subtotal: parseFloat(row.totalPerCycle) || 0,
+            tax_amount: 0,
+            total_amount: parseFloat(row.totalPerCycle) || 0,
+            status: 'pending',
+          }));
+
+          const { error: insErr } = await supabase.from('invoices').insert(rowsToInsert);
+          if (insErr) throw insErr;
+          legacyCreated = rowsToInsert.length;
+        }
+      }
+
+      const exported = downloadInvoiceCsv((allRows || []).filter((r) => r.status === 'active' && (parseFloat(r.itemCount) || 0) > 0));
+
+      if (subscriptionCreated === 0 && legacyCreated === 0) {
+        setActionSuccess('No active rentals to invoice right now.');
         ctx.refresh();
         return;
       }
 
-      // Fallback for virtual/legacy rentals: create invoice rows in legacy invoices table.
-      const invoiceableRows = (allRows || []).filter((row) => (
-        row.status === 'active' &&
-        (parseFloat(row.totalPerCycle) || 0) > 0 &&
-        String(row.customer_id || '').trim()
-      ));
-      if (invoiceableRows.length === 0) {
-        setActionSuccess('No active rentals to invoice right now.');
-        return;
+      const parts = [];
+      if (subscriptionCreated > 0) {
+        parts.push(`Generated ${subscriptionCreated} subscription invoice${subscriptionCreated === 1 ? '' : 's'}`);
       }
-
-      const { data: existingInvs } = await supabase
-        .from('invoices')
-        .select('invoice_number')
-        .eq('organization_id', organization.id);
-      let maxNum = 0;
-      for (const inv of existingInvs || []) {
-        const n = String(inv.invoice_number || '').match(/(\d+)/)?.[1];
-        if (!n) continue;
-        maxNum = Math.max(maxNum, parseInt(n, 10) || 0);
+      if (legacyCreated > 0) {
+        parts.push(`created ${legacyCreated} invoice${legacyCreated === 1 ? '' : 's'} from rentals and lease agreements`);
       }
-
-      const today = new Date();
-      const invoiceDate = today.toISOString().split('T')[0];
-      const dueDate = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
-      const periodStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-      const periodEnd = dueDate;
-
-      // Prevent duplicate invoices for the same customer + period.
-      const customerIds = [...new Set(invoiceableRows.map((r) => String(r.customer_id || '').trim()).filter(Boolean))];
-      const { data: existingSamePeriod } = await supabase
-        .from('invoices')
-        .select('customer_id')
-        .eq('organization_id', organization.id)
-        .eq('period_start', periodStart)
-        .eq('period_end', periodEnd)
-        .in('customer_id', customerIds);
-      const alreadyInvoicedIds = new Set((existingSamePeriod || []).map((r) => String(r.customer_id || '').trim()));
-      const filteredInvoiceableRows = invoiceableRows.filter((row) => !alreadyInvoicedIds.has(String(row.customer_id || '').trim()));
-
-      if (filteredInvoiceableRows.length === 0) {
-        setActionSuccess('Invoices for this period already exist for the selected active rentals.');
-        return;
+      if (exported > 0) {
+        parts.push(`downloaded ${exported} CSV row${exported === 1 ? '' : 's'}`);
       }
-
-      const rowsToInsert = filteredInvoiceableRows.map((row, idx) => ({
-        organization_id: organization.id,
-        invoice_number: formatLegacyInvoiceNumber(maxNum + idx + 1),
-        customer_id: row.customer_id,
-        customer_name: row.customer?.name || row.customer?.Name || row.customer_id,
-        period_start: periodStart,
-        period_end: periodEnd,
-        invoice_date: invoiceDate,
-        due_date: dueDate,
-        subtotal: parseFloat(row.totalPerCycle) || 0,
-        tax_amount: 0,
-        total_amount: parseFloat(row.totalPerCycle) || 0,
-        status: 'pending',
-      }));
-
-      const { error: insErr } = await supabase.from('invoices').insert(rowsToInsert);
-      if (insErr) throw insErr;
-
-      const exported = downloadInvoiceCsv(filteredInvoiceableRows);
-      setActionSuccess(`Generated ${rowsToInsert.length} invoice${rowsToInsert.length === 1 ? '' : 's'} from active rentals${exported > 0 ? ` and downloaded ${exported} CSV row${exported === 1 ? '' : 's'}` : ''}.`);
+      setActionSuccess(`${parts.join('; ')}.`);
       ctx.refresh();
     } catch (err) {
       setActionError(err.message);
@@ -861,7 +868,8 @@ export default function Subscriptions() {
     }
   };
 
-  const downloadInvoiceCsv = (activeRows) => {
+  const downloadInvoiceCsv = (activeRows, options = {}) => {
+    const filePrefix = options.filePrefix || 'quickbooks_invoices';
     if (!activeRows || activeRows.length === 0) return 0;
     const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
     const now = new Date();
@@ -902,23 +910,28 @@ export default function Subscriptions() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `quickbooks_invoices_${invoiceDate}.csv`;
+    a.download = `${filePrefix}_${invoiceDate}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     return rows.length;
   };
 
-  const handleExportInvoiceCsv = () => {
-    const activeRows = (allRows || []).filter((row) => (
-      row.status === 'active' &&
-      (parseFloat(row.itemCount) || 0) > 0
-    ));
-    if (activeRows.length === 0) {
-      setActionError('No active rentals to export.');
+  const getActiveExportRows = () => (allRows || []).filter((row) => (
+    row.status === 'active' &&
+    (parseFloat(row.itemCount) || 0) > 0
+  ));
+
+  const handleExportQbInvoiceCsv = (period) => {
+    setActionError(null);
+    setActionSuccess(null);
+    const base = getActiveExportRows();
+    const rows = base.filter((r) => String(r.billing_period || 'monthly').toLowerCase() === period);
+    if (rows.length === 0) {
+      setActionError(`No active ${period} rentals to export to QuickBooks CSV.`);
       return;
     }
-    const exported = downloadInvoiceCsv(activeRows);
-    setActionSuccess(`Exported ${exported} invoice row${exported === 1 ? '' : 's'} to CSV.`);
+    const exported = downloadInvoiceCsv(rows, { filePrefix: `quickbooks_invoices_${period}` });
+    setActionSuccess(`Exported ${exported} QuickBooks CSV row${exported === 1 ? '' : 's'} (${period}).`);
   };
 
   const getNextLegacyInvoiceNumber = async () => {
@@ -1054,13 +1067,17 @@ export default function Subscriptions() {
         });
       }
       if (row?.productCounts && Object.keys(row.productCounts).length > 0) {
+        const periodFallback = row.billing_period === 'yearly'
+          ? defaultUnitRateByPeriod.yearly
+          : defaultUnitRateByPeriod.monthly;
         return Object.entries(row.productCounts).map(([code, qtyRaw]) => {
           const qty = parseFloat(qtyRaw) || 0;
-          const codeKey = String(code || '').trim().toLowerCase();
-          const pricing = assetPricingMap.get(codeKey);
-          const unit = row.billing_period === 'yearly'
-            ? parseFloat(pricing?.yearly_price) || defaultUnitRateByPeriod.yearly
-            : parseFloat(pricing?.monthly_price) || defaultUnitRateByPeriod.monthly;
+          const unitRaw = resolveDisplayUnitPrice(row, {
+            product_code: code,
+            description: code || 'Asset',
+          });
+          const unit =
+            Number.isFinite(unitRaw) && unitRaw > 0 ? unitRaw : periodFallback;
           return {
             description: code || 'Asset',
             qty,
@@ -1110,7 +1127,13 @@ export default function Subscriptions() {
       }
     };
     const createInvoicePdfDocForRow = async (row) => {
-      const total = parseFloat(row.totalPerCycle) || 0;
+      const lineItems = getLineItemsForRow(row);
+      const hasDetail =
+        (Array.isArray(row?.items) && row.items.length > 0) ||
+        (row?.productCounts && Object.keys(row.productCounts || {}).length > 0);
+      const lineSum = lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0);
+      const total =
+        hasDetail && lineSum > 0 ? lineSum : (parseFloat(row.totalPerCycle) || 0);
       const today = new Date();
       const invoiceDate = today.toISOString().split('T')[0];
       const dueDate = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
@@ -1128,7 +1151,6 @@ export default function Subscriptions() {
       const fontFamily = template.font_family || 'helvetica';
       const primaryRgb = rgbFromHex(primary, [64, 181, 173]);
       const secondaryRgb = rgbFromHex(secondary, [100, 116, 139]);
-      const lineItems = getLineItemsForRow(row);
       const bottles = getCustomerBottlesForRow(row);
       const logoUrl = template.logo_url || organization?.logo_url || organization?.app_icon_url || '';
       const logoDataUrl = await fetchImageAsDataUrl(logoUrl);
@@ -1293,7 +1315,7 @@ export default function Subscriptions() {
 
       const options = Array.from(emails);
       const defaultFrom = orgData?.default_invoice_email || options[0] || '';
-      const customerEmail = (
+      let customerEmail = (
         sub?.customer?.email
         || sub?.customer?.Email
         || sub?.customer?.email_address
@@ -1301,6 +1323,25 @@ export default function Subscriptions() {
         || sub?.customer?.primary_email
         || ''
       );
+      const cid = String(sub?.customer_id || '').trim();
+      if (!customerEmail && cid && organization?.id) {
+        const { data: byList } = await supabase
+          .from('customers')
+          .select('email')
+          .eq('organization_id', organization.id)
+          .eq('CustomerListID', cid)
+          .maybeSingle();
+        customerEmail = (byList?.email && String(byList.email).trim()) || customerEmail;
+        if (!customerEmail) {
+          const { data: byId } = await supabase
+            .from('customers')
+            .select('email')
+            .eq('organization_id', organization.id)
+            .eq('id', cid)
+            .maybeSingle();
+          customerEmail = (byId?.email && String(byId.email).trim()) || customerEmail;
+        }
+      }
       const customerName = sub?.customer?.name || sub?.customer?.Name || sub?.customer_id || 'Customer';
 
       setSenderOptions(options);
@@ -1403,13 +1444,17 @@ export default function Subscriptions() {
           });
         }
         if (row?.productCounts && Object.keys(row.productCounts).length > 0) {
+          const periodFallback = row.billing_period === 'yearly'
+            ? defaultUnitRateByPeriod.yearly
+            : defaultUnitRateByPeriod.monthly;
           return Object.entries(row.productCounts).map(([code, qtyRaw]) => {
             const qty = parseFloat(qtyRaw) || 0;
-            const codeKey = String(code || '').trim().toLowerCase();
-            const pricing = assetPricingMap.get(codeKey);
-            const unit = row.billing_period === 'yearly'
-              ? parseFloat(pricing?.yearly_price) || defaultUnitRateByPeriod.yearly
-              : parseFloat(pricing?.monthly_price) || defaultUnitRateByPeriod.monthly;
+            const unitRaw = resolveDisplayUnitPrice(row, {
+              product_code: code,
+              description: code || 'Asset',
+            });
+            const unit =
+              Number.isFinite(unitRaw) && unitRaw > 0 ? unitRaw : periodFallback;
             return { description: code || 'Asset', qty, unit, amount: unit * qty };
           });
         }
@@ -1418,7 +1463,13 @@ export default function Subscriptions() {
         return [{ description: `Rental charges (${String(row?.billing_period || 'monthly')})`, qty, unit: qty > 0 ? amount / qty : amount, amount }];
       };
       const createInvoicePdfDocForRow = async (row) => {
-        const total = parseFloat(row.totalPerCycle) || 0;
+        const lineItems = getLineItemsForRow(row);
+        const hasDetail =
+          (Array.isArray(row?.items) && row.items.length > 0) ||
+          (row?.productCounts && Object.keys(row.productCounts || {}).length > 0);
+        const lineSum = lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0);
+        const total =
+          hasDetail && lineSum > 0 ? lineSum : (parseFloat(row.totalPerCycle) || 0);
         const today = new Date();
         const invoiceDate = today.toISOString().split('T')[0];
         const dueDate = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
@@ -1443,7 +1494,6 @@ export default function Subscriptions() {
         const fontFamily = template.font_family || 'helvetica';
         const primaryRgb = rgbFromHex(primary, [64, 181, 173]);
         const secondaryRgb = rgbFromHex(secondary, [100, 116, 139]);
-        const lineItems = getLineItemsForRow(row);
         const bottles = getCustomerBottlesForRow(row);
         const logoUrl = template.logo_url || organization?.logo_url || organization?.app_icon_url || '';
         const logoDataUrl = await fetchImageAsDataUrl(logoUrl);
@@ -1626,36 +1676,74 @@ export default function Subscriptions() {
       <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2} sx={{ mb: 3 }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary' }}>Rentals</Typography>
-          <Typography variant="body2" sx={{ color: 'text.secondary' }}>Manage customer rentals and billing</Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Manage customer rentals, lease agreements, and billing
+          </Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
+        <Stack
+          direction="row"
+          flexWrap="wrap"
+          justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}
+          sx={{ maxWidth: { sm: '70%', md: '62%' }, gap: 0.5 }}
+        >
           <Tooltip title="Refresh">
-            <IconButton onClick={ctx.refresh} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
-              <RefreshIcon />
+            <IconButton size="small" onClick={ctx.refresh} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, p: 0.5 }}>
+              <RefreshIcon fontSize="small" />
             </IconButton>
           </Tooltip>
           <Button
+            size="small"
             variant="outlined"
             onClick={() => navigate('/settings?tab=invoice-template')}
-            sx={{ borderRadius: 2, textTransform: 'none' }}
+            sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
           >
-            Invoice Template
+            Invoice template
           </Button>
           <Button
+            size="small"
             variant="outlined"
-            onClick={() => navigate('/import-rental-agreements')}
-            sx={{ borderRadius: 2, textTransform: 'none' }}
+            onClick={() => handleExportQbInvoiceCsv('monthly')}
+            startIcon={<DownloadIcon sx={{ fontSize: 16 }} />}
+            sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
           >
-            Import Lease (TrackAbout)
+            QB monthly CSV
           </Button>
-          <Button variant="outlined" onClick={handleExportInvoiceCsv} startIcon={<DownloadIcon />} sx={{ borderRadius: 2, textTransform: 'none' }}>
-            Export Invoice CSV
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => handleExportQbInvoiceCsv('yearly')}
+            startIcon={<DownloadIcon sx={{ fontSize: 16 }} />}
+            sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
+          >
+            QB yearly CSV
           </Button>
-          <Button variant="outlined" onClick={handleGenerateAllInvoices} disabled={saving} startIcon={<InvoiceIcon />} sx={{ borderRadius: 2, textTransform: 'none' }}>
-            Generate Invoices
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={handleGenerateAllInvoices}
+            disabled={saving}
+            startIcon={<InvoiceIcon sx={{ fontSize: 16 }} />}
+            sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
+          >
+            Generate invoices
           </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateOpen(true)} sx={{ borderRadius: 2, textTransform: 'none', bgcolor: primaryColor, '&:hover': { bgcolor: primaryColor, opacity: 0.9 } }}>
-            New Rental
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<AddIcon sx={{ fontSize: 16 }} />}
+            onClick={() => setCreateOpen(true)}
+            sx={{
+              borderRadius: 1.5,
+              textTransform: 'none',
+              fontSize: '0.75rem',
+              px: 1.25,
+              py: 0.25,
+              minWidth: 0,
+              bgcolor: primaryColor,
+              '&:hover': { bgcolor: primaryColor, opacity: 0.9 },
+            }}
+          >
+            New rental
           </Button>
         </Stack>
       </Stack>
@@ -1754,14 +1842,14 @@ export default function Subscriptions() {
                           sx={{
                             textTransform: 'none',
                             minWidth: 'auto',
-                            px: 1,
+                            px: 0.75,
                             py: 0.25,
-                            fontSize: '0.72rem',
+                            fontSize: '0.7rem',
                             lineHeight: 1.2,
                             borderRadius: 1.5,
                           }}
                         >
-                          Generate Invoice
+                          Invoice
                         </Button>
                         <Button
                           size="small"
