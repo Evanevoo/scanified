@@ -2022,6 +2022,10 @@ export default function Import() {
               <Typography variant="body2"><strong>Quantity Returned:</strong> Number of items returned/in</Typography>
             </Grid>
           </Grid>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            TrackAbout lease / subscription agreements (expiring asset agreements) use a separate importer:{' '}
+            <Link to="/import-rental-agreements">Import rental agreements</Link>.
+          </Typography>
           <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
             <Typography variant="caption" color="primary" fontWeight={600} display="block" gutterBottom>
               Example row:
@@ -2089,16 +2093,21 @@ export default function Import() {
               {loading ? (previewLoadingStep || 'Analyzing...') : 'Preview Status'}
             </Button>
             
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={autoCreateCustomers}
-                  onChange={(e) => setAutoCreateCustomers(e.target.checked)}
-                  color="primary"
-                />
-              }
-              label="Auto-create missing customers"
-            />
+            <Box sx={{ minWidth: { xs: '100%', sm: 280 } }}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={autoCreateCustomers}
+                    onChange={(e) => setAutoCreateCustomers(e.target.checked)}
+                    color="primary"
+                  />
+                }
+                label="Auto-create missing customers during import"
+              />
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: -0.5, ml: 4.5 }}>
+                When checked, customers listed in the file that don&apos;t exist yet are created automatically before rows import.
+              </Typography>
+            </Box>
             <Button
               variant="contained"
               onClick={handleImport}
@@ -2139,8 +2148,9 @@ export default function Import() {
       {previewSummary && previewSummary.customersCreated > 0 && (
         <Alert severity="warning" sx={{ mb: 3 }}>
           <Typography variant="body2">
-            You need to create {previewSummary.customersCreated} missing customers before you can import the data. 
-            Click the "Create Missing Customers" button in the summary above to proceed.
+            {previewSummary.customersCreated} customers in this file are missing.
+            Turn on &quot;Auto-create missing customers during import&quot; so they are created when you import,
+            or use &quot;Create Missing Customers&quot; in the Preview Summary above.
           </Typography>
         </Alert>
       )}

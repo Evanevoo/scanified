@@ -163,6 +163,20 @@ function normalizeCustomerId(id) {
 }
 
 /**
+ * Escape values embedded in PostgREST .or(...) filter strings.
+ * Commas and parentheses must be escaped so each condition stays intact.
+ */
+function escapePostgrestFilterValue(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/\\/g, '\\\\')
+    .replace(/,/g, '\\,')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+    .replace(/"/g, '\\"');
+}
+
+/**
  * Batch find customers efficiently (chunked queries to avoid URL length limits)
  * @param {Array} customers - Array of customer objects with {name, CustomerListID}
  * @param {string} organizationId - Organization ID for filtering
@@ -230,7 +244,7 @@ export async function batchFindCustomers(customers, organizationId = null) {
     const orConditions = chunk.map(id => {
       // Use exact match with ilike (case-insensitive)
       // PostgREST will handle URL encoding automatically
-      return `CustomerListID.ilike.${id}`;
+      return `CustomerListID.ilike.${escapePostgrestFilterValue(id)}`;
     });
     
     try {
@@ -267,7 +281,7 @@ export async function batchFindCustomers(customers, organizationId = null) {
     const chunk = idArray.slice(i, i + CHUNK_SIZE);
     const orConditions = chunk.map(id => {
       // Use pattern matching to find IDs that start with normalized ID (handles trailing letters)
-      return `CustomerListID.ilike.*${id}*`;
+      return `CustomerListID.ilike.*${escapePostgrestFilterValue(id)}*`;
     });
     
     try {
@@ -302,7 +316,7 @@ export async function batchFindCustomers(customers, organizationId = null) {
   for (let i = 0; i < nameArray.length; i += CHUNK_SIZE) {
     const chunk = nameArray.slice(i, i + CHUNK_SIZE);
     const orConditions = chunk.map(name => {
-      return `name.ilike.${name}`;
+      return `name.ilike.${escapePostgrestFilterValue(name)}`;
     });
     
     try {
@@ -347,7 +361,7 @@ export async function batchFindCustomers(customers, organizationId = null) {
     for (let i = 0; i < barcodeArray.length; i += CHUNK_SIZE) {
       const chunk = barcodeArray.slice(i, i + CHUNK_SIZE);
       const orConditions = chunk.map(barcode => {
-        return `barcode.ilike.${barcode}`;
+        return `barcode.ilike.${escapePostgrestFilterValue(barcode)}`;
       });
       
       try {

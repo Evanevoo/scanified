@@ -1,7 +1,21 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from 'react';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
-import { computeMRR, computeSubscriptionTotal } from '../utils/subscriptionUtils';
+import {
+  buildAssetPricingMap,
+  buildCustomerOverrideMap,
+  flattenCustomerPricingRowsToLegacyOverrides,
+  computeMRRWithResolution,
+  defaultUnitRatesFromAssetPricingTable,
+} from '../services/pricingResolution';
 
 const SubscriptionContext = createContext(null);
 
@@ -9,9 +23,12 @@ const REALTIME_TABLES = [
   'subscriptions',
   'subscription_items',
   'asset_type_pricing',
+  'customer_pricing',
   'customer_pricing_overrides',
   'subscription_invoices',
   'payments',
+  'lease_contracts',
+  'lease_contract_items',
 ];
 
 export function SubscriptionProvider({ children }) {
@@ -25,11 +42,14 @@ export function SubscriptionProvider({ children }) {
   const [subscriptions, setSubscriptions] = useState([]);
   const [subscriptionItems, setSubscriptionItems] = useState([]);
   const [assetTypePricing, setAssetTypePricing] = useState([]);
+  const [customerPricingRows, setCustomerPricingRows] = useState([]);
   const [customerPricingOverrides, setCustomerPricingOverrides] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [payments, setPayments] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [bottles, setBottles] = useState([]);
+  const [leaseContracts, setLeaseContracts] = useState([]);
+  const [leaseContractItems, setLeaseContractItems] = useState([]);
 
   const mountedRef = useRef(true);
   const channelRef = useRef(null);
@@ -92,15 +112,19 @@ export function SubscriptionProvider({ children }) {
         subsRes,
         itemsRes,
         pricingRes,
+        legacyPricingRes,
         overridesRes,
         invoicesRes,
         paymentsRes,
         custRes,
         bottlesRes,
+        leaseRes,
+        leaseItemsRes,
       ] = await Promise.all([
         safe('subscriptions', supabase.from('subscriptions').select('*').eq('organization_id', orgId).order('created_at', { ascending: false })),
         safe('subscription_items', supabase.from('subscription_items').select('*').eq('organization_id', orgId)),
         safe('asset_type_pricing', supabase.from('asset_type_pricing').select('*').eq('organization_id', orgId).order('product_code')),
+        safe('customer_pricing', supabase.from('customer_pricing').select('*').eq('organization_id', orgId)),
         safe('customer_pricing_overrides', supabase.from('customer_pricing_overrides').select('*').eq('organization_id', orgId)),
         safe('subscription_invoices', supabase.from('subscription_invoices').select('*').eq('organization_id', orgId).order('created_at', { ascending: false })),
         safe('payments', supabase.from('payments').select('*').eq('organization_id', orgId).order('payment_date', { ascending: false })),
@@ -112,17 +136,20 @@ export function SubscriptionProvider({ children }) {
             .select('*')
             .eq('organization_id', orgId)
         ),
+        safe('lease_contracts', supabase.from('lease_contracts').select('*').eq('organization_id', orgId).order('start_date', { ascending: false })),
+        safe('lease_contract_items', supabase.from('lease_contract_items').select('*').eq('organization_id', orgId)),
       ]);
 
       if (!mountedRef.current) return;
 
-      for (const res of [subsRes, itemsRes, pricingRes, overridesRes, invoicesRes, paymentsRes, custRes, bottlesRes]) {
+      for (const res of [subsRes, itemsRes, pricingRes, legacyPricingRes, overridesRes, invoicesRes, paymentsRes, custRes, bottlesRes, leaseRes, leaseItemsRes]) {
         if (res.error) throw res.error;
       }
 
       setSubscriptions(subsRes.data || []);
       setSubscriptionItems(itemsRes.data || []);
       setAssetTypePricing(pricingRes.data || []);
+      setCustomerPricingRows(legacyPricingRes.data || []);
       setCustomerPricingOverrides(overridesRes.data || []);
       setInvoices(invoicesRes.data || []);
       setPayments(paymentsRes.data || []);
@@ -131,6 +158,8 @@ export function SubscriptionProvider({ children }) {
         ...b,
         customer_id: b.customer_id || b.customer_uuid || b.assigned_customer || null,
       })));
+      setLeaseContracts(leaseRes.data || []);
+      setLeaseContractItems(leaseItemsRes.data || []);
     } catch (err) {
       console.error('SubscriptionContext fetch error:', err);
       if (mountedRef.current) setError(err.message);
@@ -161,10 +190,13 @@ export function SubscriptionProvider({ children }) {
     subscribeIfPresent('subscriptions');
     subscribeIfPresent('subscription_items');
     subscribeIfPresent('asset_type_pricing');
+    subscribeIfPresent('customer_pricing');
     subscribeIfPresent('customer_pricing_overrides');
     subscribeIfPresent('subscription_invoices');
     subscribeIfPresent('payments');
     subscribeIfPresent('bottles');
+    subscribeIfPresent('lease_contracts');
+    subscribeIfPresent('lease_contract_items');
 
     channel.subscribe();
 
@@ -175,7 +207,49 @@ export function SubscriptionProvider({ children }) {
   }, [orgId, fetchAll]);
 
   const activeSubscriptions = subscriptions.filter((s) => s.status === 'active');
-  const mrr = computeMRR(subscriptions, subscriptionItems);
+
+  const legacyPricingOverrides = useMemo(
+    () => flattenCustomerPricingRowsToLegacyOverrides(customerPricingRows),
+    [customerPricingRows]
+  );
+
+  const assetPricingMap = useMemo(() => buildAssetPricingMap(assetTypePricing), [assetTypePricing]);
+
+  const customerOverrideMap = useMemo(
+    () =>
+      buildCustomerOverrideMap({
+        legacyPricingOverrides,
+        customerPricingOverrides,
+        organizationId: orgId,
+      }),
+    [legacyPricingOverrides, customerPricingOverrides, orgId]
+  );
+
+  const defaultRates = useMemo(
+    () => defaultUnitRatesFromAssetPricingTable(assetTypePricing),
+    [assetTypePricing]
+  );
+
+  const mrr = useMemo(
+    () =>
+      computeMRRWithResolution(
+        subscriptions,
+        customers,
+        {
+          customerOverrideMap,
+          assetPricingMap,
+          defaultMonthly: defaultRates.monthly,
+          defaultYearly: defaultRates.yearly,
+        },
+        {
+          bottles,
+          leaseContracts,
+          leaseContractItems,
+        }
+      ),
+    [subscriptions, customers, customerOverrideMap, assetPricingMap, defaultRates, bottles, leaseContracts, leaseContractItems]
+  );
+
   const arr = Math.round(mrr * 12 * 100) / 100;
 
   const outstandingBalance = invoices
@@ -194,11 +268,15 @@ export function SubscriptionProvider({ children }) {
     subscriptions,
     subscriptionItems,
     assetTypePricing,
+    customerPricingRows,
+    legacyPricingOverrides,
     customerPricingOverrides,
     invoices,
     payments,
     customers,
     bottles,
+    leaseContracts,
+    leaseContractItems,
     activeSubscriptions,
     mrr,
     arr,

@@ -264,6 +264,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       icon: <Schedule />,
       items: [
         { title: 'Rentals', subtitle: 'Active rentals & billing', path: '/subscriptions', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Lease Agreements', subtitle: 'Manage agreements and terms', path: '/lease-agreements', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
       ]
     },
     inventory: {

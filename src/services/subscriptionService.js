@@ -6,6 +6,74 @@ import {
   calculateProration,
   getEndOfMonth,
 } from '../utils/subscriptionUtils';
+import {
+  buildAssetPricingMap,
+  buildCustomerOverrideMap,
+  flattenCustomerPricingRowsToLegacyOverrides,
+  resolveEffectiveUnitPrice,
+  defaultUnitRatesFromAssetPricingTable,
+  normalizePricingKey,
+} from './pricingResolution';
+import { groupAssignedBottleCountsByProductCode } from './billingFromAssets';
+import { findActiveLeaseContract, leaseLineCycleAmount } from './leaseBilling';
+
+/** Legacy `rentals` rows and `rental_amount` are not used for subscription invoice math; invoices branch on customers.billing_mode. */
+
+async function loadCustomerRowForSubscription(sub, organizationId) {
+  const cid = sub?.customer_id;
+  if (!cid || !organizationId) return { id: cid, CustomerListID: cid };
+  const { data: byId } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('organization_id', organizationId)
+    .eq('id', cid)
+    .maybeSingle();
+  if (byId) return byId;
+  const { data: byList } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('organization_id', organizationId)
+    .eq('CustomerListID', cid)
+    .maybeSingle();
+  return byList || { id: cid, CustomerListID: cid };
+}
+
+async function loadPricingMaps(organizationId) {
+  const [{ data: assetRows, error: aErr }, { data: overrideRows, error: oErr }, { data: legacyRows, error: lErr }] =
+    await Promise.all([
+      supabase
+        .from('asset_type_pricing')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('is_active', true),
+      supabase
+        .from('customer_pricing_overrides')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('is_active', true),
+      supabase.from('customer_pricing').select('*').eq('organization_id', organizationId),
+    ]);
+  if (aErr) throw aErr;
+  if (oErr) throw oErr;
+  if (lErr) throw lErr;
+  const legacyFlat = flattenCustomerPricingRowsToLegacyOverrides(legacyRows || []);
+  const customerOverrideMap = buildCustomerOverrideMap({
+    legacyPricingOverrides: legacyFlat,
+    customerPricingOverrides: overrideRows || [],
+    organizationId,
+  });
+  const assetPricingMap = buildAssetPricingMap(assetRows || []);
+  const { monthly: defaultMonthly, yearly: defaultYearly } = defaultUnitRatesFromAssetPricingTable(
+    assetRows || []
+  );
+  return {
+    customerOverrideMap,
+    assetPricingMap,
+    defaultMonthly,
+    defaultYearly,
+    assetTypePricingRows: assetRows || [],
+  };
+}
 
 export async function createSubscription(organizationId, customerId, planId, billingPeriod, items = []) {
   const startDate = new Date().toISOString().split('T')[0];
@@ -127,13 +195,99 @@ export async function renewSubscription(subscriptionId) {
 export async function generateInvoice(organizationId, subscriptionId) {
   const { data: sub, error: subErr } = await supabase
     .from('subscriptions')
-    .select('*, subscription_items(*)')
+    .select('*')
     .eq('id', subscriptionId)
     .single();
   if (subErr) throw subErr;
 
-  const activeItems = (sub.subscription_items || []).filter((i) => i.status === 'active');
-  const subtotal = activeItems.reduce((s, i) => s + (parseFloat(i.unit_price) || 0) * (i.quantity || 1), 0);
+  const customerRow = await loadCustomerRowForSubscription(sub, organizationId);
+  const billingMode = customerRow?.billing_mode === 'lease' ? 'lease' : 'rental';
+
+  const {
+    customerOverrideMap,
+    assetPricingMap,
+    defaultMonthly,
+    defaultYearly,
+    assetTypePricingRows,
+  } = await loadPricingMaps(organizationId);
+
+  const rowForPricing = { ...sub, customer: customerRow };
+  const assetById = new Map((assetTypePricingRows || []).map((p) => [p.id, p]));
+
+  let lineCalcs = [];
+
+  if (billingMode === 'lease') {
+    const { data: leaseContracts, error: lcErr } = await supabase
+      .from('lease_contracts')
+      .select('*')
+      .eq('organization_id', organizationId);
+    if (lcErr) throw lcErr;
+    const contract = findActiveLeaseContract(leaseContracts || [], sub.customer_id, organizationId);
+    if (!contract) {
+      throw new Error(
+        'No active lease contract for this customer. Add a lease contract (Customer detail → Lease) before generating an invoice.'
+      );
+    }
+    const { data: leaseItems, error: liErr } = await supabase
+      .from('lease_contract_items')
+      .select('*')
+      .eq('contract_id', contract.id);
+    if (liErr) throw liErr;
+    for (const line of leaseItems || []) {
+      const lineCycle = leaseLineCycleAmount(line, sub.billing_period);
+      const qtyRaw = parseInt(line.contracted_quantity, 10);
+      const qty = Number.isFinite(qtyRaw) && qtyRaw > 0 ? qtyRaw : 1;
+      const unit = Math.round((lineCycle / qty) * 100) / 100;
+      const amount = Math.round(lineCycle * 100) / 100;
+      const atp = line.asset_type_id ? assetById.get(line.asset_type_id) : null;
+      const productCode = (line.product_code || atp?.product_code || '').trim() || null;
+      lineCalcs.push({
+        subscription_item_id: null,
+        lease_contract_item_id: line.id,
+        product_code: productCode,
+        description: atp?.description || atp?.category || line.product_code || null,
+        quantity: qty,
+        unit_price: unit,
+        amount,
+      });
+    }
+  } else {
+    const { data: bottleRows, error: bErr } = await supabase
+      .from('bottles')
+      .select('*')
+      .eq('organization_id', organizationId);
+    if (bErr) throw bErr;
+    const groups = groupAssignedBottleCountsByProductCode(
+      bottleRows || [],
+      sub.customer_id,
+      customerRow
+    );
+    for (const { productCode, count } of groups) {
+      if (count <= 0) continue;
+      const unit = resolveEffectiveUnitPrice({
+        row: rowForPricing,
+        item: { product_code: productCode },
+        customerOverrideMap,
+        assetPricingMap,
+        defaultMonthly,
+        defaultYearly,
+      });
+      const amount = Math.round(unit * count * 100) / 100;
+      const pricingRow = assetPricingMap.get(normalizePricingKey(productCode));
+      lineCalcs.push({
+        subscription_item_id: null,
+        lease_contract_item_id: null,
+        product_code: pricingRow?.product_code || productCode,
+        description: pricingRow?.description || pricingRow?.category || null,
+        quantity: count,
+        unit_price: unit,
+        amount,
+      });
+    }
+  }
+
+  const subtotalRaw = lineCalcs.reduce((s, l) => s + l.amount, 0);
+  const subtotal = Math.round(subtotalRaw * 100) / 100;
   const taxRate = 0.11;
   const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
   const totalAmount = Math.round((subtotal + taxAmount) * 100) / 100;
@@ -161,19 +315,20 @@ export async function generateInvoice(organizationId, subscriptionId) {
     .single();
   if (invErr) throw invErr;
 
-  const lineItems = activeItems.map((item) => ({
+  const lineItems = lineCalcs.map((row) => ({
     invoice_id: invoice.id,
-    subscription_item_id: item.id,
-    product_code: item.product_code,
-    description: item.description,
-    quantity: item.quantity,
-    unit_price: parseFloat(item.unit_price) || 0,
-    amount: (parseFloat(item.unit_price) || 0) * (item.quantity || 1),
+    subscription_item_id: row.subscription_item_id,
+    lease_contract_item_id: row.lease_contract_item_id,
+    product_code: row.product_code,
+    description: row.description,
+    quantity: row.quantity,
+    unit_price: row.unit_price,
+    amount: row.amount,
   }));
 
   if (lineItems.length > 0) {
-    const { error: liErr } = await supabase.from('invoice_line_items').insert(lineItems);
-    if (liErr) throw liErr;
+    const { error: insertLiErr } = await supabase.from('invoice_line_items').insert(lineItems);
+    if (insertLiErr) throw insertLiErr;
   }
 
   return invoice;
@@ -218,41 +373,19 @@ export async function recordPayment(invoiceId, organizationId, amount, method, r
 }
 
 export async function getEffectivePrice(organizationId, customerId, productCode, billingPeriod) {
-  const { data: override } = await supabase
-    .from('customer_pricing_overrides')
-    .select('*')
-    .eq('organization_id', organizationId)
-    .eq('customer_id', customerId)
-    .eq('product_code', productCode)
-    .eq('is_active', true)
-    .maybeSingle();
-
-  if (override) {
-    if (override.fixed_rate_override != null) return parseFloat(override.fixed_rate_override);
-    const baseField = billingPeriod === 'yearly' ? 'custom_yearly_price' : 'custom_monthly_price';
-    if (override[baseField] != null) return parseFloat(override[baseField]);
-  }
-
-  const { data: assetPrice } = await supabase
-    .from('asset_type_pricing')
-    .select('*')
-    .eq('organization_id', organizationId)
-    .eq('product_code', productCode)
-    .eq('is_active', true)
-    .maybeSingle();
-
-  if (assetPrice) {
-    const price = billingPeriod === 'yearly'
-      ? parseFloat(assetPrice.yearly_price)
-      : parseFloat(assetPrice.monthly_price);
-
-    if (override?.discount_percent > 0) {
-      return Math.round(price * (1 - override.discount_percent / 100) * 100) / 100;
-    }
-    return price;
-  }
-
-  return 0;
+  const { customerOverrideMap, assetPricingMap, defaultMonthly, defaultYearly } =
+    await loadPricingMaps(organizationId);
+  const customer = { CustomerListID: customerId, id: customerId };
+  const row = { billing_period: billingPeriod, customer_id: customerId, customer };
+  const item = { product_code: productCode };
+  return resolveEffectiveUnitPrice({
+    row,
+    item,
+    customerOverrideMap,
+    assetPricingMap,
+    defaultMonthly,
+    defaultYearly,
+  });
 }
 
 // Compatibility shim for existing pages that rely on the legacy service shape.

@@ -134,6 +134,8 @@ const AssetHistory = lazy(() => import('./pages/AssetHistory'));
 const AssetHistoryLookup = lazy(() => import('./pages/AssetHistoryLookup'));
 const BottleActivity = lazy(() => import('./pages/BottleActivity'));
 const Import = lazy(() => import('./pages/Import'));
+const ImportRentalAgreements = lazy(() => import('./pages/ImportRentalAgreements'));
+const LeaseAgreements = lazy(() => import('./pages/LeaseAgreements'));
 const Settings = lazy(() => import('./pages/Settings'));
 const ImportCustomerInfo = lazy(() => import('./pages/ImportCustomerInfo'));
 const ScannedOrders = lazy(() => import('./pages/ScannedOrders'));
@@ -320,7 +322,7 @@ function AppContent() {
                     <Route path="/invoices/export" element={<QuickBooksExport />} />
                     {/* Legacy redirects */}
                     <Route path="/rentals" element={<Navigate to="/subscriptions" replace />} />
-                    <Route path="/lease-agreements" element={<Navigate to="/subscriptions" replace />} />
+                    <Route path="/lease-agreements" element={<LeaseAgreements />} />
                     <Route path="/industry-analytics" element={<IndustryAnalyticsDashboard />} />
                     <Route path="/web-scanning" element={<WebScanning />} />
                     <Route path="/custom-reports" element={<CustomReports />} />
@@ -366,7 +368,7 @@ function AppContent() {
                     <Route path="/role-permission-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/unified-role-manager" element={<Navigate to="/role-management" replace />} />
                     <Route path="/import-asset-balance" element={<ImportAssetBalance />} />
-                    <Route path="/import-rental-agreements" element={<Navigate to="/import" replace />} />
+                    <Route path="/import-rental-agreements" element={<ImportRentalAgreements />} />
                     <Route path="/send-yearly-lease-emails" element={<Navigate to="/subscriptions" replace />} />
                     <Route path="/import-approvals" element={<ImportApprovals />} />
                     <Route path="/import-approval/:id/detail" element={<ImportApprovalDetail />} />
