@@ -1230,9 +1230,11 @@ export default function Subscriptions() {
       if (subscriptionIds.length > 0) {
         const { data: subInvRows } = await supabase
           .from('subscription_invoices')
-          .select('customer_id, invoice_number, status, updated_at')
+          .select('customer_id, invoice_number, status, updated_at, period_start, period_end')
           .eq('organization_id', organization.id)
-          .in('subscription_id', subscriptionIds);
+          .in('subscription_id', subscriptionIds)
+          .eq('period_start', periodStart)
+          .eq('period_end', periodEnd);
         if (!active) return;
         for (const row of (subInvRows || [])) {
           const key = String(row.customer_id || '').trim();
@@ -2465,20 +2467,25 @@ export default function Subscriptions() {
                       {(() => {
                         const cid = String(sub.customer_id || '').trim();
                         const cycleInv = cid ? cycleInvoiceByCustomer[cid] : null;
-                        const issued =
-                          String(cycleInv?.status || '').toLowerCase() === 'sent'
-                          && String(cycleInv?.invoice_number || '').trim()
-                            ? String(cycleInv.invoice_number).trim()
-                            : null;
+                        const invNo = String(cycleInv?.invoice_number || '').trim();
+                        const st = String(cycleInv?.status || '').toLowerCase();
                         return (
                           <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap">
-                            {issued ? (
-                              <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{issued}</Typography>
+                            {invNo ? (
+                              <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{invNo}</Typography>
                             ) : (
-                              <Typography variant="caption" sx={{ color: 'text.disabled' }}>Not issued</Typography>
+                              <Typography variant="caption" sx={{ color: 'text.disabled' }}>No invoice row</Typography>
                             )}
-                            {cycleInv?.status === 'sent' && (
+                            {invNo && st === 'sent' && (
                               <Chip label="Emailed" size="small" color="success" sx={{ height: 20, fontSize: '0.65rem' }} />
+                            )}
+                            {invNo && st && st !== 'sent' && (
+                              <Chip
+                                label={st === 'draft' ? 'Draft' : st === 'paid' ? 'Paid' : st === 'pending' ? 'Pending' : st}
+                                size="small"
+                                variant="outlined"
+                                sx={{ height: 20, fontSize: '0.65rem', textTransform: 'capitalize' }}
+                              />
                             )}
                           </Stack>
                         );
