@@ -267,6 +267,21 @@ function openRentalMatchesCustomer(rental, subscriptionCustomerId, customerRecor
   return false;
 }
 
+function openRentalBusinessKey(rental) {
+  if (rental?.is_dns === true) {
+    return `dns:${String(rental?.dns_product_code || rental?.product_code || '').trim()}:${String(
+      rental?.bottle_barcode || ''
+    ).trim().toUpperCase()}:${String(rental?.customer_id || '').trim()}`;
+  }
+  if (rental?.bottle_id != null && String(rental.bottle_id).trim() !== '') {
+    return `bottle_id:${String(rental.bottle_id).trim()}`;
+  }
+  if (rental?.bottle_barcode != null && String(rental.bottle_barcode).trim() !== '') {
+    return `barcode:${String(rental.bottle_barcode).trim().toUpperCase()}`;
+  }
+  return `row:${String(rental?.id || '').trim()}`;
+}
+
 /** Product / SKU key for an open rental row (DNS uses dns_product_code). */
 export function rentalProductCode(rental) {
   return String(
@@ -279,8 +294,9 @@ export function rentalProductCode(rental) {
 }
 
 /**
- * Billable units for rental-mode billing: assigned bottles plus open rentals (incl. DNS / placeholder rows).
- * When a rental references bottle_id and that bottle is already counted as an assigned bottle, the rental is skipped to avoid double billing.
+ * Billable units for rental-mode billing.
+ * Prefer open rental rows (aligned with CustomerDetail "Open rentals (billing)"),
+ * then fall back to assigned bottles when rentals are missing.
  * @returns {Array<{ productCode: string, count: number }>}
  */
 export function groupBillableUnitCountsByProductCode(bottles, rentals, subscriptionCustomerId, customerRecord, options = {}) {
@@ -292,29 +308,27 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
       : [];
   const assignOpts = { descendantCustomers: descendants, allCustomers };
 
-  const bottleGroups = groupAssignedBottleCountsByProductCode(bottles, subscriptionCustomerId, customerRecord, {
-    allCustomers,
-  });
-
-  const countedBottleIds = new Set();
-  for (const b of bottles || []) {
-    if (!bottleAssignedToCustomer(b, subscriptionCustomerId, customerRecord, assignOpts)) continue;
-    if (b?.id != null && String(b.id).trim() !== '') countedBottleIds.add(String(b.id).trim());
-  }
-
   const map = new Map();
-  for (const { productCode, count } of bottleGroups) {
-    map.set(productCode, count);
-  }
+  const seenRentalKeys = new Set();
 
   for (const r of rentals || []) {
     if (!openRentalMatchesCustomer(r, subscriptionCustomerId, customerRecord, assignOpts)) continue;
-    const bid = r.bottle_id != null ? String(r.bottle_id).trim() : '';
-    if (bid && countedBottleIds.has(bid)) continue;
+    const businessKey = openRentalBusinessKey(r);
+    if (seenRentalKeys.has(businessKey)) continue;
+    seenRentalKeys.add(businessKey);
     const raw = rentalProductCode(r);
     const key = raw ? normalizePricingKey(raw) : '__unclassified__';
     if (!key) continue;
     map.set(key, (map.get(key) || 0) + 1);
+  }
+
+  if (map.size === 0) {
+    const bottleGroups = groupAssignedBottleCountsByProductCode(bottles, subscriptionCustomerId, customerRecord, {
+      allCustomers,
+    });
+    for (const { productCode, count } of bottleGroups) {
+      map.set(productCode, count);
+    }
   }
 
   const out = [];

@@ -78,12 +78,14 @@ function formatMoney(n) {
   return `$${x.toFixed(2)}`;
 }
 
-/** Display invoice # on PDFs and in customer emails (e.g. R97318 from row id). */
+/** Display invoice # on PDFs and in customer emails (e.g. W97318 from row id). */
 export function defaultInvoiceNumber(row) {
+  const existing = String(row?.invoice_number || '').trim();
+  if (existing) return existing;
   const fromId = String(row?.id || '').replace(/\D/g, '');
-  if (fromId.length >= 5) return `R${fromId.slice(-5)}`;
+  if (fromId.length >= 5) return `W${fromId.slice(-5)}`;
   const pad = String(fromId || Date.now() % 100000).padStart(5, '0');
-  return `R${pad.slice(-5)}`;
+  return `W${pad.slice(-5)}`;
 }
 
 function daysBetween(startIso, endIso) {
