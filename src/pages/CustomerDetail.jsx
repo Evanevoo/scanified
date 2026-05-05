@@ -150,8 +150,8 @@ function buildOpenRentalsBillingHelper({
   const rnsLine = rnsCount > 0 ? `${rnsCount} RNS. ` : '';
   const tail =
     dnsCount === 0 && rnbCount === 0 && rnsCount === 0
-      ? `With no DNS/RNB/RNS here, this ${delta}-row gap means open rentals exist for bottles not yet assigned in inventory — auto-reassignment should fix this on page load.`
-      : `Remaining mismatch is usually open rentals not yet paired with an assigned bottle — auto-reassignment runs on load.`;
+      ? `With no DNS/RNB/RNS here, this ${delta}-row gap usually means open rentals exist for bottles not yet assigned in inventory. Use Assign/Reassign to sync inventory.`
+      : 'Remaining mismatch is usually open rentals not yet paired with an assigned bottle. Use Assign/Reassign to sync inventory.';
   return `Billing uses ${openCount} open rows vs ${assignedBottleCount} assigned bottles (Δ ${delta}). ${dnsLine}${rnbLine}${rnsLine}${tail}`;
 }
 
@@ -2075,7 +2075,7 @@ export default function CustomerDetail() {
     {
       label: 'Child locations',
       value: childCustomers.length,
-      helper: 'Subsidiary locations or departments linked here',
+      helper: 'Subsidiary locations or departments linked to this customer',
     },
   ];
 
