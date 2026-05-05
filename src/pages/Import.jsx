@@ -1720,7 +1720,10 @@ export default function Import() {
           .select('CustomerListID')
           .in('CustomerListID', customerIds)
           .eq('organization_id', userProfile.organization_id);
-        const existingCustomerIds = new Set((existingCustomers || []).map(c => c.CustomerListID));
+        const normalizeCustomerListId = (value) => String(value || '').trim().toLowerCase();
+        const existingCustomerIds = new Set(
+          (existingCustomers || []).map(c => normalizeCustomerListId(c.CustomerListID))
+        );
         
         // --- Bulk insert new customers with better duplicate handling ---
         const newCustomers = [];
@@ -1730,10 +1733,10 @@ export default function Import() {
           if (!row.customer_id || !row.customer_name) continue;
           
           const customerId = row.customer_id.trim();
-          const customerIdLower = customerId.toLowerCase();
+          const customerIdLower = normalizeCustomerListId(customerId);
           
           // Skip if already exists in database or already processed in this chunk
-          if (existingCustomerIds.has(customerId) || seenInChunk.has(customerIdLower)) {
+          if (existingCustomerIds.has(customerIdLower) || seenInChunk.has(customerIdLower)) {
             continue;
           }
           
@@ -1765,7 +1768,12 @@ export default function Import() {
           }
           
           // Enhanced customer creation with RLS-friendly approach
-          const { error: customerError } = await supabase.from('customers').insert(newCustomers);
+          const { error: customerError } = await supabase
+            .from('customers')
+            .upsert(newCustomers, {
+              onConflict: 'organization_id,CustomerListID',
+              ignoreDuplicates: true,
+            });
           if (customerError) {
             logger.error('Error creating customers:', customerError);
             
@@ -1784,7 +1792,10 @@ export default function Import() {
                   
                   const { error: singleError } = await supabase
                     .from('customers')
-                    .insert([customerWithOrgId]);
+                    .upsert([customerWithOrgId], {
+                      onConflict: 'organization_id,CustomerListID',
+                      ignoreDuplicates: true,
+                    });
                     
                   if (singleError) {
                     if (singleError.code === '23505') {
@@ -1810,7 +1821,12 @@ export default function Import() {
             } else {
               // Try one-by-one if batch fails for other reasons
               for (const customer of newCustomers) {
-                const { error: singleError } = await supabase.from('customers').insert([customer]);
+                const { error: singleError } = await supabase
+                  .from('customers')
+                  .upsert([customer], {
+                    onConflict: 'organization_id,CustomerListID',
+                    ignoreDuplicates: true,
+                  });
                 if (singleError && singleError.code !== '23505') { // Ignore duplicate errors
                   logger.error('Error creating customer:', customer.CustomerListID, singleError);
                   errors++;
