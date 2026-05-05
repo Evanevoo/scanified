@@ -4,7 +4,7 @@
  * All UI, invoices, and aggregates should use these functions with live data from Supabase — not duplicated formulas.
  */
 
-import { groupAssignedBottleCountsByProductCode } from './billingFromAssets';
+import { groupBillableUnitCountsByProductCode } from './billingFromAssets';
 import {
   findActiveLeaseContract,
   sumLeaseContractAnnualTotal,
@@ -337,7 +337,8 @@ export function defaultUnitRatesFromAssetPricingTable(assetTypePricingRows) {
 }
 
 /**
- * One billing-cycle total: rental = Σ (live assigned bottle count × resolved unit price);
+ * One billing-cycle total: rental = Σ (billable unit count per SKU × resolved unit price);
+ * units = assigned bottles + open rentals (incl. DNS), see groupBillableUnitCountsByProductCode.
  * lease = contract annual total mapped to this subscription's billing_period (monthly → ÷12).
  * Does not use subscription_items.quantity for rental mode.
  */
@@ -360,8 +361,9 @@ export function computeSubscriptionBillingCycleTotal(sub, customerRecord, ctx, b
     return leaseAnnualToCycleTotal(annual, sub.billing_period);
   }
 
-  const groups = groupAssignedBottleCountsByProductCode(
+  const groups = groupBillableUnitCountsByProductCode(
     billingData.bottles || [],
+    billingData.rentals || [],
     sub.customer_id,
     cust,
     { allCustomers: billingData.customers }
@@ -387,13 +389,14 @@ export function computeSubscriptionCycleTotal(sub, activeItems, customerRecord, 
   void activeItems;
   return computeSubscriptionBillingCycleTotal(sub, customerRecord, ctx, {
     bottles: [],
+    rentals: [],
     leaseContracts: [],
     leaseContractItems: [],
   });
 }
 
 /**
- * @param {object} billingData — { bottles, leaseContracts, leaseContractItems, customers? }
+ * @param {object} billingData — { bottles, rentals?, leaseContracts, leaseContractItems, customers? }
  */
 export function computeMRRWithResolution(subscriptions, customers, ctx, billingData = {}) {
   const customerForSub = (sub) =>

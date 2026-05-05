@@ -35,7 +35,8 @@ const FIELD_ALIASES = {
   address4: ['address4', 'address 4', 'billing address 4', 'shipping address line4', 'shipping address 4'],
   address5: ['address5', 'address 5', 'billing address 5', 'shipping address line5', 'shipping address 5'],
   city: ['city', 'billing city', 'shipping city'],
-  postal_code: ['postal_code', 'postal code', 'zip', 'zipcode', 'billing zip', 'shipping zip', 'billing postal', 'shipping postal']
+  postal_code: ['postal_code', 'postal code', 'zip', 'zipcode', 'billing zip', 'shipping zip', 'billing postal', 'shipping postal'],
+  payment_terms: ['payment_terms', 'payment terms', 'terms', 'paymentterms', 'net terms', 'billing terms'],
 };
 
 const ALLOWED_FIELDS = [
@@ -50,7 +51,8 @@ const ALLOWED_FIELDS = [
   { key: 'postal_code', label: 'Postal Code' },
   { key: 'phone', label: 'Phone' },
   { key: 'email', label: 'Email' },
-  { key: 'barcode', label: 'Customer Barcode' }
+  { key: 'barcode', label: 'Customer Barcode' },
+  { key: 'payment_terms', label: 'Payment Terms' },
 ];
 
 // Asset import fields for 'Import Assets by Customer'
@@ -613,6 +615,11 @@ const ImportCustomerInfo = () => {
               hasUpdates = true;
             }
           }
+          const paymentTerms = getMappedValue(customer, 'payment_terms');
+          if (paymentTerms !== undefined && paymentTerms !== null && paymentTerms !== '') {
+            updateData.payment_terms = paymentTerms.trim() || null;
+            hasUpdates = true;
+          }
           
           // Always update name if provided (in case of slight variations)
           const name = getMappedValue(customer, 'name');
@@ -661,6 +668,7 @@ const ImportCustomerInfo = () => {
           phone: (getMappedValue(customer, 'phone') || '').trim() || null,
           email: (getMappedValue(customer, 'email') || '').trim() || null,
           barcode: normalizedBarcode,
+          payment_terms: (getMappedValue(customer, 'payment_terms') || '').trim() || null,
           location: location,
           organization_id: profile.organization_id
         };

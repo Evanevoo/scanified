@@ -48,6 +48,7 @@ export function SubscriptionProvider({ children }) {
   const [payments, setPayments] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [bottles, setBottles] = useState([]);
+  const [openRentals, setOpenRentals] = useState([]);
   const [leaseContracts, setLeaseContracts] = useState([]);
   const [leaseContractItems, setLeaseContractItems] = useState([]);
 
@@ -118,6 +119,7 @@ export function SubscriptionProvider({ children }) {
         paymentsRes,
         custRes,
         bottlesRes,
+        rentalsRes,
         leaseRes,
         leaseItemsRes,
       ] = await Promise.all([
@@ -136,13 +138,17 @@ export function SubscriptionProvider({ children }) {
             .select('*')
             .eq('organization_id', orgId)
         ),
+        safe(
+          'rentals',
+          supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null)
+        ),
         safe('lease_contracts', supabase.from('lease_contracts').select('*').eq('organization_id', orgId).order('start_date', { ascending: false })),
         safe('lease_contract_items', supabase.from('lease_contract_items').select('*').eq('organization_id', orgId)),
       ]);
 
       if (!mountedRef.current) return;
 
-      for (const res of [subsRes, itemsRes, pricingRes, legacyPricingRes, overridesRes, invoicesRes, paymentsRes, custRes, bottlesRes, leaseRes, leaseItemsRes]) {
+      for (const res of [subsRes, itemsRes, pricingRes, legacyPricingRes, overridesRes, invoicesRes, paymentsRes, custRes, bottlesRes, rentalsRes, leaseRes, leaseItemsRes]) {
         if (res.error) throw res.error;
       }
 
@@ -158,6 +164,7 @@ export function SubscriptionProvider({ children }) {
         ...b,
         customer_id: b.customer_id || b.customer_uuid || b.assigned_customer || null,
       })));
+      setOpenRentals(rentalsRes.data || []);
       setLeaseContracts(leaseRes.data || []);
       setLeaseContractItems(leaseItemsRes.data || []);
     } catch (err) {
@@ -195,6 +202,7 @@ export function SubscriptionProvider({ children }) {
     subscribeIfPresent('subscription_invoices');
     subscribeIfPresent('payments');
     subscribeIfPresent('bottles');
+    subscribeIfPresent('rentals');
     subscribeIfPresent('lease_contracts');
     subscribeIfPresent('lease_contract_items');
 
@@ -244,12 +252,13 @@ export function SubscriptionProvider({ children }) {
         },
         {
           bottles,
+          rentals: openRentals,
           leaseContracts,
           leaseContractItems,
           customers,
         }
       ),
-    [subscriptions, customers, customerOverrideMap, assetPricingMap, defaultRates, bottles, leaseContracts, leaseContractItems]
+    [subscriptions, customers, customerOverrideMap, assetPricingMap, defaultRates, bottles, openRentals, leaseContracts, leaseContractItems]
   );
 
   const arr = Math.round(mrr * 12 * 100) / 100;
@@ -277,6 +286,7 @@ export function SubscriptionProvider({ children }) {
     payments,
     customers,
     bottles,
+    rentals: openRentals,
     leaseContracts,
     leaseContractItems,
     activeSubscriptions,

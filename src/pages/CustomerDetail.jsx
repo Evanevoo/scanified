@@ -76,6 +76,85 @@ import {
 } from '../utils/rentalPricing';
 import { findActiveLeaseContract } from '../services/leaseBilling';
 
+/** rentals.location is often empty; use the live bottle and then customer branch. */
+function displayRentalRowLocation(rental, bottle, customer) {
+  const pick = (v) => (v == null ? '' : String(v).trim());
+  for (const raw of [pick(rental?.location), pick(bottle?.location), pick(customer?.location)]) {
+    if (raw) return formatLocationDisplay(raw);
+  }
+  return 'Unknown';
+}
+
+/** Compare barcodes / serials loosely (leading zeros, serial stored as barcode on rental). */
+function normalizeAssetIdKey(v) {
+  const t = String(v ?? '').trim();
+  if (!t) return '';
+  if (/^\d+$/.test(t)) {
+    const stripped = t.replace(/^0+/, '');
+    return stripped || '0';
+  }
+  return t.toLowerCase();
+}
+
+function bottleMatchesRentalRow(bottle, rentalBarcode) {
+  if (!rentalBarcode || !bottle) return false;
+  const r = String(rentalBarcode).trim();
+  const bc = bottle.barcode_number || bottle.barcode || '';
+  const sn = bottle.serial_number || '';
+  const candidates = [bc, sn].filter(Boolean);
+  for (const c of candidates) {
+    const ct = String(c).trim();
+    if (!ct) continue;
+    if (ct === r) return true;
+    if (normalizeAssetIdKey(ct) === normalizeAssetIdKey(r)) return true;
+  }
+  return false;
+}
+
+/** Resolve assigned bottle for a non-DNS rental (used for pricing + display rows). */
+function findCustomerAssetForRental(assets, rental) {
+  if (!rental || rental.is_dns) return null;
+  const rid = rental.bottle_id;
+  return (assets || []).find((b) => {
+    if (rid && b.id === rid) return true;
+    if (rental.bottle_barcode) return bottleMatchesRentalRow(b, rental.bottle_barcode);
+    return false;
+  }) || null;
+}
+
+/** Same as findCustomerAssetForRental but includes org bottles not in the merged assigned list. */
+function findCustomerAssetForRentalExtended(assignedAssets, supplementalBottles, rental) {
+  const fromAssigned = findCustomerAssetForRental(assignedAssets, rental);
+  if (fromAssigned) return fromAssigned;
+  if (!supplementalBottles?.length) return null;
+  return findCustomerAssetForRental(supplementalBottles, rental);
+}
+
+/** Explains open-rentals vs assigned-bottle count without blaming DNS when dnsCount is 0. */
+function buildOpenRentalsBillingHelper({
+  delta,
+  openCount,
+  assignedBottleCount,
+  dnsCount,
+  rnbCount,
+  rnsCount,
+}) {
+  if (delta <= 0) {
+    return 'Monthly rental invoices total these lines — same open rows as the Rentals workspace';
+  }
+  const dnsLine =
+    dnsCount > 0
+      ? `${dnsCount} DNS (approved invoice without a scanned bottle). `
+      : '';
+  const rnbLine = rnbCount > 0 ? `${rnbCount} RNB. ` : '';
+  const rnsLine = rnsCount > 0 ? `${rnsCount} RNS. ` : '';
+  const tail =
+    dnsCount === 0 && rnbCount === 0 && rnsCount === 0
+      ? `With no DNS/RNB/RNS here, this ${delta}-row gap means open rentals exist for bottles not yet assigned in inventory — auto-reassignment should fix this on page load.`
+      : `Remaining mismatch is usually open rentals not yet paired with an assigned bottle — auto-reassignment runs on load.`;
+  return `Billing uses ${openCount} open rows vs ${assignedBottleCount} assigned bottles (Δ ${delta}). ${dnsLine}${rnbLine}${rnsLine}${tail}`;
+}
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -123,6 +202,25 @@ function looksLikeAddress(str) {
   if (!str) return false;
   // Heuristic: contains a comma and a number
   return /\d/.test(str) && str.includes(',');
+}
+
+/** Payment terms: shared between Overview edit and Rental settings dialog */
+const CUSTOMER_PAYMENT_TERM_OPTIONS = [
+  { value: '', label: 'Not set' },
+  { value: 'COD', label: 'COD' },
+  { value: 'CREDIT CARD', label: 'Credit card' },
+  { value: 'Net 15', label: 'Net 15' },
+  { value: 'Net 30', label: 'Net 30' },
+  { value: 'Net 60', label: 'Net 60' },
+  { value: 'Due on receipt', label: 'Due on receipt' },
+];
+
+function canonicalPaymentTermValue(raw) {
+  if (raw == null || raw === '') return '';
+  const t = String(raw).trim();
+  const lower = t.toLowerCase();
+  const hit = CUSTOMER_PAYMENT_TERM_OPTIONS.find((o) => o.value && o.value.toLowerCase() === lower);
+  return hit ? hit.value : t;
 }
 
 const CUSTOMER_PK_UUID_RE =
@@ -239,6 +337,9 @@ export default function CustomerDetail() {
     yearly_price: '',
   });
   const [leaseBusy, setLeaseBusy] = useState(false);
+  /** Bottles referenced by open rentals but missing from merged assigned-bottle list (stale/wrong customer link, etc.). */
+  const [supplementalBottles, setSupplementalBottles] = useState([]);
+  const [reassigningOrphans, setReassigningOrphans] = useState(false);
 
   /**
    * Bottles for this account. Legacy import paths could have saved:
@@ -355,7 +456,7 @@ export default function CustomerDetail() {
     return Array.from(byKey.values());
   }, [id]);
 
-  // Combine physical bottles with DNS (Delivered Not Scanned), RNB (Return not on balance), and RNS (Return not scanned)
+  // DNS = approved invoice without a scanned bottle; RNB = return without being on that customer's balance; RNS = return with no scanned bottle
   const dnsRentals = useMemo(() => (locationAssets || []).filter(r => r.is_dns), [locationAssets]);
   const rnbRentals = useMemo(() => dnsRentals.filter(r => (r.dns_description || '').includes('Return not on balance')), [dnsRentals]);
   const rnsRentals = useMemo(() => dnsRentals.filter(r => (r.dns_description || '').includes('Return not scanned')), [dnsRentals]);
@@ -733,9 +834,186 @@ export default function CustomerDetail() {
     [subscriptionCtx.assetTypePricing]
   );
 
+  /**
+   * Supplemental bottle fetch + auto-reassign.
+   * When an open rental references a bottle that isn't in the assigned list,
+   * look it up in the org, then automatically reassign it here — if there's
+   * an open rental and no return was ever scanned, the customer still has it.
+   */
+  useEffect(() => {
+    const orgId = organization?.id;
+    const cust = customer;
+    if (!orgId || !cust) {
+      setSupplementalBottles([]);
+      return;
+    }
+    const listId = (cust.CustomerListID || id || '').toString().trim();
+    const assets = customerAssets || [];
+    const loc = locationAssets || [];
+    const needIds = [];
+    const needBarcodes = [];
+    const idSeen = new Set();
+    const bcSeen = new Set();
+    for (const r of loc) {
+      if (r?.is_dns) continue;
+      if (findCustomerAssetForRental(assets, r)) continue;
+      if (r?.bottle_id && !idSeen.has(r.bottle_id)) {
+        idSeen.add(r.bottle_id);
+        needIds.push(r.bottle_id);
+      }
+      const bc = String(r?.bottle_barcode || '').trim();
+      if (bc && !bcSeen.has(bc)) {
+        bcSeen.add(bc);
+        needBarcodes.push(bc);
+      }
+    }
+    if (!needIds.length && !needBarcodes.length) {
+      setSupplementalBottles([]);
+      return;
+    }
+    let cancelled = false;
+    const CHUNK = 80;
+    (async () => {
+      const collected = [];
+      const mergeRows = (rows) => {
+        for (const b of rows || []) {
+          if (b?.id) collected.push(b);
+        }
+      };
+      try {
+        for (let i = 0; i < needIds.length; i += CHUNK) {
+          const slice = needIds.slice(i, i + CHUNK);
+          const { data, error } = await supabase
+            .from('bottles')
+            .select('*')
+            .eq('organization_id', orgId)
+            .in('id', slice);
+          if (error) throw error;
+          mergeRows(data);
+        }
+        for (let i = 0; i < needBarcodes.length; i += CHUNK) {
+          const slice = needBarcodes.slice(i, i + CHUNK);
+          const { data: d1, error: e1 } = await supabase
+            .from('bottles')
+            .select('*')
+            .eq('organization_id', orgId)
+            .in('barcode_number', slice);
+          if (e1) throw e1;
+          mergeRows(d1);
+          const { data: d2, error: e2 } = await supabase
+            .from('bottles')
+            .select('*')
+            .eq('organization_id', orgId)
+            .in('serial_number', slice);
+          if (e2) throw e2;
+          mergeRows(d2);
+        }
+      } catch (e) {
+        logger.error('Supplemental bottle fetch failed:', e);
+      }
+      const dedupe = new Map();
+      for (const b of collected) {
+        if (b?.id) dedupe.set(b.id, b);
+      }
+      const found = Array.from(dedupe.values());
+      if (cancelled) return;
+      setSupplementalBottles(found);
+
+      // Auto-reassign: open rental + bottle exists in org = customer still has it
+      if (!listId || !found.length) return;
+      let reassigned = 0;
+      for (const bottle of found) {
+        const alreadyHere =
+          String(bottle.assigned_customer || '') === listId ||
+          String(bottle.customer_id || '') === listId;
+        if (alreadyHere) continue;
+        const { error } = await supabase
+          .from('bottles')
+          .update({
+            assigned_customer: listId,
+            customer_id: listId,
+            customer_name: cust.name,
+          })
+          .eq('id', bottle.id)
+          .eq('organization_id', orgId);
+        if (!error) reassigned++;
+        else logger.error('Auto-reassign orphan bottle failed:', error);
+      }
+      if (cancelled || reassigned === 0) return;
+      const freshBottles = await fetchMergedBottlesForCustomer(orgId, cust.name, listId);
+      if (!cancelled) {
+        setCustomerAssets(freshBottles);
+        setTransferMessage({
+          open: true,
+          message: `Auto-assigned ${reassigned} bottle(s) to ${cust.name} — open rental exists, no return was scanned.`,
+          severity: 'info',
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [organization?.id, customer, locationAssets, customerAssets, id, fetchMergedBottlesForCustomer]);
+
+  const orphanRentals = useMemo(() => {
+    const assets = customerAssets || [];
+    const extras = supplementalBottles || [];
+    return (locationAssets || [])
+      .filter((r) => {
+        if (r?.is_dns) return false;
+        if (findCustomerAssetForRental(assets, r)) return false;
+        return true;
+      })
+      .map((r) => {
+        const bottle = findCustomerAssetForRental(extras, r);
+        return { rental: r, bottle };
+      });
+  }, [locationAssets, customerAssets, supplementalBottles]);
+
+  const handleReassignOrphans = async () => {
+    if (!customer || !organization?.id) return;
+    const listId = customer.CustomerListID || id;
+    const toFix = orphanRentals.filter((o) => o.bottle?.id);
+    if (!toFix.length) return;
+    setReassigningOrphans(true);
+    try {
+      let fixed = 0;
+      for (const { bottle } of toFix) {
+        const { error } = await supabase
+          .from('bottles')
+          .update({
+            assigned_customer: listId,
+            customer_id: listId,
+            customer_name: customer.name,
+          })
+          .eq('id', bottle.id)
+          .eq('organization_id', organization.id);
+        if (!error) fixed++;
+        else logger.error('Reassign orphan bottle failed:', error);
+      }
+      const freshBottles = await fetchMergedBottlesForCustomer(
+        organization.id,
+        customer.name,
+        listId,
+      );
+      setCustomerAssets(freshBottles);
+      setTransferMessage({
+        open: true,
+        message: `Reassigned ${fixed} bottle(s) to ${customer.name}. Inventory now matches open rentals.`,
+        severity: 'success',
+      });
+    } catch (e) {
+      logger.error('Reassign orphans error:', e);
+      setTransferMessage({ open: true, message: e?.message || 'Failed to reassign', severity: 'error' });
+    } finally {
+      setReassigningOrphans(false);
+    }
+  };
+
   /** Match Rentals page: overrides + rate table + local SKU rates, not stale DB rental_amount. */
   const rentalHistoryDisplayRows = useMemo(() => {
     const assets = customerAssets || [];
+    const extra = supplementalBottles || [];
     const customerKey = customer?.CustomerListID;
     return (locationAssets || []).map((rental) => {
       const isDNS = rental.is_dns === true;
@@ -758,12 +1036,7 @@ export default function CustomerDetail() {
           category: '',
         };
       } else {
-        bottle = assets.find(
-          (b) =>
-            (rental.bottle_id && b.id === rental.bottle_id) ||
-            (rental.bottle_barcode &&
-              (b.barcode_number || b.barcode) === rental.bottle_barcode)
-        );
+        bottle = findCustomerAssetForRentalExtended(assets, extra, rental);
       }
       if (!bottle) {
         const raw = parseFloat(String(rental.rental_amount ?? ''));
@@ -785,6 +1058,7 @@ export default function CustomerDetail() {
   }, [
     locationAssets,
     customerAssets,
+    supplementalBottles,
     customer,
     rentalHistoryCustomerOverrideMap,
     rentalHistoryAssetPricingMap,
@@ -1718,6 +1992,7 @@ export default function CustomerDetail() {
       // Include barcode if provided (empty string allowed to clear)
       barcode: normalizedBarcode || null,
       billing_mode: editForm.billing_mode === 'lease' ? 'lease' : 'rental',
+      payment_terms: canonicalPaymentTermValue(editForm.payment_terms) || null,
     };
     const customerIdChanged = newCustomerListID !== id;
     if (customerIdChanged) {
@@ -1772,26 +2047,35 @@ export default function CustomerDetail() {
     </Box>
   );
 
+  const openRentalsDelta = (locationAssets?.length || 0) - (customerAssets?.length || 0);
+  const openRentalsBillingHelper = buildOpenRentalsBillingHelper({
+    delta: openRentalsDelta,
+    openCount: locationAssets.length,
+    assignedBottleCount: customerAssets.length,
+    dnsCount: dnsRentals.length,
+    rnbCount: rnbRentals.length,
+    rnsCount: rnsRentals.length,
+  });
   const detailMetrics = [
     {
-      label: 'Assigned bottles',
-      value: totalBottleCount,
-      helper: 'Inventory and rental exceptions included in the customer total',
+      label: 'Open rentals (billing)',
+      value: locationAssets.length,
+      helper: openRentalsBillingHelper,
     },
     {
-      label: 'Physical assets',
+      label: 'Physical inventory',
       value: customerAssets.length,
-      helper: 'Containers physically assigned to this account',
+      helper: 'Containers assigned to this account in inventory (can be lower than open rentals)',
+    },
+    {
+      label: 'Reporting total',
+      value: totalBottleCount,
+      helper: 'Physical + DNS (invoiced, no scan) − RNS (returned, no scan). RNB excluded. For on-hand summaries, not invoice line count.',
     },
     {
       label: 'Child locations',
       value: childCustomers.length,
       helper: 'Subsidiary locations or departments linked here',
-    },
-    {
-      label: 'Open rentals',
-      value: locationAssets.length,
-      helper: 'Live rental rows attached to this customer',
     },
   ];
 
@@ -2012,6 +2296,38 @@ export default function CustomerDetail() {
               <TextField name="phone" value={editForm.phone || ''} onChange={handleEditChange} size="small" sx={{ mb: 2, minWidth: 180 }} />
             ) : (
               <Typography variant="body1" sx={{ mb: 2 }}>{customer.phone || 'Not provided'}</Typography>
+            )}
+
+            <Typography variant="body2" color="text.secondary">Payment terms</Typography>
+            {editing ? (
+              <FormControl size="small" sx={{ mb: 2, minWidth: 220 }}>
+                <InputLabel id="customer-payment-terms-label">Payment terms</InputLabel>
+                <Select
+                  labelId="customer-payment-terms-label"
+                  name="payment_terms"
+                  label="Payment terms"
+                  value={editForm.payment_terms ?? ''}
+                  onChange={handleEditChange}
+                >
+                  {CUSTOMER_PAYMENT_TERM_OPTIONS.map((opt) => (
+                    <MenuItem key={opt.label + opt.value} value={opt.value}>{opt.label}</MenuItem>
+                  ))}
+                  {(editForm.payment_terms || '').trim() !== ''
+                    && !CUSTOMER_PAYMENT_TERM_OPTIONS.some((o) => o.value === editForm.payment_terms)
+                    ? (
+                      <MenuItem value={editForm.payment_terms}>{editForm.payment_terms} (imported)</MenuItem>
+                    )
+                    : null}
+                </Select>
+              </FormControl>
+            ) : (
+              <Typography variant="body1" sx={{ mb: 2 }}>
+                {customer.payment_terms ? (
+                  <Chip size="small" label={customer.payment_terms} variant="outlined" sx={{ fontWeight: 600 }} />
+                ) : (
+                  <em style={{ color: '#888' }}>Not set — edit customer or import a Terms column</em>
+                )}
+              </Typography>
             )}
             
             <Typography variant="body2" color="text.secondary">Customer Type</Typography>
@@ -2525,7 +2841,8 @@ export default function CustomerDetail() {
               ))}
             </Box>
             <Typography variant="body2" color="text.secondary" mt={2}>
-              Total bottles: {totalBottleCount} ({customerAssets.length} physical{dnsOnlyRentals.length > 0 ? ` + ${dnsOnlyRentals.length} DNS` : ''}{rnbRentals.length > 0 ? `, ${rnbRentals.length} RNB not counted` : ''}{rnsRentals.length > 0 ? ` − ${rnsRentals.length} RNS` : ''})
+              On-hand roll-up: {totalBottleCount} ({customerAssets.length} physical{dnsOnlyRentals.length > 0 ? ` + ${dnsOnlyRentals.length} DNS` : ''}{rnbRentals.length > 0 ? `, ${rnbRentals.length} RNB not counted here` : ''}{rnsRentals.length > 0 ? ` − ${rnsRentals.length} RNS` : ''}). Billing uses{' '}
+              <strong>{locationAssets.length} open rental rows</strong>, which can be higher than physical inventory.
             </Typography>
           </Box>
         )}
@@ -2542,7 +2859,7 @@ export default function CustomerDetail() {
               <Typography variant="body2" color="text.secondary">
                 {customerAssets.length} physical
                 {dnsOnlyRentals.length > 0 ? ` + ${dnsOnlyRentals.length} DNS` : ''}
-                {rnbRentals.length > 0 ? ` (${rnbRentals.length} RNB return not on balance — not counted)` : ''}
+                {rnbRentals.length > 0 ? ` (${rnbRentals.length} RNB return without being on balance — not counted)` : ''}
                 {rnsRentals.length > 0 ? ` − ${rnsRentals.length} RNS` : ''}
                 {totalBottleCount !== customerAssets.length && (dnsOnlyRentals.length > 0 || rnsRentals.length > 0) && ` = ${totalBottleCount} total`}
               </Typography>
@@ -2749,7 +3066,7 @@ export default function CustomerDetail() {
       <Paper elevation={0} sx={{ p: { xs: 2.5, md: 4 }, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2, mb: 3 }}>
           <Typography variant="h5" fontWeight={700} color="primary">
-            📋 Rental History ({locationAssets.length}{rnbRentals.length > 0 ? ` — ${totalBottleCount} billable` : ''})
+            📋 Rental History ({locationAssets.length} open — billing basis)
           </Typography>
           {locationAssets.length > 0 && (
             <Button
@@ -2766,7 +3083,47 @@ export default function CustomerDetail() {
         {locationAssets.length > 0 && (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 900 }}>
             Rental amount uses your <strong>standard rate table</strong>, product/category matching, and this customer&apos;s pricing — the same live rules as the Rentals page (including saved overrides and local rate edits).
+            {' '}
+            <strong>Invoices charge each open row below ({locationAssets.length}).</strong>
+            {openRentalsDelta !== 0 && (
+              <>
+                {' '}
+                Physical inventory shows <strong>{customerAssets.length}</strong> assigned containers.
+                {dnsRentals.length === 0 && rnbRentals.length === 0 && rnsRentals.length === 0
+                  ? ` The ${openRentalsDelta}-row difference is not “DNS without barcodes” — those lines are regular rentals where the bottle is not in the assigned list on this page (wrong assignment, transfer, or lookup mismatch).`
+                  : ' Lower counts often mix DNS/RNB/RNS billing rows with how assigned inventory is loaded.'}
+              </>
+            )}
           </Typography>
+        )}
+
+        {orphanRentals.length > 0 && (
+          <Alert
+            severity="warning"
+            sx={{ mb: 2 }}
+            action={
+              <Button
+                color="warning"
+                size="small"
+                variant="contained"
+                disabled={reassigningOrphans || orphanRentals.filter((o) => o.bottle?.id).length === 0}
+                onClick={handleReassignOrphans}
+                startIcon={reassigningOrphans ? <CircularProgress size={14} /> : <Inventory2Icon />}
+              >
+                {reassigningOrphans ? 'Reassigning…' : `Assign ${orphanRentals.filter((o) => o.bottle?.id).length} bottle(s)`}
+              </Button>
+            }
+          >
+            <Typography variant="body2" fontWeight={600} gutterBottom>
+              {orphanRentals.length} rental row(s) are billing this customer but the bottle isn&apos;t assigned here in inventory.
+            </Typography>
+            <Typography variant="body2">
+              Barcodes: {orphanRentals.map((o) => o.rental.bottle_barcode || '?').join(', ')}.
+              {orphanRentals.filter((o) => o.bottle?.id).length > 0
+                ? ' Click to reassign these bottles to this customer so physical inventory matches open rentals.'
+                : ' Could not find matching bottle records — these may need manual investigation.'}
+            </Typography>
+          </Alert>
         )}
 
         {locationAssets.length === 0 ? (
@@ -2791,10 +3148,19 @@ export default function CustomerDetail() {
                   const isDNS = rental.is_dns === true;
                   const isRNB = isDNS && (rental.dns_description || '').includes('Return not on balance');
                   const isRNS = isDNS && (rental.dns_description || '').includes('Return not scanned');
-                  const bottle = !isDNS && (customerAssets || []).find(
-                    (b) => b.id === rental.bottle_id || (b.barcode_number || b.barcode) === rental.bottle_barcode
-                  );
-                  const typeProduct = bottle ? (bottle.type || bottle.description || bottle.product_code) : (rental.cylinder?.type || 'Unknown');
+                  const bottle =
+                    !isDNS &&
+                    findCustomerAssetForRentalExtended(customerAssets || [], supplementalBottles, rental);
+                  const typeProduct = bottle
+                    ? (bottle.type || bottle.description || bottle.product_code)
+                    : (rental.cylinder?.type
+                      || rental.product_code
+                      || rental.product_type
+                      || rental.asset_type
+                      || rental.gas_type
+                      || rental.cylinder_type
+                      || (typeof rental.description === 'string' ? rental.description : '')
+                      || 'Unknown');
                   return (
                     <TableRow key={rental.id} hover sx={{ bgcolor: isRNB ? '#ffebee' : isRNS ? '#f5f5f5' : isDNS ? '#fff3cd' : 'inherit' }}>
                       <TableCell>
@@ -2825,7 +3191,7 @@ export default function CustomerDetail() {
                               {rental.dns_product_code || 'N/A'}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                              {rental.dns_description || 'Not Scanned'}
+                              {rental.dns_description || 'Approved invoice, no scanned bottle'}
                             </Typography>
                           </Box>
                         ) : (
@@ -2843,7 +3209,7 @@ export default function CustomerDetail() {
                       <TableCell>${displayAmount.toFixed(2)}</TableCell>
                       <TableCell>
                         <Chip 
-                          label={rental.location ? formatLocationDisplay(rental.location) : 'Unknown'} 
+                          label={displayRentalRowLocation(rental, bottle, customer)} 
                           color="secondary" 
                           size="small"
                           variant="outlined"
@@ -2852,7 +3218,7 @@ export default function CustomerDetail() {
                       <TableCell>{rental.rental_start_date || '-'}</TableCell>
                       <TableCell>
                         <Chip 
-                          label={isRNB ? 'RNB (Return not on balance)' : isRNS ? 'RNS (Return not scanned)' : isDNS ? 'DNS (Not Scanned)' : (rental.status || 'Active')} 
+                          label={isRNB ? 'RNB (Return without being on balance)' : isRNS ? 'RNS (Return, no scanned bottle)' : isDNS ? 'DNS (Invoice, no scanned bottle)' : (rental.status || 'Active')} 
                           color={isRNB ? 'error' : isRNS ? 'default' : isDNS ? 'warning' : (rental.status === 'at_home' ? 'warning' : 'success')}
                           size="small"
                         />
@@ -3430,10 +3796,6 @@ export default function CustomerDetail() {
 
           <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mt: 3, mb: 2 }}>Other settings</Typography>
           <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
-            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="body2">Payment terms</Typography>
-              <Typography variant="body2" color="text.secondary">{customer?.payment_terms || 'Not set'}</Typography>
-            </Box>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider', bgcolor: customer?.purchase_order ? 'transparent' : 'warning.light', px: 1.5, borderRadius: 1 }}>
               <Typography variant="body2">Purchase order</Typography>
               <Typography variant="body2" fontWeight={customer?.purchase_order ? 400 : 600}>
@@ -3469,12 +3831,9 @@ export default function CustomerDetail() {
                 onChange={(e) => setRentalSettingsForm(f => ({ ...f, payment_terms: e.target.value }))}
                 label="Payment terms"
               >
-                <MenuItem value="">Not set</MenuItem>
-                <MenuItem value="CREDIT CARD">Credit card</MenuItem>
-                <MenuItem value="Net 15">Net 15</MenuItem>
-                <MenuItem value="Net 30">Net 30</MenuItem>
-                <MenuItem value="Net 60">Net 60</MenuItem>
-                <MenuItem value="Due on receipt">Due on receipt</MenuItem>
+                {CUSTOMER_PAYMENT_TERM_OPTIONS.map((opt) => (
+                  <MenuItem key={`rs-${opt.label}-${opt.value}`} value={opt.value}>{opt.label}</MenuItem>
+                ))}
               </Select>
             </FormControl>
             <TextField
