@@ -143,11 +143,16 @@ function lineProductKeys(line) {
   return keys;
 }
 
+/**
+ * Exact SKU or hyphenated family only (e.g. bcs68-300 vs bcs68-300-16pack).
+ * Avoids parent codes like "bchemtane" matching every bchemtane240 / bchemtane260 line.
+ */
 function codesMatchProductKey(codeNorm, keyNorm) {
   if (!codeNorm || !keyNorm) return false;
   if (codeNorm === keyNorm) return true;
-  if (keyNorm.length < 3 || codeNorm.length < 3) return false;
-  return codeNorm.includes(keyNorm) || keyNorm.includes(codeNorm);
+  const a = codeNorm.length <= keyNorm.length ? codeNorm : keyNorm;
+  const b = codeNorm.length > keyNorm.length ? codeNorm : keyNorm;
+  return b.startsWith(`${a}-`);
 }
 
 /** Match serialized bottle / open rental row to a summary line (productCounts / items). */
@@ -213,7 +218,16 @@ function movementCountsForLine(line, ps, pe, inPeriodBottles, returnsInPeriod, g
   const q = Math.round(Number(line?.qty) || 0);
   const anyBottleMatch = inPeriodBottles.some((b) => bottleMatchesLineItem(b, line));
   const endOut = endN > 0 ? endN : (!anyBottleMatch && q > 0 ? q : endN);
-  return { ship: shipN, rtn: rtnN, end: endOut };
+
+  let ship = shipN;
+  let rtn = rtnN;
+  // Serialized rows rarely have delivery inside the invoice month; infer movement from STRT vs END when both raw counts are zero.
+  if (ship === 0 && rtn === 0) {
+    if (endOut > q) ship = endOut - q;
+    else if (q > endOut) rtn = q - endOut;
+  }
+
+  return { ship, rtn, end: endOut };
 }
 
 /**
