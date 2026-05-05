@@ -277,10 +277,19 @@ export async function generateInvoice(organizationId, subscriptionId) {
       .eq('organization_id', organizationId)
       .is('rental_end_date', null);
     if (rRentErr) throw rRentErr;
+    const subscriptionMatchKey =
+      String(
+        sub.customer_id ||
+          customerRow?.CustomerListID ||
+          customerRow?.id ||
+          customerRow?.name ||
+          customerRow?.Name ||
+          ''
+      ).trim() || sub.customer_id;
     const groups = groupBillableUnitCountsByProductCode(
       bottleRows || [],
       rentalRows || [],
-      sub.customer_id,
+      subscriptionMatchKey,
       customerRow,
       { allCustomers: orgCustomers || [] }
     );

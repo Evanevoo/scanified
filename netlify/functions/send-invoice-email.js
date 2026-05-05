@@ -70,7 +70,7 @@ exports.handler = async (event, _context) => {
         };
       }
 
-      const { to, from, subject, body, pdfBase64, pdfFileName, invoiceNumber } = requestData;
+      const { to, from, subject, body, pdfBase64, pdfFileName, invoiceNumber, senderName } = requestData;
 
       // Validate required fields
       if (!to || !subject || !pdfBase64) {
@@ -250,13 +250,47 @@ exports.handler = async (event, _context) => {
         };
       }
 
-      // Send email with PDF attachment
-      console.log(`Sending invoice email via ${emailService} from: ${senderEmail} to: ${to}`);
-      
+      // Send email with PDF attachment.
+      // Gmail SMTP only sends as the authenticated mailbox; if `from` differs, Gmail rewrites the visible From.
+      // We set Reply-To to the selected sender so customers reply to the right person; SMTP2GO can often send as `from` directly.
+      const friendly = String(senderName || '').trim() || 'Invoice';
+      const addr = String(senderEmail || '').trim();
+      const gmailUser = process.env.EMAIL_USER ? String(process.env.EMAIL_USER).trim().toLowerCase() : '';
+      const smtpEnvelope =
+        process.env.SMTP2GO_FROM ||
+        process.env.EMAIL_FROM ||
+        process.env.OUTLOOK_FROM ||
+        process.env.EMAIL_USER ||
+        '';
+
+      let fromHeader;
+      let replyToHeader = addr;
+
+      if (emailService === 'Gmail' && gmailUser) {
+        const requestedLower = addr.toLowerCase();
+        if (requestedLower && requestedLower === gmailUser) {
+          fromHeader = `"${friendly}" <${addr}>`;
+        } else {
+          fromHeader = `"${friendly}" <${process.env.EMAIL_USER}>`;
+          console.warn(
+            `Gmail SMTP: visible From uses authenticated account ${process.env.EMAIL_USER}; Reply-To set to selected sender ${addr}`
+          );
+        }
+      } else if (emailService === 'SMTP2GO' && addr) {
+        fromHeader = `"${friendly}" <${addr}>`;
+      } else if (addr) {
+        fromHeader = `"${friendly}" <${addr}>`;
+      } else {
+        fromHeader = smtpEnvelope ? `"${friendly}" <${smtpEnvelope}>` : `"${friendly}" <unknown>`;
+      }
+
+      console.log(`Sending invoice email via ${emailService} from header: ${fromHeader}, replyTo: ${replyToHeader}, to: ${to}`);
+
       const mailOptions = {
-        from: senderEmail, // Use the logged-in user's email as sender
-        to: to,
-        subject: subject,
+        from: fromHeader,
+        to,
+        replyTo: replyToHeader,
+        subject,
         html: body || '<p>Please find your invoice attached.</p>',
         attachments: [
           {
@@ -276,7 +310,7 @@ exports.handler = async (event, _context) => {
         );
         
         info = await Promise.race([sendPromise, timeoutPromise]);
-        console.log(`Invoice email sent successfully via ${emailService} from: ${senderEmail} to: ${to}`);
+        console.log(`Invoice email sent successfully via ${emailService} to: ${to}`);
         console.log('Message ID:', info.messageId);
       } catch (sendError) {
         console.error('Error sending email:', sendError);
@@ -294,7 +328,8 @@ exports.handler = async (event, _context) => {
           message: 'Invoice email sent successfully',
           messageId: info.messageId,
           emailService: emailService,
-          from: senderEmail
+          from: fromHeader,
+          replyTo: replyToHeader
         })
       };
 

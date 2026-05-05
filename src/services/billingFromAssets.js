@@ -50,25 +50,89 @@ export function getDescendantCustomerRecords(parentRecord, allCustomers) {
   return out;
 }
 
-function buildTargetCustomerIdSet(subscriptionCustomerId, customerRecord) {
+/**
+ * Every alias for a subscription/customer used to match bottles & rentals (UUID ↔ QuickBooks ID ↔ display name),
+ * aligned with CustomerDetail merged queries and pricingResolution.expandCustomerKeysForOverrides.
+ */
+function buildTargetCustomerIdSet(subscriptionCustomerId, customerRecord, allCustomers) {
   const s = new Set();
   const add = (v) => {
     const n = norm(v);
     if (n) s.add(n);
   };
+
   add(subscriptionCustomerId);
   if (customerRecord) {
     add(customerRecord.CustomerListID);
     add(customerRecord.id);
     add(customerRecord.customer_id);
   }
+
+  const linkDirectoryRow = (c) => {
+    if (!c) return;
+    add(c.CustomerListID);
+    add(c.id);
+    add(c.customer_id);
+    add(c.name);
+    add(c.Name);
+  };
+
+  if (Array.isArray(allCustomers) && allCustomers.length > 0) {
+    const raw = String(subscriptionCustomerId ?? '').trim();
+    if (raw) {
+      for (const c of allCustomers) {
+        const id = c?.id != null ? String(c.id).trim() : '';
+        const list = c?.CustomerListID != null ? String(c.CustomerListID).trim() : '';
+        if (!id && !list) continue;
+        if (
+          raw === id ||
+          raw === list ||
+          norm(raw) === norm(id) ||
+          norm(raw) === norm(list)
+        ) {
+          linkDirectoryRow(c);
+          break;
+        }
+      }
+    }
+
+    if (customerRecord) {
+      const rid = customerRecord.id != null ? String(customerRecord.id).trim() : '';
+      const rlist = customerRecord.CustomerListID != null ? String(customerRecord.CustomerListID).trim() : '';
+      if (rid || rlist) {
+        for (const c of allCustomers) {
+          const id = c?.id != null ? String(c.id).trim() : '';
+          const list = c?.CustomerListID != null ? String(c.CustomerListID).trim() : '';
+          if (
+            (rid && (rid === id || rid === list)) ||
+            (rlist && (rlist === id || rlist === list))
+          ) {
+            linkDirectoryRow(c);
+            break;
+          }
+        }
+      }
+    }
+
+    const subNm = normName(subscriptionCustomerId);
+    if (subNm) {
+      for (const c of allCustomers) {
+        const cn = normName(c.name || c.Name);
+        if (cn && cn === subNm) {
+          linkDirectoryRow(c);
+          break;
+        }
+      }
+    }
+  }
+
   return s;
 }
 
 /**
  * Match one bottle field against subscription + customer record (same OR-branches as CustomerDetail bottle queries).
  */
-function bottleFieldMatchesSubscription(fieldRaw, subscriptionCustomerId, customerRecord) {
+function bottleFieldMatchesSubscription(fieldRaw, subscriptionCustomerId, customerRecord, allCustomers) {
   if (fieldRaw == null || fieldRaw === '') return false;
   const fieldId = norm(fieldRaw);
   const fieldAsName = normName(fieldRaw);
@@ -78,7 +142,7 @@ function bottleFieldMatchesSubscription(fieldRaw, subscriptionCustomerId, custom
   const cid = norm(customerRecord?.id);
   const name = normName(customerRecord?.name || customerRecord?.Name);
 
-  const targetIds = buildTargetCustomerIdSet(subscriptionCustomerId, customerRecord);
+  const targetIds = buildTargetCustomerIdSet(subscriptionCustomerId, customerRecord, allCustomers);
   if (fieldId && targetIds.has(fieldId)) return true;
 
   if (subKey && fieldId && fieldId === subKey) return true;
@@ -96,7 +160,7 @@ function bottleFieldMatchesSubscription(fieldRaw, subscriptionCustomerId, custom
   return false;
 }
 
-function singleCustomerAssignmentMatch(bottle, subscriptionCustomerId, customerRecord) {
+function singleCustomerAssignmentMatch(bottle, subscriptionCustomerId, customerRecord, allCustomers) {
   const assignedName = normName(bottle.customer_name);
 
   const subKey = norm(subscriptionCustomerId);
@@ -105,8 +169,8 @@ function singleCustomerAssignmentMatch(bottle, subscriptionCustomerId, customerR
 
   // Do not use assigned_customer || customer_id — legacy rows can have a stale assigned_customer
   // while customer_id still matches (CustomerDetail runs separate queries per column).
-  if (bottleFieldMatchesSubscription(bottle.assigned_customer, subscriptionCustomerId, customerRecord)) return true;
-  if (bottleFieldMatchesSubscription(bottle.customer_id, subscriptionCustomerId, customerRecord)) return true;
+  if (bottleFieldMatchesSubscription(bottle.assigned_customer, subscriptionCustomerId, customerRecord, allCustomers)) return true;
+  if (bottleFieldMatchesSubscription(bottle.customer_id, subscriptionCustomerId, customerRecord, allCustomers)) return true;
 
   const assignedNameMatches =
     (subKey && assignedName && assignedName === normName(subscriptionCustomerId)) ||
@@ -125,10 +189,11 @@ function singleCustomerAssignmentMatch(bottle, subscriptionCustomerId, customerR
  */
 export function bottleAssignedToCustomer(bottle, subscriptionCustomerId, customerRecord, options = {}) {
   const descendants = options.descendantCustomers || [];
-  if (singleCustomerAssignmentMatch(bottle, subscriptionCustomerId, customerRecord)) return true;
+  const { allCustomers } = options;
+  if (singleCustomerAssignmentMatch(bottle, subscriptionCustomerId, customerRecord, allCustomers)) return true;
   for (const d of descendants) {
     const kidKey = d.CustomerListID || d.id;
-    if (singleCustomerAssignmentMatch(bottle, kidKey, d)) return true;
+    if (singleCustomerAssignmentMatch(bottle, kidKey, d, allCustomers)) return true;
   }
   return false;
 }
@@ -166,6 +231,7 @@ export function groupAssignedBottleCountsByProductCode(bottles, subscriptionCust
     if (
       !bottleAssignedToCustomer(b, subscriptionCustomerId, customerRecord, {
         descendantCustomers: descendants,
+        allCustomers,
       })
     )
       continue;
@@ -189,9 +255,10 @@ function isRentalOpen(rental) {
 function openRentalMatchesCustomer(rental, subscriptionCustomerId, customerRecord, options = {}) {
   if (!isRentalOpen(rental)) return false;
   const descendants = options.descendantCustomers || [];
+  const { allCustomers } = options;
   const matchOne = (subId, cust) =>
-    bottleFieldMatchesSubscription(rental.customer_id, subId, cust) ||
-    bottleFieldMatchesSubscription(rental.customer_name, subId, cust);
+    bottleFieldMatchesSubscription(rental.customer_id, subId, cust, allCustomers) ||
+    bottleFieldMatchesSubscription(rental.customer_name, subId, cust, allCustomers);
   if (matchOne(subscriptionCustomerId, customerRecord)) return true;
   for (const d of descendants) {
     const kidKey = d.CustomerListID || d.id;
@@ -223,7 +290,7 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
     root?.id && Array.isArray(allCustomers)
       ? getDescendantCustomerRecords(root, allCustomers)
       : [];
-  const assignOpts = { descendantCustomers: descendants };
+  const assignOpts = { descendantCustomers: descendants, allCustomers };
 
   const bottleGroups = groupAssignedBottleCountsByProductCode(bottles, subscriptionCustomerId, customerRecord, {
     allCustomers,

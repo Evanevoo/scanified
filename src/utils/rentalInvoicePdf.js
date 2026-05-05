@@ -78,7 +78,8 @@ function formatMoney(n) {
   return `$${x.toFixed(2)}`;
 }
 
-function defaultInvoiceNumber(row) {
+/** Display invoice # on PDFs and in customer emails (e.g. R97318 from row id). */
+export function defaultInvoiceNumber(row) {
   const fromId = String(row?.id || '').replace(/\D/g, '');
   if (fromId.length >= 5) return `R${fromId.slice(-5)}`;
   const pad = String(fromId || Date.now() % 100000).padStart(5, '0');
@@ -107,7 +108,8 @@ function daysBetween(startIso, endIso) {
  * @param {string} [params.terms]
  * @param {string} [params.territory]
  * @param {string} [params.purchaseOrder]
- * @param {Array<object>} params.bottles - bottle records for serialized balance
+ * @param {Array<object>} params.bottles - on-hand serialized rows (merged bottles + open rentals)
+ * @param {Array<object>} [params.returnsInPeriod] - closed rentals whose rental_end_date falls in invoice period
  * @param {string} [params.invoiceNumber]
  * @param {(n:number)=>string} [params.formatCurrency] - optional UI formatter
  */
@@ -126,6 +128,7 @@ export async function createRentalInvoicePdfDoc(params) {
     territory = '—',
     purchaseOrder = '—',
     bottles = [],
+    returnsInPeriod = [],
     invoiceNumber,
     formatCurrency = formatMoney,
   } = params;
@@ -384,50 +387,44 @@ export async function createRentalInvoicePdfDoc(params) {
   doc.setTextColor(40, 40, 40);
   y += 12;
 
-  // --- Transactions placeholder (section present on supplier invoices) ---
-  y = ensureY(y, 24);
-  doc.setFont(undefined, 'bold');
-  doc.setFontSize(9);
-  doc.text('TRANSACTIONS', left, y);
-  y += 5;
-  doc.setFont(undefined, 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-  doc.text('Detailed shipment and return history is not included in this export.', left, y);
-  y += 8;
-  doc.setTextColor(40, 40, 40);
-
-  // --- Serialized asset balance ---
+  // --- Serialized asset balance (on hand at period end) ---
   y = ensureY(y, 20);
   doc.setFont(undefined, 'bold');
   doc.setFontSize(9);
-  doc.text('SERIALIZED ASSET BALANCE AT END OF PERIOD', left, y);
+  doc.text('ON-HAND SERIALIZED ASSETS (END OF PERIOD)', left, y);
   y += 5;
 
   if (bottles.length === 0) {
     doc.setFont(undefined, 'normal');
     doc.setFontSize(7);
-    doc.text('No serialized assets linked to this rental for the export.', left, y);
-    y += 8;
+    doc.text(
+      'No serialized cylinders/assets matched this customer for on-hand listing (assign bottles or ensure open rental rows).',
+      left,
+      y,
+      { maxWidth: contentW }
+    );
+    y += 10;
   } else {
     const a1 = left;
-    const a2 = left + 28;
-    const a3 = left + 72;
-    const a4 = left + 102;
-    const a5 = left + 118;
-    const a6 = left + 142;
+    const a2 = left + 26;
+    const a3 = left + 52;
+    const a4 = left + 76;
+    const a5 = left + 92;
+    const a6 = left + 108;
+    const a7 = left + 124;
     doc.setFillColor(238, 239, 241);
     doc.rect(left, y - 3.5, contentW, 6, 'F');
-    doc.setFontSize(6);
-    doc.text('RENTAL CLASS', a1, y);
-    doc.text('ASSET TYPE', a2, y);
+    doc.setFontSize(5.5);
+    doc.text('CLASS', a1, y);
+    doc.text('ASSET / TYPE', a2, y);
     doc.text('DELIVERED', a3, y);
-    doc.text('DAYS HELD', a4, y);
-    doc.text('BARCODE', a5, y);
-    doc.text('SERIAL NUMBER', a6, y);
+    doc.text('STATUS', a4, y);
+    doc.text('DAYS', a5, y);
+    doc.text('BARCODE', a6, y);
+    doc.text('SERIAL', a7, y);
     y += 6;
     doc.setFont(undefined, 'normal');
-    doc.setFontSize(6);
+    doc.setFontSize(5.5);
 
     bottles.forEach((b) => {
       const rentalClass = b.rental_class || b.type || 'Industrial Cylinders';
@@ -435,19 +432,82 @@ export async function createRentalInvoicePdfDoc(params) {
       const delivered = b.rental_start_date || b.delivery_date || b.purchase_date;
       const held = daysBetween(delivered, period?.end);
       const barcode = b.barcode_number || b.barcode || b.bottle_barcode || b.asset_tag || '—';
-      const serial = b.serial_number || b.cylinder_number || '—';
-      const rcLines = doc.splitTextToSize(String(rentalClass), 24);
-      const atLines = doc.splitTextToSize(String(assetType), 38);
+      const serial = b.serial_number || b.cylinder_number || b._serial_display || '—';
+      const status = b._invoiceStatus || 'On hand';
+      const rcLines = doc.splitTextToSize(String(rentalClass), 22);
+      const atLines = doc.splitTextToSize(String(assetType), 34);
       const rowLines = Math.max(rcLines.length, atLines.length);
-      const h = Math.max(4, rowLines * 3);
+      const h = Math.max(4, rowLines * 2.8);
       y = ensureY(y, h + 2);
       doc.text(rcLines, a1, y);
       doc.text(atLines, a2, y);
-      doc.text(formatUsDate(delivered), a3, y);
-      doc.text(held != null ? String(held) : '—', a4, y);
-      doc.text(String(barcode), a5, y);
-      doc.text(String(serial), a6, y);
+      doc.text(delivered ? formatUsDate(delivered) : '—', a3, y);
+      doc.text(String(status), a4, y);
+      doc.text(held != null ? String(held) : '—', a5, y);
+      doc.text(String(barcode), a6, y);
+      doc.text(String(serial), a7, y);
       y += h;
+    });
+  }
+
+  // --- Returns closed during invoice period ---
+  const returns = Array.isArray(returnsInPeriod) ? returnsInPeriod : [];
+  if (returns.length > 0) {
+    y += 6;
+    y = ensureY(y, 28);
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(40, 40, 40);
+    doc.text('RETURNS DURING INVOICE PERIOD', left, y);
+    y += 5;
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(7);
+    doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
+    doc.text(
+      `Assets returned between ${formatUsDate(period?.start)} and ${formatUsDate(period?.end)}.`,
+      left,
+      y,
+      { maxWidth: contentW }
+    );
+    y += 8;
+    doc.setTextColor(40, 40, 40);
+
+    const r1 = left;
+    const r2 = left + 28;
+    const r3 = left + 52;
+    const r4 = left + 72;
+    const r5 = left + 92;
+    const r6 = left + 118;
+    doc.setFillColor(238, 239, 241);
+    doc.rect(left, y - 3.5, contentW, 6, 'F');
+    doc.setFontSize(5.5);
+    doc.text('RETURN DATE', r1, y);
+    doc.text('DELIVERED', r2, y);
+    doc.text('DAYS OUT', r3, y);
+    doc.text('BARCODE', r4, y);
+    doc.text('SERIAL', r5, y);
+    doc.text('ASSET TYPE', r6, y);
+    y += 6;
+    doc.setFont(undefined, 'normal');
+
+    returns.forEach((r) => {
+      const retDate = r.rental_end_date;
+      const del = r.rental_start_date;
+      const daysOut = daysBetween(del, retDate);
+      const barcode = r._barcode_display || r.bottle_barcode || '—';
+      const serial = r._serial_display || r.serial_number || '—';
+      const assetType =
+        r.product_code || r.product_type || r.dns_product_code || r.asset_type || '—';
+      const typeLines = doc.splitTextToSize(String(assetType), 42);
+      const rowH = Math.max(4, typeLines.length * 2.8);
+      y = ensureY(y, rowH + 2);
+      doc.text(formatUsDate(retDate), r1, y);
+      doc.text(del ? formatUsDate(del) : '—', r2, y);
+      doc.text(daysOut != null ? String(daysOut) : '—', r3, y);
+      doc.text(String(barcode), r4, y);
+      doc.text(String(serial), r5, y);
+      doc.text(typeLines, r6, y);
+      y += rowH + 1;
     });
   }
 
