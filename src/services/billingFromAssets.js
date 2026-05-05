@@ -256,6 +256,20 @@ function openRentalMatchesCustomer(rental, subscriptionCustomerId, customerRecor
   if (!isRentalOpen(rental)) return false;
   const descendants = options.descendantCustomers || [];
   const { allCustomers } = options;
+  const assignedBottleIds = options.assignedBottleIds || new Set();
+  const assignedBarcodes = options.assignedBarcodes || new Set();
+  const allowAssignedBottleRecovery = options.allowAssignedBottleRecovery === true;
+
+  // Duplicate/merge recovery:
+  // if an open rental points at a bottle currently assigned to this customer,
+  // treat it as billable even when rental.customer_id/customer_name are stale.
+  if (allowAssignedBottleRecovery) {
+    const rentalBottleId = rental?.bottle_id != null ? String(rental.bottle_id).trim() : '';
+    if (rentalBottleId && assignedBottleIds.has(rentalBottleId)) return true;
+    const rentalBarcode = rental?.bottle_barcode != null ? String(rental.bottle_barcode).trim().toUpperCase() : '';
+    if (rentalBarcode && assignedBarcodes.has(rentalBarcode)) return true;
+  }
+
   const matchOne = (subId, cust) =>
     bottleFieldMatchesSubscription(rental.customer_id, subId, cust, allCustomers) ||
     bottleFieldMatchesSubscription(rental.customer_name, subId, cust, allCustomers);
@@ -295,18 +309,45 @@ export function rentalProductCode(rental) {
 
 /**
  * Billable units for rental-mode billing.
- * Prefer open rental rows (aligned with CustomerDetail "Open rentals (billing)"),
- * then fall back to assigned bottles when rentals are missing.
+ * Use the larger of:
+ * - open rental rows (billing history / DNS awareness), and
+ * - currently assigned bottles (inventory truth).
+ *
+ * This guarantees assigned inventory is always billable even when rental rows lag behind.
  * @returns {Array<{ productCode: string, count: number }>}
  */
 export function groupBillableUnitCountsByProductCode(bottles, rentals, subscriptionCustomerId, customerRecord, options = {}) {
   const { allCustomers } = options;
+  const allowAssignedBottleRecovery = options.allowAssignedBottleRecovery === true;
   const root = resolveCustomerRowForHierarchy(customerRecord, allCustomers);
   const descendants =
     root?.id && Array.isArray(allCustomers)
       ? getDescendantCustomerRecords(root, allCustomers)
       : [];
-  const assignOpts = { descendantCustomers: descendants, allCustomers };
+  const assignedBottleIds = new Set();
+  const assignedBarcodes = new Set();
+  if (allowAssignedBottleRecovery) {
+    for (const b of bottles || []) {
+      if (
+        !bottleAssignedToCustomer(b, subscriptionCustomerId, customerRecord, {
+          descendantCustomers: descendants,
+          allCustomers,
+        })
+      ) continue;
+      if (b?.id != null && String(b.id).trim() !== '') {
+        assignedBottleIds.add(String(b.id).trim());
+      }
+      const barcode = String(b?.barcode_number || b?.barcode || '').trim().toUpperCase();
+      if (barcode) assignedBarcodes.add(barcode);
+    }
+  }
+  const assignOpts = {
+    descendantCustomers: descendants,
+    allCustomers,
+    assignedBottleIds,
+    assignedBarcodes,
+    allowAssignedBottleRecovery,
+  };
 
   const map = new Map();
   const seenRentalKeys = new Set();
@@ -322,13 +363,13 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
     map.set(key, (map.get(key) || 0) + 1);
   }
 
-  if (map.size === 0) {
-    const bottleGroups = groupAssignedBottleCountsByProductCode(bottles, subscriptionCustomerId, customerRecord, {
-      allCustomers,
-    });
-    for (const { productCode, count } of bottleGroups) {
-      map.set(productCode, count);
-    }
+  const bottleGroups = groupAssignedBottleCountsByProductCode(bottles, subscriptionCustomerId, customerRecord, {
+    allCustomers,
+  });
+  for (const { productCode, count } of bottleGroups) {
+    const rentalCount = map.get(productCode) || 0;
+    // Ensure all assigned bottles are billed, while preserving higher open-rental counts when present.
+    map.set(productCode, Math.max(rentalCount, count));
   }
 
   const out = [];

@@ -115,8 +115,10 @@ function bottleMatchesRentalRow(bottle, rentalBarcode) {
 function findCustomerAssetForRental(assets, rental) {
   if (!rental || rental.is_dns) return null;
   const rid = rental.bottle_id;
+  const ridKey = rid == null ? '' : String(rid).trim();
   return (assets || []).find((b) => {
-    if (rid && b.id === rid) return true;
+    const bidKey = b?.id == null ? '' : String(b.id).trim();
+    if (ridKey && bidKey && bidKey === ridKey) return true;
     if (rental.bottle_barcode) return bottleMatchesRentalRow(b, rental.bottle_barcode);
     return false;
   }) || null;
@@ -352,15 +354,28 @@ export default function CustomerDetail() {
    */
   const fetchMergedBottlesForCustomer = useCallback(async (orgId, customerName, customerListId) => {
     const listId = (customerListId || id || '').toString().trim();
-    const runs = await Promise.all([
+    const idRuns = await Promise.all([
       listId
         ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', listId)
         : Promise.resolve({ data: [], error: null }),
-      customerName
-        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', customerName)
-        : Promise.resolve({ data: [], error: null }),
       listId
         ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_id', listId)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    const map = new Map();
+    idRuns.forEach(({ data, error }) => {
+      if (error) return;
+      (data || []).forEach((b) => {
+        if (b?.id) map.set(b.id, b);
+      });
+    });
+    if (map.size > 0) return Array.from(map.values());
+
+    // Legacy fallback only when strict CustomerListID matching returns nothing.
+    const legacyRuns = await Promise.all([
+      customerName
+        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', customerName)
         : Promise.resolve({ data: [], error: null }),
       customerName
         ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_id', customerName)
@@ -369,9 +384,7 @@ export default function CustomerDetail() {
         ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_name', customerName)
         : Promise.resolve({ data: [], error: null }),
     ]);
-
-    const map = new Map();
-    runs.forEach(({ data, error }) => {
+    legacyRuns.forEach(({ data, error }) => {
       if (error) return;
       (data || []).forEach((b) => {
         if (b?.id) map.set(b.id, b);
@@ -381,7 +394,7 @@ export default function CustomerDetail() {
   }, [id]);
 
   /** Open rentals: customer_id may be List ID or (incorrectly) name; customer_name also matches. */
-  const fetchMergedOpenRentalsForCustomer = useCallback(async (orgId, customerName, customerListId) => {
+  const fetchMergedOpenRentalsForCustomer = useCallback(async (orgId, customerName, customerListId, assignedBottles = []) => {
     const listId = (customerListId || id || '').toString().trim();
     let rentalById = [];
     if (listId) {
@@ -394,18 +407,134 @@ export default function CustomerDetail() {
       if (rentalError) throw rentalError;
       rentalById = data || [];
     }
-    const { data: rentalByName, error: rentalByNameError } = await supabase
-      .from('rentals')
-      .select('*')
-      .eq('customer_name', customerName)
-      .eq('organization_id', orgId)
-      .is('rental_end_date', null);
-    const { data: rentalByNameAsId, error: rentalByNameAsIdError } = await supabase
-      .from('rentals')
-      .select('*')
-      .eq('customer_id', customerName)
-      .eq('organization_id', orgId)
-      .is('rental_end_date', null);
+
+    // Recovery path for deduped customers:
+    // include open rentals tied to currently assigned bottles even when rental.customer_id
+    // still points at an old/deleted duplicate customer identifier.
+    let rentalByAssignedBottleIds = [];
+    let rentalByAssignedBarcodes = [];
+    const assignedBottleIds = Array.from(
+      new Set(
+        (assignedBottles || [])
+          .map((b) => b?.id)
+          .filter((v) => v !== null && v !== undefined && String(v).trim() !== '')
+      )
+    );
+    const assignedBarcodes = Array.from(
+      new Set(
+        (assignedBottles || [])
+          .map((b) => (b?.barcode_number || b?.barcode || '').toString().trim())
+          .filter(Boolean)
+      )
+    );
+    if (assignedBottleIds.length > 0) {
+      const { data: byBottleIdData, error: byBottleIdErr } = await supabase
+        .from('rentals')
+        .select('*')
+        .in('bottle_id', assignedBottleIds)
+        .eq('organization_id', orgId)
+        .is('rental_end_date', null);
+      if (!byBottleIdErr) rentalByAssignedBottleIds = byBottleIdData || [];
+    }
+    if (assignedBarcodes.length > 0) {
+      const { data: byBarcodeData, error: byBarcodeErr } = await supabase
+        .from('rentals')
+        .select('*')
+        .in('bottle_barcode', assignedBarcodes)
+        .eq('organization_id', orgId)
+        .is('rental_end_date', null);
+      if (!byBarcodeErr) rentalByAssignedBarcodes = byBarcodeData || [];
+    }
+
+    let rentalByName = [];
+    let rentalByNameAsId = [];
+    let rentalByNameDns = [];
+    let rentalByNameAsIdDns = [];
+    let rentalByNameError = null;
+    let rentalByNameAsIdError = null;
+    let rentalByNameDnsError = null;
+    let rentalByNameAsIdDnsError = null;
+    if (rentalById.length === 0) {
+      // Legacy fallback only when strict CustomerListID matching returns nothing.
+      const byNameResp = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_name', customerName)
+        .eq('organization_id', orgId)
+        .is('rental_end_date', null);
+      const byNameAsIdResp = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_id', customerName)
+        .eq('organization_id', orgId)
+        .is('rental_end_date', null);
+      rentalByName = byNameResp.data || [];
+      rentalByNameAsId = byNameAsIdResp.data || [];
+      rentalByNameError = byNameResp.error;
+      rentalByNameAsIdError = byNameAsIdResp.error;
+    } else {
+      // Duplicate-customer cleanup support:
+      // include name-linked open rentals whose customer_id no longer exists in this org.
+      const { data: orgCustomerKeysData, error: orgCustomerKeysError } = await supabase
+        .from('customers')
+        .select('id, CustomerListID')
+        .eq('organization_id', orgId);
+      const knownCustomerKeys = new Set();
+      if (!orgCustomerKeysError) {
+        (orgCustomerKeysData || []).forEach((c) => {
+          const idKey = String(c?.id || '').trim();
+          const listKey = String(c?.CustomerListID || '').trim();
+          if (idKey) knownCustomerKeys.add(idKey);
+          if (listKey) knownCustomerKeys.add(listKey);
+        });
+      }
+
+      const byNameResp = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_name', customerName)
+        .eq('organization_id', orgId)
+        .is('rental_end_date', null);
+      const byNameAsIdResp = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_id', customerName)
+        .eq('organization_id', orgId)
+        .is('rental_end_date', null);
+      rentalByNameError = byNameResp.error;
+      rentalByNameAsIdError = byNameAsIdResp.error;
+      if (!rentalByNameError || !rentalByNameAsIdError) {
+        const onlyOrphanedLinkage = (rows) => (rows || []).filter((r) => {
+          const cid = String(r?.customer_id || '').trim();
+          if (!cid) return true;
+          if (cid === listId) return false;
+          return !knownCustomerKeys.has(cid);
+        });
+        rentalByName = onlyOrphanedLinkage(byNameResp.data || []);
+        rentalByNameAsId = onlyOrphanedLinkage(byNameAsIdResp.data || []);
+      }
+
+      // DNS can still be billable even when stored with legacy customer-name linkage.
+      const byNameDnsResp = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_name', customerName)
+        .eq('organization_id', orgId)
+        .is('rental_end_date', null)
+        .eq('is_dns', true);
+      const byNameAsIdDnsResp = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_id', customerName)
+        .eq('organization_id', orgId)
+        .is('rental_end_date', null)
+        .eq('is_dns', true);
+      rentalByNameDns = byNameDnsResp.data || [];
+      rentalByNameAsIdDns = byNameAsIdDnsResp.data || [];
+      rentalByNameDnsError = byNameDnsResp.error;
+      rentalByNameAsIdDnsError = byNameAsIdDnsResp.error;
+    }
+
     const seen = new Set();
     const merged = [];
     const push = (rows) => {
@@ -417,8 +546,12 @@ export default function CustomerDetail() {
       });
     };
     push(rentalById);
+    push(rentalByAssignedBottleIds);
+    push(rentalByAssignedBarcodes);
     if (!rentalByNameError) push(rentalByName);
     if (!rentalByNameAsIdError) push(rentalByNameAsId);
+    if (!rentalByNameDnsError) push(rentalByNameDns);
+    if (!rentalByNameAsIdDnsError) push(rentalByNameAsIdDns);
 
     // Final safety dedupe by business key so one active row is shown per bottle/DNS key.
     // Keep the most recent row when duplicates exist.
@@ -522,7 +655,8 @@ export default function CustomerDetail() {
       const merged = await fetchMergedOpenRentalsForCustomer(
         customer.organization_id,
         customer.name,
-        customer.CustomerListID
+        customer.CustomerListID,
+        customerAssets
       );
       setLocationAssets(merged);
       setTransferMessage({ open: true, message: 'RNB resolved. It will no longer show on this customer.', severity: 'success' });
@@ -549,7 +683,8 @@ export default function CustomerDetail() {
       const merged = await fetchMergedOpenRentalsForCustomer(
         customer.organization_id,
         customer.name,
-        customer.CustomerListID
+        customer.CustomerListID,
+        customerAssets
       );
       setLocationAssets(merged);
       setTransferMessage({ open: true, message: 'RNS resolved. It will no longer reduce this customer\'s total.', severity: 'success' });
@@ -624,7 +759,8 @@ export default function CustomerDetail() {
         const merged = await fetchMergedOpenRentalsForCustomer(
           orgId,
           customerData.name,
-          customerData.CustomerListID
+          customerData.CustomerListID,
+          customerAssetsData
         );
         // Backfill: assigned bottles with no rental record (e.g. assigned before rental creation was enforced)
         const bottleIdsWithRental = new Set(merged.map(r => r.bottle_id).filter(Boolean));
@@ -659,7 +795,8 @@ export default function CustomerDetail() {
           const mergedAfterBackfill = await fetchMergedOpenRentalsForCustomer(
             orgId,
             customerData.name,
-            customerData.CustomerListID
+            customerData.CustomerListID,
+            customerAssetsData
           );
           setLocationAssets(mergedAfterBackfill);
         } else {
@@ -931,7 +1068,6 @@ export default function CustomerDetail() {
           .from('bottles')
           .update({
             assigned_customer: listId,
-            customer_id: listId,
             customer_name: cust.name,
           })
           .eq('id', bottle.id)
@@ -978,18 +1114,47 @@ export default function CustomerDetail() {
     setReassigningOrphans(true);
     try {
       let fixed = 0;
-      for (const { bottle } of toFix) {
-        const { error } = await supabase
-          .from('bottles')
-          .update({
-            assigned_customer: listId,
-            customer_id: listId,
-            customer_name: customer.name,
-          })
-          .eq('id', bottle.id)
-          .eq('organization_id', organization.id);
-        if (!error) fixed++;
-        else logger.error('Reassign orphan bottle failed:', error);
+      for (const { rental, bottle } of toFix) {
+        const payload = {
+          assigned_customer: listId,
+          customer_name: customer.name,
+        };
+        let updated = false;
+
+        // Primary: update by bottle row id.
+        if (bottle?.id != null && String(bottle.id).trim() !== '') {
+          const { data, error } = await supabase
+            .from('bottles')
+            .update(payload)
+            .eq('id', bottle.id)
+            .eq('organization_id', organization.id)
+            .select('id');
+          if (error) {
+            logger.error('Reassign orphan bottle by id failed:', error);
+          } else if ((data || []).length > 0) {
+            updated = true;
+          }
+        }
+
+        // Fallback: update by rental barcode when id path updated 0 rows.
+        if (!updated) {
+          const barcode = String(rental?.bottle_barcode || '').trim();
+          if (barcode) {
+            const { data, error } = await supabase
+              .from('bottles')
+              .update(payload)
+              .eq('organization_id', organization.id)
+              .or(`barcode_number.eq.${barcode},serial_number.eq.${barcode}`)
+              .select('id');
+            if (error) {
+              logger.error('Reassign orphan bottle by barcode failed:', error);
+            } else if ((data || []).length > 0) {
+              updated = true;
+            }
+          }
+        }
+
+        if (updated) fixed++;
       }
       const freshBottles = await fetchMergedBottlesForCustomer(
         organization.id,
@@ -999,8 +1164,11 @@ export default function CustomerDetail() {
       setCustomerAssets(freshBottles);
       setTransferMessage({
         open: true,
-        message: `Reassigned ${fixed} bottle(s) to ${customer.name}. Inventory now matches open rentals.`,
-        severity: 'success',
+        message:
+          fixed > 0
+            ? `Reassigned ${fixed} bottle(s) to ${customer.name}.`
+            : 'No bottle assignments were changed. These rows may already be assigned or require manual data repair.',
+        severity: fixed > 0 ? 'success' : 'warning',
       });
     } catch (e) {
       logger.error('Reassign orphans error:', e);
@@ -1996,12 +2164,37 @@ export default function CustomerDetail() {
     };
     const customerIdChanged = newCustomerListID !== id;
     if (customerIdChanged) {
+      const orgId = customer?.organization_id;
+      if (!orgId) {
+        setSaveError('Organization is missing for this customer.');
+        setSaving(false);
+        return;
+      }
+      const { data: duplicate, error: duplicateCheckError } = await supabase
+        .from('customers')
+        .select('id, CustomerListID')
+        .eq('organization_id', orgId)
+        .eq('CustomerListID', newCustomerListID)
+        .maybeSingle();
+      if (duplicateCheckError) {
+        setSaveError(duplicateCheckError.message || 'Could not validate customer ID uniqueness.');
+        setSaving(false);
+        return;
+      }
+      if (duplicate && duplicate.id !== customer?.id) {
+        setSaveError(`Customer ID "${newCustomerListID}" already exists in this organization.`);
+        setSaving(false);
+        return;
+      }
+    }
+    if (customerIdChanged) {
       updateFields.CustomerListID = newCustomerListID;
     }
     const { error } = await supabase
       .from('customers')
       .update(updateFields)
-      .eq('CustomerListID', id);
+      .eq('CustomerListID', id)
+      .eq('organization_id', customer.organization_id);
     if (error) {
       setSaveError(error.message);
       setSaving(false);
@@ -2067,25 +2260,15 @@ export default function CustomerDetail() {
       value: customerAssets.length,
       helper: 'Containers assigned to this account in inventory (can be lower than open rentals)',
     },
-    {
-      label: 'Reporting total',
-      value: totalBottleCount,
-      helper: 'Physical + DNS (invoiced, no scan) − RNS (returned, no scan). RNB excluded. For on-hand summaries, not invoice line count.',
-    },
-    {
-      label: 'Child locations',
-      value: childCustomers.length,
-      helper: 'Subsidiary locations or departments linked to this customer',
-    },
   ];
 
   return (
-    <Box sx={{ p: { xs: 2, sm: 3 }, width: '100%' }}>
+    <Box sx={{ p: { xs: 1.25, sm: 2 }, width: '100%' }}>
       <Paper
         elevation={0}
         sx={{
-          p: { xs: 2.5, sm: 3 },
-          mb: 3,
+          p: { xs: 1.75, sm: 2.25 },
+          mb: 2,
           borderRadius: 3,
           border: '1px solid rgba(15, 23, 42, 0.08)',
           background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
@@ -2098,11 +2281,11 @@ export default function CustomerDetail() {
               <Chip label={customer.customer_type || 'CUSTOMER'} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
               <Chip label={formatLocationDisplay(customer.location || 'SASKATOON')} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
             </Stack>
-            <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
+            <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em' }}>
               {customer.name}
             </Typography>
-            <Typography variant="body1" sx={{ color: '#64748b', mt: 1, maxWidth: 760 }}>
-              Review customer identity, structure, assigned inventory, rental activity, and transfer actions from one operational detail workspace.
+            <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5, maxWidth: 760 }}>
+              Customer profile, inventory, and rental activity.
             </Typography>
           </Box>
           <Button
@@ -2116,13 +2299,13 @@ export default function CustomerDetail() {
         </Stack>
       </Paper>
 
-      <Grid container spacing={2} sx={{ mb: 3 }}>
+      <Grid container spacing={1.5} sx={{ mb: 2 }}>
         {detailMetrics.map((metric) => (
           <Grid item xs={12} sm={6} lg={3} key={metric.label}>
             <Paper
               elevation={0}
               sx={{
-                p: 2.25,
+                p: 1.5,
                 borderRadius: 2.5,
                 border: '1px solid rgba(15, 23, 42, 0.08)',
                 height: '100%',
@@ -2132,7 +2315,7 @@ export default function CustomerDetail() {
               <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                 {metric.label}
               </Typography>
-              <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', mt: 0.5, letterSpacing: '-0.03em' }}>
+              <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a', mt: 0.25, letterSpacing: '-0.02em' }}>
                 {metric.value}
               </Typography>
               <Typography variant="body2" sx={{ color: '#64748b', mt: 0.75 }}>
@@ -2147,10 +2330,10 @@ export default function CustomerDetail() {
         value={customerDetailTab}
         onChange={(_, v) => setCustomerDetailTab(v)}
         sx={{
-          mb: 3,
+          mb: 2,
           borderBottom: 1,
           borderColor: 'divider',
-          '& .MuiTab-root': { fontWeight: 700, textTransform: 'none', minHeight: 52 },
+          '& .MuiTab-root': { fontWeight: 700, textTransform: 'none', minHeight: 42, py: 0.5 },
           '& .Mui-selected': { color: 'primary.main' }
         }}
       >
@@ -2162,7 +2345,7 @@ export default function CustomerDetail() {
       {customerDetailTab === 0 && (
       <>
       {/* Customer Information */}
-      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 4 }, mb: 4, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
+      <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2.5 }, mb: 2.5, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Box display="flex" alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between" flexDirection={{ xs: 'column', md: 'row' }} mb={2}>
           <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
             <Typography variant="h5" fontWeight={700} color="primary">
@@ -2693,7 +2876,7 @@ export default function CustomerDetail() {
 
       {/* Transfer Information & Quick Actions */}
       {customerAssets.length === 0 && (
-        <Paper elevation={0} sx={{ p: { xs: 2.5, md: 4 }, mb: 4, borderRadius: 3, backgroundColor: '#f8fafc', border: '1px solid rgba(59, 130, 246, 0.16)' }}>
+        <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2.5 }, mb: 2.5, borderRadius: 3, backgroundColor: '#f8fafc', border: '1px solid rgba(59, 130, 246, 0.16)' }}>
           <Typography variant="h6" fontWeight={700} color="primary" mb={2}>
             📦 Bottle Assignment & Transfer Options
           </Typography>
@@ -2754,7 +2937,7 @@ export default function CustomerDetail() {
       )}
 
       {/* Bottle Rental Summary */}
-      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 4 }, mb: 4, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
+      <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2.5 }, mb: 2.5, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Box display="flex" alignItems="center" justifyContent="space-between" mb={3}>
           <Typography variant="h5" fontWeight={700} color="primary">
             📊 Bottle Rental Summary
@@ -2849,7 +3032,7 @@ export default function CustomerDetail() {
       </Paper>
 
       {/* Currently Assigned Bottles (physical + DNS so we know how many the customer has) */}
-      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 4 }, mb: 4, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
+      <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2.5 }, mb: 2.5, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
           <Box>
             <Typography variant="h5" fontWeight={700} color="primary">
@@ -3063,8 +3246,8 @@ export default function CustomerDetail() {
       </Paper>
 
       {/* Rental History */}
-      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 4 }, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2, mb: 3 }}>
+      <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2.5 }, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.25, mb: 2 }}>
           <Typography variant="h5" fontWeight={700} color="primary">
             📋 Rental History ({locationAssets.length} open — billing basis)
           </Typography>
@@ -3267,7 +3450,8 @@ export default function CustomerDetail() {
                                 const merged = await fetchMergedOpenRentalsForCustomer(
                                   customer?.organization_id,
                                   customer?.name,
-                                  customer?.CustomerListID || id
+                                  customer?.CustomerListID || id,
+                                  customerAssets
                                 );
                                 setLocationAssets(merged);
                               };
@@ -3624,8 +3808,8 @@ export default function CustomerDetail() {
 
       {/* Tab 1: Rental settings (TrackAbout-style) - theme matches Customer Info paper */}
       {customerDetailTab === 1 && (
-        <Paper elevation={3} sx={{ p: 4, mb: 4, borderRadius: 4, border: '1.5px solid', borderColor: 'divider', boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)' }}>
-          <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Paper elevation={3} sx={{ p: { xs: 1.75, md: 2.5 }, mb: 2.5, borderRadius: 4, border: '1.5px solid', borderColor: 'divider', boxShadow: '0 2px 12px 0 rgba(16,24,40,0.04)' }}>
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
             <Typography variant="h5" fontWeight={700} color="primary">Rental</Typography>
             <Button variant="outlined" startIcon={<EditIcon />} onClick={handleOpenRentalSettings} sx={{ borderRadius: 2, fontWeight: 700 }}>
               Edit rental settings
