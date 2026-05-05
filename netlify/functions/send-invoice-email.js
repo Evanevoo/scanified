@@ -266,22 +266,14 @@ exports.handler = async (event, _context) => {
       let fromHeader;
       let replyToHeader = addr;
 
-      if (emailService === 'Gmail' && gmailUser) {
-        const requestedLower = addr.toLowerCase();
-        if (requestedLower && requestedLower === gmailUser) {
-          fromHeader = `"${friendly}" <${addr}>`;
-        } else {
-          fromHeader = `"${friendly}" <${process.env.EMAIL_USER}>`;
-          console.warn(
-            `Gmail SMTP: visible From uses authenticated account ${process.env.EMAIL_USER}; Reply-To set to selected sender ${addr}`
-          );
-        }
-      } else if (emailService === 'SMTP2GO' && addr) {
-        fromHeader = `"${friendly}" <${addr}>`;
-      } else if (addr) {
+      if (addr) {
         fromHeader = `"${friendly}" <${addr}>`;
       } else {
         fromHeader = smtpEnvelope ? `"${friendly}" <${smtpEnvelope}>` : `"${friendly}" <unknown>`;
+      }
+
+      if (emailService === 'Gmail' && addr && addr.toLowerCase() !== gmailUser) {
+        console.log(`Gmail SMTP: From set to ${addr}; Gmail may rewrite to authenticated account. Reply-To: ${addr}`);
       }
 
       console.log(`Sending invoice email via ${emailService} from header: ${fromHeader}, replyTo: ${replyToHeader}, to: ${to}`);

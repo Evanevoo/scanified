@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscriptions } from '../context/SubscriptionContext';
@@ -105,6 +105,8 @@ export default function Subscriptions() {
   const [monthlyQbCohort, setMonthlyQbCohort] = useState('all');
   const [bulkEmailing, setBulkEmailing] = useState(false);
   const [bulkEmailProgress, setBulkEmailProgress] = useState({ sent: 0, total: 0, failed: 0 });
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [templateForm, setTemplateForm] = useState({ subject: '', body: '' });
 
   const tabFilters = ['all', 'monthly', 'yearly', 'cancelled'];
 
@@ -151,6 +153,9 @@ export default function Subscriptions() {
     const nameKey = normalizeName(idOrName) || normalizeName(fallbackName);
     return customerResolvers.byId.get(idKey) || customerResolvers.byName.get(nameKey) || null;
   }, [customerResolvers]);
+
+  const resolveCustomerRef = useRef(resolveCustomer);
+  useEffect(() => { resolveCustomerRef.current = resolveCustomer; });
 
   const matchCustomerRecordBySubscriptionId = useCallback((customerId) => {
     if (!customerId || !(ctx.customers || []).length) return null;
@@ -481,7 +486,7 @@ export default function Subscriptions() {
           .reduce((acc, row) => {
             const key = String(row.customer_id || row.customer_name || 'unassigned').trim();
             if (!key) return acc;
-            const resolvedCustomer = resolveCustomer(row.customer_id || row.customer_name, row.customer_name);
+            const resolvedCustomer = resolveCustomerRef.current(row.customer_id || row.customer_name, row.customer_name);
             const fallbackId = String(row.customer_id || row.customer_name || key).trim();
             const fallbackName =
               row.customer_name ||
@@ -562,7 +567,7 @@ export default function Subscriptions() {
         if (!active) return;
 
         leaseRows = (leaseData || []).map((a) => {
-          const resolvedCustomer = resolveCustomer(a.customer_id || a.customer_name, a.customer_name);
+          const resolvedCustomer = resolveCustomerRef.current(a.customer_id || a.customer_name, a.customer_name);
           const displayName =
             resolvedCustomer?.name ||
             resolvedCustomer?.Name ||
@@ -600,7 +605,7 @@ export default function Subscriptions() {
     };
     loadLegacyActiveRentals();
     return () => { active = false; };
-  }, [organization?.id, customerResolvers]);
+  }, [organization?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const allRows = useMemo(() => {
     const activeCustomerIdKeys = new Set(
@@ -664,14 +669,54 @@ export default function Subscriptions() {
     const legacyTotalsByCustomer = new Map(
       (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), parseFloat(r.totalPerCycle) || 0])
     );
+
+    const bottles = ctx.bottles || [];
+    const rentals = ctx.rentals || [];
+    const allCustomers = ctx.customers || [];
+    const billableGroupsCache = new Map();
+    for (const row of combined) {
+      if (!row.isVirtual) continue;
+      const cacheKey = String(
+        row.customer_id || row.customer?.CustomerListID || row.customer?.id || row.customer?.name || row.customer?.Name || ''
+      ).trim();
+      if (!cacheKey || billableGroupsCache.has(cacheKey)) continue;
+      billableGroupsCache.set(cacheKey, groupBillableUnitCountsByProductCode(
+        bottles, rentals, cacheKey, row.customer || null, { allCustomers }
+      ));
+    }
+
     return combined.map((row) => {
       const customerKey = normalize(row.customer_id);
       const allProductsOverride = findAllProductsOverrideMultiKey(customerOverrideMap, row);
       const period = String(row.billing_period || 'monthly').toLowerCase();
       let total = parseFloat(row.totalPerCycle) || 0;
+      let computedItemCount = parseFloat(row.itemCount) || 0;
       let effectiveProductCounts = row.productCounts && typeof row.productCounts === 'object'
         ? row.productCounts
         : null;
+
+      if (row.isVirtual) {
+        const subscriptionMatchKey =
+          String(
+            row.customer_id ||
+              row.customer?.CustomerListID ||
+              row.customer?.id ||
+              row.customer?.name ||
+              row.customer?.Name ||
+              ''
+          ).trim();
+        const groups = billableGroupsCache.get(subscriptionMatchKey || row.customer_id) || [];
+        if (groups.length > 0) {
+          computedItemCount = groups.reduce((s, g) => s + (parseFloat(g.count) || 0), 0);
+          effectiveProductCounts = {};
+          for (const g of groups) {
+            if ((parseFloat(g.count) || 0) <= 0) continue;
+            const key = g.productCode || '__unclassified__';
+            effectiveProductCounts[key] = (effectiveProductCounts[key] || 0) + g.count;
+          }
+          if (Object.keys(effectiveProductCounts).length === 0) effectiveProductCounts = null;
+        }
+      }
 
       // For legacy virtual rows, derive product mix from linked bottle ids first.
       if (row.isVirtual && !effectiveProductCounts) {
@@ -769,7 +814,7 @@ export default function Subscriptions() {
                 ? parseFloat(allProductsOverride.custom_monthly_price)
                 : null;
 
-        const qty = parseFloat(row.itemCount) || 0;
+        const qty = computedItemCount;
         if (unitOverride != null) {
           total = (unitOverride || 0) * qty;
         } else if ((parseFloat(allProductsOverride.discount_percent) || 0) > 0 && total > 0) {
@@ -797,7 +842,7 @@ export default function Subscriptions() {
       // Absolute fallback: never leave active rows with items at $0 when no
       // resolvable pricing source exists.
       if ((parseFloat(total) || 0) <= 0) {
-        const qty = parseFloat(row.itemCount) || 0;
+        const qty = computedItemCount;
         if (qty > 0) {
           const period = String(row.billing_period || 'monthly').toLowerCase();
           const unit = period === 'yearly' ? defaultUnitRateByPeriod.yearly : defaultUnitRateByPeriod.monthly;
@@ -805,7 +850,7 @@ export default function Subscriptions() {
         }
       }
 
-      return { ...row, totalPerCycle: total };
+      return { ...row, itemCount: computedItemCount, ...(effectiveProductCounts ? { productCounts: effectiveProductCounts } : {}), totalPerCycle: total };
     });
   }, [
     enriched,
@@ -1444,7 +1489,11 @@ export default function Subscriptions() {
       }
 
       const defaultSubject = savedEmailTemplate?.subject
-        || `Invoice ${invNo} – ${customerName} – ${orgName}`;
+        ? savedEmailTemplate.subject
+            .replace(/\{invoice_number\}/gi, invNo)
+            .replace(/\{amount\}/gi, `$${formattedAmount}`)
+            .replace(/\{customer_name\}/gi, customerName)
+        : `Invoice ${invNo} – ${customerName} – ${orgName}`;
 
       setSenderOptions(options);
       setEmailRow(sub);
@@ -1626,6 +1675,37 @@ export default function Subscriptions() {
     }
   }, [filtered, buildInvoicePdfForRow, organization, profile, user]);
 
+  const openTemplateDialog = useCallback(() => {
+    const saved = (() => {
+      try {
+        const raw = localStorage.getItem(`invoiceEmailTemplate_${organization?.id}`);
+        return raw ? JSON.parse(raw) : null;
+      } catch { return null; }
+    })();
+    setTemplateForm({
+      subject: saved?.subject || 'Invoice {invoice_number} – {customer_name}',
+      body: saved?.body || 'Your invoice {invoice_number} for {amount} is attached.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.',
+    });
+    setTemplateDialogOpen(true);
+  }, [organization?.id]);
+
+  const handleSaveTemplate = useCallback(() => {
+    if (!organization?.id) return;
+    localStorage.setItem(
+      `invoiceEmailTemplate_${organization.id}`,
+      JSON.stringify(templateForm)
+    );
+    setTemplateDialogOpen(false);
+    setActionSuccess('Email template saved.');
+  }, [organization?.id, templateForm]);
+
+  const headerCards = useMemo(() => [
+    { label: 'Active Rentals', value: activeRentalCount, icon: <People />, color: '#10B981' },
+    { label: 'Active Assets', value: activeRentalAssetCount, icon: <People />, color: '#0EA5E9' },
+    { label: 'Outstanding', value: formatCurrency(ctx.outstandingBalance), icon: <AccountBalance />, color: ctx.outstandingBalance > 0 ? '#EF4444' : '#10B981' },
+    { label: 'Next Billing', value: derivedNextBilling ? formatDate(derivedNextBilling) : '—', icon: <Schedule />, color: '#F59E0B' },
+  ], [activeRentalCount, activeRentalAssetCount, ctx.outstandingBalance, derivedNextBilling]);
+
   if (ctx.loading) {
     return (
       <Box sx={{ p: 4 }}>
@@ -1634,13 +1714,6 @@ export default function Subscriptions() {
       </Box>
     );
   }
-
-  const headerCards = [
-    { label: 'Active Rentals', value: activeRentalCount, icon: <People />, color: '#10B981' },
-    { label: 'Active Assets', value: activeRentalAssetCount, icon: <People />, color: '#0EA5E9' },
-    { label: 'Outstanding', value: formatCurrency(ctx.outstandingBalance), icon: <AccountBalance />, color: ctx.outstandingBalance > 0 ? '#EF4444' : '#10B981' },
-    { label: 'Next Billing', value: derivedNextBilling ? formatDate(derivedNextBilling) : '—', icon: <Schedule />, color: '#F59E0B' },
-  ];
 
   return (
     <Box sx={{ p: { xs: 2, sm: 3 }, minHeight: '100%' }}>
@@ -1670,6 +1743,17 @@ export default function Subscriptions() {
           >
             Invoice template
           </Button>
+          <Tooltip title="Set default email subject & message for all invoice emails">
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<EditIcon sx={{ fontSize: 14 }} />}
+              onClick={openTemplateDialog}
+              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
+            >
+              Email Template
+            </Button>
+          </Tooltip>
           <Tooltip title="Filter by payment terms on the customer record (import or Customer detail). NET 30 = terms containing net and 30. Credit card = Visa, Mastercard, Amex, credit card, etc.">
             <Stack direction="row" alignItems="center" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
               <FormControl size="small" sx={{ minWidth: 118 }}>
@@ -2132,6 +2216,42 @@ export default function Subscriptions() {
             sx={{ textTransform: 'none', bgcolor: primaryColor, '&:hover': { bgcolor: primaryColor, opacity: 0.9 } }}
           >
             {emailing ? 'Sending...' : 'Send Invoice'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog open={templateDialogOpen} onClose={() => setTemplateDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>Edit Email Template</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              size="small"
+              label="Subject"
+              value={templateForm.subject}
+              onChange={(e) => setTemplateForm((p) => ({ ...p, subject: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              size="small"
+              label="Message Body"
+              value={templateForm.body}
+              onChange={(e) => setTemplateForm((p) => ({ ...p, body: e.target.value }))}
+              multiline
+              rows={8}
+              fullWidth
+            />
+            <Alert severity="info" sx={{ fontSize: '0.8rem' }}>
+              Available placeholders: <strong>{'{invoice_number}'}</strong>, <strong>{'{amount}'}</strong>, <strong>{'{customer_name}'}</strong>
+            </Alert>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setTemplateDialogOpen(false)} sx={{ textTransform: 'none' }}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleSaveTemplate}
+            sx={{ textTransform: 'none', bgcolor: primaryColor, '&:hover': { bgcolor: primaryColor, opacity: 0.9 } }}
+          >
+            Save Template
           </Button>
         </DialogActions>
       </Dialog>
