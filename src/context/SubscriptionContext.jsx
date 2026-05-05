@@ -82,6 +82,14 @@ export function SubscriptionProvider({ children }) {
     }
 
     try {
+      const withTimeout = (promise, label, ms = 15000) =>
+        Promise.race([
+          promise,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`${label} query timed out after ${ms}ms`)), ms)
+          ),
+        ]);
+
       const isMissingTableError = (res) => (
         !!res?.error && (
           res.error.code === '42P01' || // Postgres undefined_table
@@ -106,7 +114,7 @@ export function SubscriptionProvider({ children }) {
           return { data: fallback, error: null };
         }
 
-        const res = await queryPromise;
+        const res = await withTimeout(queryPromise, tableName);
         if (isMissingTableError(res)) {
           missingTablesRef.current.add(tableName);
           persistMissingTables();

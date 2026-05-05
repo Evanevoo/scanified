@@ -393,8 +393,8 @@ export default function CustomerDetail() {
     return Array.from(map.values());
   }, [id]);
 
-  /** Open rentals: customer_id may be List ID or (incorrectly) name; customer_name also matches. */
-  const fetchMergedOpenRentalsForCustomer = useCallback(async (orgId, customerName, customerListId, assignedBottles = []) => {
+  /** Open rentals: strict customer_id (CustomerListID) match; legacy name fallback only when none found. */
+  const fetchMergedOpenRentalsForCustomer = useCallback(async (orgId, customerName, customerListId) => {
     const listId = (customerListId || id || '').toString().trim();
     let rentalById = [];
     if (listId) {
@@ -408,54 +408,11 @@ export default function CustomerDetail() {
       rentalById = data || [];
     }
 
-    // Recovery path for deduped customers:
-    // include open rentals tied to currently assigned bottles even when rental.customer_id
-    // still points at an old/deleted duplicate customer identifier.
-    let rentalByAssignedBottleIds = [];
-    let rentalByAssignedBarcodes = [];
-    const assignedBottleIds = Array.from(
-      new Set(
-        (assignedBottles || [])
-          .map((b) => b?.id)
-          .filter((v) => v !== null && v !== undefined && String(v).trim() !== '')
-      )
-    );
-    const assignedBarcodes = Array.from(
-      new Set(
-        (assignedBottles || [])
-          .map((b) => (b?.barcode_number || b?.barcode || '').toString().trim())
-          .filter(Boolean)
-      )
-    );
-    if (assignedBottleIds.length > 0) {
-      const { data: byBottleIdData, error: byBottleIdErr } = await supabase
-        .from('rentals')
-        .select('*')
-        .in('bottle_id', assignedBottleIds)
-        .eq('organization_id', orgId)
-        .is('rental_end_date', null);
-      if (!byBottleIdErr) rentalByAssignedBottleIds = byBottleIdData || [];
-    }
-    if (assignedBarcodes.length > 0) {
-      const { data: byBarcodeData, error: byBarcodeErr } = await supabase
-        .from('rentals')
-        .select('*')
-        .in('bottle_barcode', assignedBarcodes)
-        .eq('organization_id', orgId)
-        .is('rental_end_date', null);
-      if (!byBarcodeErr) rentalByAssignedBarcodes = byBarcodeData || [];
-    }
-
     let rentalByName = [];
     let rentalByNameAsId = [];
-    let rentalByNameDns = [];
-    let rentalByNameAsIdDns = [];
     let rentalByNameError = null;
     let rentalByNameAsIdError = null;
-    let rentalByNameDnsError = null;
-    let rentalByNameAsIdDnsError = null;
-    if (rentalById.length === 0) {
-      // Legacy fallback only when strict CustomerListID matching returns nothing.
+    if (rentalById.length === 0 && customerName) {
       const byNameResp = await supabase
         .from('rentals')
         .select('*')
@@ -472,67 +429,6 @@ export default function CustomerDetail() {
       rentalByNameAsId = byNameAsIdResp.data || [];
       rentalByNameError = byNameResp.error;
       rentalByNameAsIdError = byNameAsIdResp.error;
-    } else {
-      // Duplicate-customer cleanup support:
-      // include name-linked open rentals whose customer_id no longer exists in this org.
-      const { data: orgCustomerKeysData, error: orgCustomerKeysError } = await supabase
-        .from('customers')
-        .select('id, CustomerListID')
-        .eq('organization_id', orgId);
-      const knownCustomerKeys = new Set();
-      if (!orgCustomerKeysError) {
-        (orgCustomerKeysData || []).forEach((c) => {
-          const idKey = String(c?.id || '').trim();
-          const listKey = String(c?.CustomerListID || '').trim();
-          if (idKey) knownCustomerKeys.add(idKey);
-          if (listKey) knownCustomerKeys.add(listKey);
-        });
-      }
-
-      const byNameResp = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_name', customerName)
-        .eq('organization_id', orgId)
-        .is('rental_end_date', null);
-      const byNameAsIdResp = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_id', customerName)
-        .eq('organization_id', orgId)
-        .is('rental_end_date', null);
-      rentalByNameError = byNameResp.error;
-      rentalByNameAsIdError = byNameAsIdResp.error;
-      if (!rentalByNameError || !rentalByNameAsIdError) {
-        const onlyOrphanedLinkage = (rows) => (rows || []).filter((r) => {
-          const cid = String(r?.customer_id || '').trim();
-          if (!cid) return true;
-          if (cid === listId) return false;
-          return !knownCustomerKeys.has(cid);
-        });
-        rentalByName = onlyOrphanedLinkage(byNameResp.data || []);
-        rentalByNameAsId = onlyOrphanedLinkage(byNameAsIdResp.data || []);
-      }
-
-      // DNS can still be billable even when stored with legacy customer-name linkage.
-      const byNameDnsResp = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_name', customerName)
-        .eq('organization_id', orgId)
-        .is('rental_end_date', null)
-        .eq('is_dns', true);
-      const byNameAsIdDnsResp = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_id', customerName)
-        .eq('organization_id', orgId)
-        .is('rental_end_date', null)
-        .eq('is_dns', true);
-      rentalByNameDns = byNameDnsResp.data || [];
-      rentalByNameAsIdDns = byNameAsIdDnsResp.data || [];
-      rentalByNameDnsError = byNameDnsResp.error;
-      rentalByNameAsIdDnsError = byNameAsIdDnsResp.error;
     }
 
     const seen = new Set();
@@ -546,12 +442,8 @@ export default function CustomerDetail() {
       });
     };
     push(rentalById);
-    push(rentalByAssignedBottleIds);
-    push(rentalByAssignedBarcodes);
     if (!rentalByNameError) push(rentalByName);
     if (!rentalByNameAsIdError) push(rentalByNameAsId);
-    if (!rentalByNameDnsError) push(rentalByNameDns);
-    if (!rentalByNameAsIdDnsError) push(rentalByNameAsIdDns);
 
     // Final safety dedupe by business key so one active row is shown per bottle/DNS key.
     // Keep the most recent row when duplicates exist.
@@ -655,8 +547,7 @@ export default function CustomerDetail() {
       const merged = await fetchMergedOpenRentalsForCustomer(
         customer.organization_id,
         customer.name,
-        customer.CustomerListID,
-        customerAssets
+        customer.CustomerListID
       );
       setLocationAssets(merged);
       setTransferMessage({ open: true, message: 'RNB resolved. It will no longer show on this customer.', severity: 'success' });
@@ -683,8 +574,7 @@ export default function CustomerDetail() {
       const merged = await fetchMergedOpenRentalsForCustomer(
         customer.organization_id,
         customer.name,
-        customer.CustomerListID,
-        customerAssets
+        customer.CustomerListID
       );
       setLocationAssets(merged);
       setTransferMessage({ open: true, message: 'RNS resolved. It will no longer reduce this customer\'s total.', severity: 'success' });
@@ -759,8 +649,7 @@ export default function CustomerDetail() {
         const merged = await fetchMergedOpenRentalsForCustomer(
           orgId,
           customerData.name,
-          customerData.CustomerListID,
-          customerAssetsData
+          customerData.CustomerListID
         );
         // Backfill: assigned bottles with no rental record (e.g. assigned before rental creation was enforced)
         const bottleIdsWithRental = new Set(merged.map(r => r.bottle_id).filter(Boolean));
@@ -795,8 +684,7 @@ export default function CustomerDetail() {
           const mergedAfterBackfill = await fetchMergedOpenRentalsForCustomer(
             orgId,
             customerData.name,
-            customerData.CustomerListID,
-            customerAssetsData
+            customerData.CustomerListID
           );
           setLocationAssets(mergedAfterBackfill);
         } else {
@@ -1056,35 +944,10 @@ export default function CustomerDetail() {
       if (cancelled) return;
       setSupplementalBottles(found);
 
-      // Auto-reassign: open rental + bottle exists in org = customer still has it
-      if (!listId || !found.length) return;
-      let reassigned = 0;
-      for (const bottle of found) {
-        const alreadyHere =
-          String(bottle.assigned_customer || '') === listId ||
-          String(bottle.customer_id || '') === listId;
-        if (alreadyHere) continue;
-        const { error } = await supabase
-          .from('bottles')
-          .update({
-            assigned_customer: listId,
-            customer_name: cust.name,
-          })
-          .eq('id', bottle.id)
-          .eq('organization_id', orgId);
-        if (!error) reassigned++;
-        else logger.error('Auto-reassign orphan bottle failed:', error);
-      }
-      if (cancelled || reassigned === 0) return;
-      const freshBottles = await fetchMergedBottlesForCustomer(orgId, cust.name, listId);
-      if (!cancelled) {
-        setCustomerAssets(freshBottles);
-        setTransferMessage({
-          open: true,
-          message: `Auto-assigned ${reassigned} bottle(s) to ${cust.name} — open rental exists, no return was scanned.`,
-          severity: 'info',
-        });
-      }
+      // Auto-reassign disabled: silently rewriting bottles.assigned_customer based on
+      // stale open rentals can merge customers that share legacy rental linkage.
+      // Use the explicit "Assign N bottle(s)" button on this page when you want to
+      // reconcile inventory with open rental rows.
     })();
     return () => {
       cancelled = true;
@@ -3450,8 +3313,7 @@ export default function CustomerDetail() {
                                 const merged = await fetchMergedOpenRentalsForCustomer(
                                   customer?.organization_id,
                                   customer?.name,
-                                  customer?.CustomerListID || id,
-                                  customerAssets
+                                  customer?.CustomerListID || id
                                 );
                                 setLocationAssets(merged);
                               };
