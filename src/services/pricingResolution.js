@@ -361,10 +361,20 @@ export function computeSubscriptionBillingCycleTotal(sub, customerRecord, ctx, b
     return leaseAnnualToCycleTotal(annual, sub.billing_period);
   }
 
+  const subscriptionMatchKey =
+    String(
+      sub.customer_id ||
+        cust?.CustomerListID ||
+        cust?.id ||
+        cust?.name ||
+        cust?.Name ||
+        ''
+    ).trim() || sub.customer_id;
+
   const groups = groupBillableUnitCountsByProductCode(
     billingData.bottles || [],
     billingData.rentals || [],
-    sub.customer_id,
+    subscriptionMatchKey,
     cust,
     { allCustomers: billingData.customers }
   );

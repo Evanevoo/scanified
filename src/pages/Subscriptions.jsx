@@ -6,7 +6,8 @@ import { useTheme } from '../context/ThemeContext';
 import { createSubscription, generateInvoice } from '../services/subscriptionService';
 import { supabase } from '../supabase/client';
 import { formatCurrency, formatDate, STATUS_COLORS } from '../utils/subscriptionUtils';
-import { createRentalInvoicePdfDoc } from '../utils/rentalInvoicePdf';
+import { createRentalInvoicePdfDoc, defaultInvoiceNumber } from '../utils/rentalInvoicePdf';
+import { buildOpenAssetRowsForInvoice, fetchReturnsInInvoicePeriod } from '../utils/rentalInvoiceAssets';
 import {
   buildAssetPricingMap,
   buildCustomerOverrideMap,
@@ -18,6 +19,7 @@ import {
   computeSubscriptionBillingCycleTotal,
 } from '../utils/rentalDisplayPricing';
 import { groupBillableUnitCountsByProductCode } from '../services/billingFromAssets';
+import { useDebounce } from '../utils/performance';
 import { findActiveLeaseContract } from '../services/leaseBilling';
 import {
   Box, Typography, Card, CardContent, Grid, Tabs, Tab, Table, TableBody,
@@ -71,6 +73,8 @@ export default function Subscriptions() {
 
   const [tab, setTab] = useState(0);
   const [search, setSearch] = useState('');
+  /** Avoid re-filtering / full table work on every keystroke */
+  const debouncedSearch = useDebounce(search, 280);
   const [createOpen, setCreateOpen] = useState(false);
   const [newSub, setNewSub] = useState({ customer_id: '', billing_period: 'monthly' });
   const [saving, setSaving] = useState(false);
@@ -267,28 +271,63 @@ export default function Subscriptions() {
         organization?.id
       );
       let itemCount = 0;
+      /** Per SKU / rental-class counts — drives invoice PDF/email lines with correct resolveDisplayUnitPrice per asset type. */
+      let productCounts = null;
       if (customer?.billing_mode === 'lease') {
         const leaseLines = activeLease
           ? (ctx.leaseContractItems || []).filter((i) => i.contract_id === activeLease.id)
           : [];
         itemCount = leaseLines.reduce((s, i) => s + (parseInt(i.contracted_quantity, 10) || 0), 0);
+        if (leaseLines.length > 0) {
+          productCounts = {};
+          for (const line of leaseLines) {
+            const qty = parseInt(line.contracted_quantity, 10) || 0;
+            if (qty <= 0) continue;
+            const code = String(line.product_code || line.description || 'Lease asset').trim() || 'Lease asset';
+            productCounts[code] = (productCounts[code] || 0) + qty;
+          }
+        }
       } else {
+        const subscriptionMatchKey =
+          String(
+            sub.customer_id ||
+              customer?.CustomerListID ||
+              customer?.id ||
+              customer?.name ||
+              customer?.Name ||
+              ''
+          ).trim();
         const groups = groupBillableUnitCountsByProductCode(
           ctx.bottles || [],
           ctx.rentals || [],
-          sub.customer_id,
+          subscriptionMatchKey || sub.customer_id,
           customer,
           {
-          allCustomers: ctx.customers || [],
+            allCustomers: ctx.customers || [],
           }
         );
         itemCount = groups.reduce((s, g) => s + g.count, 0);
+        productCounts = {};
+        for (const g of groups) {
+          if (g.count <= 0) continue;
+          const key = g.productCode || '__unclassified__';
+          productCounts[key] = (productCounts[key] || 0) + g.count;
+        }
+        if (Object.keys(productCounts).length === 0) productCounts = null;
       }
       const forceYearlyPeriod =
         customer?.billing_mode === 'lease' ||
         (!!activeLease && customer?.billing_mode !== 'rental');
       const billingPeriod = forceYearlyPeriod ? 'yearly' : canonicalBillingPeriod(sub.billing_period);
-      return { ...sub, items, customer, totalPerCycle, itemCount, billing_period: billingPeriod };
+      return {
+        ...sub,
+        items,
+        customer,
+        totalPerCycle,
+        itemCount,
+        billing_period: billingPeriod,
+        ...(productCounts && Object.keys(productCounts).length > 0 ? { productCounts } : {}),
+      };
     });
   }, [
     ctx.subscriptions,
@@ -885,8 +924,8 @@ export default function Subscriptions() {
       });
     }
 
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
       list = list.filter((s) => {
         const name = s.customer?.name || s.customer?.Name || s.customer_id || '';
         const haystack = [name, String(s.customer_id || ''), String(s.notes || ''), String(s.customer?.payment_terms || '')].join(' ').toLowerCase();
@@ -894,7 +933,7 @@ export default function Subscriptions() {
       });
     }
     return list;
-  }, [allRows, tab, search, termsFilter]);
+  }, [allRows, tab, debouncedSearch, termsFilter]);
 
   const handleCreate = async () => {
     if (!newSub.customer_id) return;
@@ -1202,57 +1241,35 @@ export default function Subscriptions() {
   };
 
   const handleDownloadInvoicePdfForRow = (sub) => {
-    const norm = (v) => String(v || '').trim().toLowerCase();
-    const normName = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
-    const getCustomerBottlesForRow = (row) => {
-      if (Array.isArray(row?.bottleIdentifiers) && row.bottleIdentifiers.length > 0) {
-        return row.bottleIdentifiers.map((label, idx) => ({ id: `legacy-${idx}`, display_label: label }));
-      }
-      const idKeys = new Set([
-        norm(row?.customer_id),
-        norm(row?.customer?.id),
-        norm(row?.customer?.CustomerListID),
-      ].filter(Boolean));
-      const nameKeys = new Set([
-        normName(row?.customer?.name),
-        normName(row?.customer?.Name),
-        normName(row?.customer_name),
-      ].filter(Boolean));
-      return (ctx.bottles || []).filter((b) => {
-        const bottleIdKey = norm(b.assigned_customer || b.customer_id);
-        const bottleNameKey = normName(b.customer_name);
-        if (bottleIdKey && idKeys.has(bottleIdKey)) return true;
-        if (bottleNameKey && nameKeys.has(bottleNameKey)) return true;
-        return false;
-      });
-    };
     const getLineItemsForRow = (row) => {
-      if (Array.isArray(row?.items) && row.items.length > 0) {
-        return row.items.map((item) => {
-          const qty = parseFloat(item.quantity) || 1;
-          const unit = resolveDisplayUnitPrice(row, item);
-          return {
-            description: item.description || item.product_code || 'Rental item',
-            qty,
-            unit,
-            amount: unit * qty,
-          };
-        });
-      }
+      // Live billable units by SKU (from bottles + open rentals) — use first so each line gets its own resolved rate.
       if (row?.productCounts && Object.keys(row.productCounts).length > 0) {
         const periodFallback = row.billing_period === 'yearly'
           ? defaultUnitRateByPeriod.yearly
           : defaultUnitRateByPeriod.monthly;
         return Object.entries(row.productCounts).map(([code, qtyRaw]) => {
           const qty = parseFloat(qtyRaw) || 0;
+          const displayLabel = code === '__unclassified__' ? 'Unclassified' : (code || 'Asset');
           const unitRaw = resolveDisplayUnitPrice(row, {
             product_code: code,
-            description: code || 'Asset',
+            description: displayLabel,
           });
           const unit =
             Number.isFinite(unitRaw) && unitRaw > 0 ? unitRaw : periodFallback;
           return {
-            description: code || 'Asset',
+            description: displayLabel,
+            qty,
+            unit,
+            amount: unit * qty,
+          };
+        });
+      }
+      if (Array.isArray(row?.items) && row.items.length > 0) {
+        return row.items.map((item) => {
+          const qty = parseFloat(item.quantity) || 1;
+          const unit = resolveDisplayUnitPrice(row, item);
+          return {
+            description: item.description || item.product_code || 'Rental item',
             qty,
             unit,
             amount: unit * qty,
@@ -1287,8 +1304,33 @@ export default function Subscriptions() {
       const tax = +(total * taxRate).toFixed(2);
       const grandTotal = +(total + tax).toFixed(2);
       const customerRecord = matchCustomerRecordBySubscriptionId(row.customer_id);
-      const rawBottles = getCustomerBottlesForRow(row);
-      const bottlesForPdf = rawBottles.map((b) => (
+      let openAssets = buildOpenAssetRowsForInvoice(row, ctx.bottles, ctx.rentals);
+      if (Array.isArray(row?.bottleIdentifiers) && row.bottleIdentifiers.length > 0) {
+        const legacyExtras = row.bottleIdentifiers.map((label, idx) => ({
+          id: `legacy-${idx}`,
+          display_label: label,
+          description: label,
+          rental_class: 'Industrial Cylinders',
+          rental_start_date: null,
+          delivery_date: null,
+          barcode_number: label,
+          _invoiceStatus: 'On hand',
+        }));
+        openAssets = [...legacyExtras, ...openAssets];
+      }
+      let returnsInPeriod = [];
+      try {
+        returnsInPeriod = await fetchReturnsInInvoicePeriod(
+          supabase,
+          organization.id,
+          row,
+          periodStart,
+          periodEnd
+        );
+      } catch (e) {
+        console.warn('Invoice PDF: could not load returns in period', e);
+      }
+      const bottlesForPdf = openAssets.map((b) => (
         b.display_label ? { ...b, description: b.display_label } : b
       ));
       return createRentalInvoicePdfDoc({
@@ -1298,6 +1340,7 @@ export default function Subscriptions() {
         row,
         customerRecord,
         lineItems,
+        invoiceNumber: defaultInvoiceNumber(row),
         totals: {
           subtotal: total,
           tax,
@@ -1308,6 +1351,7 @@ export default function Subscriptions() {
         dates: { invoice: invoiceDate, due: dueDate },
         terms: customerRecord?.payment_terms || 'NET 30',
         bottles: bottlesForPdf,
+        returnsInPeriod,
         formatCurrency,
       });
     };
@@ -1338,15 +1382,23 @@ export default function Subscriptions() {
         .eq('id', organization.id)
         .single();
 
-      const loggedInEmail = user?.email || profile?.email || '';
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionEmail = sessionData?.session?.user?.email?.trim() || '';
+      const profileEmail = profile?.email?.trim() || '';
+      const loggedInEmail =
+        sessionEmail || profileEmail || user?.email?.trim() || '';
 
       const emails = new Set();
       if (loggedInEmail) emails.add(loggedInEmail);
       (orgData?.invoice_emails || []).forEach((e) => e && emails.add(e));
       if (orgData?.email) emails.add(orgData.email);
 
-      const options = Array.from(emails);
-      const defaultFrom = loggedInEmail || orgData?.default_invoice_email || options[0] || '';
+      const unique = Array.from(emails);
+      const options = loggedInEmail
+        ? [loggedInEmail, ...unique.filter((e) => e && e !== loggedInEmail)]
+        : unique;
+      const defaultFrom =
+        loggedInEmail || orgData?.default_invoice_email || options[0] || '';
       let customerEmail = (
         sub?.customer?.email
         || sub?.customer?.Email
@@ -1386,7 +1438,7 @@ export default function Subscriptions() {
       const periodEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
       const dueBase = new Date(`${periodEnd}T12:00:00`);
       dueBase.setDate(dueBase.getDate() + 30);
-      const invNo = `R${String(Date.now() % 100000).padStart(5, '0')}`;
+      const invNo = defaultInvoiceNumber(sub);
       const formattedAmount = amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
       const savedEmailTemplate = (() => {
@@ -1431,51 +1483,28 @@ export default function Subscriptions() {
     setActionError(null);
     setActionSuccess(null);
     try {
-      const norm = (v) => String(v || '').trim().toLowerCase();
-      const normName = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
-      const getCustomerBottlesForRow = (row) => {
-        if (Array.isArray(row?.bottleIdentifiers) && row.bottleIdentifiers.length > 0) {
-          return row.bottleIdentifiers.map((label, idx) => ({ id: `legacy-${idx}`, display_label: label }));
-        }
-        const idKeys = new Set([
-          norm(row?.customer_id),
-          norm(row?.customer?.id),
-          norm(row?.customer?.CustomerListID),
-        ].filter(Boolean));
-        const nameKeys = new Set([
-          normName(row?.customer?.name),
-          normName(row?.customer?.Name),
-          normName(row?.customer_name),
-        ].filter(Boolean));
-        return (ctx.bottles || []).filter((b) => {
-          const bottleIdKey = norm(b.assigned_customer || b.customer_id);
-          const bottleNameKey = normName(b.customer_name);
-          if (bottleIdKey && idKeys.has(bottleIdKey)) return true;
-          if (bottleNameKey && nameKeys.has(bottleNameKey)) return true;
-          return false;
-        });
-      };
       const getLineItemsForRow = (row) => {
-        if (Array.isArray(row?.items) && row.items.length > 0) {
-          return row.items.map((item) => {
-            const qty = parseFloat(item.quantity) || 1;
-            const unit = resolveDisplayUnitPrice(row, item);
-            return { description: item.description || item.product_code || 'Rental item', qty, unit, amount: unit * qty };
-          });
-        }
         if (row?.productCounts && Object.keys(row.productCounts).length > 0) {
           const periodFallback = row.billing_period === 'yearly'
             ? defaultUnitRateByPeriod.yearly
             : defaultUnitRateByPeriod.monthly;
           return Object.entries(row.productCounts).map(([code, qtyRaw]) => {
             const qty = parseFloat(qtyRaw) || 0;
+            const displayLabel = code === '__unclassified__' ? 'Unclassified' : (code || 'Asset');
             const unitRaw = resolveDisplayUnitPrice(row, {
               product_code: code,
-              description: code || 'Asset',
+              description: displayLabel,
             });
             const unit =
               Number.isFinite(unitRaw) && unitRaw > 0 ? unitRaw : periodFallback;
-            return { description: code || 'Asset', qty, unit, amount: unit * qty };
+            return { description: displayLabel, qty, unit, amount: unit * qty };
+          });
+        }
+        if (Array.isArray(row?.items) && row.items.length > 0) {
+          return row.items.map((item) => {
+            const qty = parseFloat(item.quantity) || 1;
+            const unit = resolveDisplayUnitPrice(row, item);
+            return { description: item.description || item.product_code || 'Rental item', qty, unit, amount: unit * qty };
           });
         }
         const qty = parseFloat(row?.itemCount) || 1;
@@ -1501,10 +1530,36 @@ export default function Subscriptions() {
         const tax = +(total * taxRate).toFixed(2);
         const grandTotal = +(total + tax).toFixed(2);
         const customerRecord = matchCustomerRecordBySubscriptionId(row.customer_id);
-        const rawBottles = getCustomerBottlesForRow(row);
-        const bottlesForPdf = rawBottles.map((b) => (
+        let openAssets = buildOpenAssetRowsForInvoice(row, ctx.bottles, ctx.rentals);
+        if (Array.isArray(row?.bottleIdentifiers) && row.bottleIdentifiers.length > 0) {
+          const legacyExtras = row.bottleIdentifiers.map((label, idx) => ({
+            id: `legacy-${idx}`,
+            display_label: label,
+            description: label,
+            rental_class: 'Industrial Cylinders',
+            rental_start_date: null,
+            delivery_date: null,
+            barcode_number: label,
+            _invoiceStatus: 'On hand',
+          }));
+          openAssets = [...legacyExtras, ...openAssets];
+        }
+        let returnsInPeriod = [];
+        try {
+          returnsInPeriod = await fetchReturnsInInvoicePeriod(
+            supabase,
+            organization.id,
+            row,
+            periodStart,
+            periodEnd
+          );
+        } catch (e) {
+          console.warn('Invoice email PDF: could not load returns in period', e);
+        }
+        const bottlesForPdf = openAssets.map((b) => (
           b.display_label ? { ...b, description: b.display_label } : b
         ));
+        const inv = defaultInvoiceNumber(row);
         return createRentalInvoicePdfDoc({
           organization,
           invoiceTemplate,
@@ -1512,6 +1567,7 @@ export default function Subscriptions() {
           row,
           customerRecord,
           lineItems,
+          invoiceNumber: inv,
           totals: {
             subtotal: total,
             tax,
@@ -1522,6 +1578,7 @@ export default function Subscriptions() {
           dates: { invoice: invoiceDate, due: dueDate },
           terms: customerRecord?.payment_terms || 'NET 30',
           bottles: bottlesForPdf,
+          returnsInPeriod,
           formatCurrency,
         });
       };
@@ -1536,11 +1593,12 @@ export default function Subscriptions() {
         body: JSON.stringify({
           to: emailForm.to,
           from: emailForm.from,
+          senderName: profile?.full_name || user?.user_metadata?.full_name || user?.user_metadata?.name || '',
           subject: emailForm.subject,
           body: bodyHtml,
           pdfBase64,
           pdfFileName,
-          invoiceNumber: emailRow?.id || '',
+          invoiceNumber: defaultInvoiceNumber(emailRow),
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -1726,7 +1784,12 @@ export default function Subscriptions() {
           />
         </Box>
 
-        <TableContainer>
+        <TableContainer
+          sx={{
+            transition: 'opacity 0.15s ease',
+            opacity: search !== debouncedSearch ? 0.88 : 1,
+          }}
+        >
           <Table size="small">
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' } }}>

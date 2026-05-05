@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
 import { useTheme } from '../context/ThemeContext';
@@ -34,12 +34,18 @@ export default function Home() {
     totalUsers: 0,
   });
   const [loading, setLoading] = useState(true);
+  const statsLoadedForOrgRef = useRef(null);
 
   useEffect(() => {
     let active = true;
     const loadStats = async () => {
-      if (!organization?.id) return;
-      setLoading(true);
+      if (!organization?.id) {
+        setLoading(false);
+        return;
+      }
+      const orgKey = organization.id;
+      const showFullPageLoader = statsLoadedForOrgRef.current !== orgKey;
+      if (showFullPageLoader) setLoading(true);
 
       const [customersRes, bottlesRes, rentalsRes, activeSubsRes, usersRes] = await Promise.allSettled([
         supabase.from('customers').select('id', { count: 'exact', head: true }).eq('organization_id', organization.id),
@@ -80,7 +86,10 @@ export default function Home() {
         activeRentals: Math.max(activeSubsCountFromDb, bottleCustomerIds.size, rentalCustomerIds.size, (subCtx.activeSubscriptions || []).length),
         totalUsers,
       });
-      setLoading(false);
+      if (showFullPageLoader) {
+        statsLoadedForOrgRef.current = orgKey;
+        setLoading(false);
+      }
     };
 
     loadStats();

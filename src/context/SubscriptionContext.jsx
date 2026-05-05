@@ -70,10 +70,16 @@ export function SubscriptionProvider({ children }) {
     }
   }, [orgId]);
 
-  const fetchAll = useCallback(async () => {
-    if (!orgId) return;
-    setLoading(true);
-    setError(null);
+  const fetchAll = useCallback(async (options = {}) => {
+    const silent = options.silent === true;
+    if (!orgId) {
+      if (mountedRef.current && !silent) setLoading(false);
+      return;
+    }
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
 
     try {
       const isMissingTableError = (res) => (
@@ -169,9 +175,9 @@ export function SubscriptionProvider({ children }) {
       setLeaseContractItems(leaseItemsRes.data || []);
     } catch (err) {
       console.error('SubscriptionContext fetch error:', err);
-      if (mountedRef.current) setError(err.message);
+      if (mountedRef.current && !silent) setError(err.message);
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current && !silent) setLoading(false);
     }
   }, [orgId]);
 
@@ -182,7 +188,22 @@ export function SubscriptionProvider({ children }) {
   }, [fetchAll]);
 
   useEffect(() => {
+    if (!orgId) {
+      setLoading(false);
+    }
+  }, [orgId]);
+
+  useEffect(() => {
     if (!orgId) return;
+
+    let debounceTimer = null;
+    const scheduleSilentRefresh = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        fetchAll({ silent: true });
+      }, 400);
+    };
 
     const channel = supabase.channel(`subscription-ctx-${orgId}`);
     const subscribeIfPresent = (table) => {
@@ -190,7 +211,7 @@ export function SubscriptionProvider({ children }) {
       channel.on(
         'postgres_changes',
         { event: '*', schema: 'public', table, filter: `organization_id=eq.${orgId}` },
-        () => fetchAll()
+        scheduleSilentRefresh
       );
     };
 
@@ -210,6 +231,7 @@ export function SubscriptionProvider({ children }) {
 
     channelRef.current = channel;
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
     };
   }, [orgId, fetchAll]);
@@ -294,7 +316,7 @@ export function SubscriptionProvider({ children }) {
     arr,
     outstandingBalance,
     nextBillingDate,
-    refresh: fetchAll,
+    refresh: () => fetchAll({ silent: false }),
   };
 
   return (
