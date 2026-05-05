@@ -5,8 +5,8 @@ import { useSubscriptions } from '../context/SubscriptionContext';
 import { useTheme } from '../context/ThemeContext';
 import { createSubscription, generateInvoice } from '../services/subscriptionService';
 import { supabase } from '../supabase/client';
-import jsPDF from 'jspdf';
 import { formatCurrency, formatDate, STATUS_COLORS } from '../utils/subscriptionUtils';
+import { createRentalInvoicePdfDoc } from '../utils/rentalInvoicePdf';
 import {
   buildAssetPricingMap,
   buildCustomerOverrideMap,
@@ -17,7 +17,7 @@ import {
   defaultUnitRatesFromAssetPricingTable,
   computeSubscriptionBillingCycleTotal,
 } from '../utils/rentalDisplayPricing';
-import { groupAssignedBottleCountsByProductCode } from '../services/billingFromAssets';
+import { groupBillableUnitCountsByProductCode } from '../services/billingFromAssets';
 import { findActiveLeaseContract } from '../services/leaseBilling';
 import {
   Box, Typography, Card, CardContent, Grid, Tabs, Tab, Table, TableBody,
@@ -31,6 +31,36 @@ import {
   Visibility as ViewIcon, Edit as EditIcon, Cancel as CancelIcon, Email as EmailIcon,
   Receipt as InvoiceIcon, TrendingUp, People, Schedule, AccountBalance, Download as DownloadIcon,
 } from '@mui/icons-material';
+
+/**
+ * Classifies customer payment_terms for QuickBooks monthly export cohorts.
+ * Returns net30 | credit_card | other | unknown (empty terms).
+ */
+function classifyInvoiceTermsForExport(paymentTermsRaw) {
+  const t = String(paymentTermsRaw || '').trim().toLowerCase();
+  if (!t) return 'unknown';
+  if (t.includes('net') && t.includes('30')) return 'net30';
+  if (
+    /\bvisa\b|\bmastercard\b|\bmc\b|\bamex\b|american express|\bdiscover\b|credit\s*card|card\s*payment|\bdebit\s*card\b/.test(t)
+  ) return 'credit_card';
+  return 'other';
+}
+
+function rowMatchesMonthlyQbCohort(row, cohort) {
+  if (cohort === 'all') return true;
+  const cat = classifyInvoiceTermsForExport(row.customer?.payment_terms);
+  if (cohort === 'net30') return cat === 'net30';
+  if (cohort === 'credit_card') return cat === 'credit_card';
+  return true;
+}
+
+/** Maps DB/UI aliases so period tabs stay consistent (e.g. annual → yearly). */
+function canonicalBillingPeriod(raw) {
+  const p = String(raw || '').trim().toLowerCase();
+  if (p === 'yearly' || p === 'annual' || p === 'year') return 'yearly';
+  if (p === 'monthly' || p === 'month') return 'monthly';
+  return p || 'monthly';
+}
 
 export default function Subscriptions() {
   const { organization, user, profile } = useAuth();
@@ -55,6 +85,9 @@ export default function Subscriptions() {
   const [senderOptions, setSenderOptions] = useState([]);
   const [emailRow, setEmailRow] = useState(null);
   const [emailForm, setEmailForm] = useState({ to: '', from: '', subject: '', message: '' });
+  const [termsFilter, setTermsFilter] = useState('all');
+  /** Monthly QuickBooks CSV: all | net30 | credit_card */
+  const [monthlyQbCohort, setMonthlyQbCohort] = useState('all');
 
   const tabFilters = ['all', 'monthly', 'yearly', 'cancelled'];
   const normalize = (v) => String(v || '').trim().toLowerCase();
@@ -204,6 +237,7 @@ export default function Subscriptions() {
   const enriched = useMemo(() => {
     const billingData = {
       bottles: ctx.bottles || [],
+      rentals: ctx.rentals || [],
       leaseContracts: ctx.leaseContracts || [],
       leaseContractItems: ctx.leaseContractItems || [],
       customers: ctx.customers || [],
@@ -225,33 +259,42 @@ export default function Subscriptions() {
           id: sub.customer_id,
           name: sub.customer_name || sub.customer_id,
           Name: sub.customer_name,
-          billing_mode: 'rental',
         };
       const totalPerCycle = computeSubscriptionBillingCycleTotal(sub, customer, pricingCtx, billingData);
+      const activeLease = findActiveLeaseContract(
+        ctx.leaseContracts || [],
+        sub.customer_id,
+        organization?.id
+      );
       let itemCount = 0;
       if (customer?.billing_mode === 'lease') {
-        const contract = findActiveLeaseContract(
-          ctx.leaseContracts || [],
-          sub.customer_id,
-          organization?.id
-        );
-        const leaseLines = contract
-          ? (ctx.leaseContractItems || []).filter((i) => i.contract_id === contract.id)
+        const leaseLines = activeLease
+          ? (ctx.leaseContractItems || []).filter((i) => i.contract_id === activeLease.id)
           : [];
         itemCount = leaseLines.reduce((s, i) => s + (parseInt(i.contracted_quantity, 10) || 0), 0);
       } else {
-        const groups = groupAssignedBottleCountsByProductCode(ctx.bottles || [], sub.customer_id, customer, {
+        const groups = groupBillableUnitCountsByProductCode(
+          ctx.bottles || [],
+          ctx.rentals || [],
+          sub.customer_id,
+          customer,
+          {
           allCustomers: ctx.customers || [],
-        });
+          }
+        );
         itemCount = groups.reduce((s, g) => s + g.count, 0);
       }
-      const billingPeriod = customer?.billing_mode === 'lease' ? 'yearly' : sub.billing_period;
+      const forceYearlyPeriod =
+        customer?.billing_mode === 'lease' ||
+        (!!activeLease && customer?.billing_mode !== 'rental');
+      const billingPeriod = forceYearlyPeriod ? 'yearly' : canonicalBillingPeriod(sub.billing_period);
       return { ...sub, items, customer, totalPerCycle, itemCount, billing_period: billingPeriod };
     });
   }, [
     ctx.subscriptions,
     ctx.subscriptionItems,
     ctx.bottles,
+    ctx.rentals,
     ctx.leaseContracts,
     ctx.leaseContractItems,
     ctx.customers,
@@ -352,7 +395,17 @@ export default function Subscriptions() {
           id: `virtual-${groupKey}`,
           customer: customer || { name: displayName, Name: displayName },
           customer_id: customerIdValue,
-          billing_period: customer?.billing_mode === 'lease' ? 'yearly' : 'monthly',
+          billing_period: (() => {
+            const activeLeaseForPeriod = findActiveLeaseContract(
+              ctx.leaseContracts || [],
+              customerIdValue,
+              organization?.id
+            );
+            const forceYearly =
+              customer?.billing_mode === 'lease' ||
+              (!!activeLeaseForPeriod && customer?.billing_mode !== 'rental');
+            return forceYearly ? 'yearly' : 'monthly';
+          })(),
           itemCount: group.bottleCount,
           productCounts: group.productCounts || {},
           totalPerCycle: 0,
@@ -363,7 +416,7 @@ export default function Subscriptions() {
       })
       .filter(Boolean)
       .sort((a, b) => (b.itemCount || 0) - (a.itemCount || 0));
-  }, [ctx.bottles, ctx.subscriptions, ctx.customers, customerResolvers]);
+  }, [ctx.bottles, ctx.subscriptions, ctx.customers, ctx.leaseContracts, customerResolvers, organization?.id]);
 
   useEffect(() => {
     let active = true;
@@ -450,7 +503,58 @@ export default function Subscriptions() {
         rows = [];
       }
 
-      if (active) setLegacyRows(rows);
+      // Imported / TrackAbout lease_agreements: yearly-only billing (no monthly cylinder rental).
+      // Shown on Rentals under Yearly / All; omitted from extraLegacy dedupe so they still appear
+      // when the same customer also has a monthly subscription row.
+      let leaseRows = [];
+      try {
+        if (!active) return;
+        const { data: leaseData, error: leaseErr } = await supabase
+          .from('lease_agreements')
+          .select(
+            'id, customer_id, customer_name, agreement_number, assets_on_agreement, max_asset_count, annual_amount, next_billing_date, end_date, status'
+          )
+          .eq('organization_id', organization.id)
+          .in('status', ['active', 'paused']);
+        if (leaseErr) throw leaseErr;
+        if (!active) return;
+
+        leaseRows = (leaseData || []).map((a) => {
+          const resolvedCustomer = resolveCustomer(a.customer_id || a.customer_name, a.customer_name);
+          const displayName =
+            resolvedCustomer?.name ||
+            resolvedCustomer?.Name ||
+            a.customer_name ||
+            a.customer_id ||
+            'Assigned customer';
+          const itemCount = Number.parseInt(String(a.max_asset_count ?? ''), 10);
+          const agreementCode = String(a.agreement_number || '').trim();
+          const productCode = String(a.assets_on_agreement || '').trim();
+          const productCounts = {};
+          if (productCode) productCounts[productCode] = Number.isFinite(itemCount) && itemCount > 0 ? itemCount : 1;
+
+          return {
+            id: `lease-agreement-${a.id}`,
+            customer: resolvedCustomer || { name: displayName, Name: displayName },
+            customer_id: resolvedCustomer?.CustomerListID || resolvedCustomer?.id || a.customer_id || a.customer_name,
+            billing_period: 'yearly',
+            itemCount: Number.isFinite(itemCount) && itemCount > 0 ? itemCount : 1,
+            totalPerCycle: parseFloat(a.annual_amount) || 0,
+            bottleIdentifiers: [],
+            bottleIds: [],
+            productCounts,
+            next_billing_date: a.next_billing_date || a.end_date || null,
+            status: String(a.status || 'active').toLowerCase(),
+            isVirtual: true,
+            legacySource: 'lease_agreements',
+            notes: agreementCode ? `Agreement ${agreementCode}` : undefined,
+          };
+        });
+      } catch {
+        leaseRows = [];
+      }
+
+      if (active) setLegacyRows([...rows, ...leaseRows]);
     };
     loadLegacyActiveRentals();
     return () => { active = false; };
@@ -479,18 +583,25 @@ export default function Subscriptions() {
     );
     // Legacy rentals table: only add when this customer is not already in subscriptions/bottle rows.
     const extraLegacy = (legacyRows || []).filter((r) => {
+      if (r.legacySource === 'lease_agreements') return false;
       const k = String(r.customer_id || r.customer?.name || '').trim().toLowerCase();
       return k && !existingKeys.has(k);
     });
-    const combined = [...merged, ...extraLegacy].filter((row) => {
+    // lease_agreements imports are yearly lease fees (not monthly cylinder rental); always merge so
+    // lease-only customers appear, and Yearly tab stays populated when they share a customer with other rows.
+    const leaseAgreementRows = (legacyRows || []).filter((r) => r.legacySource === 'lease_agreements');
+    const combined = [...merged, ...extraLegacy, ...leaseAgreementRows].filter((row) => {
       const itemCount = parseFloat(row.itemCount) || 0;
       const rawTotal = parseFloat(row.totalPerCycle) || 0;
       const fromLegacyRentals = row.legacySource === 'rentals_table';
+      const fromLeaseAgreements = row.legacySource === 'lease_agreements';
       const isPersistedSubscriptionRow = row.id != null && subscriptionIds.has(row.id);
 
       // Drop rows with no quantity and no cycle total, unless they're from the
-      // legacy rentals table or are real subscription records.
-      if (!fromLegacyRentals && !isPersistedSubscriptionRow && itemCount <= 0 && rawTotal <= 0) return false;
+      // legacy rentals / lease_agreements tables or are real subscription records.
+      if (!fromLegacyRentals && !fromLeaseAgreements && !isPersistedSubscriptionRow && itemCount <= 0 && rawTotal <= 0) {
+        return false;
+      }
 
       const idKey = normalize(row.customer_id);
       const nameKey = normalizeName(row.customer?.name || row.customer?.Name || '');
@@ -502,7 +613,9 @@ export default function Subscriptions() {
         !row.isVirtual &&
         Boolean(String(row.customer_id || '').trim());
 
-      if (!inCustomerDirectory && !fromLegacyRentals && !pricedLiveSubscription && !isPersistedSubscriptionRow) return false;
+      if (!inCustomerDirectory && !fromLegacyRentals && !fromLeaseAgreements && !pricedLiveSubscription && !isPersistedSubscriptionRow) {
+        return false;
+      }
 
       return true;
     });
@@ -713,6 +826,33 @@ export default function Subscriptions() {
       .reduce((sum, r) => sum + (parseFloat(r.itemCount) || 0), 0);
   }, [allRows]);
 
+  const tabRowCounts = useMemo(() => {
+    const isNotTerminalRow = (s) => {
+      const st = String(s.status || '').toLowerCase();
+      return st !== 'cancelled' && st !== 'expired';
+    };
+    return {
+      monthly: allRows.filter(
+        (s) => canonicalBillingPeriod(s.billing_period) === 'monthly' && isNotTerminalRow(s)
+      ).length,
+      yearly: allRows.filter(
+        (s) => canonicalBillingPeriod(s.billing_period) === 'yearly' && isNotTerminalRow(s)
+      ).length,
+      cancelled: allRows.filter((s) => s.status === 'cancelled').length,
+    };
+  }, [allRows]);
+
+  const termsCounts = useMemo(() => {
+    const counts = { net30: 0, cod: 0, other: 0 };
+    for (const row of allRows) {
+      const t = String(row.customer?.payment_terms || '').trim().toLowerCase();
+      if (t.includes('net') && t.includes('30')) counts.net30 += 1;
+      else if (t === 'cod' || t === 'cash on delivery' || t === 'c.o.d.') counts.cod += 1;
+      else counts.other += 1;
+    }
+    return counts;
+  }, [allRows]);
+
   const filtered = useMemo(() => {
     let list = allRows;
     const filter = tabFilters[tab];
@@ -722,23 +862,39 @@ export default function Subscriptions() {
     };
     if (filter === 'monthly') {
       list = list.filter(
-        (s) => String(s.billing_period || '').toLowerCase() === 'monthly' && isNotTerminal(s)
+        (s) => canonicalBillingPeriod(s.billing_period) === 'monthly' && isNotTerminal(s)
       );
     } else if (filter === 'yearly') {
       list = list.filter(
-        (s) => String(s.billing_period || '').toLowerCase() === 'yearly' && isNotTerminal(s)
+        (s) => canonicalBillingPeriod(s.billing_period) === 'yearly' && isNotTerminal(s)
       );
     } else if (filter === 'cancelled') list = list.filter((s) => s.status === 'cancelled');
+
+    if (termsFilter !== 'all') {
+      list = list.filter((s) => {
+        const terms = String(s.customer?.payment_terms || '').trim().toLowerCase();
+        if (termsFilter === 'net30') return terms.includes('net') && terms.includes('30');
+        if (termsFilter === 'cod') return terms === 'cod' || terms === 'cash on delivery' || terms === 'c.o.d.';
+        if (termsFilter === 'other') {
+          if (!terms) return true;
+          const isNet30 = terms.includes('net') && terms.includes('30');
+          const isCod = terms === 'cod' || terms === 'cash on delivery' || terms === 'c.o.d.';
+          return !isNet30 && !isCod;
+        }
+        return true;
+      });
+    }
 
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((s) => {
         const name = s.customer?.name || s.customer?.Name || s.customer_id || '';
-        return name.toLowerCase().includes(q) || String(s.billing_period || '').toLowerCase().includes(q);
+        const haystack = [name, String(s.customer_id || ''), String(s.notes || ''), String(s.customer?.payment_terms || '')].join(' ').toLowerCase();
+        return haystack.includes(q) || String(s.billing_period || '').toLowerCase().includes(q);
       });
     }
     return list;
-  }, [allRows, tab, search]);
+  }, [allRows, tab, search, termsFilter]);
 
   const handleCreate = async () => {
     if (!newSub.customer_id) return;
@@ -932,17 +1088,38 @@ export default function Subscriptions() {
     (parseFloat(row.itemCount) || 0) > 0
   ));
 
-  const handleExportQbInvoiceCsv = (period) => {
+  const handleExportQbInvoiceCsv = (period, cohort = 'all') => {
     setActionError(null);
     setActionSuccess(null);
     const base = getActiveExportRows();
-    const rows = base.filter((r) => String(r.billing_period || 'monthly').toLowerCase() === period);
+    let rows = base.filter((r) => String(r.billing_period || 'monthly').toLowerCase() === period);
+    if (period === 'monthly' && cohort !== 'all') {
+      rows = rows.filter((r) => rowMatchesMonthlyQbCohort(r, cohort));
+    }
     if (rows.length === 0) {
-      setActionError(`No active ${period} rentals to export to QuickBooks CSV.`);
+      const cohortHint =
+        period === 'monthly' && cohort === 'net30'
+          ? ' (NET 30 terms only — check customer payment terms on import)'
+          : period === 'monthly' && cohort === 'credit_card'
+            ? ' (credit card terms — e.g. Visa, Mastercard in payment terms)'
+            : '';
+      setActionError(`No active ${period} rentals match this export${cohortHint}.`);
       return;
     }
-    const exported = downloadInvoiceCsv(rows, { filePrefix: `quickbooks_invoices_${period}` });
-    setActionSuccess(`Exported ${exported} QuickBooks CSV row${exported === 1 ? '' : 's'} (${period}).`);
+    const cohortSuffix =
+      period === 'monthly' && cohort === 'net30'
+        ? '_net30'
+        : period === 'monthly' && cohort === 'credit_card'
+          ? '_creditcard'
+          : '';
+    const exported = downloadInvoiceCsv(rows, { filePrefix: `quickbooks_invoices_${period}${cohortSuffix}` });
+    const cohortLabel =
+      period === 'monthly' && cohort === 'net30'
+        ? ', NET 30 customers only'
+        : period === 'monthly' && cohort === 'credit_card'
+          ? ', credit card customers only'
+          : '';
+    setActionSuccess(`Exported ${exported} QuickBooks CSV row${exported === 1 ? '' : 's'} (${period}${cohortLabel}).`);
   };
 
   const getNextLegacyInvoiceNumber = async () => {
@@ -1027,21 +1204,6 @@ export default function Subscriptions() {
   const handleDownloadInvoicePdfForRow = (sub) => {
     const norm = (v) => String(v || '').trim().toLowerCase();
     const normName = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
-    const getCustomerDisplayName = (row) => (
-      row?.customer?.name
-      || row?.customer?.Name
-      || row?.customer_name
-      || row?.customer_id
-      || 'Customer'
-    );
-    const getCustomerEmail = (row) => (
-      row?.customer?.email
-      || row?.customer?.Email
-      || row?.customer?.email_address
-      || row?.customer?.emailAddress
-      || row?.customer?.primary_email
-      || ''
-    );
     const getCustomerBottlesForRow = (row) => {
       if (Array.isArray(row?.bottleIdentifiers) && row.bottleIdentifiers.length > 0) {
         return row.bottleIdentifiers.map((label, idx) => ({ id: `legacy-${idx}`, display_label: label }));
@@ -1106,37 +1268,6 @@ export default function Subscriptions() {
         amount,
       }];
     };
-    const rgbFromHex = (hex, fallback) => {
-      const raw = String(hex || '').trim().replace('#', '');
-      const full = raw.length === 3 ? raw.split('').map((c) => `${c}${c}`).join('') : raw;
-      if (!/^[0-9a-fA-F]{6}$/.test(full)) return fallback;
-      return [
-        parseInt(full.slice(0, 2), 16),
-        parseInt(full.slice(2, 4), 16),
-        parseInt(full.slice(4, 6), 16),
-      ];
-    };
-    const wrapText = (doc, text, x, y, maxWidth, lineHeight = 5) => {
-      const lines = doc.splitTextToSize(String(text || ''), maxWidth);
-      lines.forEach((line, idx) => doc.text(line, x, y + (idx * lineHeight)));
-      return y + (lines.length * lineHeight);
-    };
-    const fetchImageAsDataUrl = async (url) => {
-      if (!url) return null;
-      try {
-        const res = await fetch(url);
-        if (!res.ok) return null;
-        const blob = await res.blob();
-        return await new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result);
-          reader.onerror = () => resolve(null);
-          reader.readAsDataURL(blob);
-        });
-      } catch {
-        return null;
-      }
-    };
     const createInvoicePdfDocForRow = async (row) => {
       const lineItems = getLineItemsForRow(row);
       const hasDetail =
@@ -1146,150 +1277,39 @@ export default function Subscriptions() {
       const total =
         hasDetail && lineSum > 0 ? lineSum : (parseFloat(row.totalPerCycle) || 0);
       const today = new Date();
-      const invoiceDate = today.toISOString().split('T')[0];
-      const dueDate = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
       const periodStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-      const periodEnd = dueDate;
-      const customerName = getCustomerDisplayName(row);
-      const customerEmail = getCustomerEmail(row);
-      const itemCount = parseFloat(row.itemCount) || 0;
-      const tax = +(total * 0.11).toFixed(2);
+      const periodEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+      const invoiceDate = periodEnd;
+      const dueBase = new Date(`${invoiceDate}T12:00:00`);
+      dueBase.setDate(dueBase.getDate() + 30);
+      const dueDate = dueBase.toISOString().split('T')[0];
+      const taxRate = 0.11;
+      const tax = +(total * taxRate).toFixed(2);
       const grandTotal = +(total + tax).toFixed(2);
-      const template = invoiceTemplate || {};
-      const templateName = String(template.name || 'Standard');
-      const primary = template.primary_color || primaryColor || '#40B5AD';
-      const secondary = template.secondary_color || '#64748B';
-      const fontFamily = template.font_family || 'helvetica';
-      const primaryRgb = rgbFromHex(primary, [64, 181, 173]);
-      const secondaryRgb = rgbFromHex(secondary, [100, 116, 139]);
-      const bottles = getCustomerBottlesForRow(row);
-      const logoUrl = template.logo_url || organization?.logo_url || organization?.app_icon_url || '';
-      const logoDataUrl = await fetchImageAsDataUrl(logoUrl);
-
-      const doc = new jsPDF();
-      doc.setFont(fontFamily, 'normal');
-      doc.setFillColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
-      doc.rect(0, 0, 210, 30, 'F');
-
-      if (logoDataUrl) {
-        try {
-          doc.addImage(logoDataUrl, 'PNG', 14, 6, 16, 16);
-        } catch {
-          // Ignore bad image formats and continue rendering.
-        }
-      }
-      doc.setTextColor(255, 255, 255);
-      doc.setFont(undefined, 'bold');
-      doc.setFontSize(20);
-      doc.text('INVOICE', logoDataUrl ? 34 : 14, 18);
-      doc.setFontSize(10);
-      doc.text(organization?.name || '', logoDataUrl ? 34 : 14, 24);
-
-      doc.setTextColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
-      doc.setFontSize(11);
-      doc.text(`Invoice Date: ${invoiceDate}`, 196, 14, { align: 'right' });
-      doc.text(`Due Date: ${dueDate}`, 196, 20, { align: 'right' });
-      doc.text(`Billing: ${String(row.billing_period || 'monthly')}`, 196, 26, { align: 'right' });
-
-      doc.setTextColor(40, 40, 40);
-      doc.setFont(undefined, 'bold');
-      doc.setFontSize(11);
-      doc.text('Bill To', 14, 40);
-      doc.setFont(undefined, 'normal');
-      doc.text(customerName, 14, 46);
-      if (row.customer_id) doc.text(`Customer ID: ${row.customer_id}`, 14, 52);
-      if (customerEmail) doc.text(`Email: ${customerEmail}`, 14, 58);
-
-      doc.setDrawColor(220, 220, 220);
-      doc.rect(124, 36, 72, 22);
-      doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-      doc.setFontSize(9);
-      doc.text('Service Period', 128, 42);
-      doc.setTextColor(40, 40, 40);
-      doc.setFont(undefined, 'bold');
-      doc.setFontSize(10);
-      doc.text(`${periodStart} to ${periodEnd}`, 128, 48);
-      doc.setFont(undefined, 'normal');
-      doc.text(`Assets: ${itemCount}`, 128, 54);
-      doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-      doc.setFontSize(8);
-      doc.text(`Template: ${templateName}`, 128, 56.5);
-
-      let y = 68;
-      doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-      doc.setFontSize(10);
-      doc.text('Description', 14, y);
-      doc.text('Qty', 128, y);
-      doc.text('Unit', 156, y);
-      doc.text('Amount', 196, y, { align: 'right' });
-      doc.setDrawColor(230, 230, 230);
-      doc.line(14, y + 2, 196, y + 2);
-      y += 8;
-
-      doc.setTextColor(40, 40, 40);
-      doc.setFontSize(9);
-      lineItems.forEach((line) => {
-        doc.text(String(line.description || ''), 14, y);
-        doc.text(String(line.qty || 0), 128, y);
-        doc.text(formatCurrency(line.unit || 0), 156, y);
-        doc.text(formatCurrency(line.amount || 0), 196, y, { align: 'right' });
-        y += 6;
+      const customerRecord = matchCustomerRecordBySubscriptionId(row.customer_id);
+      const rawBottles = getCustomerBottlesForRow(row);
+      const bottlesForPdf = rawBottles.map((b) => (
+        b.display_label ? { ...b, description: b.display_label } : b
+      ));
+      return createRentalInvoicePdfDoc({
+        organization,
+        invoiceTemplate,
+        primaryColorFallback: primaryColor,
+        row,
+        customerRecord,
+        lineItems,
+        totals: {
+          subtotal: total,
+          tax,
+          amountDue: grandTotal,
+          taxRate,
+        },
+        period: { start: periodStart, end: periodEnd },
+        dates: { invoice: invoiceDate, due: dueDate },
+        terms: customerRecord?.payment_terms || 'NET 30',
+        bottles: bottlesForPdf,
+        formatCurrency,
       });
-
-      y += 2;
-      doc.setDrawColor(220, 220, 220);
-      doc.line(120, y, 196, y);
-      y += 7;
-      doc.text('Subtotal', 146, y);
-      doc.text(formatCurrency(total), 196, y, { align: 'right' });
-      y += 6;
-      doc.text('Tax (11%)', 146, y);
-      doc.text(formatCurrency(tax), 196, y, { align: 'right' });
-      y += 6;
-      doc.setDrawColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
-      doc.line(140, y, 196, y);
-      y += 7;
-      doc.setFont(undefined, 'bold');
-      doc.setTextColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
-      doc.text('Total', 146, y);
-      doc.text(formatCurrency(grandTotal), 196, y, { align: 'right' });
-      doc.setFont(undefined, 'normal');
-
-      y += 12;
-      if (bottles.length > 0) {
-        const labels = bottles.slice(0, 120).map((b) => {
-          if (b.display_label) return String(b.display_label);
-          const readable = (
-            b.barcode_number
-            || b.barcode
-            || b.bottle_barcode
-            || b.asset_tag
-            || b.serial_number
-            || b.cylinder_number
-            || b.tag
-            || ''
-          );
-          return readable ? String(readable) : null;
-        }).filter(Boolean);
-        if (labels.length === 0) return;
-        doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-        doc.setFontSize(10);
-        doc.text(`Bottle List (${labels.length})`, 14, y);
-        y += 6;
-        doc.setTextColor(60, 60, 60);
-        doc.setFontSize(8);
-        const bottleText = labels.join(', ');
-        y = wrapText(doc, bottleText || 'No bottle identifiers available.', 14, y, 182, 4);
-        if (bottles.length > 120) {
-          y += 3;
-          doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-          doc.text(`+ ${bottles.length - 120} more`, 14, y);
-        }
-      }
-
-      const safeName = String(customerName).replace(/[^\w\-]+/g, '_');
-      const fileName = `Invoice_${safeName}_${invoiceDate}.pdf`;
-      return { doc, fileName, customerName, customerEmail };
     };
     try {
       const total = parseFloat(sub.totalPerCycle) || 0;
@@ -1318,14 +1338,15 @@ export default function Subscriptions() {
         .eq('id', organization.id)
         .single();
 
+      const loggedInEmail = user?.email || profile?.email || '';
+
       const emails = new Set();
+      if (loggedInEmail) emails.add(loggedInEmail);
       (orgData?.invoice_emails || []).forEach((e) => e && emails.add(e));
       if (orgData?.email) emails.add(orgData.email);
-      if (user?.email) emails.add(user.email);
-      if (profile?.email) emails.add(profile.email);
 
       const options = Array.from(emails);
-      const defaultFrom = orgData?.default_invoice_email || options[0] || '';
+      const defaultFrom = loggedInEmail || orgData?.default_invoice_email || options[0] || '';
       let customerEmail = (
         sub?.customer?.email
         || sub?.customer?.Email
@@ -1354,14 +1375,40 @@ export default function Subscriptions() {
         }
       }
       const customerName = sub?.customer?.name || sub?.customer?.Name || sub?.customer_id || 'Customer';
+      const orgName = organization?.name || 'your organization';
+      const orgWebsite = organization?.website || '';
+
+      const total = parseFloat(sub.totalPerCycle) || 0;
+      const taxRate = 0.11;
+      const tax = +(total * taxRate).toFixed(2);
+      const amountDue = +(total + tax).toFixed(2);
+      const today = new Date();
+      const periodEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+      const dueBase = new Date(`${periodEnd}T12:00:00`);
+      dueBase.setDate(dueBase.getDate() + 30);
+      const invNo = `R${String(Date.now() % 100000).padStart(5, '0')}`;
+      const formattedAmount = amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+      const savedEmailTemplate = (() => {
+        try {
+          const raw = localStorage.getItem(`invoiceEmailTemplate_${organization?.id}`);
+          return raw ? JSON.parse(raw) : null;
+        } catch { return null; }
+      })();
+
+      const defaultMessage = savedEmailTemplate?.body
+        || `Your invoice ${invNo} for $${formattedAmount} is attached.\n\n${orgName} accepts the following payment methods: Cheque, EFT transfers, Interac E-Transfer, MasterCard, & VISA. E-transfers can be sent to ${defaultFrom}.\n\nCredit Card payments will be charged a 2.4% service fee.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.\n\n\nSincerely,\n${orgName}${orgWebsite ? `\n\n${orgWebsite}` : ''}`;
+
+      const defaultSubject = savedEmailTemplate?.subject
+        || `Invoice ${invNo} – ${customerName} – ${orgName}`;
 
       setSenderOptions(options);
       setEmailRow(sub);
       setEmailForm({
         to: customerEmail,
         from: defaultFrom,
-        subject: `Invoice for ${customerName} from ${organization?.name || 'your organization'}`,
-        message: `Hello ${customerName},\n\nPlease find your invoice attached.\n\nThank you.`,
+        subject: defaultSubject,
+        message: defaultMessage,
       });
       setEmailOpen(true);
     } catch (err) {
@@ -1386,44 +1433,6 @@ export default function Subscriptions() {
     try {
       const norm = (v) => String(v || '').trim().toLowerCase();
       const normName = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
-      const getCustomerDisplayName = (row) => (
-        row?.customer?.name
-        || row?.customer?.Name
-        || row?.customer_name
-        || row?.customer_id
-        || 'Customer'
-      );
-      const rgbFromHex = (hex, fallback) => {
-        const raw = String(hex || '').trim().replace('#', '');
-        const full = raw.length === 3 ? raw.split('').map((c) => `${c}${c}`).join('') : raw;
-        if (!/^[0-9a-fA-F]{6}$/.test(full)) return fallback;
-        return [
-          parseInt(full.slice(0, 2), 16),
-          parseInt(full.slice(2, 4), 16),
-          parseInt(full.slice(4, 6), 16),
-        ];
-      };
-      const wrapText = (doc, text, x, y, maxWidth, lineHeight = 5) => {
-        const lines = doc.splitTextToSize(String(text || ''), maxWidth);
-        lines.forEach((line, idx) => doc.text(line, x, y + (idx * lineHeight)));
-        return y + (lines.length * lineHeight);
-      };
-      const fetchImageAsDataUrl = async (url) => {
-        if (!url) return null;
-        try {
-          const res = await fetch(url);
-          if (!res.ok) return null;
-          const blob = await res.blob();
-          return await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result);
-            reader.onerror = () => resolve(null);
-            reader.readAsDataURL(blob);
-          });
-        } catch {
-          return null;
-        }
-      };
       const getCustomerBottlesForRow = (row) => {
         if (Array.isArray(row?.bottleIdentifiers) && row.bottleIdentifiers.length > 0) {
           return row.bottleIdentifiers.map((label, idx) => ({ id: `legacy-${idx}`, display_label: label }));
@@ -1482,157 +1491,39 @@ export default function Subscriptions() {
         const total =
           hasDetail && lineSum > 0 ? lineSum : (parseFloat(row.totalPerCycle) || 0);
         const today = new Date();
-        const invoiceDate = today.toISOString().split('T')[0];
-        const dueDate = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
         const periodStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-        const periodEnd = dueDate;
-        const customerName = getCustomerDisplayName(row);
-        const customerEmail = (
-          row?.customer?.email
-          || row?.customer?.Email
-          || row?.customer?.email_address
-          || row?.customer?.emailAddress
-          || row?.customer?.primary_email
-          || ''
-        );
-        const itemCount = parseFloat(row.itemCount) || 0;
-        const tax = +(total * 0.11).toFixed(2);
+        const periodEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+        const invoiceDate = periodEnd;
+        const dueBase = new Date(`${invoiceDate}T12:00:00`);
+        dueBase.setDate(dueBase.getDate() + 30);
+        const dueDate = dueBase.toISOString().split('T')[0];
+        const taxRate = 0.11;
+        const tax = +(total * taxRate).toFixed(2);
         const grandTotal = +(total + tax).toFixed(2);
-        const template = invoiceTemplate || {};
-        const templateName = String(template.name || 'Standard');
-        const primary = template.primary_color || primaryColor || '#40B5AD';
-        const secondary = template.secondary_color || '#64748B';
-        const fontFamily = template.font_family || 'helvetica';
-        const primaryRgb = rgbFromHex(primary, [64, 181, 173]);
-        const secondaryRgb = rgbFromHex(secondary, [100, 116, 139]);
-        const bottles = getCustomerBottlesForRow(row);
-        const logoUrl = template.logo_url || organization?.logo_url || organization?.app_icon_url || '';
-        const logoDataUrl = await fetchImageAsDataUrl(logoUrl);
-
-        const doc = new jsPDF();
-        doc.setFont(fontFamily, 'normal');
-        doc.setFillColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
-        doc.rect(0, 0, 210, 30, 'F');
-
-        if (logoDataUrl) {
-          try {
-            doc.addImage(logoDataUrl, 'PNG', 14, 6, 16, 16);
-          } catch {
-            // Ignore bad image formats and continue rendering.
-          }
-        }
-        doc.setTextColor(255, 255, 255);
-        doc.setFont(undefined, 'bold');
-        doc.setFontSize(20);
-        doc.text('INVOICE', logoDataUrl ? 34 : 14, 18);
-        doc.setFontSize(10);
-        doc.text(organization?.name || '', logoDataUrl ? 34 : 14, 24);
-
-        doc.setTextColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
-        doc.setFontSize(11);
-        doc.text(`Invoice Date: ${invoiceDate}`, 196, 14, { align: 'right' });
-        doc.text(`Due Date: ${dueDate}`, 196, 20, { align: 'right' });
-        doc.text(`Billing: ${String(row.billing_period || 'monthly')}`, 196, 26, { align: 'right' });
-
-        doc.setTextColor(40, 40, 40);
-        doc.setFont(undefined, 'bold');
-        doc.setFontSize(11);
-        doc.text('Bill To', 14, 40);
-        doc.setFont(undefined, 'normal');
-        doc.text(customerName, 14, 46);
-        if (row.customer_id) doc.text(`Customer ID: ${row.customer_id}`, 14, 52);
-        if (customerEmail) doc.text(`Email: ${customerEmail}`, 14, 58);
-
-        doc.setDrawColor(220, 220, 220);
-        doc.rect(124, 36, 72, 22);
-        doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-        doc.setFontSize(9);
-        doc.text('Service Period', 128, 42);
-        doc.setTextColor(40, 40, 40);
-        doc.setFont(undefined, 'bold');
-        doc.setFontSize(10);
-        doc.text(`${periodStart} to ${periodEnd}`, 128, 48);
-        doc.setFont(undefined, 'normal');
-        doc.text(`Assets: ${itemCount}`, 128, 54);
-        doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-        doc.setFontSize(8);
-        doc.text(`Template: ${templateName}`, 128, 56.5);
-
-        let y = 68;
-        doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-        doc.setFontSize(10);
-        doc.text('Description', 14, y);
-        doc.text('Qty', 128, y);
-        doc.text('Unit', 156, y);
-        doc.text('Amount', 196, y, { align: 'right' });
-        doc.setDrawColor(230, 230, 230);
-        doc.line(14, y + 2, 196, y + 2);
-        y += 8;
-
-        doc.setTextColor(40, 40, 40);
-        doc.setFontSize(9);
-        lineItems.forEach((line) => {
-          doc.text(String(line.description || ''), 14, y);
-          doc.text(String(line.qty || 0), 128, y);
-          doc.text(formatCurrency(line.unit || 0), 156, y);
-          doc.text(formatCurrency(line.amount || 0), 196, y, { align: 'right' });
-          y += 6;
+        const customerRecord = matchCustomerRecordBySubscriptionId(row.customer_id);
+        const rawBottles = getCustomerBottlesForRow(row);
+        const bottlesForPdf = rawBottles.map((b) => (
+          b.display_label ? { ...b, description: b.display_label } : b
+        ));
+        return createRentalInvoicePdfDoc({
+          organization,
+          invoiceTemplate,
+          primaryColorFallback: primaryColor,
+          row,
+          customerRecord,
+          lineItems,
+          totals: {
+            subtotal: total,
+            tax,
+            amountDue: grandTotal,
+            taxRate,
+          },
+          period: { start: periodStart, end: periodEnd },
+          dates: { invoice: invoiceDate, due: dueDate },
+          terms: customerRecord?.payment_terms || 'NET 30',
+          bottles: bottlesForPdf,
+          formatCurrency,
         });
-
-        y += 2;
-        doc.setDrawColor(220, 220, 220);
-        doc.line(120, y, 196, y);
-        y += 7;
-        doc.text('Subtotal', 146, y);
-        doc.text(formatCurrency(total), 196, y, { align: 'right' });
-        y += 6;
-        doc.text('Tax (11%)', 146, y);
-        doc.text(formatCurrency(tax), 196, y, { align: 'right' });
-        y += 6;
-        doc.setDrawColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
-        doc.line(140, y, 196, y);
-        y += 7;
-        doc.setFont(undefined, 'bold');
-        doc.setTextColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
-        doc.text('Total', 146, y);
-        doc.text(formatCurrency(grandTotal), 196, y, { align: 'right' });
-        doc.setFont(undefined, 'normal');
-
-        y += 12;
-        if (bottles.length > 0) {
-          const labels = bottles.slice(0, 120).map((b) => {
-            if (b.display_label) return String(b.display_label);
-            const readable = (
-              b.barcode_number
-              || b.barcode
-              || b.bottle_barcode
-              || b.asset_tag
-              || b.serial_number
-              || b.cylinder_number
-              || b.tag
-              || ''
-            );
-            return readable ? String(readable) : null;
-          }).filter(Boolean);
-          if (labels.length === 0) return;
-          doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-          doc.setFontSize(10);
-          doc.text(`Bottle List (${labels.length})`, 14, y);
-          y += 6;
-          doc.setTextColor(60, 60, 60);
-          doc.setFontSize(8);
-          const bottleText = labels.join(', ');
-          y = wrapText(doc, bottleText || 'No bottle identifiers available.', 14, y, 182, 4);
-          if (bottles.length > 120) {
-            y += 3;
-            doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-            doc.text(`+ ${bottles.length - 120} more`, 14, y);
-          }
-        }
-
-        const safeName = String(customerName).replace(/[^\w\-]+/g, '_');
-        const fileName = `Invoice_${safeName}_${invoiceDate}.pdf`;
-        return { doc, fileName, customerName };
       };
 
       const { doc, customerName } = await createInvoicePdfDocForRow(emailRow);
@@ -1710,15 +1601,33 @@ export default function Subscriptions() {
           >
             Invoice template
           </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => handleExportQbInvoiceCsv('monthly')}
-            startIcon={<DownloadIcon sx={{ fontSize: 16 }} />}
-            sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
-          >
-            QB monthly CSV
-          </Button>
+          <Tooltip title="Filter by payment terms on the customer record (import or Customer detail). NET 30 = terms containing net and 30. Credit card = Visa, Mastercard, Amex, credit card, etc.">
+            <Stack direction="row" alignItems="center" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
+              <FormControl size="small" sx={{ minWidth: 118 }}>
+                <InputLabel id="monthly-qb-cohort-label">Monthly</InputLabel>
+                <Select
+                  labelId="monthly-qb-cohort-label"
+                  label="Monthly"
+                  value={monthlyQbCohort}
+                  onChange={(e) => setMonthlyQbCohort(e.target.value)}
+                  sx={{ borderRadius: 1.5, fontSize: '0.75rem', '& .MuiSelect-select': { py: 0.5 } }}
+                >
+                  <MenuItem value="all">All customers</MenuItem>
+                  <MenuItem value="net30">NET 30 only</MenuItem>
+                  <MenuItem value="credit_card">Credit card only</MenuItem>
+                </Select>
+              </FormControl>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => handleExportQbInvoiceCsv('monthly', monthlyQbCohort)}
+                startIcon={<DownloadIcon sx={{ fontSize: 16 }} />}
+                sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
+              >
+                QB CSV
+              </Button>
+            </Stack>
+          </Tooltip>
           <Button
             size="small"
             variant="outlined"
@@ -1784,10 +1693,29 @@ export default function Subscriptions() {
         <Box sx={{ px: 2, pt: 2, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
           <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ '& .MuiTab-root': { textTransform: 'none', fontWeight: 600, fontSize: '0.875rem' } }}>
             <Tab label={`All (${allRows.length})`} />
-            <Tab label="Monthly" />
-            <Tab label="Yearly" />
-            <Tab label="Cancelled" />
+            <Tab label={`Monthly (${tabRowCounts.monthly})`} />
+            <Tab label={`Yearly (${tabRowCounts.yearly})`} />
+            <Tab label={`Cancelled (${tabRowCounts.cancelled})`} />
           </Tabs>
+          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: 1 }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, mr: 0.5 }}>Terms:</Typography>
+            {[
+              { key: 'all', label: 'All' },
+              { key: 'net30', label: `NET 30 (${termsCounts.net30})` },
+              { key: 'cod', label: `COD (${termsCounts.cod})` },
+              { key: 'other', label: `Other (${termsCounts.other})` },
+            ].map((opt) => (
+              <Chip
+                key={opt.key}
+                label={opt.label}
+                size="small"
+                variant={termsFilter === opt.key ? 'filled' : 'outlined'}
+                color={termsFilter === opt.key ? 'primary' : 'default'}
+                onClick={() => setTermsFilter(opt.key)}
+                sx={{ fontWeight: 600, fontSize: '0.7rem', cursor: 'pointer' }}
+              />
+            ))}
+          </Stack>
           <TextField
             size="small"
             placeholder="Search customers..."
@@ -1804,6 +1732,7 @@ export default function Subscriptions() {
               <TableRow sx={{ '& th': { fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' } }}>
                 <TableCell>Customer</TableCell>
                 <TableCell>Period</TableCell>
+                <TableCell>Terms</TableCell>
                 <TableCell align="center">Items</TableCell>
                 <TableCell align="right">Total / Cycle</TableCell>
                 <TableCell>Next Billing</TableCell>
@@ -1814,8 +1743,41 @@ export default function Subscriptions() {
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 6, color: 'text.secondary' }}>
-                    {allRows.length === 0 ? 'No rentals found yet.' : 'No matching rentals.'}
+                  <TableCell colSpan={8} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                    {allRows.length === 0 ? (
+                      'No rentals found yet.'
+                    ) : (
+                      <Stack spacing={1.25} alignItems="center" sx={{ maxWidth: 520, mx: 'auto' }}>
+                        <Typography variant="body2">
+                          No rows match this tab or search ({allRows.length} total in list).
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', lineHeight: 1.5 }}>
+                          Lease-style accounts and yearly subscriptions appear under Yearly, not Monthly. Try the All or Yearly tab, or clear the search box.
+                        </Typography>
+                        <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="center">
+                          {search.trim() !== '' && (
+                            <Button size="small" variant="outlined" onClick={() => setSearch('')}>
+                              Clear search
+                            </Button>
+                          )}
+                          {tab !== 0 && (
+                            <Button size="small" variant="outlined" onClick={() => setTab(0)}>
+                              All ({allRows.length})
+                            </Button>
+                          )}
+                          {tabRowCounts.yearly > 0 && tab !== 2 && (
+                            <Button size="small" variant="outlined" onClick={() => setTab(2)}>
+                              Yearly ({tabRowCounts.yearly})
+                            </Button>
+                          )}
+                          {tabRowCounts.monthly > 0 && tab !== 1 && (
+                            <Button size="small" variant="outlined" onClick={() => setTab(1)}>
+                              Monthly ({tabRowCounts.monthly})
+                            </Button>
+                          )}
+                        </Stack>
+                      </Stack>
+                    )}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -1831,6 +1793,23 @@ export default function Subscriptions() {
                     </TableCell>
                     <TableCell>
                       <Chip label={sub.billing_period} size="small" variant="outlined" sx={{ textTransform: 'capitalize', fontWeight: 600 }} />
+                    </TableCell>
+                    <TableCell>
+                      {(() => {
+                        const t = String(sub.customer?.payment_terms || '').trim();
+                        if (!t) return <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>;
+                        const lower = t.toLowerCase();
+                        const isCod = lower === 'cod' || lower === 'cash on delivery' || lower === 'c.o.d.';
+                        return (
+                          <Chip
+                            label={t.toUpperCase()}
+                            size="small"
+                            variant="outlined"
+                            color={isCod ? 'warning' : 'default'}
+                            sx={{ fontWeight: 600, fontSize: '0.68rem' }}
+                          />
+                        );
+                      })()}
                     </TableCell>
                     <TableCell align="center">{sub.itemCount}</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>{formatCurrency(sub.totalPerCycle)}</TableCell>
@@ -2039,7 +2018,7 @@ export default function Subscriptions() {
               value={emailForm.message}
               onChange={(e) => setEmailForm((p) => ({ ...p, message: e.target.value }))}
               multiline
-              rows={4}
+              rows={10}
             />
           </Stack>
         </DialogContent>

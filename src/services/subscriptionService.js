@@ -14,7 +14,7 @@ import {
   defaultUnitRatesFromAssetPricingTable,
   normalizePricingKey,
 } from './pricingResolution';
-import { groupAssignedBottleCountsByProductCode } from './billingFromAssets';
+import { groupBillableUnitCountsByProductCode } from './billingFromAssets';
 import { findActiveLeaseContract, leaseLineCycleAmount } from './leaseBilling';
 
 /** Legacy `rentals` rows and `rental_amount` are not used for subscription invoice math; invoices branch on customers.billing_mode. */
@@ -271,8 +271,15 @@ export async function generateInvoice(organizationId, subscriptionId) {
       .select('*')
       .eq('organization_id', organizationId);
     if (bErr) throw bErr;
-    const groups = groupAssignedBottleCountsByProductCode(
+    const { data: rentalRows, error: rRentErr } = await supabase
+      .from('rentals')
+      .select('*')
+      .eq('organization_id', organizationId)
+      .is('rental_end_date', null);
+    if (rRentErr) throw rRentErr;
+    const groups = groupBillableUnitCountsByProductCode(
       bottleRows || [],
+      rentalRows || [],
       sub.customer_id,
       customerRow,
       { allCustomers: orgCustomers || [] }
