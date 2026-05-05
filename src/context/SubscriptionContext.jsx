@@ -306,7 +306,9 @@ export function SubscriptionProvider({ children }) {
     [activeSubscriptions]
   );
 
-  const value = {
+  const refresh = useCallback(() => fetchAll({ silent: false }), [fetchAll]);
+
+  const value = useMemo(() => ({
     loading,
     error,
     subscriptions,
@@ -327,8 +329,14 @@ export function SubscriptionProvider({ children }) {
     arr,
     outstandingBalance,
     nextBillingDate,
-    refresh: () => fetchAll({ silent: false }),
-  };
+    refresh,
+  }), [
+    loading, error, subscriptions, subscriptionItems, assetTypePricing,
+    customerPricingRows, legacyPricingOverrides, customerPricingOverrides,
+    invoices, payments, customers, bottles, openRentals,
+    leaseContracts, leaseContractItems, activeSubscriptions,
+    mrr, arr, outstandingBalance, nextBillingDate, refresh,
+  ]);
 
   return (
     <SubscriptionContext.Provider value={value}>
