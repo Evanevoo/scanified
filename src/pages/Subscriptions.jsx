@@ -64,6 +64,17 @@ function canonicalBillingPeriod(raw) {
   return p || 'monthly';
 }
 
+const normalize = (v) => String(v || '').trim().toLowerCase();
+const normalizeName = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+const isActiveCustomer = (customer) => {
+  if (!customer) return false;
+  if (customer.deleted_at) return false;
+  if (customer.is_deleted === true) return false;
+  if (customer.is_active === false) return false;
+  if (customer.archived === true) return false;
+  return true;
+};
+
 export default function Subscriptions() {
   const { organization, user, profile } = useAuth();
   const ctx = useSubscriptions();
@@ -92,18 +103,10 @@ export default function Subscriptions() {
   const [termsFilter, setTermsFilter] = useState('all');
   /** Monthly QuickBooks CSV: all | net30 | credit_card */
   const [monthlyQbCohort, setMonthlyQbCohort] = useState('all');
+  const [bulkEmailing, setBulkEmailing] = useState(false);
+  const [bulkEmailProgress, setBulkEmailProgress] = useState({ sent: 0, total: 0, failed: 0 });
 
   const tabFilters = ['all', 'monthly', 'yearly', 'cancelled'];
-  const normalize = (v) => String(v || '').trim().toLowerCase();
-  const normalizeName = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
-  const isActiveCustomer = (customer) => {
-    if (!customer) return false;
-    if (customer.deleted_at) return false;
-    if (customer.is_deleted === true) return false;
-    if (customer.is_active === false) return false;
-    if (customer.archived === true) return false;
-    return true;
-  };
 
   const customerResolvers = useMemo(() => {
     const byId = new Map();
@@ -143,11 +146,11 @@ export default function Subscriptions() {
     return { byId, byName };
   }, [ctx.customers, fallbackResolverCustomers, ctx.bottles]);
 
-  const resolveCustomer = (idOrName, fallbackName = '') => {
+  const resolveCustomer = useCallback((idOrName, fallbackName = '') => {
     const idKey = normalize(idOrName);
     const nameKey = normalizeName(idOrName) || normalizeName(fallbackName);
     return customerResolvers.byId.get(idKey) || customerResolvers.byName.get(nameKey) || null;
-  };
+  }, [customerResolvers]);
 
   const matchCustomerRecordBySubscriptionId = useCallback((customerId) => {
     if (!customerId || !(ctx.customers || []).length) return null;
@@ -228,7 +231,7 @@ export default function Subscriptions() {
     [ctx.customerPricingOverrides, ctx.legacyPricingOverrides, organization?.id, ctx.customers, localRatesVersion]
   );
 
-  const resolveDisplayUnitPrice = (pricingRow, item) =>
+  const resolveDisplayUnitPrice = useCallback((pricingRow, item) =>
     resolveDisplayUnitFromMaps({
       row: pricingRow,
       item,
@@ -236,7 +239,7 @@ export default function Subscriptions() {
       assetPricingMap,
       defaultMonthly: defaultUnitRateByPeriod.monthly,
       defaultYearly: defaultUnitRateByPeriod.yearly,
-    });
+    }), [customerOverrideMap, assetPricingMap, defaultUnitRateByPeriod]);
 
   const enriched = useMemo(() => {
     const billingData = {
@@ -1057,7 +1060,7 @@ export default function Subscriptions() {
 
       const parts = [];
       if (subscriptionCreated > 0) {
-        parts.push(`Generated ${subscriptionCreated} subscription invoice${subscriptionCreated === 1 ? '' : 's'}`);
+        parts.push(`Generated ${subscriptionCreated} rental invoice${subscriptionCreated === 1 ? '' : 's'}`);
       }
       if (legacyCreated > 0) {
         parts.push(`created ${legacyCreated} invoice${legacyCreated === 1 ? '' : 's'} from rentals`);
@@ -1240,137 +1243,119 @@ export default function Subscriptions() {
     }
   };
 
-  const handleDownloadInvoicePdfForRow = (sub) => {
-    const getLineItemsForRow = (row) => {
-      // Live billable units by SKU (from bottles + open rentals) — use first so each line gets its own resolved rate.
-      if (row?.productCounts && Object.keys(row.productCounts).length > 0) {
-        const periodFallback = row.billing_period === 'yearly'
-          ? defaultUnitRateByPeriod.yearly
-          : defaultUnitRateByPeriod.monthly;
-        return Object.entries(row.productCounts).map(([code, qtyRaw]) => {
-          const qty = parseFloat(qtyRaw) || 0;
-          const displayLabel = code === '__unclassified__' ? 'Unclassified' : (code || 'Asset');
-          const unitRaw = resolveDisplayUnitPrice(row, {
-            product_code: code,
-            description: displayLabel,
-          });
-          const unit =
-            Number.isFinite(unitRaw) && unitRaw > 0 ? unitRaw : periodFallback;
-          return {
-            description: displayLabel,
-            qty,
-            unit,
-            amount: unit * qty,
-          };
-        });
-      }
-      if (Array.isArray(row?.items) && row.items.length > 0) {
-        return row.items.map((item) => {
-          const qty = parseFloat(item.quantity) || 1;
-          const unit = resolveDisplayUnitPrice(row, item);
-          return {
-            description: item.description || item.product_code || 'Rental item',
-            qty,
-            unit,
-            amount: unit * qty,
-          };
-        });
-      }
-      const qty = parseFloat(row?.itemCount) || 1;
-      const amount = parseFloat(row?.totalPerCycle) || 0;
-      return [{
-        description: `Rental charges (${String(row?.billing_period || 'monthly')})`,
-        qty,
-        unit: qty > 0 ? amount / qty : amount,
-        amount,
-      }];
-    };
-    const createInvoicePdfDocForRow = async (row) => {
-      const lineItems = getLineItemsForRow(row);
-      const hasDetail =
-        (Array.isArray(row?.items) && row.items.length > 0) ||
-        (row?.productCounts && Object.keys(row.productCounts || {}).length > 0);
-      const lineSum = lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0);
-      const total =
-        hasDetail && lineSum > 0 ? lineSum : (parseFloat(row.totalPerCycle) || 0);
-      const today = new Date();
-      const periodStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-      const periodEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
-      const invoiceDate = periodEnd;
-      const dueBase = new Date(`${invoiceDate}T12:00:00`);
-      dueBase.setDate(dueBase.getDate() + 30);
-      const dueDate = dueBase.toISOString().split('T')[0];
-      const taxRate = 0.11;
-      const tax = +(total * taxRate).toFixed(2);
-      const grandTotal = +(total + tax).toFixed(2);
-      const customerRecord = matchCustomerRecordBySubscriptionId(row.customer_id);
-      let openAssets = buildOpenAssetRowsForInvoice(row, ctx.bottles, ctx.rentals);
-      if (Array.isArray(row?.bottleIdentifiers) && row.bottleIdentifiers.length > 0) {
-        const legacyExtras = row.bottleIdentifiers.map((label, idx) => ({
-          id: `legacy-${idx}`,
-          display_label: label,
-          description: label,
-          rental_class: 'Industrial Cylinders',
-          rental_start_date: null,
-          delivery_date: null,
-          barcode_number: label,
-          _invoiceStatus: 'On hand',
-        }));
-        openAssets = [...legacyExtras, ...openAssets];
-      }
-      let returnsInPeriod = [];
-      try {
-        returnsInPeriod = await fetchReturnsInInvoicePeriod(
-          supabase,
-          organization.id,
-          row,
-          periodStart,
-          periodEnd
-        );
-      } catch (e) {
-        console.warn('Invoice PDF: could not load returns in period', e);
-      }
-      const bottlesForPdf = openAssets.map((b) => (
-        b.display_label ? { ...b, description: b.display_label } : b
-      ));
-      return createRentalInvoicePdfDoc({
-        organization,
-        invoiceTemplate,
-        primaryColorFallback: primaryColor,
-        row,
-        customerRecord,
-        lineItems,
-        invoiceNumber: defaultInvoiceNumber(row),
-        totals: {
-          subtotal: total,
-          tax,
-          amountDue: grandTotal,
-          taxRate,
-        },
-        period: { start: periodStart, end: periodEnd },
-        dates: { invoice: invoiceDate, due: dueDate },
-        terms: customerRecord?.payment_terms || 'NET 30',
-        bottles: bottlesForPdf,
-        returnsInPeriod,
-        formatCurrency,
+  const getLineItemsForRow = useCallback((row) => {
+    if (row?.productCounts && Object.keys(row.productCounts).length > 0) {
+      const periodFallback = row.billing_period === 'yearly'
+        ? defaultUnitRateByPeriod.yearly
+        : defaultUnitRateByPeriod.monthly;
+      return Object.entries(row.productCounts).map(([code, qtyRaw]) => {
+        const qty = parseFloat(qtyRaw) || 0;
+        const displayLabel = code === '__unclassified__' ? 'Unclassified' : (code || 'Asset');
+        const unitRaw = resolveDisplayUnitPrice(row, { product_code: code, description: displayLabel });
+        const unit = Number.isFinite(unitRaw) && unitRaw > 0 ? unitRaw : periodFallback;
+        return { description: displayLabel, qty, unit, amount: unit * qty };
       });
-    };
-    try {
-      const total = parseFloat(sub.totalPerCycle) || 0;
-      if (total <= 0) {
-        setActionError('Cannot download a $0.00 invoice PDF.');
-        return;
-      }
-      createInvoicePdfDocForRow(sub).then(({ doc, fileName, customerName }) => {
-        doc.save(fileName);
-        setActionSuccess(`Invoice PDF downloaded for ${customerName}.`);
-      }).catch((err) => {
-        setActionError(err.message || 'Failed to generate invoice PDF.');
-      });
-    } catch (err) {
-      setActionError(err.message || 'Failed to generate invoice PDF.');
     }
-  };
+    if (Array.isArray(row?.items) && row.items.length > 0) {
+      return row.items.map((item) => {
+        const qty = parseFloat(item.quantity) || 1;
+        const unit = resolveDisplayUnitPrice(row, item);
+        return {
+          description: item.description || item.product_code || 'Rental item',
+          qty,
+          unit,
+          amount: unit * qty,
+        };
+      });
+    }
+    const qty = parseFloat(row?.itemCount) || 1;
+    const amount = parseFloat(row?.totalPerCycle) || 0;
+    return [{
+      description: `Rental charges (${String(row?.billing_period || 'monthly')})`,
+      qty,
+      unit: qty > 0 ? amount / qty : amount,
+      amount,
+    }];
+  }, [defaultUnitRateByPeriod, resolveDisplayUnitPrice]);
+
+  const buildInvoicePdfForRow = useCallback(async (row) => {
+    const lineItems = getLineItemsForRow(row);
+    const hasDetail =
+      (Array.isArray(row?.items) && row.items.length > 0) ||
+      (row?.productCounts && Object.keys(row.productCounts || {}).length > 0);
+    const lineSum = lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0);
+    const total = hasDetail && lineSum > 0 ? lineSum : (parseFloat(row.totalPerCycle) || 0);
+    const today = new Date();
+    const periodStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    const periodEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+    const invoiceDate = periodEnd;
+    const dueBase = new Date(`${invoiceDate}T12:00:00`);
+    dueBase.setDate(dueBase.getDate() + 30);
+    const dueDate = dueBase.toISOString().split('T')[0];
+    const taxRate = 0.11;
+    const tax = +(total * taxRate).toFixed(2);
+    const grandTotal = +(total + tax).toFixed(2);
+    const customerRecord = matchCustomerRecordBySubscriptionId(row.customer_id);
+    let openAssets = buildOpenAssetRowsForInvoice(row, ctx.bottles, ctx.rentals);
+    if (Array.isArray(row?.bottleIdentifiers) && row.bottleIdentifiers.length > 0) {
+      const legacyExtras = row.bottleIdentifiers.map((label, idx) => ({
+        id: `legacy-${idx}`,
+        display_label: label,
+        description: label,
+        rental_class: 'Industrial Cylinders',
+        rental_start_date: null,
+        delivery_date: null,
+        barcode_number: label,
+        _invoiceStatus: 'On hand',
+      }));
+      openAssets = [...legacyExtras, ...openAssets];
+    }
+    let returnsInPeriod = [];
+    try {
+      returnsInPeriod = await fetchReturnsInInvoicePeriod(supabase, organization.id, row, periodStart, periodEnd);
+    } catch (e) {
+      console.warn('Invoice PDF: could not load returns in period', e);
+    }
+    const bottlesForPdf = openAssets.map((b) => (b.display_label ? { ...b, description: b.display_label } : b));
+    return createRentalInvoicePdfDoc({
+      organization,
+      invoiceTemplate,
+      primaryColorFallback: primaryColor,
+      row,
+      customerRecord,
+      lineItems,
+      invoiceNumber: defaultInvoiceNumber(row),
+      totals: { subtotal: total, tax, amountDue: grandTotal, taxRate },
+      period: { start: periodStart, end: periodEnd },
+      dates: { invoice: invoiceDate, due: dueDate },
+      terms: customerRecord?.payment_terms || 'NET 30',
+      bottles: bottlesForPdf,
+      returnsInPeriod,
+      formatCurrency,
+    });
+  }, [
+    getLineItemsForRow,
+    matchCustomerRecordBySubscriptionId,
+    ctx.bottles,
+    ctx.rentals,
+    organization,
+    invoiceTemplate,
+    primaryColor,
+  ]);
+
+  const handleDownloadInvoicePdfForRow = useCallback((sub) => {
+    const total = parseFloat(sub.totalPerCycle) || 0;
+    if (total <= 0) {
+      setActionError('Cannot download a $0.00 invoice PDF.');
+      return;
+    }
+    buildInvoicePdfForRow(sub).then(({ doc, fileName, customerName }) => {
+      doc.save(fileName);
+      setActionSuccess(`Invoice PDF downloaded for ${customerName}.`);
+    }).catch((err) => {
+      setActionError(err.message || 'Failed to generate invoice PDF.');
+    });
+  }, [buildInvoicePdfForRow]);
 
   const openEmailDialogForRow = async (sub) => {
     setActionError(null);
@@ -1448,8 +1433,15 @@ export default function Subscriptions() {
         } catch { return null; }
       })();
 
-      const defaultMessage = savedEmailTemplate?.body
-        || `Your invoice ${invNo} for $${formattedAmount} is attached.\n\n${orgName} accepts the following payment methods: Cheque, EFT transfers, Interac E-Transfer, MasterCard, & VISA. E-transfers can be sent to ${defaultFrom}.\n\nCredit Card payments will be charged a 2.4% service fee.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.\n\n\nSincerely,\n${orgName}${orgWebsite ? `\n\n${orgWebsite}` : ''}`;
+      let defaultMessage = savedEmailTemplate?.body
+        ? savedEmailTemplate.body
+            .replace(/\{invoice_number\}/gi, invNo)
+            .replace(/\{amount\}/gi, `$${formattedAmount}`)
+            .replace(/\{customer_name\}/gi, customerName)
+        : `Your invoice ${invNo} for $${formattedAmount} is attached.\n\n${orgName} accepts the following payment methods: Cheque, EFT transfers, Interac E-Transfer, MasterCard, & VISA. E-transfers can be sent to ${defaultFrom}.\n\nCredit Card payments will be charged a 2.4% service fee.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.\n\n\nSincerely,\n${orgName}${orgWebsite ? `\n\n${orgWebsite}` : ''}`;
+      if (savedEmailTemplate?.body && !defaultMessage.includes(invNo)) {
+        defaultMessage = `Invoice ${invNo}\n\n${defaultMessage}`;
+      }
 
       const defaultSubject = savedEmailTemplate?.subject
         || `Invoice ${invNo} – ${customerName} – ${orgName}`;
@@ -1468,7 +1460,7 @@ export default function Subscriptions() {
     }
   };
 
-  const handleSendInvoiceEmail = async () => {
+  const handleSendInvoiceEmail = useCallback(async () => {
     if (!emailRow) return;
     if (!emailForm.to || !emailForm.from) {
       setActionError('Recipient and sender email are required.');
@@ -1483,107 +1475,7 @@ export default function Subscriptions() {
     setActionError(null);
     setActionSuccess(null);
     try {
-      const getLineItemsForRow = (row) => {
-        if (row?.productCounts && Object.keys(row.productCounts).length > 0) {
-          const periodFallback = row.billing_period === 'yearly'
-            ? defaultUnitRateByPeriod.yearly
-            : defaultUnitRateByPeriod.monthly;
-          return Object.entries(row.productCounts).map(([code, qtyRaw]) => {
-            const qty = parseFloat(qtyRaw) || 0;
-            const displayLabel = code === '__unclassified__' ? 'Unclassified' : (code || 'Asset');
-            const unitRaw = resolveDisplayUnitPrice(row, {
-              product_code: code,
-              description: displayLabel,
-            });
-            const unit =
-              Number.isFinite(unitRaw) && unitRaw > 0 ? unitRaw : periodFallback;
-            return { description: displayLabel, qty, unit, amount: unit * qty };
-          });
-        }
-        if (Array.isArray(row?.items) && row.items.length > 0) {
-          return row.items.map((item) => {
-            const qty = parseFloat(item.quantity) || 1;
-            const unit = resolveDisplayUnitPrice(row, item);
-            return { description: item.description || item.product_code || 'Rental item', qty, unit, amount: unit * qty };
-          });
-        }
-        const qty = parseFloat(row?.itemCount) || 1;
-        const amount = parseFloat(row?.totalPerCycle) || 0;
-        return [{ description: `Rental charges (${String(row?.billing_period || 'monthly')})`, qty, unit: qty > 0 ? amount / qty : amount, amount }];
-      };
-      const createInvoicePdfDocForRow = async (row) => {
-        const lineItems = getLineItemsForRow(row);
-        const hasDetail =
-          (Array.isArray(row?.items) && row.items.length > 0) ||
-          (row?.productCounts && Object.keys(row.productCounts || {}).length > 0);
-        const lineSum = lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0);
-        const total =
-          hasDetail && lineSum > 0 ? lineSum : (parseFloat(row.totalPerCycle) || 0);
-        const today = new Date();
-        const periodStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-        const periodEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
-        const invoiceDate = periodEnd;
-        const dueBase = new Date(`${invoiceDate}T12:00:00`);
-        dueBase.setDate(dueBase.getDate() + 30);
-        const dueDate = dueBase.toISOString().split('T')[0];
-        const taxRate = 0.11;
-        const tax = +(total * taxRate).toFixed(2);
-        const grandTotal = +(total + tax).toFixed(2);
-        const customerRecord = matchCustomerRecordBySubscriptionId(row.customer_id);
-        let openAssets = buildOpenAssetRowsForInvoice(row, ctx.bottles, ctx.rentals);
-        if (Array.isArray(row?.bottleIdentifiers) && row.bottleIdentifiers.length > 0) {
-          const legacyExtras = row.bottleIdentifiers.map((label, idx) => ({
-            id: `legacy-${idx}`,
-            display_label: label,
-            description: label,
-            rental_class: 'Industrial Cylinders',
-            rental_start_date: null,
-            delivery_date: null,
-            barcode_number: label,
-            _invoiceStatus: 'On hand',
-          }));
-          openAssets = [...legacyExtras, ...openAssets];
-        }
-        let returnsInPeriod = [];
-        try {
-          returnsInPeriod = await fetchReturnsInInvoicePeriod(
-            supabase,
-            organization.id,
-            row,
-            periodStart,
-            periodEnd
-          );
-        } catch (e) {
-          console.warn('Invoice email PDF: could not load returns in period', e);
-        }
-        const bottlesForPdf = openAssets.map((b) => (
-          b.display_label ? { ...b, description: b.display_label } : b
-        ));
-        const inv = defaultInvoiceNumber(row);
-        return createRentalInvoicePdfDoc({
-          organization,
-          invoiceTemplate,
-          primaryColorFallback: primaryColor,
-          row,
-          customerRecord,
-          lineItems,
-          invoiceNumber: inv,
-          totals: {
-            subtotal: total,
-            tax,
-            amountDue: grandTotal,
-            taxRate,
-          },
-          period: { start: periodStart, end: periodEnd },
-          dates: { invoice: invoiceDate, due: dueDate },
-          terms: customerRecord?.payment_terms || 'NET 30',
-          bottles: bottlesForPdf,
-          returnsInPeriod,
-          formatCurrency,
-        });
-      };
-
-      const { doc, customerName } = await createInvoicePdfDocForRow(emailRow);
+      const { doc, customerName } = await buildInvoicePdfForRow(emailRow);
       const pdfBase64 = doc.output('datauristring').split(',')[1];
       const pdfFileName = `Invoice_${String(customerName).replace(/[^\w\-]+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
       const bodyHtml = (emailForm.message || '').replace(/\n/g, '<br/>');
@@ -1613,7 +1505,126 @@ export default function Subscriptions() {
     } finally {
       setEmailing(false);
     }
-  };
+  }, [emailRow, emailForm, buildInvoicePdfForRow, profile, user]);
+
+  const handleBulkEmailInvoices = useCallback(async () => {
+    const rows = filtered.filter((r) => r.status === 'active' && (parseFloat(r.totalPerCycle) || 0) > 0);
+    if (rows.length === 0) {
+      setActionError('No invoiceable rentals in the current view.');
+      return;
+    }
+    setBulkEmailing(true);
+    setBulkEmailProgress({ sent: 0, total: rows.length, failed: 0 });
+    setActionError(null);
+    setActionSuccess(null);
+
+    let defaultFrom = '';
+    const orgName = organization?.name || 'your organization';
+    const orgWebsite = organization?.website || '';
+    try {
+      const { data: orgData } = await supabase
+        .from('organizations')
+        .select('invoice_emails, default_invoice_email, email')
+        .eq('id', organization.id)
+        .single();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionEmail = sessionData?.session?.user?.email?.trim() || '';
+      const profileEmail = profile?.email?.trim() || '';
+      defaultFrom = sessionEmail || profileEmail || user?.email?.trim() || orgData?.default_invoice_email || orgData?.email || '';
+    } catch {
+      defaultFrom = profile?.email?.trim() || user?.email?.trim() || '';
+    }
+
+    const savedEmailTemplate = (() => {
+      try {
+        const raw = localStorage.getItem(`invoiceEmailTemplate_${organization?.id}`);
+        return raw ? JSON.parse(raw) : null;
+      } catch { return null; }
+    })();
+
+    let sent = 0;
+    let failed = 0;
+    for (const row of rows) {
+      try {
+        let customerEmail = row.customer?.email || row.customer?.Email || row.customer?.email_address || '';
+        if (!customerEmail) {
+          const cid = String(row.customer_id || '').trim();
+          if (cid) {
+            const { data: byList } = await supabase
+              .from('customers').select('email').eq('organization_id', organization.id).eq('CustomerListID', cid).maybeSingle();
+            customerEmail = byList?.email?.trim() || '';
+            if (!customerEmail) {
+              const { data: byId } = await supabase
+                .from('customers').select('email').eq('organization_id', organization.id).eq('id', cid).maybeSingle();
+              customerEmail = byId?.email?.trim() || '';
+            }
+          }
+        }
+        if (!customerEmail) {
+          failed += 1;
+          setBulkEmailProgress((p) => ({ ...p, failed: p.failed + 1 }));
+          continue;
+        }
+
+        const invNo = defaultInvoiceNumber(row);
+        const customerName = row.customer?.name || row.customer?.Name || row.customer_id || 'Customer';
+        const total = parseFloat(row.totalPerCycle) || 0;
+        const taxRate = 0.11;
+        const amountDue = +((total + total * taxRate)).toFixed(2);
+        const formattedAmount = amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        let msgBody = savedEmailTemplate?.body
+          ? savedEmailTemplate.body
+              .replace(/\{invoice_number\}/gi, invNo)
+              .replace(/\{amount\}/gi, `$${formattedAmount}`)
+              .replace(/\{customer_name\}/gi, customerName)
+          : `Your invoice ${invNo} for $${formattedAmount} is attached.\n\n${orgName} accepts the following payment methods: Cheque, EFT transfers, Interac E-Transfer, MasterCard, & VISA. E-transfers can be sent to ${defaultFrom}.\n\nCredit Card payments will be charged a 2.4% service fee.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.\n\n\nSincerely,\n${orgName}${orgWebsite ? `\n\n${orgWebsite}` : ''}`;
+        if (savedEmailTemplate?.body && !msgBody.includes(invNo)) {
+          msgBody = `Invoice ${invNo}\n\n${msgBody}`;
+        }
+        const subject = savedEmailTemplate?.subject
+          ? savedEmailTemplate.subject.replace(/\{invoice_number\}/gi, invNo).replace(/\{customer_name\}/gi, customerName)
+          : `Invoice ${invNo} – ${customerName} – ${orgName}`;
+
+        const { doc, customerName: cn } = await buildInvoicePdfForRow(row);
+        const pdfBase64 = doc.output('datauristring').split(',')[1];
+        const pdfFileName = `Invoice_${String(cn || customerName).replace(/[^\w\-]+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+        const bodyHtml = msgBody.replace(/\n/g, '<br/>');
+
+        const response = await fetch('/.netlify/functions/send-invoice-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: customerEmail,
+            from: defaultFrom,
+            senderName: profile?.full_name || user?.user_metadata?.full_name || '',
+            subject,
+            body: bodyHtml,
+            pdfBase64,
+            pdfFileName,
+            invoiceNumber: invNo,
+          }),
+        });
+        if (!response.ok) {
+          failed += 1;
+          setBulkEmailProgress((p) => ({ ...p, failed: p.failed + 1 }));
+        } else {
+          sent += 1;
+          setBulkEmailProgress((p) => ({ ...p, sent: p.sent + 1 }));
+        }
+      } catch {
+        failed += 1;
+        setBulkEmailProgress((p) => ({ ...p, failed: p.failed + 1 }));
+      }
+    }
+
+    setBulkEmailing(false);
+    if (failed > 0) {
+      setActionError(`Sent ${sent}/${rows.length} invoices. ${failed} skipped (no email on file or send error).`);
+    } else {
+      setActionSuccess(`Sent ${sent}/${rows.length} invoices successfully.`);
+    }
+  }, [filtered, buildInvoicePdfForRow, organization, profile, user]);
 
   if (ctx.loading) {
     return (
@@ -1707,6 +1718,18 @@ export default function Subscriptions() {
           </Button>
           <Button
             size="small"
+            variant="outlined"
+            onClick={handleBulkEmailInvoices}
+            disabled={saving || bulkEmailing}
+            startIcon={<EmailIcon sx={{ fontSize: 16 }} />}
+            sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
+          >
+            {bulkEmailing
+              ? `Sending ${bulkEmailProgress.sent + bulkEmailProgress.failed}/${bulkEmailProgress.total}…`
+              : 'Bulk Email'}
+          </Button>
+          <Button
+            size="small"
             variant="contained"
             startIcon={<AddIcon sx={{ fontSize: 16 }} />}
             onClick={() => setCreateOpen(true)}
@@ -1728,6 +1751,21 @@ export default function Subscriptions() {
 
       {actionError && <Alert severity="error" onClose={() => setActionError(null)} sx={{ mb: 2 }}>{actionError}</Alert>}
       {actionSuccess && <Alert severity="success" onClose={() => setActionSuccess(null)} sx={{ mb: 2 }}>{actionSuccess}</Alert>}
+      {bulkEmailing && (
+        <Box sx={{ mb: 2 }}>
+          <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Sending bulk invoices…</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              {bulkEmailProgress.sent} sent · {bulkEmailProgress.failed} skipped · {bulkEmailProgress.total} total
+            </Typography>
+          </Stack>
+          <LinearProgress
+            variant="determinate"
+            value={bulkEmailProgress.total > 0 ? ((bulkEmailProgress.sent + bulkEmailProgress.failed) / bulkEmailProgress.total) * 100 : 0}
+            sx={{ borderRadius: 1, height: 6 }}
+          />
+        </Box>
+      )}
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {headerCards.map((c, i) => (
@@ -1815,7 +1853,7 @@ export default function Subscriptions() {
                           No rows match this tab or search ({allRows.length} total in list).
                         </Typography>
                         <Typography variant="caption" sx={{ color: 'text.secondary', lineHeight: 1.5 }}>
-                          Lease-style accounts and yearly subscriptions appear under Yearly, not Monthly. Try the All or Yearly tab, or clear the search box.
+                          Lease-style accounts and yearly rentals appear under Yearly, not Monthly. Try the All or Yearly tab, or clear the search box.
                         </Typography>
                         <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="center">
                           {search.trim() !== '' && (
