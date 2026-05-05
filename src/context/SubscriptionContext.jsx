@@ -236,7 +236,10 @@ export function SubscriptionProvider({ children }) {
     };
   }, [orgId, fetchAll]);
 
-  const activeSubscriptions = subscriptions.filter((s) => s.status === 'active');
+  const activeSubscriptions = useMemo(
+    () => subscriptions.filter((s) => s.status === 'active'),
+    [subscriptions]
+  );
 
   const legacyPricingOverrides = useMemo(
     () => flattenCustomerPricingRowsToLegacyOverrides(customerPricingRows),
@@ -285,15 +288,23 @@ export function SubscriptionProvider({ children }) {
 
   const arr = Math.round(mrr * 12 * 100) / 100;
 
-  const outstandingBalance = invoices
-    .filter((i) => i.status !== 'paid' && i.status !== 'void')
-    .reduce((s, i) => s + (parseFloat(i.total_amount) || 0), 0);
+  const outstandingBalance = useMemo(
+    () =>
+      invoices
+        .filter((i) => i.status !== 'paid' && i.status !== 'void')
+        .reduce((s, i) => s + (parseFloat(i.total_amount) || 0), 0),
+    [invoices]
+  );
 
-  const nextBillingDate = activeSubscriptions.reduce((earliest, sub) => {
-    if (!sub.next_billing_date) return earliest;
-    const d = new Date(sub.next_billing_date);
-    return !earliest || d < earliest ? d : earliest;
-  }, null);
+  const nextBillingDate = useMemo(
+    () =>
+      activeSubscriptions.reduce((earliest, sub) => {
+        if (!sub.next_billing_date) return earliest;
+        const d = new Date(sub.next_billing_date);
+        return !earliest || d < earliest ? d : earliest;
+      }, null),
+    [activeSubscriptions]
+  );
 
   const value = {
     loading,

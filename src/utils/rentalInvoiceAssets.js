@@ -18,9 +18,18 @@ export function bottleRowMatchesInvoiceCustomer(b, row) {
   const nameKeys = new Set(
     [normName(row?.customer?.name), normName(row?.customer?.Name), normName(row?.customer_name)].filter(Boolean)
   );
-  const bottleIdKey = norm(b.assigned_customer || b.customer_id);
+  // Check each bottle identifier independently so a stale assigned_customer never
+  // blocks a valid customer_id or customer_uuid match (and vice-versa).
+  const bottleAssignedKey = norm(b.assigned_customer);
+  const bottleCustomerIdKey = norm(b.customer_id);
+  const bottleCustomerUuidKey = norm(b.customer_uuid);
   const bottleNameKey = normName(b.customer_name);
-  return (bottleIdKey && idKeys.has(bottleIdKey)) || (bottleNameKey && nameKeys.has(bottleNameKey));
+  return (
+    (bottleAssignedKey && idKeys.has(bottleAssignedKey)) ||
+    (bottleCustomerIdKey && idKeys.has(bottleCustomerIdKey)) ||
+    (bottleCustomerUuidKey && idKeys.has(bottleCustomerUuidKey)) ||
+    (bottleNameKey && nameKeys.has(bottleNameKey))
+  );
 }
 
 export function rentalRowMatchesInvoiceCustomer(r, row) {
