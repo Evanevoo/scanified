@@ -66,10 +66,10 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 const InvoiceTemplateManager = ({ open, onClose }) => open ? (
   <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
     <div style={{ background: 'white', borderRadius: 12, padding: 24, maxWidth: 400 }}>
-      <h3 style={{ margin: 0 }}>Invoice template editor unavailable</h3>
+      <h3 style={{ margin: 0 }}>Invoice template editor moved</h3>
       <p>
-        Your saved template is still kept in this browser and is now applied from Rentals.
-        Use <a href="/rentals">Rentals</a> to generate invoice PDFs with your current template.
+        Invoice email template and signature are now managed in Settings on this page.
+        Use the "Email Message Template" section below to update defaults for all invoice emails.
       </p>
       <button onClick={onClose}>Close</button>
     </div>
@@ -415,13 +415,30 @@ export default function Settings() {
   // Invoice Template
   const [invoiceTemplate, setInvoiceTemplate] = useState(null);
   const [invoiceTemplateManagerOpen, setInvoiceTemplateManagerOpen] = useState(false);
-  
+
+  // Remit-to / Bill-to address + GST number (stored in invoice_settings)
+  const [remitAddress, setRemitAddress] = useState({
+    remit_name: '',
+    remit_address_line1: '',
+    remit_address_line2: '',
+    remit_address_line3: '',
+    gst_number: '',
+  });
+  const [remitAddressLoading, setRemitAddressLoading] = useState(false);
+  const [remitAddressMsg, setRemitAddressMsg] = useState('');
+
   // Invoice Email Management
   const [invoiceEmails, setInvoiceEmails] = useState([]);
   const [defaultInvoiceEmail, setDefaultInvoiceEmail] = useState('');
   const [newInvoiceEmail, setNewInvoiceEmail] = useState('');
   const [invoiceEmailLoading, setInvoiceEmailLoading] = useState(false);
   const [invoiceEmailMsg, setInvoiceEmailMsg] = useState('');
+  const [invoiceEmailTemplate, setInvoiceEmailTemplate] = useState({
+    subject: 'Invoice {invoice_number} – {customer_name}',
+    body: 'Your invoice {invoice_number} for {amount} is attached.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.',
+    signature: 'Sincerely,\n{organization_name}',
+  });
+  const [invoiceEmailTemplateMsg, setInvoiceEmailTemplateMsg] = useState('');
 
   // Tab configuration based on user role (memoized so URL ?tab= sync re-runs when profile loads)
   const tabsConfig = useMemo(() => {
@@ -571,6 +588,26 @@ export default function Settings() {
         logger.error('Error loading invoice template:', error);
       }
       
+      // Load remit address from invoice_settings
+      (async () => {
+        try {
+          const { data } = await supabase
+            .from('invoice_settings')
+            .select('remit_name, remit_address_line1, remit_address_line2, remit_address_line3, gst_number')
+            .eq('organization_id', organization.id)
+            .maybeSingle();
+          if (data) {
+            setRemitAddress({
+              remit_name: data.remit_name || '',
+              remit_address_line1: data.remit_address_line1 || '',
+              remit_address_line2: data.remit_address_line2 || '',
+              remit_address_line3: data.remit_address_line3 || '',
+              gst_number: data.gst_number || '',
+            });
+          }
+        } catch { /* columns may not exist yet */ }
+      })();
+
       // Load invoice emails
       const loadInvoiceEmails = async () => {
         try {
@@ -617,6 +654,22 @@ export default function Settings() {
       };
       
       loadInvoiceEmails();
+
+      // Load invoice email template/signature (used by Rentals single + bulk send)
+      try {
+        const savedEmailTemplate = localStorage.getItem(`invoiceEmailTemplate_${organization.id}`);
+        if (savedEmailTemplate) {
+          const parsed = JSON.parse(savedEmailTemplate);
+          setInvoiceEmailTemplate((prev) => ({
+            ...prev,
+            subject: parsed?.subject || prev.subject,
+            body: parsed?.body || prev.body,
+            signature: parsed?.signature || prev.signature,
+          }));
+        }
+      } catch (error) {
+        logger.error('Error loading invoice email template:', error);
+      }
     }
   }, [barcodeConfig, organization]);
 
@@ -1933,8 +1986,168 @@ export default function Settings() {
                   </Typography>
                 </Alert>
 
+                {/* Remit-To / Bill-To Address */}
+                <Paper sx={{ p: 3, mt: 3 }}>
+                  <Typography variant="h5" gutterBottom>
+                    Invoice Bill-To Address
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    This is your organization's billing address shown on invoices under "PLEASE REMIT PAYMENT TO".
+                    Use this if your billing address is different from your branch address.
+                  </Typography>
+                  <Stack spacing={2} sx={{ mb: 2 }}>
+                    <TextField
+                      fullWidth
+                      label="Company Name"
+                      value={remitAddress.remit_name}
+                      onChange={(e) => setRemitAddress((p) => ({ ...p, remit_name: e.target.value }))}
+                      placeholder={organization?.name || 'Your Company Name'}
+                      helperText="Leave blank to use your organization name"
+                    />
+                    <TextField
+                      fullWidth
+                      label="Address Line 1"
+                      value={remitAddress.remit_address_line1}
+                      onChange={(e) => setRemitAddress((p) => ({ ...p, remit_address_line1: e.target.value }))}
+                      placeholder="123 Main Street"
+                    />
+                    <TextField
+                      fullWidth
+                      label="Address Line 2"
+                      value={remitAddress.remit_address_line2}
+                      onChange={(e) => setRemitAddress((p) => ({ ...p, remit_address_line2: e.target.value }))}
+                      placeholder="City, Province/State, Postal Code"
+                    />
+                    <TextField
+                      fullWidth
+                      label="Address Line 3"
+                      value={remitAddress.remit_address_line3}
+                      onChange={(e) => setRemitAddress((p) => ({ ...p, remit_address_line3: e.target.value }))}
+                      placeholder="Country (optional)"
+                    />
+                    <TextField
+                      fullWidth
+                      label="GST Number"
+                      value={remitAddress.gst_number}
+                      onChange={(e) => setRemitAddress((p) => ({ ...p, gst_number: e.target.value }))}
+                      placeholder="e.g. 123456789 RT0001"
+                      helperText="Shown on invoices next to your company address"
+                    />
+                  </Stack>
+                  {remitAddressMsg && (
+                    <Alert
+                      severity={remitAddressMsg.includes('saved') ? 'success' : 'error'}
+                      onClose={() => setRemitAddressMsg('')}
+                      sx={{ mb: 2 }}
+                    >
+                      {remitAddressMsg}
+                    </Alert>
+                  )}
+                  <Button
+                    variant="contained"
+                    disabled={remitAddressLoading}
+                    onClick={async () => {
+                      if (!organization?.id) {
+                        setRemitAddressMsg('Organization not found.');
+                        return;
+                      }
+                      setRemitAddressLoading(true);
+                      setRemitAddressMsg('');
+                      try {
+                        const { error } = await supabase
+                          .from('invoice_settings')
+                          .update({
+                            remit_name: remitAddress.remit_name || null,
+                            remit_address_line1: remitAddress.remit_address_line1 || null,
+                            remit_address_line2: remitAddress.remit_address_line2 || null,
+                            remit_address_line3: remitAddress.remit_address_line3 || null,
+                            gst_number: remitAddress.gst_number || null,
+                            updated_at: new Date().toISOString(),
+                          })
+                          .eq('organization_id', organization.id);
+                        if (error) throw error;
+                        setRemitAddressMsg('Bill-to address saved successfully.');
+                      } catch (err) {
+                        logger.error('Error saving remit address:', err);
+                        setRemitAddressMsg('Failed to save address. The remit address columns may need to be added to invoice_settings.');
+                      } finally {
+                        setRemitAddressLoading(false);
+                      }
+                    }}
+                  >
+                    {remitAddressLoading ? 'Saving...' : 'Save Bill-To Address'}
+                  </Button>
+                </Paper>
+
                 {/* Invoice Email Management */}
                 <Paper sx={{ p: 3, mt: 3 }}>
+                  <Typography variant="h5" gutterBottom>
+                    Email Message Template
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    This template and signature are applied to all invoice emails from Rentals (single-send and bulk-send).
+                  </Typography>
+                  <Stack spacing={2} sx={{ mb: 3 }}>
+                    <TextField
+                      fullWidth
+                      label="Default Email Subject"
+                      value={invoiceEmailTemplate.subject}
+                      onChange={(e) => setInvoiceEmailTemplate((p) => ({ ...p, subject: e.target.value }))}
+                    />
+                    <TextField
+                      fullWidth
+                      label="Default Email Body"
+                      value={invoiceEmailTemplate.body}
+                      onChange={(e) => setInvoiceEmailTemplate((p) => ({ ...p, body: e.target.value }))}
+                      multiline
+                      rows={6}
+                    />
+                    <TextField
+                      fullWidth
+                      label="Global Signature"
+                      value={invoiceEmailTemplate.signature}
+                      onChange={(e) => setInvoiceEmailTemplate((p) => ({ ...p, signature: e.target.value }))}
+                      multiline
+                      rows={4}
+                    />
+                    <Alert severity="info">
+                      Available placeholders: <strong>{'{invoice_number}'}</strong>, <strong>{'{amount}'}</strong>, <strong>{'{customer_name}'}</strong>, <strong>{'{organization_name}'}</strong>, <strong>{'{organization_website}'}</strong>
+                    </Alert>
+                    {invoiceEmailTemplateMsg && (
+                      <Alert
+                        severity={invoiceEmailTemplateMsg.includes('saved') ? 'success' : 'error'}
+                        onClose={() => setInvoiceEmailTemplateMsg('')}
+                      >
+                        {invoiceEmailTemplateMsg}
+                      </Alert>
+                    )}
+                    <Box>
+                      <Button
+                        variant="contained"
+                        onClick={() => {
+                          if (!organization?.id) {
+                            setInvoiceEmailTemplateMsg('Organization not found. Please refresh and try again.');
+                            return;
+                          }
+                          try {
+                            localStorage.setItem(
+                              `invoiceEmailTemplate_${organization.id}`,
+                              JSON.stringify(invoiceEmailTemplate)
+                            );
+                            setInvoiceEmailTemplateMsg('Email template saved successfully.');
+                          } catch (error) {
+                            logger.error('Error saving invoice email template:', error);
+                            setInvoiceEmailTemplateMsg('Failed to save email template.');
+                          }
+                        }}
+                      >
+                        Save Email Template
+                      </Button>
+                    </Box>
+                  </Stack>
+
+                  <Divider sx={{ my: 2 }} />
+
                   <Typography variant="h5" gutterBottom>
                     📧 Invoice Email Addresses
                   </Typography>

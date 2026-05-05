@@ -3,12 +3,29 @@
  * (same spirit as CustomerDetail / billing) so DNS-only and timing gaps still appear.
  */
 
+import { rentalWasBillableAsOfPeriodEnd } from '../services/billingFromAssets';
+
 function norm(v) {
   return String(v || '').trim().toLowerCase();
 }
 
 function normName(v) {
   return String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function clipYmd(v) {
+  const s = String(v || '').trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+/**
+ * Oldest plausible **delivery** date among real delivery fields (not created_at — that is often
+ * import/system time and shows bogus “delivered” days like May 1).
+ */
+function earliestDeliveryYmd(...candidates) {
+  const ymds = candidates.map(clipYmd).filter(Boolean);
+  if (ymds.length === 0) return null;
+  return ymds.reduce((a, b) => (a <= b ? a : b));
 }
 
 export function bottleRowMatchesInvoiceCustomer(b, row) {
@@ -50,29 +67,39 @@ export function rentalRowMatchesInvoiceCustomer(r, row) {
 /**
  * Open / on-hand assets: assigned bottles plus open rental rows not already represented (e.g. DNS).
  * Enriches delivered date from matching open rental when the bottle row lacks it.
+ * @param {{ asOfPeriodEnd?: string }} [options] - YYYY-MM-DD: include rentals active on that day and exclude bottles delivered after it (April invoice after May activity).
  */
-export function buildOpenAssetRowsForInvoice(row, bottles, openRentals) {
+export function buildOpenAssetRowsForInvoice(row, bottles, openRentals, options = {}) {
+  const { asOfPeriodEnd } = options;
   const bottlesArr = Array.isArray(bottles) ? bottles : [];
   const rentalsArr = Array.isArray(openRentals) ? openRentals : [];
 
   const customerBottles = bottlesArr.filter((b) => bottleRowMatchesInvoiceCustomer(b, row));
-  const customerRentals = rentalsArr.filter((r) => rentalRowMatchesInvoiceCustomer(r, row));
+  let customerRentals = rentalsArr.filter((r) => rentalRowMatchesInvoiceCustomer(r, row));
+  if (asOfPeriodEnd) {
+    customerRentals = customerRentals.filter((r) => rentalWasBillableAsOfPeriodEnd(r, asOfPeriodEnd));
+  }
 
   const matchedRentalIds = new Set();
   const out = [];
 
   for (const b of customerBottles) {
+    if (asOfPeriodEnd) {
+      const delivered = earliestDeliveryYmd(b.rental_start_date, b.delivery_date, b.purchase_date);
+      const pe = clipYmd(asOfPeriodEnd);
+      if (delivered && pe && delivered > pe) continue;
+    }
     const rental = customerRentals.find(
       (r) => r.bottle_id != null && String(r.bottle_id).trim() === String(b.id).trim()
     );
     if (rental) matchedRentalIds.add(rental.id);
 
-    const delivered =
-      rental?.rental_start_date ||
-      b.rental_start_date ||
-      b.delivery_date ||
-      b.purchase_date ||
-      null;
+    const delivered = earliestDeliveryYmd(
+      rental?.rental_start_date,
+      b.rental_start_date,
+      b.delivery_date,
+      b.purchase_date
+    );
 
     out.push({
       ...b,
@@ -90,6 +117,8 @@ export function buildOpenAssetRowsForInvoice(row, bottles, openRentals) {
       continue;
     }
 
+    const rentalDelivered = earliestDeliveryYmd(r.rental_start_date);
+
     out.push({
       id: r.id || `rental-${r.bottle_barcode || Math.random()}`,
       rental_class: r.asset_type || r.product_type || 'Industrial Cylinders',
@@ -99,8 +128,8 @@ export function buildOpenAssetRowsForInvoice(row, bottles, openRentals) {
         r.dns_product_code ||
         r.asset_type ||
         '—',
-      rental_start_date: r.rental_start_date,
-      delivery_date: r.rental_start_date,
+      rental_start_date: rentalDelivered,
+      delivery_date: rentalDelivered,
       barcode_number: r.bottle_barcode,
       bottle_barcode: r.bottle_barcode,
       serial_number: '—',
@@ -136,7 +165,7 @@ async function enrichReturnsWithBottleDetails(supabase, organizationId, returnsR
 
   const { data: bottleRows, error } = await supabase
     .from('bottles')
-    .select('id, serial_number, cylinder_number, barcode_number, barcode')
+    .select('id, serial_number, cylinder_number, barcode_number, barcode, delivery_date, purchase_date, rental_start_date')
     .eq('organization_id', organizationId)
     .in('id', ids);
 
@@ -146,8 +175,10 @@ async function enrichReturnsWithBottleDetails(supabase, organizationId, returnsR
 
   return returnsRows.map((r) => {
     const b = r.bottle_id != null ? byId.get(String(r.bottle_id)) : null;
+    const deliveredDate = r.rental_start_date || b?.rental_start_date || b?.delivery_date || b?.purchase_date || null;
     return {
       ...r,
+      rental_start_date: deliveredDate,
       _serial_display: b?.serial_number || b?.cylinder_number || null,
       _barcode_display: r.bottle_barcode || b?.barcode_number || b?.barcode || null,
     };

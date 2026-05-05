@@ -7249,6 +7249,7 @@ return (
         }
         const custId = String(newCustomerId || '').trim();
         const custName = String(newCustomerName || '').trim();
+        const custNameLower = custName.toLowerCase();
         for (const retBc of retArr) {
           const retNorm = normalizeBarcode(retBc);
           const latestScan = latestOrderScanModeByBarcode.get(retNorm);
@@ -7259,7 +7260,11 @@ return (
           if (!bottle) continue;
           const ac = String(bottle.assigned_customer || '').trim();
           const cn = String(bottle.customer_name || '').trim();
-          const onBalance = (custId && ac === custId) || (custName && (ac === custName || cn === custName));
+          const acLower = ac.toLowerCase();
+          const cnLower = cn.toLowerCase();
+          const idMatch = custId && (ac === custId || acLower === custId.toLowerCase());
+          const nameMatch = custNameLower && (acLower === custNameLower || cnLower === custNameLower);
+          const onBalance = idMatch || nameMatch;
           if (!onBalance) {
             returnsNotOnBalance.push({ barcode: retBc, product_code: (bottle.product_code || '').trim() });
           }

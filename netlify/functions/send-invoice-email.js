@@ -266,14 +266,31 @@ exports.handler = async (event, _context) => {
       let fromHeader;
       let replyToHeader = addr;
 
-      if (addr) {
+      // SMTP2GO: many accounts enforce verified senders/domains.
+      // Use configured sender for transport reliability and route replies to selected user.
+      if (emailService === 'SMTP2GO') {
+        const smtp2goFrom =
+          process.env.SMTP2GO_FROM ||
+          process.env.EMAIL_FROM ||
+          process.env.OUTLOOK_FROM ||
+          process.env.EMAIL_USER ||
+          addr;
+        if (!smtp2goFrom) {
+          throw new Error('SMTP2GO_FROM (or EMAIL_FROM) is required for SMTP2GO sending.');
+        }
+        fromHeader = `"${friendly}" <${smtp2goFrom}>`;
+        replyToHeader = addr || smtp2goFrom;
+        if (addr && addr.toLowerCase() !== String(smtp2goFrom).toLowerCase()) {
+          console.log(`SMTP2GO: using verified From ${smtp2goFrom}, Reply-To ${addr}`);
+        }
+      } else if (emailService === 'Gmail' && gmailUser && addr && addr.toLowerCase() !== gmailUser) {
+        fromHeader = `"${friendly}" <${gmailUser}>`;
+        replyToHeader = addr;
+        console.log(`Gmail SMTP: Using authenticated account ${gmailUser} as From, Reply-To set to ${addr}`);
+      } else if (addr) {
         fromHeader = `"${friendly}" <${addr}>`;
       } else {
         fromHeader = smtpEnvelope ? `"${friendly}" <${smtpEnvelope}>` : `"${friendly}" <unknown>`;
-      }
-
-      if (emailService === 'Gmail' && addr && addr.toLowerCase() !== gmailUser) {
-        console.log(`Gmail SMTP: From set to ${addr}; Gmail may rewrite to authenticated account. Reply-To: ${addr}`);
       }
 
       console.log(`Sending invoice email via ${emailService} from header: ${fromHeader}, replyTo: ${replyToHeader}, to: ${to}`);
@@ -284,6 +301,11 @@ exports.handler = async (event, _context) => {
         replyTo: replyToHeader,
         subject,
         html: body || '<p>Please find your invoice attached.</p>',
+        headers: {
+          'X-SMTPAPI': JSON.stringify({ filters: { subscriptiontrack: { settings: { enable: 0 } } } }),
+          'List-Unsubscribe': '<mailto:>',
+          'X-Auto-Response-Suppress': 'All',
+        },
         attachments: [
           {
             filename: pdfFileName || `Invoice_${invoiceNumber || 'invoice'}.pdf`,

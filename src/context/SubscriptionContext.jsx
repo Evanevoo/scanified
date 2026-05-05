@@ -210,7 +210,7 @@ export function SubscriptionProvider({ children }) {
       debounceTimer = setTimeout(() => {
         debounceTimer = null;
         fetchAll({ silent: true });
-      }, 400);
+      }, 2000);
     };
 
     const channel = supabase.channel(`subscription-ctx-${orgId}`);

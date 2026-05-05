@@ -1,6 +1,7 @@
 /**
- * Weldcor-style rental invoice PDF (jsPDF).
- * Layout mirrors common industrial gas rental invoices: remit-to, bill/ship, rental summary grid, asset register.
+ * Rental invoice PDF (jsPDF).
+ * Layout aligned to TrackAbout-style industrial rental invoices: black summary headers, remit box,
+ * bill/ship columns, account band, movement grid (start/ship/rtn/end), asset register.
  */
 import jsPDF from 'jspdf';
 
@@ -34,10 +35,24 @@ export function fetchImageAsDataUrl(url) {
   })();
 }
 
+/**
+ * US short date for PDFs. If the value starts with YYYY-MM-DD, that calendar date is shown as-is
+ * (no local-timezone shift). Timestamps like …T00:00:00Z were showing the wrong day in some zones.
+ */
 function formatUsDate(isoOrDate) {
   if (!isoOrDate) return '—';
-  const d = typeof isoOrDate === 'string' ? new Date(`${isoOrDate}T12:00:00`) : isoOrDate;
-  if (Number.isNaN(d.getTime())) return String(isoOrDate);
+  if (isoOrDate instanceof Date) {
+    if (Number.isNaN(isoOrDate.getTime())) return '—';
+    return isoOrDate.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
+  }
+  const s = String(isoOrDate).trim();
+  const lead = s.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(lead)) {
+    const [y, mo, d] = lead.split('-').map((x) => parseInt(x, 10));
+    return `${mo}/${d}/${y}`;
+  }
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
   return d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
 }
 
@@ -78,6 +93,13 @@ function formatMoney(n) {
   return `$${x.toFixed(2)}`;
 }
 
+/** Per-day rent rate like TrackAbout ($9.000). */
+function formatMoneyRate3(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return '$0.000';
+  return `$${x.toFixed(3)}`;
+}
+
 /** Display invoice # on PDFs and in customer emails (e.g. W97318 from row id). */
 export function defaultInvoiceNumber(row) {
   const existing = String(row?.invoice_number || '').trim();
@@ -88,12 +110,136 @@ export function defaultInvoiceNumber(row) {
   return `W${pad.slice(-5)}`;
 }
 
+function clipYmd(v) {
+  const s = String(v || '').trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+/** Inclusive calendar days from startYmd through endYmd (UTC date math; avoids DST / timezone drift). */
+function inclusiveDaysBetweenYmd(startYmd, endYmd) {
+  const a = clipYmd(startYmd);
+  const b = clipYmd(endYmd);
+  if (!a || !b) return null;
+  if (a > b) return 0;
+  const [ay, am, ad] = a.split('-').map((x) => parseInt(x, 10));
+  const [by, bm, bd] = b.split('-').map((x) => parseInt(x, 10));
+  const ua = Date.UTC(ay, am - 1, ad);
+  const ub = Date.UTC(by, bm - 1, bd);
+  return Math.max(0, Math.floor((ub - ua) / 86400000) + 1);
+}
+
+function normInvoiceProductKey(v) {
+  return String(v || '').trim().toLowerCase();
+}
+
+function lineProductKeys(line) {
+  const keys = new Set();
+  const add = (v) => {
+    const n = normInvoiceProductKey(v);
+    if (n) keys.add(n);
+  };
+  add(line?.description);
+  add(line?.product_code);
+  return keys;
+}
+
+function codesMatchProductKey(codeNorm, keyNorm) {
+  if (!codeNorm || !keyNorm) return false;
+  if (codeNorm === keyNorm) return true;
+  if (keyNorm.length < 3 || codeNorm.length < 3) return false;
+  return codeNorm.includes(keyNorm) || keyNorm.includes(codeNorm);
+}
+
+/** Match serialized bottle / open rental row to a summary line (productCounts / items). */
+function bottleMatchesLineItem(b, line) {
+  const keys = lineProductKeys(line);
+  if (keys.size === 0) return false;
+  const codes = [
+    b.product_code,
+    b.dns_product_code,
+    b.display_label,
+    b.description,
+    b.gas_type,
+  ].map(normInvoiceProductKey).filter(Boolean);
+
+  for (const key of keys) {
+    if (key === 'unclassified') {
+      const pc = normInvoiceProductKey(b.product_code);
+      if (!pc || pc === '__unclassified__') return true;
+      continue;
+    }
+    if (codes.some((c) => codesMatchProductKey(c, key))) return true;
+  }
+  return false;
+}
+
+function returnMatchesLineItem(r, line) {
+  const keys = lineProductKeys(line);
+  if (keys.size === 0) return false;
+  const rc = normInvoiceProductKey(
+    r.product_code || r.dns_product_code || r.product_type || r.asset_type
+  );
+  for (const key of keys) {
+    if (key === 'unclassified') return !rc || rc === '__unclassified__';
+    if (codesMatchProductKey(rc, key)) return true;
+  }
+  return false;
+}
+
+/**
+ * SHIP/RTN/END per product line; falls back to invoice-level totals only for a single generic line.
+ */
+function movementCountsForLine(line, ps, pe, inPeriodBottles, returnsInPeriod, globalShip, globalRtn, globalOnHand, lineCount) {
+  const shipN = inPeriodBottles.filter((b) => {
+    if (!bottleMatchesLineItem(b, line)) return false;
+    const d = clipYmd(b.rental_start_date || b.delivery_date || b.purchase_date);
+    return d && ps && pe && d >= ps && d <= pe;
+  }).length;
+  const rtnN = (returnsInPeriod || []).filter((r) => returnMatchesLineItem(r, line)).length;
+  const endN = inPeriodBottles.filter((b) => bottleMatchesLineItem(b, line)).length;
+
+  const desc = String(line?.description || '').toLowerCase();
+  const genericSingle =
+    lineCount === 1
+    && (desc.includes('rental charges') || desc.includes('rental charge'))
+    && shipN === 0
+    && rtnN === 0
+    && endN === 0
+    && (globalShip > 0 || globalRtn > 0 || globalOnHand > 0);
+
+  if (genericSingle) {
+    return { ship: globalShip, rtn: globalRtn, end: globalOnHand };
+  }
+  const q = Math.round(Number(line?.qty) || 0);
+  const anyBottleMatch = inPeriodBottles.some((b) => bottleMatchesLineItem(b, line));
+  const endOut = endN > 0 ? endN : (!anyBottleMatch && q > 0 ? q : endN);
+  return { ship: shipN, rtn: rtnN, end: endOut };
+}
+
+/**
+ * Legacy: difference in whole days using local noon (used where inclusive calendar span is not required).
+ */
 function daysBetween(startIso, endIso) {
   const a = startIso ? new Date(`${String(startIso).slice(0, 10)}T12:00:00`) : null;
   const b = endIso ? new Date(`${String(endIso).slice(0, 10)}T12:00:00`) : new Date();
   if (!a || Number.isNaN(a.getTime())) return null;
   const ms = b.getTime() - a.getTime();
   return Math.max(0, Math.round(ms / (24 * 60 * 60 * 1000)));
+}
+
+/**
+ * Days on rent during [periodStart, periodEnd] for the asset grid.
+ * If delivery predates the invoice period, counts from period start (full month on hand).
+ */
+function daysOnRentInInvoicePeriod(deliveredRaw, periodStartRaw, periodEndRaw) {
+  const pe = clipYmd(periodEndRaw);
+  const ps = clipYmd(periodStartRaw);
+  const d = clipYmd(deliveredRaw);
+  if (!pe || !ps) return null;
+  if (!d) return null;
+  if (d > pe) return 0;
+  const effectiveStart = d < ps ? ps : d;
+  return inclusiveDaysBetweenYmd(effectiveStart, pe);
 }
 
 /**
@@ -104,7 +250,7 @@ function daysBetween(startIso, endIso) {
  * @param {object} params.row - subscription / virtual rental row
  * @param {object} [params.customerRecord] - resolved customers row for addresses
  * @param {Array<{description:string,qty:number,unit:number,amount:number}>} params.lineItems
- * @param {{subtotal:number,tax:number,amountDue:number,taxRate:number}} params.totals
+ * @param {{subtotal:number,gst:number,pst:number,tax:number,amountDue:number,gstRate:number,pstRate:number,taxRate:number}} params.totals
  * @param {{start:string,end:string}} params.period - ISO date strings
  * @param {{invoice:string,due:string}} params.dates - ISO date strings
  * @param {string} [params.terms]
@@ -136,10 +282,8 @@ export async function createRentalInvoicePdfDoc(params) {
   } = params;
 
   const template = invoiceTemplate || {};
-  const primary = template.primary_color || primaryColorFallback || '#1e293b';
   const secondary = template.secondary_color || '#64748B';
   const fontFamily = template.font_family || 'helvetica';
-  const primaryRgb = rgbFromHex(primary, [30, 41, 59]);
   const secondaryRgb = rgbFromHex(secondary, [100, 116, 139]);
   const logoUrl = template.logo_url || organization?.logo_url || organization?.app_icon_url || '';
   const logoDataUrl = await fetchImageAsDataUrl(logoUrl);
@@ -169,6 +313,8 @@ export async function createRentalInvoicePdfDoc(params) {
     if (cityLine) remitLines.push(cityLine);
     if (organization?.country) remitLines.push(organization.country);
   }
+  const gstNumber = template.gst_number || organization?.gst_number || '';
+  if (gstNumber) remitLines.push(`GST# ${gstNumber}`);
 
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   doc.setFont(fontFamily, 'normal');
@@ -180,6 +326,7 @@ export async function createRentalInvoicePdfDoc(params) {
   const contentW = right - left;
 
   const footerY = pageH - 10;
+  const headerPageNumY = 11;
 
   const newPage = () => {
     doc.addPage();
@@ -188,18 +335,20 @@ export async function createRentalInvoicePdfDoc(params) {
   const ensureY = (y, needed) => {
     if (y + needed > footerY - 6) {
       newPage();
-      return 18;
+      return 22;
     }
     return y;
   };
 
-  const applyFooters = () => {
+  /** TrackAbout-style: page X of Y top-right on every page. */
+  const applyPageHeaders = () => {
     const totalPages = doc.getNumberOfPages();
     for (let i = 1; i <= totalPages; i += 1) {
       doc.setPage(i);
+      doc.setFont(fontFamily, 'normal');
       doc.setFontSize(8);
-      doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-      doc.text(`Page ${i} of ${totalPages}`, right, footerY, { align: 'right' });
+      doc.setTextColor(60, 60, 60);
+      doc.text(`Page ${i} of ${totalPages}`, right, headerPageNumY, { align: 'right' });
     }
     doc.setPage(totalPages);
   };
@@ -210,59 +359,116 @@ export async function createRentalInvoicePdfDoc(params) {
     return y + lines.length * lineH;
   };
 
-  // --- Page 1 header (business-style, not full banner) ---
-  let y = 14;
-  doc.setTextColor(40, 40, 40);
-  doc.setFont(undefined, 'bold');
-  doc.setFontSize(16);
-  doc.text('RENTAL INVOICE', left, y);
-  y += 8;
+  const custName = customer.name || customer.Name || row?.customer_name || 'Customer';
 
+  // --- Issuer block (logo + address + phone) top-left, title top-right (TrackAbout-style) ---
+  let y = 16;
+  const logoY = 14;
+  const logoW = 38;
+  const logoH = 16;
   if (logoDataUrl) {
     try {
-      doc.addImage(logoDataUrl, 'PNG', right - 28, 12, 22, 10);
+      doc.addImage(logoDataUrl, 'PNG', left, logoY, logoW, logoH);
     } catch {
       // ignore
     }
   }
 
-  doc.setFont(undefined, 'normal');
+  let issuerY = logoDataUrl ? logoY + logoH + 3 : logoY;
+  doc.setFont(fontFamily, 'bold');
   doc.setFontSize(9);
-  doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-  doc.text('INVOICE DATE', left, y);
-  doc.text('INVOICE NUMBER', left + 55, y);
-  doc.text('AMOUNT DUE', right, y, { align: 'right' });
-  y += 4;
-  doc.setTextColor(30, 30, 30);
-  doc.setFont(undefined, 'bold');
-  doc.text(formatUsDate(dates.invoice), left, y);
-  doc.text(String(invNo), left + 55, y);
-  doc.text(formatCurrency(totals.amountDue), right, y, { align: 'right' });
-  doc.setFont(undefined, 'normal');
-  y += 10;
-
-  doc.setFontSize(8);
-  doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-  doc.text('PLEASE REMIT PAYMENT TO:', left, y);
-  y += 4;
+  doc.setTextColor(20, 20, 20);
+  doc.text(String(organization?.name || remitName).toUpperCase(), left, issuerY);
+  issuerY += 4;
+  doc.setFont(fontFamily, 'normal');
+  doc.setFontSize(7.5);
   doc.setTextColor(45, 45, 45);
-  remitLines.forEach((ln) => {
-    doc.text(String(ln).toUpperCase(), left, y);
-    y += 3.5;
+  const issuerAddr = [];
+  if (template.remit_address_line1) issuerAddr.push(template.remit_address_line1);
+  if (template.remit_address_line2) issuerAddr.push(template.remit_address_line2);
+  if (template.remit_address_line3) issuerAddr.push(template.remit_address_line3);
+  if (!template.remit_address_line1) {
+    if (organization?.address) issuerAddr.push(organization.address);
+    const cityLine = [organization?.city, organization?.state, organization?.postal_code].filter(Boolean).join(', ');
+    if (cityLine) issuerAddr.push(cityLine);
+  }
+  issuerAddr.forEach((ln) => {
+    doc.text(String(ln), left, issuerY);
+    issuerY += 3.4;
   });
-  y += 4;
+  const invPhone = organization?.phone || organization?.support_phone || organization?.invoice_phone;
+  const invFax = organization?.fax;
+  if (invPhone) {
+    doc.text(`Phone: ${invPhone}`, left, issuerY);
+    issuerY += 3.4;
+  }
+  if (invFax) {
+    doc.text(`Fax: ${invFax}`, left, issuerY);
+    issuerY += 3.4;
+  }
+
+  doc.setFont(fontFamily, 'bold');
+  doc.setFontSize(17);
+  doc.setTextColor(15, 15, 15);
+  doc.text('RENTAL INVOICE', right, logoY + 6, { align: 'right' });
+
+  y = Math.max(issuerY, logoY + logoH + 2) + 4;
+
+  // --- Black header strip: invoice date / number / amount due ---
+  const metaH = 5.5;
+  doc.setFillColor(0, 0, 0);
+  doc.rect(left, y, contentW, metaH, 'F');
+  doc.setFont(fontFamily, 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(255, 255, 255);
+  const metaX1 = left + 3;
+  const metaX2 = left + contentW * 0.36;
+  const metaX3 = left + contentW * 0.62;
+  doc.text('INVOICE DATE', metaX1, y + 3.8);
+  doc.text('INVOICE NUMBER', metaX2, y + 3.8);
+  doc.text('AMOUNT DUE', right - 3, y + 3.8, { align: 'right' });
+  y += metaH;
+  doc.setDrawColor(0, 0, 0);
+  doc.rect(left, y, contentW, metaH + 0.5, 'S');
+  doc.setFont(fontFamily, 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(25, 25, 25);
+  doc.text(formatUsDate(dates.invoice), metaX1, y + 4);
+  doc.text(String(invNo), metaX2, y + 4);
+  doc.text(formatCurrency(totals.amountDue), right - 3, y + 4, { align: 'right' });
+  y += metaH + 6;
+
+  // --- Remit box ---
+  const remitBoxTop = y;
+  doc.setFont(fontFamily, 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(55, 55, 55);
+  doc.text('PLEASE REMIT PAYMENT TO:', left + 2, y + 4);
+  let remitInnerY = y + 8;
+  doc.setFont(fontFamily, 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(35, 35, 35);
+  remitLines.forEach((ln) => {
+    doc.text(String(ln).toUpperCase(), left + 2, remitInnerY);
+    remitInnerY += 3.6;
+  });
+  const remitBoxH = remitInnerY - remitBoxTop + 3;
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.3);
+  doc.rect(left, remitBoxTop, contentW, remitBoxH, 'S');
+  doc.setLineWidth(0.2);
+  y = remitBoxTop + remitBoxH + 5;
 
   const mid = left + contentW / 2;
-  doc.setFont(undefined, 'bold');
+  doc.setFont(fontFamily, 'bold');
   doc.setFontSize(8);
+  doc.setTextColor(30, 30, 30);
   doc.text('BILL TO:', left, y);
   doc.text('SHIP TO:', mid + 2, y);
   y += 4;
-  doc.setFont(undefined, 'normal');
-  const billStart = y;
+  doc.setFont(fontFamily, 'normal');
   let billY = y;
   doc.setFontSize(8);
-  const custName = customer.name || customer.Name || row?.customer_name || 'Customer';
   doc.text(String(custName).toUpperCase(), left, billY);
   billY += 3.5;
   billLines.forEach((ln) => {
@@ -276,118 +482,179 @@ export async function createRentalInvoicePdfDoc(params) {
   });
   y = Math.max(billY, shipY) + 6;
 
-  doc.setDrawColor(210, 210, 210);
-  doc.line(left, y, right, y);
-  y += 5;
-
-  y = ensureY(y, 36);
-  doc.setFont(undefined, 'bold');
-  doc.setFontSize(8);
-  doc.text('RENTAL PERIOD', left, y);
-  y += 5;
-  doc.setFont(undefined, 'normal');
-  doc.setFontSize(7);
+  // --- Account band (single bordered table; TrackAbout-style) ---
   const pStart = formatUsDate(period.start);
   const pEnd = formatUsDate(period.end);
-  doc.text(`${pStart}  –  ${pEnd}`, left, y);
-  y += 8;
-
-  const rh = 6;
-  doc.setFillColor(245, 245, 246);
-  doc.rect(left, y - 4, contentW, rh, 'F');
-  doc.setFont(undefined, 'bold');
-  doc.setFontSize(6.5);
-  const c1 = left;
-  const c2 = left + 32;
-  const c3 = left + 64;
-  const c4 = left + 96;
-  const c5 = left + 118;
-  const c6 = left + 140;
-  doc.text('BILL TO ACCT #', c1, y);
-  doc.text('SHIP TO ACCT #', c2, y);
-  doc.text('TERRITORY', c3, y);
-  doc.text('TERMS', c4, y);
-  doc.text('DUE DATE', c5, y);
-  doc.text('PURCHASE ORDER', c6, y);
-  y += rh - 1;
-  doc.setFont(undefined, 'normal');
-  doc.text(String(billAcct), c1, y);
-  doc.text(String(shipAcct), c2, y);
-  doc.text(String(territory), c3, y);
-  doc.text(String(terms), c4, y);
-  doc.text(formatUsDate(dates.due), c5, y);
-  doc.text(String(purchaseOrder), c6, y);
-  y += 10;
-
-  // --- Rental summary table ---
-  y = ensureY(y, 40);
-  doc.setFont(undefined, 'bold');
-  doc.setFontSize(9);
-  doc.text('RENTAL SUMMARY', left, y);
-  y += 5;
-
-  const colItem = left;
-  const colStart = left + 72;
-  const colShip = left + 86;
-  const colRtn = left + 98;
-  const colEnd = left + 110;
-  const colDays = left + 122;
-  const colRate = left + 148;
-  const colTot = right;
-
-  doc.setFillColor(238, 239, 241);
-  doc.rect(left, y - 3.5, contentW, 6, 'F');
+  const bandTop = y;
+  const bandHeaderH = 5;
+  const bandRowH = 6;
+  const bandTotalH = bandHeaderH + bandRowH;
+  doc.setFillColor(0, 0, 0);
+  doc.rect(left, bandTop, contentW, bandHeaderH, 'F');
+  doc.setFont(fontFamily, 'bold');
   doc.setFontSize(6);
-  doc.text('ITEM', colItem, y);
-  doc.text('START COUNT', colStart, y);
-  doc.text('SHIP', colShip, y);
-  doc.text('RTN', colRtn, y);
-  doc.text('END COUNT', colEnd, y);
-  doc.text('RENT DAYS', colDays, y);
-  doc.text('RENT RATE', colRate, y);
-  doc.text('TOTAL', colTot, y, { align: 'right' });
-  y += 6;
+  doc.setTextColor(255, 255, 255);
+  const b1 = left + 2;
+  const b2 = left + contentW * 0.22;
+  const b3 = left + contentW * 0.40;
+  const b4 = left + contentW * 0.58;
+  const b5 = left + contentW * 0.72;
+  const b6 = left + contentW * 0.84;
+  doc.text('RENTAL PERIOD', b1, bandTop + 3.6);
+  doc.text('BILL TO ACCT #', b2, bandTop + 3.6);
+  doc.text('SHIP TO ACCT #', b3, bandTop + 3.6);
+  doc.text('TERMS', b4, bandTop + 3.6);
+  doc.text('DUE DATE', b5, bandTop + 3.6);
+  doc.text('PURCHASE ORDER', b6, bandTop + 3.6);
+  doc.setDrawColor(0, 0, 0);
+  doc.rect(left, bandTop, contentW, bandTotalH, 'S');
+  doc.line(left, bandTop + bandHeaderH, left + contentW, bandTop + bandHeaderH);
+  doc.setFont(fontFamily, 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(30, 30, 30);
+  const bandValY = bandTop + bandHeaderH + 4.2;
+  doc.text(`${pStart} - ${pEnd}`, b1, bandValY);
+  doc.text(String(billAcct), b2, bandValY);
+  doc.text(String(shipAcct), b3, bandValY);
+  doc.text(String(terms), b4, bandValY);
+  doc.text(formatUsDate(dates.due), b5, bandValY);
+  doc.text(purchaseOrder && purchaseOrder !== '—' ? String(purchaseOrder) : '', b6, bandValY);
+  y = bandTop + bandTotalH + 8;
 
-  doc.setFont(undefined, 'normal');
+  // --- Rental summary table (black column header, grid) ---
+  y = ensureY(y, 40);
+  const tableLeft = left;
+  const tableW = contentW;
+  const colItem = tableLeft + 1;
+  const itemColEnd = tableLeft + tableW * 0.28;
+  const colStart = itemColEnd + 4;
+  const colShip = colStart + 24;
+  const colRtn = colShip + 16;
+  const colEnd = colRtn + 16;
+  const colDays = colEnd + 17;
+  const colTot = tableLeft + tableW - 2;
+  const splitAmt = colTot - 15;
+  const colRate = colDays + 14;
+  const colDescMaxW = Math.max(18, colStart - colItem - 3);
+
+  const sumHeaderH = 5.5;
+  const summaryTableTop = y;
+  doc.setFillColor(0, 0, 0);
+  doc.rect(tableLeft, y, tableW, sumHeaderH, 'F');
+  doc.setFont(fontFamily, 'bold');
+  doc.setFontSize(4.8);
+  doc.setTextColor(255, 255, 255);
+  const headY = y + 3.8;
+  const headCell = (label, left, width) => {
+    doc.text(label, left + width / 2, headY, { align: 'center', maxWidth: Math.max(4, width - 1) });
+  };
+  headCell('ITEM', colItem, colStart - colItem - 2);
+  headCell('STRT', colStart, colShip - colStart - 1);
+  headCell('SHIP', colShip, colRtn - colShip - 1);
+  headCell('RTN', colRtn, colEnd - colRtn - 1);
+  headCell('END', colEnd, colDays - colEnd - 1);
+  headCell('DAYS', colDays, colRate - colDays - 1);
+  headCell('RATE', colRate, splitAmt - colRate - 1);
+  doc.text('TOTAL', colTot, headY, { align: 'right' });
+  y += sumHeaderH;
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.2);
+
+  const pe = clipYmd(period?.end);
+  const ps = clipYmd(period?.start);
+  const inPeriodBottles = bottles.filter((b) => {
+    const d = clipYmd(b.rental_start_date || b.delivery_date || b.purchase_date);
+    return !d || !pe || d <= pe;
+  });
+  const rtnCount = Array.isArray(returnsInPeriod) ? returnsInPeriod.length : 0;
+  const onHandCount = inPeriodBottles.length;
+  const shipCount = (() => {
+    if (!ps || !pe) return 0;
+    return inPeriodBottles.filter((b) => {
+      const d = clipYmd(b.rental_start_date || b.delivery_date);
+      return d && d >= ps && d <= pe;
+    }).length;
+  })();
+
+  doc.setFont(fontFamily, 'normal');
   doc.setFontSize(6.5);
+  doc.setTextColor(35, 35, 35);
+  const totalsX0 = tableLeft + tableW * 0.52;
+  const lineCount = lineItems.length;
+  const periodBillDays = ps && pe ? inclusiveDaysBetweenYmd(ps, pe) : null;
+  const rentDaysStr =
+    periodBillDays != null && periodBillDays > 0 ? String(periodBillDays) : '—';
   lineItems.forEach((line) => {
     const desc = String(line.description || '—');
-    const descLines = doc.splitTextToSize(desc, colStart - colItem - 2);
-    const rowH = Math.max(4, descLines.length * 3.2);
-    y = ensureY(y, rowH + 2);
+    const descLines = doc.splitTextToSize(desc, colDescMaxW);
+    const rowH = Math.max(4.5, descLines.length * 3.2);
+    y = ensureY(y, rowH + 3);
     doc.text(descLines, colItem, y);
     const qty = line.qty != null ? String(line.qty) : '—';
-    doc.text(qty, colStart + 8, y, { align: 'right' });
-    doc.text('—', colShip + 4, y, { align: 'right' });
-    doc.text('—', colRtn + 4, y, { align: 'right' });
-    doc.text('—', colEnd + 8, y, { align: 'right' });
-    doc.text('—', colDays + 8, y, { align: 'right' });
-    doc.text(formatCurrency(line.unit || 0), colRate + 10, y, { align: 'right' });
+    doc.text(qty, colShip - 1, y, { align: 'right' });
+    const { ship, rtn, end } = movementCountsForLine(
+      line,
+      ps,
+      pe,
+      inPeriodBottles,
+      returnsInPeriod,
+      shipCount,
+      rtnCount,
+      onHandCount,
+      lineCount
+    );
+    doc.text(String(ship), colRtn - 1, y, { align: 'right' });
+    doc.text(String(rtn), colEnd - 1, y, { align: 'right' });
+    doc.text(String(end), colDays - 1, y, { align: 'right' });
+    doc.text(rentDaysStr, colRate - 1, y, { align: 'right' });
+    doc.text(formatMoneyRate3(line.unit || 0), splitAmt - 1, y, { align: 'right' });
     doc.text(formatCurrency(line.amount || 0), colTot, y, { align: 'right' });
     y += rowH;
+    doc.setDrawColor(200, 200, 200);
+    doc.line(tableLeft, y, tableLeft + tableW, y);
   });
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.3);
+  doc.rect(tableLeft, summaryTableTop, tableW, y - summaryTableTop, 'S');
+  doc.setLineWidth(0.2);
 
-  y += 4;
+  y += 6;
   doc.setDrawColor(220, 220, 220);
-  doc.line(left + 100, y, right, y);
+  doc.line(totalsX0, y, right, y);
   y += 5;
   doc.setFontSize(8);
-  doc.text('Subtotal', left + 120, y);
+  doc.setTextColor(30, 30, 30);
+  doc.text('Subtotal', totalsX0, y);
   doc.text(formatCurrency(totals.subtotal), right, y, { align: 'right' });
   y += 4;
-  const taxLabel = Number.isFinite(totals.taxRate) && totals.taxRate > 0
-    ? `Tax (${(totals.taxRate * 100).toFixed(0)}%)`
-    : 'Tax';
-  doc.text(taxLabel, left + 120, y);
-  doc.text(formatCurrency(totals.tax), right, y, { align: 'right' });
-  y += 5;
-  doc.setFont(undefined, 'bold');
-  doc.setTextColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
-  doc.text('AMOUNT DUE', left + 120, y);
-  doc.text(formatCurrency(totals.amountDue), right, y, { align: 'right' });
-  doc.setFont(undefined, 'normal');
+  const hasGstPst = Number.isFinite(totals.gst) && Number.isFinite(totals.pst);
+  if (hasGstPst) {
+    const gstLabel = Number.isFinite(totals.gstRate) ? `GST (${(totals.gstRate * 100).toFixed(0)}%)` : 'GST';
+    doc.text(gstLabel, totalsX0, y);
+    doc.text(formatCurrency(totals.gst), right, y, { align: 'right' });
+    y += 4;
+    const pstLabel = Number.isFinite(totals.pstRate) ? `PST (${(totals.pstRate * 100).toFixed(0)}%)` : 'PST';
+    doc.text(pstLabel, totalsX0, y);
+    doc.text(formatCurrency(totals.pst), right, y, { align: 'right' });
+  } else {
+    const taxLabel = Number.isFinite(totals.taxRate) && totals.taxRate > 0
+      ? `Tax (${(totals.taxRate * 100).toFixed(0)}%)`
+      : 'Tax';
+    doc.text(taxLabel, totalsX0, y);
+    doc.text(formatCurrency(totals.tax), right, y, { align: 'right' });
+  }
+  y += 6;
+  const dueRowH = 7;
+  doc.setFillColor(0, 0, 0);
+  doc.rect(totalsX0 - 1, y - 1, right - totalsX0 + 2, dueRowH, 'F');
+  doc.setFont(fontFamily, 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(255, 255, 255);
+  doc.text('AMOUNT DUE', totalsX0, y + 4);
+  doc.text(formatCurrency(totals.amountDue), right - 1, y + 4, { align: 'right' });
+  doc.setFont(fontFamily, 'normal');
   doc.setTextColor(40, 40, 40);
-  y += 12;
+  y += dueRowH + 8;
 
   // --- Serialized asset balance (on hand at period end) ---
   y = ensureY(y, 20);
@@ -396,7 +663,7 @@ export async function createRentalInvoicePdfDoc(params) {
   doc.text('ON-HAND SERIALIZED ASSETS (END OF PERIOD)', left, y);
   y += 5;
 
-  if (bottles.length === 0) {
+  if (inPeriodBottles.length === 0) {
     doc.setFont(undefined, 'normal');
     doc.setFontSize(7);
     doc.text(
@@ -410,41 +677,43 @@ export async function createRentalInvoicePdfDoc(params) {
     const a1 = left;
     const a2 = left + 26;
     const a3 = left + 52;
-    const a4 = left + 76;
-    const a5 = left + 92;
-    const a6 = left + 108;
+    const a5 = left + 76;
+    const a6 = left + 96;
     const a7 = left + 124;
-    doc.setFillColor(238, 239, 241);
+    const classColW = Math.max(8, a2 - a1 - 2);
+    const assetColW = Math.max(8, a3 - a2 - 2);
+    doc.setFillColor(0, 0, 0);
     doc.rect(left, y - 3.5, contentW, 6, 'F');
+    doc.setFont(fontFamily, 'bold');
+    doc.setTextColor(255, 255, 255);
     doc.setFontSize(5.5);
     doc.text('CLASS', a1, y);
     doc.text('ASSET / TYPE', a2, y);
     doc.text('DELIVERED', a3, y);
-    doc.text('STATUS', a4, y);
     doc.text('DAYS', a5, y);
     doc.text('BARCODE', a6, y);
     doc.text('SERIAL', a7, y);
     y += 6;
-    doc.setFont(undefined, 'normal');
+    doc.setFont(fontFamily, 'normal');
     doc.setFontSize(5.5);
+    doc.setTextColor(35, 35, 35);
 
-    bottles.forEach((b) => {
-      const rentalClass = b.rental_class || b.type || 'Industrial Cylinders';
-      const assetType = b.description || b.product_code || b.display_label || b.gas_type || '—';
+    inPeriodBottles.forEach((b) => {
+      const rentalClass = b.product_code || b.rental_class || b.type || 'Industrial Cylinders';
+      const assetType = b.description || b.display_label || b.gas_type || b.product_code || '—';
       const delivered = b.rental_start_date || b.delivery_date || b.purchase_date;
-      const held = daysBetween(delivered, period?.end);
+      const held = daysOnRentInInvoicePeriod(delivered, period?.start, period?.end);
       const barcode = b.barcode_number || b.barcode || b.bottle_barcode || b.asset_tag || '—';
-      const serial = b.serial_number || b.cylinder_number || b._serial_display || '—';
-      const status = b._invoiceStatus || 'On hand';
-      const rcLines = doc.splitTextToSize(String(rentalClass), 22);
-      const atLines = doc.splitTextToSize(String(assetType), 34);
+      const rawSerial = b.serial_number || b.cylinder_number || b._serial_display || '';
+      const serial = rawSerial && rawSerial !== 'Not Set' ? rawSerial : '—';
+      const rcLines = doc.splitTextToSize(String(rentalClass), classColW);
+      const atLines = doc.splitTextToSize(String(assetType), assetColW);
       const rowLines = Math.max(rcLines.length, atLines.length);
       const h = Math.max(4, rowLines * 2.8);
       y = ensureY(y, h + 2);
       doc.text(rcLines, a1, y);
       doc.text(atLines, a2, y);
       doc.text(delivered ? formatUsDate(delivered) : '—', a3, y);
-      doc.text(String(status), a4, y);
       doc.text(held != null ? String(held) : '—', a5, y);
       doc.text(String(barcode), a6, y);
       doc.text(String(serial), a7, y);
@@ -480,8 +749,11 @@ export async function createRentalInvoicePdfDoc(params) {
     const r4 = left + 72;
     const r5 = left + 92;
     const r6 = left + 118;
-    doc.setFillColor(238, 239, 241);
+    const retTypeColW = Math.max(8, right - r6 - 2);
+    doc.setFillColor(0, 0, 0);
     doc.rect(left, y - 3.5, contentW, 6, 'F');
+    doc.setFont(fontFamily, 'bold');
+    doc.setTextColor(255, 255, 255);
     doc.setFontSize(5.5);
     doc.text('RETURN DATE', r1, y);
     doc.text('DELIVERED', r2, y);
@@ -490,17 +762,21 @@ export async function createRentalInvoicePdfDoc(params) {
     doc.text('SERIAL', r5, y);
     doc.text('ASSET TYPE', r6, y);
     y += 6;
-    doc.setFont(undefined, 'normal');
+    doc.setFont(fontFamily, 'normal');
+    doc.setTextColor(35, 35, 35);
 
     returns.forEach((r) => {
       const retDate = r.rental_end_date;
       const del = r.rental_start_date;
-      const daysOut = daysBetween(del, retDate);
+      const daysOut = inclusiveDaysBetweenYmd(
+        del ? String(del).slice(0, 10) : null,
+        retDate ? String(retDate).slice(0, 10) : null
+      );
       const barcode = r._barcode_display || r.bottle_barcode || '—';
       const serial = r._serial_display || r.serial_number || '—';
       const assetType =
         r.product_code || r.product_type || r.dns_product_code || r.asset_type || '—';
-      const typeLines = doc.splitTextToSize(String(assetType), 42);
+      const typeLines = doc.splitTextToSize(String(assetType), retTypeColW);
       const rowH = Math.max(4, typeLines.length * 2.8);
       y = ensureY(y, rowH + 2);
       doc.text(formatUsDate(retDate), r1, y);
@@ -519,7 +795,7 @@ export async function createRentalInvoicePdfDoc(params) {
   doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
   doc.text('The total value of assets in your possession: —', left, y);
 
-  applyFooters();
+  applyPageHeaders();
 
   const safeName = String(custName).replace(/[^\w\-]+/g, '_');
   const fileName = `Rental_Invoice_${safeName}_${String(dates.invoice || '').slice(0, 10)}.pdf`;
