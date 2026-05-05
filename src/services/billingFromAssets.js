@@ -309,11 +309,7 @@ export function rentalProductCode(rental) {
 
 /**
  * Billable units for rental-mode billing.
- * Use the larger of:
- * - open rental rows (billing history / DNS awareness), and
- * - currently assigned bottles (inventory truth).
- *
- * This guarantees assigned inventory is always billable even when rental rows lag behind.
+ * Prefer open rental rows, then fall back to assigned bottles when rentals are missing.
  * @returns {Array<{ productCode: string, count: number }>}
  */
 export function groupBillableUnitCountsByProductCode(bottles, rentals, subscriptionCustomerId, customerRecord, options = {}) {
@@ -363,13 +359,13 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
     map.set(key, (map.get(key) || 0) + 1);
   }
 
-  const bottleGroups = groupAssignedBottleCountsByProductCode(bottles, subscriptionCustomerId, customerRecord, {
-    allCustomers,
-  });
-  for (const { productCode, count } of bottleGroups) {
-    const rentalCount = map.get(productCode) || 0;
-    // Ensure all assigned bottles are billed, while preserving higher open-rental counts when present.
-    map.set(productCode, Math.max(rentalCount, count));
+  if (map.size === 0) {
+    const bottleGroups = groupAssignedBottleCountsByProductCode(bottles, subscriptionCustomerId, customerRecord, {
+      allCustomers,
+    });
+    for (const { productCode, count } of bottleGroups) {
+      map.set(productCode, count);
+    }
   }
 
   const out = [];

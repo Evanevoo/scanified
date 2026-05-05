@@ -260,6 +260,135 @@ export default function Subscriptions() {
       defaultMonthly: defaultUnitRateByPeriod.monthly,
       defaultYearly: defaultUnitRateByPeriod.yearly,
     };
+
+    /**
+     * Performance: pre-bucket bottles + open rentals by customer-link keys ONCE.
+     * Avoids O(subscriptions × (bottles + rentals)) inside the per-subscription map.
+     * Each bucket: { byProduct: Map<productCode, count>, businessKeys: Set<string> } (DNS dedupe).
+     */
+    const bottlesByCustomerKey = new Map();
+    const rentalsByCustomerKey = new Map();
+    const ensureBottleBucket = (key) => {
+      if (!key) return null;
+      let b = bottlesByCustomerKey.get(key);
+      if (!b) { b = new Map(); bottlesByCustomerKey.set(key, b); }
+      return b;
+    };
+    const ensureRentalBucket = (key) => {
+      if (!key) return null;
+      let r = rentalsByCustomerKey.get(key);
+      if (!r) { r = { byProduct: new Map(), businessKeys: new Set() }; rentalsByCustomerKey.set(key, r); }
+      return r;
+    };
+
+    for (const bottle of (ctx.bottles || [])) {
+      const productRaw = String(
+        bottle?.product_code
+        || bottle?.product_type
+        || bottle?.asset_type
+        || bottle?.cylinder_type
+        || bottle?.gas_type
+        || bottle?.sku
+        || ''
+      ).trim();
+      const productKey = productRaw ? normalize(productRaw) : '__unclassified__';
+      const linkKeys = new Set();
+      const addId = (v) => { const n = normalize(v); if (n) linkKeys.add(n); };
+      const addName = (v) => { const n = normalizeName(v); if (n) linkKeys.add(n); };
+      addId(bottle.assigned_customer);
+      addId(bottle.customer_id);
+      addName(bottle.customer_name);
+      for (const k of linkKeys) {
+        const bucket = ensureBottleBucket(k);
+        if (!bucket) continue;
+        bucket.set(productKey, (bucket.get(productKey) || 0) + 1);
+      }
+    }
+
+    for (const rental of (ctx.rentals || [])) {
+      const productRaw = String(
+        rental?.dns_product_code
+        || rental?.product_code
+        || rental?.product_type
+        || rental?.asset_type
+        || ''
+      ).trim();
+      const productKey = productRaw ? normalize(productRaw) : '__unclassified__';
+      let businessKey;
+      if (rental?.is_dns === true) {
+        businessKey = `dns:${String(rental?.dns_product_code || rental?.product_code || '').trim()}:${String(rental?.bottle_barcode || '').trim().toUpperCase()}:${String(rental?.customer_id || '').trim()}`;
+      } else if (rental?.bottle_id != null && String(rental.bottle_id).trim() !== '') {
+        businessKey = `bottle_id:${String(rental.bottle_id).trim()}`;
+      } else if (rental?.bottle_barcode != null && String(rental.bottle_barcode).trim() !== '') {
+        businessKey = `barcode:${String(rental.bottle_barcode).trim().toUpperCase()}`;
+      } else {
+        businessKey = `row:${String(rental?.id || '').trim()}`;
+      }
+      const linkKeys = new Set();
+      const addId = (v) => { const n = normalize(v); if (n) linkKeys.add(n); };
+      const addName = (v) => { const n = normalizeName(v); if (n) linkKeys.add(n); };
+      addId(rental.customer_id);
+      addName(rental.customer_name);
+      for (const k of linkKeys) {
+        const bucket = ensureRentalBucket(k);
+        if (!bucket) continue;
+        if (bucket.businessKeys.has(businessKey)) continue;
+        bucket.businessKeys.add(businessKey);
+        bucket.byProduct.set(productKey, (bucket.byProduct.get(productKey) || 0) + 1);
+      }
+    }
+
+    const customerKeysForSubscription = (sub, customer) => {
+      const keys = new Set();
+      const addId = (v) => { const n = normalize(v); if (n) keys.add(n); };
+      const addName = (v) => { const n = normalizeName(v); if (n) keys.add(n); };
+      addId(sub?.customer_id);
+      addName(sub?.customer_name);
+      if (customer) {
+        addId(customer.id);
+        addId(customer.CustomerListID);
+        addId(customer.customer_id);
+        addName(customer.name);
+        addName(customer.Name);
+      }
+      return keys;
+    };
+
+    const lookupBillableGroups = (sub, customer) => {
+      const keys = customerKeysForSubscription(sub, customer);
+      const rentalProducts = new Map();
+      const seenBusinessKeys = new Set();
+      for (const k of keys) {
+        const rb = rentalsByCustomerKey.get(k);
+        if (!rb) continue;
+        for (const bk of rb.businessKeys) seenBusinessKeys.add(bk);
+        for (const [pc, count] of rb.byProduct.entries()) {
+          rentalProducts.set(pc, (rentalProducts.get(pc) || 0) + count);
+        }
+      }
+      const haveAnyRental = rentalProducts.size > 0;
+      if (haveAnyRental) {
+        const out = [];
+        for (const [productCode, count] of rentalProducts.entries()) {
+          out.push({ productCode, count });
+        }
+        return out;
+      }
+      const bottleProducts = new Map();
+      for (const k of keys) {
+        const bb = bottlesByCustomerKey.get(k);
+        if (!bb) continue;
+        for (const [pc, count] of bb.entries()) {
+          bottleProducts.set(pc, (bottleProducts.get(pc) || 0) + count);
+        }
+      }
+      const out = [];
+      for (const [productCode, count] of bottleProducts.entries()) {
+        out.push({ productCode, count });
+      }
+      return out;
+    };
+
     return ctx.subscriptions.map((sub) => {
       const items = ctx.subscriptionItems.filter((i) => i.subscription_id === sub.id && i.status === 'active');
       const customer =
@@ -296,24 +425,7 @@ export default function Subscriptions() {
           }
         }
       } else {
-        const subscriptionMatchKey =
-          String(
-            sub.customer_id ||
-              customer?.CustomerListID ||
-              customer?.id ||
-              customer?.name ||
-              customer?.Name ||
-              ''
-          ).trim();
-        const groups = groupBillableUnitCountsByProductCode(
-          ctx.bottles || [],
-          ctx.rentals || [],
-          subscriptionMatchKey || sub.customer_id,
-          customer,
-          {
-            allCustomers: ctx.customers || [],
-          }
-        );
+        const groups = lookupBillableGroups(sub, customer);
         itemCount = groups.reduce((s, g) => s + g.count, 0);
         productCounts = {};
         for (const g of groups) {
@@ -670,11 +782,12 @@ export default function Subscriptions() {
       (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), parseFloat(r.totalPerCycle) || 0])
     );
 
+    const ENABLE_LIVE_GROUP_RECALC = false;
     const bottles = ctx.bottles || [];
     const rentals = ctx.rentals || [];
     const allCustomers = ctx.customers || [];
     const billableGroupsCache = new Map();
-    for (const row of combined) {
+    if (ENABLE_LIVE_GROUP_RECALC) for (const row of combined) {
       if (!row.isVirtual) continue;
       const cacheKey = String(
         row.customer_id || row.customer?.CustomerListID || row.customer?.id || row.customer?.name || row.customer?.Name || ''
@@ -695,7 +808,7 @@ export default function Subscriptions() {
         ? row.productCounts
         : null;
 
-      if (row.isVirtual) {
+      if (ENABLE_LIVE_GROUP_RECALC && row.isVirtual) {
         const subscriptionMatchKey =
           String(
             row.customer_id ||
